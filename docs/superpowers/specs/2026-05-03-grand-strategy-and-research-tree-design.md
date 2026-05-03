@@ -1,7 +1,7 @@
 # Grand Strategy and Research Tree Design
 
 Date: 2026-05-03
-Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering is live locally through #16; objective tags, policy steering, and project steering remain design work.
+Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering is live locally through #16; objective tags, policy steering, project steering, recruitment intent, and naval intent remain design work.
 Scope: Slice A enrichment only. This is strategic-layer input to CIC planning, policy selection, and project selection. It does not open Slice B tactical behavior.
 
 ## Why this exists
@@ -50,6 +50,8 @@ Sources used:
 - American Battlefield Trust, "Cotton is King": https://www.battlefields.org/learn/articles/cotton-king
 - U.S. Office of the Historian, "Preventing Diplomatic Recognition of the Confederacy, 1861-1865": https://history.state.gov/milestones/1861-1865/confederacy
 - American Battlefield Trust, "Commerce Raiders": https://www.battlefields.org/learn/articles/commerce-raiders
+- Encyclopedia Virginia, "Desertion (Confederate) during the Civil War": https://encyclopediavirginia.org/entries/desertion-confederate-during-the-civil-war/
+- House Divided, "Confederate president Jefferson Davis signs the first Conscription Act in American history": https://hd.housedivided.dickinson.edu/node/28514
 
 ## Game data findings
 
@@ -197,6 +199,110 @@ Key project surfaces parsed from `projects.dat`:
 | 108-112 | both | Military | agents, recruitment, cavalry, artillery |
 | 113-120 | both/faction-specific | Agriculture/Politics | farm/cotton/corn, training, railroad construction, improvised shipyards |
 | 123-124 | both | Military | horse artillery, 6-gun batteries |
+
+### Recruitment and formation AI
+
+Primary decompile anchors:
+
+- `AICampaign.Update()` job sequence at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:11299`
+- `AICampaign.CalculateZoneRecruitingProbs(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:13078`
+- `AICampaign.ZoneRecruiting(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:12405`
+- `AIArea.GetBestRecruitingState(int, int, bool, bool)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:10722`
+- `AICampaign.RaiseNewCampaignGroup(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:12940`
+- `AICampaign.CheckCombinationOfBrigades(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17644`
+- `AICampaign.CheckCombinationOfUnits(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17141`
+- `AICampaign.CheckArmyGroupManagement(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17705`
+
+Vanilla behavior:
+
+- `CalculateZoneRecruitingProbs` computes own/enemy campaign strength, nearby strength, and average morale per `AIArea`.
+- `ZoneRecruiting` finds the weakest owned-town heatmap cell, writes `positiondeficit` / `positionsurplus`, checks global strength ratio against `targetrecruitingratio + usedcampaignagressiveness * targetrecruitingmultiplier`, and recruits only when the faction is below target.
+- `ZoneRecruiting` prefers volunteers over drafts when possible. It sets `num13=1` for draft only when volunteers in the selected state cannot satisfy the unit size, and it returns without drafting if global strength ratio is already above 1.
+- `AIArea.GetBestRecruitingState` chooses from states in/near the target area using recruit pool, state support, ownership/exclusion flags, and distance.
+- `RaiseNewCampaignGroup` creates divisions/corps/armies using vanilla hierarchy rules. If `GrandArmyStructure` is enabled, it creates army -> corps -> division; otherwise corps -> division. It also reuses nearby existing top units when possible.
+- `CheckCombinationOfBrigades` merges weak same-type brigades/regiments under campaign groups, excluding W&L player-commanded units.
+- `CheckCombinationOfUnits`, `UpdateCampaignTheaters`, and #16 `ArmyGroupManagementPatch` are already the safest surfaces for formation shape. Do not bypass them with direct tree surgery.
+
+Gap:
+
+Vanilla recruiting is reactive and local. It answers "where is the weakest heatmap cell?" and "which nearby state has enough volunteers/drafts?" It does not answer "what kind of army is the CSA trying to build in early 1861?" or "should Tennessee receive smaller defensive divisions while Virginia receives a field army?" That is where Whiskey should add weighting.
+
+Whiskey should not force one giant army or tiny scattered detachments. The better model is:
+
+- use vanilla group hierarchy for physical formation,
+- use `ArmyAreaLedger` and `FrontSectorLedger` to decide where top formations belong,
+- use a new recruitment intent layer to bias state and unit-type choices,
+- keep separate defensive divisions only where the ledger marks `Hold`, `Delay`, or `Screen`,
+- form larger field armies only where the ledger marks `Exploit` or `Counterstroke`,
+- never pull W&L player-commanded units into AI structural reshuffles.
+
+CSA early-war recruitment should be "responsible" rather than passive:
+
+- prefer volunteers and high-support home states while national strength is near parity,
+- avoid drafts until the CSA is under-strength, after major defeats, or after policy gates such as conscription/recruitment bounties are active,
+- prioritize Virginia, Tennessee, Mississippi River, and port-defense sectors according to threat,
+- avoid exhausting a single state if another viable state can support the same operating area,
+- bias artillery/cavalry only when the operating area or army role justifies it; otherwise preserve infantry-heavy line strength.
+
+Patch surface for #8:
+
+- Keep #8 anchored on `AIArea.GetBestRecruitingState` as the catalog says, but only alter `__result` when a scoped `ZoneRecruiting` context is active. That avoids corrupting raid-force and sea-invasion recruitment calls that also use the same helper.
+- Add a `RecruitmentIntentLedger` during weekly strategic review. It should output preferred states, avoid states, draft tolerance, unit-type bias, and max active recruiting pressure for each alliance.
+- Add bounded logs only when Whiskey changes the selected state or blocks draft pressure:
+  - `[once:recruitment] Recruitment steering active`
+  - `[Patch:Recruitment] alliance=1 area=VirginiaCapitalCorridor oldState=... newState=... reason=volunteer-high-support`
+  - `[Patch:Recruitment] alliance=1 action=blocked-draft reason=strength-near-parity`
+
+### Naval AI
+
+Primary decompile/config anchors:
+
+- `AICampaign.CheckFleetMovements(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:13148`
+- `AICampaign.CheckShipConstruction(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:11998`
+- `AICampaign.GrabShipType(int, bool, bool, bool, int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:12244`
+- `AICampaign.RaiseFleet(int, int, bool, bool)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:12091`
+- `ShipRecruitingList.IsShipChooseable(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:218703`
+- `Config/projects.dat` naval projects around ironclads/gunboats/imports/trade warfare, including `Ironclad Monitors`, `Ironclad Gunboats`, `Rebuilt Ironclads`, `Confederate Gunboats`, `Armored Gunboats`, British/French ironclad imports, `Trade Warfare`, and `Improvised Shipyards`.
+- `Config/CampaignTips.txt` confirms blockades use fleet command radius, fleet size, distance, opposing fleets, trade-warfare projects, and commander administration.
+
+Vanilla behavior:
+
+- Fleet movement is local and opportunistic. `CheckFleetMovements` picks a ready fleet, first responds to blocked own ports, otherwise chooses enemy sea/river ports by distance divided by port value.
+- Ship construction is probabilistic. `CheckShipConstruction` derives sea/river construction chance from own and enemy blockade ratios, fleet expense share, target fleet expense prefs, under-construction cap, and elapsed time.
+- Ship type is random from chooseable ships matching sea/river/fast/armor filters. It respects technology/import availability, port level, available port, debt rating, and fleet capacity.
+- Vanilla already has `fleetorders` for blockade/raid/patrol behavior; the mod should steer target and composition, not replace fleet movement mechanics.
+
+Historical implication:
+
+- Union should lean into blockade + brown-water river control from the start, then expand monitors/gunboats/logistics as projects and ports allow.
+- CSA should not try to match the Union ship-for-ship. It should defend key ports/rivers, use blockade running/imports/trade warfare, commerce raiding, local gunboats/cottonclads, and selective ironclads.
+
+Patch surfaces:
+
+- `ProjectSelectionPatch` should handle most naval preparation first by biasing the research/project tree:
+  - Union early: `Arming Civilian Ships`, `Legal Blockade`, monitors/gunboats, logistics/trade warfare, river capacity.
+  - CSA early: `King Cotton`, diplomacy/imports, `Organized Blockade Running`, `Letters of Marque`, `Confederate Gunboats`, `Improvised Shipyards`, arms imports.
+- Add a later `NavalIntentPatch` only after project/policy steering is verified. Preferred target: `CheckFleetMovements` Postfix/Prefix pair that changes a fleet target only when the strategy profile has a stronger port/river objective than vanilla's distance/value pick.
+- Add a later `ShipConstructionPatch` only if project steering is not enough. Preferred target: `GrabShipType` Postfix under a scoped `CheckShipConstruction` context so CSA can prefer cheap local river/coastal defense and Union can prefer blockade/river types without breaking manual ship construction.
+
+### Initial-war behavior
+
+At campaign start, weekly strategic review should build a first-war readiness package before vanilla has drifted into random local choices:
+
+| Alliance | Early profile | What Whiskey should prepare |
+|---|---|---|
+| Union | Anaconda baseline | Legal blockade / naval capacity / river gunboats, Washington and Virginia defense, Mississippi pressure, industry/logistics, cautious AoP build-up before major offensive pressure. |
+| CSA | Cordon plus foreign recognition | Defend Richmond/Virginia, hold Tennessee/Mississippi/ports, use King Cotton/diplomacy/imports, prepare local defensive divisions and one or two field-army concentrations, avoid early draft overuse while volunteers suffice. |
+
+The first 4-8 weekly reviews should therefore populate:
+
+- `GrandStrategyProfile` for the current alliance/era/chapter,
+- `PolicyIntent` and `ProjectIntent` queues,
+- `RecruitmentIntentLedger`,
+- `FrontSectorLedger` posture and minimum hold budgets,
+- `ArmyAreaLedger` assignments,
+- `ArmyGroupDoctrine` grouping plan,
+- bounded one-line logs when any intent signature changes.
 
 ## Design
 
@@ -369,14 +475,83 @@ No army should be marked heroic if:
 - the source sector would fall below its minimum hold budget,
 - the action would violate W&L player-command restrictions.
 
+### 7. Add `RecruitmentIntentLedger`
+
+Create pure strategic types:
+
+- `RecruitmentIntentLedger`
+- `RecruitmentStatePreference`
+- `RecruitmentPressure`
+- `UnitCompositionBias`
+
+Inputs:
+
+- alliance, era, vanilla chapter, active grand-strategy profile,
+- front posture and army-area assignments,
+- vanilla state recruit pools/support/ownership,
+- global strength ratio from `AICampaign.GetStrengthRatio`,
+- battle-history losses and current morale,
+- policy status for conscription/recruitment bounties.
+
+Outputs:
+
+- preferred state list by operating area,
+- avoid-state list,
+- volunteer/draft tolerance,
+- preferred unit-type weights,
+- group-size preference: independent screen/division vs field-army reinforcement.
+
+Rules:
+
+- Preserve vanilla's no-recruitment gates when debt/rating blocks recruitment.
+- Do not force drafts when vanilla would not recruit at all.
+- Do not override state selection if the Whiskey candidate lacks enough volunteers/drafts or support.
+- Do not override recruitment calls outside `ZoneRecruiting` context.
+- Keep output read-only to patches between weekly reviews.
+
+### 8. Add naval intent after policy/project steering
+
+Create pure strategic types:
+
+- `NavalIntentLedger`
+- `NavalTheaterIntent`
+- `ShipConstructionBias`
+- `PortOperationPriority`
+
+Inputs:
+
+- own/enemy port blockade ratios,
+- own/enemy fleets,
+- strategy profile,
+- project/policy status,
+- port value and river/sea flags,
+- fleet readiness and ship composition.
+
+Outputs:
+
+- blockade targets,
+- own-port relief targets,
+- raid-vs-blockade preference,
+- ship-type bias by sea/river/fast/armor,
+- maximum naval spending pressure by era/faction.
+
+Rules:
+
+- Union: blockade and river pressure are allowed to become major spending priorities.
+- CSA: naval spending should be asymmetric and survival-oriented unless foreign-recognition/import strategy is succeeding.
+- Do not bypass `ShipRecruitingList.IsShipChooseable`; only bias among chooseable ships.
+- Keep fleet movement patch bounded: one override only when vanilla chooses a low-value target and the ledger has a high-confidence target.
+
 ## Recommended sequence
 
 1. Runtime-smoke #4 `DefensiveOpsPatch`, #15 `ArmyAreaTheaterPatch`, and #16 `ArmyGroupManagementPatch` after a GTCW restart.
-2. Implement reserved #7 and #8 if still cheap and bounded.
-3. Add `GrandStrategyProfile` plus objective-tag metadata table. This is pure strategic core and can be tested without new Harmony patch risk.
-4. Add `ProjectSelectionPatch`. It is lower risk because project choice is random-weighted in vanilla and we can replace only the next project slot.
-5. Add `PolicySelectionPatch`. Policy selection is ordered and chapter-gated, so this needs a tighter safety check.
-6. Add defensive/offensive front-posture steering only after the weekly ledgers log plausible `Hold/Delay/Concede/Exploit` decisions in-game.
+2. Add `GrandStrategyProfile` plus objective-tag metadata table. This is pure strategic core and can be tested without new Harmony patch risk.
+3. Add `ProjectSelectionPatch`. It is lower risk because project choice is random-weighted in vanilla and we can replace only the next project slot. This is the first place to express naval and industrial preparation.
+4. Add `PolicySelectionPatch`. Policy selection is ordered and chapter-gated, so this needs a tighter safety check. This is the first place to express CSA King Cotton / blockade-running / conscription timing and Union blockade / mobilization timing.
+5. Implement #8 `RecruitmentPatch` as a scoped `AIArea.GetBestRecruitingState` Postfix under `ZoneRecruiting` context, driven by `RecruitmentIntentLedger`.
+6. Implement #7 `PerkSelectionPatch` only after army/naval role tags exist, so perks support assigned roles rather than generic personality flavor.
+7. Add `NavalIntentLedger`; only patch `CheckFleetMovements` / `GrabShipType` if project/policy steering is not enough.
+8. Add defensive/offensive front-posture steering only after the weekly ledgers log plausible `Hold/Delay/Concede/Exploit` decisions in-game.
 
 ## Acceptance criteria
 
@@ -385,6 +560,7 @@ No army should be marked heroic if:
 - First-fire markers appear for new patches after game restart.
 - Override logs are bounded and only appear when Whiskey actually changes a vanilla choice.
 - Front-budget/concession logs are bounded and only appear when a sector posture changes, a transfer is blocked, or a concession is made.
+- Recruitment/naval logs are bounded and only appear when Whiskey changes a vanilla selection or when an intent signature changes.
 - With `Verbose Logging = false`, normal campaign log volume remains low.
 - Sidecar does not need new persistence unless active grand-strategy profile becomes user-visible or externally configurable.
 
