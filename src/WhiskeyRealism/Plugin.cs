@@ -19,6 +19,8 @@ namespace WhiskeyRealism
 
         // Diagnostic logging — verbose first-fire markers for every patch class.
         internal ConfigEntry<bool> VerboseLogging;
+        internal ConfigEntry<bool> PlanTrace;
+        internal ConfigEntry<bool> SuccessionTrace;
 
         private Harmony _harmony;
 
@@ -33,6 +35,12 @@ namespace WhiskeyRealism
             VerboseLogging = Config.Bind(
                 "[Diagnostics]", "Verbose Logging", false,
                 "Emit per-patch first-fire markers and decision-trace logs to LogOutput.log.");
+            PlanTrace = Config.Bind(
+                "[Diagnostics]", "Plan Trace Logging", false,
+                "On each monthly tick, dump CIC's plan reasoning (objective scores, top-3, picked, phases, deadline).");
+            SuccessionTrace = Config.Bind(
+                "[Diagnostics]", "Succession Trace Logging", false,
+                "On each monthly tick, log every succession event check (date gate, war-state gate, fired/not-fired).");
 
             if (!Enabled.Value)
             {
