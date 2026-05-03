@@ -17,7 +17,7 @@
 > - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
 > - **Parallel sessions are normal.** Another agent may be working concurrently — run `git log --oneline -10` and `git status` before committing to detect parallel work.
 
-> **Current version:** v0.1.0 — scaffold only. No patches registered yet. Strategic-brain design spec in progress at `docs/superpowers/specs/`.
+> **Current release:** v0.2.1.1. **Local current:** v0.2.2 enrichment implemented through #16 and deployed for smoke (`dist`/BepInEx SHA-256 `1602c0ca07f9b0c11d12fd4f9ed0117cc7a2ff882f73af3b38aff2e9275d9246`); runtime first-fire for #15/#16 still needs a GTCW restart and campaign AI tick.
 
 ---
 
@@ -31,9 +31,9 @@ Six locked design choices (see `docs/superpowers/specs/`):
 3. Era × faction × officer (full personality stack)
 4. Triggered-scripted officer succession (~12 historical events; ~60-80% historical fidelity)
 5. Phased operational plans (2-4 phases per plan, one active per side)
-6. Monthly + event-triggered AI cadence; adjust-current-plan by default, replan only on assumption-invalidating events
+6. Weekly + event-triggered AI cadence; adjust-current-plan by default, replan only on assumption-invalidating events. Monthly is a visible heartbeat/checkpoint boundary only.
 
-Design architecture: two-tier hierarchy (CIC + theater commanders), additive personality composition with `[-1, 1]` clamp, JSON sidecar persistence next to game saves, read-only mod state from Harmony patches.
+Design architecture: two-tier hierarchy (CIC + theater commanders), weekly front/army-area ledgers, historical army-group steering through vanilla `ArmyGroup` APIs, additive personality composition with `[-1, 1]` clamp, JSON sidecar persistence next to game saves, read-only mod state from Harmony patches.
 
 ---
 
@@ -72,7 +72,7 @@ Smoke-test paths:
 
 - **Log:** `/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/LogOutput.log` — truncated on each game launch.
 - **Config:** `/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/config/dev.kyle.whiskey-realism.cfg` — created on first plugin load. **Once this file exists, its values take precedence over C# defaults** — bumping a default in `Plugin.cs` will NOT affect a user who has already run the plugin once.
-- **Mod state sidecar:** `<persistentDataPath>/Saves/<savename>.whiskeyrealism.json` — JSON sidecar with active plans, era stage, succession state. Inspect to verify save/load wiring.
+- **Mod state sidecar:** `<GTCW>/Campaigns/<level>/<sublevel>/<save>/whiskeyrealism.json` — JSON sidecar with active plans, era stage, succession state. Vanilla save paths are CWD-relative to the game install, not `Application.persistentDataPath`.
 
 ---
 
@@ -97,18 +97,21 @@ whiskey-realism-mod/
 │   ├── WhiskeyRealism.csproj
 │   ├── Plugin.cs                   ← BepInEx entry, ConfigEntry definitions
 │   ├── Strategic/                  ← strategic-brain core types
-│   │   ├── StrategicCoordinator.cs ← monthly tick + event-trigger dispatcher
+│   │   ├── StrategicCoordinator.cs ← weekly strategic review + monthly heartbeat dispatcher
 │   │   ├── CIC.cs                  ← per-faction Commander-in-Chief
 │   │   ├── TheaterCommander.cs     ← per-army-group execution layer
 │   │   ├── OperationalPlan.cs      ← phased plan + phase transitions
 │   │   ├── PersonalityVector.cs    ← 5-dim struct + composition helpers
 │   │   ├── EraStageManager.cs      ← era progression + war-state overrides
 │   │   ├── SuccessionScheduler.cs  ← canonical historical events
-│   │   └── HistoricalFigureRegistry.cs ← ~25 hand-coded officer profiles
+│   │   ├── HistoricalFigureRegistry.cs ← ~25 hand-coded officer profiles
+│   │   ├── FrontSectorLedger.cs / FrontSectorRuntime.cs
+│   │   ├── ArmyAreaDoctrine.cs / ArmyAreaLedger.cs / ArmyAreaRuntime.cs
+│   │   └── ArmyGroupDoctrine.cs
 │   ├── Patches/                    ← Harmony patches; one concern per file
-│   │   └── (none yet — scaffold)
+│   │   └── Harmony patches #1-#16 (see docs/patch-catalog.md)
 │   └── Util/                       ← shared infrastructure
-│       └── (none yet — scaffold)
+│       └── OnceLog / reflection helpers
 ├── docs/
 │   ├── handoff.md                  ← session-start master plan
 │   ├── findings.md                 ← decompile coordinates + reflection gotchas
@@ -141,7 +144,7 @@ whiskey-realism-mod/
 
 - Every Harmony patch class lives under `src/WhiskeyRealism/Patches/`. One concern per file.
 - Wrap reflection lookups in try/catch and log via `Plugin.Log.LogWarning(...)` on failure. **Never throw from a patch.** A single throw on every Postfix tick produces 40k log lines per session.
-- Strategic mod state is **read-only** to Harmony patches. Patches read CIC / TheaterCommander state and steer existing AI methods. State writes happen only on the monthly tick and event-trigger handlers.
+- Strategic mod state is **read-only** to Harmony patches. Patches read CIC / TheaterCommander / ledger state and steer existing AI methods. State writes happen only on weekly strategic review and event-trigger handlers.
 - Add a header comment explaining what the vanilla method does and what the patch changes.
 
 ### Build
@@ -152,7 +155,13 @@ whiskey-realism-mod/
 
 ### Testing
 
-No automated test loop — build, deploy, verify deployed DLL hash, run GTCW, start a career, observe. After deploy, tail `BepInEx/LogOutput.log` and scan for the per-patch first-fire markers.
+Use the console harness for pure strategic logic when touched:
+
+```bash
+dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
+```
+
+For DLL-affecting changes: build, deploy, verify deployed DLL hash, run GTCW, start a career, observe. After deploy, tail `BepInEx/LogOutput.log` and scan for the per-patch first-fire markers.
 
 ### Game updates
 
@@ -165,7 +174,7 @@ When GTCW patches: re-decompile `Assembly-CSharp.dll`, diff our patch sites, reb
 - Don't edit the game install (`/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/`) directly. Mod via plugin only.
 - Don't ship copies of `0Harmony.dll` or any GTCW/Unity DLL with our plugin — BepInEx loads HarmonyX itself, the game loads Unity itself.
 - Don't add Prefix-blocking or Transpiler patches without consulting the user — they're brittle to game updates and easy to get wrong.
-- Don't write Harmony patches that mutate strategic mod state. State writes happen ONLY on the monthly tick and event-trigger handlers. Patches READ; they don't WRITE.
+- Don't write Harmony patches that mutate strategic mod state. State writes happen ONLY on weekly strategic review and event-trigger handlers. Patches READ; they don't WRITE.
 - Don't expand workstream scope without an aligned spec. The current single workstream is Slice A (strategic brain). Slices B (tactical brain), C (W&L hierarchy AI), and D (additional historical flavor) are explicitly deferred.
 
 ---

@@ -50,7 +50,7 @@ Read vanilla `AICampaign.aifaction`, `positiondeficit`, `positionsurplus`, `ownu
 
 - [x] **Step 2: Store latest ledger**
 
-Expose `StrategicCoordinator.Fronts[alliance]` and update it once per monthly tick. Log a bounded `[FrontLedger]` summary only on posture changes or when verbose logging is on.
+Expose `StrategicCoordinator.Fronts[alliance]` and update it during weekly strategic review. Log a bounded `[FrontLedger]` summary only on posture changes or when verbose logging is on.
 
 ### Task 3: Transfer Budget Integration
 
@@ -88,4 +88,6 @@ Copy `dist/WhiskeyRealism.dll` to the GTCW BepInEx plugins folder, then compare 
 
 After game restart, tail `BepInEx/LogOutput.log` and verify first-fire plus bounded front/transfer budget logging.
 
-Result: deployed DLL hash matched `dist/WhiskeyRealism.dll` (`31766edfc8e7b451abc340161c2048bb5f5c2f09170fe4a6d4817c5e2eddd7e3`). Existing log tail was from the prior runtime; `[FrontLedger]` / `[Patch:TransferBudget]` smoke still requires a game restart and monthly campaign tick.
+Result: deployed DLL hash matched `dist/WhiskeyRealism.dll` (`31766edfc8e7b451abc340161c2048bb5f5c2f09170fe4a6d4817c5e2eddd7e3`). Existing log tail was from the prior runtime; `[FrontLedger]` / `[Patch:TransferBudget]` smoke still requires a game restart and campaign tick.
+
+**Superseding cadence note (2026-05-03):** later v0.2.2 work changed the coordinator from monthly-only review to weekly strategic review. The front ledger now refreshes weekly alongside `ArmyAreaLedger`; monthly remains only the visible heartbeat.

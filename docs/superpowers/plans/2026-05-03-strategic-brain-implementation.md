@@ -1,12 +1,14 @@
 # Strategic Brain Implementation Plan
 
+> **Current-state addendum (2026-05-03):** this is the original Slice A execution plan and contains historical monthly-cadence and smoke-marker instructions. Shipped/current code supersedes those sections: `StrategicCoordinator` now performs weekly strategic review with monthly heartbeat only; #3/#4/#5/#6 are concrete, #15 historical army-area steering and #16 historical army-group steering are implemented/deployed, and only reserved #7/#8 plus later policy/project/research integration remain backlog. For current pickup, read `docs/handoff.md` and `docs/patch-catalog.md` first.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace GTCW's random campaign-objective AI with a phased, personality-driven strategic engine running both factions through a W&L career, with explicit player-CIC noninterference and JSON-sidecar persistence.
 
-**Architecture:** Two-tier hierarchy — `StrategicCoordinator` (singleton MonoBehaviour, monthly tick) drives one `CIC` per AI-controlled faction; each `CIC` holds an `OperationalPlan` and dispatches to per-army-group `TheaterCommander` instances. Mod state is read-only from Harmony patches. Persistence is JSON sidecar inside the per-save folder. Spec: `docs/superpowers/specs/2026-05-02-strategic-brain-design.md`.
+**Architecture:** Two-tier hierarchy — `StrategicCoordinator` (singleton MonoBehaviour, weekly strategic review + monthly heartbeat) drives one `CIC` per AI-controlled faction; each `CIC` holds an `OperationalPlan` and dispatches to per-army-group `TheaterCommander` instances. Mod state is read-only from Harmony patches. Persistence is JSON sidecar inside the per-save folder. Spec: `docs/superpowers/specs/2026-05-02-strategic-brain-design.md`.
 
-**Tech Stack:** C# `netstandard2.1`, BepInEx 5.4.21 (`BepInEx.Core` NuGet), HarmonyX 2.10.2 (NuGet), Newtonsoft.Json (game-bundled), Unity 2021 Mono runtime. No automated test framework — spec §9 explicitly chose smoke-test verification in game (consistent with UBoatCrewMod). TDD discipline adapted: "write the signature → build to verify it compiles → add behavior → build → smoke-test."
+**Tech Stack:** C# `netstandard2.1`, BepInEx 5.4.21 (`BepInEx.Core` NuGet), HarmonyX 2.10.2 (NuGet), Newtonsoft.Json (game-bundled), Unity 2021 Mono runtime. Pure strategic ledger logic now uses the console harness in `tests/WhiskeyRealism.Tests`; Harmony/game integration still relies on build/deploy/hash verification plus in-game smoke.
 
 > **Plan amendment 2026-05-03 — v0.2.0 scope tightening (post-decompile-research):**
 >
@@ -42,15 +44,15 @@ This plan was executed inline during the 2026-05-03 session. All v0.2.0-scoped t
 | 1, 2 | `Util/OnceLog.cs`, `Util/Reflection.cs` | Foundation utilities. |
 | 3-6 | `Strategic/PersonalityVector.cs`, `Theater.cs`, `Phase.cs`, `ObjectiveMetadata.cs` | Pure data types. |
 | 7-10 | `Strategic/FactionProfiles.cs`, `EraStageManager.cs`, `HistoricalFigureRegistry.cs`, `ObjectiveAdapter.cs` | Static registries. 25 hand-coded officers + derived fallback shipped; ObjectiveAdapter table is empty (geographic fallback covers all objectives) — populate during play. |
-| 11-13 | `Strategic/TheaterCommander.cs`, `CIC.cs`, `SuccessionScheduler.cs` | Decision actors. 12 succession events seeded; war-state gates currently always-false until v0.2.1 observers wire town-ownership signals. |
-| 14 | `Strategic/StrategicCoordinator.cs` | Singleton MonoBehaviour. Fires `OnMonthlyTick` on first valid tick + every month rollover (post-fix `44bbcae`). Player-CIC gate engaged via `DLC_WL.IsCommanderInChief(int=-1)`. |
+| 11-13 | `Strategic/TheaterCommander.cs`, `CIC.cs`, `SuccessionScheduler.cs` | Decision actors. 12 succession events seeded; town/battle war-state gates are now wired through v0.2.1/v0.2.2 observers. |
+| 14 | `Strategic/StrategicCoordinator.cs` | Singleton MonoBehaviour. v0.2.2 runs weekly strategic review and monthly heartbeat/checkpoint. Player-CIC gate engaged via `DLC_WL.IsCommanderInChief(int=-1)`. |
 | 15, 16 | `Strategic/PersistenceDto.cs`, `Patches/AICampaignSaveLoadPatch.cs` | Sidecar JSON persistence on `AICampaign.Save`/`Load` (lines 16631 / 16435). |
 | 17 | (short-circuited inline) | Decompile findings folded directly into plan amendment + per-patch `[HarmonyPatch]` attributes. No formal `findings.md` write-up needed. |
-| 18 | `Patches/MonthlyTickHookPatch.cs` | Postfix on `AICampaign.Update`. Reads `GameVars.currentmonth` (0-indexed; +1 for 1-based) and `GameVars.year` (post-fix `4000c74` — earlier code looked for nonexistent `currentdate`/`currentyear`). |
+| 18 | `Patches/MonthlyTickHookPatch.cs` | Postfix on `AICampaign.Update`. Now reads day/month/year and feeds `StrategicCoordinator.NotifyDateAdvanced`; day/month/year latching controls weekly review plus monthly heartbeat. |
 | 19 | `Patches/PickCampaignObjectivePatch.cs` | Prefix on `AICampaign.PickCampaignObjective` (17769). Plan-driven objective replaces vanilla random. |
-| 20 | (skipped — plan amendment) | `ImportanceValuesPatch` deferred to v0.2.1 — vanilla method has wrong shape (parameterless, writes to `importancevaluestemp`, chunked processor). Right target for v0.2.1: Prefix `AIArea.CalculateMostValueableAIZones(int aifaction)`. File created with `[Obsolete]` placeholder. |
-| 21, 22, 23, 25, 26 | (deferred per amendment) | Smoke-marker patches deferred to v0.2.1. Ordinals 3, 4, 5, 7, 8 reserved in catalog. |
-| 24 | `Patches/CommanderReplacementPatch.cs` | Prefix on `AICampaign.CheckAICommanderReplacements` (17008). Gate-only this slice — concrete swap (`AssignCommando` + `DoCommanderPromotion`) deferred to v0.2.1 alongside war-state observers. |
+| 20 | `Patches/ImportanceValuesPatch.cs` | v0.2.1 target changed to Postfix on `AIArea.CalculateMostValueableAIZones(int aifaction)`; overrides the consumer-side valuable-zone pick to the plan target. |
+| 21, 22, 23, 25, 26 | (deferred per amendment) | Historical plan entry superseded: #3 transfer, #4 defensive ops, and #5 battle-history are concrete in v0.2.2; #7/#8 remain reserved. |
+| 24 | `Patches/CommanderReplacementPatch.cs` | Prefix on `AICampaign.CheckAICommanderReplacements` (17008). v0.2.1 added concrete `AssignCommando` + `DoCommanderPromotion` succession swaps. |
 | 27 | `Plugin.cs` | v0.2.0 BepInPlugin. Patches registered via `_harmony.PatchAll(typeof(Plugin).Assembly)`. ConfigEntries: `Enabled`, `VerboseLogging`, `PlanTrace`, `SuccessionTrace`, `OverrideVanillaSettings`, `LockedDifficulty`. |
 | 28 | `docs/patch-catalog.md`, `docs/handoff.md` | Catalog populated with shipped patches + reserved ordinals. Handoff updated to "shipped 0.2.0". v0.2.0 tag held until smoke-test passed (now confirmed 2026-05-03). |
 
@@ -2484,24 +2486,24 @@ namespace WhiskeyRealism.Patches
     // each game-day. Hook target identified in Task 17 research; substitute
     // the chosen class/method below if findings.md differs.
     //
-    // Spec §5.1 — monthly re-eval. The coordinator self-latches on month
-    // rollover, so it's safe to call NotifyDateAdvanced more than once per
-    // month; only the first call within a new month triggers OnMonthlyTick.
+    // Current v0.2.2 cadence: per-frame hook reads day/month/year; the
+    // coordinator latches into weekly strategic review and monthly heartbeat.
     [HarmonyPatch(typeof(AICampaign), "Update")] // <-- replace with Task 17's chosen hook
     internal static class MonthlyTickHookPatch
     {
         [HarmonyPostfix]
         internal static void Postfix()
         {
-            OnceLog.Info("monthlytick", "MonthlyTickHookPatch wired");
+            OnceLog.Info("strategic-cadence", "Strategic cadence hook wired (monthly heartbeat + weekly CIC review)");
             try
             {
+                int day = ReadGameDay();
                 int month = ReadGameMonth();
                 int year  = ReadGameYear();
-                if (month <= 0 || year <= 0) return;
+                if (day <= 0 || month <= 0 || year <= 0) return;
 
                 if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
-                StrategicCoordinator.Instance.NotifyDateAdvanced(month, year);
+                StrategicCoordinator.Instance.NotifyDateAdvanced(day, month, year);
             }
             catch (Exception ex)
             {

@@ -6,15 +6,15 @@ In W&L the player starts at the bottom — commanding an artillery section, regi
 
 ## Status
 
-**v0.2.1.1 — strategic brain shipped, smoke-test verified end-to-end.**
+**v0.2.1.1 released. v0.2.2 enrichment is implemented locally and awaiting full in-game runtime smoke/release.**
 
-The mod replaces vanilla's random-objective AI with a personality-driven phased-plan strategic engine for both Confederate and Union AI. 9 active Harmony patches + sidecar JSON persistence. 25 hand-coded historical-officer personalities, 12 canonical succession events with concrete `AssignCommando` swaps, 4-stage era progression, two-tier CIC + theater-commander hierarchy, player-CIC noninterference gate, town-ownership war-state observers (Vicksburg / Chattanooga / Atlanta). Locks the campaign-create menu's Aggressiveness / Historic / Difficulty settings + 5 realism checkboxes to coherent values.
+The mod replaces vanilla's random-objective AI with a personality-driven phased-plan strategic engine for both Confederate and Union AI. Released v0.2.1.1 ships 9 active Harmony patches + sidecar JSON persistence. Local v0.2.2 adds battle-history observers, transfer/front-budget steering, capital-defense steering, weekly CIC strategic review, historical army operating areas, and historical army-group steering using vanilla `ArmyGroup` APIs. 25 hand-coded historical-officer personalities, 12 canonical succession events with concrete `AssignCommando` swaps, 4-stage era progression, two-tier CIC + theater-commander hierarchy, player-CIC noninterference gate, and town/battle war-state observers are in place. Locks the campaign-create menu's Aggressiveness / Historic / Difficulty settings + 5 realism checkboxes to coherent values.
 
 Latest release: [v0.2.1.1](https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.1.1) — drop the attached `WhiskeyRealism.dll` into your `<GTCW>/BepInEx/plugins/` folder. Requires BepInEx 5.4.x x64 UnityMono.
 
 ## Goals
 
-- **Strategic awareness.** AI commits to phased operational plans over multiple game-months instead of randomly picking objectives turn by turn.
+- **Strategic awareness.** AI commits to phased operational plans and reviews them weekly instead of randomly picking objectives turn by turn.
 - **Historical character without scripting.** Era-based doctrine progression (1861 amateur → 1864-65 total war), faction profiles (CSA defensive-aggressive, Union slow-coordinated-pressure), and ~25 hand-coded historical commander personalities (Lee, McClellan, Grant, Sherman, Hood, Johnston, etc.) — composed additively so the same engine produces both Lee's army and Hood's army with the right feel.
 - **Recognizable but not deterministic succession.** ~12 canonical historical events (Lee taking ANV command, Grant rising to General-in-Chief, McClellan's removal, Hood replacing Johnston, etc.) gated on date AND war-state. They fire when conditions reasonably hold; if your campaign has gone unusually, alternate histories emerge.
 - **W&L-aware.** Player-commanded units are not steamrolled by the AI's strategic decisions — the existing `DLC_WL.dlc_scenarioactive` gate is respected and extended.
@@ -29,7 +29,7 @@ Latest release: [v0.2.1.1](https://github.com/3-Deacon/whiskey-realism-mod/relea
 
 ## Install
 
-1. Download `WhiskeyRealism.dll` from the [Releases page](https://github.com/3-Deacon/whiskey-realism-mod/releases) (once v0.2+ is published).
+1. Download the latest `WhiskeyRealism.dll` from the [Releases page](https://github.com/3-Deacon/whiskey-realism-mod/releases).
 2. Drop it into `<GTCW>/BepInEx/plugins/`.
 3. Launch the game. On first run a config file is generated at `<GTCW>/BepInEx/config/dev.kyle.whiskey-realism.cfg`.
 

@@ -1,7 +1,7 @@
 # Strategic Brain — Design Spec
 
 **Slice A** — strategic AI overhaul for Grand Tactician: The Civil War's Whiskey & Lemons DLC career mode.
-**Status:** approved 2026-05-02 via brainstorming session. Implementation plan TBD.
+**Status:** approved 2026-05-02 via brainstorming session. v0.2.1.1 released; local v0.2.2 enrichment is implemented through #16. This remains the historical Slice A design record; `docs/patch-catalog.md` is authoritative for live patch inventory.
 **Decompile reference:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (see `docs/findings.md` for line numbers).
 
 ---
@@ -396,6 +396,8 @@ Theater commanders cannot abandon a phase; they only signal completion (target t
 
 **v0.2.0 actual ship state** (10 active + 1 deferred). Patches numbered with stable ordinals (per `docs/patch-catalog.md`); withdrawn/deferred patches keep their slot. Postfix-preferred; Prefix only when the vanilla method directly mutates state we need to overwrite (#1, #6).
 
+**Current v0.2.2 note:** this section preserves the original Slice A design record. The live patch inventory is now authoritative in `docs/patch-catalog.md` and includes #15 `ArmyAreaTheaterPatch`, #16 `ArmyGroupManagementPatch`, weekly strategic review cadence, battle-history observers, front-sector transfer budgets, and concrete #3/#4/#5/#6 steering.
+
 **Critical runtime sequencing (added v0.2.1.1 after smoke-test):** before reading any `CampaignObjective` state in `StrategicCoordinator.OnMonthlyTick`, the coordinator invokes `Policy.CheckForChapterUpdate()` via reflection. Vanilla's per-day cycle calls this method to advance `Policy.CurrentChapter` (initial value `-1`) — but on a fresh-campaign first frame, our `OnMonthlyTick` can fire before vanilla's per-day cycle has run. Without this manual invocation, `CurrentChapter == -1` deactivates every objective (their `ObjectiveChapters` lists don't contain `-1`), `CIC.Replan` returns count=0, and plans never build. Decompile reference: `Policy.CheckForChapterUpdate` at line 211604.
 
 ### 6.1 Strategic-core patches
@@ -404,9 +406,9 @@ Theater commanders cannot abandon a phase; they only signal completion (target t
 |---|---|---|---|---|---|---|
 | 1 | `PickCampaignObjectivePatch` | **Prefix** | `AICampaign.PickCampaignObjective` | 17769 | CIC's active plan | If active plan has a valid target for this faction, set `aifaction[_aifaction].followedcampaignobjective = plan.TargetObjectiveID` and return `false` to skip vanilla. If no plan / plan stale / faction is player-CIC, return `true` for vanilla random fallback. |
 | 2 | `ImportanceValuesPatch` | Postfix | `AIArea.CalculateMostValueableAIZones(int aifaction)` | 10964 | CIC's active plan + ObjectiveAdapter target lookup | After vanilla picks `mostvalueableaiareaclose[aifaction]`, override it to point at the plan-target AIArea. Resolves CampaignObjective UniqueID → first Town/IIP target → world position → vanilla `AICampaign.aiareas.GetColorOnPos(pos, -1f)` → `AIArea.GetAIArea(color)`. (v0.2.0 originally targeted `AICampaign.UpdateImportanceValues`; that method is parameterless, returns `bool`, and is a chunked per-IIP/cbuild/town processor that writes only to `importancevaluestemp` — wrong target. Redesigned for v0.2.1 to consumer-side override; ordinal #2 preserved.) |
-| 3-5 | *(reserved for v0.2.1)* | — | — | — | — | Smoke-marker-only patches deferred per plan amendment. |
-| 6 | `CommanderReplacementPatch` | **Prefix** | `AICampaign.CheckAICommanderReplacements` | 17008 | SuccessionScheduler state | Gate-only this slice — concrete scripted-event swap (`AssignCommando` + `DoCommanderPromotion` + clear `bestcommanderidperlevel`/`worstcommanderidperlevel`) deferred to v0.2.1. Currently always returns `true` (vanilla path). |
-| 7-8 | *(reserved for v0.2.1)* | — | — | — | — | Smoke-marker-only patches deferred per plan amendment. |
+| 3-5 | *(originally reserved for v0.2.1)* | — | — | — | — | Superseded by v0.2.2 concrete #3 transfer, #4 defensive-ops, and #5 battle-history observer implementations; see patch catalog. |
+| 6 | `CommanderReplacementPatch` | **Prefix** | `AICampaign.CheckAICommanderReplacements` | 17008 | SuccessionScheduler state | Superseded from gate-only: now applies scripted succession swaps with vanilla `AssignCommando` + `DoCommanderPromotion`; see patch catalog. |
+| 7-8 | *(reserved)* | — | — | — | — | Still reserved for concrete perk/recruitment steering. |
 | 9 | `MonthlyTickHookPatch` | Postfix | `AICampaign.Update` | 11159 | — | Drives `StrategicCoordinator.NotifyDateAdvanced` from per-frame `Update`. Coordinator self-latches on 7-day in-game buckets for CIC review/replan and on month rollover for visible heartbeat, so per-frame call rate is fine. |
 
 ### 6.2 Settings-lock patches (added 2026-05-03; spec §3.2)
@@ -425,7 +427,7 @@ All settings-lock patches gate on `Plugin.Instance.OverrideVanillaSettings.Value
 
 | Patch | Hook type | Game method | Decompile line | Effect |
 |---|---|---|---|---|
-| `AICampaignSaveLoadPatch.SavePatch` | Postfix | `AICampaign.Save(string folder)` | 16631 | Writes `<persistentDataPath>/<folder>/whiskeyrealism.json` after vanilla save completes. |
+| `AICampaignSaveLoadPatch.SavePatch` | Postfix | `AICampaign.Save(string folder)` | 16631 | Writes `<folder>/whiskeyrealism.json` after vanilla save completes. `folder` is CWD-relative to the game install. |
 | `AICampaignSaveLoadPatch.LoadPatch` | Postfix | `AICampaign.Load(string folder)` | 16435 | Reads sidecar JSON; falls back to fresh init with explicit log if missing. Calls `OnceLog.Reset()` so first-fire markers re-emit per save-load cycle. |
 
 ### 6.4 Player-CIC gate inside patches
@@ -473,8 +475,8 @@ public class AICampaignSavePatch
         try
         {
             // folder is "Campaigns/<level>/<sublevel>/<saveFolder>/"
-            // sidecar lands as <persistentDataPath>/<folder>/whiskeyrealism.json
-            var sidecarPath = Path.Combine(Application.persistentDataPath, folder, "whiskeyrealism.json");
+            // sidecar lands beside vanilla save files under the game install CWD
+            var sidecarPath = Path.Combine(folder, "whiskeyrealism.json");
             StrategicCoordinator.Instance.SaveSidecar(sidecarPath);
         }
         catch (Exception ex) { Plugin.Log.LogError("Sidecar save failed: " + ex); }
@@ -497,7 +499,7 @@ public class AICampaignLoadPatch
     {
         try
         {
-            var sidecarPath = Path.Combine(Application.persistentDataPath, folder, "whiskeyrealism.json");
+            var sidecarPath = Path.Combine(folder, "whiskeyrealism.json");
             if (File.Exists(sidecarPath))
                 StrategicCoordinator.Instance.LoadSidecar(sidecarPath);
             else
@@ -567,7 +569,7 @@ Sidecar missing or corrupt → log warning, init mod state from current game sta
 
 ## 9. Testing
 
-No automated tests (consistent with UBoatCrewMod). Per-patch first-fire markers via `OnceLog.Info` for smoke-test discipline.
+Pure strategic ledger logic now has a console harness at `tests/WhiskeyRealism.Tests`. Harmony/game integration still requires manual GTCW smoke-testing. Per-patch first-fire markers use `OnceLog.Info` for smoke-test discipline.
 
 ### 9.1 Smoke-test scenarios
 
@@ -616,7 +618,7 @@ Documented in:
 1. Historical note: v0.2.0 originally searched for a monthly hook; shipped code uses `AICampaign.Update` and self-latches into weekly review/monthly heartbeat.
 2. Identify how `aifaction[i].ownunits` exposes army-group-level top units (`unittyp >= 15`?). Map to TheaterCommander assignment at first encounter.
 3. Identify `CampaignObjective.GetAvailableObjectives` return semantics (cached? per-faction? recomputed on demand?). Plan-scoring depends on this.
-4. Confirm `Application.persistentDataPath` resolves correctly for our `Path.Combine(persistentDataPath, folder, ...)` sidecar pattern when GTCW is launched via Steam vs. direct exe — the `folder` argument passed into `AICampaign.Save` is a relative path; verify that `SceneManagement.SaveAll` writes its files into `persistentDataPath` (vs. game-install dir) on the Steam build.
+4. Resolved in v0.2.0 smoke: vanilla save folders are CWD-relative to the game install, not `Application.persistentDataPath`; sidecar code must keep using `Path.Combine(folder, "whiskeyrealism.json")`.
 5. Verify event dispatcher sources for: town loss, major battle defeat, KIA-on-officer. Likely candidates in `BattleUnits` end-of-battle handling and `CampaignController` event hooks.
 6. Theater-commander identification at runtime: is there a stable ID, or do we have to track by `commander.id_hash + arrivaldate`?
 7. Phase-decomposition algorithm — section 5.3 says "decompose by geographic prerequisites" but the actual algorithm is left for implementation. Likely shape: from picked objective, walk back through geographic dependencies (target → covering force → supply hub → start position) and treat each step as a phase. Verify this maps cleanly onto GTCW's `AIArea` graph.
@@ -627,7 +629,7 @@ Documented in:
 The strategic-brain slice is "shippable" when:
 
 1. Build is green (0 warnings, 0 errors).
-2. All 10 active bridge-layer patches register and log `[once:...]` first-fire markers in a fresh career (8 strategic-core + 5 settings-lock minus 3 deferred slots; persistence pair counts separately).
+2. Active bridge-layer patches register and log `[once:...]` first-fire markers in a fresh career; current authoritative count is in `docs/patch-catalog.md`.
 3. Smoke-test scenarios 1-7 pass on a single career playthrough (boot, era=Amateur1861, sidecar round-trip, succession event #1 fires by 1862-05, monthly heartbeat appears, weekly review first-fire appears).
 4. JSON sidecar is human-readable and round-trips through save → reload without losing state.
 5. Mod state is observably read-only from patches (no patch mutates `CIC` / `TheaterCommander` state — verified by code review at PR time).

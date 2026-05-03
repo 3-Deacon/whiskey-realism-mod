@@ -1,7 +1,7 @@
 # Grand Strategy and Research Tree Design
 
 Date: 2026-05-03
-Status: proposed design for v0.2.2/v0.2.3 sequencing
+Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering is live locally through #16; objective tags, policy steering, and project steering remain design work.
 Scope: Slice A enrichment only. This is strategic-layer input to CIC planning, policy selection, and project selection. It does not open Slice B tactical behavior.
 
 ## Why this exists
@@ -108,7 +108,7 @@ The strategic AI should defend the whole front unless the CIC makes an explicit 
 - A strong/renowned commander may counterpunch locally, but only if sector risk stays under budget.
 - Concessions should be logged as strategy decisions, not accidental side effects of transfer or objective steering.
 
-This requires a monthly `FrontSectorLedger` built from vanilla data:
+This requires a weekly `FrontSectorLedger` built from vanilla data:
 
 | Field | Source |
 |---|---|
@@ -300,7 +300,7 @@ Add strategic core types:
 - `ArmyRole`
 - `ConcessionDecision`
 
-The ledger is recomputed on monthly tick and remains read-only to Harmony patches between ticks.
+The ledger is recomputed during weekly strategic review and remains read-only to Harmony patches between review ticks.
 
 Inputs:
 
@@ -352,7 +352,7 @@ Army groups should become command-intent containers, not just UI/coordination ob
 - let attached armies inherit the role unless their local state forces `Recover` or `Screen`,
 - use army-group commander personality in sector risk tolerance once available.
 
-This also addresses early-campaign succession: if no `ArmyGroup` exists when a historical event needs one, bootstrap should create/assign a command container only when vanilla prerequisites allow it or the design explicitly approves an early-campaign exception.
+This also addresses early-campaign succession: #16 `ArmyGroupManagementPatch` now creates/assigns a command container only when vanilla prerequisites and the weekly historical area ledger identify at least two eligible top formations in the same operating command.
 
 Heroism should be controlled risk, not suicidal movement:
 
@@ -371,13 +371,12 @@ No army should be marked heroic if:
 
 ## Recommended sequence
 
-1. Finish current v0.2.2 runtime smoke for #4 `DefensiveOpsPatch`.
+1. Runtime-smoke #4 `DefensiveOpsPatch`, #15 `ArmyAreaTheaterPatch`, and #16 `ArmyGroupManagementPatch` after a GTCW restart.
 2. Implement reserved #7 and #8 if still cheap and bounded.
 3. Add `GrandStrategyProfile` plus objective-tag metadata table. This is pure strategic core and can be tested without new Harmony patch risk.
-4. Add `FrontSectorLedger` and per-army roles before any broader objective/project steering. This prevents plan-target concentration from hollowing out the rest of the front.
-5. Add `ProjectSelectionPatch`. It is lower risk because project choice is random-weighted in vanilla and we can replace only the next project slot.
-6. Add `PolicySelectionPatch`. Policy selection is ordered and chapter-gated, so this needs a tighter safety check.
-7. Add defensive/offensive front-posture steering only after the ledger logs plausible `Hold/Delay/Concede/Exploit` decisions in-game.
+4. Add `ProjectSelectionPatch`. It is lower risk because project choice is random-weighted in vanilla and we can replace only the next project slot.
+5. Add `PolicySelectionPatch`. Policy selection is ordered and chapter-gated, so this needs a tighter safety check.
+6. Add defensive/offensive front-posture steering only after the weekly ledgers log plausible `Hold/Delay/Concede/Exploit` decisions in-game.
 
 ## Acceptance criteria
 

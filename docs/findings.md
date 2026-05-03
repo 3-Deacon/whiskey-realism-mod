@@ -148,6 +148,8 @@ Collected during v0.2.0 / v0.2.1 / v0.2.1.1 smoke-testing. Pattern: many vanilla
 | `BattleUnits.armygroups` populated | At campaign start | Only after vanilla AI promotes a commander to army-group rank (typically meaningful game time). `Commander.IsArmyGroupCommander() == true` requires this. |
 | Vanilla CampaignObjectives for W&L "002" | All 38 from `Config/campaignobjectives.dat` | Only the subset whose `ObjectiveScenario` list contains "002" (~19 of 38). Many are abstract win-conditions; default `mintownobjectives=1` filter excludes them — pass `0`. |
 
+**Army-group steering note (added v0.2.2):** vanilla creates/attaches army groups in `AICampaign.CheckArmyGroupManagement` (line 17705) from top units with non-default `Regiment.theaterposition`. Whiskey #16 `ArmyGroupManagementPatch` now runs after vanilla and uses vanilla `ArmyGroup.AddUnit`, `ArmyGroup.CreateNewArmyGroup`, and `ArmyGroup.AppointCommander` only after the weekly `ArmyAreaLedger` identifies at least two eligible top formations in the same historical operating command. Preferred commanders are appointed only when already attached to that group or unassigned; the patch does not yank unrelated commands across the map.
+
 **BepInEx-specific gotcha:** `Config.Bind("[General]", ...)` throws `ArgumentException`. BepInEx 5.4 forbids `[` `]` in section names; it adds the brackets when writing the .cfg file. Pass `"General"`, not `"[General]"`. Plugin Awake exceptions land in Unity's `Player.log` (`<persistentDataPath>/Player.log`), NOT `BepInEx/LogOutput.log` — always check both when diagnosing silent failures.
 
 ## Game-update re-decompile inventory
