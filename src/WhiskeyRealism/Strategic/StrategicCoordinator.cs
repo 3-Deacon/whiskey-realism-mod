@@ -108,7 +108,7 @@ namespace WhiskeyRealism.Strategic
                     if (CICs[alliance] == null) CICs[alliance] = BuildCICForAlliance(alliance);
 
                     var era = Eras[alliance];
-                    var ws = ObserveWarState(month, year, alliance);
+                    var ws = ObserveWarStateCached(month, year);
                     era.CheckTransition(month, year, ws.VicksburgFallen, ws.AtlantaThreatened);
 
                     var fired = Succession.CheckEvents(BuildSchedulerView(month, year, alliance, ws));
@@ -186,38 +186,56 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private struct WarSnapshot
+        // Cached snapshot — recomputed once per OnMonthlyTick to avoid
+        // re-reading 3+ towns per faction iteration.
+        private WarStateObserver.Snapshot _lastSnapshot;
+        private int _lastSnapshotMonth = -1;
+        private int _lastSnapshotYear  = -1;
+
+        private WarStateObserver.Snapshot ObserveWarStateCached(int month, int year)
         {
-            public bool VicksburgFallen;
-            public bool ChattanoogaFallen;
-            public bool AtlantaThreatened;
-            public bool ANVHasLostMajorBattle;
+            if (month == _lastSnapshotMonth && year == _lastSnapshotYear)
+                return _lastSnapshot;
+
+            var snap = WarStateObserver.Observe();
+            _lastSnapshot = snap;
+            _lastSnapshotMonth = month;
+            _lastSnapshotYear  = year;
+
+            // Log only when state changes month-over-month — non-spammy.
+            // Helps smoke-testers see WHEN towns fall.
+            if (snap.VicksburgFallen   && !_loggedVicksburg)   { Plugin.Log.LogInfo($"[WarState] Vicksburg fell ({year}-{month:D2})");   _loggedVicksburg = true; }
+            if (snap.ChattanoogaFallen && !_loggedChattanooga) { Plugin.Log.LogInfo($"[WarState] Chattanooga fell ({year}-{month:D2})"); _loggedChattanooga = true; }
+            if (snap.AtlantaThreatened && !_loggedAtlanta)     { Plugin.Log.LogInfo($"[WarState] Atlanta fell ({year}-{month:D2})");     _loggedAtlanta = true; }
+
+            return snap;
         }
 
-        private WarSnapshot ObserveWarState(int month, int year, int alliance)
-        {
-            return new WarSnapshot();
-        }
+        private bool _loggedVicksburg;
+        private bool _loggedChattanooga;
+        private bool _loggedAtlanta;
 
-        private SuccessionScheduler.WarStateView BuildSchedulerView(int month, int year, int alliance, WarSnapshot snap)
+        private SuccessionScheduler.WarStateView BuildSchedulerView(int month, int year, int alliance, WarStateObserver.Snapshot snap)
         {
             return new SuccessionScheduler.WarStateView
             {
                 CurrentMonth = month,
                 CurrentYear  = year,
+                // Town-ownership signals (v0.2.1).
                 VicksburgFallen     = snap.VicksburgFallen,
                 ChattanoogaFallen   = snap.ChattanoogaFallen,
                 AtlantaThreatened   = snap.AtlantaThreatened,
-                ANVHasLostMajorBattle = snap.ANVHasLostMajorBattle,
-                JohnstonWoundedOrDisabled = false,
-                BragsCommandRatingLow     = false,
-                AoPHasFailedNOffensives   = false,
-                BurnsidesFirstDefeatPassed = false,
-                LeeInvadingPennsylvania   = false,
-                WesternMajorDefeatPassed  = false,
-                DavisPatienceExhausted    = false,
-                ValleyOpsNeeded           = false,
-                WarClearlyLost            = false
+                // Battle-history / commander-state signals deferred to v0.2.2.
+                ANVHasLostMajorBattle      = snap.ANVHasLostMajorBattle,
+                JohnstonWoundedOrDisabled  = snap.JohnstonWoundedOrDisabled,
+                BragsCommandRatingLow      = snap.BragsCommandRatingLow,
+                AoPHasFailedNOffensives    = snap.AoPHasFailedNOffensives,
+                BurnsidesFirstDefeatPassed = snap.BurnsidesFirstDefeatPassed,
+                LeeInvadingPennsylvania    = snap.LeeInvadingPennsylvania,
+                WesternMajorDefeatPassed   = snap.WesternMajorDefeatPassed,
+                DavisPatienceExhausted     = snap.DavisPatienceExhausted,
+                ValleyOpsNeeded            = snap.ValleyOpsNeeded,
+                WarClearlyLost             = snap.WarClearlyLost
             };
         }
 
