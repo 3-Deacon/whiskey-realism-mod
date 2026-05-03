@@ -396,12 +396,14 @@ Theater commanders cannot abandon a phase; they only signal completion (target t
 
 **v0.2.0 actual ship state** (10 active + 1 deferred). Patches numbered with stable ordinals (per `docs/patch-catalog.md`); withdrawn/deferred patches keep their slot. Postfix-preferred; Prefix only when the vanilla method directly mutates state we need to overwrite (#1, #6).
 
+**Critical runtime sequencing (added v0.2.1.1 after smoke-test):** before reading any `CampaignObjective` state in `StrategicCoordinator.OnMonthlyTick`, the coordinator invokes `Policy.CheckForChapterUpdate()` via reflection. Vanilla's per-day cycle calls this method to advance `Policy.CurrentChapter` (initial value `-1`) — but on a fresh-campaign first frame, our `OnMonthlyTick` can fire before vanilla's per-day cycle has run. Without this manual invocation, `CurrentChapter == -1` deactivates every objective (their `ObjectiveChapters` lists don't contain `-1`), `CIC.Replan` returns count=0, and plans never build. Decompile reference: `Policy.CheckForChapterUpdate` at line 211604.
+
 ### 6.1 Strategic-core patches
 
 | # | Patch class | Hook type | Game method | Decompile line | Mod state read | Effect |
 |---|---|---|---|---|---|---|
 | 1 | `PickCampaignObjectivePatch` | **Prefix** | `AICampaign.PickCampaignObjective` | 17769 | CIC's active plan | If active plan has a valid target for this faction, set `aifaction[_aifaction].followedcampaignobjective = plan.TargetObjectiveID` and return `false` to skip vanilla. If no plan / plan stale / faction is player-CIC, return `true` for vanilla random fallback. |
-| 2 | `ImportanceValuesPatch` | **DEFERRED to v0.2.1** | `AICampaign.UpdateImportanceValues` | 14905 | — | Vanilla method is parameterless (returns `bool`) and writes to `importancevaluestemp` (chunked per-IIP/cbuild/town processor) — wrong target. v0.2.1 redesign will Prefix `AIArea.CalculateMostValueableAIZones(int aifaction)` to bias `importancevalues[aifaction]` for plan-target zones before the picker reads them. |
+| 2 | `ImportanceValuesPatch` | Postfix | `AIArea.CalculateMostValueableAIZones(int aifaction)` | 10964 | CIC's active plan + ObjectiveAdapter target lookup | After vanilla picks `mostvalueableaiareaclose[aifaction]`, override it to point at the plan-target AIArea. Resolves CampaignObjective UniqueID → first Town/IIP target → world position → vanilla `AICampaign.aiareas.GetColorOnPos(pos, -1f)` → `AIArea.GetAIArea(color)`. (v0.2.0 originally targeted `AICampaign.UpdateImportanceValues`; that method is parameterless, returns `bool`, and is a chunked per-IIP/cbuild/town processor that writes only to `importancevaluestemp` — wrong target. Redesigned for v0.2.1 to consumer-side override; ordinal #2 preserved.) |
 | 3-5 | *(reserved for v0.2.1)* | — | — | — | — | Smoke-marker-only patches deferred per plan amendment. |
 | 6 | `CommanderReplacementPatch` | **Prefix** | `AICampaign.CheckAICommanderReplacements` | 17008 | SuccessionScheduler state | Gate-only this slice — concrete scripted-event swap (`AssignCommando` + `DoCommanderPromotion` + clear `bestcommanderidperlevel`/`worstcommanderidperlevel`) deferred to v0.2.1. Currently always returns `true` (vanilla path). |
 | 7-8 | *(reserved for v0.2.1)* | — | — | — | — | Smoke-marker-only patches deferred per plan amendment. |
@@ -443,13 +445,13 @@ Patches that read CIC plan state (#1, future #3) check `StrategicCoordinator.IsP
 
 ### 7.1 Sidecar JSON, not embedded save format
 
-GTCW writes per-save folders, not single-file saves:
+GTCW writes per-save folders, not single-file saves. **Path is CWD-relative (game install dir), NOT `Application.persistentDataPath`** — vanilla `SceneManagement.SaveAll` calls `Directory.CreateDirectory("Campaigns/...")` with a relative path. Our sidecar uses the same convention so it lands beside vanilla's files:
 
 ```
-<persistentDataPath>/Campaigns/<level>/<sublevel>/<saveFolder>/scenario.txt   (vanilla)
-<persistentDataPath>/Campaigns/<level>/<sublevel>/<saveFolder>/units.txt      (vanilla)
-<persistentDataPath>/Campaigns/<level>/<sublevel>/<saveFolder>/...            (vanilla)
-<persistentDataPath>/Campaigns/<level>/<sublevel>/<saveFolder>/whiskeyrealism.json   (mod sidecar)
+<game install>/Campaigns/<level>/<sublevel>/<saveFolder>/scenario.txt   (vanilla)
+<game install>/Campaigns/<level>/<sublevel>/<saveFolder>/units.txt      (vanilla)
+<game install>/Campaigns/<level>/<sublevel>/<saveFolder>/...            (vanilla)
+<game install>/Campaigns/<level>/<sublevel>/<saveFolder>/whiskeyrealism.json   (mod sidecar)
 ```
 
 Why sidecar:

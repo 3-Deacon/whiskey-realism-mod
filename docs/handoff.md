@@ -8,7 +8,7 @@
 
 | | |
 |---|---|
-| **Current shipped version** | v0.2.1 — strategic-brain enrichment (concrete swap, war-state, plan biasing). Tagged + Released 2026-05-03. |
+| **Current shipped version** | **v0.2.1.1** — strategic-brain core verified end-to-end in-game on 2026-05-03. Tagged + GitHub Release with binary attached. |
 | **Active workstream** | Slice A v0.2.2 backlog (battle-history observers + smoke-marker patches → concrete steering + vanilla-settings integration) |
 | **Repo** | [`3-Deacon/whiskey-realism-mod`](https://github.com/3-Deacon/whiskey-realism-mod) (public, MIT) |
 | **Last updated** | 2026-05-03 |
@@ -134,23 +134,42 @@ Historical flavor on top of A/B/C. Notes:
 - **2026-05-03 — BepInEx 5.4.23.5 x64 UnityMono installed in GTCW** (was player-side prerequisite). DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll`. Build verified clean (0 warnings, 0 errors).
 - **2026-05-03 — v0.2.0 smoke-test verified.** All 8 active Harmony patches first-fire correctly; settings-lock subsystem visible in campaign-create menu (Aggressiveness/Difficulty sliders display "Locked:Realism"; Historic radio + 5 realism CBs frozen at half-alpha via `CheckBox.Freeze`); `[Heartbeat]` line appears on campaign creation; sidecar JSON round-trips through save/reload. Bugs caught + fixed during smoke-test cycle: BepInEx Config.Bind brackets, three reflection-signature mismatches, missing `GameVars.year` lookup, first-tick latch. See plan §"Bugs caught + fixed during execution" for full table.
 - **2026-05-03 — v0.2.0 tagged + GitHub Release published.** Tag at `https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.0` with DLL attached.
-- **2026-05-03 — v0.2.1 built (smoke-test pending).** Three commits closing the loop on v0.2.0's deferred behavior:
+- **2026-05-03 — v0.2.1 built and tagged.** Three commits closing the loop on v0.2.0's deferred behavior:
   - `3a429d8` — `ImportanceValuesPatch` (#2) redesigned. Postfix on `AIArea.CalculateMostValueableAIZones` overrides `mostvalueableaiareaclose[aifaction]` to point at the plan target.
   - `3d28b23` — `WarStateObserver` added. Town-ownership reads for Vicksburg / Chattanooga / Atlanta. Unlocks succession events #8 (Grant→GiC), #9 (Sherman→Western), #10 (Hood replaces Johnston).
   - `79a35ca` — Concrete commander-swap inside `CommanderReplacementPatch` (#6). When scheduler has un-applied scripted events, finds replacement Commander by name+alliance, displaces an army-group commander, calls `AssignCommando` + `DoCommanderPromotion`. Applied-event tracking persisted in sidecar.
+- **2026-05-03 — v0.2.1.1 patch release.** Five fixes from in-game smoke-testing:
+  - `1e5a1ef` — `GetAvailableObjectives(int, bool, int)` now passes `mintownobjectives=0` so abstract win-condition objectives pass through. W&L scenario "002" has more abstract than town-targeted objectives.
+  - `4bcdd15` + `30b4391` — Diagnostic logging in `CIC.Replan` (`[CIC:diag]` line) — OnceLog'd snapshot of filter-pass counts + `Policy.CurrentChapter` + `ObjectiveChapters`. Surfaces the `IsDeactivated()` sub-gate when something rejects everything.
+  - `ace7e87` — **Critical**: invoke `Policy.CheckForChapterUpdate()` at top of `OnMonthlyTick`. Without this, fresh campaigns fired our tick BEFORE vanilla's per-day cycle ran; `Policy.CurrentChapter` was still `-1` (init value); every CampaignObjective was deactivated; plans never built. For W&L scenario "002", `CheckForChapterUpdate` unconditionally sets `CurrentChapter=1`.
+  - `6ce3a31` — `FilterMap.GetColorOnPos` takes `(Vector3, float = -1f)`, not single-arg. Reflection lookup in `ImportanceValuesPatch` was failing silently — plan-target zone override never ran.
+- **2026-05-03 — v0.2.1.1 verified end-to-end.** Smoke-test log signatures confirmed:
+  - All 8 patches first-fire on launch.
+  - `[CIC:diag] alliance=0 ... Policy.CurrentChapter=1 ... not-deact=4 not-accomp=4` (chapter advance worked, objectives no longer deactivated).
+  - `[Heartbeat] 1861-06 alliance=0 ... cic=Lincoln plan=phase1/2 obj=29` (plans actually built).
+  - `[Heartbeat] 1861-06 alliance=1 ... cic=Davis plan=phase1/2 obj=1` (CSA plan too).
+  - `[ObjectiveAdapter] geographic fallback for objective ID 29 → theater=East` (geographic resolution works for Town-targeted objectives).
+  - All 12 succession events `APPLIED` end-to-end under test mode.
+  - Sidecar JSON round-trips through save/reload.
 
 ---
 
 ## Next concrete action
 
-v0.2.1 verified end-to-end via test-mode smoke run on 2026-05-03 — all 12 succession events applied with concrete `AssignCommando` + `DoCommanderPromotion` swaps; sidecar JSON round-trips through save/reload; no reflection failures, no log spam. Test-mode config flipped back to `false`. Tag + GitHub Release published.
+v0.2.1.1 shipped (tag + GitHub Release at https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.1.1). Strategic core verified working end-to-end in-game.
 
 **v0.2.2 backlog** (see `docs/patch-catalog.md` §"Pending"):
-1. **Battle-history observers in `WarStateObserver`** — track ANV defeats, AoP offensive failures, Burnside's first defeat, Lee invading Pennsylvania, Western theater defeats, Valley operations, war clearly lost. Unlocks the remaining 7 succession events (#1, #3, #4, #5, #6, #11, #12) so they can fire from observed game state without test-mode bypass.
-2. **Concrete steering for `TransferOfUnitsPatch` (#3), `DefensiveOpsPatch` (#4), `PerkSelectionPatch` (#7), `RecruitmentPatch` (#8)** — currently smoke-marker only.
-3. **Vanilla settings → mod logic integration** — route the locked-Hard `usedcampaignbonus` into `CIC.Effective` to scale `CasualtyTolerance`. Currently the lock is informational only.
-4. **`Policy.CurrentChapter` integration** — vanilla 5-chapter system overlaps with our 4-stage `EraStage`. Map / retire.
 
-**Important early-campaign constraint observed during v0.2.1 smoke-test:**
-- `CampaignObjective.GetAvailableObjectives(allianceId)` returns empty list before war declared (Chapter 0). `CIC.Replan` correctly handles this (clears plan). When war begins, vanilla publishes objectives and Replan should produce real plans.
-- `BattleUnits.armygroups` not populated until AI promotes someone to army-group rank — typically later in the war. Until then, the `CommanderReplacementPatch` real-mode path correctly defers (test-mode falls back to any-commander).
+1. **Battle-history observers in `WarStateObserver`** — track ANV defeats, AoP offensive failures, Burnside's first defeat, Lee invading Pennsylvania, Western theater defeats, Valley operations, war clearly lost. Unlocks the remaining 7 succession events (#1, #3, #4, #5, #6, #11, #12) so they can fire from observed game state without test-mode bypass. Gate sources to investigate: `Battle` history class, `aifaction[].history`, commander injury/disabled flags, Lee's `currentcommand` position vs. Pennsylvania state boundaries.
+2. **Concrete steering for `TransferOfUnitsPatch` (#3), `DefensiveOpsPatch` (#4), `PerkSelectionPatch` (#7), `RecruitmentPatch` (#8)** — currently smoke-marker-only / deferred from v0.2.0.
+3. **Vanilla settings → mod logic integration** — route the locked-Hard `usedcampaignbonus` into `CIC.Effective` to scale `CasualtyTolerance`. Currently the lock is informational only.
+4. **`Policy.CurrentChapter` integration** — vanilla's 5-chapter system overlaps with our 4-stage `EraStage`. Map our era stages onto vanilla chapters (or retire `EraStage`). For W&L scenario "002", chapter transitions are: 1 (start), 2 (after 1862-11-05), 3 (after 1864-11-09 if objective 26 accomplished AND 27 not). Decompile reference: `Policy.CheckForChapterUpdate` at line 211604.
+5. **ObjectiveAdapter table population** — the geographic fallback works (resolves objectives to East/West/Coast/Unknown). v0.2.2 should add hand-coded entries for the most strategically important objectives observed during play (smoke test logged objective IDs 0, 1, 4, 9, 10, 29, 30, 31, 32). Map IDs to specific Theater/Category/SupplyReachWeight/etc. metadata.
+
+**Constraints observed and documented during v0.2.1 smoke-testing:**
+
+- **Fresh-campaign chapter timing.** `Policy.CurrentChapter` is `-1` until vanilla's `Policy.CheckForChapterUpdate()` runs (per-day cycle). v0.2.1.1 invokes it at the top of `OnMonthlyTick` so we don't read stale state. **Don't undo this.**
+- **Vanilla saves go to game install dir, not persistentDataPath.** `SceneManagement.SaveAll` calls `Directory.CreateDirectory("Campaigns/<level>/<sublevel>/<save>/")` with a relative path — CWD-resolved. Our sidecar uses the same convention.
+- **`BattleUnits.armygroups` is null/empty until AI promotes someone.** Test mode falls back to any-commander displacement. Real mode correctly defers. v0.2.2 might add a "promote a designated lieutenant to army-group rank if no AGC exists when a scripted event fires" mechanic.
+- **W&L scenario "002" has fewer town-targeted objectives than main "001"** — most are abstract win-conditions. We pass `mintownobjectives=0` to `GetAvailableObjectives` to let them through.
+- **Many vanilla method signatures have default-valued tail parameters.** Reflection lookup must include them (`new[] { typeof(int), typeof(bool), typeof(int) }` not `new[] { typeof(int) }`). See `docs/findings.md` once it gets a "reflection-signature gotchas" section.

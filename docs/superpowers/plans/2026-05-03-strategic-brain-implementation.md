@@ -68,34 +68,55 @@ The "vanilla settings integration" subsystem emerged from a design conversation 
 
 ### Bugs caught + fixed during execution
 
+#### v0.2.0 cycle
+
 | Commit | Symptom | Root cause |
 |---|---|---|
 | `51ff74d` | First launch produced a silent BepInEx chainloader-complete with no `[Coordinator] bootstrapped` and no config file. | `Config.Bind("[General]", ...)` — BepInEx 5.4 forbids `[` `]` in section names. Inherited from v0.1.0 scaffold. Saved as memory `bepinex_gotchas.md`. |
 | `23c2e1e` | 15 repeated `[Coordinator] IsPlayerCICOf failed: Number of parameters specified does not match` warnings. | `DLC_WL.IsCommanderInChief` is `(int manualcommander = -1)`, not zero-args. Now passes `new object[] { -1 }`. |
 | `23c2e1e` | 33+ `AccessTools.Method: Could not find method for type CheckBox and name Check and parameters (bool)` warnings. | `CheckBox.Check` is `(bool newstate = true, bool manuallyset = false)`. Now passes `new[] { typeof(bool), typeof(bool) }`. |
 | `23c2e1e` | `Failed to patch bool AICampaign::UpdateImportanceValues(): Parameter "_aifaction" not found`. | Vanilla method is parameterless, returns `bool`. Wrong target. Patch deferred to v0.2.1 redesign. |
-| `4000c74` | ~2000 `AccessTools.Field: Could not find field for type GameVars and name currentdate` / `Tools.currentyear` warnings flooding the log. | `MonthlyTickHookPatch.ReadGameYear` looked for nonexistent fields. Vanilla stores year as `GameVars.year` (static int, line 64790). |
+| `4000c74` | ~2000 `AccessTools.Field: Could not find field for type GameVars and name currentdate` / `Tools.currentyear` warnings flooding the log. | `MonthlyTickHookPatch.ReadGameYear` looked for nonexistent fields. Vanilla stores year as `GameVars.year` (static int, line 64790). **Updated again in v0.2.1.1** — `GameVars.year` is also never assigned; real source is `BattleUnits.year`. |
 | `44bbcae` | All patches first-fired but `[Heartbeat]` line never appeared after starting a campaign. | `NotifyDateAdvanced` waited for a month rollover before firing the first `OnMonthlyTick`. Now fires on first valid call too. |
 
-### Smoke-test verification (2026-05-03 final launch)
+#### v0.2.1 cycle (post-tag patch fixes that became v0.2.1.1)
 
-User confirmed in-game working state. Log evidence: all 8 patches first-fired, settings-lock subsystem visible in campaign-create menu (Aggressiveness/Difficulty sliders display "Locked:Realism", radio + 5 realism CBs greyed via `CheckBox.Freeze`), heartbeat line appears on campaign creation, sidecar round-trips through save/reload.
+| Commit | Symptom | Root cause |
+|---|---|---|
+| `9f17870` | `Town.GetTownFromName(string)` lookup failed → war-state observers never detected town falls. | Vanilla signature is `(string name, string statename = "")` — two args. Pass `""` for statename. |
+| `9f17870` | `CampaignObjective.GetAvailableObjectives(int)` lookup failed → CIC.Replan always returned null → plans always cleared. | Vanilla signature is `(int allianceid, bool includeaccomplished = false, int mintownobjectives = 1)` — three args. |
+| `9f17870` | "No army-group commander to displace" log spammed every tick. | Inner `Plugin.Log.LogInfo` fired every retry; `OnceLog` wrap was on outer Prefix only. Moved both inner logs to `OnceLog` with per-event-id keys. |
+| `dd3c4bd` | Heartbeat / `OnMonthlyTick` never ran after a campaign started — patches first-fired but no monthly tick. | `MonthlyTickHookPatch.ReadGameYear` read `GameVars.year` which is **never assigned** by vanilla. Real source is `BattleUnits.year` instance field (set on scenario load at decompile line 25326). Added `ResolveBunits()` helper that does `GameObject.Find("GameController").GetComponent<BattleUnits>()` once and caches. |
+| `e9b3218` | "No army-group commander to displace" for all 12 events early in campaign — succession never applied even in test mode. | `BattleUnits.armygroups` not populated until vanilla AI promotes someone to army-group rank (typically ~30+ minutes into a fresh campaign). Added test-mode-only fallback in `FindAnyDisplaceableCommanderId` — accepts any commander with non-null `currentcommand`. Real-mode path still requires `IsArmyGroupCommander() == true`. |
+| `e5d4de6` | `[Coordinator] sidecar save failed: System.IO.DirectoryNotFoundException ...AppData\LocalLow\...\Campaigns\002\A\Save\whiskeyrealism.json`. | Vanilla writes saves to **game install dir** (CWD-resolved relative path), not `Application.persistentDataPath`. Pass `folder` directly to `File.WriteAllText` without prepending persistentDataPath. |
+| `1e5a1ef` | Plans always cleared even after fixing GetAvailableObjectives — `count=0` in diagnostic. | Vanilla's default `mintownobjectives=1` filter excludes abstract win-condition objectives. W&L scenario "002" has more abstract than town-targeted objectives. Pass `mintownobjectives=0` so abstract ones pass; ObjectiveAdapter scoring layer ranks them. |
+| `4bcdd15` + `30b4391` | Even with `mintownobjectives=0`, `count=0`. Couldn't tell which gate was rejecting. | Added `[CIC:diag]` diagnostic — OnceLog'd snapshot of `total / alliance-pass / scenario-pass / not-deact / not-accomp` plus `Policy.CurrentChapter` + `firstObjChapters`. Surfaced root cause for next fix. |
+| `ace7e87` | **Critical** — diagnostic showed `Policy.CurrentChapter=-1` while `firstObjChapters=[0,1,2,3]`. Every objective deactivated. | Vanilla's `Policy.CheckForChapterUpdate()` runs from a per-day cycle that hadn't ticked when our `OnMonthlyTick` first fired. `CurrentChapter` was still `-1` (init from line 29857). For W&L scenario "002", `CheckForChapterUpdate` unconditionally sets `CurrentChapter=1`. We invoke it ourselves at the top of `OnMonthlyTick`. **Don't undo this — load-bearing for fresh-campaign first frame.** |
+| `6ce3a31` | ~10 `FilterMap.GetColorOnPos(Vector3)` lookup-failed warnings per `CalculateMostValueableAIZones` call — `ImportanceValuesPatch` plan-target bias never ran. | Vanilla signature is `(Vector3 position, float overridealpha = -1f)` — two args. Pass `-1f` to use the default. |
 
-### Remaining for v0.2.0 ship
+### Smoke-test verification (multiple cycles, 2026-05-03)
 
-- [ ] Tag `v0.2.0` locally and push tag to `origin`.
-- [ ] (Optional) GitHub Release with `dist/WhiskeyRealism.dll` attached.
+**v0.2.0 final launch:** all 8 patches first-fired, settings-lock subsystem visible in campaign-create menu (Aggressiveness/Difficulty sliders display "Locked:Realism", radio + 5 realism CBs greyed via `CheckBox.Freeze`), heartbeat line appears on campaign creation, sidecar round-trips through save/reload.
 
-### v0.2.1 backlog (formal scope)
+**v0.2.1 final launch:** all 12 succession events APPLY end-to-end with concrete `AssignCommando` + `DoCommanderPromotion` + persisted-applied tracking in sidecar. All test-mode fallbacks engage when AGCs aren't populated yet.
 
-1. **Redesign `ImportanceValuesPatch`** — Prefix on `AIArea.CalculateMostValueableAIZones(int aifaction)` (10964) to bias `importancevalues[aifaction]` for plan-target zones before vanilla reads them.
-2. **Concrete commander-swap in `CommanderReplacementPatch`** — wire scripted-event-driven `AssignCommando` + `DoCommanderPromotion` calls in the Prefix when a `SuccessionScheduler` event has fired for this faction.
-3. **War-state observers** — patches on town-ownership transitions for Vicksburg / Atlanta / Chattanooga to drive `StrategicCoordinator.ObserveWarState`. Currently all war-state gates return false → succession events #1, #5, #6, #8, #9, #10, #12 cannot fire.
-4. **Smoke-marker patches → concrete steering** — Tasks 22, 23, 25, 26 from the original plan: `TransferOfUnitsPatch`, `DefensiveOpsPatch`, `PerkSelectionPatch`, `RecruitmentPatch`. Each needs Prefix-with-state-modify after smoke-test reveals consumption pattern.
-5. **`ObjectiveAdapter` table population** — hand-coded `UniqueObjectiveID` → `ObjectiveMetadata` entries based on geographic-fallback log entries observed during play.
-6. **Vanilla settings → mod logic integration** — read `usedcampaignbonus` (locked Hard) into `CIC.Effective` so the locked difficulty actually scales `CasualtyTolerance`. Currently the lock is informational only.
-7. **`Policy.CurrentChapter` integration** — vanilla 5-chapter system overlaps with our 4-stage `EraStage`. Map / retire.
-8. **Slider arrow grey-out** (cosmetic) — disable arrow buttons via `panelhandler.SetButtonsCondition(panel, 2, 150-153)` for visual consistency with frozen checkboxes.
+**v0.2.1.1 final launch:** plans actually build — `[Heartbeat] 1861-06 alliance=0 era=Amateur1861 cic=Lincoln plan=phase1/2 obj=29 succession_fired=0` (Lincoln has phased plan targeting objective 29 East theater). Same for Davis/CSA. ObjectiveAdapter geographic fallback resolves theaters (East, Coast, Unknown). `[CIC:diag]` shows `Policy.CurrentChapter=1`, `not-deact=4/5`. Zero unexpected warnings. Strategic core verified end-to-end.
+
+### Released to GitHub
+
+- **v0.2.0** — initial Slice A ship: https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.0
+- **v0.2.1** — concrete commander-swap + war-state + plan biasing: https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.1
+- **v0.2.1.1** — strategic-core bug fixes (chapter advance, plan-target bias, abstract objectives): https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.1.1
+
+### v0.2.2 backlog (formal scope)
+
+1. **Battle-history observers in `WarStateObserver`** — track ANV defeats, AoP offensive failures, Burnside's first defeat, Lee invading Pennsylvania, Western theater defeats, Valley operations, war clearly lost. Unlocks the remaining 7 succession events (#1, #3, #4, #5, #6, #11, #12) so they can fire from observed game state without test-mode bypass.
+2. **Concrete steering for `TransferOfUnitsPatch` (#3), `DefensiveOpsPatch` (#4), `PerkSelectionPatch` (#7), `RecruitmentPatch` (#8)** — currently smoke-marker only / deferred from v0.2.0.
+3. **`ObjectiveAdapter` table population** — hand-coded `UniqueObjectiveID` → `ObjectiveMetadata` entries. Smoke-test logged objective IDs 0, 1, 4, 9, 10, 29, 30, 31, 32 in scenario "002" with their geographic-fallback theater bucketing. Add metadata for the Town/IIP-targeted ones (29, 30, 31, 32) first.
+4. **Vanilla settings → mod logic integration** — read `usedcampaignbonus` (locked Hard) into `CIC.Effective` so the locked difficulty actually scales `CasualtyTolerance`. Currently the lock is informational only.
+5. **`Policy.CurrentChapter` integration** — vanilla 5-chapter system overlaps with our 4-stage `EraStage`. For W&L scenario "002": chapter 1 from start, chapter 2 after 1862-11-05, chapter 3 after 1864-11-09 with conditions. Map our era stages onto chapters or retire `EraStage`.
+6. **Slider arrow grey-out** (cosmetic) — disable arrow buttons via `panelhandler.SetButtonsCondition(panel, 2, 150-153)` for visual consistency with frozen checkboxes.
+7. **AGC bootstrap for early-campaign succession events** — currently in real mode, scripted events that fire before `BattleUnits.armygroups` is populated correctly defer (army-group rank doesn't exist yet). Could add a "promote a designated lieutenant to army-group rank if no AGC exists when a scripted event fires" mechanic so events apply on schedule even early in the war.
 
 **Validation strategy per task:**
 1. **Build verification** after every code change: `./build.sh` must report `Build succeeded` with `0 Error(s)` and ideally `0 Warning(s)`.
