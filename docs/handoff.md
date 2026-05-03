@@ -8,10 +8,10 @@
 
 | | |
 |---|---|
-| **Current shipped version** | v0.1.0 — scaffold only, no patches registered |
-| **Active workstream** | Slice A (strategic brain) — spec drafted, awaiting user review |
+| **Current shipped version** | v0.2.0 — Slice A built (strategic brain core); awaiting in-game smoke-test |
+| **Active workstream** | Slice A (strategic brain) — implementation complete, deploy + smoke-test pending |
 | **Repo** | [`3-Deacon/whiskey-realism-mod`](https://github.com/3-Deacon/whiskey-realism-mod) (public, MIT) |
-| **Last updated** | 2026-05-02 |
+| **Last updated** | 2026-05-03 |
 
 ---
 
@@ -21,7 +21,7 @@ We design and ship **one slice at a time.** Each slice goes through: brainstorm 
 
 | Slice | Spec | Plan | Implementation | Ship target | Est. patches | Notes |
 |---|---|---|---|---|---|---|
-| **A — Strategic brain** | drafted 2026-05-02 | not started | not started | v0.2.0 | ~10 | Replaces random objective picker; era × faction × officer personality system; ~12 triggered-scripted succession events; phased operational plans; monthly + event-triggered cadence; two-tier CIC + theater-commander hierarchy. **Awaits user spec review.** |
+| **A — Strategic brain** | shipped 2026-05-02 | shipped 2026-05-03 | **built 2026-05-03; in-game smoke-test pending BepInEx install** | v0.2.0 | 4 numbered + 2 persistence | Replaces random objective picker; era × faction × officer personality system; 12 triggered-scripted succession events; phased operational plans; monthly + event-triggered cadence; two-tier CIC + theater-commander hierarchy. v0.2.0 ships behavioral patches (#1, #2, #6, #9) + sidecar persistence; smoke-marker patches (#3, #4, #5, #7, #8) deferred to v0.2.1 alongside war-state observers and concrete commander-swap. |
 | **B — Tactical brain** | deferred | — | — | v0.3.0 | ~8 | Macro-AI stance scoring (instead of per-battle preset from `aistrategies.dat`); reserve management; feud-system gating with `PerformAIActionDLCWL` (fixes brigade auto-charge bug); smarter charge gates; retreat thresholds; AdjustGroupAIStance personality input. Depends on A's TheaterCommander layer being live. |
 | **C — W&L hierarchy AI** | deferred | — | — | v0.4.0 | ~6 | The player's CO actively gives orders (vs vanilla just-passive-presence); peer commanders act with their own competence + relations to player; hierarchy-aware order generation; officer-relations effects on compliance. Depends on B's stance system. |
 | **D — Additional historical flavor** | deferred | — | — | v0.5.0 | ~5 | Foreign-recognition modeling (CSA AI weights Antietam-class victories higher when European recognition is in play); economic strangulation logic (Union AI weights river/coastal interdiction in '63+); public-morale modeling (CSA conserves forces post-Gettysburg to prevent collapse). Sits on top of A/B/C as a weighting layer. |
@@ -126,10 +126,21 @@ Historical flavor on top of A/B/C. Notes:
 `git log --oneline -20` is authoritative for chronology. This section trims to "what's worth knowing right now":
 
 - **2026-05-02 — repo scaffolded** (commit `94863df`). BepInEx 5.4.21 + HarmonyX 2.10.2 + Unity 2021 refs. Build verified clean, 0 warnings, 0 errors.
-- **2026-05-02 — strategic-brain design spec drafted** (commit `ce366ae`). 479 lines at `docs/superpowers/specs/2026-05-02-strategic-brain-design.md`. Awaiting user review before plan-writing.
+- **2026-05-02 — strategic-brain design spec drafted** (commit `ce366ae`). 479 lines at `docs/superpowers/specs/2026-05-02-strategic-brain-design.md`.
+- **2026-05-03 — Slice A v0.2.0 built and committed.** 19 commits across the strategic-brain core: `PersonalityVector`, `Theater`/`Category` enums, `Phase`/`OperationalPlan`, `ObjectiveMetadata`, `FactionProfiles`, `EraStageManager` (4 stages + war-state overrides), `HistoricalFigureRegistry` (25 hand-coded officers + derived fallback), `ObjectiveAdapter` (table + geographic centroid fallback), `TheaterCommander`, `CIC` (Replan/Adjust/ReviewPlan), `SuccessionScheduler` (12 canonical events), `StrategicCoordinator` (singleton MonoBehaviour, monthly tick, player-CIC gate, heartbeat log), `PersistenceDto` + sidecar serialization, `OnceLog` + `Reflection` utility helpers, and 6 Harmony patches (#1 PickCampaignObjective Prefix, #2 ImportanceValues Postfix, #6 CommanderReplacement Prefix gate-only, #9 MonthlyTickHook Postfix, plus AICampaign Save/Load Postfix pair). Build verified clean (0 warnings, 0 errors); `dist/WhiskeyRealism.dll` ready to deploy. **Deploy blocked on player-side BepInEx install in GTCW folder.** Smoke-test scenarios from spec §9.1 + plan Task 28 grep checklist pending player verification.
 
 ---
 
 ## Next concrete action
 
-User reviews [`docs/superpowers/specs/2026-05-02-strategic-brain-design.md`](superpowers/specs/2026-05-02-strategic-brain-design.md). On approval, invoke `superpowers:writing-plans` to produce the implementation plan for Slice A. On plan approval, execute via `superpowers:subagent-driven-development` with isolation worktrees per task (UBoatCrewMod precedent).
+**Player-side prerequisite: install BepInEx 5.4.x x64 UnityMono into the GTCW folder.** Download from [github.com/BepInEx/BepInEx/releases](https://github.com/BepInEx/BepInEx/releases) (5.4.21 or later, x64 UnityMono build). Extract into `/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/`. Launch the game once to let BepInEx generate its config + create the `BepInEx/plugins/` folder. Close the game.
+
+**Then deploy + smoke-test:**
+
+```bash
+cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"
+```
+
+Launch GTCW, start a fresh CSA career, run a couple game-months, then tail `BepInEx/LogOutput.log`. Use the verification commands in `docs/superpowers/plans/2026-05-03-strategic-brain-implementation.md` Task 28 step 2 — they grep for boot, coordinator init, first-fire markers, monthly heartbeat, era transitions, succession events, sidecar round-trip, player-CIC stand-down (if applicable), ObjectiveAdapter geographic-fallback usage, reflection failures (should be zero), and total log spam canary.
+
+After smoke-test passes: tag `v0.2.0`, push to GitHub, create release with `dist/WhiskeyRealism.dll` attached. If smoke-test reveals issues, file them as v0.2.0.x patch-version commits or roll forward into the v0.2.1 backlog (see Slice A backlog table in `docs/patch-catalog.md`).
