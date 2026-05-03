@@ -204,9 +204,17 @@ namespace WhiskeyRealism.Strategic
                 // Vanilla signature: public static List<CampaignObjective> GetAvailableObjectives(
                 //     int allianceid, bool includeaccomplished = false, int mintownobjectives = 1)
                 // (decompile line 178825). Three args, two with defaults.
+                //
+                // We pass mintownobjectives = 0 (vanilla default is 1) so abstract
+                // win-condition objectives — "Break Confederate Morale", etc. — pass
+                // through. Vanilla's mintownobjectives=1 filter excludes objectives
+                // without town/IIP targets. In W&L scenario "002" this prunes most
+                // of the qualifying objectives (verified via Config/campaignobjectives.dat
+                // inspection 2026-05-03). Our own ObjectiveAdapter scoring layer
+                // gives abstract objectives lower priority than concrete ones.
                 var m = AccessTools.Method(t, "GetAvailableObjectives", new[] { typeof(int), typeof(bool), typeof(int) });
                 if (m == null) { Plugin.Log.LogWarning("[CIC] CampaignObjective.GetAvailableObjectives(int,bool,int) not found"); return null; }
-                return m.Invoke(null, new object[] { allianceId, false, 1 }) as IList;
+                return m.Invoke(null, new object[] { allianceId, false, 0 }) as IList;
             }
             catch (Exception ex)
             {
