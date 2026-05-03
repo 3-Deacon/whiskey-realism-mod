@@ -7,7 +7,7 @@ using WhiskeyRealism.Strategic;
 
 namespace WhiskeyRealism
 {
-    [BepInPlugin(GUID, "Whiskey Realism — Strategic AI Overhaul", "0.2.0")]
+    [BepInPlugin(GUID, "Whiskey Realism — Strategic AI Overhaul", "0.2.1.1")]
     public class Plugin : BaseUnityPlugin
     {
         public const string GUID = "dev.kyle.whiskey-realism";
@@ -91,7 +91,7 @@ namespace WhiskeyRealism
             // .LoadPatch). Cleaner than enumerating each class explicitly.
             _harmony.PatchAll(typeof(Plugin).Assembly);
 
-            Log.LogInfo($"{GUID} v0.2.0 loaded — strategic-brain patches registered.");
+            Log.LogInfo($"{GUID} v0.2.1.1 loaded — strategic-brain patches registered.");
         }
     }
 }

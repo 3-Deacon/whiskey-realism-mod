@@ -6,7 +6,11 @@ In W&L the player starts at the bottom — commanding an artillery section, regi
 
 ## Status
 
-**v0.1.0 — scaffold only.** The strategic-brain design spec is in progress; no patches are registered yet. Nothing changes in your game until v0.2+ ships.
+**v0.2.1.1 — strategic brain shipped, smoke-test verified end-to-end.**
+
+The mod replaces vanilla's random-objective AI with a personality-driven phased-plan strategic engine for both Confederate and Union AI. 9 active Harmony patches + sidecar JSON persistence. 25 hand-coded historical-officer personalities, 12 canonical succession events with concrete `AssignCommando` swaps, 4-stage era progression, two-tier CIC + theater-commander hierarchy, player-CIC noninterference gate, town-ownership war-state observers (Vicksburg / Chattanooga / Atlanta). Locks the campaign-create menu's Aggressiveness / Historic / Difficulty settings + 5 realism checkboxes to coherent values.
+
+Latest release: [v0.2.1.1](https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.1.1) — drop the attached `WhiskeyRealism.dll` into your `<GTCW>/BepInEx/plugins/` folder. Requires BepInEx 5.4.x x64 UnityMono.
 
 ## Goals
 

@@ -125,7 +125,28 @@ new string[5] { "none", "screen", "defend", "attack", "assault" };
 
 ## Reflection gotchas
 
-(Will grow as we write patches. Empty for now — no patches written yet.)
+Collected during v0.2.0 / v0.2.1 / v0.2.1.1 smoke-testing. Pattern: many vanilla methods have default-valued tail parameters; `AccessTools.Method` lookup must include them or returns null.
+
+| Method | Wrong (single-arg) | Correct |
+|---|---|---|
+| `DLC_WL.IsCommanderInChief` | `()` | `(int manualcommander = -1)` — pass `new object[] { -1 }` |
+| `CheckBox.Check` | `(bool)` | `(bool newstate = true, bool manuallyset = false)` |
+| `Town.GetTownFromName` | `(string)` | `(string name, string statename = "")` |
+| `CampaignObjective.GetAvailableObjectives` | `(int)` | `(int allianceid, bool includeaccomplished = false, int mintownobjectives = 1)` — pass `mintownobjectives=0` to allow abstract objectives |
+| `FilterMap.GetColorOnPos` | `(Vector3)` | `(Vector3 position, float overridealpha = -1f)` |
+
+**State-location gotchas** (where vanilla actually stores things):
+
+| What | NOT here | Actually here |
+|---|---|---|
+| Current campaign year | `GameVars.year` (declared but **never assigned**) | `BattleUnits.year` (instance field, set on scenario load at line 25326). Resolve via `GameObject.Find("GameController").GetComponent<BattleUnits>().year`. |
+| Current campaign month | `GameVars.currentmonth` (sometimes set, sometimes 0) | `bunits.uniStormSystem.monthCounter` (1-based) |
+| Save folder location | `Application.persistentDataPath` | **Game install dir (CWD)**. Vanilla `SceneManagement.SaveAll` calls `Directory.CreateDirectory("Campaigns/<level>/<sublevel>/<save>/")` with a relative path that .NET resolves against CWD. Sidecar should use the same convention. |
+| `Policy.CurrentChapter` initial state | Set by scenario start | Initialized to `-1` (line 29857). Updated by `Policy.CheckForChapterUpdate()` (line 211604) which runs from a per-day cycle. **Must invoke manually** if patch fires before per-day cycle has ticked (typical on fresh-campaign first frame). For W&L scenario "002", CheckForChapterUpdate unconditionally sets `CurrentChapter = 1`. |
+| `BattleUnits.armygroups` populated | At campaign start | Only after vanilla AI promotes a commander to army-group rank (typically meaningful game time). `Commander.IsArmyGroupCommander() == true` requires this. |
+| Vanilla CampaignObjectives for W&L "002" | All 38 from `Config/campaignobjectives.dat` | Only the subset whose `ObjectiveScenario` list contains "002" (~19 of 38). Many are abstract win-conditions; default `mintownobjectives=1` filter excludes them — pass `0`. |
+
+**BepInEx-specific gotcha:** `Config.Bind("[General]", ...)` throws `ArgumentException`. BepInEx 5.4 forbids `[` `]` in section names; it adds the brackets when writing the .cfg file. Pass `"General"`, not `"[General]"`. Plugin Awake exceptions land in Unity's `Player.log` (`<persistentDataPath>/Player.log`), NOT `BepInEx/LogOutput.log` — always check both when diagnosing silent failures.
 
 ## Game-update re-decompile inventory
 
@@ -136,6 +157,22 @@ When GTCW patches:
 4. Update `[HarmonyPatch(...)]` attribute strings if classes were renamed.
 5. Update this doc with new line numbers.
 
-## Saves location (player-side)
+## Saves location (player-side) — corrected 2026-05-03
 
-`<persistentDataPath>/Saves/` — typically `%USERPROFILE%/AppData/LocalLow/Oliver Keppelmüller/Grand Tactician The Civil War (1861-1865)/Saves/` on Windows. Mod sidecar will live alongside game saves here.
+**Vanilla saves go to the GAME INSTALL DIRECTORY, not `Application.persistentDataPath`.**
+
+`SceneManagement.SaveAll` calls `Directory.CreateDirectory("Campaigns/<level>/<sublevel>/<saveFolder>/")` with a relative path. .NET resolves it against CWD which Unity sets to the game install dir. So actual save paths look like:
+
+```
+<game install>/Campaigns/001/A/Save/scenario.txt          (vanilla — main campaign)
+<game install>/Campaigns/002/A/Save/scenario.txt          (vanilla — W&L)
+<game install>/Campaigns/002/A/Save/whiskeyrealism.json   (mod sidecar)
+```
+
+Player.log (Unity engine log, where unhandled mod exceptions land) DOES live at `Application.persistentDataPath`:
+
+```
+<persistentDataPath>/Player.log   = %USERPROFILE%\AppData\LocalLow\Grand Tactician\The Civil War (1861-1865)\Player.log
+```
+
+Don't conflate the two. Mod's `AICampaignSaveLoadPatch` uses `Path.Combine(folder, "whiskeyrealism.json")` with the relative `folder` arg — let .NET's CWD resolution handle the rest.

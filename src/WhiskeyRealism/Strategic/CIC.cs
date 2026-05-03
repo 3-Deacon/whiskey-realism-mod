@@ -238,11 +238,8 @@ namespace WhiskeyRealism.Strategic
 
                 // Inspect the IsDeactivated sub-gates for the first matching alliance objective.
                 int firstObjId = -1;
-                int firstObjChapter = -999;
-                int chapterCheckResult = -1;       // 0 = passes, 1 = chapter not in list, -1 = no chapters defined
                 int currentChapter = -999;
                 bool nationNull = true;
-                bool dateInRange = false;
                 int[] firstObjChapters = null;
 
                 if (all != null)
