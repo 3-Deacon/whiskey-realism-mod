@@ -6,12 +6,12 @@ Canonical numbered catalog of all shipped Harmony patches. Each item has a stabl
 |---|---|---|---|---|---|
 | 1 | `PickCampaignObjectivePatch`   | Prefix  | `Patches/PickCampaignObjectivePatch.cs` | `AICampaign.PickCampaignObjective` (17769)   | Replace vanilla random pick with active CIC plan target; vanilla fallback when no plan / player-CIC. |
 | 2 | `ImportanceValuesPatch`        | Postfix | `Patches/ImportanceValuesPatch.cs`      | `AIArea.CalculateMostValueableAIZones` (10964) — *target changed in v0.2.1; original v0.2.0 target was AICampaign.UpdateImportanceValues which had wrong shape* | Override `__instance.mostvalueableaiareaclose[aifaction]` to point at the plan-target AIArea. Resolves CampaignObjective ID → first Town/IIP position → AICampaign.aiareas.GetColorOnPos → AIArea.GetAIArea. |
-| 3 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
+| 3 | `TransferOfUnitsPatch`         | Prefix/Postfix | `Patches/TransferOfUnitsPatch.cs` | `AICampaign.CheckTransferOfUnits` (17232) | v0.2.2 concrete steering. Temporarily redirects vanilla `positiondeficit` to the active plan target when the target is under-strength, lets vanilla queue/move the unit, then restores vanilla state. Logs `[once:transfer]` and bounded `[Patch:Transfer]` queue lines. |
 | 4 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
-| 5 | `BattleResultObserverPatch`   | Postfix | `Patches/BattleResultObserverPatch.cs` | `BattleMonument.UpdateAllianceWon` (76496) | v0.2.2 observer. Records final land-battle outcomes into `StrategicCoordinator.BattleHistory`, persists the ring buffer, and marks both factions dirty for monthly succession/plan reevaluation. Build-verified; in-game smoke pending. |
+| 5 | `BattleResultObserverPatch`   | Postfix | `Patches/BattleResultObserverPatch.cs` | `BattleMonument.UpdateAllianceWon` (76496) | v0.2.2 observer. Records final land-battle outcomes into `StrategicCoordinator.BattleHistory`, persists the ring buffer, and marks both factions dirty for monthly succession/plan reevaluation. Build/deploy/smoke verified. |
 | 6 | `CommanderReplacementPatch`    | Prefix  | `Patches/CommanderReplacementPatch.cs`  | `AICampaign.CheckAICommanderReplacements` (17008) | v0.2.1 concrete swap — when scheduler has un-applied scripted events for this faction, resolves replacement Commander by `combinedname` last-token + alliance, finds an army-group commander (`IsArmyGroupCommander() && currentcommand != null`) to displace, calls `AssignCommando` + `DoCommanderPromotion`, marks applied (persisted via sidecar). Returns false to skip vanilla on apply; falls through if preconditions unmet. |
-| 7 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
-| 8 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
+| 7 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
+| 8 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
 | 9 | `MonthlyTickHookPatch`         | Postfix | `Patches/MonthlyTickHookPatch.cs`       | `AICampaign.Update` (11159)                  | Drives `StrategicCoordinator.NotifyDateAdvanced` from the per-frame Update; coordinator self-latches on month rollover. |
 | 10 | `CampaignParametersLockPatch` | Postfix | `Patches/CampaignParametersLockPatch.cs` | `MainMenu.SetCampaignParameters` (193675)   | Override `usedcampaignagressiveness` → 1.0 and `usehistoricaipersonality` → true after vanilla writes player menu picks. Final value-lock; difficulty intentionally untouched. Gated by `OverrideVanillaSettings` config (default true). |
 | 11 | `AggressivenessSliderLockPatch` | Postfix | `Patches/AggressivenessSliderLockPatch.cs` | `MainMenu.SwitchAIMode(float)` (~193739) | UI grey-out for campaign-aggressiveness slider. Snaps `aimode = 1.0`, sets displayed text to "Aggressiveness: Locked by Whiskey Realism". Gates by gameObject name to avoid touching BattlePanel's per-battle "AI Mode" toggle. |
@@ -45,11 +45,10 @@ Canonical numbered catalog of all shipped Harmony patches. Each item has a stabl
 
 ## Pending (v0.2.2 backlog)
 
-Reserved ordinals 3, 4, 7, 8 are held for v0.2.2 patches that further the strategic core:
+Reserved ordinals 4, 7, 8 are held for v0.2.2 patches that further the strategic core:
 
 | # | Planned class | Target | Rationale |
 |---|---|---|---|
-| 3 | `TransferOfUnitsPatch` (concrete steering) | `AICampaign.CheckTransferOfUnits` (17232) | Needs Prefix-with-state-modify; tied to TheaterCommander consolidation urgency. |
 | 4 | `DefensiveOpsPatch` (concrete steering) | `AICampaign.CheckPickDefensiveOps` (11791) | Per-personality strength gate. |
 | 7 | `PerkSelectionPatch` (concrete steering) | `AICampaign.CheckPerkSelection` (11873) | Needs perk-id → personality-attribute mapping table. |
 | 8 | `RecruitmentPatch` (concrete steering) | `AIArea.GetBestRecruitingState` (10722) | Needs concrete weighting strategy. |

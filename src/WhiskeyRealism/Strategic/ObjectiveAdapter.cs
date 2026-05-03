@@ -30,6 +30,30 @@ namespace WhiskeyRealism.Strategic
             return derived;
         }
 
+        internal static Vector3? ResolveObjectivePosition(int objectiveId)
+        {
+            try
+            {
+                var obj = FindCampaignObjective(objectiveId);
+                if (obj == null) return null;
+                var objList = AccessTools.Field(obj.GetType(), "objectives")?.GetValue(obj) as IList;
+                if (objList == null || objList.Count == 0) return null;
+
+                foreach (var target in objList)
+                {
+                    var pos = TryGetWorldPosition(target);
+                    if (pos.HasValue) return pos;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "objpos:" + objectiveId,
+                    $"[ObjectiveAdapter] position resolve failed for objective ID {objectiveId}: {ex.Message}");
+            }
+            return null;
+        }
+
         private static ObjectiveMetadata Derive(object campaignObjective)
         {
             try
@@ -63,6 +87,23 @@ namespace WhiskeyRealism.Strategic
                 Plugin.Log.LogWarning($"[ObjectiveAdapter] derive failed: {ex.Message}");
                 return ObjectiveMetadata.DefaultDerived(Theater.Unknown, 0f, 0f);
             }
+        }
+
+        private static object FindCampaignObjective(int objectiveId)
+        {
+            var coType = AccessTools.TypeByName("CampaignObjective");
+            if (coType == null) return null;
+            var allObjs = AccessTools.Field(coType, "allcampaignobjectives")?.GetValue(null) as IList;
+            if (allObjs == null) return null;
+            var idField = AccessTools.Field(coType, "UniqueObjectiveID");
+            if (idField == null) return null;
+
+            foreach (var obj in allObjs)
+            {
+                if (obj == null) continue;
+                if ((int)idField.GetValue(obj) == objectiveId) return obj;
+            }
+            return null;
         }
 
         private static Vector3? TryGetWorldPosition(object target)

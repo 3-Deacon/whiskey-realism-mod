@@ -152,6 +152,7 @@ Historical flavor on top of A/B/C. Notes:
   - All 12 succession events `APPLIED` end-to-end under test mode.
   - Sidecar JSON round-trips through save/reload.
 - **2026-05-03 — v0.2.2 battle-history observer implemented + smoke-verified.** Local implementation adds #5 `BattleResultObserverPatch` on `BattleMonument.UpdateAllianceWon`, a persisted `BattleHistory` ring buffer on `StrategicCoordinator`, and battle-history/commander-state gates in `WarStateObserver`. `./build.sh` passes with 0 warnings / 0 errors. DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll` and verified by SHA-256 (`bc3f4935f60253733a2c611282eaf03e71b5833db15a7124ea865b82b944d9f3`). Smoke log confirmed `[once:battle-result]`, two `[BattleHistory]` entries (Phillippi East, Hampton Coast), dirty-plan events for both factions, and sidecar `battleHistory` persistence. Not yet tagged or released.
+- **2026-05-03 — v0.2.2 transfer steering implemented + smoke-verified.** Local implementation adds #3 `TransferOfUnitsPatch` on `AICampaign.CheckTransferOfUnits`. It temporarily redirects vanilla `positiondeficit` to the active plan target only when the target is under-strength, lets vanilla queue/move units, then restores vanilla state in Postfix. Logging is bounded: `[once:transfer]` first-fire plus `[Patch:Transfer]` queue lines only when a transfer is queued; detailed steering math is behind `Verbose Logging`. `Plugin.cs` metadata now reports `v0.2.2` so restart logs identify this build. `./build.sh` passes with 0 warnings / 0 errors. DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll` and verified by SHA-256 (`5263d2312816c7a28619a80314f6fc8c4802841632a499580ccee33fea3ad11e`). Smoke log confirmed `dev.kyle.whiskey-realism v0.2.2 loaded`, `[once:transfer]`, and `[Patch:Transfer] alliance=0 obj=31 queued=1`.
 
 ---
 
@@ -161,7 +162,7 @@ v0.2.1.1 shipped (tag + GitHub Release at https://github.com/3-Deacon/whiskey-re
 
 **v0.2.2 backlog** (see `docs/patch-catalog.md` §"Pending"):
 
-1. **Concrete steering for `TransferOfUnitsPatch` (#3), `DefensiveOpsPatch` (#4), `PerkSelectionPatch` (#7), `RecruitmentPatch` (#8)** — currently smoke-marker-only / deferred from v0.2.0. Start with #3 because moving force toward the active plan is the highest-impact remaining execution gap.
+1. **Concrete steering for `DefensiveOpsPatch` (#4), `PerkSelectionPatch` (#7), `RecruitmentPatch` (#8)** — still smoke-marker-only / deferred from v0.2.0. #3 `TransferOfUnitsPatch` is implemented, built, deployed, hash-verified, and smoke-verified.
 2. **Succession gate long-run smoke** — #5 battle-history observer is verified for recording/persistence. Still needs a longer campaign run to confirm date-gated succession events #1, #3, #4, #5, #6, #11, #12 fire from observed game state without test-mode bypass. **Verified anchors (do NOT use `aifaction[].history` — it doesn't exist):**
     - `BattleMonument.UpdateAllianceWon(...)` at decompile line 76496 — final result hook with `_alliancewon`, `_battleresulttype`, `_battleendtype`, `_casualties`, `_commanderskia0/1`, `_commanderfame`, `_commanderdefamed`, `_battlename`, `_position`. #5 Postfix records final land-battle outcomes into `StrategicCoordinator.BattleHistory`.
     - `ImportExportUnitData.ExportBattleResultData(...)` at line 69670 — same data set, called from a different code path; useful as a fallback hook.
