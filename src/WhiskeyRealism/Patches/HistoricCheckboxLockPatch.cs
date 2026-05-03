@@ -49,6 +49,10 @@ namespace WhiskeyRealism.Patches
                 ForceCheck(historicCb, true);
                 ForceCheck(dynamicCb, false);
 
+                // Freeze both — disabled-look + clicks ignored (CheckBox.frozen).
+                Freeze(historicCb, true);
+                Freeze(dynamicCb, true);
+
                 // Sync the lastcheckboxstates cache so vanilla doesn't fire its
                 // change-detected branch on the next call.
                 var lastField = AccessTools.Field(t, "lastcheckboxstates");
@@ -93,6 +97,13 @@ namespace WhiskeyRealism.Patches
             }
             var f = AccessTools.Field(checkBox.GetType(), "isactive");
             f?.SetValue(checkBox, desired);
+        }
+
+        private static void Freeze(object checkBox, bool freeze)
+        {
+            if (checkBox == null) return;
+            var freezeMethod = AccessTools.Method(checkBox.GetType(), "Freeze", new[] { typeof(bool) });
+            freezeMethod?.Invoke(checkBox, new object[] { freeze });
         }
     }
 }
