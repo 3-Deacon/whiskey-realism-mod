@@ -1,0 +1,11 @@
+bin/
+obj/
+dist/
+refs/
+refs
+.codex
+.worktrees/
+.claude/worktrees/
+*.user
+.vs/
+.idea/
