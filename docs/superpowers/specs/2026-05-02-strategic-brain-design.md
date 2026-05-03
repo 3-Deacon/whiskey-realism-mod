@@ -82,6 +82,35 @@ StrategicCoordinator.OnMonthlyTick():
 
 Edge case: the player's faction is **not** strategically headless when the player is CIC — the player IS the strategic authority. The mod does not write a sidecar plan for that faction; on save, only the AI-driven faction's plan is persisted. On load, if the player has changed factions or rank since save, mod state initializes lazily for whichever side is now AI-driven.
 
+### 3.2 Vanilla settings integration (added 2026-05-03)
+
+GTCW's campaign-creation menu (`MainMenu` class, decompile line 193154) exposes three player-facing knobs that interact with the strategic brain:
+
+| Vanilla setting | Field | Conflict with mod logic? | Mod's response |
+|---|---|---|---|
+| **Aggressiveness** (5 steps Calm…Very High) | `GameVars.usedcampaignagressiveness` (default 1.0) | YES — global multiplier on AI offensive/defensive rolls would double-count our `PersonalityVector.Aggression` dimension | **Lock to 1.0** ("Mediocre" — neutral midpoint). Mod's personality system owns aggression. |
+| **Historic AI Personality** (toggle) | `GameVars.usehistoricaipersonality` (default true) | YES — when false, vanilla rolls random AI grand-strategy policies; our 12 scripted succession events assume historical context | **Lock to true.** Required for our `HistoricalFigureRegistry` and `SuccessionScheduler` to be coherent. |
+| **Difficulty** (5 steps Very Easy…Very Hard) | `GameVars.usedcampaignbonus` → `GameVars.casualtiesmodifier` | NO functional conflict (mod doesn't read either field) — but design-asymmetric to leave only this one player-controlled | **Lock to "Hard"** (index 3 of 5; matches Civil War casualty reality — ~620k dead). |
+
+Plus 5 realism-quality checkboxes (FogOfWar, OrderDelays, Feuds, FullReadiness, AllAutomanage) all forced ON for an immersive W&L experience.
+
+**Locking implementation has two layers:**
+
+1. **Value lock** at finalize: `Postfix` on `MainMenu.SetCampaignParameters` overwrites `GameVars.usedcampaignagressiveness`, `usehistoricaipersonality`, `usedcampaignbonus`, `usedcampaignbonusrunning`, `casualtiesmodifier` regardless of what the player picked.
+2. **UI grey-out** on every menu interaction: `Postfix` on `MainMenu.SwitchAIMode`, `MainMenu.ChangeBonus`, `MainMenu.CheckForCheckBoxUpdates`. Sliders snap back to locked values + display "Locked:Realism" label. Checkboxes get force-checked + `CheckBox.Freeze(true)` (decompile line ~186890) which sets `frozen = true` (causes `CheckClicks()` to early-return) and applies a half-alpha visual color via `SetButtonColor`. Click input is dropped at the source — no flicker.
+
+**Battle-panel exclusions:** `SwitchAIMode` and `ChangeBonus` are shared between the campaign-create menu and the battle-launch panel ("AI Mode: historic vs dynamic", "Difficulty: per-battle"). Patches gate by `gameObject.name == "BattlePanel"` to leave per-battle settings player-controlled (they don't conflict with strategic brain).
+
+**Config escape hatches** (in `BepInEx/config/dev.kyle.whiskey-realism.cfg`):
+
+```ini
+[Strategic]
+Override Vanilla Settings = true   ; flip false to disable all locks (advanced)
+Locked Difficulty = 3              ; 0=Very Easy, 1=Easy, 2=Mediocre, 3=Hard, 4=Very Hard
+```
+
+**Why this design:** the player keeps the UI they expect; the mod just makes those settings deterministic so the strategic brain isn't competing with global multipliers. A player who genuinely wants to override (e.g., for a non-historical experiment) can flip the config — the mod stands down.
+
 ## 4. Data model
 
 ### 4.1 PersonalityVector
@@ -365,30 +394,50 @@ Theater commanders cannot abandon a phase; they only signal completion (target t
 
 ## 6. Bridge layer — Harmony patches
 
-Approximately 9 patches. Postfix-preferred; two patches (#1, #6) are Prefix-with-vanilla-fallback because the vanilla methods directly mutate game state inside the method body and a Postfix would have to undo-and-reapply. Each is a stable catalog item; ordinals assigned at implementation in `docs/patch-catalog.md`.
+**v0.2.0 actual ship state** (10 active + 1 deferred). Patches numbered with stable ordinals (per `docs/patch-catalog.md`); withdrawn/deferred patches keep their slot. Postfix-preferred; Prefix only when the vanilla method directly mutates state we need to overwrite (#1, #6).
+
+### 6.1 Strategic-core patches
 
 | # | Patch class | Hook type | Game method | Decompile line | Mod state read | Effect |
 |---|---|---|---|---|---|---|
 | 1 | `PickCampaignObjectivePatch` | **Prefix** | `AICampaign.PickCampaignObjective` | 17769 | CIC's active plan | If active plan has a valid target for this faction, set `aifaction[_aifaction].followedcampaignobjective = plan.TargetObjectiveID` and return `false` to skip vanilla. If no plan / plan stale / faction is player-CIC, return `true` for vanilla random fallback. |
-| 2 | `ImportanceValuesPatch` | Postfix | `AICampaign.UpdateImportanceValues` | 14906 | TheaterCommander zone relevance | Multiply per-zone importance |
-| 3 | `MostValueableZonesPatch` | Postfix | `AICampaign.CalculateMostValueableAIZones` | 10965 | Plan phase target | Bias toward phase target |
-| 4 | `TransferOfUnitsPatch` | Postfix | `AICampaign.CheckTransferOfUnits` | 17232 | TheaterCommander consolidation urgency | Lower threshold when phase demands consolidation |
-| 5 | `DefensiveOpsPatch` | Postfix | `AICampaign.CheckPickDefensiveOps` | 11791 | TheaterCommander defensive threshold | Per-personality strength gate |
-| 6 | `CommanderReplacementPatch` | **Prefix** | `AICampaign.CheckAICommanderReplacements` | 17008 | SuccessionScheduler state | If a scripted succession event is active for this faction's tier, perform the scripted `AssignCommando` + `DoCommanderPromotion` and clear `bestcommanderidperlevel` / `worstcommanderidperlevel` slots, then return `false` to skip vanilla's competence-based pick. Otherwise return `true`. |
-| 7 | `PerkSelectionPatch` | Postfix | `AICampaign.CheckPerkSelection` | 11873 | Officer personality | Bias picks |
-| 8 | `RecruitmentPatch` | Postfix | `AICampaign.GetBestRecruitingState` | 10723 | CIC theater preferences | Weight recruitment toward priority theaters |
-| 9 | `MonthlyTickHookPatch` | Postfix | (TBD: month-rollover hook — see §13) | — | — | Drives StrategicCoordinator.OnMonthlyTick() |
+| 2 | `ImportanceValuesPatch` | **DEFERRED to v0.2.1** | `AICampaign.UpdateImportanceValues` | 14905 | — | Vanilla method is parameterless (returns `bool`) and writes to `importancevaluestemp` (chunked per-IIP/cbuild/town processor) — wrong target. v0.2.1 redesign will Prefix `AIArea.CalculateMostValueableAIZones(int aifaction)` to bias `importancevalues[aifaction]` for plan-target zones before the picker reads them. |
+| 3-5 | *(reserved for v0.2.1)* | — | — | — | — | Smoke-marker-only patches deferred per plan amendment. |
+| 6 | `CommanderReplacementPatch` | **Prefix** | `AICampaign.CheckAICommanderReplacements` | 17008 | SuccessionScheduler state | Gate-only this slice — concrete scripted-event swap (`AssignCommando` + `DoCommanderPromotion` + clear `bestcommanderidperlevel`/`worstcommanderidperlevel`) deferred to v0.2.1. Currently always returns `true` (vanilla path). |
+| 7-8 | *(reserved for v0.2.1)* | — | — | — | — | Smoke-marker-only patches deferred per plan amendment. |
+| 9 | `MonthlyTickHookPatch` | Postfix | `AICampaign.Update` | 11159 | — | Drives `StrategicCoordinator.NotifyDateAdvanced` from per-frame `Update`. Coordinator self-latches on month rollover (`GameVars.currentmonth + 1` vs `LastSeenMonth`) so per-frame call rate is fine. |
 
-**Macro-AI battle stance (formerly patch #8) is deferred to Slice B.** `AIBattle.CheckGlobalAIStrategy` (line 6314) lives in the tactical brain per `docs/handoff.md`'s slice scope; pulling it into Slice A would breach the "Slice A only" lock from §2.
+### 6.2 Settings-lock patches (added 2026-05-03; spec §3.2)
 
-**Player-CIC gate inside patches:** patches that read CIC plan state (#1, #3) check `IsPlayerCICOf(aifaction[_aifaction].allianceid)` first and return the vanilla-fallback path when true. Theater-commander-driven patches (#2, #4, #5, #7, #8) similarly skip when the relevant unit's faction is player-CIC. Belt-and-suspenders to §3.1's coordinator-level gate — if mod state is somehow populated for a player-CIC faction, the patches still hand control back to vanilla.
+| # | Patch class | Hook type | Game method | Decompile line | Effect |
+|---|---|---|---|---|---|
+| 10 | `CampaignParametersLockPatch` | Postfix | `MainMenu.SetCampaignParameters` | 193675 | Final value lock at campaign-create finalize: overwrites `usedcampaignagressiveness=1.0`, `usehistoricaipersonality=true`, `usedcampaignbonus=maxstartbonuscampaign × (LockedDifficulty/4)`, plus `casualtiesmodifier` derived. Logs each overwrite when the player's pick differed. |
+| 11 | `AggressivenessSliderLockPatch` | Postfix | `MainMenu.SwitchAIMode(float)` | ~193739 | UI grey-out for campaign-aggressiveness slider. Snaps `aimode = 1.0` and overwrites `aimodetext[].text` to `"Locked:Realism"`. Gated by `gameObject.name != "BattlePanel"` to leave the per-battle "AI Mode: historic vs dynamic" toggle alone. |
+| 12 | `HistoricCheckboxLockPatch` | Postfix | `MainMenu.CheckForCheckBoxUpdates` | 193612 | Forces `CheckBoxes[0]` (Historic) ON, `CheckBoxes[1]` (Dynamic) OFF; calls `CheckBox.Freeze(true)` on both for visual grey-out + click-block. Re-invokes `ChooseHistoricPolicies(true)` if the player tried to flip to Dynamic. Syncs `lastcheckboxstates` cache. |
+| 13 | `DifficultySliderLockPatch` | Postfix | `MainMenu.ChangeBonus(float)` | ~193786 | UI grey-out for campaign-difficulty slider. Snaps `bonus = maxstartbonuscampaign × (LockedDifficulty/4)`, overwrites `bonustext[].text` to `"Locked:Realism"`. Gated like #11 to leave BattlePanel's per-battle difficulty alone. |
+| 14 | `RealismCheckboxesLockPatch` | Postfix | `MainMenu.CheckForCheckBoxUpdates` | 193612 | Forces 5 realism CBs ON + frozen: `FogOfWarCB`, `OrderDelaysCB`, `FeudsCB`, `FullReadinessCB`, `AllAutomanageCB`. Belt-and-suspenders writes `GameVars.usefow=true`, `useorderdelays=true`, `debug_deactivatefeuds=false`, `fullreadiness=false`, and calls `MainMenu.SetAutomanage(true)` directly. |
 
-**Patch hygiene:**
+All settings-lock patches gate on `Plugin.Instance.OverrideVanillaSettings.Value` (default `true`); flipping that config to `false` cleanly disables all 5 in one switch.
+
+### 6.3 Persistence patches (not numbered — symmetric pair)
+
+| Patch | Hook type | Game method | Decompile line | Effect |
+|---|---|---|---|---|
+| `AICampaignSaveLoadPatch.SavePatch` | Postfix | `AICampaign.Save(string folder)` | 16631 | Writes `<persistentDataPath>/<folder>/whiskeyrealism.json` after vanilla save completes. |
+| `AICampaignSaveLoadPatch.LoadPatch` | Postfix | `AICampaign.Load(string folder)` | 16435 | Reads sidecar JSON; falls back to fresh init with explicit log if missing. Calls `OnceLog.Reset()` so first-fire markers re-emit per save-load cycle. |
+
+### 6.4 Player-CIC gate inside patches
+
+Patches that read CIC plan state (#1, future #3) check `StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)` first and return the vanilla-fallback path when true. Belt-and-suspenders to §3.1's coordinator-level gate — if mod state is somehow populated for a player-CIC faction, the patches still hand control back to vanilla.
+
+### 6.5 Patch hygiene
+
 - Postfix preferred; Prefix only when the vanilla method directly mutates state we need to overwrite (#1, #6).
-- Reflection for fields/properties (forward-compat to game updates).
+- Reflection for fields/properties via `HarmonyLib.AccessTools` (forward-compat to game updates).
 - All reflection wrapped in try/catch + `Plugin.Log.LogWarning(...)`. Never throw from a patch.
 - Each patch logs `OnceLog.Info(...)` on first invocation per save-load cycle for smoke-testing.
 - Mod state is **read-only** to patches. They steer existing AI; they never mutate `CIC` / `TheaterCommander` / `OperationalPlan`.
+- UI patches (#11-#14) carry extra risk of breaking across game updates — `MainMenu` is volatile. If they fail silently after a game patch, players can flip `OverrideVanillaSettings = false` as a workaround until a mod update lands.
 
 ## 7. Persistence
 
@@ -576,14 +625,15 @@ Documented in:
 The strategic-brain slice is "shippable" when:
 
 1. Build is green (0 warnings, 0 errors).
-2. All 9 bridge-layer patches are registered and log first-fire markers in a fresh career.
-3. Smoke-test scenarios 1-7 pass on a single career playthrough.
+2. All 10 active bridge-layer patches register and log `[once:...]` first-fire markers in a fresh career (8 strategic-core + 5 settings-lock minus 3 deferred slots; persistence pair counts separately).
+3. Smoke-test scenarios 1-7 pass on a single career playthrough (boot, era=Amateur1861, sidecar round-trip, succession event #1 fires by 1862-05, monthly heartbeat appears).
 4. JSON sidecar is human-readable and round-trips through save → reload without losing state.
 5. Mod state is observably read-only from patches (no patch mutates `CIC` / `TheaterCommander` state — verified by code review at PR time).
 6. Reflection failures (simulated by deleting a target method's signature in a unit-test stub, or by checking on a manually-corrupted DLL) degrade to vanilla rather than crashing.
 7. Player-commanded units are observably untouched by mod's strategic decisions (confirm `dlcw_isundercommander` units are not assigned to plans).
 8. **Player-CIC noninterference (§3.1).** When `DLC_WL.IsCommanderInChief()` is true for the player's faction X: (a) `StrategicCoordinator` has no `CIC[X]` instance, (b) no monthly tick mutates faction X's plan or theater state, (c) sidecar JSON contains no entry for faction X, (d) all bridge-layer patches return the vanilla-fallback path for faction X. Verified by playing through a CIC-rank promotion event in W&L and confirming via verbose logs.
-9. `dist/WhiskeyRealism.dll` deploys cleanly to GTCW with BepInEx 5.4.x x64 UnityMono installed.
+9. **Settings lock visible in menu (§3.2).** Aggressiveness slider displays `"Locked:Realism"` and stays at neutral; Difficulty slider displays `"Locked:Realism"` and stays at Hard; Historic radio is checked + greyed; FogOfWar / OrderDelays / Feuds / FullReadiness / AllAutomanage all checked + greyed. Flipping `OverrideVanillaSettings = false` in the .cfg restores vanilla menu behavior cleanly.
+10. `dist/WhiskeyRealism.dll` deploys cleanly to GTCW with BepInEx 5.4.x x64 UnityMono installed.
 
 ## 15. References
 

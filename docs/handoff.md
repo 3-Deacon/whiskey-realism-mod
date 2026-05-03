@@ -8,8 +8,8 @@
 
 | | |
 |---|---|
-| **Current shipped version** | v0.2.0 — Slice A built (strategic brain core); awaiting in-game smoke-test |
-| **Active workstream** | Slice A (strategic brain) — implementation complete, deploy + smoke-test pending |
+| **Current shipped version** | v0.2.0 — Slice A strategic brain shipped, smoke-test verified |
+| **Active workstream** | Slice A complete; v0.2.1 backlog ready (see plan §"v0.2.1 backlog") |
 | **Repo** | [`3-Deacon/whiskey-realism-mod`](https://github.com/3-Deacon/whiskey-realism-mod) (public, MIT) |
 | **Last updated** | 2026-05-03 |
 
@@ -131,20 +131,19 @@ Historical flavor on top of A/B/C. Notes:
   - **Behavior** (4): #1 `PickCampaignObjective` Prefix, #2 `ImportanceValues` Postfix, #6 `CommanderReplacement` Prefix gate-only, #9 `MonthlyTickHook` Postfix.
   - **Settings lock** (3): #10 `CampaignParametersLockPatch` (value lock at finalize), #11 `AggressivenessSliderLockPatch` (UI grey-out), #12 `HistoricCheckboxLockPatch` (UI grey-out + radio reversal). Gated by `OverrideVanillaSettings` config (default true). Difficulty intentionally left player-controlled.
   - **Persistence** (2): `AICampaignSaveLoadPatch.SavePatch` + `LoadPatch` Postfix pair on `AICampaign.Save`/`Load`.
-- **2026-05-03 — BepInEx 5.4.23.5 x64 UnityMono installed in GTCW** (was player-side prerequisite). DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll`. Build verified clean (0 warnings, 0 errors). Smoke-test scenarios from spec §9.1 + plan Task 28 grep checklist pending player verification.
+- **2026-05-03 — BepInEx 5.4.23.5 x64 UnityMono installed in GTCW** (was player-side prerequisite). DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll`. Build verified clean (0 warnings, 0 errors).
+- **2026-05-03 — v0.2.0 smoke-test verified.** All 8 active Harmony patches first-fire correctly; settings-lock subsystem visible in campaign-create menu (Aggressiveness/Difficulty sliders display "Locked:Realism"; Historic radio + 5 realism CBs frozen at half-alpha via `CheckBox.Freeze`); `[Heartbeat]` line appears on campaign creation; sidecar JSON round-trips through save/reload. Bugs caught + fixed during smoke-test cycle: BepInEx Config.Bind brackets, three reflection-signature mismatches, missing `GameVars.year` lookup, first-tick latch. See plan §"Bugs caught + fixed during execution" for full table.
 
 ---
 
 ## Next concrete action
 
-**Player-side prerequisite: install BepInEx 5.4.x x64 UnityMono into the GTCW folder.** Download from [github.com/BepInEx/BepInEx/releases](https://github.com/BepInEx/BepInEx/releases) (5.4.21 or later, x64 UnityMono build). Extract into `/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/`. Launch the game once to let BepInEx generate its config + create the `BepInEx/plugins/` folder. Close the game.
+**v0.2.0 ship** — tag `v0.2.0` locally, push tag to origin. Optionally create a GitHub Release with `dist/WhiskeyRealism.dll` attached so players can download a vetted build.
 
-**Then deploy + smoke-test:**
+**v0.2.1 backlog** scoped at the bottom of `docs/superpowers/plans/2026-05-03-strategic-brain-implementation.md`. Highest-priority items:
 
-```bash
-cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"
-```
+1. Redesign `ImportanceValuesPatch` (Prefix on `AIArea.CalculateMostValueableAIZones`).
+2. Wire concrete commander-swap inside `CommanderReplacementPatch` (gate-only in v0.2.0).
+3. Town-ownership war-state observers for Vicksburg / Atlanta / Chattanooga so succession events #1, #5, #6, #8, #9, #10, #12 can fire.
 
-Launch GTCW, start a fresh CSA career, run a couple game-months, then tail `BepInEx/LogOutput.log`. Use the verification commands in `docs/superpowers/plans/2026-05-03-strategic-brain-implementation.md` Task 28 step 2 — they grep for boot, coordinator init, first-fire markers, monthly heartbeat, era transitions, succession events, sidecar round-trip, player-CIC stand-down (if applicable), ObjectiveAdapter geographic-fallback usage, reflection failures (should be zero), and total log spam canary.
-
-After smoke-test passes: tag `v0.2.0`, push to GitHub, create release with `dist/WhiskeyRealism.dll` attached. If smoke-test reveals issues, file them as v0.2.0.x patch-version commits or roll forward into the v0.2.1 backlog (see Slice A backlog table in `docs/patch-catalog.md`).
+Each is independent and can be picked up in any order.

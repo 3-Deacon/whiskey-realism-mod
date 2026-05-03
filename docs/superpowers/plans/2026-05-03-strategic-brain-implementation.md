@@ -31,6 +31,72 @@
 > - `AIArea` field names: `importancevalues` (plural, `float[]` by alliance), `points`, `ownpoints`, `distancepoints`. NO `id` / `value` / `totalvalue`. Use list-index for area identity.
 > - `Commander` fields: `combinedname`, `fame`, `lastfame`, `westpoint`, `political`, `currentcommand` confirmed. NO `defamed` — derived formula uses `fame - lastfame` instead.
 
+## Execution status — v0.2.0 ship complete (2026-05-03)
+
+This plan was executed inline during the 2026-05-03 session. All v0.2.0-scoped tasks shipped, smoke-test verified live in-game. Tag pending.
+
+### Tasks completed (22 of 28)
+
+| Task | File(s) | Notes |
+|---|---|---|
+| 1, 2 | `Util/OnceLog.cs`, `Util/Reflection.cs` | Foundation utilities. |
+| 3-6 | `Strategic/PersonalityVector.cs`, `Theater.cs`, `Phase.cs`, `ObjectiveMetadata.cs` | Pure data types. |
+| 7-10 | `Strategic/FactionProfiles.cs`, `EraStageManager.cs`, `HistoricalFigureRegistry.cs`, `ObjectiveAdapter.cs` | Static registries. 25 hand-coded officers + derived fallback shipped; ObjectiveAdapter table is empty (geographic fallback covers all objectives) — populate during play. |
+| 11-13 | `Strategic/TheaterCommander.cs`, `CIC.cs`, `SuccessionScheduler.cs` | Decision actors. 12 succession events seeded; war-state gates currently always-false until v0.2.1 observers wire town-ownership signals. |
+| 14 | `Strategic/StrategicCoordinator.cs` | Singleton MonoBehaviour. Fires `OnMonthlyTick` on first valid tick + every month rollover (post-fix `44bbcae`). Player-CIC gate engaged via `DLC_WL.IsCommanderInChief(int=-1)`. |
+| 15, 16 | `Strategic/PersistenceDto.cs`, `Patches/AICampaignSaveLoadPatch.cs` | Sidecar JSON persistence on `AICampaign.Save`/`Load` (lines 16631 / 16435). |
+| 17 | (short-circuited inline) | Decompile findings folded directly into plan amendment + per-patch `[HarmonyPatch]` attributes. No formal `findings.md` write-up needed. |
+| 18 | `Patches/MonthlyTickHookPatch.cs` | Postfix on `AICampaign.Update`. Reads `GameVars.currentmonth` (0-indexed; +1 for 1-based) and `GameVars.year` (post-fix `4000c74` — earlier code looked for nonexistent `currentdate`/`currentyear`). |
+| 19 | `Patches/PickCampaignObjectivePatch.cs` | Prefix on `AICampaign.PickCampaignObjective` (17769). Plan-driven objective replaces vanilla random. |
+| 20 | (skipped — plan amendment) | `ImportanceValuesPatch` deferred to v0.2.1 — vanilla method has wrong shape (parameterless, writes to `importancevaluestemp`, chunked processor). Right target for v0.2.1: Prefix `AIArea.CalculateMostValueableAIZones(int aifaction)`. File created with `[Obsolete]` placeholder. |
+| 21, 22, 23, 25, 26 | (deferred per amendment) | Smoke-marker patches deferred to v0.2.1. Ordinals 3, 4, 5, 7, 8 reserved in catalog. |
+| 24 | `Patches/CommanderReplacementPatch.cs` | Prefix on `AICampaign.CheckAICommanderReplacements` (17008). Gate-only this slice — concrete swap (`AssignCommando` + `DoCommanderPromotion`) deferred to v0.2.1 alongside war-state observers. |
+| 27 | `Plugin.cs` | v0.2.0 BepInPlugin. Patches registered via `_harmony.PatchAll(typeof(Plugin).Assembly)`. ConfigEntries: `Enabled`, `VerboseLogging`, `PlanTrace`, `SuccessionTrace`, `OverrideVanillaSettings`, `LockedDifficulty`. |
+| 28 | `docs/patch-catalog.md`, `docs/handoff.md` | Catalog populated with shipped patches + reserved ordinals. Handoff updated to "shipped 0.2.0". v0.2.0 tag held until smoke-test passed (now confirmed 2026-05-03). |
+
+### Bonus tasks added during execution (5 patches not in original plan)
+
+The "vanilla settings integration" subsystem emerged from a design conversation mid-execution and isn't in the original 28-task list. Spec §3.2 describes the design.
+
+| # | File | Effect |
+|---|---|---|
+| 10 | `Patches/CampaignParametersLockPatch.cs` | Postfix on `MainMenu.SetCampaignParameters` (193675). Final value lock at finalize: `usedcampaignagressiveness=1.0`, `usehistoricaipersonality=true`, `usedcampaignbonus = max × (LockedDifficulty/4)`, `casualtiesmodifier` derived. |
+| 11 | `Patches/AggressivenessSliderLockPatch.cs` | Postfix on `MainMenu.SwitchAIMode(float)`. UI grey-out for aggressiveness slider; snap to 1.0; label "Locked:Realism". Gates by `gameObject.name != "BattlePanel"`. |
+| 12 | `Patches/HistoricCheckboxLockPatch.cs` | Postfix on `MainMenu.CheckForCheckBoxUpdates` (193612). Forces Historic radio ON, Dynamic OFF; `CheckBox.Freeze(true)` on both for half-alpha + click-block. |
+| 13 | `Patches/DifficultySliderLockPatch.cs` | Postfix on `MainMenu.ChangeBonus(float)`. UI grey-out for difficulty slider; locked to "Hard" by default (configurable via `LockedDifficulty`). |
+| 14 | `Patches/RealismCheckboxesLockPatch.cs` | Postfix on `MainMenu.CheckForCheckBoxUpdates` (sister to #12). Forces FogOfWar / OrderDelays / Feuds / FullReadiness / AllAutomanage all ON + frozen. Belt-and-suspenders writes the underlying `GameVars` directly. |
+
+### Bugs caught + fixed during execution
+
+| Commit | Symptom | Root cause |
+|---|---|---|
+| `51ff74d` | First launch produced a silent BepInEx chainloader-complete with no `[Coordinator] bootstrapped` and no config file. | `Config.Bind("[General]", ...)` — BepInEx 5.4 forbids `[` `]` in section names. Inherited from v0.1.0 scaffold. Saved as memory `bepinex_gotchas.md`. |
+| `23c2e1e` | 15 repeated `[Coordinator] IsPlayerCICOf failed: Number of parameters specified does not match` warnings. | `DLC_WL.IsCommanderInChief` is `(int manualcommander = -1)`, not zero-args. Now passes `new object[] { -1 }`. |
+| `23c2e1e` | 33+ `AccessTools.Method: Could not find method for type CheckBox and name Check and parameters (bool)` warnings. | `CheckBox.Check` is `(bool newstate = true, bool manuallyset = false)`. Now passes `new[] { typeof(bool), typeof(bool) }`. |
+| `23c2e1e` | `Failed to patch bool AICampaign::UpdateImportanceValues(): Parameter "_aifaction" not found`. | Vanilla method is parameterless, returns `bool`. Wrong target. Patch deferred to v0.2.1 redesign. |
+| `4000c74` | ~2000 `AccessTools.Field: Could not find field for type GameVars and name currentdate` / `Tools.currentyear` warnings flooding the log. | `MonthlyTickHookPatch.ReadGameYear` looked for nonexistent fields. Vanilla stores year as `GameVars.year` (static int, line 64790). |
+| `44bbcae` | All patches first-fired but `[Heartbeat]` line never appeared after starting a campaign. | `NotifyDateAdvanced` waited for a month rollover before firing the first `OnMonthlyTick`. Now fires on first valid call too. |
+
+### Smoke-test verification (2026-05-03 final launch)
+
+User confirmed in-game working state. Log evidence: all 8 patches first-fired, settings-lock subsystem visible in campaign-create menu (Aggressiveness/Difficulty sliders display "Locked:Realism", radio + 5 realism CBs greyed via `CheckBox.Freeze`), heartbeat line appears on campaign creation, sidecar round-trips through save/reload.
+
+### Remaining for v0.2.0 ship
+
+- [ ] Tag `v0.2.0` locally and push tag to `origin`.
+- [ ] (Optional) GitHub Release with `dist/WhiskeyRealism.dll` attached.
+
+### v0.2.1 backlog (formal scope)
+
+1. **Redesign `ImportanceValuesPatch`** — Prefix on `AIArea.CalculateMostValueableAIZones(int aifaction)` (10964) to bias `importancevalues[aifaction]` for plan-target zones before vanilla reads them.
+2. **Concrete commander-swap in `CommanderReplacementPatch`** — wire scripted-event-driven `AssignCommando` + `DoCommanderPromotion` calls in the Prefix when a `SuccessionScheduler` event has fired for this faction.
+3. **War-state observers** — patches on town-ownership transitions for Vicksburg / Atlanta / Chattanooga to drive `StrategicCoordinator.ObserveWarState`. Currently all war-state gates return false → succession events #1, #5, #6, #8, #9, #10, #12 cannot fire.
+4. **Smoke-marker patches → concrete steering** — Tasks 22, 23, 25, 26 from the original plan: `TransferOfUnitsPatch`, `DefensiveOpsPatch`, `PerkSelectionPatch`, `RecruitmentPatch`. Each needs Prefix-with-state-modify after smoke-test reveals consumption pattern.
+5. **`ObjectiveAdapter` table population** — hand-coded `UniqueObjectiveID` → `ObjectiveMetadata` entries based on geographic-fallback log entries observed during play.
+6. **Vanilla settings → mod logic integration** — read `usedcampaignbonus` (locked Hard) into `CIC.Effective` so the locked difficulty actually scales `CasualtyTolerance`. Currently the lock is informational only.
+7. **`Policy.CurrentChapter` integration** — vanilla 5-chapter system overlaps with our 4-stage `EraStage`. Map / retire.
+8. **Slider arrow grey-out** (cosmetic) — disable arrow buttons via `panelhandler.SetButtonsCondition(panel, 2, 150-153)` for visual consistency with frozen checkboxes.
+
 **Validation strategy per task:**
 1. **Build verification** after every code change: `./build.sh` must report `Build succeeded` with `0 Error(s)` and ideally `0 Warning(s)`.
 2. **Deploy + smoke-test** at the end of each phase: `cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"` then launch GTCW and tail `BepInEx/LogOutput.log`.
