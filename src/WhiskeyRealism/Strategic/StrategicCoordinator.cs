@@ -19,6 +19,7 @@ namespace WhiskeyRealism.Strategic
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
         private readonly string[] _frontSignatures = new string[2];
         private readonly string[] _armyAreaSignatures = new string[2];
+        private readonly WeeklyCadence _operationalCadence = new WeeklyCadence();
 
         public int LastSeenMonth = -1;
         public int LastSeenYear  = -1;
@@ -79,6 +80,11 @@ namespace WhiskeyRealism.Strategic
 
         public void NotifyDateAdvanced(int gameMonth, int gameYear)
         {
+            NotifyDateAdvanced(1, gameMonth, gameYear);
+        }
+
+        public void NotifyDateAdvanced(int gameDay, int gameMonth, int gameYear)
+        {
             if (!Initialized) InitializeFromGameState();
 
             bool firstCall = (LastSeenMonth < 0);
@@ -88,15 +94,34 @@ namespace WhiskeyRealism.Strategic
             // AND on every subsequent month rollover. The first heartbeat gives
             // smoke-testers immediate confirmation the strategic core is running
             // without having to advance game-time past a month boundary first.
+            bool ranMonthly = false;
             if (firstCall || rollover)
             {
                 LastSeenMonth = gameMonth;
                 LastSeenYear  = gameYear;
                 OnMonthlyTick(gameMonth, gameYear);
+                ranMonthly = true;
             }
+
+            if (_operationalCadence.ShouldFire(gameDay, gameMonth, gameYear) && !ranMonthly)
+                OnWeeklyOperationalTick(gameDay, gameMonth, gameYear);
         }
 
         private bool _forcedAllSuccession;
+
+        public void OnWeeklyOperationalTick(int day, int month, int year)
+        {
+            try
+            {
+                OnceLog.Info("weeklyops", "Weekly operational analysis active");
+
+                RunStrategicReview(day, month, year, logHeartbeat: false);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[WeeklyOps] tick failed: " + ex.Message);
+            }
+        }
 
         private static void ForceChapterUpdate()
         {
@@ -132,54 +157,59 @@ namespace WhiskeyRealism.Strategic
                     Plugin.Log.LogWarning("[TestMode] Force All Succession Events is ON — all 12 events marked fired this tick. Disable in BepInEx config before a real playthrough.");
                 }
 
-                int playerAlliance = ResolvePlayerAlliance();
-                for (int alliance = 0; alliance < 2; alliance++)
+                RunStrategicReview(1, month, year, logHeartbeat: true);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogError("[Coordinator] tick failed: " + ex);
+            }
+        }
+
+        private void RunStrategicReview(int day, int month, int year, bool logHeartbeat)
+        {
+            int playerAlliance = ResolvePlayerAlliance();
+            for (int alliance = 0; alliance < 2; alliance++)
+            {
+                if (IsPlayerCICOf(alliance, playerAlliance))
                 {
-                    if (IsPlayerCICOf(alliance, playerAlliance))
-                    {
-                        OnceLog.Info("playerciconly:" + alliance,
-                            $"player is CIC of alliance {alliance} ({(alliance == 1 ? "CSA" : "Union")}) — mod stands down for that faction");
-                        CICs[alliance] = null;
-                        continue;
-                    }
-                    if (CICs[alliance] == null) CICs[alliance] = BuildCICForAlliance(alliance);
+                    OnceLog.Info("playerciconly:" + alliance,
+                        $"player is CIC of alliance {alliance} ({(alliance == 1 ? "CSA" : "Union")}) — mod stands down for that faction");
+                    CICs[alliance] = null;
+                    continue;
+                }
+                if (CICs[alliance] == null) CICs[alliance] = BuildCICForAlliance(alliance);
 
-                    var era = Eras[alliance];
-                    var ws = ObserveWarStateCached(month, year);
-                    era.CheckTransition(month, year, ws.VicksburgFallen, ws.AtlantaThreatened);
+                var era = Eras[alliance];
+                var ws = ObserveWarStateCached(day, month, year);
+                era.CheckTransition(month, year, ws.VicksburgFallen, ws.AtlantaThreatened);
 
-                    var fired = Succession.CheckEvents(BuildSchedulerView(month, year, alliance, ws));
-                    foreach (var e in fired)
-                    {
-                        if (e.AllianceId != alliance) continue;
-                        SwapOfficer(alliance, e);
-                        if (CICs[alliance].ActivePlan != null)
-                            CICs[alliance].ActivePlan.IsDirty = true;
-                    }
+                var fired = Succession.CheckEvents(BuildSchedulerView(month, year, alliance, ws));
+                foreach (var e in fired)
+                {
+                    if (e.AllianceId != alliance) continue;
+                    SwapOfficer(alliance, e);
+                    if (CICs[alliance].ActivePlan != null)
+                        CICs[alliance].ActivePlan.IsDirty = true;
+                }
 
-                    var cic = CICs[alliance];
-                    if (cic.ReviewPlan(month, year))
-                    {
-                        // plan still valid
-                    }
-                    else
-                    {
-                        cic.Replan(era, month, year);
-                    }
+                var cic = CICs[alliance];
+                if (!cic.ReviewPlan(month, year))
+                    cic.Replan(era, month, year);
 
-                    UpdateFrontLedger(alliance, cic);
-                    UpdateArmyAreaLedger(alliance, cic);
+                UpdateFrontLedger(alliance, cic);
+                UpdateArmyAreaLedger(alliance, cic);
 
+                if (Plugin.Instance.VerboseLogging.Value && !logHeartbeat)
+                    Plugin.Log.LogInfo($"[WeeklyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
+
+                if (logHeartbeat)
+                {
                     Plugin.Log.LogInfo(
                         $"[Heartbeat] {year}-{month:D2} alliance={alliance} " +
                         $"era={era.Stage} cic={cic.OfficerName ?? "<none>"} " +
                         $"plan={(cic.ActivePlan == null ? "<none>" : $"phase{cic.ActivePlan.CurrentPhaseIndex + 1}/{cic.ActivePlan.Phases.Count} obj={cic.ActivePlan.CurrentPhase?.TargetObjectiveId}")} " +
                         $"succession_fired={Succession.FiredEventIds.Count}");
                 }
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogError("[Coordinator] tick failed: " + ex);
             }
         }
 
@@ -281,19 +311,21 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        // Cached snapshot — recomputed once per OnMonthlyTick to avoid
+        // Cached snapshot — recomputed once per strategic review to avoid
         // re-reading 3+ towns per faction iteration.
         private WarStateObserver.Snapshot _lastSnapshot;
+        private int _lastSnapshotDay = -1;
         private int _lastSnapshotMonth = -1;
         private int _lastSnapshotYear  = -1;
 
-        private WarStateObserver.Snapshot ObserveWarStateCached(int month, int year)
+        private WarStateObserver.Snapshot ObserveWarStateCached(int day, int month, int year)
         {
-            if (month == _lastSnapshotMonth && year == _lastSnapshotYear)
+            if (day == _lastSnapshotDay && month == _lastSnapshotMonth && year == _lastSnapshotYear)
                 return _lastSnapshot;
 
             var snap = WarStateObserver.Observe();
             _lastSnapshot = snap;
+            _lastSnapshotDay = day;
             _lastSnapshotMonth = month;
             _lastSnapshotYear  = year;
 

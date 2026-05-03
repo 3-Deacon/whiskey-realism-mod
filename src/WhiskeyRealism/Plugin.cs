@@ -29,7 +29,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<int>  LockedDifficulty;
 
         // Diagnostic test mode — bypass date + war-state gates and force all
-        // 12 scripted succession events to fire on first monthly tick. For
+        // 12 scripted succession events to fire on first strategic review. For
         // verifying the commander-swap apply mechanic without playing through
         // a multi-month campaign. Default off; remember to disable before
         // playing for real.
@@ -50,10 +50,10 @@ namespace WhiskeyRealism
                 "Emit per-patch first-fire markers and decision-trace logs to LogOutput.log.");
             PlanTrace = Config.Bind(
                 "Diagnostics", "Plan Trace Logging", false,
-                "On each monthly tick, dump CIC's plan reasoning (objective scores, top-3, picked, phases, deadline).");
+                "On each strategic review tick, dump CIC's plan reasoning (objective scores, top-3, picked, phases, deadline).");
             SuccessionTrace = Config.Bind(
                 "Diagnostics", "Succession Trace Logging", false,
-                "On each monthly tick, log every succession event check (date gate, war-state gate, fired/not-fired).");
+                "On each strategic review tick, log every succession event check (date gate, war-state gate, fired/not-fired).");
             OverrideVanillaSettings = Config.Bind(
                 "Strategic", "Override Vanilla Settings", true,
                 "When true, Whiskey Realism locks Aggressiveness to Mediocre, Historic AI Personality to true, and Difficulty to the value of LockedDifficulty (default Hard) at campaign creation. " +
@@ -63,7 +63,7 @@ namespace WhiskeyRealism
                 "Difficulty index 0-4 to lock when OverrideVanillaSettings is true. 0=Very Easy, 1=Easy, 2=Mediocre, 3=Hard (default — historical brutality), 4=Very Hard.");
             ForceAllSuccessionEvents = Config.Bind(
                 "Diagnostics", "Force All Succession Events", false,
-                "TEST MODE — bypass date and war-state gates and force all 12 scripted succession events to fire on first monthly tick. Lets you verify the concrete commander-swap mechanic in seconds without playing through a multi-month campaign. DISABLE before a real playthrough.");
+                "TEST MODE — bypass date and war-state gates and force all 12 scripted succession events to fire on first strategic review tick. Lets you verify the concrete commander-swap mechanic in seconds without playing through a multi-month campaign. DISABLE before a real playthrough.");
 
             if (!Enabled.Value)
             {

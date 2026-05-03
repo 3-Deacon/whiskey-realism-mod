@@ -27,13 +27,13 @@ Six choices locked during the 2026-05-02 brainstorming session. Reject any spec 
 | 3 | Era × faction × officer personality system. | User explicitly asked for both factions to feel different (faction asymmetry) and history-flavored. |
 | 4 | Triggered-scripted officer succession (~12 events, ~60-80% historical fidelity). | Recognizable patterns without deterministic runs. |
 | 5 | Phased operational plans (2-4 phases, one active per side). | Captures real campaigns (Peninsula, Vicksburg) without combinatorial explosion. |
-| 6 | Monthly + event-triggered cadence; events mark plans dirty (next-tick processing); adjust by default, replan only on assumption-invalidating events. | Matches real CIC review cadence; prevents AI thrashing. |
+| 6 | Weekly + event-triggered cadence; events mark plans dirty (next-tick processing); adjust by default, replan only on assumption-invalidating events. Monthly remains a heartbeat/checkpoint boundary only. | Campaign speed makes monthly command too slow; weekly keeps strategic control responsive without daily thrash. |
 
 ## 3. Architecture — two-tier hierarchy
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  StrategicCoordinator   (singleton MonoBehaviour, monthly)   │
+│  StrategicCoordinator   (singleton, weekly review + monthly heartbeat) │
 │  • runs the 1st-of-month re-eval loop                        │
 │  • listens for event triggers (KIA, town loss, defeat)       │
 └─────────┬────────────────────────────────────┬───────────────┘
@@ -65,14 +65,14 @@ Six choices locked during the 2026-05-02 brainstorming session. Reject any spec 
 
 Without this rule the layers fight each other (CIC says concentrate, theater commander says raid) and AI behavior becomes opaque.
 
-**Read-only mod-state invariant:** Harmony patches **read** mod state, never **write** to it. State writes happen only on the monthly tick and event-trigger handlers. This is the load-bearing invariant that keeps the bridge debuggable.
+**Read-only mod-state invariant:** Harmony patches **read** mod state, never **write** to it. State writes happen only on weekly strategic review and event-trigger handlers. This is the load-bearing invariant that keeps the bridge debuggable.
 
 ### 3.1 W&L player-CIC gate (load-bearing)
 
 Vanilla `AICampaign` already skips the player's faction in its update loop when the player is CIC (decompile line 11620 — `if (DLC_WL.dlc_scenarioactive && ... && DLC_WL.IsCommanderInChief() && aifaction[currentfaction].allianceid == GameVars.commander[DLC_WL.dlc_chosencommander].alliance) { currentfaction++; ... }`). The mod must match this contract: when the player is CIC of faction X, the mod's `StrategicCoordinator` does NOT instantiate or run a `CIC[X]`. Theater commanders for faction X are also skipped — the player gives orders to subordinates directly through the W&L UI; the mod has no business steering those orders. The opposing faction's CIC + theater commanders run normally.
 
 ```
-StrategicCoordinator.OnMonthlyTick():
+StrategicCoordinator.RunStrategicReview():
   for faction in [CSA, Union]:
     if IsPlayerCICOf(faction): continue   // player has authority; mod stands down
     // ... era / succession / plan review for AI-driven faction
@@ -247,7 +247,7 @@ public enum PhaseTransition
 
 ### 4.6 Succession events
 
-~12 canonical events. Each = `(date, war-state condition, new officer assignment)`. Fires on monthly tick when both gates pass. Won't fire if the named replacement is already in command (idempotent).
+~12 canonical events. Each = `(date, war-state condition, new officer assignment)`. Fires on weekly strategic review when both gates pass. Won't fire if the named replacement is already in command (idempotent).
 
 | # | Event | Date | War-state condition |
 |---|---|---|---|
@@ -311,12 +311,12 @@ public static class ObjectiveAdapter
 
 ## 5. Decision flow
 
-### 5.1 Monthly tick
+### 5.1 Strategic cadence
 
-Hooked via Postfix on the game's existing month-rollover (TBD: identify hook in implementation phase; candidates include `Tools.Date.NewMonth` events or end-of-day cycle's monthly branch).
+Hooked via Postfix on `AICampaign.Update`. The hook reads `BattleUnits.uniStormSystem.dayCounter/monthCounter` plus `BattleUnits.year`, then self-latches into weekly strategic review buckets and monthly heartbeat boundaries.
 
 ```
-StrategicCoordinator.OnMonthlyTick():
+StrategicCoordinator.RunStrategicReview():
   for faction in [CSA, Union]:
     1. EraStageManager.CheckTransition(faction)
        → advance era if date OR war-state trigger fires
@@ -348,10 +348,10 @@ StrategicCoordinator.OnEventTrigger(faction, eventType, details):
   cic = CICs[faction]
   if eventType invalidates cic.ActivePlan's assumptions:
     cic.ActivePlan.IsDirty = true
-  // events do NOT cause immediate re-eval; next monthly tick processes the dirty bit
+  // events do NOT cause immediate re-eval; next weekly review processes the dirty bit
 ```
 
-This deferred-processing rule prevents the AI from thrashing on a chain of events within a single month.
+This deferred-processing rule prevents the AI from thrashing on a chain of events within a few game-days.
 
 ### 5.3 CIC.Replan()
 
@@ -390,7 +390,7 @@ TheaterCommander.GetPerkPreference(perkId)     → used by CheckPerkSelection pa
 TheaterCommander.GetRecruitmentTheaterWeight   → used by GetBestRecruitingState patch
 ```
 
-Theater commanders cannot abandon a phase; they only signal completion (target taken/engaged) or failure (force below threshold). Phase-transition decisions belong to the CIC on monthly tick.
+Theater commanders cannot abandon a phase; they only signal completion (target taken/engaged) or failure (force below threshold). Phase-transition decisions belong to the CIC on weekly strategic review.
 
 ## 6. Bridge layer — Harmony patches
 
@@ -407,7 +407,7 @@ Theater commanders cannot abandon a phase; they only signal completion (target t
 | 3-5 | *(reserved for v0.2.1)* | — | — | — | — | Smoke-marker-only patches deferred per plan amendment. |
 | 6 | `CommanderReplacementPatch` | **Prefix** | `AICampaign.CheckAICommanderReplacements` | 17008 | SuccessionScheduler state | Gate-only this slice — concrete scripted-event swap (`AssignCommando` + `DoCommanderPromotion` + clear `bestcommanderidperlevel`/`worstcommanderidperlevel`) deferred to v0.2.1. Currently always returns `true` (vanilla path). |
 | 7-8 | *(reserved for v0.2.1)* | — | — | — | — | Smoke-marker-only patches deferred per plan amendment. |
-| 9 | `MonthlyTickHookPatch` | Postfix | `AICampaign.Update` | 11159 | — | Drives `StrategicCoordinator.NotifyDateAdvanced` from per-frame `Update`. Coordinator self-latches on month rollover (`GameVars.currentmonth + 1` vs `LastSeenMonth`) so per-frame call rate is fine. |
+| 9 | `MonthlyTickHookPatch` | Postfix | `AICampaign.Update` | 11159 | — | Drives `StrategicCoordinator.NotifyDateAdvanced` from per-frame `Update`. Coordinator self-latches on 7-day in-game buckets for CIC review/replan and on month rollover for visible heartbeat, so per-frame call rate is fine. |
 
 ### 6.2 Settings-lock patches (added 2026-05-03; spec §3.2)
 
@@ -587,8 +587,8 @@ No automated tests (consistent with UBoatCrewMod). Per-patch first-fire markers 
 `Plugin.cs` `[Diagnostics]` section gates verbose logging:
 
 - `Verbose Logging` → emit per-patch first-fire markers and decision-trace logs.
-- `Plan Trace Logging` → on each monthly tick, dump CIC's plan reasoning (objective scores, top-3, picked, phases, deadline).
-- `Succession Trace Logging` → on each monthly tick, log every succession event check (date gate result, war-state gate result, fired/not-fired).
+- `Plan Trace Logging` → on each strategic review tick, dump CIC's plan reasoning (objective scores, top-3, picked, phases, deadline).
+- `Succession Trace Logging` → on each strategic review tick, log every succession event check (date gate result, war-state gate result, fired/not-fired).
 
 ## 10. Project setup (already done)
 
@@ -613,7 +613,7 @@ Documented in:
 
 ## 13. Open questions for implementation phase
 
-1. Identify the exact game hook for monthly tick. Candidates: `Tools.Date.NewMonth`-style event, `Economy.UpdateMonthly`-style method, or end-of-day cycle's monthly branch in `bunits` / campaign-controller.
+1. Historical note: v0.2.0 originally searched for a monthly hook; shipped code uses `AICampaign.Update` and self-latches into weekly review/monthly heartbeat.
 2. Identify how `aifaction[i].ownunits` exposes army-group-level top units (`unittyp >= 15`?). Map to TheaterCommander assignment at first encounter.
 3. Identify `CampaignObjective.GetAvailableObjectives` return semantics (cached? per-faction? recomputed on demand?). Plan-scoring depends on this.
 4. Confirm `Application.persistentDataPath` resolves correctly for our `Path.Combine(persistentDataPath, folder, ...)` sidecar pattern when GTCW is launched via Steam vs. direct exe — the `folder` argument passed into `AICampaign.Save` is a relative path; verify that `SceneManagement.SaveAll` writes its files into `persistentDataPath` (vs. game-install dir) on the Steam build.
@@ -628,12 +628,12 @@ The strategic-brain slice is "shippable" when:
 
 1. Build is green (0 warnings, 0 errors).
 2. All 10 active bridge-layer patches register and log `[once:...]` first-fire markers in a fresh career (8 strategic-core + 5 settings-lock minus 3 deferred slots; persistence pair counts separately).
-3. Smoke-test scenarios 1-7 pass on a single career playthrough (boot, era=Amateur1861, sidecar round-trip, succession event #1 fires by 1862-05, monthly heartbeat appears).
+3. Smoke-test scenarios 1-7 pass on a single career playthrough (boot, era=Amateur1861, sidecar round-trip, succession event #1 fires by 1862-05, monthly heartbeat appears, weekly review first-fire appears).
 4. JSON sidecar is human-readable and round-trips through save → reload without losing state.
 5. Mod state is observably read-only from patches (no patch mutates `CIC` / `TheaterCommander` state — verified by code review at PR time).
 6. Reflection failures (simulated by deleting a target method's signature in a unit-test stub, or by checking on a manually-corrupted DLL) degrade to vanilla rather than crashing.
 7. Player-commanded units are observably untouched by mod's strategic decisions (confirm `dlcw_isundercommander` units are not assigned to plans).
-8. **Player-CIC noninterference (§3.1).** When `DLC_WL.IsCommanderInChief()` is true for the player's faction X: (a) `StrategicCoordinator` has no `CIC[X]` instance, (b) no monthly tick mutates faction X's plan or theater state, (c) sidecar JSON contains no entry for faction X, (d) all bridge-layer patches return the vanilla-fallback path for faction X. Verified by playing through a CIC-rank promotion event in W&L and confirming via verbose logs.
+8. **Player-CIC noninterference (§3.1).** When `DLC_WL.IsCommanderInChief()` is true for the player's faction X: (a) `StrategicCoordinator` has no `CIC[X]` instance, (b) no strategic review mutates faction X's plan or theater state, (c) sidecar JSON contains no entry for faction X, (d) all bridge-layer patches return the vanilla-fallback path for faction X. Verified by playing through a CIC-rank promotion event in W&L and confirming via verbose logs.
 9. **Settings lock visible in menu (§3.2).** Aggressiveness slider displays `"Locked:Realism"` and stays at neutral; Difficulty slider displays `"Locked:Realism"` and stays at Hard; Historic radio is checked + greyed; FogOfWar / OrderDelays / Feuds / FullReadiness / AllAutomanage all checked + greyed. Flipping `OverrideVanillaSettings = false` in the .cfg restores vanilla menu behavior cleanly.
 10. `dist/WhiskeyRealism.dll` deploys cleanly to GTCW with BepInEx 5.4.x x64 UnityMono installed.
 

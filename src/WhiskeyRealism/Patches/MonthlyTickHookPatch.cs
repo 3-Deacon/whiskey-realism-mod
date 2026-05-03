@@ -11,15 +11,16 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix()
         {
-            OnceLog.Info("monthlytick", "MonthlyTickHookPatch wired");
+            OnceLog.Info("strategic-cadence", "Strategic cadence hook wired (monthly heartbeat + weekly CIC review)");
             try
             {
+                int day = ReadGameDay();
                 int month = ReadGameMonth();
                 int year  = ReadGameYear();
-                if (month <= 0 || year <= 0) return;
+                if (day <= 0 || month <= 0 || year <= 0) return;
 
                 if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
-                StrategicCoordinator.Instance.NotifyDateAdvanced(month, year);
+                StrategicCoordinator.Instance.NotifyDateAdvanced(day, month, year);
             }
             catch (Exception ex)
             {
@@ -58,6 +59,22 @@ namespace WhiskeyRealism.Patches
                 if (storm == null) return -1;
                 var mField = AccessTools.Field(storm.GetType(), "monthCounter");
                 return mField != null ? (int)mField.GetValue(storm) : -1;
+            }
+            catch { return -1; }
+        }
+
+        private static int ReadGameDay()
+        {
+            try
+            {
+                // Vanilla: bunits.uniStormSystem.dayCounter (1-based).
+                var bunits = ResolveBunits();
+                if (bunits == null) return -1;
+                var stormField = AccessTools.Field(bunits.GetType(), "uniStormSystem");
+                var storm = stormField?.GetValue(bunits);
+                if (storm == null) return -1;
+                var dField = AccessTools.Field(storm.GetType(), "dayCounter");
+                return dField != null ? (int)dField.GetValue(storm) : -1;
             }
             catch { return -1; }
         }

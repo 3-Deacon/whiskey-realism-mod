@@ -11,5 +11,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaDoctrine.cs" Link="ArmyAreaDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalArmyAreaRegistry.cs" Link="HistoricalArmyAreaRegistry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaLedger.cs" Link="ArmyAreaLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WeeklyCadence.cs" Link="WeeklyCadence.cs" />
   </ItemGroup>
 </Project>

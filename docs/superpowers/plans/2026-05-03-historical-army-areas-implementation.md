@@ -20,19 +20,19 @@
 - `Strategic/ArmyAreaRuntime.cs`
 - `Patches/ArmyAreaTheaterPatch.cs`
 
-The coordinator now builds `ArmyAreas[alliance]` monthly next to `Fronts[alliance]`. The new patch runs after vanilla `UpdateCampaignTheaters` and, only for idle AI top-level strategic formations, nudges out-of-area units back toward their historical operating-area anchor using vanilla `AICampaign.MoveUnitTo`.
+The coordinator now builds `ArmyAreas[alliance]` weekly next to `Fronts[alliance]`. The new patch runs after vanilla `UpdateCampaignTheaters` and, only for idle AI top-level strategic formations, nudges out-of-area units back toward their historical operating-area anchor using vanilla `AICampaign.MoveUnitTo`.
 
 ## Logging
 
 - `[once:army-area]` confirms the patch first-fired.
-- `[ArmyArea] alliance=...` logs only when the monthly assignment signature changes or verbose logging is enabled.
+- `[ArmyArea] alliance=...` logs only when the weekly assignment signature changes or verbose logging is enabled.
 - `[Patch:ArmyArea] alliance=... unit=... action=return-area area=... reason=...` logs once per unit/area correction.
 
 ## Verification
 
 - `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` passes.
 - `./build.sh` passes with 0 warnings / 0 errors.
-- DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll` and verified by SHA-256: `5c377369bf8a0b03c61c88c1dbd8a823f29ed97815355b88063abe98d6930f59`.
+- DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll` and verified by SHA-256: `f0b0bdc853d55e4230a876cd98b5dd783f8a0531ed1d500740c46313564c8de1`.
 - Runtime smoke still needs a GTCW restart and a campaign AI tick that hits `UpdateCampaignTheaters`.
 
 ## Next

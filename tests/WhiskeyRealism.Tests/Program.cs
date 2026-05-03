@@ -15,7 +15,8 @@ static class Program
             ("historical registry maps ANV to Virginia corridor", HistoricalRegistryMapsAnv),
             ("historical registry maps Union Tennessee army to Mississippi river corridor", HistoricalRegistryMapsUnionArmyOfTheTennessee),
             ("army area ledger holds historical area", ArmyAreaLedgerHoldsHistoricalArea),
-            ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy)
+            ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy),
+            ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover)
         };
 
         foreach (var test in tests)
@@ -169,6 +170,17 @@ static class Program
         AssertEqual("TennesseeGeorgiaCorridor", assignment.AssignedAreaKey);
         AssertEqual(ArmyAreaBehavior.Recover, assignment.Behavior);
         AssertEqual(true, assignment.OutOfArea);
+    }
+
+    private static void WeeklyCadenceFiresOnFirstSeenWeekAndRollover()
+    {
+        var cadence = new WeeklyCadence();
+
+        AssertEqual(true, cadence.ShouldFire(1, 6, 1861));
+        AssertEqual(false, cadence.ShouldFire(6, 6, 1861));
+        AssertEqual(true, cadence.ShouldFire(8, 6, 1861));
+        AssertEqual(false, cadence.ShouldFire(13, 6, 1861));
+        AssertEqual(true, cadence.ShouldFire(1, 7, 1861));
     }
 
     private static void AssertEqual<T>(T expected, T actual)
