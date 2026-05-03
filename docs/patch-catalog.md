@@ -13,6 +13,11 @@ Canonical numbered catalog of all shipped Harmony patches. Each item has a stabl
 | 7 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
 | 8 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
 | 9 | `MonthlyTickHookPatch`         | Postfix | `Patches/MonthlyTickHookPatch.cs`       | `AICampaign.Update` (11159)                  | Drives `StrategicCoordinator.NotifyDateAdvanced` from the per-frame Update; coordinator self-latches on month rollover. |
+| 10 | `CampaignParametersLockPatch` | Postfix | `Patches/CampaignParametersLockPatch.cs` | `MainMenu.SetCampaignParameters` (193675)   | Override `usedcampaignagressiveness` → 1.0 and `usehistoricaipersonality` → true after vanilla writes player menu picks. Final value-lock; difficulty intentionally untouched. Gated by `OverrideVanillaSettings` config (default true). |
+| 11 | `AggressivenessSliderLockPatch` | Postfix | `Patches/AggressivenessSliderLockPatch.cs` | `MainMenu.SwitchAIMode(float)` (~193739) | UI grey-out for campaign-aggressiveness slider. Snaps `aimode = 1.0`, sets displayed text to "Aggressiveness: Locked by Whiskey Realism". Gates by gameObject name to avoid touching BattlePanel's per-battle "AI Mode" toggle. |
+| 12 | `HistoricCheckboxLockPatch`   | Postfix | `Patches/HistoricCheckboxLockPatch.cs`  | `MainMenu.CheckForCheckBoxUpdates` (193612) | UI grey-out for Historic/Dynamic radio. Forces CheckBoxes[0]=true, [1]=false, syncs `lastcheckboxstates`, reverses `ChooseHistoricPolicies(false)` calls if player tried to flip to Dynamic. |
+
+**Note on UI patches:** #11 and #12 patch `MainMenu` UI methods, which is the most volatile part of the codebase across game patches. If a future GTCW update breaks them, the OnceLog markers stay silent (no first-fire). Workaround for affected users: set `OverrideVanillaSettings = false` in `BepInEx/config/dev.kyle.whiskey-realism.cfg` and pick the recommended values manually (Mediocre aggression, Historic personality) until a mod update lands.
 
 **Persistence patches (not numbered — symmetric pair):**
 
