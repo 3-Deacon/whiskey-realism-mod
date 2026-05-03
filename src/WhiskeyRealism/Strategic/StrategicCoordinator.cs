@@ -14,6 +14,7 @@ namespace WhiskeyRealism.Strategic
         public EraStageManager[] Eras = new EraStageManager[2];
         internal SuccessionScheduler Succession = new SuccessionScheduler();
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
+        internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
 
         public int LastSeenMonth = -1;
         public int LastSeenYear  = -1;
@@ -185,6 +186,26 @@ namespace WhiskeyRealism.Strategic
             Plugin.Log.LogInfo($"[Coordinator] event '{eventType}' for alliance {allianceId} — plan marked dirty");
         }
 
+        internal void RecordBattleOutcome(BattleHistoryRecord record)
+        {
+            if (record == null || record.AllianceWon < 0) return;
+
+            foreach (var existing in BattleHistory)
+                if (existing.SameBattleKey(record)) return;
+
+            BattleHistory.Add(record);
+            while (BattleHistory.Count > 64) BattleHistory.RemoveAt(0);
+
+            string scale = record.IsMajorResult ? "major" : "minor";
+            Plugin.Log.LogInfo(
+                $"[BattleHistory] {record.Year}-{record.Month:D2}-{record.Day:D2} " +
+                $"{record.BattleName} winner={record.AllianceWon} loser={record.LosingAlliance} " +
+                $"result={scale} theater={record.Theater}");
+
+            OnEventTrigger(record.AllianceWon, "battle_result");
+            OnEventTrigger(record.LosingAlliance, "battle_result");
+        }
+
         public static int ResolvePlayerAlliance()
         {
             try
@@ -347,6 +368,11 @@ namespace WhiskeyRealism.Strategic
             dto.Succession.FiredEvents   = new List<int>(Succession.FiredEventIds);
             dto.Succession.AppliedEvents = new List<int>(Succession.AppliedEventIds);
             dto.Succession.LastChecked   = LastSeenYear + "-" + LastSeenMonth.ToString("D2") + "-01";
+            foreach (var battle in BattleHistory)
+            {
+                var battleDto = BattleToDto(battle);
+                if (battleDto != null) dto.BattleHistory.Add(battleDto);
+            }
             return dto;
         }
 
@@ -383,6 +409,73 @@ namespace WhiskeyRealism.Strategic
                 MinorOfficerProfiles[m.CommanderId] = m.Personality.ToVector();
             Succession.FiredEventIds   = new HashSet<int>(dto.Succession.FiredEvents);
             Succession.AppliedEventIds = new HashSet<int>(dto.Succession.AppliedEvents ?? new List<int>());
+            BattleHistory.Clear();
+            if (dto.BattleHistory != null)
+            {
+                foreach (var battle in dto.BattleHistory)
+                {
+                    var record = BattleFromDto(battle);
+                    if (record != null) BattleHistory.Add(record);
+                }
+                while (BattleHistory.Count > 64) BattleHistory.RemoveAt(0);
+            }
+        }
+
+        private BattleHistoryDto BattleToDto(BattleHistoryRecord record)
+        {
+            if (record == null) return null;
+            return new BattleHistoryDto
+            {
+                BattleName = record.BattleName,
+                Day = record.Day,
+                Month = record.Month,
+                Year = record.Year,
+                LandOrSea = record.LandOrSea,
+                AllianceWon = record.AllianceWon,
+                BattleResultType = record.BattleResultType,
+                BattleEndType = record.BattleEndType,
+                Theater = record.Theater.ToString(),
+                PositionX = record.PositionX,
+                PositionZ = record.PositionZ,
+                Alliance = new List<int>(record.Alliance),
+                Commander = new List<int>(record.Commander),
+                CommanderName = new List<string>(record.CommanderName),
+                Casualties = new List<int>(record.Casualties),
+                CommanderKia = new List<int>(record.CommanderKia)
+            };
+        }
+
+        private BattleHistoryRecord BattleFromDto(BattleHistoryDto dto)
+        {
+            if (dto == null) return null;
+            var record = new BattleHistoryRecord
+            {
+                BattleName = dto.BattleName,
+                Day = dto.Day,
+                Month = dto.Month,
+                Year = dto.Year,
+                LandOrSea = dto.LandOrSea,
+                AllianceWon = dto.AllianceWon,
+                BattleResultType = dto.BattleResultType,
+                BattleEndType = dto.BattleEndType,
+                PositionX = dto.PositionX,
+                PositionZ = dto.PositionZ
+            };
+            if (!Enum.TryParse<Theater>(dto.Theater, out record.Theater))
+                record.Theater = Theater.Unknown;
+            CopyList(dto.Alliance, record.Alliance);
+            CopyList(dto.Commander, record.Commander);
+            CopyList(dto.CommanderName, record.CommanderName);
+            CopyList(dto.Casualties, record.Casualties);
+            if (dto.CommanderKia != null) record.CommanderKia.AddRange(dto.CommanderKia);
+            return record;
+        }
+
+        private static void CopyList<T>(List<T> source, T[] target)
+        {
+            if (source == null || target == null) return;
+            for (int i = 0; i < source.Count && i < target.Length; i++)
+                target[i] = source[i];
         }
 
         private OperationalPlanDto PlanToDto(OperationalPlan p)

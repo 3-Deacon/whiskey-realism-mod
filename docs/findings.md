@@ -134,6 +134,7 @@ Collected during v0.2.0 / v0.2.1 / v0.2.1.1 smoke-testing. Pattern: many vanilla
 | `Town.GetTownFromName` | `(string)` | `(string name, string statename = "")` |
 | `CampaignObjective.GetAvailableObjectives` | `(int)` | `(int allianceid, bool includeaccomplished = false, int mintownobjectives = 1)` — pass `mintownobjectives=0` to allow abstract objectives |
 | `FilterMap.GetColorOnPos` | `(Vector3)` | `(Vector3 position, float overridealpha = -1f)` |
+| `BattlefieldSetup.GetStateOfField` | `(Vector3)` when using reflection with explicit args | `(Vector3 position, bool usecloseststate = false)` — pass `true` for campaign-map commander-position checks |
 
 **State-location gotchas** (where vanilla actually stores things):
 

@@ -13,6 +13,13 @@ namespace WhiskeyRealism.Util
             Plugin.Log.LogInfo("[once:" + key + "] " + message);
         }
 
+        internal static void Warning(string key, string message)
+        {
+            if (_fired.Contains(key)) return;
+            _fired.Add(key);
+            Plugin.Log.LogWarning("[once:" + key + "] " + message);
+        }
+
         internal static void Reset()
         {
             _fired.Clear();

@@ -9,6 +9,7 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("factions")] public List<FactionDto> Factions = new List<FactionDto>();
         [JsonProperty("minorOfficerProfiles")] public List<MinorOfficerDto> MinorOfficerProfiles = new List<MinorOfficerDto>();
         [JsonProperty("succession")] public SuccessionDto Succession = new SuccessionDto();
+        [JsonProperty("battleHistory")] public List<BattleHistoryDto> BattleHistory = new List<BattleHistoryDto>();
     }
 
     internal class FactionDto
@@ -83,5 +84,25 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("firedEvents")]   public List<int> FiredEvents   = new List<int>();
         [JsonProperty("appliedEvents")] public List<int> AppliedEvents = new List<int>();   // v0.2.1 — track concrete-swap applications
         [JsonProperty("lastChecked")]   public string    LastChecked;
+    }
+
+    internal class BattleHistoryDto
+    {
+        [JsonProperty("battleName")] public string BattleName;
+        [JsonProperty("day")] public int Day;
+        [JsonProperty("month")] public int Month;
+        [JsonProperty("year")] public int Year;
+        [JsonProperty("landOrSea")] public int LandOrSea;
+        [JsonProperty("allianceWon")] public int AllianceWon;
+        [JsonProperty("battleResultType")] public int BattleResultType;
+        [JsonProperty("battleEndType")] public int BattleEndType;
+        [JsonProperty("theater")] public string Theater;
+        [JsonProperty("positionX")] public float PositionX;
+        [JsonProperty("positionZ")] public float PositionZ;
+        [JsonProperty("alliance")] public List<int> Alliance = new List<int>();
+        [JsonProperty("commander")] public List<int> Commander = new List<int>();
+        [JsonProperty("commanderName")] public List<string> CommanderName = new List<string>();
+        [JsonProperty("casualties")] public List<int> Casualties = new List<int>();
+        [JsonProperty("commanderKia")] public List<int> CommanderKia = new List<int>();
     }
 }

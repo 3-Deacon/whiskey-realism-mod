@@ -8,7 +8,7 @@ Canonical numbered catalog of all shipped Harmony patches. Each item has a stabl
 | 2 | `ImportanceValuesPatch`        | Postfix | `Patches/ImportanceValuesPatch.cs`      | `AIArea.CalculateMostValueableAIZones` (10964) — *target changed in v0.2.1; original v0.2.0 target was AICampaign.UpdateImportanceValues which had wrong shape* | Override `__instance.mostvalueableaiareaclose[aifaction]` to point at the plan-target AIArea. Resolves CampaignObjective ID → first Town/IIP position → AICampaign.aiareas.GetColorOnPos → AIArea.GetAIArea. |
 | 3 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
 | 4 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
-| 5 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
+| 5 | `BattleResultObserverPatch`   | Postfix | `Patches/BattleResultObserverPatch.cs` | `BattleMonument.UpdateAllianceWon` (76496) | v0.2.2 observer. Records final land-battle outcomes into `StrategicCoordinator.BattleHistory`, persists the ring buffer, and marks both factions dirty for monthly succession/plan reevaluation. Build-verified; in-game smoke pending. |
 | 6 | `CommanderReplacementPatch`    | Prefix  | `Patches/CommanderReplacementPatch.cs`  | `AICampaign.CheckAICommanderReplacements` (17008) | v0.2.1 concrete swap — when scheduler has un-applied scripted events for this faction, resolves replacement Commander by `combinedname` last-token + alliance, finds an army-group commander (`IsArmyGroupCommander() && currentcommand != null`) to displace, calls `AssignCommando` + `DoCommanderPromotion`, marks applied (persisted via sidecar). Returns false to skip vanilla on apply; falls through if preconditions unmet. |
 | 7 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
 | 8 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
@@ -45,14 +45,13 @@ Canonical numbered catalog of all shipped Harmony patches. Each item has a stabl
 
 ## Pending (v0.2.2 backlog)
 
-Reserved ordinals 3, 4, 5, 7, 8 are held for v0.2.2 patches that further the strategic core:
+Reserved ordinals 3, 4, 7, 8 are held for v0.2.2 patches that further the strategic core:
 
 | # | Planned class | Target | Rationale |
 |---|---|---|---|
 | 3 | `TransferOfUnitsPatch` (concrete steering) | `AICampaign.CheckTransferOfUnits` (17232) | Needs Prefix-with-state-modify; tied to TheaterCommander consolidation urgency. |
 | 4 | `DefensiveOpsPatch` (concrete steering) | `AICampaign.CheckPickDefensiveOps` (11791) | Per-personality strength gate. |
-| 5 | (open) | — | Available for new v0.2.2 work. |
 | 7 | `PerkSelectionPatch` (concrete steering) | `AICampaign.CheckPerkSelection` (11873) | Needs perk-id → personality-attribute mapping table. |
 | 8 | `RecruitmentPatch` (concrete steering) | `AIArea.GetBestRecruitingState` (10722) | Needs concrete weighting strategy. |
 
-**v0.2.2 also includes:** battle-history observers in `WarStateObserver` to unlock the remaining 7 succession events (#1, #3, #4, #5, #6, #11, #12 — gated on ANV defeats / AoP failures / Burnside's first defeat / Lee invading Pennsylvania / Western theater defeats / Valley operations / war clearly lost). And: vanilla settings → mod logic integration (route locked-Hard difficulty into `CIC.Effective` casualty-tolerance scaling).
+**v0.2.2 also includes:** using the #5 battle-history observer inside `WarStateObserver` to unlock the remaining 7 succession events (#1, #3, #4, #5, #6, #11, #12 — gated on ANV defeats / AoP failures / Burnside's first defeat / Lee invading Pennsylvania / Western theater defeats / Valley operations / war clearly lost). And: vanilla settings → mod logic integration (route locked-Hard difficulty into `CIC.Effective` casualty-tolerance scaling).
