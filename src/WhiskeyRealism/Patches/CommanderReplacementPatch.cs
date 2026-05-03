@@ -96,10 +96,20 @@ namespace WhiskeyRealism.Patches
                 }
 
                 int displaceId = FindDisplaceableArmyGroupCommanderId(commanders, allianceId, replacementId);
+                if (displaceId < 0 && Plugin.Instance.ForceAllSuccessionEvents.Value)
+                {
+                    // Test-mode fallback: when no army-group commander exists yet
+                    // (typical early in a campaign before BattleUnits.armygroups
+                    // gets populated), displace ANY commander with a currentcommand
+                    // so the swap mechanic actually exercises end-to-end. NOT used
+                    // in normal play.
+                    displaceId = FindAnyDisplaceableCommanderId(commanders, allianceId, replacementId);
+                    if (displaceId >= 0)
+                        Plugin.Log.LogInfo($"[TestMode] [Succession:{e.Id}] no AGC available; falling back to any commander with a currentcommand (id={displaceId})");
+                }
                 if (displaceId < 0)
                 {
-                    // Common in early campaign — BattleUnits.armygroups isn't populated until
-                    // the AI promotes someone to army-group rank. OnceLog'd to prevent per-tick spam.
+                    // Common in early campaign. OnceLog'd to prevent per-tick spam.
                     OnceLog.Info($"replace:noagc:{e.Id}",
                         $"[Succession:{e.Id}] no army-group commander to displace in alliance {allianceId} — armygroups not yet populated");
                     return false;
@@ -180,6 +190,28 @@ namespace WhiskeyRealism.Patches
                 var isAGC = AccessTools.Method(cmdType, "IsArmyGroupCommander");
                 if (isAGC == null) continue;
                 if ((bool)isAGC.Invoke(cmd, null)) return i;
+            }
+            return -1;
+        }
+
+        // Test-mode-only fallback: any commander in this alliance with a
+        // non-null currentcommand. Lets the swap mechanic exercise without
+        // waiting for the AI to populate BattleUnits.armygroups.
+        private static int FindAnyDisplaceableCommanderId(IList commanders, int allianceId, int skipId)
+        {
+            for (int i = 0; i < commanders.Count; i++)
+            {
+                if (i == skipId) continue;
+                var cmd = commanders[i];
+                if (cmd == null) continue;
+                var cmdType = cmd.GetType();
+                var allianceField = AccessTools.Field(cmdType, "alliance");
+                if (allianceField == null || (int)allianceField.GetValue(cmd) != allianceId) continue;
+
+                var ccField = AccessTools.Field(cmdType, "currentcommand");
+                if (ccField?.GetValue(cmd) == null) continue;
+
+                return i;
             }
             return -1;
         }
