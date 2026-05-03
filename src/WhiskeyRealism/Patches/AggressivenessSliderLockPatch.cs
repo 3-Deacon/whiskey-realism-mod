@@ -54,7 +54,7 @@ namespace WhiskeyRealism.Patches
                     {
                         var textObj = textArr.GetValue(displaySlot);
                         var textProp = textObj?.GetType().GetProperty("text");
-                        textProp?.SetValue(textObj, "Aggressiveness: Locked by Whiskey Realism", null);
+                        textProp?.SetValue(textObj, "Locked:Realism", null);
                     }
                 }
             }
