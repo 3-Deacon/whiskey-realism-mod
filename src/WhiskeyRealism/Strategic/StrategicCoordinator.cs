@@ -223,5 +223,165 @@ namespace WhiskeyRealism.Strategic
         {
             Plugin.Log.LogInfo($"[Succession:{e.Id}] FIRED — {e.Name}, replacing role={e.ReplacedRole} with={e.ReplacementName}");
         }
+
+        public void SaveSidecar(string fullPath)
+        {
+            try
+            {
+                var dto = BuildDto();
+                var json = Newtonsoft.Json.JsonConvert.SerializeObject(dto, Newtonsoft.Json.Formatting.Indented);
+                System.IO.File.WriteAllText(fullPath, json);
+                Plugin.Log.LogInfo("[Coordinator] sidecar written: " + fullPath);
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Coordinator] sidecar save failed: " + ex); }
+        }
+
+        public void LoadSidecar(string fullPath)
+        {
+            try
+            {
+                var json = System.IO.File.ReadAllText(fullPath);
+                var dto = Newtonsoft.Json.JsonConvert.DeserializeObject<SidecarDto>(json);
+                if (dto == null) { InitializeFromGameState(); return; }
+                ApplyDto(dto);
+                Initialized = true;
+                Plugin.Log.LogInfo("[Coordinator] sidecar loaded: " + fullPath);
+                OnceLog.Reset();
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[Coordinator] sidecar load failed (falling back to fresh init): " + ex.Message);
+                InitializeFromGameState();
+            }
+        }
+
+        private SidecarDto BuildDto()
+        {
+            var dto = new SidecarDto();
+            for (int alliance = 0; alliance < 2; alliance++)
+            {
+                if (CICs[alliance] == null) continue;
+                var f = new FactionDto
+                {
+                    FactionId   = alliance,
+                    FactionName = (alliance == 1) ? "CSA" : "Union",
+                    CurrentEra  = Eras[alliance].Stage.ToString(),
+                    Cic = new CICDto
+                    {
+                        OfficerName = CICs[alliance].OfficerName,
+                        Personality = PersonalityDto.FromVector(CICs[alliance].OfficerPersonality),
+                        ActivePlan  = (CICs[alliance].ActivePlan != null) ? PlanToDto(CICs[alliance].ActivePlan) : null
+                    }
+                };
+                foreach (var tc in CICs[alliance].Theaters)
+                {
+                    f.TheaterCommanders.Add(new TheaterCommanderDto
+                    {
+                        TheaterId   = tc.TheaterId,
+                        OfficerName = tc.OfficerName,
+                        Personality = PersonalityDto.FromVector(tc.Personality)
+                    });
+                }
+                dto.Factions.Add(f);
+            }
+            foreach (var kv in MinorOfficerProfiles)
+            {
+                dto.MinorOfficerProfiles.Add(new MinorOfficerDto
+                {
+                    CommanderId = kv.Key,
+                    Personality = PersonalityDto.FromVector(kv.Value)
+                });
+            }
+            dto.Succession.FiredEvents = new List<int>(Succession.FiredEventIds);
+            dto.Succession.LastChecked = LastSeenYear + "-" + LastSeenMonth.ToString("D2") + "-01";
+            return dto;
+        }
+
+        private void ApplyDto(SidecarDto dto)
+        {
+            for (int alliance = 0; alliance < 2; alliance++)
+            {
+                Eras[alliance] = Eras[alliance] ?? new EraStageManager();
+            }
+            foreach (var f in dto.Factions)
+            {
+                if (f.FactionId < 0 || f.FactionId >= 2) continue;
+                if (Enum.TryParse<EraStage>(f.CurrentEra, out var era)) Eras[f.FactionId].Stage = era;
+                var cic = new CIC
+                {
+                    AllianceId         = f.FactionId,
+                    OfficerName        = f.Cic?.OfficerName,
+                    OfficerPersonality = f.Cic?.Personality?.ToVector() ?? default(PersonalityVector),
+                    ActivePlan         = (f.Cic?.ActivePlan != null) ? PlanFromDto(f.Cic.ActivePlan, f.FactionId) : null
+                };
+                foreach (var tc in f.TheaterCommanders)
+                {
+                    cic.Theaters.Add(new TheaterCommander
+                    {
+                        TheaterId   = tc.TheaterId,
+                        OfficerName = tc.OfficerName,
+                        Personality = tc.Personality?.ToVector() ?? default(PersonalityVector)
+                    });
+                }
+                CICs[f.FactionId] = cic;
+            }
+            MinorOfficerProfiles.Clear();
+            foreach (var m in dto.MinorOfficerProfiles)
+                MinorOfficerProfiles[m.CommanderId] = m.Personality.ToVector();
+            Succession.FiredEventIds = new HashSet<int>(dto.Succession.FiredEvents);
+        }
+
+        private OperationalPlanDto PlanToDto(OperationalPlan p)
+        {
+            var dto = new OperationalPlanDto
+            {
+                AssignedTheaterId = p.AssignedTheaterId,
+                CurrentPhaseIndex = p.CurrentPhaseIndex,
+                PlanDeadlineMonth = p.PlanDeadlineMonth,
+                PlanDeadlineYear  = p.PlanDeadlineYear,
+                Rationale         = p.Rationale,
+                IsDirty           = p.IsDirty
+            };
+            foreach (var ph in p.Phases)
+                dto.Phases.Add(new PhaseDto
+                {
+                    TargetAreaId          = ph.TargetAreaId,
+                    TargetObjectiveId     = ph.TargetObjectiveId,
+                    ForceFractionRequired = ph.ForceFractionRequired,
+                    Transition            = ph.Transition.ToString(),
+                    DeadlineMonth         = ph.DeadlineMonth,
+                    DeadlineYear          = ph.DeadlineYear
+                });
+            return dto;
+        }
+
+        private OperationalPlan PlanFromDto(OperationalPlanDto dto, int allianceId)
+        {
+            var p = new OperationalPlan
+            {
+                CICFactionAllianceId = allianceId,
+                AssignedTheaterId    = dto.AssignedTheaterId,
+                CurrentPhaseIndex    = dto.CurrentPhaseIndex,
+                PlanDeadlineMonth    = dto.PlanDeadlineMonth,
+                PlanDeadlineYear     = dto.PlanDeadlineYear,
+                Rationale            = dto.Rationale,
+                IsDirty              = dto.IsDirty
+            };
+            foreach (var ph in dto.Phases)
+            {
+                Enum.TryParse<PhaseTransition>(ph.Transition, out var trans);
+                p.Phases.Add(new Phase
+                {
+                    TargetAreaId          = ph.TargetAreaId,
+                    TargetObjectiveId     = ph.TargetObjectiveId,
+                    ForceFractionRequired = ph.ForceFractionRequired,
+                    Transition            = trans,
+                    DeadlineMonth         = ph.DeadlineMonth,
+                    DeadlineYear          = ph.DeadlineYear,
+                    Fallback              = null
+                });
+            }
+            return p;
+        }
     }
 }
