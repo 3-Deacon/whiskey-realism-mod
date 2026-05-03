@@ -8,8 +8,8 @@
 
 | | |
 |---|---|
-| **Current shipped version** | v0.2.1 built — concrete commander-swap, war-state observers, ImportanceValuesPatch redesign. Smoke-test pending. |
-| **Active workstream** | Slice A v0.2.1 → v0.2.2 (battle-history observers + remaining smoke-marker patches → concrete steering) |
+| **Current shipped version** | v0.2.1 — strategic-brain enrichment (concrete swap, war-state, plan biasing). Tagged + Released 2026-05-03. |
+| **Active workstream** | Slice A v0.2.2 backlog (battle-history observers + smoke-marker patches → concrete steering + vanilla-settings integration) |
 | **Repo** | [`3-Deacon/whiskey-realism-mod`](https://github.com/3-Deacon/whiskey-realism-mod) (public, MIT) |
 | **Last updated** | 2026-05-03 |
 
@@ -143,17 +143,14 @@ Historical flavor on top of A/B/C. Notes:
 
 ## Next concrete action
 
-**Smoke-test v0.2.1** — start a fresh CSA career, advance time enough to trigger at least one succession event with a war-state gate. Expected log signatures:
-- `[once:replace] CommanderReplacementPatch wired (v0.2.1 concrete swap)` — patch attached.
-- `[WarState] Vicksburg fell (1863-07)` (or similar) — town observer detects ownership change.
-- `[Succession:N] FIRED — <event name>` — event passes both date + war-state gates.
-- `[Succession:N] APPLIED — commander '<name>' (id=X) now commands what id=Y previously held` — concrete swap happened.
-
-If swap log appears but in-game commander assignments don't visibly change, that's a sign the swap mechanic needs further refinement (the role-mapping is approximate — replaces *some* army-group commander, not always the historically correct one).
-
-**After smoke-test passes**: tag `v0.2.1`, push tag, create GitHub Release.
+v0.2.1 verified end-to-end via test-mode smoke run on 2026-05-03 — all 12 succession events applied with concrete `AssignCommando` + `DoCommanderPromotion` swaps; sidecar JSON round-trips through save/reload; no reflection failures, no log spam. Test-mode config flipped back to `false`. Tag + GitHub Release published.
 
 **v0.2.2 backlog** (see `docs/patch-catalog.md` §"Pending"):
-1. Battle-history observers in `WarStateObserver` (ANV defeats, AoP offensive failures, Burnside's first defeat, etc.) to unlock the remaining 7 succession events.
-2. Concrete steering for `TransferOfUnitsPatch`, `DefensiveOpsPatch`, `PerkSelectionPatch`, `RecruitmentPatch`.
-3. Vanilla settings → mod logic integration (locked-Hard difficulty scales `CasualtyTolerance`).
+1. **Battle-history observers in `WarStateObserver`** — track ANV defeats, AoP offensive failures, Burnside's first defeat, Lee invading Pennsylvania, Western theater defeats, Valley operations, war clearly lost. Unlocks the remaining 7 succession events (#1, #3, #4, #5, #6, #11, #12) so they can fire from observed game state without test-mode bypass.
+2. **Concrete steering for `TransferOfUnitsPatch` (#3), `DefensiveOpsPatch` (#4), `PerkSelectionPatch` (#7), `RecruitmentPatch` (#8)** — currently smoke-marker only.
+3. **Vanilla settings → mod logic integration** — route the locked-Hard `usedcampaignbonus` into `CIC.Effective` to scale `CasualtyTolerance`. Currently the lock is informational only.
+4. **`Policy.CurrentChapter` integration** — vanilla 5-chapter system overlaps with our 4-stage `EraStage`. Map / retire.
+
+**Important early-campaign constraint observed during v0.2.1 smoke-test:**
+- `CampaignObjective.GetAvailableObjectives(allianceId)` returns empty list before war declared (Chapter 0). `CIC.Replan` correctly handles this (clears plan). When war begins, vanilla publishes objectives and Replan should produce real plans.
+- `BattleUnits.armygroups` not populated until AI promotes someone to army-group rank — typically later in the war. Until then, the `CommanderReplacementPatch` real-mode path correctly defers (test-mode falls back to any-commander).
