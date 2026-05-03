@@ -198,9 +198,12 @@ namespace WhiskeyRealism.Strategic
             {
                 var t = AccessTools.TypeByName("CampaignObjective");
                 if (t == null) { Plugin.Log.LogWarning("[CIC] CampaignObjective type not found"); return null; }
-                var m = AccessTools.Method(t, "GetAvailableObjectives", new[] { typeof(int) });
-                if (m == null) { Plugin.Log.LogWarning("[CIC] CampaignObjective.GetAvailableObjectives not found"); return null; }
-                return m.Invoke(null, new object[] { allianceId }) as IList;
+                // Vanilla signature: public static List<CampaignObjective> GetAvailableObjectives(
+                //     int allianceid, bool includeaccomplished = false, int mintownobjectives = 1)
+                // (decompile line 178825). Three args, two with defaults.
+                var m = AccessTools.Method(t, "GetAvailableObjectives", new[] { typeof(int), typeof(bool), typeof(int) });
+                if (m == null) { Plugin.Log.LogWarning("[CIC] CampaignObjective.GetAvailableObjectives(int,bool,int) not found"); return null; }
+                return m.Invoke(null, new object[] { allianceId, false, 1 }) as IList;
             }
             catch (Exception ex)
             {

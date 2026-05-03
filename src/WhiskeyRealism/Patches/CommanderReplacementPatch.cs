@@ -90,14 +90,18 @@ namespace WhiskeyRealism.Patches
                 int replacementId = FindCommanderIdByLastName(commanders, e.ReplacementName, allianceId);
                 if (replacementId < 0)
                 {
-                    Plugin.Log.LogInfo($"[Succession:{e.Id}] no commander matching '{e.ReplacementName}' in alliance {allianceId}");
+                    OnceLog.Info($"replace:noreplacement:{e.Id}",
+                        $"[Succession:{e.Id}] no commander matching '{e.ReplacementName}' in alliance {allianceId} — historical figure not on roster yet");
                     return false;
                 }
 
                 int displaceId = FindDisplaceableArmyGroupCommanderId(commanders, allianceId, replacementId);
                 if (displaceId < 0)
                 {
-                    Plugin.Log.LogInfo($"[Succession:{e.Id}] no army-group commander to displace in alliance {allianceId}");
+                    // Common in early campaign — BattleUnits.armygroups isn't populated until
+                    // the AI promotes someone to army-group rank. OnceLog'd to prevent per-tick spam.
+                    OnceLog.Info($"replace:noagc:{e.Id}",
+                        $"[Succession:{e.Id}] no army-group commander to displace in alliance {allianceId} — armygroups not yet populated");
                     return false;
                 }
 

@@ -56,10 +56,12 @@ namespace WhiskeyRealism.Strategic
             {
                 var townType = AccessTools.TypeByName("Town");
                 if (townType == null) return false;
-                var getTownFromName = AccessTools.Method(townType, "GetTownFromName", new[] { typeof(string) });
+                // Vanilla signature: public static Town GetTownFromName(string name, string statename = "")
+                // (decompile line 144004). Takes TWO args; pass empty string for statename.
+                var getTownFromName = AccessTools.Method(townType, "GetTownFromName", new[] { typeof(string), typeof(string) });
                 if (getTownFromName == null) return false;
 
-                var town = getTownFromName.Invoke(null, new object[] { cityName });
+                var town = getTownFromName.Invoke(null, new object[] { cityName, "" });
                 if (town == null) return false;
 
                 var ownerField = AccessTools.Field(townType, "Owner");
