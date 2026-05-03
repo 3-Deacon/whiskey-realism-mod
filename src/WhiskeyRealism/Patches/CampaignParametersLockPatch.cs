@@ -47,6 +47,37 @@ namespace WhiskeyRealism.Patches
                     if (!prev)
                         Plugin.Log.LogInfo("[Settings] Historic AI Personality override: false → true (required for scripted succession events)");
                 }
+
+                // Difficulty lock — index 3 (Hard) by default, configurable.
+                // bonus mapping: bonus = (index/4) * GamePrefs.maxstartbonuscampaign
+                // (vanilla ChangeBonus formula: steps = bonus/num2 mapped to 0..length-1).
+                int idx = Math.Max(0, Math.Min(4, Plugin.Instance.LockedDifficulty.Value));
+                var prefsType = AccessTools.TypeByName("GamePrefs");
+                var maxBonusField = AccessTools.Field(prefsType, "maxstartbonuscampaign");
+                if (maxBonusField != null)
+                {
+                    float maxBonus = (float)maxBonusField.GetValue(null);
+                    float lockedBonus = maxBonus * (idx / 4f);
+
+                    var bonusField = AccessTools.Field(gv, "usedcampaignbonus");
+                    var bonusRunningField = AccessTools.Field(gv, "usedcampaignbonusrunning");
+                    var casualtiesField = AccessTools.Field(gv, "casualtiesmodifier");
+                    var casualtiesBonusField = AccessTools.Field(prefsType, "casualtiesmodifierbonus");
+
+                    if (bonusField != null && casualtiesBonusField != null)
+                    {
+                        float prevBonus = (float)bonusField.GetValue(null);
+                        float casualtiesBonusCoef = (float)casualtiesBonusField.GetValue(null);
+
+                        bonusField.SetValue(null, lockedBonus);
+                        bonusRunningField?.SetValue(null, lockedBonus);
+                        casualtiesField?.SetValue(null, lockedBonus * casualtiesBonusCoef);
+
+                        var labels = new[] { "Very Easy", "Easy", "Mediocre", "Hard", "Very Hard" };
+                        if (Math.Abs(prevBonus - lockedBonus) > 0.001f)
+                            Plugin.Log.LogInfo($"[Settings] Difficulty override: bonus {prevBonus:F2} → {lockedBonus:F2} ({labels[idx]} — historical Civil War brutality)");
+                    }
+                }
             }
             catch (Exception ex)
             {
