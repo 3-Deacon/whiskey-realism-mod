@@ -56,9 +56,12 @@ namespace WhiskeyRealism.Strategic
         public void Replan(EraStageManager era, int currentMonth, int currentYear)
         {
             var availableObjectives = GetAvailableObjectivesViaReflection(AllianceId);
+            int objCount = availableObjectives?.Count ?? -1;
             if (availableObjectives == null || availableObjectives.Count == 0)
             {
-                Plugin.Log.LogInfo($"[CIC:{OfficerName}] Replan — no available objectives, plan cleared.");
+                // -1 = reflection failure (warning was already logged); 0 = vanilla
+                // genuinely returned empty (likely pre-war chapter, no objectives published yet).
+                Plugin.Log.LogInfo($"[CIC:{OfficerName}] Replan — no available objectives (count={objCount}), plan cleared.");
                 ActivePlan = null;
                 return;
             }

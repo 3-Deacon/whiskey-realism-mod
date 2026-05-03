@@ -11,6 +11,12 @@ namespace WhiskeyRealism.Patches
     {
         private const string SidecarFile = "whiskeyrealism.json";
 
+        // NOTE: vanilla writes campaign saves to the GAME INSTALL DIR (current
+        // working directory at runtime), NOT Application.persistentDataPath.
+        // Vanilla's SceneManagement.SaveAll calls Directory.CreateDirectory(text)
+        // where `text` is a relative path like "Campaigns/002/A/Save/" — CWD-resolved.
+        // Our patch must use the same convention so the sidecar lands beside
+        // vanilla's files.
         [HarmonyPatch(typeof(AICampaign), "Save")]
         internal static class SavePatch
         {
@@ -21,7 +27,8 @@ namespace WhiskeyRealism.Patches
                 try
                 {
                     if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
-                    var fullPath = Path.Combine(Application.persistentDataPath, folder, SidecarFile);
+                    // Relative — let .NET resolve against CWD (the game install dir).
+                    var fullPath = Path.Combine(folder, SidecarFile);
                     StrategicCoordinator.Instance.SaveSidecar(fullPath);
                 }
                 catch (Exception ex) { Plugin.Log.LogError("[SavePatch] " + ex); }
@@ -38,7 +45,7 @@ namespace WhiskeyRealism.Patches
                 try
                 {
                     if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
-                    var fullPath = Path.Combine(Application.persistentDataPath, folder, SidecarFile);
+                    var fullPath = Path.Combine(folder, SidecarFile);
                     if (File.Exists(fullPath))
                     {
                         StrategicCoordinator.Instance.LoadSidecar(fullPath);
