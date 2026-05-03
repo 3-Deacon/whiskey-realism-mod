@@ -8,8 +8,8 @@
 
 | | |
 |---|---|
-| **Current shipped version** | v0.2.0 — Slice A strategic brain shipped, smoke-test verified |
-| **Active workstream** | Slice A complete; v0.2.1 backlog ready (see plan §"v0.2.1 backlog") |
+| **Current shipped version** | v0.2.1 built — concrete commander-swap, war-state observers, ImportanceValuesPatch redesign. Smoke-test pending. |
+| **Active workstream** | Slice A v0.2.1 → v0.2.2 (battle-history observers + remaining smoke-marker patches → concrete steering) |
 | **Repo** | [`3-Deacon/whiskey-realism-mod`](https://github.com/3-Deacon/whiskey-realism-mod) (public, MIT) |
 | **Last updated** | 2026-05-03 |
 
@@ -133,17 +133,27 @@ Historical flavor on top of A/B/C. Notes:
   - **Persistence** (2): `AICampaignSaveLoadPatch.SavePatch` + `LoadPatch` Postfix pair on `AICampaign.Save`/`Load`.
 - **2026-05-03 — BepInEx 5.4.23.5 x64 UnityMono installed in GTCW** (was player-side prerequisite). DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll`. Build verified clean (0 warnings, 0 errors).
 - **2026-05-03 — v0.2.0 smoke-test verified.** All 8 active Harmony patches first-fire correctly; settings-lock subsystem visible in campaign-create menu (Aggressiveness/Difficulty sliders display "Locked:Realism"; Historic radio + 5 realism CBs frozen at half-alpha via `CheckBox.Freeze`); `[Heartbeat]` line appears on campaign creation; sidecar JSON round-trips through save/reload. Bugs caught + fixed during smoke-test cycle: BepInEx Config.Bind brackets, three reflection-signature mismatches, missing `GameVars.year` lookup, first-tick latch. See plan §"Bugs caught + fixed during execution" for full table.
+- **2026-05-03 — v0.2.0 tagged + GitHub Release published.** Tag at `https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.0` with DLL attached.
+- **2026-05-03 — v0.2.1 built (smoke-test pending).** Three commits closing the loop on v0.2.0's deferred behavior:
+  - `3a429d8` — `ImportanceValuesPatch` (#2) redesigned. Postfix on `AIArea.CalculateMostValueableAIZones` overrides `mostvalueableaiareaclose[aifaction]` to point at the plan target.
+  - `3d28b23` — `WarStateObserver` added. Town-ownership reads for Vicksburg / Chattanooga / Atlanta. Unlocks succession events #8 (Grant→GiC), #9 (Sherman→Western), #10 (Hood replaces Johnston).
+  - `79a35ca` — Concrete commander-swap inside `CommanderReplacementPatch` (#6). When scheduler has un-applied scripted events, finds replacement Commander by name+alliance, displaces an army-group commander, calls `AssignCommando` + `DoCommanderPromotion`. Applied-event tracking persisted in sidecar.
 
 ---
 
 ## Next concrete action
 
-**v0.2.0 ship** — tag `v0.2.0` locally, push tag to origin. Optionally create a GitHub Release with `dist/WhiskeyRealism.dll` attached so players can download a vetted build.
+**Smoke-test v0.2.1** — start a fresh CSA career, advance time enough to trigger at least one succession event with a war-state gate. Expected log signatures:
+- `[once:replace] CommanderReplacementPatch wired (v0.2.1 concrete swap)` — patch attached.
+- `[WarState] Vicksburg fell (1863-07)` (or similar) — town observer detects ownership change.
+- `[Succession:N] FIRED — <event name>` — event passes both date + war-state gates.
+- `[Succession:N] APPLIED — commander '<name>' (id=X) now commands what id=Y previously held` — concrete swap happened.
 
-**v0.2.1 backlog** scoped at the bottom of `docs/superpowers/plans/2026-05-03-strategic-brain-implementation.md`. Highest-priority items:
+If swap log appears but in-game commander assignments don't visibly change, that's a sign the swap mechanic needs further refinement (the role-mapping is approximate — replaces *some* army-group commander, not always the historically correct one).
 
-1. Redesign `ImportanceValuesPatch` (Prefix on `AIArea.CalculateMostValueableAIZones`).
-2. Wire concrete commander-swap inside `CommanderReplacementPatch` (gate-only in v0.2.0).
-3. Town-ownership war-state observers for Vicksburg / Atlanta / Chattanooga so succession events #1, #5, #6, #8, #9, #10, #12 can fire.
+**After smoke-test passes**: tag `v0.2.1`, push tag, create GitHub Release.
 
-Each is independent and can be picked up in any order.
+**v0.2.2 backlog** (see `docs/patch-catalog.md` §"Pending"):
+1. Battle-history observers in `WarStateObserver` (ANV defeats, AoP offensive failures, Burnside's first defeat, etc.) to unlock the remaining 7 succession events.
+2. Concrete steering for `TransferOfUnitsPatch`, `DefensiveOpsPatch`, `PerkSelectionPatch`, `RecruitmentPatch`.
+3. Vanilla settings → mod logic integration (locked-Hard difficulty scales `CasualtyTolerance`).

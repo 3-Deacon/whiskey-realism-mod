@@ -5,11 +5,11 @@ Canonical numbered catalog of all shipped Harmony patches. Each item has a stabl
 | # | Patch | Type | File | Targets (decompile line) | Description |
 |---|---|---|---|---|---|
 | 1 | `PickCampaignObjectivePatch`   | Prefix  | `Patches/PickCampaignObjectivePatch.cs` | `AICampaign.PickCampaignObjective` (17769)   | Replace vanilla random pick with active CIC plan target; vanilla fallback when no plan / player-CIC. |
-| 2 | `ImportanceValuesPatch`        | Postfix | `Patches/ImportanceValuesPatch.cs`      | `AICampaign.UpdateImportanceValues` (14906)  | Multiply per-zone `importancevalues[alliance]` by TheaterCommander.GetZoneRelevance — biases downstream zone-pick automatically. |
-| 3 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
-| 4 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
-| 5 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
-| 6 | `CommanderReplacementPatch`    | Prefix  | `Patches/CommanderReplacementPatch.cs`  | `AICampaign.CheckAICommanderReplacements` (17008) | Gate-only this slice — concrete scripted-event swap deferred to v0.2.1. Player-CIC fallback to vanilla path. |
+| 2 | `ImportanceValuesPatch`        | Postfix | `Patches/ImportanceValuesPatch.cs`      | `AIArea.CalculateMostValueableAIZones` (10964) — *target changed in v0.2.1; original v0.2.0 target was AICampaign.UpdateImportanceValues which had wrong shape* | Override `__instance.mostvalueableaiareaclose[aifaction]` to point at the plan-target AIArea. Resolves CampaignObjective ID → first Town/IIP position → AICampaign.aiareas.GetColorOnPos → AIArea.GetAIArea. |
+| 3 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
+| 4 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
+| 5 | *(reserved for v0.2.2)*        | —       | —                                       | —                                            | — |
+| 6 | `CommanderReplacementPatch`    | Prefix  | `Patches/CommanderReplacementPatch.cs`  | `AICampaign.CheckAICommanderReplacements` (17008) | v0.2.1 concrete swap — when scheduler has un-applied scripted events for this faction, resolves replacement Commander by `combinedname` last-token + alliance, finds an army-group commander (`IsArmyGroupCommander() && currentcommand != null`) to displace, calls `AssignCommando` + `DoCommanderPromotion`, marks applied (persisted via sidecar). Returns false to skip vanilla on apply; falls through if preconditions unmet. |
 | 7 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
 | 8 | *(reserved for v0.2.1)*        | —       | —                                       | —                                            | — |
 | 9 | `MonthlyTickHookPatch`         | Postfix | `Patches/MonthlyTickHookPatch.cs`       | `AICampaign.Update` (11159)                  | Drives `StrategicCoordinator.NotifyDateAdvanced` from the per-frame Update; coordinator self-latches on month rollover. |
@@ -35,16 +35,22 @@ Canonical numbered catalog of all shipped Harmony patches. Each item has a stabl
 - **Targets column** lists `Class.Method` and the decompile line number from `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 - **Source-of-truth order:** shipped code > this catalog > per-patch design doc > umbrella spec > archived plan. If they disagree, trust the code.
 
-## Pending (v0.2.1 backlog)
+## v0.2.1 — what shipped
 
-Reserved ordinals 3, 4, 5, 7, 8 are held for v0.2.1 patches that complement the v0.2.0 strategic core:
+- **#2 `ImportanceValuesPatch` redesigned** — moved from `AICampaign.UpdateImportanceValues` (wrong shape) to `AIArea.CalculateMostValueableAIZones` (Postfix override of `mostvalueableaiareaclose`). Catalog ordinal preserved.
+- **#6 `CommanderReplacementPatch` upgraded** — gate-only stub replaced with concrete `AssignCommando` + `DoCommanderPromotion` swap when scripted succession events fire. `AppliedEventIds` tracking persisted in sidecar.
+- **`Strategic/WarStateObserver.cs`** — town-ownership observers for Vicksburg / Chattanooga / Atlanta. Unlocks succession events #8 (Grant→GiC), #9 (Sherman→Western), #10 (Hood replaces Johnston) which previously could never fire.
 
-| # | Planned class | Target | Rationale for deferral |
+## Pending (v0.2.2 backlog)
+
+Reserved ordinals 3, 4, 5, 7, 8 are held for v0.2.2 patches that further the strategic core:
+
+| # | Planned class | Target | Rationale |
 |---|---|---|---|
-| 3 | `MostValueableZonesPatch` (revised) | `AIArea.CalculateMostValueableAIZones` | Vanilla derives the pick live from `importancevalues + points + distancepoints`, so v0.2.0's patch #2 already biases this. v0.2.1 may add a Postfix that overrides `mostvalueableaiareaclose[aifaction]` directly when phase target diverges. |
-| 4 | `TransferOfUnitsPatch` (concrete steering) | `AICampaign.CheckTransferOfUnits` | Needs Prefix-with-state-modify after smoke-test reveals consolidation thresholds. |
-| 5 | `DefensiveOpsPatch` (concrete steering) | `AICampaign.CheckPickDefensiveOps` | Same — needs Prefix to override threshold. |
-| 7 | `PerkSelectionPatch` (concrete steering) | `AICampaign.CheckPerkSelection` | Needs perk-id → personality-attribute mapping table. |
-| 8 | `RecruitmentPatch` (concrete steering) | `AIArea.GetBestRecruitingState` | Needs concrete weighting strategy after observing how `__result` is consumed downstream. |
+| 3 | `TransferOfUnitsPatch` (concrete steering) | `AICampaign.CheckTransferOfUnits` (17232) | Needs Prefix-with-state-modify; tied to TheaterCommander consolidation urgency. |
+| 4 | `DefensiveOpsPatch` (concrete steering) | `AICampaign.CheckPickDefensiveOps` (11791) | Per-personality strength gate. |
+| 5 | (open) | — | Available for new v0.2.2 work. |
+| 7 | `PerkSelectionPatch` (concrete steering) | `AICampaign.CheckPerkSelection` (11873) | Needs perk-id → personality-attribute mapping table. |
+| 8 | `RecruitmentPatch` (concrete steering) | `AIArea.GetBestRecruitingState` (10722) | Needs concrete weighting strategy. |
 
-War-state observers (Vicksburg / Atlanta / Chattanooga town-ownership patches) and concrete commander-swap inside #6 also land in v0.2.1.
+**v0.2.2 also includes:** battle-history observers in `WarStateObserver` to unlock the remaining 7 succession events (#1, #3, #4, #5, #6, #11, #12 — gated on ANV defeats / AoP failures / Burnside's first defeat / Lee invading Pennsylvania / Western theater defeats / Valley operations / war clearly lost). And: vanilla settings → mod logic integration (route locked-Hard difficulty into `CIC.Effective` casualty-tolerance scaling).
