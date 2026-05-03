@@ -42,18 +42,10 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var gv = AccessTools.TypeByName("GameVars");
-                var fdate = AccessTools.Field(gv, "currentdate");
-                if (fdate != null)
-                {
-                    var dateObj = fdate.GetValue(null);
-                    var fy = AccessTools.Field(dateObj.GetType(), "year");
-                    if (fy != null) return (int)fy.GetValue(dateObj);
-                }
-                var t = AccessTools.TypeByName("Tools");
-                var f = AccessTools.Field(t, "currentyear");
-                if (f != null) return (int)f.GetValue(null);
-                return -1;
+                // Vanilla: public static int year (decompile line 64790).
+                var t = AccessTools.TypeByName("GameVars");
+                var f = AccessTools.Field(t, "year");
+                return f != null ? (int)f.GetValue(null) : -1;
             }
             catch { return -1; }
         }
