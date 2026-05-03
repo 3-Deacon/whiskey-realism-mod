@@ -236,6 +236,15 @@ namespace WhiskeyRealism.Strategic
                 int total = all?.Count ?? -1;
                 int passAlliance = 0, passScenario = 0, passDeact = 0, passAccomp = 0;
 
+                // Inspect the IsDeactivated sub-gates for the first matching alliance objective.
+                int firstObjId = -1;
+                int firstObjChapter = -999;
+                int chapterCheckResult = -1;       // 0 = passes, 1 = chapter not in list, -1 = no chapters defined
+                int currentChapter = -999;
+                bool nationNull = true;
+                bool dateInRange = false;
+                int[] firstObjChapters = null;
+
                 if (all != null)
                 {
                     foreach (var obj in all)
@@ -252,6 +261,19 @@ namespace WhiskeyRealism.Strategic
 
                         var isDeactMethod = AccessTools.Method(coType, "IsDeactivated");
                         bool isDeact = isDeactMethod != null && (bool)isDeactMethod.Invoke(obj, null);
+
+                        // Capture first objective's deeper state.
+                        if (firstObjId < 0)
+                        {
+                            firstObjId = (int)(AccessTools.Field(coType, "UniqueObjectiveID")?.GetValue(obj) ?? -1);
+                            firstObjChapters = AccessTools.Field(coType, "ObjectiveChapters")?.GetValue(obj) as int[];
+                            var policyType = AccessTools.TypeByName("Policy");
+                            currentChapter = (int)(AccessTools.Field(policyType, "CurrentChapter")?.GetValue(null) ?? -999);
+                            var gvType = AccessTools.TypeByName("GameVars");
+                            var nation = AccessTools.Field(gvType, "nation")?.GetValue(null);
+                            nationNull = nation == null;
+                        }
+
                         if (isDeact) continue;
                         passDeact++;
 
@@ -261,9 +283,11 @@ namespace WhiskeyRealism.Strategic
                     }
                 }
 
+                string chapterStr = (firstObjChapters != null) ? string.Join(",", firstObjChapters) : "<null>";
                 WhiskeyRealism.Util.OnceLog.Info(key,
                     $"[CIC:diag] alliance={allianceId} leveltoload='{leveltoload}' total={total} " +
-                    $"alliance-pass={passAlliance} scenario-pass={passScenario} not-deact={passDeact} not-accomp={passAccomp}");
+                    $"alliance-pass={passAlliance} scenario-pass={passScenario} not-deact={passDeact} not-accomp={passAccomp} " +
+                    $"| first-obj-id={firstObjId} firstObjChapters=[{chapterStr}] Policy.CurrentChapter={currentChapter} GameVars.nation==null:{nationNull}");
             }
             catch (Exception ex)
             {
