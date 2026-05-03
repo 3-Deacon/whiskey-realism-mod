@@ -26,6 +26,9 @@ namespace WhiskeyRealism.Patches
             public int AllianceId;
             public int ObjectiveId;
             public int BeforeTransferCount;
+            public string SourceSector;
+            public string DestinationSector;
+            public TransferBudgetAction BudgetAction;
         }
 
         [HarmonyPrefix]
@@ -84,6 +87,40 @@ namespace WhiskeyRealism.Patches
                 float requiredAtTarget = Math.Max(2500f, totalOwn * Clamp(phase.ForceFractionRequired, 0.15f, 0.95f));
                 if (ownNear >= requiredAtTarget && ownNear >= enemyNear) return;
 
+                string sourceSector = null;
+                string destinationSector = FrontSectorRuntime.SectorKey(target.Value);
+                TransferBudgetAction budgetAction = TransferBudgetAction.Allowed;
+                var sourcePosition = ReadTransferPosition(surplus);
+                if (sourcePosition.HasValue)
+                {
+                    sourceSector = FrontSectorRuntime.SectorKey(sourcePosition.Value);
+                    float strengthToMove = Math.Min(Math.Max(requiredAtTarget - ownNear, 1000f), totalOwn * 0.1f);
+                    var ledger = StrategicCoordinator.Instance.Fronts[allianceId];
+                    var decision = ledger?.EvaluateTransfer(sourceSector, destinationSector, strengthToMove);
+                    if (decision != null)
+                    {
+                        budgetAction = decision.Action;
+                        if (!decision.Allowed)
+                        {
+                            OnceLog.Info(
+                                $"transfer-budget:{allianceId}:{sourceSector}:{destinationSector}:{decision.Action}:{decision.Reason}",
+                                $"[Patch:TransferBudget] alliance={allianceId} from={sourceSector} to={destinationSector} action=blocked reason={decision.Reason}");
+                            return;
+                        }
+
+                        if (decision.Action == TransferBudgetAction.Concession)
+                        {
+                            OnceLog.Info(
+                                $"transfer-budget:{allianceId}:{sourceSector}:{destinationSector}:{decision.Action}:{decision.Reason}",
+                                $"[Patch:TransferBudget] alliance={allianceId} from={sourceSector} to={destinationSector} action=concession reason={decision.Reason}");
+                        }
+                    }
+                }
+                else
+                {
+                    OnceLog.Warning("transfer-budget:source-position", "[Patch:TransferBudget] could not read vanilla surplus position; front-budget gate skipped");
+                }
+
                 float enemyProxy = Math.Max(enemyNear, requiredAtTarget);
                 var transferData = CreateTransferData(factionType, target.Value, ownNear, enemyProxy);
                 if (transferData == null) return;
@@ -97,7 +134,10 @@ namespace WhiskeyRealism.Patches
                     Changed = true,
                     AllianceId = allianceId,
                     ObjectiveId = phase.TargetObjectiveId,
-                    BeforeTransferCount = TransferCount(faction)
+                    BeforeTransferCount = TransferCount(faction),
+                    SourceSector = sourceSector,
+                    DestinationSector = destinationSector,
+                    BudgetAction = budgetAction
                 };
 
                 deficitField.SetValue(faction, transferData);
@@ -174,6 +214,18 @@ namespace WhiskeyRealism.Patches
         {
             var list = AccessTools.Field(faction.GetType(), "unitstobetransfered")?.GetValue(faction) as IList;
             return list?.Count ?? 0;
+        }
+
+        private static Vector3? ReadTransferPosition(object transferData)
+        {
+            if (transferData == null) return null;
+            try
+            {
+                var field = AccessTools.Field(transferData.GetType(), "position");
+                if (field != null) return (Vector3)field.GetValue(transferData);
+            }
+            catch { }
+            return null;
         }
 
         private static float SumStrengthNear(IList units, Vector3 position, float radius)
