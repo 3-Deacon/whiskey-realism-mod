@@ -5,10 +5,20 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    [HarmonyPatch(typeof(AICampaign), "UpdateImportanceValues")]
+    // DEFERRED to v0.2.1 — vanilla AICampaign.UpdateImportanceValues() is parameterless,
+    // returns bool, and is a chunked per-IIP/cbuild/town processor that writes to
+    // `importancevaluestemp` (not the final `importancevalues`). Postfixing it would
+    // fire repeatedly per tick, double-counting our bias. Wrong target.
+    //
+    // Right target for v0.2.1: Prefix on AIArea.CalculateMostValueableAIZones(int aifaction)
+    // that pre-biases aiarea[i].importancevalues[aifaction] for plan-target zones, since
+    // that's the method that READS the final array to make the zone-pick decision.
+    //
+    // Class kept (without [HarmonyPatch] attribute, so PatchAll skips it) so the v0.2.1
+    // redesign has a stable file to land in.
     internal static class ImportanceValuesPatch
     {
-        [HarmonyPostfix]
+        [Obsolete("Disabled in v0.2.0 — wrong vanilla target. Redesign in v0.2.1.")]
         internal static void Postfix(int _aifaction)
         {
             OnceLog.Info("importance", "ImportanceValuesPatch wired");
@@ -53,6 +63,7 @@ namespace WhiskeyRealism.Patches
         }
     }
 
+    // Shared reflection helper used by patches that take int _aifaction.
     internal static class AICampaignReflect
     {
         internal static int GetAllianceId(int aifactionIndex)

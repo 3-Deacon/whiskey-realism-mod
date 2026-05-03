@@ -83,12 +83,12 @@ namespace WhiskeyRealism.Patches
         private static void ForceCheck(object checkBox, bool desired)
         {
             if (checkBox == null) return;
-            // Use Check(newstate) — same method vanilla calls. Falls back to
-            // setting isactive directly if Check isn't available for some reason.
-            var checkMethod = AccessTools.Method(checkBox.GetType(), "Check", new[] { typeof(bool) });
+            // Vanilla signature: public void Check(bool newstate = true, bool manuallyset = false)
+            // (decompile line 186823). Pass both args explicitly.
+            var checkMethod = AccessTools.Method(checkBox.GetType(), "Check", new[] { typeof(bool), typeof(bool) });
             if (checkMethod != null)
             {
-                checkMethod.Invoke(checkBox, new object[] { desired });
+                checkMethod.Invoke(checkBox, new object[] { desired, false });
                 return;
             }
             var f = AccessTools.Field(checkBox.GetType(), "isactive");

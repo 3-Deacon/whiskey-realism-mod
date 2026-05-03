@@ -173,9 +173,11 @@ namespace WhiskeyRealism.Strategic
                 if (dlcType == null) return false;
                 var scenarioActive = (bool)AccessTools.Field(dlcType, "dlc_scenarioactive").GetValue(null);
                 if (!scenarioActive) return false;
-                var isCIC = AccessTools.Method(dlcType, "IsCommanderInChief");
+                // Vanilla signature: public static bool IsCommanderInChief(int manualcommander = -1)
+                // (decompile line 47475). Pass -1 to use the default behavior (check dlc_chosencommander).
+                var isCIC = AccessTools.Method(dlcType, "IsCommanderInChief", new[] { typeof(int) });
                 if (isCIC == null) return false;
-                return (bool)isCIC.Invoke(null, null);
+                return (bool)isCIC.Invoke(null, new object[] { -1 });
             }
             catch (Exception ex)
             {
