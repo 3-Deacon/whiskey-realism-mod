@@ -3,10 +3,11 @@ using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
+using WhiskeyRealism.Strategic;
 
 namespace WhiskeyRealism
 {
-    [BepInPlugin(GUID, "Whiskey Realism — Strategic AI Overhaul", "0.1.0")]
+    [BepInPlugin(GUID, "Whiskey Realism — Strategic AI Overhaul", "0.2.0")]
     public class Plugin : BaseUnityPlugin
     {
         public const string GUID = "dev.kyle.whiskey-realism";
@@ -17,7 +18,7 @@ namespace WhiskeyRealism
         // Master enable. Setting false short-circuits every patch in the suite.
         internal ConfigEntry<bool> Enabled;
 
-        // Diagnostic logging — verbose first-fire markers for every patch class.
+        // Diagnostic logging.
         internal ConfigEntry<bool> VerboseLogging;
         internal ConfigEntry<bool> PlanTrace;
         internal ConfigEntry<bool> SuccessionTrace;
@@ -48,12 +49,27 @@ namespace WhiskeyRealism
                 return;
             }
 
+            // Heuristic Community Hotfix detection — best-effort sentinel check.
+            try
+            {
+                var hotfixType = AccessTools.TypeByName("CommunityHotfix");
+                if (hotfixType != null)
+                    Log.LogWarning("Community Hotfix detected — Whiskey Realism is INCOMPATIBLE. Strategic patches may not behave as expected.");
+            }
+            catch { /* ignore — best-effort only */ }
+
             _harmony = new Harmony(GUID);
 
-            // Patches will be registered here once the strategic-brain spec is implemented.
-            // Pattern: _harmony.PatchAll(typeof(PatchClassName));
+            // Strategic-brain bootstrap before patches register so patches
+            // never see a null Instance on their first invocation.
+            StrategicCoordinator.Bootstrap();
 
-            Log.LogInfo($"{GUID} v0.1.0 loaded. (No patches registered yet — scaffold only.)");
+            // PatchAll(assembly) reflects all [HarmonyPatch] attributed classes
+            // (including nested types like AICampaignSaveLoadPatch.SavePatch /
+            // .LoadPatch). Cleaner than enumerating each class explicitly.
+            _harmony.PatchAll(typeof(Plugin).Assembly);
+
+            Log.LogInfo($"{GUID} v0.2.0 loaded — strategic-brain patches registered.");
         }
     }
 }
