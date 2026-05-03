@@ -16,7 +16,9 @@ static class Program
             ("historical registry maps Union Tennessee army to Mississippi river corridor", HistoricalRegistryMapsUnionArmyOfTheTennessee),
             ("army area ledger holds historical area", ArmyAreaLedgerHoldsHistoricalArea),
             ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy),
-            ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover)
+            ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover),
+            ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
+            ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference)
         };
 
         foreach (var test in tests)
@@ -181,6 +183,54 @@ static class Program
         AssertEqual(true, cadence.ShouldFire(8, 6, 1861));
         AssertEqual(false, cadence.ShouldFire(13, 6, 1861));
         AssertEqual(true, cadence.ShouldFire(1, 7, 1861));
+    }
+
+    private static void ArmyGroupDoctrineRequiresTwoCommittedFormations()
+    {
+        var ledger = ArmyAreaLedger.Build(new[]
+        {
+            new ArmyAreaInput
+            {
+                UnitKey = "anv-main",
+                AllianceId = 1,
+                UnitName = "Army of Northern Virginia",
+                CurrentAreaKey = "VirginiaCapitalCorridor",
+                Strength = 42000f,
+                Readiness = 0.8f
+            },
+            new ArmyAreaInput
+            {
+                UnitKey = "valley",
+                AllianceId = 1,
+                UnitName = "Army of the Valley",
+                CurrentAreaKey = "ShenandoahValley",
+                Strength = 9000f,
+                Readiness = 0.7f
+            },
+            new ArmyAreaInput
+            {
+                UnitKey = "recovering-west",
+                AllianceId = 1,
+                UnitName = "Army of Tennessee",
+                CurrentAreaKey = "VirginiaCapitalCorridor",
+                Strength = 22000f,
+                Readiness = 0.7f
+            }
+        });
+
+        var groups = ArmyGroupDoctrine.PlanGroups(ledger, minimumUnitsPerGroup: 2);
+
+        AssertEqual(1, groups.Count);
+        AssertEqual("VirginiaCapitalCorridor", groups[0].AreaKey);
+        AssertEqual(2, groups[0].UnitKeys.Count);
+    }
+
+    private static void ArmyGroupDoctrineExposesHistoricalCommanderPreference()
+    {
+        var preference = ArmyGroupDoctrine.ResolveCommanderPreference(1, "VirginiaCapitalCorridor");
+
+        AssertEqual("Lee", preference.PreferredLastNames[0]);
+        AssertTrue(preference.PreferredLastNames.Contains("Johnston"), "expected Johnston fallback");
     }
 
     private static void AssertEqual<T>(T expected, T actual)

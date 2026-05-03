@@ -18,22 +18,29 @@
 - `Strategic/HistoricalArmyAreaRegistry.cs`
 - `Strategic/ArmyAreaLedger.cs`
 - `Strategic/ArmyAreaRuntime.cs`
+- `Strategic/ArmyGroupDoctrine.cs`
 - `Patches/ArmyAreaTheaterPatch.cs`
+- `Patches/ArmyGroupManagementPatch.cs`
 
 The coordinator now builds `ArmyAreas[alliance]` weekly next to `Fronts[alliance]`. The new patch runs after vanilla `UpdateCampaignTheaters` and, only for idle AI top-level strategic formations, nudges out-of-area units back toward their historical operating-area anchor using vanilla `AICampaign.MoveUnitTo`.
+
+`ArmyGroupManagementPatch` runs after vanilla `CheckArmyGroupManagement`. It groups committed top formations by `ArmyAreaDoctrine.PrimaryAreaKey`, lets vanilla's own pass run first, then uses vanilla `ArmyGroup.AddUnit`, `ArmyGroup.CreateNewArmyGroup`, and `ArmyGroup.AppointCommander` to attach/create historically coherent operating commands and appoint preferred commanders when they are already part of that command or currently unassigned.
 
 ## Logging
 
 - `[once:army-area]` confirms the patch first-fired.
 - `[ArmyArea] alliance=...` logs only when the weekly assignment signature changes or verbose logging is enabled.
 - `[Patch:ArmyArea] alliance=... unit=... action=return-area area=... reason=...` logs once per unit/area correction.
+- `[once:armygroup]` confirms the army-group steering patch first-fired.
+- `[Patch:ArmyGroup] alliance=... area=... action=create|attach|appoint ...` logs only on concrete hierarchy/commander changes.
 
 ## Verification
 
 - `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` passes.
 - `./build.sh` passes with 0 warnings / 0 errors.
 - DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll` and verified by SHA-256: `f0b0bdc853d55e4230a876cd98b5dd783f8a0531ed1d500740c46313564c8de1`.
-- Runtime smoke still needs a GTCW restart and a campaign AI tick that hits `UpdateCampaignTheaters`.
+- Follow-up army-group steering DLL deployed and verified by SHA-256: `1602c0ca07f9b0c11d12fd4f9ed0117cc7a2ff882f73af3b38aff2e9275d9246`.
+- Runtime smoke still needs a GTCW restart and campaign AI ticks that hit `UpdateCampaignTheaters` and `CheckArmyGroupManagement`.
 
 ## Next
 
