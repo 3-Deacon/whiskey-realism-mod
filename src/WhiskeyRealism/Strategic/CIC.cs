@@ -201,17 +201,14 @@ namespace WhiskeyRealism.Strategic
             {
                 var t = AccessTools.TypeByName("CampaignObjective");
                 if (t == null) { Plugin.Log.LogWarning("[CIC] CampaignObjective type not found"); return null; }
+
+                // Diagnostic — inspect the global state to understand why filters return empty.
+                // OnceLog'd so we don't spam.
+                LogObjectivesDiagnosticOnce(t, allianceId);
+
                 // Vanilla signature: public static List<CampaignObjective> GetAvailableObjectives(
                 //     int allianceid, bool includeaccomplished = false, int mintownobjectives = 1)
-                // (decompile line 178825). Three args, two with defaults.
-                //
-                // We pass mintownobjectives = 0 (vanilla default is 1) so abstract
-                // win-condition objectives — "Break Confederate Morale", etc. — pass
-                // through. Vanilla's mintownobjectives=1 filter excludes objectives
-                // without town/IIP targets. In W&L scenario "002" this prunes most
-                // of the qualifying objectives (verified via Config/campaignobjectives.dat
-                // inspection 2026-05-03). Our own ObjectiveAdapter scoring layer
-                // gives abstract objectives lower priority than concrete ones.
+                // mintownobjectives=0 lets abstract win-condition objectives pass.
                 var m = AccessTools.Method(t, "GetAvailableObjectives", new[] { typeof(int), typeof(bool), typeof(int) });
                 if (m == null) { Plugin.Log.LogWarning("[CIC] CampaignObjective.GetAvailableObjectives(int,bool,int) not found"); return null; }
                 return m.Invoke(null, new object[] { allianceId, false, 0 }) as IList;
@@ -220,6 +217,57 @@ namespace WhiskeyRealism.Strategic
             {
                 Plugin.Log.LogWarning("[CIC] GetAvailableObjectives reflection failed: " + ex.Message);
                 return null;
+            }
+        }
+
+        // Logs the global allcampaignobjectives count + leveltoload + per-objective gate
+        // results to expose which filter is rejecting everything. OnceLog-keyed by alliance
+        // so we get one snapshot per alliance per save-load cycle.
+        private static void LogObjectivesDiagnosticOnce(Type coType, int allianceId)
+        {
+            string key = "objs-diag:" + allianceId;
+            try
+            {
+                var allField = AccessTools.Field(coType, "allcampaignobjectives");
+                var all = allField?.GetValue(null) as IList;
+                var prefsType = AccessTools.TypeByName("GamePrefs");
+                var leveltoload = AccessTools.Field(prefsType, "leveltoload")?.GetValue(null) as string ?? "<null>";
+
+                int total = all?.Count ?? -1;
+                int passAlliance = 0, passScenario = 0, passDeact = 0, passAccomp = 0;
+
+                if (all != null)
+                {
+                    foreach (var obj in all)
+                    {
+                        if (obj == null) continue;
+                        int oa = (int)(AccessTools.Field(coType, "ObjectiveAlliance")?.GetValue(obj) ?? -1);
+                        if (oa != allianceId) continue;
+                        passAlliance++;
+
+                        var scenList = AccessTools.Field(coType, "ObjectiveScenario")?.GetValue(obj) as IList<string>;
+                        bool scenOk = scenList != null && scenList.Contains(leveltoload);
+                        if (!scenOk) continue;
+                        passScenario++;
+
+                        var isDeactMethod = AccessTools.Method(coType, "IsDeactivated");
+                        bool isDeact = isDeactMethod != null && (bool)isDeactMethod.Invoke(obj, null);
+                        if (isDeact) continue;
+                        passDeact++;
+
+                        bool accomp = (bool)(AccessTools.Field(coType, "accomplished")?.GetValue(obj) ?? false);
+                        if (accomp) continue;
+                        passAccomp++;
+                    }
+                }
+
+                WhiskeyRealism.Util.OnceLog.Info(key,
+                    $"[CIC:diag] alliance={allianceId} leveltoload='{leveltoload}' total={total} " +
+                    $"alliance-pass={passAlliance} scenario-pass={passScenario} not-deact={passDeact} not-accomp={passAccomp}");
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[CIC:diag] " + ex.Message);
             }
         }
     }
