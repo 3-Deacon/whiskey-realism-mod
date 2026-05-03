@@ -80,7 +80,8 @@ namespace WhiskeyRealism.Strategic
 
     internal class SuccessionDto
     {
-        [JsonProperty("firedEvents")] public List<int> FiredEvents = new List<int>();
-        [JsonProperty("lastChecked")] public string    LastChecked;
+        [JsonProperty("firedEvents")]   public List<int> FiredEvents   = new List<int>();
+        [JsonProperty("appliedEvents")] public List<int> AppliedEvents = new List<int>();   // v0.2.1 — track concrete-swap applications
+        [JsonProperty("lastChecked")]   public string    LastChecked;
     }
 }

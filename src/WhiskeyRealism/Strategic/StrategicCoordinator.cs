@@ -312,8 +312,9 @@ namespace WhiskeyRealism.Strategic
                     Personality = PersonalityDto.FromVector(kv.Value)
                 });
             }
-            dto.Succession.FiredEvents = new List<int>(Succession.FiredEventIds);
-            dto.Succession.LastChecked = LastSeenYear + "-" + LastSeenMonth.ToString("D2") + "-01";
+            dto.Succession.FiredEvents   = new List<int>(Succession.FiredEventIds);
+            dto.Succession.AppliedEvents = new List<int>(Succession.AppliedEventIds);
+            dto.Succession.LastChecked   = LastSeenYear + "-" + LastSeenMonth.ToString("D2") + "-01";
             return dto;
         }
 
@@ -348,7 +349,8 @@ namespace WhiskeyRealism.Strategic
             MinorOfficerProfiles.Clear();
             foreach (var m in dto.MinorOfficerProfiles)
                 MinorOfficerProfiles[m.CommanderId] = m.Personality.ToVector();
-            Succession.FiredEventIds = new HashSet<int>(dto.Succession.FiredEvents);
+            Succession.FiredEventIds   = new HashSet<int>(dto.Succession.FiredEvents);
+            Succession.AppliedEventIds = new HashSet<int>(dto.Succession.AppliedEvents ?? new List<int>());
         }
 
         private OperationalPlanDto PlanToDto(OperationalPlan p)

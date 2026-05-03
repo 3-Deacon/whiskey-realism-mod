@@ -39,7 +39,29 @@ namespace WhiskeyRealism.Strategic
 
         private readonly List<Event> _events = new List<Event>();
 
+        // Events that have FIRED (passed both gates) but haven't necessarily had
+        // their game-state effect applied yet. Persisted across save/reload.
         internal HashSet<int> FiredEventIds = new HashSet<int>();
+
+        // Events whose game-state swap has been applied via
+        // CommanderReplacementPatch. Persisted so we don't re-apply on reload.
+        internal HashSet<int> AppliedEventIds = new HashSet<int>();
+
+        internal IEnumerable<Event> GetPendingApplications(int allianceId)
+        {
+            foreach (var e in _events)
+            {
+                if (e.AllianceId != allianceId) continue;
+                if (!FiredEventIds.Contains(e.Id)) continue;
+                if (AppliedEventIds.Contains(e.Id)) continue;
+                yield return e;
+            }
+        }
+
+        internal void MarkApplied(int eventId)
+        {
+            AppliedEventIds.Add(eventId);
+        }
 
         internal SuccessionScheduler()
         {
