@@ -13,10 +13,12 @@ namespace WhiskeyRealism.Strategic
         public CIC[] CICs = new CIC[2];
         public EraStageManager[] Eras = new EraStageManager[2];
         public FrontSectorLedger[] Fronts = new FrontSectorLedger[2];
+        public ArmyAreaLedger[] ArmyAreas = new ArmyAreaLedger[2];
         internal SuccessionScheduler Succession = new SuccessionScheduler();
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
         private readonly string[] _frontSignatures = new string[2];
+        private readonly string[] _armyAreaSignatures = new string[2];
 
         public int LastSeenMonth = -1;
         public int LastSeenYear  = -1;
@@ -166,6 +168,7 @@ namespace WhiskeyRealism.Strategic
                     }
 
                     UpdateFrontLedger(alliance, cic);
+                    UpdateArmyAreaLedger(alliance, cic);
 
                     Plugin.Log.LogInfo(
                         $"[Heartbeat] {year}-{month:D2} alliance={alliance} " +
@@ -192,6 +195,26 @@ namespace WhiskeyRealism.Strategic
             {
                 Plugin.Log.LogInfo($"[FrontLedger] alliance={alliance} {signature}");
                 _frontSignatures[alliance] = signature;
+            }
+        }
+
+        private void UpdateArmyAreaLedger(int alliance, CIC cic)
+        {
+            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
+            string planTargetAreaKey = null;
+            var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
+            if (targetPosition.HasValue)
+                planTargetAreaKey = ArmyAreaRuntime.AreaKey(targetPosition.Value);
+
+            var ledger = ArmyAreaRuntime.BuildForAlliance(alliance, planTargetAreaKey);
+            if (ledger == null) return;
+
+            ArmyAreas[alliance] = ledger;
+            string signature = ledger.Summary();
+            if (Plugin.Instance.VerboseLogging.Value || _armyAreaSignatures[alliance] != signature)
+            {
+                Plugin.Log.LogInfo($"[ArmyArea] alliance={alliance} {signature}");
+                _armyAreaSignatures[alliance] = signature;
             }
         }
 

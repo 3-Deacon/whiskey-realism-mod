@@ -11,7 +11,11 @@ static class Program
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
-            ("economy source allows concession transfer", EconomySourceAllowsConcessionTransfer)
+            ("economy source allows concession transfer", EconomySourceAllowsConcessionTransfer),
+            ("historical registry maps ANV to Virginia corridor", HistoricalRegistryMapsAnv),
+            ("historical registry maps Union Tennessee army to Mississippi river corridor", HistoricalRegistryMapsUnionArmyOfTheTennessee),
+            ("army area ledger holds historical area", ArmyAreaLedgerHoldsHistoricalArea),
+            ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy)
         };
 
         foreach (var test in tests)
@@ -109,9 +113,72 @@ static class Program
         AssertEqual(TransferBudgetAction.Concession, decision.Action);
     }
 
+    private static void HistoricalRegistryMapsAnv()
+    {
+        var doctrine = HistoricalArmyAreaRegistry.Resolve(1, "Army of Northern Virginia", "Lee");
+        AssertEqual("VirginiaCapitalCorridor", doctrine.PrimaryAreaKey);
+        AssertTrue(doctrine.PreferredAreaKeys.Contains("ShenandoahValley"), "expected ShenandoahValley preference");
+    }
+
+    private static void HistoricalRegistryMapsUnionArmyOfTheTennessee()
+    {
+        var doctrine = HistoricalArmyAreaRegistry.Resolve(0, "Army of the Tennessee", "Grant");
+        AssertEqual("MississippiRiverCorridor", doctrine.PrimaryAreaKey);
+        AssertTrue(doctrine.PreferredAreaKeys.Contains("TennesseeGeorgiaCorridor"), "expected TennesseeGeorgiaCorridor preference");
+    }
+
+    private static void ArmyAreaLedgerHoldsHistoricalArea()
+    {
+        var ledger = ArmyAreaLedger.Build(new[]
+        {
+            new ArmyAreaInput
+            {
+                UnitKey = "anv",
+                AllianceId = 1,
+                UnitName = "Army of Northern Virginia",
+                CommanderName = "Lee",
+                CurrentAreaKey = "VirginiaCapitalCorridor",
+                Strength = 45000f,
+                Readiness = 0.8f
+            }
+        }, planTargetAreaKey: "VirginiaCapitalCorridor");
+
+        var assignment = ledger.GetAssignment("anv");
+        AssertEqual("VirginiaCapitalCorridor", assignment.AssignedAreaKey);
+        AssertEqual(ArmyAreaBehavior.Hold, assignment.Behavior);
+        AssertEqual(false, assignment.OutOfArea);
+    }
+
+    private static void ArmyAreaLedgerRedirectsOutOfAreaArmy()
+    {
+        var ledger = ArmyAreaLedger.Build(new[]
+        {
+            new ArmyAreaInput
+            {
+                UnitKey = "aot",
+                AllianceId = 1,
+                UnitName = "Army of Tennessee",
+                CommanderName = "Johnston",
+                CurrentAreaKey = "VirginiaCapitalCorridor",
+                Strength = 30000f,
+                Readiness = 0.75f
+            }
+        }, planTargetAreaKey: "VirginiaCapitalCorridor");
+
+        var assignment = ledger.GetAssignment("aot");
+        AssertEqual("TennesseeGeorgiaCorridor", assignment.AssignedAreaKey);
+        AssertEqual(ArmyAreaBehavior.Recover, assignment.Behavior);
+        AssertEqual(true, assignment.OutOfArea);
+    }
+
     private static void AssertEqual<T>(T expected, T actual)
     {
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
             throw new Exception("expected " + expected + " but got " + actual);
+    }
+
+    private static void AssertTrue(bool condition, string message)
+    {
+        if (!condition) throw new Exception(message);
     }
 }

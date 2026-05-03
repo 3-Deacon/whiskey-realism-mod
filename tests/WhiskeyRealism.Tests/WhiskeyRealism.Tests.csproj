@@ -8,5 +8,8 @@
   <ItemGroup>
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Theater.cs" Link="Theater.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FrontSectorLedger.cs" Link="FrontSectorLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaDoctrine.cs" Link="ArmyAreaDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalArmyAreaRegistry.cs" Link="HistoricalArmyAreaRegistry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaLedger.cs" Link="ArmyAreaLedger.cs" />
   </ItemGroup>
 </Project>
