@@ -53,6 +53,82 @@ Sources used:
 
 ## Game data findings
 
+### Campaign-map command and front AI
+
+Primary decompile anchors:
+
+- `AICampaign.Update()` job sequence at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:11480`
+- `AICampaign.CheckForDefensiveOperations(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:13510`
+- `AICampaign.CheckOffensiveMovements(int, Regiment, float)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:14095`
+- `AICampaign.UpdateMicroMovementInOffensive(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:13965`
+- `AICampaign.RollUpEnemyObjectivesInZone(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:13905`
+- `AICampaign.CheckTransferOfUnits(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17232`
+- `AICampaign.UpdateCampaignTheaters(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17074`
+- `AICampaign.CheckCombinationOfUnits(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17141`
+- `AICampaign.CheckArmyGroupManagement(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17705`
+- `AIArea.CalculateMostValueableAIZones(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:10965`
+- `AIFaction.TransferData` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:10301`
+- `ArmyGroup` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:75007`
+- `GameVars.Alliance.AllowsArmyGroups()` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:62545`
+- `GameVars.Commander.IsArmyGroupCommander()` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:60650`
+
+Vanilla structure:
+
+- `unittyp <= 13`: brigades/regiments/batteries.
+- `unittyp == 14`: division-level campaign group.
+- `unittyp == 15`: corps-level campaign group.
+- `unittyp == 16`: army-level campaign group.
+- `ArmyGroup`: extra W&L/top command layer above armies, stored in `BattleUnits.armygroups`.
+
+Vanilla campaign AI works through an `AIFaction` snapshot with `ownunits`, `enemyunits`, `neutralunits`, `ownfleets`, `enemyfleets`, `unitsinoffensiveoperations`, `unitsindefensiveoperations`, `unitstobetransfered`, `groupstodefendcapital`, `positiondeficit`, and `positionsurplus`.
+
+Relevant vanilla behavior:
+
+- `UpdateAreaPoints` populates each `AIArea` with own/enemy points, distance pressure, and nearby campaign strength.
+- `AIArea.CalculateMostValueableAIZones` picks one nearby "best" area from importance + force + distance values.
+- `CheckOffensiveMovements` builds a local force package from a campaign group and nearby eligible units, checks strength dominance, weather, readiness, morale, supply, and commander initiative, then sends units toward the chosen area objective.
+- `UpdateMicroMovementInOffensive` keeps offensive units rolling to nearby objectives while morale/supply/readiness remain acceptable.
+- `CheckForDefensiveOperations` sorts enemy threats by proximity/front pressure, gathers nearby friendly units within theater limits, and launches a defensive operation only if local strength ratio and morale gates pass.
+- `CheckTransferOfUnits` strips subordinate units from a surplus area and moves them to a deficit area, capped by `maximumunittransferstrength`.
+- `UpdateCampaignTheaters` gives each unit a loose `theaterposition` near the closest enemy contact; `IsWithinOperationsTheater` then blocks operations outside that box when theater logic is enabled.
+- `CheckCombinationOfUnits` and `RaiseNewCampaignGroup` create division/corps/army structures around theater positions.
+- `CheckArmyGroupManagement` creates or attaches W&L army groups when armies are close enough and have theater positions.
+
+Gap:
+
+Vanilla has local threat response and local opportunity seeking, but it does not appear to maintain a true front-sector ledger. It can see a deficit/surplus and transfer strength, but it does not explicitly reason "I am weakening the Valley to reinforce Richmond" or "the Mississippi line may be conceded so Atlanta/Virginia survives." That means Whiskey's current plan-target steering can over-concentrate if we do not add a front-budget layer.
+
+### Required front behavior
+
+The strategic AI should defend the whole front unless the CIC makes an explicit concession. "Heroic but intelligent" means:
+
+- Armies can take bold operational risks when the reward is high and the commander/profile supports it.
+- Armies should not abandon a critical sector just because one target looks attractive.
+- A weak army can delay, screen, fall back to a defensible line, or request transfer instead of charging.
+- A strong/renowned commander may counterpunch locally, but only if sector risk stays under budget.
+- Concessions should be logged as strategy decisions, not accidental side effects of transfer or objective steering.
+
+This requires a monthly `FrontSectorLedger` built from vanilla data:
+
+| Field | Source |
+|---|---|
+| sector id/theater/tag | `AIArea`, objective metadata, world-position bucketing |
+| own/enemy strength | `AIArea.campaignunitsstrength`, `enemycampaignunitsstrength`, `enemycampaignunitsstrengthclose` |
+| local morale/supply/readiness | `Regiment.groupmorale`, `groupsupplystate`, `CampaignArmyPanel.GetReadinessStep` |
+| command level | `Regiment.unittyp`, `ArmyGroup.GetArmyGroup`, commander id |
+| importance | current `ObjectiveMetadata`, campaign objective, capital/ports/rail/river tags |
+| minimum garrison ratio | faction/era/profile + objective tags |
+| concession cost | capital, river, rail, port, state support, foreign-recognition impact |
+
+The ledger should produce:
+
+- `Hold`: keep minimum force, defensive operations favored.
+- `Delay`: hold if cheap, avoid offensive movements, accept retreat to supply/defensible line.
+- `EconomyOfForce`: sector may be thinned but not emptied.
+- `Concede`: sector may be weakened or abandoned to fund higher-priority plan.
+- `Counterstroke`: local offensive is allowed because strength, commander, and reward support it.
+- `Exploit`: plan-target sector receives extra offensive budget.
+
 ### Policy tree
 
 Primary data file:
@@ -214,13 +290,94 @@ Update `CIC.ScoreObjective` so it composes:
 
 The goal is not to script outcomes. It is to make the AI more likely to pursue historically coherent choices when the board state supports them.
 
+### 6. Add front/army posture before wider steering
+
+Add strategic core types:
+
+- `FrontSector`
+- `FrontPosture`
+- `FrontBudget`
+- `ArmyRole`
+- `ConcessionDecision`
+
+The ledger is recomputed on monthly tick and remains read-only to Harmony patches between ticks.
+
+Inputs:
+
+- active CIC plan,
+- grand-strategy profile,
+- objective tags,
+- faction/era/personality,
+- observed battle history,
+- vanilla `AIArea` strength/importance fields,
+- army/corps/division positions and command hierarchy.
+
+Outputs:
+
+- sector minimum force ratios,
+- sector offensive budget,
+- allowed concession list,
+- preferred reserve source sectors,
+- preferred reinforcement destination sectors,
+- per-army role: `Hold`, `Screen`, `Reserve`, `Exploit`, `Counterstroke`, `Recover`.
+
+Force concentration must pay a real price. Before `TransferOfUnitsPatch` redirects `positiondeficit` to the active plan target, check the source sector:
+
+- Do not strip below `minimum force ratio` unless the CIC profile has issued a `Concede` or `EconomyOfForce` decision.
+- Prefer taking from `Reserve` or `EconomyOfForce` sectors before `Hold` sectors.
+- Log only when a transfer is blocked or redirected:
+  - `[Patch:TransferBudget] alliance=... from=... to=... action=blocked reason=min-hold`
+  - `[Patch:TransferBudget] alliance=... from=... to=... action=concession reason=...`
+
+Defensive posture rules:
+
+- `Hold`: lower threshold for local defensive response; favor nearby units and current theater units.
+- `Delay`: allow defensive operations but prefer supply depot / fallback-line targets.
+- `EconomyOfForce`: defend against direct threats only; do not pull reserves from high-priority sectors.
+- `Concede`: do not launch expensive defensive operations unless capital/army-destruction risk is high.
+- `Counterstroke`: allow the second branch in `CheckForDefensiveOperations` to attack enemy units on occupied friendly soil only when strength dominance and commander initiative justify it.
+
+Offensive posture rules:
+
+- `Exploit` armies may attack the plan target or adjacent objective chain.
+- `Counterstroke` armies may attack local exposed enemies or recover a key lost town.
+- `Hold` armies should not be selected for distant offensive operations.
+- `Recover` armies should be excluded until morale/readiness/supply improves.
+- `Screen` armies should move toward defensive depth or block routes, not launch deep attacks.
+
+Army groups should become command-intent containers, not just UI/coordination objects:
+
+- map `ArmyGroup` and its attached armies to a `FrontSector`,
+- assign a role to the army group first,
+- let attached armies inherit the role unless their local state forces `Recover` or `Screen`,
+- use army-group commander personality in sector risk tolerance once available.
+
+This also addresses early-campaign succession: if no `ArmyGroup` exists when a historical event needs one, bootstrap should create/assign a command container only when vanilla prerequisites allow it or the design explicitly approves an early-campaign exception.
+
+Heroism should be controlled risk, not suicidal movement:
+
+- `HeroicDefense`: stand/defend longer at capitals, river keys, rail hubs, and army-preservation moments if supply and morale are not collapsing.
+- `OperationalAudacity`: accept a wider force-ratio band for counterstrokes or exploitation when commander audacity/initiative is high.
+- `ArmyPreservation`: if casualties, morale, supply, or battle-history losses cross thresholds, downgrade from `Counterstroke` to `Delay` or `Recover`.
+- `PoliticalStakes`: CSA overweights Richmond/Virginia and foreign-recognition opportunities; Union overweights Mississippi, blockade, rail/industry, and simultaneous pressure.
+
+No army should be marked heroic if:
+
+- readiness is below vanilla movement gate,
+- morale is below cancel-defensive-operation thresholds,
+- supply state is below offensive target threshold,
+- the source sector would fall below its minimum hold budget,
+- the action would violate W&L player-command restrictions.
+
 ## Recommended sequence
 
 1. Finish current v0.2.2 runtime smoke for #4 `DefensiveOpsPatch`.
 2. Implement reserved #7 and #8 if still cheap and bounded.
 3. Add `GrandStrategyProfile` plus objective-tag metadata table. This is pure strategic core and can be tested without new Harmony patch risk.
-4. Add `ProjectSelectionPatch` first. It is lower risk because project choice is random-weighted in vanilla and we can replace only the next project slot.
-5. Add `PolicySelectionPatch` second. Policy selection is ordered and chapter-gated, so this needs a tighter safety check.
+4. Add `FrontSectorLedger` and per-army roles before any broader objective/project steering. This prevents plan-target concentration from hollowing out the rest of the front.
+5. Add `ProjectSelectionPatch`. It is lower risk because project choice is random-weighted in vanilla and we can replace only the next project slot.
+6. Add `PolicySelectionPatch`. Policy selection is ordered and chapter-gated, so this needs a tighter safety check.
+7. Add defensive/offensive front-posture steering only after the ledger logs plausible `Hold/Delay/Concede/Exploit` decisions in-game.
 
 ## Acceptance criteria
 
@@ -228,6 +385,7 @@ The goal is not to script outcomes. It is to make the AI more likely to pursue h
 - DLL deployed after every code change and SHA-256 verified against `dist/WhiskeyRealism.dll`.
 - First-fire markers appear for new patches after game restart.
 - Override logs are bounded and only appear when Whiskey actually changes a vanilla choice.
+- Front-budget/concession logs are bounded and only appear when a sector posture changes, a transfer is blocked, or a concession is made.
 - With `Verbose Logging = false`, normal campaign log volume remains low.
 - Sidecar does not need new persistence unless active grand-strategy profile becomes user-visible or externally configurable.
 
