@@ -35,19 +35,19 @@ namespace WhiskeyRealism
             Log = Logger;
 
             Enabled = Config.Bind(
-                "[General]", "Enabled", true,
+                "General", "Enabled", true,
                 "Master enable. Disable to short-circuit every patch in this mod.");
             VerboseLogging = Config.Bind(
-                "[Diagnostics]", "Verbose Logging", false,
+                "Diagnostics", "Verbose Logging", false,
                 "Emit per-patch first-fire markers and decision-trace logs to LogOutput.log.");
             PlanTrace = Config.Bind(
-                "[Diagnostics]", "Plan Trace Logging", false,
+                "Diagnostics", "Plan Trace Logging", false,
                 "On each monthly tick, dump CIC's plan reasoning (objective scores, top-3, picked, phases, deadline).");
             SuccessionTrace = Config.Bind(
-                "[Diagnostics]", "Succession Trace Logging", false,
+                "Diagnostics", "Succession Trace Logging", false,
                 "On each monthly tick, log every succession event check (date gate, war-state gate, fired/not-fired).");
             OverrideVanillaSettings = Config.Bind(
-                "[Strategic]", "Override Vanilla Settings", true,
+                "Strategic", "Override Vanilla Settings", true,
                 "When true, Whiskey Realism locks Aggressiveness to Mediocre and Historic AI Personality to true at campaign creation. " +
                 "These two settings conflict with the mod's personality system and scripted succession events. " +
                 "Difficulty (casualty modifier) stays player-controlled. Set false to allow vanilla settings to apply (advanced — may produce incoherent AI behavior).");
