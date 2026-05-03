@@ -111,9 +111,11 @@ namespace WhiskeyRealism.Patches
                 var aiareas = aiareasField?.GetValue(null);
                 if (aiareas == null) return null;
 
-                var getColorOnPos = AccessTools.Method(aiareas.GetType(), "GetColorOnPos", new[] { typeof(Vector3) });
+                // Vanilla: public Color GetColorOnPos(Vector3 position, float overridealpha = -1f)
+                // (decompile line 33585). Two args; pass -1f to use the default.
+                var getColorOnPos = AccessTools.Method(aiareas.GetType(), "GetColorOnPos", new[] { typeof(Vector3), typeof(float) });
                 if (getColorOnPos == null) return null;
-                var color = getColorOnPos.Invoke(aiareas, new object[] { pos.Value });
+                var color = getColorOnPos.Invoke(aiareas, new object[] { pos.Value, -1f });
                 if (color == null) return null;
 
                 var aiAreaType = AccessTools.TypeByName("AIArea");
