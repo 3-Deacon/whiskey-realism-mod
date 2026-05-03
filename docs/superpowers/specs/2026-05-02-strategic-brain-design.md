@@ -8,13 +8,13 @@
 
 ## 1. Goal
 
-Replace the vanilla random-objective campaign AI with a thinking-but-not-historically-deterministic strategic engine that runs continuously for both Confederate and Union AI throughout a W&L career. Player commands a small actor (artillery section / regiment / brigade depending on questionnaire); both nations' Commanders-in-Chief and theater commanders are AI-driven.
+Replace the vanilla random-objective campaign AI with a thinking-but-not-historically-deterministic strategic engine that runs continuously for the AI-controlled faction(s) throughout a W&L career. Player commands a small actor (artillery section / regiment / brigade depending on questionnaire). The AI-controlled CIC and all theater commanders are AI-driven; the player's faction CIC is the player whenever `DLC_WL.IsCommanderInChief()` is true (see §3.1).
 
 Three success criteria:
 
 1. **Strategic awareness** — the AI commits to phased operational plans over multiple game-months instead of randomly picking objectives turn by turn.
 2. **Historical character without scripting** — playthroughs follow recognizable arcs (1861 amateur mobilization → 1864-65 total war; CSA defensive-aggressive; Union slow consolidated pressure; ~60-80% of runs see McClellan get sacked, Lee take ANV command, Grant rise to general-in-chief at roughly historical dates) but alternate histories emerge in unusual campaigns.
-3. **W&L-aware** — player-commanded units are not steamrolled by the AI's strategic decisions; the existing `DLC_WL.dlc_scenarioactive` / `dlcw_isundercommander` / `PerformAIActionDLCWL` gate is respected and extended.
+3. **W&L-aware** — player-commanded units are not steamrolled by the AI's strategic decisions; the existing `DLC_WL.dlc_scenarioactive` / `dlcw_isundercommander` / `PerformAIActionDLCWL` gate is respected and extended. When the player IS the CIC, the mod does not override the player's strategic authority — the mod runs only the opposing CIC + both sides' theater commanders.
 
 ## 2. Locked design choices
 
@@ -66,6 +66,21 @@ Six choices locked during the 2026-05-02 brainstorming session. Reject any spec 
 Without this rule the layers fight each other (CIC says concentrate, theater commander says raid) and AI behavior becomes opaque.
 
 **Read-only mod-state invariant:** Harmony patches **read** mod state, never **write** to it. State writes happen only on the monthly tick and event-trigger handlers. This is the load-bearing invariant that keeps the bridge debuggable.
+
+### 3.1 W&L player-CIC gate (load-bearing)
+
+Vanilla `AICampaign` already skips the player's faction in its update loop when the player is CIC (decompile line 11620 — `if (DLC_WL.dlc_scenarioactive && ... && DLC_WL.IsCommanderInChief() && aifaction[currentfaction].allianceid == GameVars.commander[DLC_WL.dlc_chosencommander].alliance) { currentfaction++; ... }`). The mod must match this contract: when the player is CIC of faction X, the mod's `StrategicCoordinator` does NOT instantiate or run a `CIC[X]`. Theater commanders for faction X are also skipped — the player gives orders to subordinates directly through the W&L UI; the mod has no business steering those orders. The opposing faction's CIC + theater commanders run normally.
+
+```
+StrategicCoordinator.OnMonthlyTick():
+  for faction in [CSA, Union]:
+    if IsPlayerCICOf(faction): continue   // player has authority; mod stands down
+    // ... era / succession / plan review for AI-driven faction
+```
+
+`IsPlayerCICOf(faction)` is computed each tick (cheap), not cached, because W&L promotion/demotion is event-driven and the player can transition into and out of CIC rank mid-career. `dlcw_isundercommander` and `PerformAIActionDLCWL` continue to gate tactical-unit AI under the player at sub-CIC ranks; that's separate machinery owned by future Slice C.
+
+Edge case: the player's faction is **not** strategically headless when the player is CIC — the player IS the strategic authority. The mod does not write a sidecar plan for that faction; on save, only the AI-driven faction's plan is persisted. On load, if the player has changed factions or rank since save, mod state initializes lazily for whichever side is now AI-driven.
 
 ## 4. Data model
 
@@ -220,6 +235,51 @@ public enum PhaseTransition
 | 11 | Sheridan → Shenandoah | 1864-08 | Valley operations needed (Confederate raid OR Union strategic pivot) |
 | 12 | Lee → General-in-Chief CSA | 1865-02 | War clearly lost (CSA total morale + economy below threshold) |
 
+### 4.7 ObjectiveAdapter
+
+`CampaignObjective` (decompile line 178484) exposes `UniqueObjectiveID`, `ObjectiveAlliance`, `ObjectiveScenario`, `ObjectiveChapters`, `validfromdate` / `validtodate`, `precampaignobjectives`, `objectives` (opaque `List<object>` of target Town / IIP refs), and `influenceprestige`. It does NOT expose theater, category, supply-reach, foreign-recognition, or attrition metadata. The CIC scoring in §5.3 needs these dimensions, so the mod owns an adapter that synthesizes them.
+
+```csharp
+public struct ObjectiveMetadata
+{
+    public Theater  Theater;                    // East / West / TransMiss / Coast / River
+    public Category Category;                   // CapitalThreat / SupplyHub / ForeignRecognition / Attrition / RailroadCut / RiverControl / Other
+    public float    SupplyReachWeight;          // [0..1] — how much this objective opens supply lines
+    public float    ForeignRecognitionWeight;   // [0..1] — diplomatic value (Antietam-class strategic-defensive-victory targets)
+    public float    AttritionWeight;            // [0..1] — bleed-the-enemy value
+    public float    GeographicCentroidX;        // for distance scoring
+    public float    GeographicCentroidY;
+}
+
+public static class ObjectiveAdapter
+{
+    // Hand-coded table keyed by UniqueObjectiveID. Populated during implementation
+    // by reading <GTCW>/Modding/ModdingTool_1.11.xlsm objective sheets + per-objective
+    // designer judgement. ~50-100 entries expected (full GTCW campaign objective set).
+    private static readonly Dictionary<int, ObjectiveMetadata> Table = new()
+    {
+        // { 1001, new ObjectiveMetadata { Theater = Theater.East, Category = Category.CapitalThreat, ... } },
+        // ...populated during implementation...
+    };
+
+    public static ObjectiveMetadata Resolve(CampaignObjective obj)
+    {
+        if (Table.TryGetValue(obj.UniqueObjectiveID, out var meta))
+            return meta;
+        return Derive(obj);   // fallback for unmapped objectives
+    }
+
+    // Geographic fallback: walk obj.objectives, grab any Town/IIP target,
+    // pick theater by centroid lat/long bucketing. Category defaults to Other,
+    // weights default to 0.5 across the board.
+    private static ObjectiveMetadata Derive(CampaignObjective obj) { ... }
+}
+```
+
+**Why a hand-coded table:** GTCW's vanilla objectives are a fixed, modest-sized set defined by the dev team; the metadata is editorial judgement (Antietam vs Vicksburg vs Gettysburg each have different strategic flavor) that can't be derived purely from geography. The table is small enough to hand-curate and small enough to audit. The geographic fallback is for safety only — it covers DLC additions, modded objectives, or vanilla updates that add new IDs before we update the table.
+
+**Open question for implementation phase (added to §13):** confirm `objectives` (`List<object>`) members at runtime — likely a mix of `Town`, `IIP`, and possibly `BattleSite` references. Adapter geographic fallback needs reflection-safe casts.
+
 ## 5. Decision flow
 
 ### 5.1 Monthly tick
@@ -267,15 +327,16 @@ This deferred-processing rule prevents the AI from thrashing on a chain of event
 ### 5.3 CIC.Replan()
 
 ```
-1. Score all CampaignObjective.GetAvailableObjectives() for this faction
-   using era × faction × CIC personality.
-   Each objective contributes:
-     theaterMatch    × factionTheaterPreference[obj.theater]
-     forceRatio      × (cic.Caution invertedly weights this — cautious = needs higher ratio)
-     distanceFromForces × negative weight (cic.Audacity offsets — audacious tolerates distance)
-     supplyReach
-     foreignRecognitionValue × factionForeignRecognitionWeight
-     attritionValue          × cic.CasualtyTolerance
+1. For each obj in CampaignObjective.GetAvailableObjectives(faction):
+     meta = ObjectiveAdapter.Resolve(obj)              // see §4.7
+     score =
+         factionTheaterPreference[meta.Theater]
+       + meta.SupplyReachWeight        × supplyContext
+       + meta.ForeignRecognitionWeight × factionForeignRecognitionWeight × erage(faction)
+       + meta.AttritionWeight          × cic.CasualtyTolerance
+       + forceRatioTerm     × (1 - cic.Caution)        // cautious wants higher ratio
+       - distanceTerm(meta.GeographicCentroid, friendlyForceCentroid)
+                            × (1 - cic.Audacity)       // audacious tolerates distance
 2. Weighted-random pick from the top 3 (not pure argmax — gives replay variety).
 3. Decompose into 2-4 phases by geographic prerequisites:
      "must take supply hub before main objective"
@@ -304,23 +365,27 @@ Theater commanders cannot abandon a phase; they only signal completion (target t
 
 ## 6. Bridge layer — Harmony patches
 
-Approximately 10 patches. All Postfix unless noted. Each is a stable catalog item; ordinals assigned at implementation in `docs/patch-catalog.md`.
+Approximately 9 patches. Postfix-preferred; two patches (#1, #6) are Prefix-with-vanilla-fallback because the vanilla methods directly mutate game state inside the method body and a Postfix would have to undo-and-reapply. Each is a stable catalog item; ordinals assigned at implementation in `docs/patch-catalog.md`.
 
-| # | Patch class | Game method | Decompile line | Mod state read | Effect |
-|---|---|---|---|---|---|
-| 1 | `PickCampaignObjectivePatch` | `AICampaign.PickCampaignObjective` | 17770 | CIC's active plan | Replace `Random.Range` with plan target |
-| 2 | `ImportanceValuesPatch` | `AICampaign.UpdateImportanceValues` | 14906 | TheaterCommander zone relevance | Multiply per-zone importance |
-| 3 | `MostValueableZonesPatch` | `AICampaign.CalculateMostValueableAIZones` | 10965 | Plan phase target | Bias toward phase target |
-| 4 | `TransferOfUnitsPatch` | `AICampaign.CheckTransferOfUnits` | 17232 | TheaterCommander consolidation urgency | Lower threshold when phase demands consolidation |
-| 5 | `DefensiveOpsPatch` | `AICampaign.CheckPickDefensiveOps` | 11791 | TheaterCommander defensive threshold | Per-personality strength gate |
-| 6 | `CommanderReplacementPatch` | `AICampaign.CheckAICommanderReplacements` | 17009 | SuccessionScheduler state | Override picks during scripted events |
-| 7 | `PerkSelectionPatch` | `AICampaign.CheckPerkSelection` | 11873 | Officer personality | Bias picks |
-| 8 | `MacroAIStancePatch` | `AIBattle.CheckGlobalAIStrategy` | 6314 | Plan phase + theater personality | Override `macroai` per battle |
-| 9 | `RecruitmentPatch` | `AICampaign.GetBestRecruitingState` | 10723 | CIC theater preferences | Weight recruitment toward priority theaters |
-| 10 | `MonthlyTickHookPatch` | (TBD: month-rollover hook) | — | — | Drives StrategicCoordinator.OnMonthlyTick() |
+| # | Patch class | Hook type | Game method | Decompile line | Mod state read | Effect |
+|---|---|---|---|---|---|---|
+| 1 | `PickCampaignObjectivePatch` | **Prefix** | `AICampaign.PickCampaignObjective` | 17769 | CIC's active plan | If active plan has a valid target for this faction, set `aifaction[_aifaction].followedcampaignobjective = plan.TargetObjectiveID` and return `false` to skip vanilla. If no plan / plan stale / faction is player-CIC, return `true` for vanilla random fallback. |
+| 2 | `ImportanceValuesPatch` | Postfix | `AICampaign.UpdateImportanceValues` | 14906 | TheaterCommander zone relevance | Multiply per-zone importance |
+| 3 | `MostValueableZonesPatch` | Postfix | `AICampaign.CalculateMostValueableAIZones` | 10965 | Plan phase target | Bias toward phase target |
+| 4 | `TransferOfUnitsPatch` | Postfix | `AICampaign.CheckTransferOfUnits` | 17232 | TheaterCommander consolidation urgency | Lower threshold when phase demands consolidation |
+| 5 | `DefensiveOpsPatch` | Postfix | `AICampaign.CheckPickDefensiveOps` | 11791 | TheaterCommander defensive threshold | Per-personality strength gate |
+| 6 | `CommanderReplacementPatch` | **Prefix** | `AICampaign.CheckAICommanderReplacements` | 17008 | SuccessionScheduler state | If a scripted succession event is active for this faction's tier, perform the scripted `AssignCommando` + `DoCommanderPromotion` and clear `bestcommanderidperlevel` / `worstcommanderidperlevel` slots, then return `false` to skip vanilla's competence-based pick. Otherwise return `true`. |
+| 7 | `PerkSelectionPatch` | Postfix | `AICampaign.CheckPerkSelection` | 11873 | Officer personality | Bias picks |
+| 8 | `RecruitmentPatch` | Postfix | `AICampaign.GetBestRecruitingState` | 10723 | CIC theater preferences | Weight recruitment toward priority theaters |
+| 9 | `MonthlyTickHookPatch` | Postfix | (TBD: month-rollover hook — see §13) | — | — | Drives StrategicCoordinator.OnMonthlyTick() |
+
+**Macro-AI battle stance (formerly patch #8) is deferred to Slice B.** `AIBattle.CheckGlobalAIStrategy` (line 6314) lives in the tactical brain per `docs/handoff.md`'s slice scope; pulling it into Slice A would breach the "Slice A only" lock from §2.
+
+**Player-CIC gate inside patches:** patches that read CIC plan state (#1, #3) check `IsPlayerCICOf(aifaction[_aifaction].allianceid)` first and return the vanilla-fallback path when true. Theater-commander-driven patches (#2, #4, #5, #7, #8) similarly skip when the relevant unit's faction is player-CIC. Belt-and-suspenders to §3.1's coordinator-level gate — if mod state is somehow populated for a player-CIC faction, the patches still hand control back to vanilla.
 
 **Patch hygiene:**
-- Postfix-preferred. Reflection for fields/properties (forward-compat to game updates).
+- Postfix preferred; Prefix only when the vanilla method directly mutates state we need to overwrite (#1, #6).
+- Reflection for fields/properties (forward-compat to game updates).
 - All reflection wrapped in try/catch + `Plugin.Log.LogWarning(...)`. Never throw from a patch.
 - Each patch logs `OnceLog.Info(...)` on first invocation per save-load cycle for smoke-testing.
 - Mod state is **read-only** to patches. They steer existing AI; they never mutate `CIC` / `TheaterCommander` / `OperationalPlan`.
@@ -329,9 +394,13 @@ Approximately 10 patches. All Postfix unless noted. Each is a stable catalog ite
 
 ### 7.1 Sidecar JSON, not embedded save format
 
+GTCW writes per-save folders, not single-file saves:
+
 ```
-<persistentDataPath>/Saves/MyCareer.gtsave           (vanilla)
-<persistentDataPath>/Saves/MyCareer.whiskeyrealism.json   (mod sidecar)
+<persistentDataPath>/Campaigns/<level>/<sublevel>/<saveFolder>/scenario.txt   (vanilla)
+<persistentDataPath>/Campaigns/<level>/<sublevel>/<saveFolder>/units.txt      (vanilla)
+<persistentDataPath>/Campaigns/<level>/<sublevel>/<saveFolder>/...            (vanilla)
+<persistentDataPath>/Campaigns/<level>/<sublevel>/<saveFolder>/whiskeyrealism.json   (mod sidecar)
 ```
 
 Why sidecar:
@@ -341,11 +410,56 @@ Why sidecar:
 
 ### 7.2 Save hook
 
-Prefix `SavesManager.Save(string name)` to capture filename. Write JSON sidecar after game's save completes (Postfix on the EOD cycle that owns Save).
+GTCW has no `SavesManager` class (UBoatCrewMod's pattern doesn't transfer here). The save surface is `SceneManagement.SaveAll(...)` at decompile line 36708, which builds `text = "Campaigns/" + GamePrefs.leveltoload + "/" + GamePrefs.subleveltoload + "/" + Saving.latestfolder + "/"` and dispatches per-subsystem `Save(text)` calls. The cleanest hook is **Postfix on `AICampaign.Save(string folder)` (line 16631)** — symmetric with the load hook, single string argument is exactly the directory we need, fires only when AI state is being persisted (skipped when caller passes `savecampaigndata: false`, e.g. battle-only saves at line 36808).
+
+```csharp
+[HarmonyPatch(typeof(AICampaign), nameof(AICampaign.Save))]
+public class AICampaignSavePatch
+{
+    [HarmonyPostfix]
+    public static void Postfix(string folder)
+    {
+        try
+        {
+            // folder is "Campaigns/<level>/<sublevel>/<saveFolder>/"
+            // sidecar lands as <persistentDataPath>/<folder>/whiskeyrealism.json
+            var sidecarPath = Path.Combine(Application.persistentDataPath, folder, "whiskeyrealism.json");
+            StrategicCoordinator.Instance.SaveSidecar(sidecarPath);
+        }
+        catch (Exception ex) { Plugin.Log.LogError("Sidecar save failed: " + ex); }
+    }
+}
+```
+
+Per-save-folder placement (rather than `<savename>.whiskeyrealism.json` in a Saves/ root) makes the sidecar travel with the save when the player copies/renames/deletes the game's save folder. It also avoids any chance of the mod's filename colliding with a vanilla file: the game writes scenario.txt, units.txt, etc. inside the folder; `whiskeyrealism.json` is a name we own.
 
 ### 7.3 Load hook
 
-`SavesManager.Loaded` is an `event Action<Queue<Action>>` (UBoatCrewMod precedent — same trap). Use `EventInfo.AddEventHandler` from a real-method hook (Postfix `SavesManager.Awake` for one-time install per process).
+**Postfix on `AICampaign.Load(string folder)` (line 16435)**, called from the campaign-load batch operation at decompile line 30023 with the same folder shape used by Save. The Postfix reads the sidecar JSON and rehydrates `StrategicCoordinator` state. Theater-commander/CIC instances are recreated from saved personality vectors + officer name lookups against the live `GameVars.commander[]` array (officer assignments may have been altered by mid-career events the mod didn't drive — match by name + faction, fall back to derived personality if no match).
+
+```csharp
+[HarmonyPatch(typeof(AICampaign), nameof(AICampaign.Load))]
+public class AICampaignLoadPatch
+{
+    [HarmonyPostfix]
+    public static void Postfix(string folder)
+    {
+        try
+        {
+            var sidecarPath = Path.Combine(Application.persistentDataPath, folder, "whiskeyrealism.json");
+            if (File.Exists(sidecarPath))
+                StrategicCoordinator.Instance.LoadSidecar(sidecarPath);
+            else
+                StrategicCoordinator.Instance.InitializeFromGameState();   // fresh-career init
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning("Sidecar load failed, falling back to fresh init: " + ex);
+            StrategicCoordinator.Instance.InitializeFromGameState();
+        }
+    }
+}
+```
 
 Sidecar missing or corrupt → log warning, init mod state from current game state (treat as fresh career — era stage from current date, no active plans, theater commanders newly assigned with personalities derived from existing officers).
 
@@ -451,7 +565,7 @@ Documented in:
 1. Identify the exact game hook for monthly tick. Candidates: `Tools.Date.NewMonth`-style event, `Economy.UpdateMonthly`-style method, or end-of-day cycle's monthly branch in `bunits` / campaign-controller.
 2. Identify how `aifaction[i].ownunits` exposes army-group-level top units (`unittyp >= 15`?). Map to TheaterCommander assignment at first encounter.
 3. Identify `CampaignObjective.GetAvailableObjectives` return semantics (cached? per-faction? recomputed on demand?). Plan-scoring depends on this.
-4. Verify GTCW's save format does not collide with our sidecar `.whiskeyrealism.json` filename (no game system writes to that extension).
+4. Confirm `Application.persistentDataPath` resolves correctly for our `Path.Combine(persistentDataPath, folder, ...)` sidecar pattern when GTCW is launched via Steam vs. direct exe — the `folder` argument passed into `AICampaign.Save` is a relative path; verify that `SceneManagement.SaveAll` writes its files into `persistentDataPath` (vs. game-install dir) on the Steam build.
 5. Verify event dispatcher sources for: town loss, major battle defeat, KIA-on-officer. Likely candidates in `BattleUnits` end-of-battle handling and `CampaignController` event hooks.
 6. Theater-commander identification at runtime: is there a stable ID, or do we have to track by `commander.id_hash + arrivaldate`?
 7. Phase-decomposition algorithm — section 5.3 says "decompose by geographic prerequisites" but the actual algorithm is left for implementation. Likely shape: from picked objective, walk back through geographic dependencies (target → covering force → supply hub → start position) and treat each step as a phase. Verify this maps cleanly onto GTCW's `AIArea` graph.
@@ -462,13 +576,14 @@ Documented in:
 The strategic-brain slice is "shippable" when:
 
 1. Build is green (0 warnings, 0 errors).
-2. All ~10 bridge-layer patches are registered and log first-fire markers in a fresh career.
+2. All 9 bridge-layer patches are registered and log first-fire markers in a fresh career.
 3. Smoke-test scenarios 1-7 pass on a single career playthrough.
 4. JSON sidecar is human-readable and round-trips through save → reload without losing state.
 5. Mod state is observably read-only from patches (no patch mutates `CIC` / `TheaterCommander` state — verified by code review at PR time).
 6. Reflection failures (simulated by deleting a target method's signature in a unit-test stub, or by checking on a manually-corrupted DLL) degrade to vanilla rather than crashing.
 7. Player-commanded units are observably untouched by mod's strategic decisions (confirm `dlcw_isundercommander` units are not assigned to plans).
-8. `dist/WhiskeyRealism.dll` deploys cleanly to GTCW with BepInEx 5.4.x x64 UnityMono installed.
+8. **Player-CIC noninterference (§3.1).** When `DLC_WL.IsCommanderInChief()` is true for the player's faction X: (a) `StrategicCoordinator` has no `CIC[X]` instance, (b) no monthly tick mutates faction X's plan or theater state, (c) sidecar JSON contains no entry for faction X, (d) all bridge-layer patches return the vanilla-fallback path for faction X. Verified by playing through a CIC-rank promotion event in W&L and confirming via verbose logs.
+9. `dist/WhiskeyRealism.dll` deploys cleanly to GTCW with BepInEx 5.4.x x64 UnityMono installed.
 
 ## 15. References
 
