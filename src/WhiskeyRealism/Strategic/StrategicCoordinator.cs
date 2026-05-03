@@ -76,19 +76,19 @@ namespace WhiskeyRealism.Strategic
         {
             if (!Initialized) InitializeFromGameState();
 
-            if (LastSeenMonth < 0)
+            bool firstCall = (LastSeenMonth < 0);
+            bool rollover  = !firstCall && ((gameMonth != LastSeenMonth) || (gameYear != LastSeenYear));
+
+            // Fire on first valid call (campaign just started / save just loaded)
+            // AND on every subsequent month rollover. The first heartbeat gives
+            // smoke-testers immediate confirmation the strategic core is running
+            // without having to advance game-time past a month boundary first.
+            if (firstCall || rollover)
             {
                 LastSeenMonth = gameMonth;
                 LastSeenYear  = gameYear;
-                return;
+                OnMonthlyTick(gameMonth, gameYear);
             }
-
-            bool rollover = (gameMonth != LastSeenMonth) || (gameYear != LastSeenYear);
-            if (!rollover) return;
-
-            LastSeenMonth = gameMonth;
-            LastSeenYear  = gameYear;
-            OnMonthlyTick(gameMonth, gameYear);
         }
 
         public void OnMonthlyTick(int month, int year)
