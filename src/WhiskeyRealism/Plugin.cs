@@ -23,6 +23,10 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> PlanTrace;
         internal ConfigEntry<bool> SuccessionTrace;
 
+        // Vanilla-settings override — lock Aggressiveness + Historic AI Personality
+        // at campaign creation. Difficulty stays player-controlled.
+        internal ConfigEntry<bool> OverrideVanillaSettings;
+
         private Harmony _harmony;
 
         private void Awake()
@@ -42,6 +46,11 @@ namespace WhiskeyRealism
             SuccessionTrace = Config.Bind(
                 "[Diagnostics]", "Succession Trace Logging", false,
                 "On each monthly tick, log every succession event check (date gate, war-state gate, fired/not-fired).");
+            OverrideVanillaSettings = Config.Bind(
+                "[Strategic]", "Override Vanilla Settings", true,
+                "When true, Whiskey Realism locks Aggressiveness to Mediocre and Historic AI Personality to true at campaign creation. " +
+                "These two settings conflict with the mod's personality system and scripted succession events. " +
+                "Difficulty (casualty modifier) stays player-controlled. Set false to allow vanilla settings to apply (advanced — may produce incoherent AI behavior).");
 
             if (!Enabled.Value)
             {
