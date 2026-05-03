@@ -28,6 +28,13 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> OverrideVanillaSettings;
         internal ConfigEntry<int>  LockedDifficulty;
 
+        // Diagnostic test mode — bypass date + war-state gates and force all
+        // 12 scripted succession events to fire on first monthly tick. For
+        // verifying the commander-swap apply mechanic without playing through
+        // a multi-month campaign. Default off; remember to disable before
+        // playing for real.
+        internal ConfigEntry<bool> ForceAllSuccessionEvents;
+
         private Harmony _harmony;
 
         private void Awake()
@@ -54,6 +61,9 @@ namespace WhiskeyRealism
             LockedDifficulty = Config.Bind(
                 "Strategic", "Locked Difficulty", 3,
                 "Difficulty index 0-4 to lock when OverrideVanillaSettings is true. 0=Very Easy, 1=Easy, 2=Mediocre, 3=Hard (default — historical brutality), 4=Very Hard.");
+            ForceAllSuccessionEvents = Config.Bind(
+                "Diagnostics", "Force All Succession Events", false,
+                "TEST MODE — bypass date and war-state gates and force all 12 scripted succession events to fire on first monthly tick. Lets you verify the concrete commander-swap mechanic in seconds without playing through a multi-month campaign. DISABLE before a real playthrough.");
 
             if (!Enabled.Value)
             {

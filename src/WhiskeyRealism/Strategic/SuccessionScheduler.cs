@@ -63,6 +63,14 @@ namespace WhiskeyRealism.Strategic
             AppliedEventIds.Add(eventId);
         }
 
+        // Diagnostic: bypass gates and mark all events as fired. Used by the
+        // ForceAllSuccessionEvents config flag so smoke-testers can exercise
+        // the apply mechanic without waiting for in-game dates.
+        internal void ForceAllFired()
+        {
+            foreach (var e in _events) FiredEventIds.Add(e.Id);
+        }
+
         internal SuccessionScheduler()
         {
             _events.Add(new Event { Id =  1, Name = "Lee → ANV command",         EarliestYear = 1862, EarliestMonth =  5, AllianceId = 1, ReplacementName = "lee",       ReplacedRole = "ANV",            WarStateGate = w => w.JohnstonWoundedOrDisabled || w.ANVHasLostMajorBattle });

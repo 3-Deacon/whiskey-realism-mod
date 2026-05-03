@@ -91,10 +91,20 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
+        private bool _forcedAllSuccession;
+
         public void OnMonthlyTick(int month, int year)
         {
             try
             {
+                // Test-mode: bypass gates and fire every event on first tick.
+                if (Plugin.Instance.ForceAllSuccessionEvents.Value && !_forcedAllSuccession)
+                {
+                    _forcedAllSuccession = true;
+                    Succession.ForceAllFired();
+                    Plugin.Log.LogWarning("[TestMode] Force All Succession Events is ON — all 12 events marked fired this tick. Disable in BepInEx config before a real playthrough.");
+                }
+
                 int playerAlliance = ResolvePlayerAlliance();
                 for (int alliance = 0; alliance < 2; alliance++)
                 {
