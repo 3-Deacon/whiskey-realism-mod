@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -49,6 +50,9 @@ namespace WhiskeyRealism.Patches
 
                 var era = StrategicCoordinator.Instance.Eras[alliance]?.Stage ?? EraStage.Amateur1861;
                 var profile = GrandStrategyRegistry.Resolve(alliance, era);
+                var fiscalIntent = StrategicCoordinator.Instance.FiscalIntents != null && alliance < StrategicCoordinator.Instance.FiscalIntents.Length
+                    ? StrategicCoordinator.Instance.FiscalIntents[alliance]
+                    : null;
 
                 for (int subsidyType = 0; subsidyType < lanes; subsidyType++)
                 {
@@ -57,7 +61,13 @@ namespace WhiskeyRealism.Patches
                     int vanillaProjectId = nextProjects[subsidyType];
                     float vanillaWeight = ReadVanillaProjectWeight(aiPersonality, vanillaProjectId);
                     var candidates = BuildCandidates(alliance, subsidyType, aiPersonality);
-                    var decision = ProjectSelectionScorer.Select(profile, subsidyType, vanillaProjectId, vanillaWeight, candidates);
+                    var decision = ProjectSelectionScorer.Select(
+                        profile,
+                        subsidyType,
+                        vanillaProjectId,
+                        vanillaWeight,
+                        candidates,
+                        projectId => FiscalPolicyScorer.ProjectWeight(fiscalIntent, alliance, projectId, subsidyType));
 
                     if (!decision.ShouldReplace) continue;
                     if (decision.ProjectId < 0 || decision.ProjectId == vanillaProjectId) continue;

@@ -27,10 +27,11 @@ namespace WhiskeyRealism.Strategic
             int subsidyType,
             int vanillaProjectId,
             float vanillaWeight,
-            IEnumerable<ProjectCandidateInput> candidates)
+            IEnumerable<ProjectCandidateInput> candidates,
+            System.Func<int, float> extraWeight = null)
         {
             int bestProjectId = vanillaProjectId;
-            float vanillaScore = Score(profile, vanillaProjectId, vanillaWeight);
+            float vanillaScore = Score(profile, vanillaProjectId, vanillaWeight, extraWeight);
             float bestScore = vanillaScore;
 
             if (candidates != null)
@@ -40,7 +41,7 @@ namespace WhiskeyRealism.Strategic
                     if (candidate == null) continue;
                     if (candidate.SubsidyType != subsidyType) continue;
 
-                    float candidateScore = Score(profile, candidate.ProjectId, candidate.VanillaWeight);
+                    float candidateScore = Score(profile, candidate.ProjectId, candidate.VanillaWeight, extraWeight);
                     if (candidate.ProjectId == vanillaProjectId)
                         vanillaScore = candidateScore;
 
@@ -76,10 +77,12 @@ namespace WhiskeyRealism.Strategic
             };
         }
 
-        private static float Score(GrandStrategyProfile profile, int projectId, float vanillaWeight)
+        private static float Score(GrandStrategyProfile profile, int projectId, float vanillaWeight, System.Func<int, float> extraWeight)
         {
             if (projectId < 0) return -999f;
-            return vanillaWeight + (profile?.ProjectWeightFor(projectId) ?? 0f);
+            float profileWeight = profile != null ? profile.ProjectWeightFor(projectId) : 0f;
+            float fiscalWeight = extraWeight != null ? extraWeight.Invoke(projectId) : 0f;
+            return vanillaWeight + profileWeight + fiscalWeight;
         }
     }
 }
