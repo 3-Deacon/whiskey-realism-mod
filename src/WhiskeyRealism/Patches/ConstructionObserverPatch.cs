@@ -18,28 +18,29 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void CBuildingPlacePostfix(
             CBuilding __result,
+            Vector3 position,
             int type,
             int owner,
-            bool newlycreated,
-            bool pay)
+            bool newlycreated)
         {
             if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
-            if (!newlycreated || !pay || __result == null) return;
+            if (!newlycreated || __result == null) return;
             if (owner < 0 || owner >= 2) return;
+            if (IsConstructionWishPlaceholder(position)) return;
 
             try
             {
                 OnceLog.Info("construction-observer:building", "ConstructionObserverPatch wired (CBuilding.Place)");
 
-                Vector3 position = ((Component)__result).transform.position;
+                Vector3 actualPosition = ((Component)__result).transform.position;
                 var start = new ConstructionStartEvent
                 {
                     AllianceId = owner,
                     Kind = KindForBuilding(type),
                     BuildingTypeId = type,
                     Name = SafeBuildingName(__result, type),
-                    Theater = TheaterFromPosition(position),
-                    SiteKey = position.x.ToString("0") + "," + position.z.ToString("0"),
+                    Theater = TheaterFromPosition(actualPosition),
+                    SiteKey = actualPosition.x.ToString("0") + "," + actualPosition.z.ToString("0"),
                     Year = SafeYear(),
                     Month = SafeMonth(),
                     Day = SafeDay()
@@ -98,6 +99,11 @@ namespace WhiskeyRealism.Patches
             if (type == CBuilding.id_fort) return ConstructionCandidateKind.Fort;
             if (type == CBuilding.id_telegraphstation) return ConstructionCandidateKind.Telegraph;
             return ConstructionCandidateKind.PrivateBuilding;
+        }
+
+        private static bool IsConstructionWishPlaceholder(Vector3 position)
+        {
+            return position.x < -10000f && position.y < -10000f && position.z < -10000f;
         }
 
         private static string SafeBuildingName(CBuilding building, int type)

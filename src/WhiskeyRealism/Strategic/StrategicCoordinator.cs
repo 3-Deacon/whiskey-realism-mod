@@ -422,6 +422,8 @@ namespace WhiskeyRealism.Strategic
 
         private static bool ConstructionVerboseLoggingEnabled()
         {
+            // Task 4 will introduce construction-specific config. Until then,
+            // construction start detail follows the existing global verbose flag.
             try
             {
                 return Plugin.Instance != null && Plugin.Instance.VerboseLogging.Value;
