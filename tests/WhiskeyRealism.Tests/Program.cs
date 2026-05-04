@@ -71,6 +71,10 @@ static class Program
             ("construction ledger suppresses csa rail by doctrine", ConstructionLedgerSuppressesCsaRailByDoctrine),
             ("construction ledger makes emergency hold strict near bond floor", ConstructionLedgerEmergencyHoldNearBondFloor),
             ("construction ledger signature changes on top candidate", ConstructionLedgerSignatureChangesOnTopCandidate),
+            ("construction ledger handles null input", ConstructionLedgerHandlesNullInput),
+            ("construction ledger keeps credit-defense bank", ConstructionLedgerKeepsCreditDefenseBank),
+            ("construction ledger suppresses union arms under credit defense", ConstructionLedgerSuppressesUnionArmsUnderCreditDefense),
+            ("construction ledger suppresses late csa arms under credit defense", ConstructionLedgerSuppressesLateCsaArmsUnderCreditDefense),
             ("fast forward scheduler keeps 5x vanilla only", FastForwardSchedulerKeepsFiveXVanillaOnly),
             ("fast forward scheduler boosts high speeds within cap", FastForwardSchedulerBoostsHighSpeedsWithinCap),
             ("fast forward scheduler disables cleanly", FastForwardSchedulerDisablesCleanly),
@@ -1272,6 +1276,77 @@ static class Program
         var second = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
 
         AssertTrue(first.Signature != second.Signature, "expected signature to change when top candidate changes");
+    }
+
+    private static void ConstructionLedgerHandlesNullInput()
+    {
+        var output = ConstructionIntentLedger.Compute(null, null);
+
+        AssertEqual(ConstructionPosture.Infrastructure, output.Posture);
+        AssertEqual(ConstructionCandidate.None.Name, output.TopPrivateBuilding.Name);
+        AssertEqual(0, output.Suppressions.Length);
+    }
+
+    private static void ConstructionLedgerKeepsCreditDefenseBank()
+    {
+        var input = BaseConstructionInput(1);
+        input.FiscalPosture = FiscalPosture.CreditDefense;
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 2,
+            Name = "State Bank",
+            Theater = Theater.East,
+            VanillaValid = true
+        });
+
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        AssertEqual(2, output.TopPrivateBuilding.BuildingTypeId);
+        AssertEqual(0, output.Suppressions.Length);
+    }
+
+    private static void ConstructionLedgerSuppressesUnionArmsUnderCreditDefense()
+    {
+        var input = BaseConstructionInput(0);
+        input.FiscalPosture = FiscalPosture.CreditDefense;
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 10,
+            Name = "Iron Works",
+            Theater = Theater.East,
+            ArmsIndustry = true,
+            SupportsActiveArmyCorridor = true,
+            VanillaValid = true
+        });
+
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        AssertEqual(ConstructionCandidate.None.Name, output.TopPrivateBuilding.Name);
+        AssertEqual(ConstructionSuppressionReason.DiscretionaryIndustryCreditDefense, output.Suppressions[0].Reason);
+    }
+
+    private static void ConstructionLedgerSuppressesLateCsaArmsUnderCreditDefense()
+    {
+        var input = BaseConstructionInput(1);
+        input.FiscalPosture = FiscalPosture.CreditDefense;
+        input.CurrentYear = 1864;
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 10,
+            Name = "Iron Works",
+            Theater = Theater.East,
+            ArmsIndustry = true,
+            SupportsActiveArmyCorridor = true,
+            VanillaValid = true
+        });
+
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        AssertEqual(ConstructionCandidate.None.Name, output.TopPrivateBuilding.Name);
+        AssertEqual(ConstructionSuppressionReason.DiscretionaryIndustryCreditDefense, output.Suppressions[0].Reason);
     }
 
     private static void FastForwardSchedulerKeepsFiveXVanillaOnly()

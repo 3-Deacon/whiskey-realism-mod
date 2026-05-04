@@ -7,22 +7,16 @@ namespace WhiskeyRealism.Strategic.Construction
     {
         public static ConstructionOutput Compute(ConstructionInput input, ConstructionOptions options)
         {
-            if (options == null)
-                options = new ConstructionOptions();
+            options = options != null ? options : new ConstructionOptions();
+            input = input != null ? input : new ConstructionInput();
+            var candidates = input.Candidates != null ? input.Candidates : new List<ConstructionCandidate>();
 
             var output = new ConstructionOutput();
             var suppressions = new List<ConstructionSuppression>();
 
             output.Posture = ResolvePosture(input, options);
-            if (output.Posture == ConstructionPosture.EmergencyHold)
-            {
-                SuppressAll(input, suppressions, ConstructionSuppressionReason.EmergencyCreditFloor);
-                output.Suppressions = suppressions.ToArray();
-                output.Signature = BuildSignature(input, output);
-                return output;
-            }
 
-            foreach (var candidate in input.Candidates)
+            foreach (var candidate in candidates)
             {
                 if (IsSuppressed(input, options, candidate, out var suppressionReason))
                 {
@@ -36,7 +30,7 @@ namespace WhiskeyRealism.Strategic.Construction
                 }
 
                 var scored = candidate;
-                scored.Score = Score(input, output.Posture, scored);
+                scored.Score = Score(input, options, output.Posture, scored);
                 scored.Reason = output.Posture.ToString();
                 AssignTop(output, scored);
             }
@@ -89,6 +83,20 @@ namespace WhiskeyRealism.Strategic.Construction
                 return true;
             }
 
+            bool nearBondFloor = IsNearBondFloor(input, options);
+
+            if (input.FiscalPosture == FiscalPosture.EmergencySolvency || nearBondFloor)
+            {
+                if (IsEmergencyAllowed(input, options, candidate, nearBondFloor))
+                {
+                    reason = ConstructionSuppressionReason.None;
+                    return false;
+                }
+
+                reason = ConstructionSuppressionReason.EmergencyCreditFloor;
+                return true;
+            }
+
             if (input.AllianceId == 1 &&
                 candidate.Kind == ConstructionCandidateKind.Railroad &&
                 (input.ActiveRailroadStarts > 0 || !candidate.SupportsActiveArmyCorridor))
@@ -99,34 +107,84 @@ namespace WhiskeyRealism.Strategic.Construction
 
             if (input.FiscalPosture == FiscalPosture.CreditDefense &&
                 candidate.Kind == ConstructionCandidateKind.PrivateBuilding &&
-                !candidate.ArmsIndustry)
+                IsDiscretionaryPrivateBuilding(input, options, candidate, nearBondFloor))
             {
                 reason = ConstructionSuppressionReason.DiscretionaryIndustryCreditDefense;
                 return true;
-            }
-
-            if (candidate.Kind == ConstructionCandidateKind.PrivateBuilding &&
-                candidate.ArmsIndustry &&
-                input.FiscalPosture == FiscalPosture.CreditDefense &&
-                input.AllianceId == 1 &&
-                input.CurrentYear <= options.CsaArmsStressLastYear)
-            {
-                reason = ConstructionSuppressionReason.None;
-                return false;
             }
 
             reason = ConstructionSuppressionReason.None;
             return false;
         }
 
-        private static float Score(ConstructionInput input, ConstructionPosture posture, ConstructionCandidate candidate)
+        private static bool IsEmergencyAllowed(
+            ConstructionInput input,
+            ConstructionOptions options,
+            ConstructionCandidate candidate,
+            bool nearBondFloor)
+        {
+            if (candidate.CriticalDefense)
+                return true;
+            if (candidate.Kind == ConstructionCandidateKind.SupplyDepot)
+                return true;
+            if (candidate.Kind == ConstructionCandidateKind.PrivateBuilding && IsMarket(candidate))
+                return true;
+            return IsCsaEarlyArmsSurvival(input, options, candidate, nearBondFloor);
+        }
+
+        private static bool IsDiscretionaryPrivateBuilding(
+            ConstructionInput input,
+            ConstructionOptions options,
+            ConstructionCandidate candidate,
+            bool nearBondFloor)
+        {
+            if (IsBank(candidate) || IsMarket(candidate))
+                return false;
+            return !IsCsaEarlyArmsSurvival(input, options, candidate, nearBondFloor);
+        }
+
+        private static bool IsCsaEarlyArmsSurvival(
+            ConstructionInput input,
+            ConstructionOptions options,
+            ConstructionCandidate candidate,
+            bool nearBondFloor)
+        {
+            return candidate.Kind == ConstructionCandidateKind.PrivateBuilding &&
+                candidate.ArmsIndustry &&
+                input.FiscalPosture == FiscalPosture.CreditDefense &&
+                input.AllianceId == 1 &&
+                input.CurrentYear <= options.CsaArmsStressLastYear &&
+                !nearBondFloor &&
+                candidate.SupportsActiveArmyCorridor;
+        }
+
+        private static bool IsBank(ConstructionCandidate candidate)
+        {
+            return Contains(CandidateName(candidate), "bank");
+        }
+
+        private static bool IsMarket(ConstructionCandidate candidate)
+        {
+            return candidate.BuildingTypeId == 13 || Contains(CandidateName(candidate), "market");
+        }
+
+        private static bool Contains(string value, string fragment)
+        {
+            return value != null && value.ToLowerInvariant().Contains(fragment);
+        }
+
+        private static float Score(
+            ConstructionInput input,
+            ConstructionOptions options,
+            ConstructionPosture posture,
+            ConstructionCandidate candidate)
         {
             float score = 0.25f;
 
             if (candidate.SupportsActiveArmyCorridor)
                 score += 0.2f;
             if (candidate.ArmsIndustry)
-                score += input.AllianceId == 1 && input.CurrentYear <= 1863 ? 0.55f : 0.25f;
+                score += input.AllianceId == 1 && input.CurrentYear <= options.CsaArmsStressLastYear ? 0.55f : 0.25f;
             if (candidate.CriticalDefense)
                 score += 0.3f;
 
@@ -173,22 +231,6 @@ namespace WhiskeyRealism.Strategic.Construction
             if (current.Kind == ConstructionCandidateKind.None || candidate.Score > current.Score)
                 return candidate;
             return current;
-        }
-
-        private static void SuppressAll(
-            ConstructionInput input,
-            List<ConstructionSuppression> suppressions,
-            ConstructionSuppressionReason reason)
-        {
-            foreach (var candidate in input.Candidates)
-            {
-                suppressions.Add(new ConstructionSuppression
-                {
-                    Kind = candidate.Kind,
-                    Name = CandidateName(candidate),
-                    Reason = reason
-                });
-            }
         }
 
         private static string ResolveTopTheater(ConstructionOutput output)
