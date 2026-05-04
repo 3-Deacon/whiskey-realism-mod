@@ -15,11 +15,10 @@ This file is the project memory index for agents and maintainers. It is intentio
 ## Current Checkpoint
 
 - Current release is `v0.2.2`.
-- Current main is post-release Slice A cleanup plus construction steering Slice B and fast-forward diagnostics/throttle.
-- Current deployed DLL SHA-256, if no newer commit has superseded it, is `24bc91a17512f53a4724bcbbd006550b6e8630e1d79d2bbec828c83a8392b243`.
-- Fresh W&L command-selection smoke is required after the latest #22 usable-row retry change.
+- Current main is post-release Slice A cleanup plus construction steering Slice B, fast-forward diagnostics/throttle, campaign-map town/state/fort/harbor awareness, and proportional capital-defense force sizing.
+- Current deployed DLL SHA-256, if no newer commit has superseded it, is `15c3e21be80ff6ae9c37225387287576494d86e0d6824251e3c319ef4277dc9d`.
 - Default-off telegraph AI still needs a focused enabled smoke run.
-- Forts, depots, railroads, tactical brain, W&L hierarchy AI, and additional historical flavor remain deferred.
+- Full non-capital/coastal/patrol defense steering, fort/depot/railroad construction steering, tactical brain, W&L hierarchy AI, and additional historical flavor remain deferred.
 
 ## Load-Bearing Runtime Lessons
 
@@ -28,14 +27,15 @@ This file is the project memory index for agents and maintainers. It is intentio
 - Existing BepInEx config values override C# defaults after first plugin load; changing `Plugin.cs` defaults alone does not update an existing user's config.
 - DLL-affecting changes are not ready until built, deployed, and verified by matching `sha256sum` between `dist/WhiskeyRealism.dll` and the BepInEx plugin DLL.
 - Harmony patches must not mutate strategic mod state. State writes happen through coordinator/weekly/event paths; patches steer vanilla decisions and log bounded evidence.
+- `CampaignMapLedger` is now the active-map source for towns, represented states, forts, sea harbors, and river harbors. Do not reintroduce hardcoded Mississippi/Alabama assumptions for W&L unless the runtime map actually exposes those states.
+- #4 capital-defense add-on should stay proportional: readiness-gated, morale-adjusted, and penalizing gross overmatch for small threats.
 
 ## Current Priorities
 
-1. Smoke-test W&L command selection and time advance after #22 usable-row retry.
-2. Review fresh `BepInEx/LogOutput.log` for `[W&LStartSelection]`, exception, and first-fire markers.
-3. Smoke construction steering Slice B and optional telegraph AI with `Enable Telegraph AI = true` only for a focused test.
-4. Continue construction doctrine only after observer data proves the gap.
-5. Keep tactical and W&L hierarchy AI deferred unless the user explicitly redirects.
+1. Design/implement the full `DefenseIntentLedger` slice for non-capital towns, coastal lands, ports, forts, patrol zones, and vanilla `CheckForDefensiveOperations` steering.
+2. Smoke construction steering Slice B and optional telegraph AI with `Enable Telegraph AI = true` only for a focused test.
+3. Continue fort/depot/railroad construction doctrine only after observer data proves the gap.
+4. Keep tactical and W&L hierarchy AI deferred unless the user explicitly redirects.
 
 ## Update Rules
 

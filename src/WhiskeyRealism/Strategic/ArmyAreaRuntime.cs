@@ -15,7 +15,9 @@ namespace WhiskeyRealism.Strategic
             { "WashingtonDefenses", new Vector3(1350f, 0f, -631f) },
             { "ShenandoahValley", new Vector3(1107f, 0f, -555f) },
             { "MarylandPennsylvaniaCorridor", new Vector3(1195f, 0f, -426f) },
-            { "CoastalCarolinaVirginia", new Vector3(1451f, 0f, -1233f) }
+            { "CoastalCarolinaVirginia", new Vector3(1451f, 0f, -1233f) },
+            { "CarolinaInterior", new Vector3(750f, 0f, -1600f) },
+            { "OhioValley", new Vector3(400f, 0f, -340f) }
         };
 
         internal static ArmyAreaLedger BuildForAlliance(int allianceId, string planTargetAreaKey)
@@ -77,8 +79,8 @@ namespace WhiskeyRealism.Strategic
             if (position.x > 950f && position.x < 1225f && position.z > -760f && position.z < -400f) return "ShenandoahValley";
             if (position.x > 1150f && position.z > -450f) return "MarylandPennsylvaniaCorridor";
             if (position.x > 1050f && position.z < -850f) return "VirginiaCapitalCorridor";
-            if (position.x > 250f && position.z < -250f) return "MississippiRiverCorridor";
-            return "TennesseeGeorgiaCorridor";
+            if (position.z < -1250f) return "CarolinaInterior";
+            return "OhioValley";
         }
 
         internal static bool TryGetAnchor(string areaKey, out Vector3 anchor)

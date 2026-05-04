@@ -7,6 +7,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Theater.cs" Link="Theater.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignMapLedger.cs" Link="CampaignMapLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\TheaterClassifier.cs" Link="TheaterClassifier.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseForceSizer.cs" Link="DefenseForceSizer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FrontSectorLedger.cs" Link="FrontSectorLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaDoctrine.cs" Link="ArmyAreaDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalArmyAreaRegistry.cs" Link="HistoricalArmyAreaRegistry.cs" />

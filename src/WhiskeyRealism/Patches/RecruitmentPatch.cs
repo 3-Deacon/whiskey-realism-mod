@@ -196,37 +196,26 @@ namespace WhiskeyRealism.Patches
 
         private static Theater DefaultRecruitmentTheater(int alliance)
         {
-            return alliance == 1 ? Theater.East : Theater.River;
+            return Theater.East;
         }
 
         private static Theater StateTheater(int stateId)
         {
-            switch (stateId)
+            try
             {
-                case 17: // Maryland
-                case 31: // Pennsylvania
-                case 38: // Virginia
-                case 39: // West Virginia
-                case 46: // District of Columbia
-                    return Theater.East;
-                case 7:  // Florida
-                case 8:  // Georgia
-                case 28: // North Carolina
-                case 33: // South Carolina
-                    return Theater.Coast;
-                case 2:  // Arkansas
-                case 15: // Louisiana
-                case 21: // Mississippi
-                case 22: // Missouri
-                    return Theater.River;
-                case 1:  // Arizona Territory
-                case 10: // Indian Territory
-                case 35: // Texas
-                case 50: // New Mexico Territory
-                    return Theater.TransMiss;
-                default:
-                    return Theater.West;
+                var ledger = StrategicCoordinator.Instance?.CampaignMap;
+                if (ledger != null && ledger.TryGetStateTheater(stateId, out var theater))
+                    return theater;
+
+                if (GameVars.nation != null && stateId >= 0 && stateId < GameVars.nation.Length)
+                {
+                    theater = TheaterClassifier.FromStateName(GameVars.nation[stateId]?.name);
+                    if (theater != Theater.Unknown) return theater;
+                }
             }
+            catch { }
+
+            return Theater.Unknown;
         }
     }
 }

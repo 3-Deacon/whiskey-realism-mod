@@ -33,6 +33,13 @@ static class Program
             ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
             ("union early policy scorer favors legal blockade", UnionEarlyPolicyScorerFavorsLegalBlockade),
             ("csa early policy scorer favors trade and recognition over naval parity", CsaEarlyPolicyScorerFavorsTradeAndRecognition),
+            ("theater classifier maps wl capitals to east", TheaterClassifierMapsWlCapitalsToEast),
+            ("theater classifier uses state names before broad coordinates", TheaterClassifierUsesStateNamesBeforeCoordinates),
+            ("campaign map ledger only maps states represented by towns", CampaignMapLedgerOnlyMapsRepresentedStates),
+            ("campaign map ledger ranks owned capitals for defense", CampaignMapLedgerRanksOwnedCapitalsForDefense),
+            ("campaign map ledger tracks ports and forts", CampaignMapLedgerTracksPortsAndForts),
+            ("defense force sizer avoids oversized army for small threat", DefenseForceSizerAvoidsOversizedArmyForSmallThreat),
+            ("defense force sizer accepts large force for large threat", DefenseForceSizerAcceptsLargeForceForLargeThreat),
             ("objective catalog maps known wl objectives", ObjectiveCatalogMapsKnownWlObjectives),
             ("objective catalog keeps unknown ids unresolved", ObjectiveCatalogKeepsUnknownIdsUnresolved),
             ("recruitment intent prefers supported volunteers", RecruitmentIntentPrefersSupportedVolunteers),
@@ -535,6 +542,189 @@ static class Program
         AssertEqual(Theater.West, saltville.Theater);
         AssertEqual(Category.SupplyHub, saltville.Category);
         AssertTrue(saltville.HasTag(StrategyTag.RailHub), "Saltville should carry supply/rail pressure");
+    }
+
+    private static void TheaterClassifierMapsWlCapitalsToEast()
+    {
+        AssertEqual(Theater.East, TheaterClassifier.FromPosition(1263f, -1010f));
+        AssertEqual(Theater.East, TheaterClassifier.FromPosition(1350f, -631f));
+    }
+
+    private static void TheaterClassifierUsesStateNamesBeforeCoordinates()
+    {
+        AssertEqual(Theater.East, TheaterClassifier.FromStateNameOrPosition("Virginia", 1263f, -1010f));
+        AssertEqual(Theater.Coast, TheaterClassifier.FromStateNameOrPosition("North Carolina", 998f, -1492f));
+        AssertEqual(Theater.Unknown, TheaterClassifier.FromStateName("Mississippi"));
+        AssertEqual(Theater.Unknown, TheaterClassifier.FromStateName("Alabama"));
+    }
+
+    private static void CampaignMapLedgerOnlyMapsRepresentedStates()
+    {
+        var ledger = CampaignMapLedger.Build(new[]
+        {
+            new CampaignMapTown
+            {
+                CityName = "Richmond",
+                StateId = 38,
+                StateName = "Virginia",
+                Owner = 1,
+                OriginalOwner = 1,
+                IsCapital = true,
+                X = 1263f,
+                Z = -1010f,
+                CitySize = 0.69f,
+                RepresentingPopulation = 112919f
+            },
+            new CampaignMapTown
+            {
+                CityName = "Columbus",
+                StateId = 29,
+                StateName = "Ohio",
+                Owner = 0,
+                OriginalOwner = 0,
+                X = 55f,
+                Z = -340f,
+                CitySize = 0.58f,
+                RepresentingPopulation = 50000f
+            }
+        });
+
+        AssertEqual(Theater.East, ledger.GetStateTheaterOrUnknown(38));
+        AssertEqual(Theater.West, ledger.GetStateTheaterOrUnknown(29));
+        AssertEqual(Theater.Unknown, ledger.GetStateTheaterOrUnknown(21));
+    }
+
+    private static void CampaignMapLedgerRanksOwnedCapitalsForDefense()
+    {
+        var ledger = CampaignMapLedger.Build(new[]
+        {
+            new CampaignMapTown
+            {
+                CityName = "Richmond",
+                StateId = 38,
+                StateName = "Virginia",
+                Owner = 1,
+                OriginalOwner = 1,
+                IsCapital = true,
+                X = 1263f,
+                Z = -1010f,
+                CitySize = 0.69f,
+                RepresentingPopulation = 112919f
+            },
+            new CampaignMapTown
+            {
+                CityName = "Norfolk",
+                StateId = 38,
+                StateName = "Virginia",
+                Owner = 1,
+                OriginalOwner = 1,
+                X = 1515f,
+                Z = -1199f,
+                CitySize = 0.55f,
+                RepresentingPopulation = 112919f
+            }
+        });
+
+        AssertEqual("Richmond", ledger.BestDefenseTown(1).CityName);
+        AssertTrue(ledger.TryGetTown("Norfolk", out var norfolk), "expected Norfolk in map ledger");
+        AssertTrue((norfolk.Roles & CampaignTownRole.MajorCity) != 0, "Norfolk should be tagged as major city");
+    }
+
+    private static void CampaignMapLedgerTracksPortsAndForts()
+    {
+        var ledger = CampaignMapLedger.Build(
+            new[]
+            {
+                new CampaignMapTown
+                {
+                    CityName = "Richmond",
+                    StateId = 38,
+                    StateName = "Virginia",
+                    Owner = 1,
+                    OriginalOwner = 1,
+                    IsCapital = true,
+                    X = 1263f,
+                    Z = -1010f
+                }
+            },
+            new[]
+            {
+                new CampaignMapAsset
+                {
+                    Kind = CampaignMapAssetKind.SeaHarbor,
+                    Name = "Norfolk",
+                    StateId = 38,
+                    StateName = "Virginia",
+                    Owner = 1,
+                    X = 1515f,
+                    Z = -1199f,
+                    Capacity = 100f
+                },
+                new CampaignMapAsset
+                {
+                    Kind = CampaignMapAssetKind.Fort,
+                    Name = "Fort Monroe",
+                    StateId = 38,
+                    StateName = "Virginia",
+                    Owner = 0,
+                    X = 1550f,
+                    Z = -1220f,
+                    Level = 2
+                }
+            });
+
+        AssertEqual(2, ledger.Assets.Count);
+        AssertEqual(CampaignMapAssetKind.SeaHarbor, ledger.Assets[0].Kind);
+        AssertEqual(Theater.East, ledger.Assets[1].Theater);
+        AssertTrue(ledger.Summary().Contains("forts=1"), "summary should include fort count");
+    }
+
+    private static void DefenseForceSizerAvoidsOversizedArmyForSmallThreat()
+    {
+        float division = DefenseForceSizer.ScoreCandidate(
+            activeStrength: 6000f,
+            morale: 0.9f,
+            readinessStep: 2f,
+            distance: 220f,
+            desiredStrength: 4500f,
+            inOffensiveOperation: false,
+            caution: 0.2f,
+            aggression: 0f);
+        float army = DefenseForceSizer.ScoreCandidate(
+            activeStrength: 22000f,
+            morale: 0.9f,
+            readinessStep: 2f,
+            distance: 80f,
+            desiredStrength: 4500f,
+            inOffensiveOperation: false,
+            caution: 0.2f,
+            aggression: 0f);
+
+        AssertTrue(division < army, "smaller sufficient force should beat nearby oversized army");
+    }
+
+    private static void DefenseForceSizerAcceptsLargeForceForLargeThreat()
+    {
+        float division = DefenseForceSizer.ScoreCandidate(
+            activeStrength: 6000f,
+            morale: 0.9f,
+            readinessStep: 2f,
+            distance: 140f,
+            desiredStrength: 18000f,
+            inOffensiveOperation: false,
+            caution: 0.2f,
+            aggression: 0f);
+        float army = DefenseForceSizer.ScoreCandidate(
+            activeStrength: 22000f,
+            morale: 0.9f,
+            readinessStep: 2f,
+            distance: 160f,
+            desiredStrength: 18000f,
+            inOffensiveOperation: false,
+            caution: 0.2f,
+            aggression: 0f);
+
+        AssertTrue(army < division, "large threat should allow the larger force");
     }
 
     private static void ObjectiveCatalogKeepsUnknownIdsUnresolved()

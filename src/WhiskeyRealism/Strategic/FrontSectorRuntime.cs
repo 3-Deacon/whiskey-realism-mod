@@ -202,11 +202,7 @@ namespace WhiskeyRealism.Strategic
 
         private static Theater TheaterFromPosition(Vector3 position)
         {
-            if (position.x < -200f) return Theater.TransMiss;
-            if (position.x > 800f && position.z < -100f) return Theater.Coast;
-            if (position.x > 600f) return Theater.East;
-            if (position.x > 250f && position.z < -250f) return Theater.River;
-            return Theater.West;
+            return CampaignMapTheaterRuntime.FromPosition(position);
         }
 
         private static string SectorKey(Theater theater)

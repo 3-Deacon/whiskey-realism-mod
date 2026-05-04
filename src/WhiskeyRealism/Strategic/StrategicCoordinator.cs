@@ -23,6 +23,7 @@ namespace WhiskeyRealism.Strategic
         public FiscalOutput[] FiscalIntents = new FiscalOutput[2];
         public ConstructionOutput[] ConstructionIntents = new ConstructionOutput[2];
         public ConstructionTelemetry ConstructionTelemetry = new ConstructionTelemetry();
+        public CampaignMapLedger CampaignMap = CampaignMapLedger.Build(null);
         internal SuccessionScheduler Succession = new SuccessionScheduler();
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
@@ -36,6 +37,7 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _formationDirectiveSignatures = new string[2];
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly string[] _constructionSignatures = new string[2];
+        private string _campaignMapSignature;
         private readonly WeeklyCadence _operationalCadence = new WeeklyCadence();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
@@ -205,6 +207,9 @@ namespace WhiskeyRealism.Strategic
                 Plugin.Log.LogInfo("[Coordinator] operational ledgers deferred until AICampaign factions initialize");
             }
 
+            if (operationalRuntimeReady)
+                UpdateCampaignMapLedger(logHeartbeat);
+
             for (int alliance = 0; alliance < 2; alliance++)
             {
                 if (IsPlayerCICOf(alliance, playerAlliance))
@@ -253,6 +258,28 @@ namespace WhiskeyRealism.Strategic
                         $"plan={(cic.ActivePlan == null ? "<none>" : $"phase{cic.ActivePlan.CurrentPhaseIndex + 1}/{cic.ActivePlan.Phases.Count} obj={cic.ActivePlan.CurrentPhase?.TargetObjectiveId}")} " +
                         $"succession_fired={Succession.FiredEventIds.Count}");
                 }
+            }
+        }
+
+        private void UpdateCampaignMapLedger(bool logHeartbeat)
+        {
+            try
+            {
+                var ledger = CampaignMapRuntime.Build();
+                CampaignMap = ledger;
+                if (ledger.Signature != _campaignMapSignature)
+                {
+                    Plugin.Log.LogInfo("[CampaignMap] " + ledger.Summary());
+                    _campaignMapSignature = ledger.Signature;
+                }
+                else if (logHeartbeat && Plugin.Instance != null && Plugin.Instance.VerboseLogging.Value)
+                {
+                    Plugin.Log.LogInfo("[CampaignMap] " + ledger.Summary());
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("campaign-map:update", "[CampaignMap] update failed: " + ex.Message);
             }
         }
 

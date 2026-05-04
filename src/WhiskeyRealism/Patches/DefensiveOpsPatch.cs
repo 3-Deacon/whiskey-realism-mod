@@ -41,13 +41,14 @@ namespace WhiskeyRealism.Patches
                 if (faction == null) return;
 
                 if (!TryResolveCapital(allianceId, out var capitalPosition, out var capitalName)) return;
+                var capitalTown = ResolveMapTown(capitalName);
 
                 var ownUnits = ReadList(faction, "ownunits", "defensiveops:field:ownunits");
                 var enemyUnits = ReadList(faction, "enemyunits", "defensiveops:field:enemyunits");
                 var capitalDefenders = ReadList(faction, "groupstodefendcapital", "defensiveops:field:capitaldefenders");
                 if (ownUnits == null || enemyUnits == null || capitalDefenders == null) return;
 
-                float required = CalculateRequiredDefense(ownUnits, enemyUnits, capitalDefenders, capitalPosition, personality);
+                float required = CalculateRequiredDefense(ownUnits, enemyUnits, capitalDefenders, capitalPosition, personality, capitalTown);
                 if (required <= 0f) return;
 
                 var candidate = FindCandidate(
@@ -58,6 +59,7 @@ namespace WhiskeyRealism.Patches
                     ReadList(faction, "unitsinoffensiveoperations", "defensiveops:field:offensiveops"),
                     ReadList(faction, "unitsconstructingsupplydepots", "defensiveops:field:supplyops"),
                     capitalPosition,
+                    required,
                     personality);
                 if (candidate == null) return;
 
@@ -122,16 +124,31 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        private static CampaignMapTown ResolveMapTown(string cityName)
+        {
+            try
+            {
+                var ledger = StrategicCoordinator.Instance?.CampaignMap;
+                if (ledger != null && ledger.TryGetTown(cityName, out var town))
+                    return town;
+            }
+            catch { }
+            return null;
+        }
+
         private static float CalculateRequiredDefense(
             IList ownUnits,
             IList enemyUnits,
             IList capitalDefenders,
             Vector3 capitalPosition,
-            PersonalityVector personality)
+            PersonalityVector personality,
+            CampaignMapTown capitalTown)
         {
             float closestEnemyDistance = 9999f;
             float searchRadius = GamePrefs.aimaximumdistancetosearchforunitrelocations * SearchRadiusMultiplier(personality);
-            float required = GamePrefs.aiminimumstrengthformovement * StrengthGateMultiplier(personality);
+            float required = GamePrefs.aiminimumstrengthformovement *
+                StrengthGateMultiplier(personality) *
+                CapitalValueMultiplier(capitalTown);
 
             for (int i = 0; i < enemyUnits.Count; i++)
             {
@@ -164,6 +181,18 @@ namespace WhiskeyRealism.Patches
             return required;
         }
 
+        private static float CapitalValueMultiplier(CampaignMapTown capitalTown)
+        {
+            if (capitalTown == null) return 1f;
+
+            float multiplier = 1f;
+            if ((capitalTown.Roles & CampaignTownRole.MajorCity) != 0) multiplier += 0.08f;
+            if ((capitalTown.Roles & CampaignTownRole.Workforce) != 0) multiplier += 0.04f;
+            if ((capitalTown.Roles & CampaignTownRole.Economic) != 0) multiplier += 0.04f;
+            multiplier += Mathf.Clamp01(capitalTown.CitySize) * 0.08f;
+            return Clamp(multiplier, 1f, 1.25f);
+        }
+
         private static Regiment FindCandidate(
             int aifactionIndex,
             IList ownUnits,
@@ -172,10 +201,12 @@ namespace WhiskeyRealism.Patches
             IList offensiveOps,
             IList supplyOps,
             Vector3 capitalPosition,
+            float requiredStrength,
             PersonalityVector personality)
         {
             float maxDistance = GamePrefs.maxdistancedefensiveoperations * SearchRadiusMultiplier(personality);
-            float bestDistance = float.MaxValue;
+            float desiredStrength = Math.Max(GamePrefs.aiminimumstrengthformovement, requiredStrength);
+            float bestScore = float.MaxValue;
             Regiment best = null;
 
             for (int i = 0; i < ownUnits.Count; i++)
@@ -184,13 +215,20 @@ namespace WhiskeyRealism.Patches
                 if (!EligibleForCapitalDefense(aifactionIndex, unit, capitalDefenders, defensiveOps, supplyOps, capitalPosition, maxDistance)) continue;
 
                 float distance = Tools.GetXZDistance(((Component)unit).transform.position, capitalPosition);
-                float score = distance - (float)unit.groupstrengthactive * 0.01f * Math.Max(0f, personality.Caution);
-                if (offensiveOps != null && offensiveOps.Contains(unit))
-                    score += 75f * (1f + Math.Max(0f, personality.Aggression));
+                float readiness = ReadinessStep(unit);
+                float score = DefenseForceSizer.ScoreCandidate(
+                    unit.groupstrengthactive,
+                    unit.groupmorale,
+                    readiness,
+                    distance,
+                    desiredStrength,
+                    offensiveOps != null && offensiveOps.Contains(unit),
+                    personality.Caution,
+                    personality.Aggression);
 
-                if (score < bestDistance)
+                if (score < bestScore)
                 {
-                    bestDistance = score;
+                    bestScore = score;
                     best = unit;
                 }
             }
@@ -212,6 +250,7 @@ namespace WhiskeyRealism.Patches
             if (Tools.GetXZDistance(((Component)unit).transform.position, capitalPosition) >= maxDistance) return false;
             if ((float)unit.groupstrength < GamePrefs.aiminimumstrengthformovement) return false;
             if (unit.groupmorale <= GamePrefs.aiminimummoraleformovement) return false;
+            if (ReadinessStep(unit) < 1f) return false;
             if (unit.onretreat || unit.inbattle) return false;
             if (supplyOps != null && supplyOps.Contains(unit)) return false;
             if (UnitAlreadyConstructing(unit)) return false;
@@ -229,6 +268,12 @@ namespace WhiskeyRealism.Patches
             }
 
             return true;
+        }
+
+        private static float ReadinessStep(Regiment unit)
+        {
+            try { return CampaignArmyPanel.GetReadinessStep(unit); }
+            catch { return 2f; }
         }
 
         private static bool UnitAlreadyConstructing(Regiment unit)
