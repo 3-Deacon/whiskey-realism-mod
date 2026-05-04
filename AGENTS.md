@@ -17,7 +17,7 @@
 > - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
 > - **Parallel sessions are normal.** Another agent may be working concurrently — run `git log --oneline -10` and `git status` before committing to detect parallel work.
 
-> **Current release:** v0.2.1.1. **Main current:** v0.2.2 enrichment implemented through #17 plus formation-directive ledger/#15/#16 division awareness, pushed to `origin/main`, built, deployed, and smoke-confirmed (`dist`/BepInEx SHA-256 `14e4ef9d0cb2ff342c34daf26de775dbad65e3cf8496b5e2b5e5edf4fc8d2a39`). Task 7 offensive safety Prefix is intentionally deferred until the directive ledger has more runtime soak.
+> **Current release:** v0.2.1.1. **Main current:** v0.2.2 enrichment implemented through #22, pushed to `origin/main`, built, deployed, and smoke-confirmed for the latest lag/startup fixes (`dist`/BepInEx SHA-256 `51a4713a1c1c743d47e86056cce6b91f2d37151f37741baa2e9d008ac092d668`). Current main includes fiscal economy AI, recruitment state steering, policy/naval grand-strategy timing, default-on fast-forward catch-up, hot-path reflection caching for startup/menu lag, and W&L command-selection prompt retry. Task 7 offensive safety Prefix remains intentionally deferred until the directive ledger has more runtime soak.
 
 ---
 
