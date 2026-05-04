@@ -1,7 +1,7 @@
 # Grand Strategy and Research Tree Design
 
 Date: 2026-05-03
-Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering is live locally through #16; objective tags, policy steering, project steering, recruitment intent, and naval intent remain design work.
+Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering and grand-strategy objective/project steering are live locally through #17; policy steering, recruitment intent, and naval intent beyond project choice remain design work.
 Scope: Slice A enrichment only. This is strategic-layer input to CIC planning, policy selection, and project selection. It does not open Slice B tactical behavior.
 
 ## Why this exists

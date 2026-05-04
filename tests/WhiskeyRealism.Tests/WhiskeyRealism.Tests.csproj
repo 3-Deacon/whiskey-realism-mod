@@ -13,5 +13,15 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaLedger.cs" Link="ArmyAreaLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WeeklyCadence.cs" Link="WeeklyCadence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersonalityVector.cs" Link="PersonalityVector.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\FactionProfiles.cs" Link="FactionProfiles.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\EraStage.cs" Link="EraStage.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategyTag.cs" Link="StrategyTag.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\GrandStrategyProfile.cs" Link="GrandStrategyProfile.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\GrandStrategyRegistry.cs" Link="GrandStrategyRegistry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveMetadata.cs" Link="ObjectiveMetadata.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveStrategyTagger.cs" Link="ObjectiveStrategyTagger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveScoring.cs" Link="ObjectiveScoring.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ProjectSelectionScorer.cs" Link="ProjectSelectionScorer.cs" />
   </ItemGroup>
 </Project>

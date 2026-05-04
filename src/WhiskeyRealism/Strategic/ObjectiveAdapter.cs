@@ -80,7 +80,8 @@ namespace WhiskeyRealism.Strategic
 
                 var cx = sumX / count;
                 var cy = sumY / count;
-                return ObjectiveMetadata.DefaultDerived(BucketTheaterFromWorldXY(cx, cy), cx, cy);
+                return ObjectiveStrategyTagger.ApplyDefaultTags(
+                    ObjectiveMetadata.DefaultDerived(BucketTheaterFromWorldXY(cx, cy), cx, cy));
             }
             catch (Exception ex)
             {

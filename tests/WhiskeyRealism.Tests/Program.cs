@@ -18,7 +18,13 @@ static class Program
             ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy),
             ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
-            ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference)
+            ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
+            ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
+            ("csa early profile favors capital defense and foreign recognition", CsaEarlyProfileFavorsDefenseAndForeignRecognition),
+            ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
+            ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
+            ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
+            ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot)
         };
 
         foreach (var test in tests)
@@ -231,6 +237,106 @@ static class Program
 
         AssertEqual("Lee", preference.PreferredLastNames[0]);
         AssertTrue(preference.PreferredLastNames.Contains("Johnston"), "expected Johnston fallback");
+    }
+
+    private static void UnionEarlyProfileFavorsBlockadeAndRiver()
+    {
+        var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
+
+        AssertEqual("Union Early Anaconda", profile.Name);
+        AssertTrue(profile.WeightFor(StrategyTag.Blockade) > profile.WeightFor(StrategyTag.CapitalDefense),
+            "Union early should prioritize blockade over capital defense");
+        AssertTrue(profile.WeightFor(StrategyTag.RiverControl) > 0.9f,
+            "Union early should strongly weight river control");
+    }
+
+    private static void CsaEarlyProfileFavorsDefenseAndForeignRecognition()
+    {
+        var profile = GrandStrategyRegistry.Resolve(1, EraStage.Amateur1861);
+
+        AssertEqual("CSA Early Cordon", profile.Name);
+        AssertTrue(profile.WeightFor(StrategyTag.CapitalDefense) > profile.WeightFor(StrategyTag.Blockade),
+            "CSA early should prioritize capital defense over blockade");
+        AssertTrue(profile.WeightFor(StrategyTag.ForeignRecognition) > 0.9f,
+            "CSA early should strongly weight foreign recognition");
+    }
+
+    private static void GrandStrategyTagsAffectObjectiveScore()
+    {
+        var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
+        var p = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+
+        var blockade = ObjectiveMetadata.DefaultDerived(Theater.Coast, 900f, -200f)
+            .WithTag(StrategyTag.Blockade)
+            .WithTag(StrategyTag.PortAccess);
+        var capital = ObjectiveMetadata.DefaultDerived(Theater.East, 700f, 100f)
+            .WithTag(StrategyTag.CapitalDefense);
+
+        AssertTrue(
+            ObjectiveScoring.Score(0, p, profile, blockade) > ObjectiveScoring.Score(0, p, profile, capital),
+            "Union early strategy tags should lift blockade objectives above capital defense");
+
+        var tagged = ObjectiveStrategyTagger.ApplyDefaultTags(
+            ObjectiveMetadata.DefaultDerived(Theater.Coast, 900f, -200f));
+
+        AssertTrue(tagged.HasTag(StrategyTag.Blockade), "expected coast fallback to add Blockade");
+        AssertTrue(tagged.HasTag(StrategyTag.PortAccess), "expected coast fallback to add PortAccess");
+    }
+
+    private static void ProjectScorerReplacesWeakCandidate()
+    {
+        var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
+        var candidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 41, SubsidyType = 5, VanillaWeight = 0.2f },
+            new ProjectCandidateInput { ProjectId = 96, SubsidyType = 5, VanillaWeight = 0.6f }
+        };
+
+        var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: 96, vanillaWeight: 0.6f, candidates);
+
+        AssertEqual(true, decision.ShouldReplace);
+        AssertEqual(41, decision.ProjectId);
+        AssertEqual("strategy-margin", decision.Reason);
+    }
+
+    private static void ProjectScorerKeepsCloseCandidate()
+    {
+        var profile = GrandStrategyRegistry.Resolve(1, EraStage.Amateur1861);
+        var candidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 1, SubsidyType = 5, VanillaWeight = 1.0f },
+            new ProjectCandidateInput { ProjectId = 6, SubsidyType = 5, VanillaWeight = 0.9f }
+        };
+
+        var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: 1, vanillaWeight: 1.0f, candidates);
+
+        AssertEqual(false, decision.ShouldReplace);
+        AssertEqual(1, decision.ProjectId);
+    }
+
+    private static void ProjectScorerRequiresMarginForEmptyVanillaSlot()
+    {
+        var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
+        var candidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 96, SubsidyType = 5, VanillaWeight = 0.1f }
+        };
+
+        var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: -1, vanillaWeight: 0f, candidates);
+
+        AssertEqual(false, decision.ShouldReplace);
+        AssertEqual(-1, decision.ProjectId);
+
+        var strongCandidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 41, SubsidyType = 5, VanillaWeight = 0.2f }
+        };
+
+        var strongDecision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: -1, vanillaWeight: 0f, strongCandidates);
+
+        AssertEqual(true, strongDecision.ShouldReplace);
+        AssertEqual(41, strongDecision.ProjectId);
+        AssertEqual("vanilla-empty-strategy-margin", strongDecision.Reason);
     }
 
     private static void AssertEqual<T>(T expected, T actual)

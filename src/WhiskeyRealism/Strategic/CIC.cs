@@ -67,12 +67,13 @@ namespace WhiskeyRealism.Strategic
             }
 
             var p = Effective(era);
+            var strategy = GrandStrategyRegistry.Resolve(AllianceId, era.Stage);
             var scored = new List<(object obj, float score, ObjectiveMetadata meta)>();
 
             foreach (var obj in availableObjectives)
             {
                 var meta = ObjectiveAdapter.Resolve(obj);
-                float score = ScoreObjective(p, meta);
+                float score = ScoreObjective(p, strategy, meta);
                 scored.Add((obj, score, meta));
             }
 
@@ -81,7 +82,7 @@ namespace WhiskeyRealism.Strategic
 
             var picked = WeightedPick(top3);
 
-            ActivePlan = BuildPlan(picked.obj, picked.meta, p, currentMonth, currentYear);
+            ActivePlan = BuildPlan(picked.obj, picked.meta, p, strategy, currentMonth, currentYear);
 
             if (ActivePlan != null && Plugin.Instance.PlanTrace.Value)
             {
@@ -91,19 +92,9 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private float ScoreObjective(PersonalityVector p, ObjectiveMetadata meta)
+        private float ScoreObjective(PersonalityVector p, GrandStrategyProfile strategy, ObjectiveMetadata meta)
         {
-            float theaterPref = FactionProfiles.TheaterPreferenceFor(AllianceId, meta.Theater);
-            float foreignWeight = FactionProfiles.ForeignRecognitionWeightFor(AllianceId);
-            float forceRatioTerm = 0.5f;
-            float distanceTerm   = 0f;
-
-            return theaterPref
-                 + meta.SupplyReachWeight        * 1.0f
-                 + meta.ForeignRecognitionWeight * foreignWeight
-                 + meta.AttritionWeight          * p.CasualtyTolerance
-                 + forceRatioTerm                * (1f - p.Caution)
-                 - distanceTerm                  * (1f - p.Audacity);
+            return ObjectiveScoring.Score(AllianceId, p, strategy, meta);
         }
 
         private (object obj, float score, ObjectiveMetadata meta) WeightedPick(
@@ -127,6 +118,7 @@ namespace WhiskeyRealism.Strategic
         }
 
         private OperationalPlan BuildPlan(object pickedObjective, ObjectiveMetadata meta, PersonalityVector p,
+                                           GrandStrategyProfile strategy,
                                            int currentMonth, int currentYear)
         {
             int objId = GetObjectiveId(pickedObjective);
@@ -147,7 +139,7 @@ namespace WhiskeyRealism.Strategic
                 CurrentPhaseIndex    = 0,
                 PlanDeadlineMonth    = deadline.month,
                 PlanDeadlineYear     = deadline.year,
-                Rationale            = $"theater={meta.Theater} category={meta.Category} forceFrac={forceFraction:F2}",
+                Rationale            = $"strategy={strategy.Name} theater={meta.Theater} category={meta.Category} forceFrac={forceFraction:F2}",
                 IsDirty              = false
             };
 
