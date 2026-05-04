@@ -97,6 +97,7 @@ namespace WhiskeyRealism.Strategic.Construction
     public struct ConstructionSuppression
     {
         public ConstructionCandidateKind Kind;
+        public int BuildingTypeId;
         public string Name;
         public ConstructionSuppressionReason Reason;
     }

@@ -16,17 +16,20 @@ namespace WhiskeyRealism.Strategic.Construction
             string buildingName,
             float fiscalMultiplier)
         {
+            fiscalMultiplier = FiniteOrDefault(fiscalMultiplier, 1f);
+
             if (output == null)
                 return Decision(Clamp(fiscalMultiplier, 0.1f, 3f), "fiscal-only");
 
-            var suppressed = SuppressionFor(output, buildingName);
+            var suppressed = SuppressionFor(output, buildingTypeId, buildingName);
             if (suppressed.HasValue)
                 return Decision(0.1f, "suppressed:" + suppressed.Value);
 
             if (output.TopPrivateBuilding.Kind == ConstructionCandidateKind.PrivateBuilding &&
                 output.TopPrivateBuilding.BuildingTypeId == buildingTypeId)
             {
-                float scoreBoost = Clamp(1f + Math.Max(0f, output.TopPrivateBuilding.Score), 1.25f, 2.5f);
+                float topScore = FiniteOrDefault(output.TopPrivateBuilding.Score, 0f);
+                float scoreBoost = Clamp(1f + Math.Max(0f, topScore), 1.25f, 2.5f);
                 return Decision(Clamp(fiscalMultiplier * scoreBoost, 0.1f, 3f), "ledger-top-private");
             }
 
@@ -39,15 +42,20 @@ namespace WhiskeyRealism.Strategic.Construction
             return Decision(Clamp(fiscalMultiplier, 0.1f, 3f), "fiscal-ledger-neutral");
         }
 
-        private static ConstructionSuppressionReason? SuppressionFor(ConstructionOutput output, string buildingName)
+        private static ConstructionSuppressionReason? SuppressionFor(ConstructionOutput output, int buildingTypeId, string buildingName)
         {
             if (output.Suppressions == null) return null;
             string wanted = Normalize(buildingName);
             for (int i = 0; i < output.Suppressions.Length; i++)
             {
                 var suppression = output.Suppressions[i];
-                if (suppression.Kind == ConstructionCandidateKind.PrivateBuilding &&
-                    Normalize(suppression.Name) == wanted)
+                if (suppression.Kind != ConstructionCandidateKind.PrivateBuilding)
+                    continue;
+
+                if (suppression.BuildingTypeId != 0 && suppression.BuildingTypeId == buildingTypeId)
+                    return suppression.Reason;
+
+                if (suppression.BuildingTypeId == 0 && Normalize(suppression.Name) == wanted)
                     return suppression.Reason;
             }
             return null;
@@ -58,8 +66,12 @@ namespace WhiskeyRealism.Strategic.Construction
             string normalized = Normalize(buildingName);
             return buildingTypeId == 13 ||
                 normalized.Contains("market") ||
-                normalized.Contains("hospital") ||
-                normalized.Contains("bank");
+                normalized.Contains("hospital");
+        }
+
+        private static float FiniteOrDefault(float value, float fallback)
+        {
+            return float.IsNaN(value) || float.IsInfinity(value) ? fallback : value;
         }
 
         private static string Normalize(string value)
@@ -78,6 +90,9 @@ namespace WhiskeyRealism.Strategic.Construction
 
         private static float Clamp(float value, float min, float max)
         {
+            if (float.IsNaN(value)) return min;
+            if (float.IsNegativeInfinity(value)) return min;
+            if (float.IsPositiveInfinity(value)) return max;
             if (value < min) return min;
             if (value > max) return max;
             return value;
