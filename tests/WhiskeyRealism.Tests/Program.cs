@@ -67,7 +67,12 @@ static class Program
             ("fast forward scheduler disables cleanly", FastForwardSchedulerDisablesCleanly),
             ("fast forward scheduler stops when frame budget is spent", FastForwardSchedulerStopsWhenFrameBudgetIsSpent),
             ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples),
-            ("historical hard difficulty adds casualty tolerance only", HistoricalHardDifficultyAddsCasualtyToleranceOnly)
+            ("historical hard difficulty adds casualty tolerance only", HistoricalHardDifficultyAddsCasualtyToleranceOnly),
+            ("perk scorer favors siege armies for fort pressure", PerkScorerFavorsSiegeArmiesForFortPressure),
+            ("perk scorer favors raid armies for irregular pressure", PerkScorerFavorsRaidArmiesForIrregularPressure),
+            ("perk scorer favors union blockade fleets", PerkScorerFavorsUnionBlockadeFleets),
+            ("perk scorer favors csa raiding fleets", PerkScorerFavorsCsaRaidingFleets),
+            ("perk scorer skips unavailable candidates", PerkScorerSkipsUnavailableCandidates)
         };
 
         foreach (var test in tests)
@@ -1119,6 +1124,69 @@ static class Program
         AssertEqual(false, gate.ShouldLog(repeat));
         AssertEqual(true, gate.ShouldLog(changed));
         AssertEqual(false, gate.ShouldLog(first));
+    }
+
+    private static void PerkScorerFavorsSiegeArmiesForFortPressure()
+    {
+        int selected = PerkSelectionScorer.SelectArmyPerk(
+            allianceId: 0,
+            theater: Theater.East,
+            role: ArmyPerkRole.Siege,
+            personality: new PersonalityVector(0.1f, 0.2f, 0f, 0f, 0f),
+            availablePerks: new[] { 1, 5, 10, 12 });
+
+        AssertEqual(10, selected);
+    }
+
+    private static void PerkScorerFavorsRaidArmiesForIrregularPressure()
+    {
+        int selected = PerkSelectionScorer.SelectArmyPerk(
+            allianceId: 1,
+            theater: Theater.West,
+            role: ArmyPerkRole.Raid,
+            personality: new PersonalityVector(0.5f, -0.2f, 0.7f, 0.1f, -0.4f),
+            availablePerks: new[] { 3, 5, 12, 13 });
+
+        AssertEqual(12, selected);
+    }
+
+    private static void PerkScorerFavorsUnionBlockadeFleets()
+    {
+        int selected = PerkSelectionScorer.SelectFleetPerk(
+            allianceId: 0,
+            role: FleetPerkRole.Blockade,
+            availablePerks: new[] { 0, 2, 5, 8 });
+
+        AssertEqual(5, selected);
+    }
+
+    private static void PerkScorerFavorsCsaRaidingFleets()
+    {
+        int selected = PerkSelectionScorer.SelectFleetPerk(
+            allianceId: 1,
+            role: FleetPerkRole.Raid,
+            availablePerks: new[] { 1, 5, 6, 8, 10 });
+
+        AssertEqual(6, selected);
+    }
+
+    private static void PerkScorerSkipsUnavailableCandidates()
+    {
+        int selected = PerkSelectionScorer.SelectArmyPerk(
+            allianceId: 0,
+            theater: Theater.River,
+            role: ArmyPerkRole.River,
+            personality: default(PersonalityVector),
+            availablePerks: new[] { 1, 3 });
+
+        AssertEqual(3, selected);
+
+        int none = PerkSelectionScorer.SelectFleetPerk(
+            allianceId: 0,
+            role: FleetPerkRole.Blockade,
+            availablePerks: Array.Empty<int>());
+
+        AssertEqual(-1, none);
     }
 
     private static void AssertEqual<T>(T expected, T actual)

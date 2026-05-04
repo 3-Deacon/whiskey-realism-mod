@@ -17,7 +17,7 @@
 > - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
 > - **Parallel sessions are normal.** Another agent may be working concurrently — run `git log --oneline -10` and `git status` before committing to detect parallel work.
 
-> **Current release:** v0.2.2. **Main current:** post-release main adds locked-Hard casualty-tolerance integration on top of v0.2.2, built and deployed (`dist`/BepInEx SHA-256 `552f2319d396dd95f97b65c82c3b80f4c1f3c594e3ded7b0a3316fd48d0b24cc`). Current main includes fiscal economy AI, recruitment state steering, policy/naval grand-strategy timing, default-on fast-forward catch-up, hot-path reflection caching for startup/menu lag, W&L command-selection prompt retry, and historical-Hard casualty tolerance routed into `CIC.Effective`. Task 7 offensive safety Prefix remains intentionally deferred until the directive ledger has more runtime soak.
+> **Current release:** v0.2.2. **Main current:** post-release main adds locked-Hard casualty-tolerance integration and #7 role-aware campaign perk steering on top of v0.2.2, built and deployed (`dist`/BepInEx SHA-256 `5852e56aaa613aa636767fb96d75546f3ef4ee8ed1b99c016aff2a16483ec29b`). Current main includes fiscal economy AI, recruitment state steering, policy/naval grand-strategy timing, default-on fast-forward catch-up, hot-path reflection caching for startup/menu lag, W&L command-selection prompt retry, historical-Hard casualty tolerance routed into `CIC.Effective`, and campaign army/fleet perk scoring. Task 7 offensive safety Prefix remains intentionally deferred until the directive ledger has more runtime soak.
 
 ---
 
