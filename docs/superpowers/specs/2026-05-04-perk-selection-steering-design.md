@@ -27,3 +27,7 @@ The patch must not run for disabled plugin state, player-CIC factions, invalid A
 - Console tests prove Union fleet scoring prefers blockade, CSA fleet scoring prefers raiding/blockade-running, siege-role army scoring prefers siege/sapper perks, raid-role army scoring prefers raid perks, and unavailable/duplicate candidates are skipped.
 - `./build.sh` succeeds.
 - Deployed DLL hash matches `dist/WhiskeyRealism.dll`.
+
+## Result
+
+Implemented on `main` in commit `2ccc743`. Console tests and `./build.sh` passed. `dist/WhiskeyRealism.dll` and the deployed BepInEx plugin DLL matched SHA-256 `5852e56aaa613aa636767fb96d75546f3ef4ee8ed1b99c016aff2a16483ec29b`. Runtime first-fire smoke is still pending.

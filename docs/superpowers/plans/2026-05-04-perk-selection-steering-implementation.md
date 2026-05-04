@@ -17,10 +17,10 @@
 - Modify: `tests/WhiskeyRealism.Tests/Program.cs`
 - Modify: `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`
 
-- [ ] Add failing tests for army siege, army raid, Union fleet blockade, CSA fleet raiding, and unavailable candidates.
-- [ ] Run `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`; expect missing `PerkSelectionScorer`.
-- [ ] Implement `PerkSelectionScorer.SelectArmyPerk(...)` and `SelectFleetPerk(...)`.
-- [ ] Re-run the console harness; expect all tests pass.
+- [x] Add failing tests for army siege, army raid, Union fleet blockade, CSA fleet raiding, and unavailable candidates.
+- [x] Run `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`; expected missing `PerkSelectionScorer` failure observed.
+- [x] Implement `PerkSelectionScorer.SelectArmyPerk(...)` and `SelectFleetPerk(...)`.
+- [x] Re-run the console harness; all tests passed.
 
 ### Task 2: Harmony Patch
 
@@ -29,11 +29,11 @@
 - Modify: `docs/patch-catalog.md`
 - Modify: `docs/handoff.md`
 
-- [ ] Add Prefix on `AICampaign.CheckPerkSelection(int)`.
-- [ ] Mirror vanilla army/fleet loops and W&L army skip.
-- [ ] Call `ChoosePerk(perkId)` only for a scorer-selected candidate.
-- [ ] Add bounded `[once:perks]` and `[Patch:Perks]` logging.
-- [ ] Update docs so #7 is no longer reserved.
+- [x] Add Prefix on `AICampaign.CheckPerkSelection(int)`.
+- [x] Mirror vanilla army/fleet loops and W&L army skip.
+- [x] Call `ChoosePerk(perkId)` only for a scorer-selected candidate.
+- [x] Add bounded `[once:perks]` and `[Patch:Perks]` logging.
+- [x] Update docs so #7 is no longer reserved.
 
 ### Task 3: Verification
 
@@ -41,8 +41,8 @@
 - `dist/WhiskeyRealism.dll`
 - GTCW BepInEx plugin folder
 
-- [ ] Run `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`.
-- [ ] Run `./build.sh`.
-- [ ] Copy `dist/WhiskeyRealism.dll` to the BepInEx plugin folder.
-- [ ] Run `stat` and `sha256sum` for dist and deployed DLL; hashes must match.
-- [ ] Commit and push one focused change.
+- [x] Run `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`.
+- [x] Run `./build.sh`.
+- [x] Copy `dist/WhiskeyRealism.dll` to the BepInEx plugin folder.
+- [x] Run `stat` and `sha256sum` for dist and deployed DLL; hashes matched at `5852e56aaa613aa636767fb96d75546f3ef4ee8ed1b99c016aff2a16483ec29b`.
+- [x] Commit and push one focused change: `2ccc743`.

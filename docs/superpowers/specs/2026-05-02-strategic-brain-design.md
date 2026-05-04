@@ -1,7 +1,7 @@
 # Strategic Brain — Design Spec
 
 **Slice A** — strategic AI overhaul for Grand Tactician: The Civil War's Whiskey & Lemons DLC career mode.
-**Status:** approved 2026-05-02 via brainstorming session. v0.2.1.1 released; main-branch v0.2.2 enrichment is implemented and smoke-confirmed through #17 plus formation directives. This remains the historical Slice A design record; `docs/patch-catalog.md` is authoritative for live patch inventory.
+**Status:** approved 2026-05-02 via brainstorming session. v0.2.2 is released and smoke-confirmed; post-release main fills #7 perk steering and locked-Hard casualty tolerance. This remains the historical Slice A design record; `docs/patch-catalog.md` is authoritative for live patch inventory.
 **Decompile reference:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (see `docs/findings.md` for line numbers).
 
 ---
@@ -396,7 +396,7 @@ Theater commanders cannot abandon a phase; they only signal completion (target t
 
 **v0.2.0 actual ship state** (10 active + 1 deferred). Patches numbered with stable ordinals (per `docs/patch-catalog.md`); withdrawn/deferred patches keep their slot. Postfix-preferred; Prefix only when the vanilla method directly mutates state we need to overwrite (#1, #6).
 
-**Current v0.2.2 note:** this section preserves the original Slice A design record. The live patch inventory is now authoritative in `docs/patch-catalog.md` and includes #15 `ArmyAreaTheaterPatch`, #16 `ArmyGroupManagementPatch`, weekly strategic review cadence, battle-history observers, front-sector transfer budgets, and concrete #3/#4/#5/#6 steering.
+**Current post-v0.2.2 note:** this section preserves the original Slice A design record. The live patch inventory is now authoritative in `docs/patch-catalog.md` and includes #15 `ArmyAreaTheaterPatch`, #16 `ArmyGroupManagementPatch`, weekly strategic review cadence, battle-history observers, front-sector transfer budgets, concrete #3/#4/#5/#6/#7/#8 steering, fiscal/policy/project/construction steering, fast-forward AI catch-up, and W&L command-selection retry.
 
 **Critical runtime sequencing (added v0.2.1.1 after smoke-test):** before reading any `CampaignObjective` state in `StrategicCoordinator.OnMonthlyTick`, the coordinator invokes `Policy.CheckForChapterUpdate()` via reflection. Vanilla's per-day cycle calls this method to advance `Policy.CurrentChapter` (initial value `-1`) — but on a fresh-campaign first frame, our `OnMonthlyTick` can fire before vanilla's per-day cycle has run. Without this manual invocation, `CurrentChapter == -1` deactivates every objective (their `ObjectiveChapters` lists don't contain `-1`), `CIC.Replan` returns count=0, and plans never build. Decompile reference: `Policy.CheckForChapterUpdate` at line 211604.
 
@@ -408,7 +408,7 @@ Theater commanders cannot abandon a phase; they only signal completion (target t
 | 2 | `ImportanceValuesPatch` | Postfix | `AIArea.CalculateMostValueableAIZones(int aifaction)` | 10964 | CIC's active plan + ObjectiveAdapter target lookup | After vanilla picks `mostvalueableaiareaclose[aifaction]`, override it to point at the plan-target AIArea. Resolves CampaignObjective UniqueID → first Town/IIP target → world position → vanilla `AICampaign.aiareas.GetColorOnPos(pos, -1f)` → `AIArea.GetAIArea(color)`. (v0.2.0 originally targeted `AICampaign.UpdateImportanceValues`; that method is parameterless, returns `bool`, and is a chunked per-IIP/cbuild/town processor that writes only to `importancevaluestemp` — wrong target. Redesigned for v0.2.1 to consumer-side override; ordinal #2 preserved.) |
 | 3-5 | *(originally reserved for v0.2.1)* | — | — | — | — | Superseded by v0.2.2 concrete #3 transfer, #4 defensive-ops, and #5 battle-history observer implementations; see patch catalog. |
 | 6 | `CommanderReplacementPatch` | **Prefix** | `AICampaign.CheckAICommanderReplacements` | 17008 | SuccessionScheduler state | Superseded from gate-only: now applies scripted succession swaps with vanilla `AssignCommando` + `DoCommanderPromotion`; see patch catalog. |
-| 7-8 | *(reserved)* | — | — | — | — | Still reserved for concrete perk/recruitment steering. |
+| 7-8 | *(originally reserved)* | — | — | — | — | Superseded by concrete #7 `PerkSelectionPatch` and #8 `RecruitmentPatch`; see patch catalog. |
 | 9 | `MonthlyTickHookPatch` | Postfix | `AICampaign.Update` | 11159 | — | Drives `StrategicCoordinator.NotifyDateAdvanced` from per-frame `Update`. Coordinator self-latches on 7-day in-game buckets for CIC review/replan and on month rollover for visible heartbeat, so per-frame call rate is fine. |
 
 ### 6.2 Settings-lock patches (added 2026-05-03; spec §3.2)

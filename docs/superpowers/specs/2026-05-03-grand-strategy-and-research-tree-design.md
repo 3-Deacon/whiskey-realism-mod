@@ -1,7 +1,7 @@
 # Grand Strategy and Research Tree Design
 
 Date: 2026-05-03
-Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering and grand-strategy objective/project steering are live locally through #17; policy steering, recruitment intent, and naval intent beyond project choice remain design work.
+Status: implemented through the post-v0.2.2 main checkpoint for objective/project steering, policy timing, recruitment intent, and role-aware campaign perk steering. Naval runtime movement/construction patches remain design work and should wait for smoke evidence that policy/project steering is insufficient.
 Scope: Slice A enrichment only. This is strategic-layer input to CIC planning, policy selection, and project selection. It does not open Slice B tactical behavior.
 
 ## Why this exists
@@ -549,7 +549,7 @@ Rules:
 3. Add `ProjectSelectionPatch`. It is lower risk because project choice is random-weighted in vanilla and we can replace only the next project slot. This is the first place to express naval and industrial preparation.
 4. Add `PolicySelectionPatch`. Policy selection is ordered and chapter-gated, so this needs a tighter safety check. This is the first place to express CSA King Cotton / blockade-running / conscription timing and Union blockade / mobilization timing.
 5. Implement #8 `RecruitmentPatch` as a scoped `AIArea.GetBestRecruitingState` Postfix under `ZoneRecruiting` context, driven by `RecruitmentIntentLedger`.
-6. Implement #7 `PerkSelectionPatch` only after army/naval role tags exist, so perks support assigned roles rather than generic personality flavor.
+6. #7 `PerkSelectionPatch` is implemented on post-v0.2.2 main with role-aware army/fleet campaign perk scoring.
 7. Add `NavalIntentLedger`; only patch `CheckFleetMovements` / `GrabShipType` if project/policy steering is not enough.
 8. Add defensive/offensive front-posture steering only after the weekly ledgers log plausible `Hold/Delay/Concede/Exploit` decisions in-game.
 

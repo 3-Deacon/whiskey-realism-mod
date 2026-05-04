@@ -1,6 +1,6 @@
 # Strategic Brain Implementation Plan
 
-> **Current-state addendum (2026-05-03):** this is the original Slice A execution plan and contains historical monthly-cadence and smoke-marker instructions. Shipped/current code supersedes those sections: `StrategicCoordinator` now performs weekly strategic review with monthly heartbeat only; #3/#4/#5/#6 are concrete, #15 historical army-area steering and #16 historical army-group steering are implemented/deployed, and only reserved #7/#8 plus later policy/project/research integration remain backlog. For current pickup, read `docs/handoff.md` and `docs/patch-catalog.md` first.
+> **Current-state addendum (2026-05-04):** this is the original Slice A execution plan and contains historical monthly-cadence and smoke-marker instructions. Shipped/current code supersedes those sections: `StrategicCoordinator` now performs weekly strategic review with monthly heartbeat only; #3/#4/#5/#6/#7/#8 are concrete; #15 historical army-area steering and #16 historical army-group steering are implemented/deployed; and policy/project/fiscal/construction/fast-forward/W&L startup fixes are live on main. For current pickup, read `docs/handoff.md` and `docs/patch-catalog.md` first.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -51,7 +51,7 @@ This plan was executed inline during the 2026-05-03 session. All v0.2.0-scoped t
 | 18 | `Patches/MonthlyTickHookPatch.cs` | Postfix on `AICampaign.Update`. Now reads day/month/year and feeds `StrategicCoordinator.NotifyDateAdvanced`; day/month/year latching controls weekly review plus monthly heartbeat. |
 | 19 | `Patches/PickCampaignObjectivePatch.cs` | Prefix on `AICampaign.PickCampaignObjective` (17769). Plan-driven objective replaces vanilla random. |
 | 20 | `Patches/ImportanceValuesPatch.cs` | v0.2.1 target changed to Postfix on `AIArea.CalculateMostValueableAIZones(int aifaction)`; overrides the consumer-side valuable-zone pick to the plan target. |
-| 21, 22, 23, 25, 26 | (deferred per amendment) | Historical plan entry superseded: #3 transfer, #4 defensive ops, and #5 battle-history are concrete in v0.2.2; #7/#8 remain reserved. |
+| 21, 22, 23, 25, 26 | (deferred per amendment) | Historical plan entry superseded: #3 transfer, #4 defensive ops, #5 battle-history, #7 perk steering, and #8 recruitment steering are concrete in current main. |
 | 24 | `Patches/CommanderReplacementPatch.cs` | Prefix on `AICampaign.CheckAICommanderReplacements` (17008). v0.2.1 added concrete `AssignCommando` + `DoCommanderPromotion` succession swaps. |
 | 27 | `Plugin.cs` | v0.2.0 BepInPlugin. Patches registered via `_harmony.PatchAll(typeof(Plugin).Assembly)`. ConfigEntries: `Enabled`, `VerboseLogging`, `PlanTrace`, `SuccessionTrace`, `OverrideVanillaSettings`, `LockedDifficulty`. |
 | 28 | `docs/patch-catalog.md`, `docs/handoff.md` | Catalog populated with shipped patches + reserved ordinals. Handoff updated to "shipped 0.2.0". v0.2.0 tag held until smoke-test passed (now confirmed 2026-05-03). |
@@ -113,9 +113,9 @@ The "vanilla settings integration" subsystem emerged from a design conversation 
 ### v0.2.2 backlog (formal scope)
 
 1. **Battle-history observers in `WarStateObserver`** — track ANV defeats, AoP offensive failures, Burnside's first defeat, Lee invading Pennsylvania, Western theater defeats, Valley operations, war clearly lost. Unlocks the remaining 7 succession events (#1, #3, #4, #5, #6, #11, #12) so they can fire from observed game state without test-mode bypass. **Implemented 2026-05-03:** #5 `BattleResultObserverPatch` records final land-battle outcomes from `BattleMonument.UpdateAllianceWon` into persisted `StrategicCoordinator.BattleHistory`; `WarStateObserver` now derives battle/commander/morale gates from that record set. Build/deploy/smoke verified against Phillippi + Hampton battle records and sidecar persistence.
-2. **Concrete steering for `TransferOfUnitsPatch` (#3), `DefensiveOpsPatch` (#4), `PerkSelectionPatch` (#7), `RecruitmentPatch` (#8)** — #3 implemented and smoke-verified 2026-05-03. `TransferOfUnitsPatch` Prefix/Postfix temporarily points vanilla `positiondeficit` at the active plan target when under-strength, then restores vanilla state; build passes and deployed DLL hash is `5263d2312816c7a28619a80314f6fc8c4802841632a499580ccee33fea3ad11e`. Smoke log confirmed `dev.kyle.whiskey-realism v0.2.2 loaded`, `[once:transfer]`, and `[Patch:Transfer] alliance=0 obj=31 queued=1`. #4 implemented 2026-05-03 on actual method `AICampaign.AssignUnitToDefendCapital` (older docs called it `CheckPickDefensiveOps`, which does not exist): Postfix applies CIC personality to the capital-defense strength gate and can pledge one extra eligible defender for vanilla to move on the next pass. First-fire was later confirmed in the 2026-05-04 v0.2.2 smoke run; assignment lines remain conditional. #7/#8 remain smoke-marker/deferred.
+2. **Concrete steering for `TransferOfUnitsPatch` (#3), `DefensiveOpsPatch` (#4), `PerkSelectionPatch` (#7), `RecruitmentPatch` (#8)** — #3 implemented and smoke-verified 2026-05-03. `TransferOfUnitsPatch` Prefix/Postfix temporarily points vanilla `positiondeficit` at the active plan target when under-strength, then restores vanilla state; build passes and deployed DLL hash is `5263d2312816c7a28619a80314f6fc8c4802841632a499580ccee33fea3ad11e`. Smoke log confirmed `dev.kyle.whiskey-realism v0.2.2 loaded`, `[once:transfer]`, and `[Patch:Transfer] alliance=0 obj=31 queued=1`. #4 implemented 2026-05-03 on actual method `AICampaign.AssignUnitToDefendCapital` (older docs called it `CheckPickDefensiveOps`, which does not exist): Postfix applies CIC personality to the capital-defense strength gate and can pledge one extra eligible defender for vanilla to move on the next pass. First-fire was later confirmed in the 2026-05-04 v0.2.2 smoke run; assignment lines remain conditional. #8 recruitment steering shipped in v0.2.2, and #7 campaign perk steering shipped in post-v0.2.2 main at `2ccc743`.
 3. **`ObjectiveAdapter` table population** — hand-coded `UniqueObjectiveID` → `ObjectiveMetadata` entries. Smoke-test logged objective IDs 0, 1, 4, 9, 10, 29, 30, 31, 32 in scenario "002" with their geographic-fallback theater bucketing. Add metadata for the Town/IIP-targeted ones (29, 30, 31, 32) first.
-4. **Vanilla settings → mod logic integration** — read `usedcampaignbonus` (locked Hard) into `CIC.Effective` so the locked difficulty actually scales `CasualtyTolerance`. Currently the lock is informational only.
+4. **Vanilla settings → mod logic integration** — shipped in post-v0.2.2 main: locked-Hard difficulty now adds a small historical casualty-tolerance modifier inside `CIC.Effective`.
 5. **`Policy.CurrentChapter` integration** — vanilla 5-chapter system overlaps with our 4-stage `EraStage`. For W&L scenario "002": chapter 1 from start, chapter 2 after 1862-11-05, chapter 3 after 1864-11-09 with conditions. Map our era stages onto chapters or retire `EraStage`.
 6. **Slider arrow grey-out** (cosmetic) — disable arrow buttons via `panelhandler.SetButtonsCondition(panel, 2, 150-153)` for visual consistency with frozen checkboxes.
 7. **AGC bootstrap for early-campaign succession events** — currently in real mode, scripted events that fire before `BattleUnits.armygroups` is populated correctly defer (army-group rank doesn't exist yet). Could add a "promote a designated lieutenant to army-group rank if no AGC exists when a scripted event fires" mechanic so events apply on schedule even early in the war.
@@ -3139,7 +3139,7 @@ EOF
 **Files:**
 - Create: `src/WhiskeyRealism/Patches/PerkSelectionPatch.cs`
 
-Spec §6 patch #7 — Postfix `AICampaign.CheckPerkSelection` (line 11873).
+Spec §6 patch #7 — historical task superseded. Current implementation is a Prefix on `AICampaign.CheckPerkSelection` (line 11871), with role-aware scoring and vanilla `Regiment.ChoosePerk` assignment.
 
 - [ ] **Step 1: Create the patch**
 
@@ -3152,8 +3152,8 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Bridge layer patch #7 — Postfix on AICampaign.CheckPerkSelection
-    // (decompile line 11873). Smoke-marker for personality-biased perk picks.
+    // Historical placeholder only. Current code uses a Prefix on
+    // AICampaign.CheckPerkSelection (decompile line 11871).
     [HarmonyPatch(typeof(AICampaign), "CheckPerkSelection")]
     internal static class PerkSelectionPatch
     {
@@ -3502,7 +3502,7 @@ Stable numbered list of shipped Harmony patches. Withdrawn patches keep their or
 | 4 | `TransferOfUnitsPatch`         | Postfix | `AICampaign.CheckTransferOfUnits`         | 17232 | shipped (smoke-marker) |
 | 5 | `DefensiveOpsPatch`            | Postfix | `AICampaign.CheckPickDefensiveOps`        | 11791 | shipped (smoke-marker) |
 | 6 | `CommanderReplacementPatch`    | Prefix  | `AICampaign.CheckAICommanderReplacements` | 17008 | shipped (gate only; concrete swap deferred) |
-| 7 | `PerkSelectionPatch`           | Postfix | `AICampaign.CheckPerkSelection`           | 11873 | shipped (smoke-marker) |
+| 7 | `PerkSelectionPatch`           | Prefix | `AICampaign.CheckPerkSelection`           | 11871 | shipped post-v0.2.2 (role-aware campaign army/fleet perk steering) |
 | 8 | `RecruitmentPatch`             | Postfix | `AIArea.GetBestRecruitingState`           | 10722 | shipped (smoke-marker) |
 | 9 | `MonthlyTickHookPatch`         | Postfix | (Task 17 finding)                          | (Task 17) | shipped |
 | — | `AICampaignSaveLoadPatch.Save` | Postfix | `AICampaign.Save`                          | 16631 | shipped (persistence; not numbered) |

@@ -1195,7 +1195,7 @@ Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group 
 to:
 
 ```markdown
-Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering and grand-strategy project steering are live locally; policy steering, recruitment intent, role-aware perks, and naval intent remain design work.
+Status: implemented through post-v0.2.2 main for objective/project steering, policy timing, recruitment intent, and role-aware campaign perk steering. Naval runtime movement/construction work remains deferred pending smoke evidence.
 ```
 
 - [ ] **Step 7: Commit docs**
@@ -1216,7 +1216,7 @@ Spec coverage:
 - Project steering before policy steering: Tasks 3-4.
 - Bounded logging: Task 4.
 - Build/deploy/hash discipline: Task 5.
-- Recruitment/naval/policy/perk work: explicitly deferred and preserved in docs.
+- Recruitment, policy, and perk work later shipped in post-plan Slice A follow-ups. Naval runtime movement/construction work remains deferred until smoke evidence proves policy/project steering is insufficient.
 
 Red-flag scan:
 

@@ -56,7 +56,7 @@ All line numbers are in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 | `CheckArmyGroupManagement` | 17706 | High-level army organization |
 | `AssignUnitToDefendCapital` | 11668 / gate at 11791 | Capital-defense assignment; older notes called this `CheckPickDefensiveOps`, but that method name does not exist in current decompile |
 | `CheckForDefensiveOperations` | 13505 | Field defensive operations trigger and unit grouping |
-| `CheckPerkSelection` | 11873 | AI commander perk picks |
+| `CheckPerkSelection` | 11871 | AI commander perk picks |
 | `CheckSelectionSingleBrigadePerk` | 17690 | Single-unit perk picks |
 | `CheckAICommanderReplacements` | 17009 | Fallen-officer replacement |
 | `CheckForSeaInvasion` | 16408 | Amphibious-op triggers |
