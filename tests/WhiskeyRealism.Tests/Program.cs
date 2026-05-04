@@ -27,7 +27,13 @@ static class Program
             ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
             ("formation level maps vanilla unit types", FormationLevelMapsVanillaUnitTypes),
             ("independent top division requires top unit and strength floor", IndependentTopDivisionRequiresTopAndStrengthFloor),
-            ("attached division is not directly controllable", AttachedDivisionIsNotDirectlyControllable)
+            ("attached division is not directly controllable", AttachedDivisionIsNotDirectlyControllable),
+            ("division refuses enemy army without support", DivisionRefusesEnemyArmyWithoutSupport),
+            ("csa coherent outnumbered division delays instead of retreating", CsaCoherentOutnumberedDivisionDelays),
+            ("low ammo formation recovers", LowAmmoFormationRecovers),
+            ("army masses for plan target when hierarchy exists", ArmyMassesForPlanTargetWhenHierarchyExists),
+            ("raid support maps only to cavalry capable formations", RaidSupportMapsOnlyToCavalryCapableFormations),
+            ("formation directive summary changes when assignment changes", FormationDirectiveSummaryChangesWhenAssignmentChanges)
         };
 
         foreach (var test in tests)
@@ -385,6 +391,116 @@ static class Program
         AssertEqual(FormationLevel.Division, snap.Level);
         AssertEqual(true, snap.IsAttachedDivision);
         AssertEqual(false, snap.CanReceiveDirectDirective);
+    }
+
+    private static FormationSnapshot Snapshot(
+        string key,
+        int alliance,
+        int unitType,
+        float strength,
+        float enemy,
+        FormationLevel enemyLevel,
+        FrontPosture posture)
+    {
+        return new FormationSnapshot
+        {
+            UnitKey = key,
+            AllianceId = alliance,
+            UnitName = key,
+            UnitType = unitType,
+            IsTopUnit = true,
+            GroupStrengthActive = strength,
+            GroupStrengthDirect = strength,
+            Morale = 0.8f,
+            Readiness = 0.8f,
+            RifleAmmo = 0.8f,
+            ArtilleryAmmo = 0.8f,
+            Supply = 0.8f,
+            WeaponFirepower = 1.0f,
+            AreaKey = "VirginiaCapitalCorridor",
+            SectorKey = "Richmond",
+            LocalEnemyStrength = enemy,
+            VisibleEnemyLevel = enemyLevel,
+            FrontPosture = posture
+        };
+    }
+
+    private static void DivisionRefusesEnemyArmyWithoutSupport()
+    {
+        var snap = Snapshot("division", 1, 14, 4500f, 50000f, FormationLevel.Army, FrontPosture.Hold);
+        var ledger = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Amateur1861, null);
+        var assignment = ledger.GetAssignment("division");
+
+        AssertEqual(FormationDirective.Screen, assignment.Directive);
+        AssertEqual(false, assignment.OffensiveAllowed);
+    }
+
+    private static void CsaCoherentOutnumberedDivisionDelays()
+    {
+        var snap = Snapshot("csa-delay", 1, 14, 6000f, 14000f, FormationLevel.Corps, FrontPosture.Delay);
+        snap.LocalFriendlySupportStrength = 5000f;
+        snap.SupportCanReach = true;
+
+        var ledger = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Amateur1861, null);
+        var assignment = ledger.GetAssignment("csa-delay");
+
+        AssertEqual(FormationDirective.Delay, assignment.Directive);
+        AssertEqual(false, assignment.OffensiveAllowed);
+        AssertEqual(true, assignment.DefensiveAllowed);
+    }
+
+    private static void LowAmmoFormationRecovers()
+    {
+        var snap = Snapshot("low-ammo", 0, 15, 16000f, 10000f, FormationLevel.Corps, FrontPosture.Counterstroke);
+        snap.RifleAmmo = 0.1f;
+        snap.ArtilleryAmmo = 0.2f;
+
+        var ledger = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Operational1862, null);
+        var assignment = ledger.GetAssignment("low-ammo");
+
+        AssertEqual(FormationDirective.Recover, assignment.Directive);
+        AssertEqual(false, assignment.OffensiveAllowed);
+    }
+
+    private static void ArmyMassesForPlanTargetWhenHierarchyExists()
+    {
+        var snap = Snapshot("army", 0, 16, 50000f, 30000f, FormationLevel.Army, FrontPosture.Exploit);
+        snap.GrandArmyStructureAvailable = true;
+        snap.IsPlanTargetArea = true;
+
+        var ledger = FormationDirectiveLedger.Build(new[] { snap }, EraStage.TotalWar1864, "VirginiaCapitalCorridor");
+        var assignment = ledger.GetAssignment("army");
+
+        AssertEqual(FormationDirective.Mass, assignment.Directive);
+        AssertEqual(true, assignment.OffensiveAllowed);
+    }
+
+    private static void RaidSupportMapsOnlyToCavalryCapableFormations()
+    {
+        var cavalry = Snapshot("cav", 1, 14, 2500f, 1000f, FormationLevel.Division, FrontPosture.EconomyOfForce);
+        cavalry.IsCavalryCapable = true;
+        cavalry.Supply = 0.9f;
+        cavalry.Readiness = 0.9f;
+
+        var infantry = Snapshot("inf", 1, 14, 2500f, 1000f, FormationLevel.Division, FrontPosture.EconomyOfForce);
+        infantry.IsCavalryCapable = false;
+
+        var ledger = FormationDirectiveLedger.Build(new[] { cavalry, infantry }, EraStage.Operational1862, null);
+
+        AssertEqual(true, ledger.GetAssignment("cav").RaidAllowed);
+        AssertEqual(FormationDirective.RaidSupport, ledger.GetAssignment("cav").Directive);
+        AssertEqual(false, ledger.GetAssignment("inf").RaidAllowed);
+    }
+
+    private static void FormationDirectiveSummaryChangesWhenAssignmentChanges()
+    {
+        var a = Snapshot("unit", 0, 15, 15000f, 10000f, FormationLevel.Corps, FrontPosture.Hold);
+        var b = Snapshot("unit", 0, 15, 15000f, 10000f, FormationLevel.Corps, FrontPosture.Counterstroke);
+
+        string first = FormationDirectiveLedger.Build(new[] { a }, EraStage.Operational1862, null).Summary();
+        string second = FormationDirectiveLedger.Build(new[] { b }, EraStage.Operational1862, null).Summary();
+
+        AssertEqual(false, string.Equals(first, second, StringComparison.Ordinal));
     }
 
     private static void AssertEqual<T>(T expected, T actual)

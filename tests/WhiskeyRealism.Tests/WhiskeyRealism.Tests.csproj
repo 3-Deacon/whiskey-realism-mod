@@ -26,5 +26,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationLevel.cs" Link="FormationLevel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirective.cs" Link="FormationDirective.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationSnapshot.cs" Link="FormationSnapshot.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirectiveLedger.cs" Link="FormationDirectiveLedger.cs" />
   </ItemGroup>
 </Project>
