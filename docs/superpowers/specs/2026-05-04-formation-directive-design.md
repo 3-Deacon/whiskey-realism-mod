@@ -64,16 +64,27 @@ Primary decompile anchors:
 - `AICampaign.CheckTransferOfUnits(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17232`
 - `AICampaign.CheckCombinationOfBrigades(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17615`
 - `AICampaign.CheckArmyGroupManagement(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17705`
+- `BattleUnits.CheckBattleParticipation(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:80414`
+- `BattleUnits.EstablishCampaignBattle(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:80526`
+- `BattleUnits.MoveUnitsToBFLocation(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:94038`
+- `Regiment.CheckEnemyContactCampaign()` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:115560`
+- `Autocalc.StartSkirmishing(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:20598`
 
 Relevant vanilla behavior:
 
 - `RaiseNewCampaignGroup` creates/fills divisions and corps, and creates full army/corps/division hierarchy when `GrandArmyStructure(alliance)` is true.
 - `GrandArmyStructure` is gated by researched project ID `90`.
 - `CheckCombinationOfUnits` moves large independent corps into nearby or newly created army structures once conditions are met.
+- Movement is not parent-only. Vanilla iterates `AIFaction.ownunits`, evaluates eligible campaign groups, and sends individual formations through `AICampaign.MoveUnitTo(...)`.
 - `UpdateCampaignTheaters` gives formations a loose `theaterposition`; offensive, defensive, transfer, and army-group logic consume that theater boundary.
 - `CheckForDefensiveOperations` already uses local strength, morale, weather, supply, and theater gates before reacting to enemy threats.
 - `CheckOffensiveMovements` already builds local force packages and uses commander initiative and strength dominance before attacking.
-- `CheckArmyGroupManagement` creates or attaches army groups from nearby top units with theater positions.
+- `CheckArmyGroupManagement` creates or attaches army groups from nearby top units with theater positions. Vanilla checks `istopunit`, non-garrison status, `theaterposition`, and `groupstrengthdirect > 1000`; it does not restrict this to corps/armies.
+- `CheckBattleParticipation` pulls nearby friendly campaign units into a battle if they are inside `commanderrange` for normal field battles or `buglerange` for siege warfare, have sufficient morale, are not retreating/in battle, are not fort garrisons, match land/naval category, and can reach through terrain restrictions.
+- For corps-level callers (`unittyp == 15`), `CheckBattleParticipation` can also pull in the parent formation and sibling corps under the same parent when they are inside the parent's `commanderrange`.
+- `MoveUnitsToBFLocation` marks participating units as `participatinginbattle`/`inbattle`, stops their current movement, records battle-trigger references, and paths them toward the battlefield.
+- `Regiment.CheckEnemyContactCampaign` can start real campaign-map skirmishing during retreat/withdrawal. If a retreating non-fleet, non-garrison land unit remains close to an enemy inside `enemy.buglerange * GamePrefs.rangefactorskirmishing`, vanilla starts an `Autocalc` skirmishing engine.
+- `Autocalc.StartSkirmishing` creates an autocalc engagement of type `6`; the skirmish engine applies casualty/morale effects until range breaks or neither top unit remains in retreat.
 
 Current Whiskey gap:
 
@@ -81,6 +92,10 @@ Current Whiskey gap:
 - `ArmyGroupManagementPatch.IsEligibleTopUnit` also includes only `unittyp 15..16`.
 - `HistoricalArmyAreaRegistry` mainly maps army names, so fallback divisions/corps get weak historical identity.
 - `TheaterCommander` remains mostly a persistence/planning scaffold and is not yet the live runtime actor for per-formation behavior.
+
+Design consequence:
+
+Whiskey should not invent a parallel formation engine. Vanilla already supports independent divisions, corps, and armies moving, supporting nearby battles, withdrawing, and skirmishing. The mod should classify and weight formations, then use vanilla's movement, support, battle, transfer, and skirmish systems more intelligently.
 
 ## Design goal
 
@@ -117,9 +132,12 @@ Patches remain read-only with respect to strategic mod state. `StrategicCoordina
 | `Morale` | `groupmorale` |
 | `Readiness` | `CampaignArmyPanel.GetReadinessStep` if safely callable |
 | `Supply` | `groupsupplystate` / supply depots where safely readable |
+| `CommandRange` | `Regiment.commanderrange` |
+| `BugleRange` | `Regiment.buglerange` |
 | `InBattle` / retreat / pathing | `inbattle`, `onretreat`, `regimentpaths` |
 | `LocalEnemyStrength` | nearby enemy units / `AIArea` strength when available |
-| `LocalFriendlySupport` | nearby friendly top formations and subordinates |
+| `LocalFriendlySupport` | nearby friendly top formations and subordinates inside support range |
+| `CanReachSupport` | terrain-restricted reachability where safely inferable |
 
 `FormationLevel`:
 
@@ -141,6 +159,8 @@ Patches remain read-only with respect to strategic mod state. `StrategicCoordina
 - `RaidSupport`: cavalry/fast/small-force support for raid logic without committing the main line.
 - `Recover`: avoid new offensive/defensive commitments until morale/readiness improves.
 - `Concede`: allow thinning or withdrawal because CIC/front ledger explicitly chose economy-of-force or abandonment.
+
+Support should be measured in vanilla terms first. A formation is not "supported" merely because another friendly formation is in the same named theater. Support means nearby, eligible friendly combat power inside command/battle participation range or close enough to be transferred/reinforced before decisive contact.
 
 ## Directive rules by level
 
@@ -214,7 +234,7 @@ A directive that permits attack or forward movement must pass a formation-level 
 Required inputs:
 
 - own effective strength: strength adjusted by morale/readiness/supply;
-- nearby friendly support: support inside theater radius and not already committed;
+- nearby friendly support: support inside `commanderrange`/battle participation range when possible, then theater radius as a weaker fallback;
 - enemy effective strength: enemy group strength and morale/readiness where visible;
 - enemy level: division/corps/army estimate from `unittyp`;
 - terrain/control context: friendly state, enemy state, contested objective, supply/capital/rail/river/port tags;
@@ -230,6 +250,7 @@ Default safety behavior:
 - Army vs enemy army: allow if plan/sector/ratio/commander gates pass.
 - Any low-morale or low-readiness formation: prefer `Recover`, `Hold`, or `Guard`.
 - Any sector below minimum hold budget: block donation/attack unless sector is explicitly `Concede`.
+- Retreating/withdrawing formations near enemy contact: prefer `Screen`, `Recover`, or `Reinforce` logic that respects vanilla campaign skirmishing risk instead of repeatedly ordering the unit back into decisive contact.
 
 The risk model should be intentionally conservative first. It is better to under-steer and let vanilla act than to create suicidal deterministic behavior.
 
@@ -296,9 +317,13 @@ The risk model should be intentionally conservative first. It is better to under
 
 Include independent `unittyp == 14` divisions as top strategic units, but do not apply the same return-area behavior to every attached subordinate division. Only top independent divisions should receive direct area movement.
 
+Area movement should respect support range. A division can be nudged back toward a historical area, but not through or adjacent to a superior enemy concentration unless friendly support is close enough to participate or reinforce under vanilla command-range rules. If the safer historical behavior is to screen or fall back toward a nearby depot/rail/town, the directive should prefer that over a direct return-area correction.
+
 ### Army-group steering (#16)
 
 Do not create army groups from division spam. Army groups should primarily coordinate armies/corps. Independent divisions can attach only when the group is otherwise valid and the division directive is `Reinforce`, `Reserve`, `Guard`, or `Mass` in the same operating area.
+
+This is intentionally narrower than vanilla's raw `istopunit` army-group eligibility. Vanilla can group any strong top unit, but Whiskey should not create ahistorical or noisy army groups from weak independent divisions. The safe rule is: use divisions as attachments to an otherwise coherent command, not as the primary reason to create the command.
 
 ### Defensive operations (#4 / future enhancement)
 
@@ -308,6 +333,7 @@ Directive effects:
 - `Reserve`, `Reinforce`: allow commitment if destination risk is higher than source risk.
 - `Recover`: block unless capital/critical objective is threatened.
 - `Concede`: do not spend scarce units defending the sector unless extraction is impossible.
+- `Screen`: may intentionally stay close enough to watch/delay but should avoid triggering decisive battle unless support can join under `CheckBattleParticipation`.
 
 ### Offensive movements / counterstroke
 
@@ -316,6 +342,18 @@ Future patch should avoid replacing vanilla offensive logic. Preferred shape is 
 - block or down-weight attacks that violate the directive risk gate;
 - up-weight `Counterstroke` and `Mass` formations when vanilla already sees a plausible target;
 - never force a division to attack a superior corps/army by itself.
+- treat `commanderrange` and terrain reachability as first-class support checks before treating nearby formations as part of the same attack package.
+
+### Campaign skirmishing
+
+Campaign-map skirmishing is a vanilla system, not a tactical-battle placeholder. Directives should use it indirectly:
+
+- `Screen` and `Guard` can allow controlled contact near friendly support, rail, towns, forts, or river/crossing anchors.
+- `Recover` should avoid repeated retreat/skirmish loops by not reissuing aggressive movement to low-morale withdrawing units.
+- `Probe` should be limited to cases where the formation can disengage or be supported; otherwise it risks becoming an accidental skirmish or battle.
+- `Counterstroke` should consider whether the target is already withdrawing; chasing can create skirmish attrition, which may be desirable for cavalry/strong commanders but bad for exhausted infantry.
+
+This spec does not patch `Autocalc.StartSkirmishing` directly. The first implementation should steer formation posture and movement eligibility so vanilla's skirmish engine emerges from better campaign choices.
 
 ### Transfers (#3)
 
@@ -387,6 +425,8 @@ Pure tests should cover:
 - independent top-level division is included in snapshots and can receive `Screen`/`Guard`;
 - attached division inherits parent posture and is not directly moved by army-area steering;
 - division refuses attack against enemy army without support;
+- division support uses command-range/proximity inputs, not just same-area membership;
+- retreating/withdrawing formation near enemy contact prefers `Screen`/`Recover`/`Reinforce` over renewed attack;
 - corps can counterstroke when supported and ratio gates pass;
 - army receives `Mass` for active CIC plan target;
 - CSA early profile favors `Hold`/`Screen`/`Guard` over broad offensive action;
@@ -408,18 +448,21 @@ Pure tests should cover:
 Recommended first implementation plan:
 
 1. Add pure formation directive model and tests.
-2. Add runtime snapshot extraction with `unittyp 14/15/16` classification.
+2. Add runtime snapshot extraction with `unittyp 14/15/16` classification plus `commanderrange`/`buglerange` support inputs.
 3. Add `StrategicCoordinator.FormationDirectives[alliance]` weekly refresh and bounded summary logging.
 4. Update #15 army-area steering to include independent top divisions while avoiding attached-division spam.
 5. Update #16 army-group steering to use directive-aware eligibility.
-6. Add an offensive safety gate only after the pure ledger and #15/#16 corrections are verified.
-7. Update docs/handoff and patch catalog after code lands.
+6. Add defensive/screening behavior that respects vanilla campaign battle participation and skirmishing.
+7. Add an offensive safety gate only after the pure ledger and #15/#16 corrections are verified.
+8. Update docs/handoff and patch catalog after code lands.
 
 ## Acceptance criteria
 
 - Independent campaign-map divisions are visible to the strategic ledger.
 - Attached divisions are not independently yanked away from parent corps/armies.
 - Division-level attacks against much larger enemy forces are blocked or down-weighted unless support and ratio gates pass.
+- Support logic accounts for `commanderrange`, `buglerange`, and terrain reachability where vanilla exposes them.
+- Campaign-map skirmishing is treated as an intentional risk/opportunity of screening, probing, retreating, and pursuit behavior.
 - Corps and armies still use vanilla campaign movement surfaces.
 - CSA early behavior reads as defensive, screening, and force-preserving unless a favorable opportunity appears.
 - Union later-war behavior reads as coordinated pressure rather than isolated local attacks.
