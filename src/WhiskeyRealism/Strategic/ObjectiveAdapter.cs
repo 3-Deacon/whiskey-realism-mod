@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Util;
@@ -9,9 +8,6 @@ namespace WhiskeyRealism.Strategic
 {
     internal static class ObjectiveAdapter
     {
-        private static readonly Dictionary<int, ObjectiveMetadata> Table
-            = new Dictionary<int, ObjectiveMetadata>();
-
         internal static ObjectiveMetadata Resolve(object campaignObjective)
         {
             if (campaignObjective == null)
@@ -20,7 +16,7 @@ namespace WhiskeyRealism.Strategic
             var idField = AccessTools.Field(campaignObjective.GetType(), "UniqueObjectiveID");
             int id = idField != null ? (int)idField.GetValue(campaignObjective) : -1;
 
-            if (id >= 0 && Table.TryGetValue(id, out var hit))
+            if (id >= 0 && ObjectiveCatalog.TryResolve(id, out var hit))
                 return hit;
 
             var derived = Derive(campaignObjective);

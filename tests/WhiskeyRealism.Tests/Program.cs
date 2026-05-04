@@ -25,6 +25,8 @@ static class Program
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
             ("csa early profile favors capital defense and foreign recognition", CsaEarlyProfileFavorsDefenseAndForeignRecognition),
             ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
+            ("objective catalog maps known wl objectives", ObjectiveCatalogMapsKnownWlObjectives),
+            ("objective catalog keeps unknown ids unresolved", ObjectiveCatalogKeepsUnknownIdsUnresolved),
             ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
             ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
             ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
@@ -343,6 +345,40 @@ static class Program
 
         AssertTrue(tagged.HasTag(StrategyTag.Blockade), "expected coast fallback to add Blockade");
         AssertTrue(tagged.HasTag(StrategyTag.PortAccess), "expected coast fallback to add PortAccess");
+    }
+
+    private static void ObjectiveCatalogMapsKnownWlObjectives()
+    {
+        foreach (var id in new[] { 3, 4, 17, 29, 30, 31, 32, 33, 34, 35, 36, 37 })
+            AssertTrue(ObjectiveCatalog.TryResolve(id, out _), "expected objective metadata for ID " + id);
+
+        AssertTrue(ObjectiveCatalog.TryResolve(3, out var richmond), "expected Richmond objective metadata");
+        AssertEqual(Theater.East, richmond.Theater);
+        AssertEqual(Category.CapitalThreat, richmond.Category);
+        AssertEqual(false, richmond.IsDerived);
+        AssertTrue(richmond.HasTag(StrategyTag.CapitalThreat), "Richmond should carry capital threat");
+        AssertTrue(richmond.HasTag(StrategyTag.CapitalDefense), "Richmond should carry capital defense");
+
+        AssertTrue(ObjectiveCatalog.TryResolve(17, out var mississippi), "expected Mississippi River objective metadata");
+        AssertEqual(Theater.River, mississippi.Theater);
+        AssertEqual(Category.RiverControl, mississippi.Category);
+        AssertTrue(mississippi.HasTag(StrategyTag.RiverControl), "Mississippi should carry river control");
+
+        AssertTrue(ObjectiveCatalog.TryResolve(35, out var coastalNc), "expected Coastal NC objective metadata");
+        AssertEqual(Theater.Coast, coastalNc.Theater);
+        AssertEqual(Category.SupplyHub, coastalNc.Category);
+        AssertTrue(coastalNc.HasTag(StrategyTag.Blockade), "Coastal NC should carry blockade");
+        AssertTrue(coastalNc.HasTag(StrategyTag.PortAccess), "Coastal NC should carry port access");
+
+        AssertTrue(ObjectiveCatalog.TryResolve(36, out var saltville), "expected Saltville objective metadata");
+        AssertEqual(Theater.West, saltville.Theater);
+        AssertEqual(Category.SupplyHub, saltville.Category);
+        AssertTrue(saltville.HasTag(StrategyTag.RailHub), "Saltville should carry supply/rail pressure");
+    }
+
+    private static void ObjectiveCatalogKeepsUnknownIdsUnresolved()
+    {
+        AssertEqual(false, ObjectiveCatalog.TryResolve(9999, out _));
     }
 
     private static void ProjectScorerReplacesWeakCandidate()
