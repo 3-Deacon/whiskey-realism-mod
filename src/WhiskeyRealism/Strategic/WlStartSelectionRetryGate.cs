@@ -48,7 +48,7 @@ namespace WhiskeyRealism.Strategic
             }
 
             if (!panelAvailable) return false;
-            if (campaignFrame < _minReadyCampaignFrame && !startupDataReady) return false;
+            if (campaignFrame < _minReadyCampaignFrame) return false;
             if (listVisible || _attempts >= _maxAttempts) return false;
             if (_lastAttemptUnityFrame >= 0 && unityFrame - _lastAttemptUnityFrame < _retryEveryUnityFrames) return false;
 

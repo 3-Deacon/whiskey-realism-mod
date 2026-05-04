@@ -12,8 +12,8 @@ namespace WhiskeyRealism.Patches
     // campaign start, then pauses the campaign. If that one-shot call races
     // panel/list readiness, the W&L career start can remain paused with no
     // command-selection popup. This retry is bounded, only active while our own
-    // start gate says the player has no command, and it stops once the
-    // unit-selection list is visible.
+    // start gate says the player has no command, waits for vanilla's frame-50
+    // startup point, and stops once the unit-selection list is visible.
     [HarmonyPatch(typeof(AICampaign), "Update")]
     internal static class WlCareerStartSelectionRetryPatch
     {
@@ -27,7 +27,6 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _gameFrameField;
         private static FieldInfo _unitSelectionListObjectField;
         private static MethodInfo _showStartUnitSelectionListMethod;
-        private static MethodInfo _getUnitListForStartSelectionMethod;
 
         [HarmonyPostfix]
         internal static void Postfix()
@@ -57,18 +56,19 @@ namespace WhiskeyRealism.Patches
                 }
 
                 CachePanelMembers(panel.GetType());
-                if (UnitSelectionListVisible(panel)) return;
+                if (UnitSelectionListVisible(panel))
+                {
+                    OnceLog.Info("wl-start-selection:visible-pending", $"[W&LStartSelection] command-selection list is visible; waiting for player command source={source} gameFrame={frame} unityFrame={unityFrame} {DescribeWlStatus()}");
+                    return;
+                }
                 if (_showStartUnitSelectionListMethod == null)
                 {
                     OnceLog.Warning("wl-start-selection:no-method", "[W&LStartSelection] retry skipped: ShowStartUnitSelectionList method unavailable");
                     return;
                 }
-                bool startupDataReady = StartupSelectionDataReady(panel);
-                if (frame < MinReadyCampaignFrame && !startupDataReady)
-                    OnceLog.Info("wl-start-selection:waiting-ready", $"[W&LStartSelection] retry waiting for startup data source={source} gameFrame={frame} unityFrame={unityFrame} {DescribeWlStatus()}");
-                if (!RetryGate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: frame, startupDataReady: startupDataReady, unityFrame: unityFrame)) return;
                 if (frame < MinReadyCampaignFrame)
-                    OnceLog.Info("wl-start-selection:stalled-ready", $"[W&LStartSelection] campaign frame below {MinReadyCampaignFrame}, but startup data is ready; retrying source={source} gameFrame={frame} unityFrame={unityFrame}");
+                    OnceLog.Info("wl-start-selection:waiting-ready", $"[W&LStartSelection] retry waiting for vanilla frame {MinReadyCampaignFrame} source={source} gameFrame={frame} unityFrame={unityFrame} {DescribeWlStatus()}");
+                if (!RetryGate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: frame, startupDataReady: false, unityFrame: unityFrame)) return;
 
                 _showStartUnitSelectionListMethod.Invoke(panel, new object[] { true });
 
@@ -137,47 +137,6 @@ namespace WhiskeyRealism.Patches
         {
             var listObject = _unitSelectionListObjectField?.GetValue(panel) as GameObject;
             return listObject != null && listObject.activeInHierarchy;
-        }
-
-        private static bool StartupSelectionDataReady(object panel)
-        {
-            try
-            {
-                if (panel == null || _unitSelectionListObjectField?.GetValue(panel) == null) return false;
-
-                var dlcType = AccessTools.TypeByName("DLC_WL");
-                var gv = AccessTools.TypeByName("GameVars");
-                if (dlcType == null || gv == null) return false;
-                bool active = Convert.ToBoolean(AccessTools.Field(dlcType, "dlc_scenarioactive")?.GetValue(null) ?? false);
-                if (!active) return false;
-                int chosen = Convert.ToInt32(AccessTools.Field(dlcType, "dlc_chosencommander")?.GetValue(null) ?? -1);
-                var commanders = AccessTools.Field(gv, "commander")?.GetValue(null) as IList;
-                if (commanders == null || chosen < 0 || chosen >= commanders.Count) return false;
-
-                var commander = commanders[chosen];
-                if (commander == null) return false;
-                var commanderType = commander.GetType();
-                if (AccessTools.Field(commanderType, "currentcommand")?.GetValue(commander) != null) return false;
-                var armyGroup = AccessTools.Method(commanderType, "GetArmyGroup")?.Invoke(commander, Array.Empty<object>());
-                if (armyGroup != null) return false;
-
-                if (_getUnitListForStartSelectionMethod == null)
-                    _getUnitListForStartSelectionMethod = AccessTools.Method(dlcType, "GetUnitListForStartSelection");
-                if (_getUnitListForStartSelectionMethod == null) return false;
-
-                float prestige = Convert.ToSingle(AccessTools.Field(dlcType, "prestige")?.GetValue(null) ?? 0f);
-                var units = _getUnitListForStartSelectionMethod.Invoke(null, new[] { commander, (object)prestige }) as IList;
-                return units != null && units.Count > 0;
-            }
-            catch (NullReferenceException)
-            {
-                return false;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("wl-start-selection:data-ready", "[W&LStartSelection] startup readiness check failed: " + DescribeException(ex));
-                return false;
-            }
         }
 
         private static string DescribeWlStatus()
