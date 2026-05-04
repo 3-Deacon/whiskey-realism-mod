@@ -28,5 +28,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirective.cs" Link="FormationDirective.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationSnapshot.cs" Link="FormationSnapshot.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirectiveLedger.cs" Link="FormationDirectiveLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalModels.cs" Link="FiscalModels.cs" />
   </ItemGroup>
 </Project>
