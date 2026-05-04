@@ -36,6 +36,11 @@ namespace WhiskeyRealism.Strategic
 
         public bool ShouldAttempt(bool pending, bool listVisible, bool panelAvailable, int campaignFrame, int unityFrame)
         {
+            return ShouldAttempt(pending, listVisible, panelAvailable, campaignFrame, startupDataReady: false, unityFrame);
+        }
+
+        public bool ShouldAttempt(bool pending, bool listVisible, bool panelAvailable, int campaignFrame, bool startupDataReady, int unityFrame)
+        {
             if (!pending)
             {
                 Reset();
@@ -43,7 +48,7 @@ namespace WhiskeyRealism.Strategic
             }
 
             if (!panelAvailable) return false;
-            if (campaignFrame < _minReadyCampaignFrame) return false;
+            if (campaignFrame < _minReadyCampaignFrame && !startupDataReady) return false;
             if (listVisible || _attempts >= _maxAttempts) return false;
             if (_lastAttemptUnityFrame >= 0 && unityFrame - _lastAttemptUnityFrame < _retryEveryUnityFrames) return false;
 

@@ -25,6 +25,7 @@ static class Program
             ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
             ("wl start selection retry waits for panel before consuming attempt", WlStartSelectionRetryWaitsForPanel),
             ("wl start selection retry waits for vanilla ready frame", WlStartSelectionRetryWaitsForReadyFrame),
+            ("wl start selection retry allows stalled ready data before frame fifty", WlStartSelectionRetryAllowsStalledReadyData),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
             ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
@@ -348,6 +349,16 @@ static class Program
         AssertEqual(false, gate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: 49, unityFrame: 1));
         AssertEqual(0, gate.Attempts);
         AssertEqual(true, gate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: 50, unityFrame: 2));
+        AssertEqual(1, gate.Attempts);
+    }
+
+    private static void WlStartSelectionRetryAllowsStalledReadyData()
+    {
+        var gate = new WlStartSelectionRetryGate(maxAttempts: 3, retryEveryUnityFrames: 15, minReadyCampaignFrame: 50);
+
+        AssertEqual(false, gate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: 49, startupDataReady: false, unityFrame: 1));
+        AssertEqual(0, gate.Attempts);
+        AssertEqual(true, gate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: 49, startupDataReady: true, unityFrame: 16));
         AssertEqual(1, gate.Attempts);
     }
 
