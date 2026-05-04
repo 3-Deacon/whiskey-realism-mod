@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Util;
 
@@ -19,6 +20,8 @@ namespace WhiskeyRealism.Strategic
         public ArmyAreaLedger[] ArmyAreas = new ArmyAreaLedger[2];
         public FormationDirectiveLedger[] FormationDirectives = new FormationDirectiveLedger[2];
         public FiscalOutput[] FiscalIntents = new FiscalOutput[2];
+        public ConstructionOutput[] ConstructionIntents = new ConstructionOutput[2];
+        public ConstructionTelemetry ConstructionTelemetry = new ConstructionTelemetry();
         internal SuccessionScheduler Succession = new SuccessionScheduler();
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
@@ -403,6 +406,27 @@ namespace WhiskeyRealism.Strategic
 
             OnEventTrigger(record.AllianceWon, "battle_result");
             OnEventTrigger(record.LosingAlliance, "battle_result");
+        }
+
+        internal void RecordConstructionStart(ConstructionStartEvent start)
+        {
+            ConstructionTelemetry.Record(start);
+
+            if (ConstructionVerboseLoggingEnabled())
+            {
+                Plugin.Log.LogInfo(
+                    $"[ConstructionStart] alliance={start.AllianceId} kind={start.Kind} " +
+                    $"name={start.Name ?? "<unnamed>"} theater={start.Theater} site={start.SiteKey ?? "<none>"}");
+            }
+        }
+
+        private static bool ConstructionVerboseLoggingEnabled()
+        {
+            try
+            {
+                return Plugin.Instance != null && Plugin.Instance.VerboseLogging.Value;
+            }
+            catch { return false; }
         }
 
         public static int ResolvePlayerAlliance()
