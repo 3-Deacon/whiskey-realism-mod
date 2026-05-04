@@ -25,7 +25,7 @@ namespace WhiskeyRealism.Patches
                 }
 
                 bool dateChanged = day != _lastNotifiedDay || month != _lastNotifiedMonth || year != _lastNotifiedYear;
-                bool runtimeReady = OperationalRuntimeReady();
+                bool runtimeReady = OperationalRuntimeReady() && !StrategicCoordinator.WlCareerStartPending();
                 if (!_startupGate.ShouldNotify(dateChanged, runtimeReady))
                     return;
 

@@ -20,6 +20,7 @@ static class Program
             ("army area ledger can redirect independent division input", ArmyAreaLedgerCanRedirectIndependentDivisionInput),
             ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
+            ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
             ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
@@ -261,6 +262,14 @@ static class Program
         AssertEqual(true, gate.ShouldNotify(dateChanged: false, runtimeReady: true));
         AssertEqual(false, gate.ShouldNotify(dateChanged: false, runtimeReady: true));
         AssertEqual(true, gate.ShouldNotify(dateChanged: true, runtimeReady: true));
+    }
+
+    private static void WlCareerStartGateDefersUntilCommandSelected()
+    {
+        AssertEqual(false, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: false, chosenCommanderId: -1, chosenCommanderHasCommand: false));
+        AssertEqual(true, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: true, chosenCommanderId: -1, chosenCommanderHasCommand: false));
+        AssertEqual(true, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: true, chosenCommanderId: 12, chosenCommanderHasCommand: false));
+        AssertEqual(false, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: true, chosenCommanderId: 12, chosenCommanderHasCommand: true));
     }
 
     private static void ArmyGroupDoctrineRequiresTwoCommittedFormations()

@@ -32,6 +32,7 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly WeeklyCadence _operationalCadence = new WeeklyCadence();
         private bool _operationalRuntimeDeferredLogged;
+        private bool _wlCareerStartDeferredLogged;
 
         public int LastSeenMonth = -1;
         public int LastSeenYear  = -1;
@@ -179,6 +180,17 @@ namespace WhiskeyRealism.Strategic
 
         private void RunStrategicReview(int day, int month, int year, bool logHeartbeat)
         {
+            if (WlCareerStartPending())
+            {
+                if (!_wlCareerStartDeferredLogged)
+                {
+                    _wlCareerStartDeferredLogged = true;
+                    Plugin.Log.LogInfo("[Coordinator] W&L career start selection pending; strategic review deferred until player has a command");
+                }
+                return;
+            }
+            _wlCareerStartDeferredLogged = false;
+
             int playerAlliance = ResolvePlayerAlliance();
             bool operationalRuntimeReady = OperationalRuntimeReady();
             if (!operationalRuntimeReady && !_operationalRuntimeDeferredLogged)
@@ -421,6 +433,34 @@ namespace WhiskeyRealism.Strategic
             catch (Exception ex)
             {
                 Plugin.Log.LogWarning("[Coordinator] IsPlayerCICOf failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        public static bool WlCareerStartPending()
+        {
+            try
+            {
+                var dlcType = AccessTools.TypeByName("DLC_WL");
+                if (dlcType == null) return false;
+
+                bool active = Convert.ToBoolean(AccessTools.Field(dlcType, "dlc_scenarioactive")?.GetValue(null) ?? false);
+                int chosen = Convert.ToInt32(AccessTools.Field(dlcType, "dlc_chosencommander")?.GetValue(null) ?? -1);
+                bool hasCommand = false;
+
+                var gv = AccessTools.TypeByName("GameVars");
+                var commanders = AccessTools.Field(gv, "commander")?.GetValue(null) as IList;
+                if (commanders != null && chosen >= 0 && chosen < commanders.Count)
+                {
+                    var commander = commanders[chosen];
+                    hasCommand = commander != null && AccessTools.Field(commander.GetType(), "currentcommand")?.GetValue(commander) != null;
+                }
+
+                return WlCareerStartGate.ShouldDeferStrategicReview(active, chosen, hasCommand);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-career-start-gate", "[Coordinator] W&L career start gate failed: " + ex.Message);
                 return false;
             }
         }
