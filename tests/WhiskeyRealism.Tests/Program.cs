@@ -53,6 +53,7 @@ static class Program
             ("fiscal hysteresis prevents immediate recovery", FiscalHysteresisPreventsImmediateRecovery),
             ("fiscal credit defense requires stable exit weeks", FiscalCreditDefenseRequiresStableExitWeeks),
             ("fiscal emergency residue clears after stable weeks", FiscalEmergencyResidueClearsAfterStableWeeks),
+            ("financial ai log gate suppresses repeated corrections", FinancialAiLogGateSuppressesRepeatedCorrections),
             ("construction scorer favors csa banks in balanced posture", ConstructionScorerFavorsCsaBanks),
             ("construction scorer favors logistics when supply is protected", ConstructionScorerFavorsLogistics),
             ("construction scorer suppresses csa naval under credit defense", ConstructionScorerSuppressesCsaNaval),
@@ -916,6 +917,18 @@ static class Program
 
         var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
         AssertEqual(FiscalPosture.BalancedWar, output.Posture);
+    }
+
+    private static void FinancialAiLogGateSuppressesRepeatedCorrections()
+    {
+        var gate = new FinancialAiLogGate();
+        string first = FinancialAiLogGate.Signature(1, "subsidy", 4, 0.15f, 0.10f, FiscalPosture.BalancedWar);
+        string repeat = FinancialAiLogGate.Signature(1, "subsidy", 4, 0.15f, 0.10f, FiscalPosture.BalancedWar);
+        string changed = FinancialAiLogGate.Signature(1, "subsidy", 3, 0.50f, 0.20f, FiscalPosture.BalancedWar);
+
+        AssertEqual(true, gate.ShouldLog(first));
+        AssertEqual(false, gate.ShouldLog(repeat));
+        AssertEqual(true, gate.ShouldLog(changed));
     }
 
     private static void ConstructionScorerFavorsCsaBanks()

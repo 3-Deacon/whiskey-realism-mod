@@ -12,6 +12,8 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "UpdateFinancialAI")]
     internal static class FinancialAIPatch
     {
+        private static readonly FinancialAiLogGate _logGate = new FinancialAiLogGate();
+
         [HarmonyPostfix]
         internal static void Postfix(int alliance)
         {
@@ -62,7 +64,7 @@ namespace WhiskeyRealism.Patches
                 return 0;
 
             if (NearlyEqual(old, tax[lane])) return 0;
-            Plugin.Log.LogInfo($"[Patch:FinancialAI] alliance={alliance} taxLane={lane} old={old:F2} new={tax[lane]:F2} posture={intent.Posture}");
+            LogCorrection(alliance, "tax", lane, old, tax[lane], intent.Posture);
             return 1;
         }
 
@@ -91,8 +93,18 @@ namespace WhiskeyRealism.Patches
                 return 0;
 
             if (NearlyEqual(old, subsidies[lane])) return 0;
-            Plugin.Log.LogInfo($"[Patch:FinancialAI] alliance={alliance} subsidyLane={lane} old={old:F2} new={subsidies[lane]:F2} posture={intent.Posture}");
+            LogCorrection(alliance, "subsidy", lane, old, subsidies[lane], intent.Posture);
             return 1;
+        }
+
+        private static void LogCorrection(int alliance, string laneType, int lane, float oldValue, float newValue, FiscalPosture posture)
+        {
+            string signature = FinancialAiLogGate.Signature(alliance, laneType, lane, oldValue, newValue, posture);
+            if (!_logGate.ShouldLog(signature)) return;
+
+            string label = laneType == "tax" ? "taxLane" : "subsidyLane";
+            Plugin.Log.LogInfo(
+                $"[Patch:FinancialAI] alliance={alliance} {label}={lane} old={oldValue:F2} new={newValue:F2} posture={posture}");
         }
 
         private static bool NearlyEqual(float left, float right)
