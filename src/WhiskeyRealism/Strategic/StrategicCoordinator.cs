@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic.Construction;
@@ -34,6 +35,7 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _armyAreaSignatures = new string[2];
         private readonly string[] _formationDirectiveSignatures = new string[2];
         private readonly string[] _fiscalSignatures = new string[2];
+        private readonly string[] _constructionSignatures = new string[2];
         private readonly WeeklyCadence _operationalCadence = new WeeklyCadence();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
@@ -238,6 +240,7 @@ namespace WhiskeyRealism.Strategic
                     UpdateFormationDirectiveLedger(alliance, cic, era);
                 }
                 UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat);
+                UpdateConstructionIntent(alliance, era.Stage, logHeartbeat);
 
                 if (Plugin.Instance.VerboseLogging.Value && !logHeartbeat)
                     Plugin.Log.LogInfo($"[WeeklyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
@@ -250,6 +253,51 @@ namespace WhiskeyRealism.Strategic
                         $"plan={(cic.ActivePlan == null ? "<none>" : $"phase{cic.ActivePlan.CurrentPhaseIndex + 1}/{cic.ActivePlan.Phases.Count} obj={cic.ActivePlan.CurrentPhase?.TargetObjectiveId}")} " +
                         $"succession_fired={Succession.FiredEventIds.Count}");
                 }
+            }
+        }
+
+        private void UpdateConstructionIntent(int alliance, EraStage era, bool logHeartbeat)
+        {
+            try
+            {
+                var plugin = Plugin.Instance;
+                if (plugin == null || !ConfigValue(plugin.EnableConstructionIntentLedger))
+                    return;
+                if (alliance < 0 || alliance >= ConstructionIntents.Length || alliance >= _constructionSignatures.Length)
+                    return;
+
+                var fiscal = alliance < FiscalIntents.Length ? FiscalIntents[alliance] : null;
+                var front = alliance < Fronts.Length ? Fronts[alliance] : null;
+                var formation = alliance < FormationDirectives.Length ? FormationDirectives[alliance] : null;
+                var input = ConstructionRuntime.BuildInput(alliance, era, fiscal, front, formation);
+                var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+                ConstructionIntents[alliance] = output;
+
+                if (ConfigValue(plugin.VerboseLogging) ||
+                    ConfigValue(plugin.ConstructionVerboseLogging) ||
+                    _constructionSignatures[alliance] != output.Signature)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[ConstructionIntent] alliance={alliance} posture={output.Posture} " +
+                        $"theater={output.TopConstructionTheater ?? ""} " +
+                        $"private={output.TopPrivateBuilding.Name} depot={output.TopSupplyDepot.Name} " +
+                        $"fort={output.TopFort.Name} rail={output.TopRailroad.Name}");
+                    _constructionSignatures[alliance] = output.Signature;
+                }
+
+                if (logHeartbeat && ConfigValue(plugin.ConstructionTelemetryEnabled, defaultValue: true))
+                {
+                    var telemetry = ConstructionTelemetry ?? (ConstructionTelemetry = new ConstructionTelemetry());
+                    Plugin.Log.LogInfo(
+                        $"[ConstructionTelemetry] alliance={alliance} posture={output.Posture} " +
+                        $"{telemetry.Summary(alliance)}");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "construction-intent:update:" + alliance,
+                    "[ConstructionIntent] update failed: " + ex.Message);
             }
         }
 
@@ -410,7 +458,8 @@ namespace WhiskeyRealism.Strategic
 
         internal void RecordConstructionStart(ConstructionStartEvent start)
         {
-            ConstructionTelemetry.Record(start);
+            var telemetry = ConstructionTelemetry ?? (ConstructionTelemetry = new ConstructionTelemetry());
+            telemetry.Record(start);
 
             if (ConstructionVerboseLoggingEnabled())
             {
@@ -422,13 +471,23 @@ namespace WhiskeyRealism.Strategic
 
         private static bool ConstructionVerboseLoggingEnabled()
         {
-            // Task 4 will introduce construction-specific config. Until then,
-            // construction start detail follows the existing global verbose flag.
             try
             {
-                return Plugin.Instance != null && Plugin.Instance.VerboseLogging.Value;
+                var plugin = Plugin.Instance;
+                return plugin != null &&
+                    (ConfigValue(plugin.VerboseLogging) ||
+                     ConfigValue(plugin.ConstructionVerboseLogging));
             }
             catch { return false; }
+        }
+
+        private static bool ConfigValue(ConfigEntry<bool> entry, bool defaultValue = false)
+        {
+            try
+            {
+                return entry != null ? entry.Value : defaultValue;
+            }
+            catch { return defaultValue; }
         }
 
         public static int ResolvePlayerAlliance()

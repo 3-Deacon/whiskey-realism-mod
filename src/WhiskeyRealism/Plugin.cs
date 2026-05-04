@@ -24,6 +24,16 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> SuccessionTrace;
         internal ConfigEntry<bool> FiscalTrace;
         internal ConfigEntry<bool> FiscalTelemetryCsv;
+        internal ConfigEntry<bool> EnableConstructionIntentLedger;
+        internal ConfigEntry<bool> EnableConstructionSiteSteering;
+        internal ConfigEntry<bool> EnableSupplyDepotSteering;
+        internal ConfigEntry<bool> EnableFortSteering;
+        internal ConfigEntry<bool> EnableTelegraphAI;
+        internal ConfigEntry<bool> EnableRailroadSteering;
+        internal ConfigEntry<bool> ConstructionTelemetryEnabled;
+        internal ConfigEntry<bool> ConstructionVerboseLogging;
+        internal ConfigEntry<int> MaxActiveTelegraphConstructionsPerFaction;
+        internal ConfigEntry<int> MaxRailroadStartsPerFactionPerMonth;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -66,6 +76,36 @@ namespace WhiskeyRealism
             FiscalTelemetryCsv = Config.Bind(
                 "Diagnostics", "Fiscal Telemetry Csv", false,
                 "Reserved for future CSV telemetry export. Current fiscal telemetry is emitted to LogOutput.log.");
+            EnableConstructionIntentLedger = Config.Bind(
+                "Construction", "Enable Construction Intent Ledger", true,
+                "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
+            EnableConstructionSiteSteering = Config.Bind(
+                "Construction", "Enable Construction Site Steering", false,
+                "Default OFF. Future valve for bestiipplaces site substitution after observation validates it.");
+            EnableSupplyDepotSteering = Config.Bind(
+                "Construction", "Enable Supply Depot Steering", false,
+                "Default OFF. Future valve for supply depot steering after observer telemetry proves safe candidate selection.");
+            EnableFortSteering = Config.Bind(
+                "Construction", "Enable Fort Steering", false,
+                "Default OFF. Future valve for fort site steering after fort-site and unit-range telemetry prove realizable sites.");
+            EnableTelegraphAI = Config.Bind(
+                "Construction", "Enable Telegraph AI", false,
+                "Default OFF. Future valve for conservative connected-chain telegraph construction.");
+            EnableRailroadSteering = Config.Bind(
+                "Construction", "Enable Railroad Steering", false,
+                "Default OFF. Future valve for per-line railroad steering. Observation remains active through telemetry.");
+            ConstructionTelemetryEnabled = Config.Bind(
+                "Construction", "Construction Telemetry", true,
+                "Emit no-spam construction intent and actual-start heartbeat lines.");
+            ConstructionVerboseLogging = Config.Bind(
+                "Construction", "Construction Verbose Logging", false,
+                "Emit verbose construction candidate and actual-start details.");
+            MaxActiveTelegraphConstructionsPerFaction = Config.Bind(
+                "Construction", "Max Active Telegraph Constructions Per Faction", 1,
+                "Future telegraph AI cap. Current slice records the value but does not build telegraphs.");
+            MaxRailroadStartsPerFactionPerMonth = Config.Bind(
+                "Construction", "Max Railroad Starts Per Faction Per Month", 1,
+                "Future railroad steering cap. Current slice observes vanilla railroad starts only.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");
