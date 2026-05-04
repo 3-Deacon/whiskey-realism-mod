@@ -14,11 +14,13 @@ namespace WhiskeyRealism.Strategic
         public EraStageManager[] Eras = new EraStageManager[2];
         public FrontSectorLedger[] Fronts = new FrontSectorLedger[2];
         public ArmyAreaLedger[] ArmyAreas = new ArmyAreaLedger[2];
+        public FormationDirectiveLedger[] FormationDirectives = new FormationDirectiveLedger[2];
         internal SuccessionScheduler Succession = new SuccessionScheduler();
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
         private readonly string[] _frontSignatures = new string[2];
         private readonly string[] _armyAreaSignatures = new string[2];
+        private readonly string[] _formationDirectiveSignatures = new string[2];
         private readonly WeeklyCadence _operationalCadence = new WeeklyCadence();
 
         public int LastSeenMonth = -1;
@@ -198,6 +200,7 @@ namespace WhiskeyRealism.Strategic
 
                 UpdateFrontLedger(alliance, cic);
                 UpdateArmyAreaLedger(alliance, cic);
+                UpdateFormationDirectiveLedger(alliance, cic, era);
 
                 if (Plugin.Instance.VerboseLogging.Value && !logHeartbeat)
                     Plugin.Log.LogInfo($"[WeeklyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
@@ -245,6 +248,30 @@ namespace WhiskeyRealism.Strategic
             {
                 Plugin.Log.LogInfo($"[ArmyArea] alliance={alliance} {signature}");
                 _armyAreaSignatures[alliance] = signature;
+            }
+        }
+
+        private void UpdateFormationDirectiveLedger(int alliance, CIC cic, EraStageManager era)
+        {
+            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
+            string planTargetAreaKey = null;
+            var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
+            if (targetPosition.HasValue)
+                planTargetAreaKey = ArmyAreaRuntime.AreaKey(targetPosition.Value);
+
+            var ledger = FormationDirectiveRuntime.BuildForAlliance(alliance, era.Stage, planTargetAreaKey);
+            if (ledger == null) return;
+
+            FormationDirectives[alliance] = ledger;
+            string signature = ledger.Summary();
+            if (Plugin.Instance.VerboseLogging.Value || _formationDirectiveSignatures[alliance] != signature)
+            {
+                Plugin.Log.LogInfo(
+                    $"[FormationDirective] alliance={alliance} summary={signature} " +
+                    $"lowSupply={ledger.Pressure.LowSupplyCount} lowAmmo={ledger.Pressure.LowAmmoCount} " +
+                    $"recover={ledger.Pressure.RecoverCount} mass={ledger.Pressure.MassCount} " +
+                    $"supplyArea={ledger.Pressure.TopSupplyAreaKey ?? "<none>"}");
+                _formationDirectiveSignatures[alliance] = signature;
             }
         }
 
