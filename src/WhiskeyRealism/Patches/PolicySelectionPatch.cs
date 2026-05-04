@@ -8,8 +8,8 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Patches
 {
     // Vanilla CheckAIPolicyChange walks the active AI personality policy list.
-    // This Prefix only intervenes when a fiscal policy has a clear score win
-    // and passes vanilla availability checks.
+    // This Prefix intervenes only when a fiscal policy has a clear score win,
+    // or when the vanilla first-available policy is fiscally suppressed.
     [HarmonyPatch(typeof(Policies), "CheckAIPolicyChange")]
     internal static class PolicySelectionPatch
     {
@@ -44,6 +44,8 @@ namespace WhiskeyRealism.Patches
 
                 int firstVanillaPolicy = -1;
                 float firstVanillaScore = 0f;
+                int firstNonSuppressedPolicy = -1;
+                float firstNonSuppressedScore = 0f;
                 int bestPolicy = -1;
                 float bestScore = MinimumFiscalScore;
 
@@ -59,6 +61,11 @@ namespace WhiskeyRealism.Patches
                         firstVanillaPolicy = policyId;
                         firstVanillaScore = score;
                     }
+                    if (firstNonSuppressedPolicy < 0 && score >= 0f)
+                    {
+                        firstNonSuppressedPolicy = policyId;
+                        firstNonSuppressedScore = score;
+                    }
 
                     if (score > bestScore)
                     {
@@ -67,19 +74,46 @@ namespace WhiskeyRealism.Patches
                     }
                 }
 
-                if (bestPolicy < 0) return true;
-                if (bestPolicy == firstVanillaPolicy) return true;
-                if (bestScore < firstVanillaScore + FiscalWinMargin) return true;
+                string reason = "fiscal-win";
+                int selectedPolicyId = -1;
+                float selectedScore = 0f;
+                if (bestPolicy >= 0 && bestPolicy != firstVanillaPolicy && bestScore >= firstVanillaScore + FiscalWinMargin)
+                {
+                    selectedPolicyId = bestPolicy;
+                    selectedScore = bestScore;
+                }
+                else if (firstVanillaPolicy >= 0 && firstVanillaScore < 0f)
+                {
+                    reason = "suppress-force-growth";
+                    if (firstNonSuppressedPolicy < 0)
+                    {
+                        OnceLog.Info("policy-selection", "PolicySelectionPatch wired");
+                        if (Plugin.Instance.VerboseLogging.Value)
+                        {
+                            Plugin.Log.LogInfo(
+                                $"[Patch:PolicySelection] alliance={alliance} blocked={firstVanillaPolicy} " +
+                                $"posture={intent.Posture} vanillaScore={firstVanillaScore:F2} reason={reason}");
+                        }
+                        return false;
+                    }
 
-                var selected = Policy.GetPolicyFromID(bestPolicy);
+                    selectedPolicyId = firstNonSuppressedPolicy;
+                    selectedScore = firstNonSuppressedScore;
+                }
+                else
+                {
+                    return true;
+                }
+
+                var selected = Policy.GetPolicyFromID(selectedPolicyId);
                 if (selected == null) return true;
 
                 OnceLog.Info("policy-selection", "PolicySelectionPatch wired");
                 Policies.AddResearch(alliance, selected);
                 Plugin.Log.LogInfo(
-                    $"[Patch:PolicySelection] alliance={alliance} policy={bestPolicy} " +
+                    $"[Patch:PolicySelection] alliance={alliance} policy={selectedPolicyId} " +
                     $"posture={intent.Posture} vanilla={firstVanillaPolicy} " +
-                    $"vanillaScore={firstVanillaScore:F2} bestScore={bestScore:F2}");
+                    $"vanillaScore={firstVanillaScore:F2} selectedScore={selectedScore:F2} reason={reason}");
                 return false;
             }
             catch (Exception ex)
