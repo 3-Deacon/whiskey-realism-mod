@@ -24,7 +24,10 @@ static class Program
             ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
             ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
             ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
-            ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot)
+            ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
+            ("formation level maps vanilla unit types", FormationLevelMapsVanillaUnitTypes),
+            ("independent top division requires top unit and strength floor", IndependentTopDivisionRequiresTopAndStrengthFloor),
+            ("attached division is not directly controllable", AttachedDivisionIsNotDirectlyControllable)
         };
 
         foreach (var test in tests)
@@ -337,6 +340,51 @@ static class Program
         AssertEqual(true, strongDecision.ShouldReplace);
         AssertEqual(41, strongDecision.ProjectId);
         AssertEqual("vanilla-empty-strategy-margin", strongDecision.Reason);
+    }
+
+    private static void FormationLevelMapsVanillaUnitTypes()
+    {
+        AssertEqual(FormationLevel.Division, FormationSnapshot.LevelFromUnitType(14));
+        AssertEqual(FormationLevel.Corps, FormationSnapshot.LevelFromUnitType(15));
+        AssertEqual(FormationLevel.Army, FormationSnapshot.LevelFromUnitType(16));
+        AssertEqual(FormationLevel.Unknown, FormationSnapshot.LevelFromUnitType(17));
+    }
+
+    private static void IndependentTopDivisionRequiresTopAndStrengthFloor()
+    {
+        var snap = new FormationSnapshot
+        {
+            UnitKey = "div:1",
+            UnitType = 14,
+            IsTopUnit = true,
+            IsGarrisoned = false,
+            GroupStrengthDirect = 1500f
+        };
+
+        AssertEqual(true, snap.IsIndependentTopDivision);
+
+        snap.IsTopUnit = false;
+        AssertEqual(false, snap.IsIndependentTopDivision);
+
+        snap.IsTopUnit = true;
+        snap.GroupStrengthDirect = 999f;
+        AssertEqual(false, snap.IsIndependentTopDivision);
+    }
+
+    private static void AttachedDivisionIsNotDirectlyControllable()
+    {
+        var snap = new FormationSnapshot
+        {
+            UnitKey = "attached:1",
+            ParentUnitKey = "corps:1",
+            UnitType = 14,
+            IsTopUnit = false,
+            GroupStrengthDirect = 3000f
+        };
+
+        AssertEqual(FormationLevel.Division, snap.Level);
+        AssertEqual(true, snap.IsAttachedDivision);
+        AssertEqual(false, snap.CanReceiveDirectDirective);
     }
 
     private static void AssertEqual<T>(T expected, T actual)
