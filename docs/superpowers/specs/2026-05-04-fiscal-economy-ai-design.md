@@ -125,6 +125,7 @@ Inputs:
 - activated policies and projects,
 - army/navy/recruitment/upkeep costs,
 - active plan and front posture,
+- formation-directive supply pressure, ammo pressure, depot coverage, and transport bottlenecks,
 - battle-history pressure and war-state gates.
 
 Outputs:
@@ -137,6 +138,7 @@ Outputs:
 - policy priorities.
 - project priorities.
 - construction priorities.
+- military supply priorities.
 - spending suppressions.
 - one-line signature for bounded logging.
 
@@ -276,6 +278,42 @@ Project priority rules:
 - CSA domestic naval projects are not in the same subsidy lane as diplomacy imports, but they still compete for fiscal room through annual subsidy cost and debt pressure.
 - Union naval projects can stay aggressive while rating remains above protected gates.
 
+## Military Supply Coupling
+
+Fiscal AI must treat military supply as a first-class war outcome, not a side effect.
+
+Vanilla annual balance includes army upkeep, navy upkeep, recruitment cost, and supply depot purchases. A finance plan that preserves credit by starving supply, transport, or depot construction is not a good plan. It only delays collapse until the field armies become immobile, under-supplied, or unable to exploit victories.
+
+Inputs from the formation-directive layer:
+
+- repeated `Recover` directives caused by low ammo, low provisions, forage shortage, fatigue, or poor supply state;
+- repeated `Mass` or `Reinforce` failures caused by rail, transport, depot, or corridor weakness;
+- front-level supply pressure from Virginia/Richmond, Tennessee/Georgia, Mississippi, ports, river corridors, and occupied logistics corridors;
+- low-ammo and low-supply formation counts by alliance and theater;
+- transport utilization and bottleneck signatures;
+- active operational plan phase, especially `Hold`, `Exploit`, `Mass`, and `Recover`.
+
+Fiscal outputs:
+
+- `SupplyProtection`: protect the spending and construction needed to keep existing field armies supplied.
+- `LogisticsExpansion`: prioritize rail, market, depot, transport, logistics-project, and infrastructure spending when armies are blocked by supply rather than enemy strength.
+- `ForceCapWarning`: suppress additional recruitment, ships, or discretionary projects when upkeep and supply costs already exceed what the economy can sustain.
+- `TheaterSupplyPriority`: choose which theater gets scarce construction/project/subsidy attention first.
+
+Faction behavior:
+
+- CSA should prefer sustaining fewer dangerous armies over recruiting or building more formations than its depots, rail, and credit can support.
+- CSA `EmergencySolvency` should protect minimum supply for Richmond/Virginia, Tennessee/Georgia, Mississippi, and key ports before funding vanity industry or naval parity.
+- Union should use its stronger economy to build logistics depth for simultaneous pressure, but still avoid unsupported army growth when transport and supply telemetry says the system is saturated.
+- Both factions should distinguish "need more men" from "existing men cannot move or fight because supply is failing."
+
+Posture rules:
+
+- `Expansion`: build logistics capacity ahead of planned offensives.
+- `BalancedWar`: maintain supply spending and pre-position depots/markets/rail near active fronts.
+- `CreditDefense`: cut discretionary subsidies before cutting critical supply/logistics support.
+- `EmergencySolvency`: suppress new force growth first; preserve the minimum supply chain for existing armies and capital/key-port defense.
+
 ## Patch Surfaces
 
 ### PolicySelectionPatch
@@ -412,6 +450,7 @@ Fiscal balance cannot be judged by feel. Add a bounded telemetry surface before 
 - Monthly log line: `[FiscalTelemetry] alliance=1 posture=... rating=... treasury=... debt=... balance=... army=... navy=... recruit=... subsidies=... taxes=... project=... construction=...`.
 - Optional config-gated CSV export next to the save sidecar, for baseline-vs-modded campaign comparisons.
 - CSV fields: date, alliance, posture, rating index/name, treasury, debt, annual balance, interest cost, army upkeep, navy upkeep, recruitment cost, subsidy rates, tax rates, top construction candidate, top project candidate, active suppressions.
+- Supply fields: supply depot purchases, transport bottleneck signature, low-supply formation count, low-ammo formation count, top supply-starved theater, and active `SupplyProtection`/`ForceCapWarning` flags.
 - Telemetry must be low volume by default: one row per alliance per month, plus posture-change rows.
 
 ## Testing
@@ -431,6 +470,8 @@ Pure tests:
 - Construction scoring prefers banks under high interest, hospitals near wounded pressure, and markets under transport bottlenecks.
 - CSA `BalancedWar` pre-positions at least one bank in major safe theaters before `CreditDefense`.
 - CSA project scoring prefers arms imports/credit/diplomacy over discretionary naval projects under fiscal stress.
+- Low-supply formation pressure raises logistics/depot/market priorities before new recruitment.
+- `EmergencySolvency` suppresses new force growth before it suppresses minimum field-army supply.
 
 Runtime smoke:
 
@@ -440,6 +481,7 @@ Runtime smoke:
 - CSA does not drop below recruitment/construction gates from random subsidy escalation in early smoke.
 - Construction patch logs only candidate boosts, not direct forced construction.
 - Monthly fiscal telemetry emits one bounded line/row per alliance.
+- Supply-starved theaters appear in fiscal telemetry and alter construction/project priorities.
 
 Required DLL-affecting verification:
 
@@ -455,6 +497,8 @@ Required DLL-affecting verification:
 - No player finance control is changed unless automanage or AI-vs-AI allows it.
 - CSA remains weaker in raw economy but avoids obviously self-destructive fiscal choices.
 - Union invests its advantage into blockade, logistics, industry, and manpower.
+- CSA is not balanced by free money or free replacements; it competes by preserving credit, supply, and field-army usefulness longer.
+- Fiscal decisions do not improve credit by starving existing field armies of minimum supply/logistics support.
 - Fiscal telemetry is sufficient to compare baseline-vs-modded CSA credit survival, project choices, and construction choices over at least one campaign year.
 - Normal log volume stays low with verbose logging off.
 
@@ -463,9 +507,10 @@ Required DLL-affecting verification:
 1. Add `FiscalIntentLedger` and pure tests.
 2. Add policy scoring and `PolicySelectionPatch`.
 3. Add target tax/subsidy ranges and `FinancialAIPatch`.
-4. Add construction scoring and `EconomyConstructionPatch`.
-5. Connect recruitment/replenishment intent to fiscal posture.
-6. Rebalance after campaign telemetry, not before.
+4. Wire formation-directive supply pressure into `FiscalIntentLedger`.
+5. Add construction scoring and `EconomyConstructionPatch`.
+6. Connect recruitment/replenishment intent to fiscal posture and `ForceCapWarning`.
+7. Rebalance after campaign telemetry, not before.
 
 ## Verified Vanilla Behavior Appendix
 
