@@ -231,7 +231,7 @@ namespace WhiskeyRealism.Strategic
             !IsGarrisoned && IsTopUnit && UnitType >= 14 && UnitType <= 16;
 
         public bool CanReceiveDirectDirective =>
-            IsTopStrategicFormation || IsAttachedDivision;
+            IsTopStrategicFormation;
 
         public bool CanReceiveDirectMovement =>
             IsTopStrategicFormation;
@@ -487,12 +487,12 @@ namespace WhiskeyRealism.Strategic
             foreach (var snapshot in snapshots)
             {
                 if (snapshot == null || string.IsNullOrEmpty(snapshot.UnitKey)) continue;
-                if (!snapshot.CanReceiveDirectDirective) continue;
                 if (snapshot.IsAttachedDivision)
                 {
                     pendingAttached.Add(snapshot);
                     continue;
                 }
+                if (!snapshot.CanReceiveDirectDirective) continue;
                 if (!snapshot.IsTopStrategicFormation) continue;
 
                 var assignment = ResolveTopDirective(snapshot, era, planTargetAreaKey);
