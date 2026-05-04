@@ -151,7 +151,8 @@ namespace WhiskeyRealism.Strategic.Construction
         {
             return candidate.Kind == ConstructionCandidateKind.PrivateBuilding &&
                 candidate.ArmsIndustry &&
-                input.FiscalPosture == FiscalPosture.CreditDefense &&
+                (input.FiscalPosture == FiscalPosture.CreditDefense ||
+                 input.FiscalPosture == FiscalPosture.EmergencySolvency) &&
                 input.AllianceId == 1 &&
                 input.CurrentYear <= options.CsaArmsStressLastYear &&
                 !nearBondFloor &&

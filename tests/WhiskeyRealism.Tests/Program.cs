@@ -68,6 +68,7 @@ static class Program
             ("construction scorer floors emergency industrial suppression", ConstructionScorerFloorsEmergencyIndustry),
             ("construction ledger chooses field supply from low-supply pressure", ConstructionLedgerChoosesFieldSupply),
             ("construction ledger allows csa early arms stress", ConstructionLedgerAllowsCsaEarlyArmsStress),
+            ("construction ledger allows emergency csa arms away from bond floor", ConstructionLedgerAllowsEmergencyCsaArmsAwayFromBondFloor),
             ("construction ledger suppresses csa rail by doctrine", ConstructionLedgerSuppressesCsaRailByDoctrine),
             ("construction ledger makes emergency hold strict near bond floor", ConstructionLedgerEmergencyHoldNearBondFloor),
             ("construction ledger signature changes on top candidate", ConstructionLedgerSignatureChangesOnTopCandidate),
@@ -1206,6 +1207,29 @@ static class Program
 
         AssertEqual(10, output.TopPrivateBuilding.BuildingTypeId);
         AssertTrue(output.TopPrivateBuilding.Score > 0.5f, "expected early CSA arms industry to remain viable");
+    }
+
+    private static void ConstructionLedgerAllowsEmergencyCsaArmsAwayFromBondFloor()
+    {
+        var input = BaseConstructionInput(1);
+        input.FiscalPosture = FiscalPosture.EmergencySolvency;
+        input.CurrentRating = 7;
+        input.BondFloorRating = 11;
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 10,
+            Name = "Iron Works",
+            Theater = Theater.East,
+            ArmsIndustry = true,
+            SupportsActiveArmyCorridor = true,
+            VanillaValid = true
+        });
+
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        AssertEqual(ConstructionPosture.EmergencyHold, output.Posture);
+        AssertEqual(10, output.TopPrivateBuilding.BuildingTypeId);
     }
 
     private static void ConstructionLedgerSuppressesCsaRailByDoctrine()
