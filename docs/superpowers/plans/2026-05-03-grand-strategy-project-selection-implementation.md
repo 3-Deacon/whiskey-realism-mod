@@ -36,20 +36,30 @@ Out of scope for this plan:
 
 - Create `src/WhiskeyRealism/Strategic/StrategyTag.cs`
   - Defines strategy tags shared by objective and project scoring.
+- Create `src/WhiskeyRealism/Strategic/EraStage.cs`
+  - Holds the `EraStage` enum separately so the pure console harness can source-link it without compiling `EraStageManager` and `Plugin`.
 - Create `src/WhiskeyRealism/Strategic/GrandStrategyProfile.cs`
   - Immutable-ish profile object plus scoring helpers.
 - Create `src/WhiskeyRealism/Strategic/GrandStrategyRegistry.cs`
   - Resolves alliance + era to a profile.
+- Create `src/WhiskeyRealism/Strategic/ObjectiveStrategyTagger.cs`
+  - Pure default tag derivation for fallback objective metadata.
+- Create `src/WhiskeyRealism/Strategic/ObjectiveScoring.cs`
+  - Pure objective score composition used by CIC and tests.
 - Create `src/WhiskeyRealism/Strategic/ProjectSelectionScorer.cs`
   - Pure project candidate scoring and replacement threshold logic.
 - Modify `src/WhiskeyRealism/Strategic/ObjectiveMetadata.cs`
   - Add `StrategyTags` and helper methods.
+- Modify `src/WhiskeyRealism/Strategic/ObjectiveAdapter.cs`
+  - Derive default strategy tags for runtime fallback objectives.
 - Modify `src/WhiskeyRealism/Strategic/CIC.cs`
   - Compose grand-strategy profile into objective scoring and plan rationale.
 - Create `src/WhiskeyRealism/Patches/ProjectSelectionPatch.cs`
   - Postfix on `AICampaign.UpdateProjects(int alliance)` that replaces `nextprojecttoresearch` only when safe.
 - Modify `tests/WhiskeyRealism.Tests/Program.cs`
   - Add pure tests for profiles, objective tags, and project selection.
+- Modify `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`
+  - Link the new pure `Strategic/` source files used by the console harness.
 - Modify `docs/patch-catalog.md`
   - Add #17 `ProjectSelectionPatch`.
 - Modify `docs/handoff.md`
@@ -61,13 +71,16 @@ Out of scope for this plan:
 
 **Files:**
 - Create: `src/WhiskeyRealism/Strategic/StrategyTag.cs`
+- Create: `src/WhiskeyRealism/Strategic/EraStage.cs`
 - Create: `src/WhiskeyRealism/Strategic/GrandStrategyProfile.cs`
 - Create: `src/WhiskeyRealism/Strategic/GrandStrategyRegistry.cs`
+- Modify: `src/WhiskeyRealism/Strategic/EraStageManager.cs`
 - Modify: `tests/WhiskeyRealism.Tests/Program.cs`
+- Modify: `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`
 
 - [ ] **Step 1: Add failing tests for strategy profiles**
 
-Add these entries to the `tests` array in `tests/WhiskeyRealism.Tests/Program.cs`:
+Add these entries to the existing `tests` array initializer in `tests/WhiskeyRealism.Tests/Program.cs` before the closing brace:
 
 ```csharp
 ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
@@ -108,9 +121,28 @@ Run:
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 ```
 
-Expected: compile failure because `GrandStrategyRegistry` and `StrategyTag` do not exist.
+Expected: compile failure because `GrandStrategyRegistry`, `StrategyTag`, and the source-linked `EraStage` enum do not exist.
 
-- [ ] **Step 3: Add `StrategyTag.cs`**
+- [ ] **Step 3: Move `EraStage` enum to a pure file**
+
+Create `src/WhiskeyRealism/Strategic/EraStage.cs`:
+
+```csharp
+namespace WhiskeyRealism.Strategic
+{
+    public enum EraStage
+    {
+        Amateur1861     = 0,
+        Operational1862 = 1,
+        Decisive1863    = 2,
+        TotalWar1864    = 3
+    }
+}
+```
+
+Remove the `EraStage` enum block from `src/WhiskeyRealism/Strategic/EraStageManager.cs`. Do not change `EraStageManager.StageVector` behavior.
+
+- [ ] **Step 4: Add `StrategyTag.cs`**
 
 Create `src/WhiskeyRealism/Strategic/StrategyTag.cs`:
 
@@ -139,7 +171,7 @@ namespace WhiskeyRealism.Strategic
 }
 ```
 
-- [ ] **Step 4: Add `GrandStrategyProfile.cs`**
+- [ ] **Step 5: Add `GrandStrategyProfile.cs`**
 
 Create `src/WhiskeyRealism/Strategic/GrandStrategyProfile.cs`:
 
@@ -181,21 +213,46 @@ namespace WhiskeyRealism.Strategic
 }
 ```
 
-- [ ] **Step 5: Add `GrandStrategyRegistry.cs`**
+- [ ] **Step 6: Add `GrandStrategyRegistry.cs`**
 
 Create `src/WhiskeyRealism/Strategic/GrandStrategyRegistry.cs`:
 
 ```csharp
+using System.Collections.Generic;
+
 namespace WhiskeyRealism.Strategic
 {
     public static class GrandStrategyRegistry
     {
+        private static readonly Dictionary<int, GrandStrategyProfile> Profiles = BuildProfiles();
+
         public static GrandStrategyProfile Resolve(int allianceId, EraStage stage)
         {
-            if (allianceId == 1)
-                return ResolveCsa(stage);
+            int key = ((allianceId == 1 ? 1 : 0) * 10) + (int)stage;
+            if (Profiles.TryGetValue(key, out var profile))
+                return profile;
 
-            return ResolveUnion(stage);
+            int fallback = ((allianceId == 1 ? 1 : 0) * 10) + (int)EraStage.Amateur1861;
+            return Profiles[fallback];
+        }
+
+        private static Dictionary<int, GrandStrategyProfile> BuildProfiles()
+        {
+            var profiles = new Dictionary<int, GrandStrategyProfile>();
+            Add(profiles, ResolveUnion(EraStage.Amateur1861));
+            Add(profiles, ResolveUnion(EraStage.Operational1862));
+            Add(profiles, ResolveUnion(EraStage.Decisive1863));
+            Add(profiles, ResolveUnion(EraStage.TotalWar1864));
+            Add(profiles, ResolveCsa(EraStage.Amateur1861));
+            Add(profiles, ResolveCsa(EraStage.Operational1862));
+            Add(profiles, ResolveCsa(EraStage.Decisive1863));
+            Add(profiles, ResolveCsa(EraStage.TotalWar1864));
+            return profiles;
+        }
+
+        private static void Add(Dictionary<int, GrandStrategyProfile> profiles, GrandStrategyProfile profile)
+        {
+            profiles[(profile.AllianceId * 10) + (int)profile.EraStage] = profile;
         }
 
         private static GrandStrategyProfile ResolveUnion(EraStage stage)
@@ -207,20 +264,20 @@ namespace WhiskeyRealism.Strategic
                     .WithTag(StrategyTag.RailHub, 1.15f)
                     .WithTag(StrategyTag.IndustrialBase, 1.05f)
                     .WithTag(StrategyTag.Blockade, 0.95f)
-                    .WithProject(104, 1.20f)
-                    .WithProject(100, 1.10f);
+                    .WithProject(104, 1.20f) // Subsidize Industry
+                    .WithProject(100, 1.10f); // Logistics Reforms
             }
 
-            if (stage == EraStage.Organized1862 || stage == EraStage.HardWar1863)
+            if (stage == EraStage.Operational1862 || stage == EraStage.Decisive1863)
             {
                 return Base(0, stage, "Union Coordinated Pressure")
                     .WithTag(StrategyTag.RiverControl, 1.25f)
                     .WithTag(StrategyTag.RailHub, 1.05f)
                     .WithTag(StrategyTag.Blockade, 1.05f)
                     .WithTag(StrategyTag.Logistics, 1.00f)
-                    .WithProject(31, 1.15f)
-                    .WithProject(100, 1.10f)
-                    .WithProject(105, 1.00f);
+                    .WithProject(31, 1.15f) // Ironclad Gunboats
+                    .WithProject(100, 1.10f) // Logistics Reforms
+                    .WithProject(105, 1.00f); // Subsidize Agriculture
             }
 
             return Base(0, EraStage.Amateur1861, "Union Early Anaconda")
@@ -229,10 +286,10 @@ namespace WhiskeyRealism.Strategic
                 .WithTag(StrategyTag.Logistics, 1.00f)
                 .WithTag(StrategyTag.IndustrialBase, 0.90f)
                 .WithTag(StrategyTag.CapitalDefense, 0.45f)
-                .WithProject(35, 1.20f)
-                .WithProject(41, 1.25f)
-                .WithProject(31, 1.10f)
-                .WithProject(100, 1.00f);
+                .WithProject(35, 1.20f) // Modern Warships
+                .WithProject(41, 1.25f) // Warrior Class
+                .WithProject(31, 1.10f) // Ironclad Gunboats
+                .WithProject(100, 1.00f); // Logistics Reforms
         }
 
         private static GrandStrategyProfile ResolveCsa(EraStage stage)
@@ -244,20 +301,20 @@ namespace WhiskeyRealism.Strategic
                     .WithTag(StrategyTag.ArmyDestruction, 0.95f)
                     .WithTag(StrategyTag.Manpower, 1.20f)
                     .WithTag(StrategyTag.TradeWarfare, 1.05f)
-                    .WithProject(118, 1.20f)
-                    .WithProject(100, 1.05f);
+                    .WithProject(118, 1.20f) // Training Manuals
+                    .WithProject(100, 1.05f); // Logistics Reforms
             }
 
-            if (stage == EraStage.Organized1862 || stage == EraStage.HardWar1863)
+            if (stage == EraStage.Operational1862 || stage == EraStage.Decisive1863)
             {
                 return Base(1, stage, "CSA Offensive Defensive")
                     .WithTag(StrategyTag.CapitalDefense, 1.20f)
                     .WithTag(StrategyTag.DefensiveDepth, 1.10f)
                     .WithTag(StrategyTag.ArmsImports, 1.10f)
                     .WithTag(StrategyTag.TradeWarfare, 1.05f)
-                    .WithProject(6, 1.10f)
-                    .WithProject(37, 1.10f)
-                    .WithProject(106, 1.00f);
+                    .WithProject(6, 1.10f) // Confederate Rifles
+                    .WithProject(37, 1.10f) // Armored Gunboats
+                    .WithProject(106, 1.00f); // Trade Warfare
             }
 
             return Base(1, EraStage.Amateur1861, "CSA Early Cordon")
@@ -267,11 +324,11 @@ namespace WhiskeyRealism.Strategic
                 .WithTag(StrategyTag.ArmsImports, 1.05f)
                 .WithTag(StrategyTag.PortAccess, 0.95f)
                 .WithTag(StrategyTag.Blockade, 0.20f)
-                .WithProject(0, 1.00f)
-                .WithProject(1, 1.05f)
-                .WithProject(6, 1.15f)
-                .WithProject(37, 1.05f)
-                .WithProject(120, 0.95f);
+                .WithProject(0, 1.00f) // Austrian Rifles
+                .WithProject(1, 1.05f) // British Rifles
+                .WithProject(6, 1.15f) // Confederate Rifles
+                .WithProject(37, 1.05f) // Armored Gunboats
+                .WithProject(120, 0.95f); // Improvised Shipyards
         }
 
         private static GrandStrategyProfile Base(int allianceId, EraStage stage, string name)
@@ -287,7 +344,18 @@ namespace WhiskeyRealism.Strategic
 }
 ```
 
-- [ ] **Step 6: Run tests**
+- [ ] **Step 7: Link new pure files into the console harness**
+
+Add these entries to `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`:
+
+```xml
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\EraStage.cs" Link="EraStage.cs" />
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategyTag.cs" Link="StrategyTag.cs" />
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\GrandStrategyProfile.cs" Link="GrandStrategyProfile.cs" />
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\GrandStrategyRegistry.cs" Link="GrandStrategyRegistry.cs" />
+```
+
+- [ ] **Step 8: Run tests**
 
 Run:
 
@@ -297,10 +365,10 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: all existing tests plus the two new profile tests pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/WhiskeyRealism/Strategic/StrategyTag.cs src/WhiskeyRealism/Strategic/GrandStrategyProfile.cs src/WhiskeyRealism/Strategic/GrandStrategyRegistry.cs tests/WhiskeyRealism.Tests/Program.cs
+git add src/WhiskeyRealism/Strategic/EraStage.cs src/WhiskeyRealism/Strategic/EraStageManager.cs src/WhiskeyRealism/Strategic/StrategyTag.cs src/WhiskeyRealism/Strategic/GrandStrategyProfile.cs src/WhiskeyRealism/Strategic/GrandStrategyRegistry.cs tests/WhiskeyRealism.Tests/Program.cs tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 git commit -m "feat: add grand strategy profiles"
 ```
 
@@ -310,12 +378,16 @@ git commit -m "feat: add grand strategy profiles"
 
 **Files:**
 - Modify: `src/WhiskeyRealism/Strategic/ObjectiveMetadata.cs`
+- Create: `src/WhiskeyRealism/Strategic/ObjectiveStrategyTagger.cs`
+- Create: `src/WhiskeyRealism/Strategic/ObjectiveScoring.cs`
+- Modify: `src/WhiskeyRealism/Strategic/ObjectiveAdapter.cs`
 - Modify: `src/WhiskeyRealism/Strategic/CIC.cs`
 - Modify: `tests/WhiskeyRealism.Tests/Program.cs`
+- Modify: `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`
 
 - [ ] **Step 1: Add failing test for objective tag scoring**
 
-Add this entry to the `tests` array:
+Add this entry to the existing `tests` array initializer before the closing brace:
 
 ```csharp
 ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
@@ -333,10 +405,14 @@ private static void GrandStrategyTagsAffectObjectiveScore()
     var capital = ObjectiveMetadata.DefaultDerived(Theater.East, 0f, 0f)
         .WithTag(StrategyTag.CapitalDefense);
 
-    float blockadeScore = CIC.ScoreObjectiveForTest(0, profile, PersonalityVector.Zero, blockade);
-    float capitalScore = CIC.ScoreObjectiveForTest(0, profile, PersonalityVector.Zero, capital);
+    float blockadeScore = ObjectiveScoring.Score(0, profile, default(PersonalityVector), blockade);
+    float capitalScore = ObjectiveScoring.Score(0, profile, default(PersonalityVector), capital);
 
     AssertTrue(blockadeScore > capitalScore, "Union early profile should prefer blockade-tagged objective");
+
+    var derivedCoast = ObjectiveStrategyTagger.ApplyDefaultTags(ObjectiveMetadata.DefaultDerived(Theater.Coast, 0f, 0f));
+    AssertTrue(derivedCoast.HasTag(StrategyTag.Blockade), "derived coast objective should carry Blockade tag");
+    AssertTrue(derivedCoast.HasTag(StrategyTag.PortAccess), "derived coast objective should carry PortAccess tag");
 }
 ```
 
@@ -348,7 +424,7 @@ Run:
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 ```
 
-Expected: compile failure because `ObjectiveMetadata.WithTag` and `CIC.ScoreObjectiveForTest` do not exist.
+Expected: compile failure because `ObjectiveMetadata.WithTag`, `ObjectiveStrategyTagger`, and `ObjectiveScoring` do not exist.
 
 - [ ] **Step 3: Update `ObjectiveMetadata.cs`**
 
@@ -419,7 +495,103 @@ namespace WhiskeyRealism.Strategic
 }
 ```
 
-- [ ] **Step 4: Update `CIC.cs` scoring**
+- [ ] **Step 4: Add `ObjectiveStrategyTagger.cs`**
+
+Create `src/WhiskeyRealism/Strategic/ObjectiveStrategyTagger.cs`. This must be pure because the console harness source-links pure `Strategic/` files and does not compile `ObjectiveAdapter`'s Harmony/Unity dependencies.
+
+```csharp
+namespace WhiskeyRealism.Strategic
+{
+    public static class ObjectiveStrategyTagger
+    {
+        public static ObjectiveMetadata ApplyDefaultTags(ObjectiveMetadata meta)
+        {
+            switch (meta.Theater)
+            {
+                case Theater.Coast:
+                    meta = meta.WithTag(StrategyTag.Blockade).WithTag(StrategyTag.PortAccess);
+                    break;
+                case Theater.River:
+                    meta = meta.WithTag(StrategyTag.RiverControl).WithTag(StrategyTag.DefensiveDepth);
+                    break;
+                case Theater.East:
+                    meta = meta.WithTag(StrategyTag.CapitalThreat).WithTag(StrategyTag.CapitalDefense);
+                    break;
+                case Theater.West:
+                    meta = meta.WithTag(StrategyTag.RailHub).WithTag(StrategyTag.DefensiveDepth);
+                    break;
+                case Theater.TransMiss:
+                    meta = meta.WithTag(StrategyTag.DefensiveDepth);
+                    break;
+            }
+
+            switch (meta.Category)
+            {
+                case Category.RiverControl:
+                    meta = meta.WithTag(StrategyTag.RiverControl);
+                    break;
+                case Category.RailroadCut:
+                case Category.SupplyHub:
+                    meta = meta.WithTag(StrategyTag.RailHub);
+                    break;
+                case Category.CapitalThreat:
+                    meta = meta.WithTag(StrategyTag.CapitalThreat);
+                    break;
+                case Category.ForeignRecognition:
+                    meta = meta.WithTag(StrategyTag.ForeignRecognition);
+                    break;
+            }
+
+            return meta;
+        }
+    }
+}
+```
+
+- [ ] **Step 5: Update `ObjectiveAdapter.cs` fallback tags**
+
+Update `ObjectiveAdapter.Derive` so runtime fallback objectives receive strategy tags. Without this, only hand-built tests have tags and campaign objectives contribute `strategyTerm == 0`.
+
+Change the successful return in `Derive` from:
+
+```csharp
+return ObjectiveMetadata.DefaultDerived(BucketTheaterFromWorldXY(cx, cy), cx, cy);
+```
+
+to:
+
+```csharp
+return ObjectiveStrategyTagger.ApplyDefaultTags(ObjectiveMetadata.DefaultDerived(BucketTheaterFromWorldXY(cx, cy), cx, cy));
+```
+
+- [ ] **Step 6: Add `ObjectiveScoring.cs` and update `CIC.cs` scoring**
+
+Create `src/WhiskeyRealism/Strategic/ObjectiveScoring.cs`:
+
+```csharp
+namespace WhiskeyRealism.Strategic
+{
+    public static class ObjectiveScoring
+    {
+        public static float Score(int allianceId, GrandStrategyProfile strategy, PersonalityVector p, ObjectiveMetadata meta)
+        {
+            float theaterPref = FactionProfiles.TheaterPreferenceFor(allianceId, meta.Theater);
+            float foreignWeight = FactionProfiles.ForeignRecognitionWeightFor(allianceId);
+            float forceRatioTerm = 0.5f;
+            float distanceTerm   = 0f;
+            float strategyTerm = meta.StrategyWeight(strategy);
+
+            return theaterPref
+                 + strategyTerm                  * 0.75f
+                 + meta.SupplyReachWeight        * 1.0f
+                 + meta.ForeignRecognitionWeight * foreignWeight
+                 + meta.AttritionWeight          * p.CasualtyTolerance
+                 + forceRatioTerm                * (1f - p.Caution)
+                 - distanceTerm                  * (1f - p.Audacity);
+        }
+    }
+}
+```
 
 Change `Replan` so it resolves a profile once after `var p = Effective(era);`:
 
@@ -440,29 +612,7 @@ Replace `ScoreObjective` with:
 ```csharp
 private float ScoreObjective(PersonalityVector p, GrandStrategyProfile strategy, ObjectiveMetadata meta)
 {
-    return ScoreObjectiveCore(AllianceId, strategy, p, meta);
-}
-
-internal static float ScoreObjectiveForTest(int allianceId, GrandStrategyProfile strategy, PersonalityVector p, ObjectiveMetadata meta)
-{
-    return ScoreObjectiveCore(allianceId, strategy, p, meta);
-}
-
-private static float ScoreObjectiveCore(int allianceId, GrandStrategyProfile strategy, PersonalityVector p, ObjectiveMetadata meta)
-{
-    float theaterPref = FactionProfiles.TheaterPreferenceFor(allianceId, meta.Theater);
-    float foreignWeight = FactionProfiles.ForeignRecognitionWeightFor(allianceId);
-    float forceRatioTerm = 0.5f;
-    float distanceTerm   = 0f;
-    float strategyTerm = meta.StrategyWeight(strategy);
-
-    return theaterPref
-         + strategyTerm                  * 0.75f
-         + meta.SupplyReachWeight        * 1.0f
-         + meta.ForeignRecognitionWeight * foreignWeight
-         + meta.AttritionWeight          * p.CasualtyTolerance
-         + forceRatioTerm                * (1f - p.Caution)
-         - distanceTerm                  * (1f - p.Audacity);
+    return ObjectiveScoring.Score(AllianceId, strategy, p, meta);
 }
 ```
 
@@ -478,7 +628,19 @@ This requires adding `GrandStrategyProfile strategy` to `BuildPlan` parameters a
 ActivePlan = BuildPlan(picked.obj, picked.meta, p, strategy, currentMonth, currentYear);
 ```
 
-- [ ] **Step 5: Run tests**
+- [ ] **Step 7: Link new pure files into the console harness**
+
+Add these entries to `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` if they are not already present:
+
+```xml
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\PersonalityVector.cs" Link="PersonalityVector.cs" />
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\FactionProfiles.cs" Link="FactionProfiles.cs" />
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveMetadata.cs" Link="ObjectiveMetadata.cs" />
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveStrategyTagger.cs" Link="ObjectiveStrategyTagger.cs" />
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveScoring.cs" Link="ObjectiveScoring.cs" />
+```
+
+- [ ] **Step 8: Run tests**
 
 Run:
 
@@ -488,10 +650,10 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/WhiskeyRealism/Strategic/ObjectiveMetadata.cs src/WhiskeyRealism/Strategic/CIC.cs tests/WhiskeyRealism.Tests/Program.cs
+git add src/WhiskeyRealism/Strategic/ObjectiveMetadata.cs src/WhiskeyRealism/Strategic/ObjectiveStrategyTagger.cs src/WhiskeyRealism/Strategic/ObjectiveScoring.cs src/WhiskeyRealism/Strategic/ObjectiveAdapter.cs src/WhiskeyRealism/Strategic/CIC.cs tests/WhiskeyRealism.Tests/Program.cs tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 git commit -m "feat: score objectives with grand strategy"
 ```
 
@@ -502,14 +664,16 @@ git commit -m "feat: score objectives with grand strategy"
 **Files:**
 - Create: `src/WhiskeyRealism/Strategic/ProjectSelectionScorer.cs`
 - Modify: `tests/WhiskeyRealism.Tests/Program.cs`
+- Modify: `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`
 
 - [ ] **Step 1: Add failing project scoring tests**
 
-Add these entries to the `tests` array:
+Add these entries to the existing `tests` array initializer before the closing brace:
 
 ```csharp
 ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
 ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
+("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
 ```
 
 Add these methods:
@@ -520,11 +684,11 @@ private static void ProjectScorerReplacesWeakCandidate()
     var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
     var candidates = new[]
     {
-        new ProjectCandidateInput { ProjectId = 41, SubsidyType = 5, IsAppointable = true, VanillaWeight = 0.2f },
-        new ProjectCandidateInput { ProjectId = 96, SubsidyType = 5, IsAppointable = true, VanillaWeight = 0.6f }
+        new ProjectCandidateInput { ProjectId = 41, SubsidyType = 5, VanillaWeight = 0.2f },
+        new ProjectCandidateInput { ProjectId = 96, SubsidyType = 5, VanillaWeight = 0.6f }
     };
 
-    var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: 96, candidates);
+    var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: 96, vanillaWeight: 0.6f, candidates);
 
     AssertEqual(true, decision.ShouldReplace);
     AssertEqual(41, decision.ProjectId);
@@ -535,14 +699,28 @@ private static void ProjectScorerKeepsCloseCandidate()
     var profile = GrandStrategyRegistry.Resolve(1, EraStage.Amateur1861);
     var candidates = new[]
     {
-        new ProjectCandidateInput { ProjectId = 1, SubsidyType = 5, IsAppointable = true, VanillaWeight = 1.0f },
-        new ProjectCandidateInput { ProjectId = 6, SubsidyType = 5, IsAppointable = true, VanillaWeight = 0.9f }
+        new ProjectCandidateInput { ProjectId = 1, SubsidyType = 5, VanillaWeight = 1.0f },
+        new ProjectCandidateInput { ProjectId = 6, SubsidyType = 5, VanillaWeight = 0.9f }
     };
 
-    var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: 1, candidates);
+    var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: 1, vanillaWeight: 1.0f, candidates);
 
     AssertEqual(false, decision.ShouldReplace);
     AssertEqual(1, decision.ProjectId);
+}
+
+private static void ProjectScorerRequiresMarginForEmptyVanillaSlot()
+{
+    var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
+    var candidates = new[]
+    {
+        new ProjectCandidateInput { ProjectId = 96, SubsidyType = 5, VanillaWeight = 0.1f }
+    };
+
+    var decision = ProjectSelectionScorer.Select(profile, subsidyType: 5, vanillaProjectId: -1, vanillaWeight: 0f, candidates);
+
+    AssertEqual(false, decision.ShouldReplace);
+    AssertEqual(-1, decision.ProjectId);
 }
 ```
 
@@ -569,7 +747,6 @@ namespace WhiskeyRealism.Strategic
     {
         public int ProjectId;
         public int SubsidyType;
-        public bool IsAppointable;
         public float VanillaWeight;
     }
 
@@ -590,17 +767,18 @@ namespace WhiskeyRealism.Strategic
             GrandStrategyProfile profile,
             int subsidyType,
             int vanillaProjectId,
+            float vanillaWeight,
             IEnumerable<ProjectCandidateInput> candidates)
         {
             int bestProject = vanillaProjectId;
-            float bestScore = Score(profile, vanillaProjectId, 0f);
+            float bestScore = Score(profile, vanillaProjectId, vanillaWeight);
             float vanillaScore = bestScore;
 
             if (candidates != null)
             {
                 foreach (var candidate in candidates)
                 {
-                    if (candidate == null || !candidate.IsAppointable) continue;
+                    if (candidate == null) continue;
                     if (candidate.SubsidyType != subsidyType) continue;
 
                     float score = Score(profile, candidate.ProjectId, candidate.VanillaWeight);
@@ -620,8 +798,8 @@ namespace WhiskeyRealism.Strategic
                            bestProject != vanillaProjectId &&
                            bestScore >= vanillaScore + ReplacementMargin;
 
-            if (vanillaProjectId < 0 && bestProject >= 0)
-                replace = true;
+            if (vanillaProjectId < 0)
+                replace = bestProject >= 0 && bestScore >= ReplacementMargin;
 
             return new ProjectSelectionDecision
             {
@@ -629,7 +807,9 @@ namespace WhiskeyRealism.Strategic
                 ProjectId = replace ? bestProject : vanillaProjectId,
                 BestScore = bestScore,
                 VanillaScore = vanillaScore,
-                Reason = replace ? "strategy-margin" : "vanilla-close"
+                Reason = replace
+                    ? (vanillaProjectId < 0 ? "vanilla-empty-strategy-margin" : "strategy-margin")
+                    : "vanilla-close"
             };
         }
 
@@ -642,7 +822,15 @@ namespace WhiskeyRealism.Strategic
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 4: Link scorer into the console harness**
+
+Add this entry to `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`:
+
+```xml
+<Compile Include="..\..\src\WhiskeyRealism\Strategic\ProjectSelectionScorer.cs" Link="ProjectSelectionScorer.cs" />
+```
+
+- [ ] **Step 5: Run tests**
 
 Run:
 
@@ -652,10 +840,10 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/WhiskeyRealism/Strategic/ProjectSelectionScorer.cs tests/WhiskeyRealism.Tests/Program.cs
+git add src/WhiskeyRealism/Strategic/ProjectSelectionScorer.cs tests/WhiskeyRealism.Tests/Program.cs tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 git commit -m "feat: score strategy projects"
 ```
 
@@ -675,6 +863,7 @@ Create `src/WhiskeyRealism/Patches/ProjectSelectionPatch.cs`:
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Util;
@@ -688,11 +877,19 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "UpdateProjects")]
     internal static class ProjectSelectionPatch
     {
+        private static readonly Type GameVarsType = AccessTools.TypeByName("GameVars");
+        private static readonly Type ProjectsType = AccessTools.TypeByName("Projects");
+        private static readonly Type LoadedProjectType = AccessTools.TypeByName("Projects+LoadedProjects");
+        private static readonly FieldInfo GameVarsAllianceField = AccessTools.Field(GameVarsType, "alliance");
+        private static readonly FieldInfo AutomanageProjectsField = AccessTools.Field(GameVarsType, "automanageprojects");
+        private static readonly FieldInfo AiVsAiField = AccessTools.Field(GameVarsType, "ai_vs_ai");
+        private static readonly FieldInfo LoadedProjectsField = AccessTools.Field(ProjectsType, "loadedprojects");
+        private static readonly MethodInfo IsAppointableMethod = AccessTools.Method(ProjectsType, "IsAppointable", new[] { LoadedProjectType, typeof(int), typeof(bool), typeof(bool) });
+        private static readonly MethodInfo UseSubsidyForPurposeMethod = AccessTools.Method(typeof(AICampaign), "UseSubsidyForPurpose", new[] { typeof(int), typeof(int) });
+
         [HarmonyPostfix]
         internal static void Postfix(int alliance)
         {
-            OnceLog.Info("project-selection", "ProjectSelectionPatch wired");
-
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
@@ -700,22 +897,36 @@ namespace WhiskeyRealism.Patches
                 if (alliance < 0 || alliance >= StrategicCoordinator.Instance.CICs.Length) return;
 
                 int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
+                if (IsHumanControlledAlliance(alliance, playerAlliance)) return;
                 if (StrategicCoordinator.IsPlayerCICOf(alliance, playerAlliance)) return;
 
                 var era = StrategicCoordinator.Instance.Eras[alliance]?.Stage ?? EraStage.Amateur1861;
                 var profile = GrandStrategyRegistry.Resolve(alliance, era);
                 var allianceObj = GetAlliance(alliance);
-                if (allianceObj == null) return;
+                if (allianceObj == null)
+                {
+                    OnceLog.Warning("project-selection:alliance", "[Patch:ProjectSelection] GameVars.alliance entry not found");
+                    return;
+                }
 
                 var nextField = AccessTools.Field(allianceObj.GetType(), "nextprojecttoresearch");
                 var next = nextField?.GetValue(allianceObj) as int[];
-                if (next == null) return;
+                if (next == null)
+                {
+                    OnceLog.Warning("project-selection:nextprojecttoresearch", "[Patch:ProjectSelection] nextprojecttoresearch field not found");
+                    return;
+                }
+
+                OnceLog.Info("project-selection", "ProjectSelectionPatch wired");
 
                 for (int subsidyType = 0; subsidyType < next.Length; subsidyType++)
                 {
+                    if (UseSubsidyForPurpose(alliance, subsidyType) != 0) continue;
+
                     int vanilla = next[subsidyType];
+                    float vanillaWeight = vanilla >= 0 ? ReadVanillaProjectWeight(alliance, vanilla) : 0f;
                     var candidates = BuildCandidates(alliance, subsidyType);
-                    var decision = ProjectSelectionScorer.Select(profile, subsidyType, vanilla, candidates);
+                    var decision = ProjectSelectionScorer.Select(profile, subsidyType, vanilla, vanillaWeight, candidates);
                     if (!decision.ShouldReplace || decision.ProjectId < 0 || decision.ProjectId == vanilla) continue;
 
                     next[subsidyType] = decision.ProjectId;
@@ -732,19 +943,49 @@ namespace WhiskeyRealism.Patches
 
         private static object GetAlliance(int alliance)
         {
-            var gameVars = AccessTools.TypeByName("GameVars");
-            var alliances = AccessTools.Field(gameVars, "alliance")?.GetValue(null) as Array;
+            var alliances = GameVarsAllianceField?.GetValue(null) as Array;
             if (alliances == null || alliance < 0 || alliance >= alliances.Length) return null;
             return alliances.GetValue(alliance);
+        }
+
+        private static bool IsHumanControlledAlliance(int alliance, int playerAlliance)
+        {
+            bool automanage = ReadStaticBool(AutomanageProjectsField);
+            bool aiVsAi = ReadStaticBool(AiVsAiField);
+            return alliance == playerAlliance && !automanage && !aiVsAi;
+        }
+
+        private static bool ReadStaticBool(FieldInfo field)
+        {
+            try { return field != null && Convert.ToBoolean(field.GetValue(null)); }
+            catch { return false; }
+        }
+
+        private static int UseSubsidyForPurpose(int alliance, int subsidyType)
+        {
+            try
+            {
+                if (UseSubsidyForPurposeMethod == null) return 0;
+                return Convert.ToInt32(UseSubsidyForPurposeMethod.Invoke(null, new object[] { alliance, subsidyType }));
+            }
+            catch { return 0; }
         }
 
         private static IEnumerable<ProjectCandidateInput> BuildCandidates(int alliance, int subsidyType)
         {
             var result = new List<ProjectCandidateInput>();
-            var projectsType = AccessTools.TypeByName("Projects+LoadedProjects");
-            var allField = AccessTools.Field(projectsType, "loadedprojects");
-            var all = allField?.GetValue(null) as IEnumerable;
-            if (all == null) return result;
+            if (LoadedProjectsField == null)
+            {
+                OnceLog.Warning("project-selection:loadedprojects", "[Patch:ProjectSelection] Projects.loadedprojects field not found");
+                return result;
+            }
+
+            var all = LoadedProjectsField?.GetValue(null) as IEnumerable;
+            if (all == null)
+            {
+                OnceLog.Warning("project-selection:loadedprojects-null", "[Patch:ProjectSelection] Projects.loadedprojects was null");
+                return result;
+            }
 
             foreach (var project in all)
             {
@@ -761,7 +1002,6 @@ namespace WhiskeyRealism.Patches
                 {
                     ProjectId = projectId,
                     SubsidyType = projectSubsidy,
-                    IsAppointable = true,
                     VanillaWeight = ReadVanillaProjectWeight(alliance, projectId)
                 });
             }
@@ -784,10 +1024,12 @@ namespace WhiskeyRealism.Patches
 
         private static bool ProjectIsAppointable(object project, int alliance)
         {
-            var projectsType = AccessTools.TypeByName("Projects");
-            var method = AccessTools.Method(projectsType, "IsAppointable", new[] { project.GetType(), typeof(int), typeof(bool), typeof(bool) });
-            if (method == null) return false;
-            return (bool)method.Invoke(null, new object[] { project, alliance, false, false });
+            if (IsAppointableMethod == null)
+            {
+                OnceLog.Warning("project-selection:isappointable", "[Patch:ProjectSelection] Projects.IsAppointable method not found");
+                return false;
+            }
+            return (bool)IsAppointableMethod.Invoke(null, new object[] { project, alliance, false, false });
         }
 
         private static float ReadVanillaProjectWeight(int alliance, int projectId)
@@ -803,9 +1045,14 @@ namespace WhiskeyRealism.Patches
                 var probs = AccessTools.Field(personality.GetType(), "projectsprob")?.GetValue(personality) as IList;
                 if (projects == null || probs == null) return 0f;
 
+                float max = 0f;
+                for (int i = 0; i < probs.Count; i++)
+                    max = Math.Max(max, Convert.ToSingle(probs[i]));
+                if (max <= 0f) return 0f;
+
                 for (int i = 0; i < projects.Count && i < probs.Count; i++)
                     if ((int)projects[i] == projectId)
-                        return Convert.ToSingle(probs[i]) / 10f;
+                        return Convert.ToSingle(probs[i]) / max;
             }
             catch { }
 
@@ -835,7 +1082,7 @@ Run:
 
 Expected: `Build succeeded` with `0 Warning(s)` and `0 Error(s)`.
 
-If `Projects+LoadedProjects` or `loadedprojects` does not match the decompile, inspect around the `Projects.LoadedProjects` class and adjust only the type/field names. Keep all failures as logged fallback, not throws.
+If `Projects.loadedprojects` does not match the decompile, inspect the outer `Projects` class first; the field is not on `Projects+LoadedProjects`. Keep all failures as logged fallback, not throws.
 
 - [ ] **Step 3: Update patch catalog**
 
@@ -927,7 +1174,7 @@ Expected replacement marker only if Whiskey actually changes a vanilla project:
 [Patch:ProjectSelection] alliance=... subsidy=... old=... new=... profile="..." reason=strategy-margin
 ```
 
-No replacement line is acceptable if vanilla already picked a close-enough strategy candidate. The first-fire marker is required.
+`reason=vanilla-empty-strategy-margin` is also acceptable when vanilla left the slot empty and the best strategy candidate still clears the absolute replacement margin. No replacement line is acceptable if vanilla already picked a close-enough strategy candidate. The first-fire marker is required after the patch reaches a non-player, strategy-eligible alliance update.
 
 - [ ] **Step 6: Update docs after build/deploy**
 
@@ -965,7 +1212,7 @@ git commit -m "docs: record project selection smoke state"
 Spec coverage:
 
 - Historical profiles: Task 1.
-- Objective strategy tags: Task 2.
+- Objective strategy tags: Task 2, including runtime fallback tags in `ObjectiveAdapter`.
 - Project steering before policy steering: Tasks 3-4.
 - Bounded logging: Task 4.
 - Build/deploy/hash discipline: Task 5.
@@ -974,10 +1221,10 @@ Spec coverage:
 Red-flag scan:
 
 - No deferred markers or undefined future steps are required to complete this plan.
-- The only conditional work is reflection-name correction if the decompile symbol name differs at build time; the instruction gives the exact recovery path.
+- The only conditional work is reflection-name correction if the decompile symbol name differs during build/runtime smoke; the instruction gives the exact recovery path.
 
 Type consistency:
 
-- `StrategyTag`, `GrandStrategyProfile`, `GrandStrategyRegistry`, `ProjectCandidateInput`, `ProjectSelectionDecision`, and `ProjectSelectionScorer` are introduced before use.
-- `CIC.ScoreObjectiveForTest` is internal static and only used by the console harness.
+- `EraStage`, `StrategyTag`, `GrandStrategyProfile`, `GrandStrategyRegistry`, `ProjectCandidateInput`, `ProjectSelectionDecision`, and `ProjectSelectionScorer` are introduced before use.
+- `ObjectiveScoring` and `ObjectiveStrategyTagger` are pure public strategic helpers used by both production code and the console harness.
 - Harmony patch writes only `nextprojecttoresearch`; it does not appoint projects or mutate strategic mod state.
