@@ -44,13 +44,23 @@ namespace WhiskeyRealism.Patches
                 int count = Math.Min(state.bestiipplaces.Length, state.bestiipplacesprob.Length);
                 count = Math.Min(count, GameVars.buildingtypes.Count);
 
-                for (int buildingType = 0; buildingType < count; buildingType++)
+                for (int buildingType = 0; buildingType < state.bestiipplacesprob.Length; buildingType++)
                 {
-                    var place = state.bestiipplaces[buildingType];
-                    if (place == null) continue;
+                    int key = Key(alliance, buildingType);
 
                     float oldProb = state.bestiipplacesprob[buildingType];
-                    if (oldProb <= 0f) continue;
+                    if (!TrySanitizeProbability(oldProb, out oldProb))
+                    {
+                        state.bestiipplacesprob[buildingType] = 0f;
+                        _biasedCandidates.Remove(key);
+                        OnceLog.Warning("economy-construction:invalid-probability", "[Patch:EconomyConstruction] invalid bestiipplaces probability sanitized to 0");
+                        continue;
+                    }
+
+                    if (buildingType >= count) continue;
+
+                    var place = state.bestiipplaces[buildingType];
+                    if (place == null) continue;
 
                     var type = GameVars.buildingtypes[buildingType];
                     if (!CandidateEligibleForVanillaPath(alliance, state, place, type)) continue;
@@ -68,7 +78,6 @@ namespace WhiskeyRealism.Patches
                         constructionReason = steering.Reason;
                     }
 
-                    int key = Key(alliance, buildingType);
                     float originalProb = oldProb;
                     BiasStamp previous;
                     bool hasPrevious = _biasedCandidates.TryGetValue(key, out previous) &&
@@ -95,6 +104,14 @@ namespace WhiskeyRealism.Patches
                     }
 
                     float newProb = originalProb * mult;
+                    if (!TrySanitizeProbability(newProb, out newProb))
+                    {
+                        state.bestiipplacesprob[buildingType] = 0f;
+                        _biasedCandidates.Remove(key);
+                        OnceLog.Warning("economy-construction:invalid-probability", "[Patch:EconomyConstruction] invalid bestiipplaces probability sanitized to 0");
+                        continue;
+                    }
+
                     state.bestiipplacesprob[buildingType] = newProb;
                     _biasedCandidates[key] = new BiasStamp(
                         place,
@@ -118,6 +135,18 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("economy-construction:prefix", "[Patch:EconomyConstruction] prefix failed: " + ex.Message);
             }
+        }
+
+        private static bool TrySanitizeProbability(float value, out float sanitized)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value) || value <= 0f)
+            {
+                sanitized = 0f;
+                return false;
+            }
+
+            sanitized = value;
+            return true;
         }
 
         private static bool ConstructionSteeringEnabled()
