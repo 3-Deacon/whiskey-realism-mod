@@ -17,7 +17,7 @@
 > - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
 > - **Parallel sessions are normal.** Another agent may be working concurrently — run `git log --oneline -10` and `git status` before committing to detect parallel work.
 
-> **Current release:** v0.2.1.1. **Local current:** v0.2.2 enrichment implemented through #16 and deployed for smoke (`dist`/BepInEx SHA-256 `1602c0ca07f9b0c11d12fd4f9ed0117cc7a2ff882f73af3b38aff2e9275d9246`); runtime first-fire for #15/#16 still needs a GTCW restart and campaign AI tick.
+> **Current release:** v0.2.1.1. **Main current:** v0.2.2 enrichment implemented through #17 plus formation-directive ledger/#15/#16 division awareness, pushed to `origin/main`, built, deployed, and smoke-confirmed (`dist`/BepInEx SHA-256 `14e4ef9d0cb2ff342c34daf26de775dbad65e3cf8496b5e2b5e5edf4fc8d2a39`). Task 7 offensive safety Prefix is intentionally deferred until the directive ledger has more runtime soak.
 
 ---
 
@@ -33,7 +33,7 @@ Six locked design choices (see `docs/superpowers/specs/`):
 5. Phased operational plans (2-4 phases per plan, one active per side)
 6. Weekly + event-triggered AI cadence; adjust-current-plan by default, replan only on assumption-invalidating events. Monthly is a visible heartbeat/checkpoint boundary only.
 
-Design architecture: two-tier hierarchy (CIC + theater commanders), weekly front/army-area ledgers, historical army-group steering through vanilla `ArmyGroup` APIs, additive personality composition with `[-1, 1]` clamp, JSON sidecar persistence next to game saves, read-only mod state from Harmony patches.
+Design architecture: two-tier hierarchy (CIC + theater commanders), startup heartbeat plus weekly front/army-area/formation-directive ledgers after vanilla `AICampaign.aifaction` initializes, historical army-group steering through vanilla `ArmyGroup` APIs, additive personality composition with `[-1, 1]` clamp, JSON sidecar persistence next to game saves, read-only mod state from Harmony patches.
 
 ---
 

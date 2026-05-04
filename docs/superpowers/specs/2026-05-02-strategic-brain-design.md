@@ -1,7 +1,7 @@
 # Strategic Brain — Design Spec
 
 **Slice A** — strategic AI overhaul for Grand Tactician: The Civil War's Whiskey & Lemons DLC career mode.
-**Status:** approved 2026-05-02 via brainstorming session. v0.2.1.1 released; local v0.2.2 enrichment is implemented through #16. This remains the historical Slice A design record; `docs/patch-catalog.md` is authoritative for live patch inventory.
+**Status:** approved 2026-05-02 via brainstorming session. v0.2.1.1 released; main-branch v0.2.2 enrichment is implemented and smoke-confirmed through #17 plus formation directives. This remains the historical Slice A design record; `docs/patch-catalog.md` is authoritative for live patch inventory.
 **Decompile reference:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (see `docs/findings.md` for line numbers).
 
 ---

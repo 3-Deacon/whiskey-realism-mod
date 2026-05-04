@@ -40,7 +40,7 @@ The coordinator now builds `ArmyAreas[alliance]` weekly next to `Fronts[alliance
 - `./build.sh` passes with 0 warnings / 0 errors.
 - DLL deployed to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll` and verified by SHA-256: `f0b0bdc853d55e4230a876cd98b5dd783f8a0531ed1d500740c46313564c8de1`.
 - Follow-up army-group steering DLL deployed and verified by SHA-256: `1602c0ca07f9b0c11d12fd4f9ed0117cc7a2ff882f73af3b38aff2e9275d9246`.
-- Runtime smoke still needs a GTCW restart and campaign AI ticks that hit `UpdateCampaignTheaters` and `CheckArmyGroupManagement`.
+- Runtime smoke was later confirmed in the 2026-05-04 v0.2.2 run: `[once:army-area]`, `[once:armygroup]`, `[ArmyArea]`, and `[FormationDirective]` all appeared after vanilla AI initialized. Return-area and army-group create/attach lines remain conditional on in-game state.
 
 ## Next
 

@@ -1189,7 +1189,7 @@ Update `docs/handoff.md` with:
 Update `docs/superpowers/specs/2026-05-03-grand-strategy-and-research-tree-design.md` status line from:
 
 ```markdown
-Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering is live locally through #16; objective tags, policy steering, project steering, recruitment intent, and naval intent remain design work.
+Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering, formation directives, objective tags, and project steering are live on `origin/main` through #17; policy steering, recruitment intent, and naval intent remain design work.
 ```
 
 to:

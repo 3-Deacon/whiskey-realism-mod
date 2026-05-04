@@ -6,6 +6,8 @@
 
 **Architecture:** Add a pure `FormationDirectiveLedger` under `src/WhiskeyRealism/Strategic/` and test it without Unity. Add `FormationDirectiveRuntime` as the only Unity/reflection extraction layer. `StrategicCoordinator` refreshes the ledger weekly after front and army-area ledgers, while Harmony patches only read the ledger and apply bounded steering to existing vanilla surfaces.
 
+**Actual ship state as of 2026-05-04:** Tasks 1-6 are implemented, tested, deployed, smoke-confirmed, and pushed to `origin/main` through commit `ff2f4fa`. Task 7 (`FormationOffensiveSafetyPatch`) is intentionally deferred because it is a Prefix-blocking offensive movement gate. Keep it out until formation directives have more runtime soak and the user explicitly resumes that task.
+
 **Tech Stack:** C# `netstandard2.1`, BepInEx 5.4.x, HarmonyX, Unity 2021 Mono, repo-local console tests in `tests/WhiskeyRealism.Tests`, runtime verification through `./build.sh`, deploy, and BepInEx log smoke.
 
 ---
@@ -1295,6 +1297,8 @@ git commit -m "feat: make army groups directive aware"
 
 ## Task 7: Narrow Offensive Safety Gate
 
+**Status:** deferred. Do not implement this in a routine cleanup pass. This is the first Prefix that can suppress vanilla `AICampaign.CheckOffensiveMovements`, so it needs a fresh runtime review and explicit go-ahead after more directive-ledger smoke.
+
 **Files:**
 
 - Create: `src/WhiskeyRealism/Patches/FormationOffensiveSafetyPatch.cs`
@@ -1402,6 +1406,8 @@ git commit -m "feat: block unsafe formation offensives"
 
 ## Task 8: Docs, Build, Deploy, Smoke
 
+**Actual result:** docs/build/deploy/smoke were completed for Tasks 1-6 plus startup/logging hardening. Final deployed SHA-256 was `14e4ef9d0cb2ff342c34daf26de775dbad65e3cf8496b5e2b5e5edf4fc8d2a39`. Runtime smoke confirmed `[once:weeklyops]`, `[FrontLedger]`, `[ArmyArea]`, `[FormationDirective]`, `[once:project-selection]`, `[Patch:ProjectSelection]`, battle-history observer, transfer-budget decisions, and sidecar save. Startup operational ledgers now defer until `AICampaign.aifaction` initializes, then run same-day via `OperationalStartupGate`.
+
 **Files:**
 
 - Modify: `docs/handoff.md`
@@ -1412,7 +1418,7 @@ git commit -m "feat: block unsafe formation offensives"
 Add a v0.2.2 note to `docs/handoff.md`:
 
 ```markdown
-- Formation directives: weekly ledger now classifies independent divisions/corps/armies, logs `[FormationDirective]`, feeds supply/ammo pressure for fiscal work, includes independent divisions in army-area steering, and makes army-group attachments directive-aware. Offensive safety patch blocks only non-player AI formations whose directive explicitly disallows offense.
+- Formation directives: weekly ledger now classifies independent divisions/corps/armies, logs `[FormationDirective]`, feeds supply/ammo pressure for fiscal work, includes independent divisions in army-area steering, and makes army-group attachments directive-aware. Offensive safety remains deferred; do not claim `FormationOffensiveSafetyPatch` shipped.
 ```
 
 - [ ] **Step 2: Run full local verification**
@@ -1462,7 +1468,7 @@ Expected markers:
 - `[FormationDirective] alliance=1 summary=Army of the Valley:Screen:division-vs-army-no-support`
 - `[once:armyarea]` existing marker still appears when that patch fires
 - `[once:armygroup]` existing marker still appears when that patch fires
-- `[once:formation-offensive-safety] FormationOffensiveSafetyPatch wired` if Task 7 landed
+- `[once:formation-offensive-safety] FormationOffensiveSafetyPatch wired` only if Task 7 lands later
 
 Failure triage:
 
@@ -1510,4 +1516,4 @@ Expected: branch reports in sync except for any intentionally uncommitted unrela
 
 - Spec coverage: Tasks 1-2 cover pure model, directive vocabulary, risk gates, pressure outputs, and no raw-headcount scoring. Task 3 covers runtime extraction. Task 4 covers weekly coordinator/logging. Tasks 5-6 cover #15/#16 integration. Task 7 covers offensive safety as the only narrow Prefix gate. Task 8 covers docs, deploy, and smoke.
 - Fiscal dependency: `FormationPressureSummary` intentionally exposes low-supply, low-ammo, recover, guard, mass, and top supply area so the later fiscal plan can consume real military pressure.
-- Known risk: Task 7 is a Prefix-blocking patch. Keep it late, narrow, and non-player only. If runtime smoke shows vanilla offensive cadence gets too quiet, revert only Task 7 and keep ledger/#15/#16.
+- Known risk: Task 7 is a Prefix-blocking patch. It did not ship. Keep it late, narrow, and non-player only. If implemented later and runtime smoke shows vanilla offensive cadence gets too quiet, revert only Task 7 and keep ledger/#15/#16.

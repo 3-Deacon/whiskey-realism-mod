@@ -542,11 +542,15 @@ The pure ledger should be testable without Unity by consuming `FormationSnapshot
 Logging must be bounded:
 
 - `[FormationDirective] alliance=... summary=...` only when weekly directive signature changes or verbose logging is enabled.
+- `[Coordinator] operational ledgers deferred until AICampaign factions initialize` once if the immediate campaign-start heartbeat runs before vanilla AI factions exist.
+- `[FormationDirective] build skipped: ...` / `[FrontLedger] build skipped: ...` / `[ArmyArea] build skipped: ...` only through `OnceLog.Warning` for runtime extraction boundaries.
 - `[Patch:FormationDirective] ... action=block-attack ...` once per unit/directive/target signature when an unsafe action is blocked.
 - `[Patch:FormationDirective] ... action=allow-counterstroke ...` only when Whiskey changes vanilla's behavior.
 - warnings only for reflection failures, missing fields, or impossible state.
 
 Do not log every formation every tick. Do not log unchanged weekly assignments unless verbose logging is enabled.
+
+Startup sequencing constraint: the first valid campaign date may arrive before vanilla `AICampaign.aifaction` is initialized. CIC heartbeat/objective planning should still log immediately, but `FrontSectorLedger`, `ArmyAreaLedger`, and `FormationDirectiveLedger` must defer until `aifaction` exists. The cadence hook should permit one same-day review once that runtime appears so operational analysis starts immediately instead of waiting a month.
 
 ## Tests
 
@@ -588,14 +592,14 @@ Pure tests should cover:
 
 Recommended first implementation plan:
 
-1. Add pure formation directive model and tests.
-2. Add runtime snapshot extraction with `unittyp 14/15/16` classification, `istopunit`/parent discrimination, project `90` hierarchy state, readiness, morale, ammo, supply, fatigue/condition, weapon/firepower, `commanderrange`, and `buglerange` inputs.
-3. Add `StrategicCoordinator.FormationDirectives[alliance]` weekly refresh and bounded summary logging.
-4. Update #15 army-area steering to include independent top divisions while avoiding attached-division spam.
-5. Update #16 army-group steering to use directive-aware eligibility.
-6. Add defensive/screening behavior that respects vanilla campaign battle participation and skirmishing.
-7. Add an offensive safety gate only after the pure ledger and #15/#16 corrections are verified.
-8. Update docs/handoff and patch catalog after code lands.
+1. Add pure formation directive model and tests. **Done.**
+2. Add runtime snapshot extraction with `unittyp 14/15/16` classification, `istopunit`/parent discrimination, project `90` hierarchy state, readiness, morale, ammo, supply, fatigue/condition, weapon/firepower, `commanderrange`, and `buglerange` inputs. **Done.**
+3. Add `StrategicCoordinator.FormationDirectives[alliance]` weekly refresh and bounded summary logging. **Done.**
+4. Update #15 army-area steering to include independent top divisions while avoiding attached-division spam. **Done.**
+5. Update #16 army-group steering to use directive-aware eligibility. **Done.**
+6. Add defensive/screening behavior that respects vanilla campaign battle participation and skirmishing. **Partially done through directive assignments and #15/#16 consumption.**
+7. Add an offensive safety gate only after the pure ledger and #15/#16 corrections are verified. **Deferred for more runtime soak; this is Prefix-blocking.**
+8. Update docs/handoff and patch catalog after code lands. **Done.**
 
 ## Acceptance criteria
 
