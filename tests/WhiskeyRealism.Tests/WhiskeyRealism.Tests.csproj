@@ -31,5 +31,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalModels.cs" Link="FiscalModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalIntentLedger.cs" Link="FiscalIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalPolicyScorer.cs" Link="FiscalPolicyScorer.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalConstructionScorer.cs" Link="FiscalConstructionScorer.cs" />
   </ItemGroup>
 </Project>

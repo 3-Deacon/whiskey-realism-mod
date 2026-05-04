@@ -41,7 +41,11 @@ static class Program
             ("fiscal enters credit defense before gate", FiscalEntersCreditDefenseBeforeGate),
             ("fiscal enters emergency before bond floor", FiscalEntersEmergencyBeforeBondFloor),
             ("fiscal protects supply before force growth", FiscalProtectsSupplyBeforeForceGrowth),
-            ("fiscal hysteresis prevents immediate recovery", FiscalHysteresisPreventsImmediateRecovery)
+            ("fiscal hysteresis prevents immediate recovery", FiscalHysteresisPreventsImmediateRecovery),
+            ("construction scorer favors csa banks in balanced posture", ConstructionScorerFavorsCsaBanks),
+            ("construction scorer favors logistics when supply is protected", ConstructionScorerFavorsLogistics),
+            ("construction scorer suppresses csa naval under credit defense", ConstructionScorerSuppressesCsaNaval),
+            ("construction scorer floors emergency industrial suppression", ConstructionScorerFloorsEmergencyIndustry)
         };
 
         foreach (var test in tests)
@@ -620,6 +624,38 @@ static class Program
         input.Memory.EmergencyResidue = true;
         var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
         AssertEqual(FiscalPosture.CreditDefense, output.Posture);
+    }
+
+    private static void ConstructionScorerFavorsCsaBanks()
+    {
+        var intent = new FiscalOutput { Posture = FiscalPosture.BalancedWar };
+        AssertEqual(1.6f, FiscalConstructionScorer.Multiplier(intent, 1, "State Bank", 0));
+        AssertEqual(1.35f, FiscalConstructionScorer.Multiplier(intent, 0, "National Bank", 0));
+    }
+
+    private static void ConstructionScorerFavorsLogistics()
+    {
+        var intent = new FiscalOutput
+        {
+            Posture = FiscalPosture.CreditDefense,
+            SupplyProtection = true
+        };
+
+        AssertEqual(1.75f, FiscalConstructionScorer.Multiplier(intent, 1, "Rail Depot", -1));
+        AssertEqual(1.35f, FiscalConstructionScorer.Multiplier(intent, 1, "Hospital", -1));
+    }
+
+    private static void ConstructionScorerSuppressesCsaNaval()
+    {
+        var intent = new FiscalOutput { Posture = FiscalPosture.CreditDefense };
+        AssertEqual(0.5f, FiscalConstructionScorer.Multiplier(intent, 1, "Naval Shipyard", 2));
+        AssertEqual(1f, FiscalConstructionScorer.Multiplier(intent, 0, "Naval Shipyard", 2));
+    }
+
+    private static void ConstructionScorerFloorsEmergencyIndustry()
+    {
+        var intent = new FiscalOutput { Posture = FiscalPosture.EmergencySolvency };
+        AssertEqual(0.15f, FiscalConstructionScorer.Multiplier(intent, 1, "Naval Industrial Shipyard Foundry", 3));
     }
 
     private static void AssertEqual<T>(T expected, T actual)
