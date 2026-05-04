@@ -246,7 +246,7 @@ namespace WhiskeyRealism.Strategic
             _fiscalMemory[alliance].EmergencyResidue = output.Posture == FiscalPosture.EmergencySolvency ||
                 _fiscalMemory[alliance].EmergencyResidue && output.Posture == FiscalPosture.CreditDefense;
 
-            if (Plugin.Instance.VerboseLogging.Value || _fiscalSignatures[alliance] != output.Signature)
+            if (Plugin.Instance.VerboseLogging.Value || Plugin.Instance.FiscalTrace.Value || _fiscalSignatures[alliance] != output.Signature)
             {
                 Plugin.Log.LogInfo($"[FiscalIntent] alliance={alliance} posture={output.Posture} gate={output.DefendedGate} supply={output.SupplyProtection} forceCap={output.ForceCapWarning}");
                 _fiscalSignatures[alliance] = output.Signature;

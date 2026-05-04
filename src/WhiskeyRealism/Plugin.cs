@@ -22,6 +22,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> VerboseLogging;
         internal ConfigEntry<bool> PlanTrace;
         internal ConfigEntry<bool> SuccessionTrace;
+        internal ConfigEntry<bool> FiscalTrace;
+        internal ConfigEntry<bool> FiscalTelemetryCsv;
 
         // Vanilla-settings override — lock Aggressiveness + Historic AI Personality
         // + Difficulty at campaign creation.
@@ -54,6 +56,12 @@ namespace WhiskeyRealism
             SuccessionTrace = Config.Bind(
                 "Diagnostics", "Succession Trace Logging", false,
                 "On each strategic review tick, log every succession event check (date gate, war-state gate, fired/not-fired).");
+            FiscalTrace = Config.Bind(
+                "Diagnostics", "Fiscal Trace Logging", false,
+                "Emit fiscal posture, gate, supply, and finance override reasoning.");
+            FiscalTelemetryCsv = Config.Bind(
+                "Diagnostics", "Fiscal Telemetry Csv", false,
+                "Write monthly fiscal telemetry rows next to the save sidecar for baseline-vs-modded comparisons.");
             OverrideVanillaSettings = Config.Bind(
                 "Strategic", "Override Vanilla Settings", true,
                 "When true, Whiskey Realism locks Aggressiveness to Mediocre, Historic AI Personality to true, and Difficulty to the value of LockedDifficulty (default Hard) at campaign creation. " +
