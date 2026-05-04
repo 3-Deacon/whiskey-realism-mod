@@ -24,6 +24,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveCatalog.cs" Link="ObjectiveCatalog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveStrategyTagger.cs" Link="ObjectiveStrategyTagger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveScoring.cs" Link="ObjectiveScoring.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\RecruitmentIntentLedger.cs" Link="RecruitmentIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ProjectSelectionScorer.cs" Link="ProjectSelectionScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationLevel.cs" Link="FormationLevel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirective.cs" Link="FormationDirective.cs" />
