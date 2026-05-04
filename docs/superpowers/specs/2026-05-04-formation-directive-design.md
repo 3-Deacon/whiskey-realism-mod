@@ -1,0 +1,427 @@
+# Formation Directive Design
+
+Date: 2026-05-04
+Status: design ready for implementation planning
+Scope: Slice A enrichment. Land campaign formations only: divisions, corps, armies, and army groups. This does not open tactical-battle AI, battlefield skirmisher micro, naval AI, policy steering, or recruitment steering except as later consumers/producers of the same strategic posture.
+
+## Why this exists
+
+Whiskey Realism now has historical operating-area steering and army-group steering, but the current implementation is too coarse for the campaign map. The game can field independent divisions, corps, and armies as campaign-map formations. Our #15/#16 steering currently sees corps and armies but excludes top-level divisions, which means early-war independent divisions are not first-class strategic actors.
+
+The AI needs to use formations with purpose:
+
+- a division can guard, screen, probe, or delay;
+- a corps can hold a sector, reinforce, or counterstroke;
+- an army can mass for a theater objective or hold a major line;
+- an army group can coordinate adjacent top formations without micromanaging every division.
+
+The core rule is that small formations should not be mindlessly sent into hopeless attacks. A lone division should not attack a 50,000-man army unless local friendly support, terrain, morale, commander intent, and strategic reward make the operation plausible. Otherwise it should screen, fall back, guard a key point, or request reinforcement through vanilla transfer/defensive-operation surfaces.
+
+## Historical findings
+
+Civil War formations were hierarchical but not static. Divisions were several brigades; corps were several divisions; armies were multiple corps; command sizes and titles varied between sides and over time. Confederate divisions were often larger than Union divisions, so "formation level" must be combined with actual strength, morale, readiness, and commander context.
+
+Early-war command was fragmented. Both sides improvised structures, mixed arms, and used small or semi-autonomous commands. This supports early-game behavior where divisions and corps often operate independently, especially along the Virginia frontier, Shenandoah Valley, Missouri/Arkansas, Kentucky/Tennessee, the coast, and the Mississippi approaches.
+
+The armies professionalized as the war continued. By 1863, artillery and cavalry were increasingly centralized instead of being scattered as small attachments. Cavalry shifted from local courier/scout use toward coordinated reconnaissance, raids, screens, and pursuit. This supports later-game behavior where corps/armies do more massing and army groups coordinate adjacent top formations, while divisions become subordinate maneuver/local-defense pieces instead of independent strategic wanderers.
+
+Union grand strategy evolved from blockade, Mississippi control, Richmond pressure, and coastal operations into 1864 simultaneous pressure on all Confederate armies. In game terms, Union formations should become more willing to mass corps and armies across theaters as era/stage, research, strength, and leadership improve.
+
+Confederate strategy centered on independence and survival. Davis leaned defensive and attempted a broad cordon defense that posted smaller armies across vulnerable fronts, but this overstretched Confederate resources. Confederate AI should defend Richmond/Virginia, Tennessee/Georgia, the Mississippi, ports, and the Trans-Mississippi with historical weighting, but should explicitly choose when to thin or concede a sector instead of accidentally stripping it.
+
+Sources:
+
+- National Park Service, "Army Structure": https://www.nps.gov/kemo/learn/historyculture/army-structure.htm
+- National Park Service, "From Regiment to President": https://www.nps.gov/articles/from-regiment-to-president-the-structure-and-command-of-civil-war-armies.htm
+- National Park Service, "The Military Experience": https://www.nps.gov/articles/the-military-experience.htm
+- Britannica, "The military background of the war": https://www.britannica.com/event/American-Civil-War/The-military-background-of-the-war
+- American Battlefield Trust, "Civil War Army Organization": https://www.battlefields.org/learn/articles/civil-war-army-organization
+- U.S. Army Center of Military History, "The Civil War in the Trans-Mississippi Theater, 1861-1865": https://history.army.mil/Publications/Publications-Catalog/The-Civil-War-in-The-Trans-Mississippi-Theater/
+
+## Vanilla game findings
+
+The decompile is authoritative for campaign formation levels:
+
+- `unittyp <= 13`: regiment/brigade/battery-level tactical or lower campaign units.
+- `unittyp == 14`: division-level campaign group.
+- `unittyp == 15`: corps-level campaign group.
+- `unittyp == 16`: army-level campaign group.
+- `ArmyGroup`: W&L/top command coordination object stored separately in `BattleUnits.armygroups`.
+
+This supersedes the stale mapping in `docs/superpowers/plans/2026-05-03-historical-army-areas-implementation.md`, which described `14/15/16` one level too low. The later grand-strategy spec and decompile agree with the mapping above.
+
+Primary decompile anchors:
+
+- `AICampaign.Update()` job sequence at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:11159`
+- `AICampaign.RaiseNewCampaignGroup(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:12940`
+- `AICampaign.GrabExistingGroup(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:12739`
+- `AICampaign.GrabSubordinateType(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:12854`
+- `AICampaign.UpdateCampaignTheaters(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17034`
+- `AICampaign.CheckCombinationOfUnits(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17112`
+- `AICampaign.GrandArmyStructure(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17166`
+- `AICampaign.CheckForDefensiveOperations(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:13505`
+- `AICampaign.CheckOffensiveMovements(int, Regiment, float)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:14166`
+- `AICampaign.CheckTransferOfUnits(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17232`
+- `AICampaign.CheckCombinationOfBrigades(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17615`
+- `AICampaign.CheckArmyGroupManagement(int)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:17705`
+
+Relevant vanilla behavior:
+
+- `RaiseNewCampaignGroup` creates/fills divisions and corps, and creates full army/corps/division hierarchy when `GrandArmyStructure(alliance)` is true.
+- `GrandArmyStructure` is gated by researched project ID `90`.
+- `CheckCombinationOfUnits` moves large independent corps into nearby or newly created army structures once conditions are met.
+- `UpdateCampaignTheaters` gives formations a loose `theaterposition`; offensive, defensive, transfer, and army-group logic consume that theater boundary.
+- `CheckForDefensiveOperations` already uses local strength, morale, weather, supply, and theater gates before reacting to enemy threats.
+- `CheckOffensiveMovements` already builds local force packages and uses commander initiative and strength dominance before attacking.
+- `CheckArmyGroupManagement` creates or attaches army groups from nearby top units with theater positions.
+
+Current Whiskey gap:
+
+- `ArmyAreaRuntime.IsTopStrategicUnit` includes only `unittyp 15..16`, excluding independent divisions.
+- `ArmyGroupManagementPatch.IsEligibleTopUnit` also includes only `unittyp 15..16`.
+- `HistoricalArmyAreaRegistry` mainly maps army names, so fallback divisions/corps get weak historical identity.
+- `TheaterCommander` remains mostly a persistence/planning scaffold and is not yet the live runtime actor for per-formation behavior.
+
+## Design goal
+
+Add a weekly `FormationDirectiveLedger` that classifies top campaign formations, assigns historically weighted directives, and exposes read-only steering signals to Harmony patches.
+
+The ledger does not replace vanilla command movement. It provides bounded guidance to existing vanilla surfaces:
+
+- historical theater position and return-area corrections,
+- defensive operation eligibility and priority,
+- offensive operation risk gates,
+- transfer-budget protection,
+- army-group coordination,
+- later recruitment/policy/naval integrations through grand-strategy posture.
+
+Patches remain read-only with respect to strategic mod state. `StrategicCoordinator` builds or refreshes the ledger during weekly strategic review. Harmony patches consume the current ledger and may steer vanilla fields/orders only inside their own patch surface.
+
+## Formation model
+
+`FormationSnapshot` should capture:
+
+| Field | Source |
+|---|---|
+| `UnitKey` | stable local key from unit name + commander + instance fallback |
+| `AllianceId` | `AIFaction.allianceid` |
+| `Level` | `Regiment.unittyp`: division/corps/army |
+| `IsTopUnit` | `Regiment.istopunit` |
+| `ParentLevel` | transform parent / attached hierarchy where available |
+| `AssignedArmyGroupKey` | `Regiment.assignedarmygroup` |
+| `CommanderId` / name | `Regiment.commander`, `GameVars.commander` |
+| `AreaKey` | `ArmyAreaRuntime.AreaKey(position)` |
+| `SectorKey` | `FrontSectorRuntime.SectorKey(position)` |
+| `TheaterPosition` | `Regiment.theaterposition` |
+| `Strength` | `groupstrengthactive`, `groupstrengthdirect`, fallback fields |
+| `Morale` | `groupmorale` |
+| `Readiness` | `CampaignArmyPanel.GetReadinessStep` if safely callable |
+| `Supply` | `groupsupplystate` / supply depots where safely readable |
+| `InBattle` / retreat / pathing | `inbattle`, `onretreat`, `regimentpaths` |
+| `LocalEnemyStrength` | nearby enemy units / `AIArea` strength when available |
+| `LocalFriendlySupport` | nearby friendly top formations and subordinates |
+
+`FormationLevel`:
+
+- `Division`
+- `Corps`
+- `Army`
+- `ArmyGroup`
+
+`FormationDirective`:
+
+- `Hold`: remain in assigned area/sector; favor defense; do not donate below minimum budget.
+- `Screen`: cover a front or approach; avoid decisive engagement against superior force.
+- `Guard`: protect rail, town, port, supply depot, crossing, capital approach, or objective anchor.
+- `Probe`: limited forward movement only when enemy strength is low/unknown and support is close.
+- `Reserve`: stay behind the front, available for transfer/counterstroke.
+- `Reinforce`: move toward a threatened friendly sector or parent formation.
+- `Counterstroke`: local attack/reaction allowed because risk gates pass.
+- `Mass`: concentrate for CIC plan target or major theater objective.
+- `RaidSupport`: cavalry/fast/small-force support for raid logic without committing the main line.
+- `Recover`: avoid new offensive/defensive commitments until morale/readiness improves.
+- `Concede`: allow thinning or withdrawal because CIC/front ledger explicitly chose economy-of-force or abandonment.
+
+## Directive rules by level
+
+### Division
+
+Independent top-level divisions are local actors, not miniature armies. They may receive:
+
+- `Hold`
+- `Screen`
+- `Guard`
+- `Probe`
+- `Reserve`
+- `RaidSupport`
+- `Recover`
+- `Reinforce`
+
+They should receive `Counterstroke` only when all of these are true:
+
+- local friendly effective strength is at least the configured division counterstroke ratio against the target;
+- another friendly formation can support within the local theater radius;
+- morale and readiness are above threshold;
+- the target is not an enemy army/corps-sized concentration unless friendly strength is aggregated;
+- the sector is not marked `Hold` with minimum budget already at risk.
+
+They should not receive `Mass` directly unless they are independent and the CIC plan target is nearby. Attached divisions inherit their parent corps/army intent.
+
+### Corps
+
+Corps are the primary operational maneuver layer. They may receive:
+
+- `Hold`
+- `Screen`
+- `Reserve`
+- `Reinforce`
+- `Counterstroke`
+- `Mass`
+- `Recover`
+- `Concede`
+
+Corps can counterstroke or contest objectives when local ratio gates pass. Corps should also be the normal unit for "defend here, concede elsewhere" choices because they have enough combat power to matter without committing an entire army.
+
+### Army
+
+Armies express theater intent. They may receive:
+
+- `Hold`
+- `Reserve`
+- `Reinforce`
+- `Mass`
+- `Counterstroke`
+- `Recover`
+- `Concede`
+
+Armies should not chase every nearby opportunity. Their directive should mostly set theater position, transfer posture, and offensive/defensive permission for subordinate corps/divisions.
+
+### ArmyGroup
+
+Army groups coordinate adjacent top formations. They may receive:
+
+- `CoordinateHold`
+- `CoordinateMass`
+- `CoordinateReserve`
+- `CoordinateConcede`
+
+Army groups should not issue direct per-division movement. They influence grouping, commander appointment, theater-area commitment, and whether nearby armies/corps share the same strategic posture.
+
+## Risk gates
+
+A directive that permits attack or forward movement must pass a formation-level risk model.
+
+Required inputs:
+
+- own effective strength: strength adjusted by morale/readiness/supply;
+- nearby friendly support: support inside theater radius and not already committed;
+- enemy effective strength: enemy group strength and morale/readiness where visible;
+- enemy level: division/corps/army estimate from `unittyp`;
+- terrain/control context: friendly state, enemy state, contested objective, supply/capital/rail/river/port tags;
+- commander profile: aggression, caution/casualty tolerance, initiative where available;
+- faction/era grand strategy;
+- current `FrontSectorLedger` posture and minimum-hold budget.
+
+Default safety behavior:
+
+- Division vs enemy army: block attack; choose `Screen`, `Guard`, `Reinforce`, or `Recover`.
+- Division vs enemy corps: allow only with support and favorable ratio.
+- Corps vs enemy army: allow only as part of aggregated theater force or defensive counterstroke.
+- Army vs enemy army: allow if plan/sector/ratio/commander gates pass.
+- Any low-morale or low-readiness formation: prefer `Recover`, `Hold`, or `Guard`.
+- Any sector below minimum hold budget: block donation/attack unless sector is explicitly `Concede`.
+
+The risk model should be intentionally conservative first. It is better to under-steer and let vanilla act than to create suicidal deterministic behavior.
+
+## Historical weighting matrix
+
+### Union
+
+| Era | Formation behavior |
+|---|---|
+| 1861 amateur | protect Washington, organize around river/coastal objectives, probe Virginia and border states, avoid overcommitting isolated divisions. |
+| 1862 operational | corps/army pressure against Richmond and western river objectives; divisions guard rail, depots, and frontier approaches. |
+| 1863 decisive | heavier Mississippi/Tennessee/Georgia pressure; corps counterstrokes more common when supported; divisions screen rail and occupation corridors. |
+| 1864 total war | simultaneous theater pressure; armies mass; corps maintain pressure; divisions guard logistics, rail, ports, and occupation lines. |
+
+### Confederacy
+
+| Era | Formation behavior |
+|---|---|
+| 1861 amateur | cordon defense with small armies/divisions; protect Richmond, Valley, Tennessee/Kentucky, Mississippi approaches, and ports. |
+| 1862 operational | offensive-defensive opportunities allowed for strong commanders; divisions screen and delay; corps counterstroke if support exists. |
+| 1863 decisive | preserve armies while contesting key corridors; defend Vicksburg/Chattanooga/Atlanta approaches; raids and probes instead of broad assaults when outmatched. |
+| 1864 total war | economy-of-force, entrenched defense, local counterstroke only with favorable odds, protect remaining armies from annihilation. |
+
+## Theater examples
+
+### East / Virginia
+
+- Union Army of the Potomac: army/corps mass against Richmond/Virginia objectives; divisions guard Washington, B&O, and approaches.
+- Confederate Army of Northern Virginia: army holds Richmond/Virginia corridor; corps counterstroke locally; divisions screen Valley/coastal/rail approaches.
+
+### Shenandoah / Maryland / Pennsylvania
+
+- Union divisions/corps guard B&O, Harpers Ferry, Winchester, Washington approaches, and later Valley suppression.
+- Confederate divisions/corps screen, raid, or threaten northward only when Army of Northern Virginia posture and local risk allow it.
+
+### Tennessee / Georgia / Cumberland
+
+- Union armies/corps pressure Nashville/Chattanooga/Atlanta line as the war matures.
+- Confederate corps/armies hold Tennessee/Georgia corridors, counterstroke when favorable, and avoid stripping Atlanta/Chattanooga approaches without explicit concession.
+
+### Mississippi River / Gulf
+
+- Union formations prioritize river control and port/coastal support, with divisions guarding captured logistics and corps/armies massing for Vicksburg/New Orleans-type objectives.
+- Confederate formations guard river crossings, ports, and supply corridors; weak divisions screen/delay rather than attack superior river armies.
+
+### Trans-Mississippi
+
+- Both sides use smaller formations and wider autonomy. Directives should tolerate more independent division/corps behavior but use stricter risk gates because support is sparse.
+
+## Integration points
+
+### Weekly coordinator
+
+`StrategicCoordinator` should build `FormationDirectiveLedger[alliance]` after `FrontSectorLedger` and `ArmyAreaLedger`, because directives depend on both:
+
+1. refresh CIC plan/era/profile;
+2. refresh front-sector posture;
+3. refresh historical army-area assignment;
+4. build formation snapshots;
+5. resolve directives;
+6. log only if the directive signature changed.
+
+### Army-area steering (#15)
+
+Include independent `unittyp == 14` divisions as top strategic units, but do not apply the same return-area behavior to every attached subordinate division. Only top independent divisions should receive direct area movement.
+
+### Army-group steering (#16)
+
+Do not create army groups from division spam. Army groups should primarily coordinate armies/corps. Independent divisions can attach only when the group is otherwise valid and the division directive is `Reinforce`, `Reserve`, `Guard`, or `Mass` in the same operating area.
+
+### Defensive operations (#4 / future enhancement)
+
+Directive effects:
+
+- `Hold`, `Guard`, `Screen`: raise defensive eligibility and lower response threshold.
+- `Reserve`, `Reinforce`: allow commitment if destination risk is higher than source risk.
+- `Recover`: block unless capital/critical objective is threatened.
+- `Concede`: do not spend scarce units defending the sector unless extraction is impossible.
+
+### Offensive movements / counterstroke
+
+Future patch should avoid replacing vanilla offensive logic. Preferred shape is a bounded Prefix/Postfix around candidate scoring or operation eligibility:
+
+- block or down-weight attacks that violate the directive risk gate;
+- up-weight `Counterstroke` and `Mass` formations when vanilla already sees a plausible target;
+- never force a division to attack a superior corps/army by itself.
+
+### Transfers (#3)
+
+`FormationDirectiveLedger` should feed the existing transfer-budget guard:
+
+- do not strip `Hold`/`Guard` sectors below minimum;
+- allow `Reserve` and `Concede` formations as donors;
+- prefer moving divisions as reinforcement packets while preserving corps/army command centers;
+- prefer corps/army movement only when the CIC plan calls for `Mass` or theater-level `Reinforce`.
+
+### Recruitment / policy / naval
+
+This spec does not implement those surfaces. Later work can use formation directives as demand signals:
+
+- repeated `Guard` gaps create recruitment intent for local infantry/artillery;
+- repeated `Screen`/`RaidSupport` gaps create cavalry intent;
+- repeated `Mass`/`Reinforce` gaps create logistics/rail/project pressure;
+- coastal `Guard`/river `Mass` connects to naval/project strategy.
+
+## Data structures
+
+Proposed pure strategic files:
+
+- `Strategic/FormationLevel.cs`
+- `Strategic/FormationDirective.cs`
+- `Strategic/FormationSnapshot.cs`
+- `Strategic/FormationDirectiveLedger.cs`
+- `Strategic/FormationDirectiveRuntime.cs`
+- tests in `tests/WhiskeyRealism.Tests/`
+
+`FormationDirectiveAssignment`:
+
+```csharp
+public sealed class FormationDirectiveAssignment
+{
+    public string UnitKey;
+    public int AllianceId;
+    public FormationLevel Level;
+    public string AreaKey;
+    public string SectorKey;
+    public FormationDirective Directive;
+    public string Reason;
+    public float OwnEffectiveStrength;
+    public float LocalFriendlySupport;
+    public float LocalEnemyStrength;
+    public bool OffensiveAllowed;
+    public bool DefensiveAllowed;
+    public bool TransferDonorAllowed;
+}
+```
+
+The pure ledger should be testable without Unity by consuming `FormationSnapshot` inputs. Runtime extraction should stay in `FormationDirectiveRuntime`.
+
+## Logging
+
+Logging must be bounded:
+
+- `[FormationDirective] alliance=... summary=...` only when weekly directive signature changes or verbose logging is enabled.
+- `[Patch:FormationDirective] ... action=block-attack ...` once per unit/directive/target signature when an unsafe action is blocked.
+- `[Patch:FormationDirective] ... action=allow-counterstroke ...` only when Whiskey changes vanilla's behavior.
+- warnings only for reflection failures, missing fields, or impossible state.
+
+Do not log every formation every tick. Do not log unchanged weekly assignments unless verbose logging is enabled.
+
+## Tests
+
+Pure tests should cover:
+
+- independent top-level division is included in snapshots and can receive `Screen`/`Guard`;
+- attached division inherits parent posture and is not directly moved by army-area steering;
+- division refuses attack against enemy army without support;
+- corps can counterstroke when supported and ratio gates pass;
+- army receives `Mass` for active CIC plan target;
+- CSA early profile favors `Hold`/`Screen`/`Guard` over broad offensive action;
+- Union 1864 profile tolerates coordinated `Mass` across multiple theaters;
+- `Concede` allows transfer donation while `Hold` blocks below minimum budget;
+- directive signature logging changes only when assignment changes.
+
+## Non-goals
+
+- No battlefield skirmisher, bridge, cavalry-charge, or tactical stance changes. Those belong to Slice B.
+- No direct rewrite of vanilla campaign movement.
+- No deterministic historical script that forces exact real-world campaigns.
+- No direct mutation of CIC/TheaterCommander state from Harmony patches.
+- No global "always attack/always defend" behavior by faction.
+- No army-group creation from arbitrary weak divisions just because they share a label.
+
+## Implementation sequence
+
+Recommended first implementation plan:
+
+1. Add pure formation directive model and tests.
+2. Add runtime snapshot extraction with `unittyp 14/15/16` classification.
+3. Add `StrategicCoordinator.FormationDirectives[alliance]` weekly refresh and bounded summary logging.
+4. Update #15 army-area steering to include independent top divisions while avoiding attached-division spam.
+5. Update #16 army-group steering to use directive-aware eligibility.
+6. Add an offensive safety gate only after the pure ledger and #15/#16 corrections are verified.
+7. Update docs/handoff and patch catalog after code lands.
+
+## Acceptance criteria
+
+- Independent campaign-map divisions are visible to the strategic ledger.
+- Attached divisions are not independently yanked away from parent corps/armies.
+- Division-level attacks against much larger enemy forces are blocked or down-weighted unless support and ratio gates pass.
+- Corps and armies still use vanilla campaign movement surfaces.
+- CSA early behavior reads as defensive, screening, and force-preserving unless a favorable opportunity appears.
+- Union later-war behavior reads as coordinated pressure rather than isolated local attacks.
+- Logs are useful for smoke testing and not spammy.
+- Build passes and runtime smoke confirms first-fire markers plus at least one directive summary after a campaign tick.
