@@ -66,6 +66,9 @@ namespace WhiskeyRealism.Strategic
             if (best == null)
                 return Keep(vanillaStateId);
 
+            if (intent.PreferredTheater != Theater.Unknown && best.Theater != intent.PreferredTheater)
+                return Keep(vanillaStateId);
+
             if (best.StateId == vanillaStateId)
                 return Keep(vanillaStateId);
 

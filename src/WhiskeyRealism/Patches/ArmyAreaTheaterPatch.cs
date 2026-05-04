@@ -29,6 +29,7 @@ namespace WhiskeyRealism.Patches
 
                 int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
                 if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
+                if (StrategicCoordinator.WlCareerStartPending()) return;
 
                 ArmyAreaRuntime.ApplyHistoricalAreaOrders(_aifaction, allianceId);
             }

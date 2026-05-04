@@ -32,6 +32,7 @@ static class Program
             ("objective catalog keeps unknown ids unresolved", ObjectiveCatalogKeepsUnknownIdsUnresolved),
             ("recruitment intent prefers supported volunteers", RecruitmentIntentPrefersSupportedVolunteers),
             ("recruitment intent does not leave preferred theater for raw pool", RecruitmentIntentDoesNotLeavePreferredTheaterForRawPool),
+            ("recruitment intent keeps vanilla when preferred theater unavailable", RecruitmentIntentKeepsVanillaWhenPreferredTheaterUnavailable),
             ("recruitment intent keeps vanilla when draft would be forced at parity", RecruitmentIntentKeepsVanillaWhenDraftWouldBeForcedAtParity),
             ("recruitment intent avoids enemy states when excluded", RecruitmentIntentAvoidsEnemyStatesWhenExcluded),
             ("recruitment log gate suppresses repeated replacements", RecruitmentLogGateSuppressesRepeatedReplacements),
@@ -548,6 +549,50 @@ static class Program
 
         AssertEqual(false, decision.ShouldReplace);
         AssertEqual(38, decision.StateId);
+    }
+
+    private static void RecruitmentIntentKeepsVanillaWhenPreferredTheaterUnavailable()
+    {
+        var intent = new RecruitmentIntent
+        {
+            AllianceId = 1,
+            PreferredTheater = Theater.East,
+            StrengthRatio = 0.8f,
+            OwnStateSupportFloor = 0.5f
+        };
+        var candidates = new[]
+        {
+            new RecruitmentStateCandidate
+            {
+                StateId = 8,
+                Theater = Theater.Coast,
+                Volunteers = 60,
+                Drafts = 0,
+                Support = 0.5f,
+                IsRecruitable = true,
+                IsEnemyState = false,
+                IsLocalArea = true
+            },
+            new RecruitmentStateCandidate
+            {
+                StateId = 0,
+                Theater = Theater.West,
+                Volunteers = 20000,
+                Drafts = 0,
+                Support = 0.95f,
+                IsRecruitable = true,
+                IsEnemyState = false,
+                IsLocalArea = false
+            }
+        };
+
+        var exploratory = RecruitmentIntentLedger.SelectState(intent, candidates, vanillaStateId: 8, strengthNeeded: 0, excludeEnemyStates: false);
+        var concrete = RecruitmentIntentLedger.SelectState(intent, candidates, vanillaStateId: 8, strengthNeeded: 60, excludeEnemyStates: false);
+
+        AssertEqual(false, exploratory.ShouldReplace);
+        AssertEqual(8, exploratory.StateId);
+        AssertEqual(false, concrete.ShouldReplace);
+        AssertEqual(8, concrete.StateId);
     }
 
     private static void RecruitmentIntentAvoidsEnemyStatesWhenExcluded()

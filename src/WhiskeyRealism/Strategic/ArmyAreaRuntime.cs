@@ -89,13 +89,7 @@ namespace WhiskeyRealism.Strategic
         internal static int ApplyHistoricalAreaOrders(int aifactionIndex, int allianceId)
         {
             var ledger = StrategicCoordinator.Instance?.ArmyAreas?[allianceId];
-            if (ledger == null)
-            {
-                OnceLog.Warning(
-                    "army-area:orders:no-ledger:" + allianceId,
-                    $"[Patch:ArmyArea] historical area orders skipped: no army-area ledger for alliance={allianceId}");
-                return 0;
-            }
+            if (ledger == null) return 0;
 
             var faction = FindFaction(allianceId);
             if (faction == null)

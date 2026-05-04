@@ -30,15 +30,10 @@ namespace WhiskeyRealism.Patches
 
                 int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
                 if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
+                if (StrategicCoordinator.WlCareerStartPending()) return;
 
                 var ledger = StrategicCoordinator.Instance.ArmyAreas[allianceId];
-                if (ledger == null)
-                {
-                    OnceLog.Warning(
-                        "armygroup:no-ledger:" + allianceId,
-                        $"[Patch:ArmyGroup] skipped: no army-area ledger for alliance={allianceId}");
-                    return;
-                }
+                if (ledger == null) return;
 
                 var plans = ArmyGroupDoctrine.PlanGroups(ledger);
                 if (plans.Count == 0) return;
