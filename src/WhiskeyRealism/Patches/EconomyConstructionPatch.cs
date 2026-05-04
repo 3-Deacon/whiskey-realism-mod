@@ -49,11 +49,17 @@ namespace WhiskeyRealism.Patches
                     int key = Key(alliance, buildingType);
 
                     float oldProb = state.bestiipplacesprob[buildingType];
-                    if (!TrySanitizeProbability(oldProb, out oldProb))
+                    var oldStatus = ConstructionProbabilitySanitizer.Classify(oldProb);
+                    if (oldStatus == ConstructionProbabilityStatus.Invalid)
                     {
                         state.bestiipplacesprob[buildingType] = 0f;
                         _biasedCandidates.Remove(key);
                         OnceLog.Warning("economy-construction:invalid-probability", "[Patch:EconomyConstruction] invalid bestiipplaces probability sanitized to 0");
+                        continue;
+                    }
+                    if (oldStatus == ConstructionProbabilityStatus.Skip)
+                    {
+                        _biasedCandidates.Remove(key);
                         continue;
                     }
 
@@ -104,7 +110,7 @@ namespace WhiskeyRealism.Patches
                     }
 
                     float newProb = originalProb * mult;
-                    if (!TrySanitizeProbability(newProb, out newProb))
+                    if (ConstructionProbabilitySanitizer.Classify(newProb) != ConstructionProbabilityStatus.Valid)
                     {
                         state.bestiipplacesprob[buildingType] = 0f;
                         _biasedCandidates.Remove(key);
@@ -135,18 +141,6 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("economy-construction:prefix", "[Patch:EconomyConstruction] prefix failed: " + ex.Message);
             }
-        }
-
-        private static bool TrySanitizeProbability(float value, out float sanitized)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value) || value <= 0f)
-            {
-                sanitized = 0f;
-                return false;
-            }
-
-            sanitized = value;
-            return true;
         }
 
         private static bool ConstructionSteeringEnabled()

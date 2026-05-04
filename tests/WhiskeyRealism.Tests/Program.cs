@@ -89,6 +89,7 @@ static class Program
             ("construction steering uses missing suppression id name fallback", ConstructionSteeringUsesMissingSuppressionIdNameFallback),
             ("construction steering ignores same-name suppression with different type", ConstructionSteeringIgnoresSameNameSuppressionWithDifferentType),
             ("construction steering leaves non-top field-supply bank fiscal-only", ConstructionSteeringLeavesNonTopFieldSupplyBankFiscalOnly),
+            ("construction probability sanitizer treats zero as normal skip", ConstructionProbabilitySanitizerTreatsZeroAsNormalSkip),
             ("telegraph intent rejects disconnected candidates", TelegraphIntentRejectsDisconnectedCandidates),
             ("telegraph intent rejects candidates without supporting unit", TelegraphIntentRejectsNoSupportingUnit),
             ("telegraph intent rejects unsafe corridor", TelegraphIntentRejectsUnsafeCorridor),
@@ -1686,6 +1687,15 @@ static class Program
 
         AssertEqual(1.35f, decision.Multiplier);
         AssertEqual("fiscal-ledger-neutral", decision.Reason);
+    }
+
+    private static void ConstructionProbabilitySanitizerTreatsZeroAsNormalSkip()
+    {
+        AssertEqual(ConstructionProbabilityStatus.Valid, ConstructionProbabilitySanitizer.Classify(0.25f));
+        AssertEqual(ConstructionProbabilityStatus.Skip, ConstructionProbabilitySanitizer.Classify(0f));
+        AssertEqual(ConstructionProbabilityStatus.Skip, ConstructionProbabilitySanitizer.Classify(-0.01f));
+        AssertEqual(ConstructionProbabilityStatus.Invalid, ConstructionProbabilitySanitizer.Classify(float.NaN));
+        AssertEqual(ConstructionProbabilityStatus.Invalid, ConstructionProbabilitySanitizer.Classify(float.PositiveInfinity));
     }
 
     private static void TelegraphIntentRejectsDisconnectedCandidates()
