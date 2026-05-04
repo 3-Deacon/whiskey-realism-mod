@@ -35,8 +35,12 @@ Key vanilla anchors:
 - `CBuilding.Place(...)` at line 96163
 - `CBuilding.AddConstructionWish(...)` at line 97479
 - `CBuilding.WorkDownConstructionWishes()` at line 97538
+- `CBuilding.id_telegraphstation = 23` at line 95089; `Config/buildingtypes.dat` names building ID 23 as `Telegraph Station`
 - `CBuilding.UpdateTelegraphConnections()` at line 95904
 - `CBuilding.CheckTelegraphConnection()` at line 95918
+- `Regiment.CheckTelegraphConnection()` at line 116179
+- campaign order-delay telegraph modifier at line 125037
+- campaign morale telegraph modifier at line 127930
 
 ## Goal
 
@@ -71,7 +75,7 @@ Whiskey should add:
 1. Current #20 only touches private-economy candidate probabilities. It cannot choose a better IIP once vanilla has picked `bestiipplaces[type]`.
 2. Supply depots are not proactive in vanilla. They are built only after unit supply drops below `GamePrefs.supplystatedepotconstruction`.
 3. Forts are not private construction candidates. They use unit/site/order logic with one active fort order per faction.
-4. Telegraph stations have no verified vanilla AI construction path. Any AI telegraph behavior is net-new.
+4. Telegraph stations are real military `CBuilding` objects (`id_telegraphstation = 23`) with command effects, but they have no verified vanilla AI construction path. Any AI telegraph construction behavior is net-new, not cosmetic.
 5. Railroad AI is random and calls `BattleUnits.Railroad.StartConstruction(alliance)` directly. That path appears fiscally lighter than the player UI path, which also adjusts subsidy funding and treasury.
 6. Military construction only progresses while a friendly unit remains inside bugle range. Smart construction cannot ignore unit support.
 7. `fortconstructionsites` is map-baked from future-appearing fort buildings during scenario initialization; Whiskey does not add new fort sites in Slice A.
@@ -355,6 +359,23 @@ Implementation must dump or telemetry-record the available `fortconstructionsite
 
 ## Telegraph Rules
 
+Verified vanilla behavior:
+
+- Telegraph Station is building ID 23 in `Config/buildingtypes.dat` and `CBuilding.id_telegraphstation`.
+- `CBuilding.UpdateTelegraphConnections()` builds a local list of nearby telegraph stations within `GamePrefs.standardtelegraphrange`.
+- `CBuilding.CheckTelegraphConnection()` marks a telegraph station connected only when it is complete, owned by the same alliance, and either within telegraph range of the alliance capital or chained through another owned connected station.
+- Connected stations store `priortelegraph` and `telegraphconnectionid`, so vanilla models an actual chain back to the capital rather than an isolated aura.
+- `Regiment.CheckTelegraphConnection()` gives a campaign unit `hastelegraphconnection` only when the unit is within `GamePrefs.standardtelegraphrange` of an owned connected station.
+- Campaign order processing multiplies order delay by `GamePrefs.orderprocessingfactorwithintelegraphrange` when `hastelegraphconnection != null`.
+- Campaign morale receives `GamePrefs.moraleimprovementtelegraphconnection` when the parent campaign unit has a telegraph connection.
+- Manual placement rejects telegraph stations that do not connect, and military construction progress still depends on friendly unit support.
+
+Strategic interpretation:
+
+- Telegraphs are command-and-control infrastructure. They directly affect campaign order responsiveness and morale for connected field formations.
+- Telegraph AI should prioritize active command corridors, not generic map coverage.
+- Telegraph value is highest when a connected chain reaches a formation that is massing, guarding, recovering, or operating far from the capital where delayed orders would otherwise slow campaign response.
+
 Patch surface:
 
 - net-new AI path using `CBuilding.AddConstructionWish(CBuilding.id_telegraphstation, ...)` only after conservative validation;
@@ -363,7 +384,7 @@ Patch surface:
 Rules:
 
 - Telegraph AI is optional and should be behind a config gate in the first implementation.
-- Treat telegraph AI as flavor/command-support until runtime proves the build time and connection chain create material strategy effects.
+- Treat telegraph AI as military command infrastructure. The conservative default-off gate exists because the AI construction path is net-new and placement/unit-support validation is brittle, not because telegraphs are strategically irrelevant.
 - Never build isolated stations.
 - Build from capital outward to active army corridors.
 - Prefer safe rear or defended corridor positions.
