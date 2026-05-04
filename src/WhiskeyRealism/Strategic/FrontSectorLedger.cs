@@ -68,6 +68,9 @@ namespace WhiskeyRealism.Strategic
         public float StrategicImportance;
         public bool IsCritical;
         public bool IsPlanTarget;
+        public float AverageMorale;
+        public float AverageSupply;
+        public float AverageReadiness;
         public FrontPosture Posture;
         public ArmyRole Role;
     }
@@ -112,7 +115,10 @@ namespace WhiskeyRealism.Strategic
                     MinimumHoldRatio = minHold,
                     StrategicImportance = Clamp01(input.StrategicImportance),
                     IsCritical = input.IsCritical,
-                    IsPlanTarget = input.IsPlanTarget
+                    IsPlanTarget = input.IsPlanTarget,
+                    AverageMorale = input.AverageMorale,
+                    AverageSupply = input.AverageSupply,
+                    AverageReadiness = input.AverageReadiness
                 };
 
                 sector.Posture = ChoosePosture(input, sector, options);

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
@@ -16,12 +17,19 @@ namespace WhiskeyRealism.Strategic
         public FrontSectorLedger[] Fronts = new FrontSectorLedger[2];
         public ArmyAreaLedger[] ArmyAreas = new ArmyAreaLedger[2];
         public FormationDirectiveLedger[] FormationDirectives = new FormationDirectiveLedger[2];
+        public FiscalOutput[] FiscalIntents = new FiscalOutput[2];
         internal SuccessionScheduler Succession = new SuccessionScheduler();
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
+        private readonly FiscalStateMemory[] _fiscalMemory = new FiscalStateMemory[2]
+        {
+            new FiscalStateMemory(),
+            new FiscalStateMemory()
+        };
         private readonly string[] _frontSignatures = new string[2];
         private readonly string[] _armyAreaSignatures = new string[2];
         private readonly string[] _formationDirectiveSignatures = new string[2];
+        private readonly string[] _fiscalSignatures = new string[2];
         private readonly WeeklyCadence _operationalCadence = new WeeklyCadence();
         private bool _operationalRuntimeDeferredLogged;
 
@@ -213,6 +221,7 @@ namespace WhiskeyRealism.Strategic
                     UpdateArmyAreaLedger(alliance, cic);
                     UpdateFormationDirectiveLedger(alliance, cic, era);
                 }
+                UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat);
 
                 if (Plugin.Instance.VerboseLogging.Value && !logHeartbeat)
                     Plugin.Log.LogInfo($"[WeeklyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
@@ -225,6 +234,27 @@ namespace WhiskeyRealism.Strategic
                         $"plan={(cic.ActivePlan == null ? "<none>" : $"phase{cic.ActivePlan.CurrentPhaseIndex + 1}/{cic.ActivePlan.Phases.Count} obj={cic.ActivePlan.CurrentPhase?.TargetObjectiveId}")} " +
                         $"succession_fired={Succession.FiredEventIds.Count}");
                 }
+            }
+        }
+
+        private void UpdateFiscalIntent(int alliance, EraStage era, int day, int month, int year, bool logHeartbeat)
+        {
+            var input = FiscalRuntime.BuildInput(alliance, era, _fiscalMemory[alliance]);
+            var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+            FiscalIntents[alliance] = output;
+            _fiscalMemory[alliance].PreviousPosture = output.Posture;
+            _fiscalMemory[alliance].EmergencyResidue = output.Posture == FiscalPosture.EmergencySolvency ||
+                _fiscalMemory[alliance].EmergencyResidue && output.Posture == FiscalPosture.CreditDefense;
+
+            if (Plugin.Instance.VerboseLogging.Value || _fiscalSignatures[alliance] != output.Signature)
+            {
+                Plugin.Log.LogInfo($"[FiscalIntent] alliance={alliance} posture={output.Posture} gate={output.DefendedGate} supply={output.SupplyProtection} forceCap={output.ForceCapWarning}");
+                _fiscalSignatures[alliance] = output.Signature;
+            }
+
+            if (logHeartbeat)
+            {
+                Plugin.Log.LogInfo($"[FiscalTelemetry] alliance={alliance} posture={output.Posture} gate={output.DefendedGate} supply={output.SupplyProtection} theater={output.TheaterSupplyPriority}");
             }
         }
 
