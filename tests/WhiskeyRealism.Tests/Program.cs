@@ -22,6 +22,7 @@ static class Program
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
+            ("wl start selection retry waits for panel before consuming attempt", WlStartSelectionRetryWaitsForPanel),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
             ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
@@ -316,6 +317,16 @@ static class Program
         AssertEqual(false, gate.ShouldAttempt(pending: true, listVisible: false, unityFrame: 10));
         AssertEqual(true, gate.ShouldAttempt(pending: true, listVisible: false, unityFrame: 16));
         AssertEqual(false, gate.ShouldAttempt(pending: true, listVisible: true, unityFrame: 31));
+    }
+
+    private static void WlStartSelectionRetryWaitsForPanel()
+    {
+        var gate = new WlStartSelectionRetryGate(maxAttempts: 3, retryEveryUnityFrames: 15);
+
+        AssertEqual(false, gate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: false, unityFrame: 1));
+        AssertEqual(0, gate.Attempts);
+        AssertEqual(true, gate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, unityFrame: 1));
+        AssertEqual(1, gate.Attempts);
     }
 
     private static void ArmyGroupDoctrineRequiresTwoCommittedFormations()

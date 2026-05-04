@@ -24,12 +24,18 @@ namespace WhiskeyRealism.Strategic
 
         public bool ShouldAttempt(bool pending, bool listVisible, int unityFrame)
         {
+            return ShouldAttempt(pending: pending, listVisible: listVisible, panelAvailable: true, unityFrame: unityFrame);
+        }
+
+        public bool ShouldAttempt(bool pending, bool listVisible, bool panelAvailable, int unityFrame)
+        {
             if (!pending)
             {
                 Reset();
                 return false;
             }
 
+            if (!panelAvailable) return false;
             if (listVisible || _attempts >= _maxAttempts) return false;
             if (_lastAttemptUnityFrame >= 0 && unityFrame - _lastAttemptUnityFrame < _retryEveryUnityFrames) return false;
 

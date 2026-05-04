@@ -22,12 +22,18 @@ namespace WhiskeyRealism.Patches
 
         private static readonly WlStartSelectionRetryGate RetryGate = new WlStartSelectionRetryGate(MaxAttempts, RetryEveryUnityFrames);
         private static object _careerPanel;
+        private static FieldInfo _controllerCareerPanelField;
         private static FieldInfo _gameFrameField;
         private static FieldInfo _unitSelectionListObjectField;
         private static MethodInfo _showStartUnitSelectionListMethod;
 
         [HarmonyPostfix]
         internal static void Postfix()
+        {
+            TryRetry(ResolveCareerPanel(), "ai");
+        }
+
+        internal static void TryRetry(object panel, string source)
         {
             try
             {
@@ -42,25 +48,25 @@ namespace WhiskeyRealism.Patches
                 int frame = ReadFrame();
                 int unityFrame = Time.frameCount;
 
-                var panel = ResolveCareerPanel();
                 if (panel == null)
                 {
-                    OnceLog.Warning("wl-start-selection:no-panel", "[W&LStartSelection] retry skipped: CareerInformation panel unavailable");
+                    OnceLog.Warning("wl-start-selection:no-panel:" + source, $"[W&LStartSelection] retry skipped from {source}: CareerInformation panel unavailable");
                     return;
                 }
 
+                CachePanelMembers(panel.GetType());
                 if (UnitSelectionListVisible(panel)) return;
                 if (_showStartUnitSelectionListMethod == null)
                 {
                     OnceLog.Warning("wl-start-selection:no-method", "[W&LStartSelection] retry skipped: ShowStartUnitSelectionList method unavailable");
                     return;
                 }
-                if (!RetryGate.ShouldAttempt(pending: true, listVisible: false, unityFrame: unityFrame)) return;
+                if (!RetryGate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, unityFrame: unityFrame)) return;
 
                 _showStartUnitSelectionListMethod.Invoke(panel, new object[] { true });
 
                 if (RetryGate.Attempts == 1 || Plugin.Instance.VerboseLogging.Value)
-                    Plugin.Log.LogInfo($"[W&LStartSelection] retried command-selection popup gameFrame={frame} unityFrame={unityFrame} attempt={RetryGate.Attempts} {DescribeWlStatus()}");
+                    Plugin.Log.LogInfo($"[W&LStartSelection] retried command-selection popup source={source} gameFrame={frame} unityFrame={unityFrame} attempt={RetryGate.Attempts} {DescribeWlStatus()}");
                 if (RetryGate.Exhausted && !UnitSelectionListVisible(panel))
                     OnceLog.Warning("wl-start-selection:max-attempts", $"[W&LStartSelection] command-selection popup still hidden after {RetryGate.Attempts} retries; {DescribeWlStatus()}");
             }
@@ -92,9 +98,32 @@ namespace WhiskeyRealism.Patches
             if (go == null) return null;
 
             _careerPanel = go.GetComponent(panelType);
+            CachePanelMembers(panelType);
+            return _careerPanel;
+        }
+
+        internal static object ResolveCareerPanelFromController(CampaignController controller)
+        {
+            if (controller == null) return ResolveCareerPanel();
+            if (_controllerCareerPanelField == null)
+                _controllerCareerPanelField = AccessTools.Field(typeof(CampaignController), "careerinformationpanel");
+
+            var panel = _controllerCareerPanelField?.GetValue(controller);
+            if (panel != null)
+            {
+                _careerPanel = panel;
+                CachePanelMembers(panel.GetType());
+                return panel;
+            }
+
+            return ResolveCareerPanel();
+        }
+
+        private static void CachePanelMembers(Type panelType)
+        {
+            if (panelType == null) return;
             _unitSelectionListObjectField = AccessTools.Field(panelType, "UnitSelectionListObject");
             _showStartUnitSelectionListMethod = AccessTools.Method(panelType, "ShowStartUnitSelectionList", new[] { typeof(bool) });
-            return _careerPanel;
         }
 
         private static bool UnitSelectionListVisible(object panel)
@@ -124,6 +153,16 @@ namespace WhiskeyRealism.Patches
             {
                 return "status=unavailable";
             }
+        }
+    }
+
+    [HarmonyPatch(typeof(CampaignController), "Update")]
+    internal static class WlCareerStartSelectionRetryCampaignControllerPatch
+    {
+        [HarmonyPostfix]
+        internal static void Postfix(CampaignController __instance)
+        {
+            WlCareerStartSelectionRetryPatch.TryRetry(WlCareerStartSelectionRetryPatch.ResolveCareerPanelFromController(__instance), "campaign");
         }
     }
 }
