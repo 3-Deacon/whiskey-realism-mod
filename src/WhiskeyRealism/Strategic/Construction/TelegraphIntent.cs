@@ -32,6 +32,8 @@ namespace WhiskeyRealism.Strategic.Construction
                 return Decision(false, 0f, "already-covered");
             if (posture == ConstructionPosture.EmergencyHold && !candidate.SupportsActiveCommandCorridor)
                 return Decision(false, 0f, "emergency-noncritical");
+            if (!candidate.SupportsActiveCommandCorridor)
+                return Decision(false, 0f, "below-threshold");
 
             float score = 0.25f;
             if (candidate.SupportsActiveCommandCorridor)
@@ -58,6 +60,7 @@ namespace WhiskeyRealism.Strategic.Construction
 
         private static float Clamp01(float value)
         {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
             if (value < 0f) return 0f;
             if (value > 1f) return 1f;
             return value;

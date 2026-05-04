@@ -90,8 +90,14 @@ static class Program
             ("construction steering ignores same-name suppression with different type", ConstructionSteeringIgnoresSameNameSuppressionWithDifferentType),
             ("construction steering leaves non-top field-supply bank fiscal-only", ConstructionSteeringLeavesNonTopFieldSupplyBankFiscalOnly),
             ("telegraph intent rejects disconnected candidates", TelegraphIntentRejectsDisconnectedCandidates),
+            ("telegraph intent rejects candidates without supporting unit", TelegraphIntentRejectsNoSupportingUnit),
+            ("telegraph intent rejects unsafe corridor", TelegraphIntentRejectsUnsafeCorridor),
+            ("telegraph intent rejects already covered candidate", TelegraphIntentRejectsAlreadyCoveredCandidate),
             ("telegraph intent favors active command corridor", TelegraphIntentFavorsActiveCommandCorridor),
             ("telegraph intent suppresses emergency noncritical build", TelegraphIntentSuppressesEmergencyNoncriticalBuild),
+            ("telegraph intent treats nonfinite inputs as no pressure", TelegraphIntentTreatsNonfiniteInputsAsNoPressure),
+            ("telegraph intent builds at exact threshold", TelegraphIntentBuildsAtExactThreshold),
+            ("telegraph intent rejects noncorridor high pressure", TelegraphIntentRejectsNoncorridorHighPressure),
             ("fast forward scheduler keeps 5x vanilla only", FastForwardSchedulerKeepsFiveXVanillaOnly),
             ("fast forward scheduler boosts high speeds within cap", FastForwardSchedulerBoostsHighSpeedsWithinCap),
             ("fast forward scheduler disables cleanly", FastForwardSchedulerDisablesCleanly),
@@ -1694,6 +1700,64 @@ static class Program
         AssertEqual("not-connected", decision.Reason);
     }
 
+    private static void TelegraphIntentRejectsNoSupportingUnit()
+    {
+        var candidate = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = true,
+            SupportingUnitEligible = false,
+            SupportsActiveCommandCorridor = true,
+            SafeRear = true,
+            CommandDelayPressure = 1f,
+            FormationImportance = 1f
+        };
+
+        var decision = TelegraphIntentScorer.Score(candidate, ConstructionPosture.FieldSupply);
+
+        AssertEqual(false, decision.ShouldBuild);
+        AssertEqual(0f, decision.Score);
+        AssertEqual("no-supporting-unit", decision.Reason);
+    }
+
+    private static void TelegraphIntentRejectsUnsafeCorridor()
+    {
+        var candidate = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = true,
+            SupportingUnitEligible = true,
+            SupportsActiveCommandCorridor = true,
+            SafeRear = false,
+            CommandDelayPressure = 1f,
+            FormationImportance = 1f
+        };
+
+        var decision = TelegraphIntentScorer.Score(candidate, ConstructionPosture.FieldSupply);
+
+        AssertEqual(false, decision.ShouldBuild);
+        AssertEqual(0f, decision.Score);
+        AssertEqual("unsafe-corridor", decision.Reason);
+    }
+
+    private static void TelegraphIntentRejectsAlreadyCoveredCandidate()
+    {
+        var candidate = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = true,
+            SupportingUnitEligible = true,
+            SupportsActiveCommandCorridor = true,
+            SafeRear = true,
+            AlreadyCoveredByTelegraph = true,
+            CommandDelayPressure = 1f,
+            FormationImportance = 1f
+        };
+
+        var decision = TelegraphIntentScorer.Score(candidate, ConstructionPosture.FieldSupply);
+
+        AssertEqual(false, decision.ShouldBuild);
+        AssertEqual(0f, decision.Score);
+        AssertEqual("already-covered", decision.Reason);
+    }
+
     private static void TelegraphIntentFavorsActiveCommandCorridor()
     {
         var candidate = new TelegraphCandidateFacts
@@ -1729,6 +1793,80 @@ static class Program
 
         AssertEqual(false, decision.ShouldBuild);
         AssertEqual("emergency-noncritical", decision.Reason);
+    }
+
+    private static void TelegraphIntentTreatsNonfiniteInputsAsNoPressure()
+    {
+        var nanPressure = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = true,
+            SupportingUnitEligible = true,
+            SupportsActiveCommandCorridor = true,
+            SafeRear = true,
+            CommandDelayPressure = float.NaN,
+            FormationImportance = float.PositiveInfinity
+        };
+
+        var nanDecision = TelegraphIntentScorer.Score(nanPressure, ConstructionPosture.Infrastructure);
+
+        AssertEqual(false, nanDecision.ShouldBuild);
+        AssertTrue(!float.IsNaN(nanDecision.Score), "expected NaN inputs to produce a finite telegraph score");
+        AssertTrue(!float.IsInfinity(nanDecision.Score), "expected infinite inputs to produce a finite telegraph score");
+        AssertEqual("below-threshold", nanDecision.Reason);
+
+        var infinitePressureOnly = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = true,
+            SupportingUnitEligible = true,
+            SupportsActiveCommandCorridor = false,
+            SafeRear = true,
+            CommandDelayPressure = float.PositiveInfinity,
+            FormationImportance = float.NegativeInfinity
+        };
+
+        var infiniteDecision = TelegraphIntentScorer.Score(infinitePressureOnly, ConstructionPosture.FieldSupply);
+
+        AssertEqual(false, infiniteDecision.ShouldBuild);
+        AssertTrue(!float.IsNaN(infiniteDecision.Score), "expected infinite pressure to produce a finite telegraph score");
+        AssertTrue(!float.IsInfinity(infiniteDecision.Score), "expected infinite pressure to produce a finite telegraph score");
+        AssertEqual("below-threshold", infiniteDecision.Reason);
+    }
+
+    private static void TelegraphIntentBuildsAtExactThreshold()
+    {
+        var candidate = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = true,
+            SupportingUnitEligible = true,
+            SupportsActiveCommandCorridor = true,
+            SafeRear = true,
+            CommandDelayPressure = 2f / 3f,
+            FormationImportance = 0f
+        };
+
+        var decision = TelegraphIntentScorer.Score(candidate, ConstructionPosture.Infrastructure);
+
+        AssertEqual(true, decision.ShouldBuild);
+        AssertEqual(1.0f, decision.Score);
+        AssertEqual("active-command-corridor", decision.Reason);
+    }
+
+    private static void TelegraphIntentRejectsNoncorridorHighPressure()
+    {
+        var candidate = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = true,
+            SupportingUnitEligible = true,
+            SupportsActiveCommandCorridor = false,
+            SafeRear = true,
+            CommandDelayPressure = 1f,
+            FormationImportance = 1f
+        };
+
+        var decision = TelegraphIntentScorer.Score(candidate, ConstructionPosture.FieldSupply);
+
+        AssertEqual(false, decision.ShouldBuild);
+        AssertEqual("below-threshold", decision.Reason);
     }
 
     private static void FastForwardSchedulerKeepsFiveXVanillaOnly()
