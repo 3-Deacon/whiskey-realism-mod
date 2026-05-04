@@ -169,6 +169,10 @@ namespace WhiskeyRealism.Patches
                 var units = _getUnitListForStartSelectionMethod.Invoke(null, new[] { commander, (object)prestige }) as IList;
                 return units != null && units.Count > 0;
             }
+            catch (NullReferenceException)
+            {
+                return false;
+            }
             catch (Exception ex)
             {
                 OnceLog.Warning("wl-start-selection:data-ready", "[W&LStartSelection] startup readiness check failed: " + DescribeException(ex));
