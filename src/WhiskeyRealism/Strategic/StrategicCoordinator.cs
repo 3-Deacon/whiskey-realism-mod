@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
@@ -22,6 +23,7 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _armyAreaSignatures = new string[2];
         private readonly string[] _formationDirectiveSignatures = new string[2];
         private readonly WeeklyCadence _operationalCadence = new WeeklyCadence();
+        private bool _operationalRuntimeDeferredLogged;
 
         public int LastSeenMonth = -1;
         public int LastSeenYear  = -1;
@@ -170,6 +172,13 @@ namespace WhiskeyRealism.Strategic
         private void RunStrategicReview(int day, int month, int year, bool logHeartbeat)
         {
             int playerAlliance = ResolvePlayerAlliance();
+            bool operationalRuntimeReady = OperationalRuntimeReady();
+            if (!operationalRuntimeReady && !_operationalRuntimeDeferredLogged)
+            {
+                _operationalRuntimeDeferredLogged = true;
+                Plugin.Log.LogInfo("[Coordinator] operational ledgers deferred until AICampaign factions initialize");
+            }
+
             for (int alliance = 0; alliance < 2; alliance++)
             {
                 if (IsPlayerCICOf(alliance, playerAlliance))
@@ -198,9 +207,12 @@ namespace WhiskeyRealism.Strategic
                 if (!cic.ReviewPlan(month, year))
                     cic.Replan(era, month, year);
 
-                UpdateFrontLedger(alliance, cic);
-                UpdateArmyAreaLedger(alliance, cic);
-                UpdateFormationDirectiveLedger(alliance, cic, era);
+                if (operationalRuntimeReady)
+                {
+                    UpdateFrontLedger(alliance, cic);
+                    UpdateArmyAreaLedger(alliance, cic);
+                    UpdateFormationDirectiveLedger(alliance, cic, era);
+                }
 
                 if (Plugin.Instance.VerboseLogging.Value && !logHeartbeat)
                     Plugin.Log.LogInfo($"[WeeklyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
@@ -214,6 +226,17 @@ namespace WhiskeyRealism.Strategic
                         $"succession_fired={Succession.FiredEventIds.Count}");
                 }
             }
+        }
+
+        private static bool OperationalRuntimeReady()
+        {
+            try
+            {
+                var aicType = AccessTools.TypeByName("AICampaign");
+                var list = AccessTools.Field(aicType, "aifaction")?.GetValue(null) as IList;
+                return list != null && list.Count > 0;
+            }
+            catch { return false; }
         }
 
         private void UpdateFrontLedger(int alliance, CIC cic)

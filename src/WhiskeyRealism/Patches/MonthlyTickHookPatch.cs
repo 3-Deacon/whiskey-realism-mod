@@ -20,11 +20,13 @@ namespace WhiskeyRealism.Patches
                 int year  = ReadGameYear();
                 if (day <= 0 || month <= 0 || year <= 0)
                 {
-                    OnceLog.Warning("strategic-cadence:date-unavailable", "[MonthlyTickHookPatch] campaign date unavailable");
+                    OnceLog.Info("strategic-cadence:date-wait", "[MonthlyTickHookPatch] campaign date unavailable; waiting for campaign scene");
                     return;
                 }
 
-                if (day == _lastNotifiedDay && month == _lastNotifiedMonth && year == _lastNotifiedYear)
+                bool dateChanged = day != _lastNotifiedDay || month != _lastNotifiedMonth || year != _lastNotifiedYear;
+                bool runtimeReady = OperationalRuntimeReady();
+                if (!_startupGate.ShouldNotify(dateChanged, runtimeReady))
                     return;
 
                 _lastNotifiedDay = day;
@@ -50,6 +52,7 @@ namespace WhiskeyRealism.Patches
         private static int _lastNotifiedDay = -1;
         private static int _lastNotifiedMonth = -1;
         private static int _lastNotifiedYear = -1;
+        private static readonly OperationalStartupGate _startupGate = new OperationalStartupGate();
 
         private static UnityEngine.Component ResolveBunits()
         {
@@ -113,6 +116,17 @@ namespace WhiskeyRealism.Patches
                 return bunits != null && _bunitsYearField != null ? (int)_bunitsYearField.GetValue(bunits) : -1;
             }
             catch { return -1; }
+        }
+
+        private static bool OperationalRuntimeReady()
+        {
+            try
+            {
+                var aicType = AccessTools.TypeByName("AICampaign");
+                var list = AccessTools.Field(aicType, "aifaction")?.GetValue(null) as System.Collections.IList;
+                return list != null && list.Count > 0;
+            }
+            catch { return false; }
         }
     }
 }

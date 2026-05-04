@@ -18,6 +18,7 @@ static class Program
             ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy),
             ("army area ledger can redirect independent division input", ArmyAreaLedgerCanRedirectIndependentDivisionInput),
             ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover),
+            ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
             ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
@@ -220,6 +221,17 @@ static class Program
         AssertEqual(true, cadence.ShouldFire(8, 6, 1861));
         AssertEqual(false, cadence.ShouldFire(13, 6, 1861));
         AssertEqual(true, cadence.ShouldFire(1, 7, 1861));
+    }
+
+    private static void OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay()
+    {
+        var gate = new OperationalStartupGate();
+
+        AssertEqual(true, gate.ShouldNotify(dateChanged: true, runtimeReady: false));
+        AssertEqual(false, gate.ShouldNotify(dateChanged: false, runtimeReady: false));
+        AssertEqual(true, gate.ShouldNotify(dateChanged: false, runtimeReady: true));
+        AssertEqual(false, gate.ShouldNotify(dateChanged: false, runtimeReady: true));
+        AssertEqual(true, gate.ShouldNotify(dateChanged: true, runtimeReady: true));
     }
 
     private static void ArmyGroupDoctrineRequiresTwoCommittedFormations()
