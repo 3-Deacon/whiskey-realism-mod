@@ -19,8 +19,9 @@ namespace WhiskeyRealism.Patches
     {
         private const int RetryEveryUnityFrames = 15;
         private const int MaxAttempts = 120;
+        private const int MinReadyCampaignFrame = 50;
 
-        private static readonly WlStartSelectionRetryGate RetryGate = new WlStartSelectionRetryGate(MaxAttempts, RetryEveryUnityFrames);
+        private static readonly WlStartSelectionRetryGate RetryGate = new WlStartSelectionRetryGate(MaxAttempts, RetryEveryUnityFrames, MinReadyCampaignFrame);
         private static object _careerPanel;
         private static FieldInfo _controllerCareerPanelField;
         private static FieldInfo _gameFrameField;
@@ -61,7 +62,7 @@ namespace WhiskeyRealism.Patches
                     OnceLog.Warning("wl-start-selection:no-method", "[W&LStartSelection] retry skipped: ShowStartUnitSelectionList method unavailable");
                     return;
                 }
-                if (!RetryGate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, unityFrame: unityFrame)) return;
+                if (!RetryGate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: frame, unityFrame: unityFrame)) return;
 
                 _showStartUnitSelectionListMethod.Invoke(panel, new object[] { true });
 
@@ -72,7 +73,7 @@ namespace WhiskeyRealism.Patches
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("wl-start-selection:retry", "[W&LStartSelection] retry failed: " + ex.Message);
+                OnceLog.Warning("wl-start-selection:retry", "[W&LStartSelection] retry failed: " + DescribeException(ex));
             }
         }
 
@@ -153,6 +154,13 @@ namespace WhiskeyRealism.Patches
             {
                 return "status=unavailable";
             }
+        }
+
+        private static string DescribeException(Exception ex)
+        {
+            if (ex is TargetInvocationException target && target.InnerException != null)
+                return target.InnerException.GetType().Name + ": " + target.InnerException.Message;
+            return ex.GetType().Name + ": " + ex.Message;
         }
     }
 

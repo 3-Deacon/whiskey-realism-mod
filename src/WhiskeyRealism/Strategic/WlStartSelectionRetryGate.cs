@@ -4,13 +4,15 @@ namespace WhiskeyRealism.Strategic
     {
         private readonly int _maxAttempts;
         private readonly int _retryEveryUnityFrames;
+        private readonly int _minReadyCampaignFrame;
         private int _lastAttemptUnityFrame = -1;
         private int _attempts;
 
-        public WlStartSelectionRetryGate(int maxAttempts, int retryEveryUnityFrames)
+        public WlStartSelectionRetryGate(int maxAttempts, int retryEveryUnityFrames, int minReadyCampaignFrame = 0)
         {
             _maxAttempts = maxAttempts;
             _retryEveryUnityFrames = retryEveryUnityFrames;
+            _minReadyCampaignFrame = minReadyCampaignFrame;
         }
 
         public int Attempts => _attempts;
@@ -29,6 +31,11 @@ namespace WhiskeyRealism.Strategic
 
         public bool ShouldAttempt(bool pending, bool listVisible, bool panelAvailable, int unityFrame)
         {
+            return ShouldAttempt(pending: pending, listVisible: listVisible, panelAvailable: panelAvailable, campaignFrame: _minReadyCampaignFrame, unityFrame: unityFrame);
+        }
+
+        public bool ShouldAttempt(bool pending, bool listVisible, bool panelAvailable, int campaignFrame, int unityFrame)
+        {
             if (!pending)
             {
                 Reset();
@@ -36,6 +43,7 @@ namespace WhiskeyRealism.Strategic
             }
 
             if (!panelAvailable) return false;
+            if (campaignFrame < _minReadyCampaignFrame) return false;
             if (listVisible || _attempts >= _maxAttempts) return false;
             if (_lastAttemptUnityFrame >= 0 && unityFrame - _lastAttemptUnityFrame < _retryEveryUnityFrames) return false;
 
