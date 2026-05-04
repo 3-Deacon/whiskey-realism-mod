@@ -82,17 +82,6 @@ namespace WhiskeyRealism.Strategic.Construction
                     return false;
                 }
 
-                string reserveReason;
-                if (!TryReserveIip(candidate.Iip, building, out reserveReason))
-                {
-                    RemovePlacement(placement);
-                    RemoveBuilding(building);
-                    OnceLog.Warning(
-                        "telegraph-ai:start-rejected:" + alliance + ":" + reserveReason,
-                        "[TelegraphAI] alliance=" + alliance + " action=start-rejected reason=" + reserveReason);
-                    return false;
-                }
-
                 PendingTelegraphs[building] = new PendingTelegraph
                 {
                     Alliance = alliance,
@@ -687,34 +676,6 @@ namespace WhiskeyRealism.Strategic.Construction
             }
         }
 
-        private static bool TryReserveIip(IIP iip, CBuilding building, out string rejectReason)
-        {
-            rejectReason = "unknown";
-            try
-            {
-                if (iip == null)
-                {
-                    rejectReason = "iip-null";
-                    return false;
-                }
-
-                var current = iip.currentlyunderconstruction;
-                if (current != null && current != building)
-                {
-                    rejectReason = "iip-reservation-changed";
-                    return false;
-                }
-
-                iip.currentlyunderconstruction = building;
-                return true;
-            }
-            catch
-            {
-                rejectReason = "iip-reservation-failed";
-                return false;
-            }
-        }
-
         private static bool TryFindPlacement(CBuilding placeholder, IIP iip, out CBuilding.AIPlacement placement)
         {
             placement = null;
@@ -765,14 +726,23 @@ namespace WhiskeyRealism.Strategic.Construction
             }
         }
 
-        private static void RemovePlacement(CBuilding.AIPlacement placement)
+        private static bool PlacementPresent(CBuilding placeholder)
         {
             try
             {
-                if (placement == null || CBuilding.aiplacements == null) return;
-                CBuilding.aiplacements.Remove(placement);
+                if (placeholder == null || CBuilding.aiplacements == null)
+                    return false;
+
+                for (int i = 0; i < CBuilding.aiplacements.Count; i++)
+                {
+                    var placement = CBuilding.aiplacements[i];
+                    if (placement != null && placement.buildingref == placeholder)
+                        return true;
+                }
             }
             catch { }
+
+            return false;
         }
 
         private static void RemoveBuilding(CBuilding building)
@@ -792,30 +762,44 @@ namespace WhiskeyRealism.Strategic.Construction
             {
                 if (pending.Iip == null) return;
                 var current = pending.Iip.currentlyunderconstruction;
-                if (current == pending.Placeholder || current == finalBuilding)
+                if (current == pending.Placeholder || (finalBuilding != null && current == finalBuilding))
                     pending.Iip.currentlyunderconstruction = null;
             }
             catch { }
         }
 
-        private static void KeepIipReservation(PendingTelegraph pending, CBuilding finalBuilding)
+        private static bool TryCommitIipReservation(PendingTelegraph pending, CBuilding finalBuilding, out string rejectReason)
         {
+            rejectReason = "unknown";
             try
             {
-                if (pending.Iip == null || finalBuilding == null) return;
-                var current = pending.Iip.currentlyunderconstruction;
-                if (current == null || current == pending.Placeholder || current == finalBuilding)
+                if (pending.Iip == null)
                 {
-                    pending.Iip.currentlyunderconstruction = finalBuilding;
-                    return;
+                    rejectReason = "iip-null";
+                    return false;
+                }
+                if (finalBuilding == null)
+                {
+                    rejectReason = "building-null";
+                    return false;
                 }
 
-                OnceLog.Warning(
-                    "telegraph-ai:iip-final-reservation:" + pending.Alliance + ":iip-reservation-changed",
-                    "[TelegraphAI] alliance=" + pending.Alliance +
-                    " action=placed-warning reason=iip-reservation-changed");
+                var current = pending.Iip.currentlyunderconstruction;
+                if (current == null || current == finalBuilding)
+                {
+                    pending.Iip.currentlyunderconstruction = finalBuilding;
+                    rejectReason = "ok";
+                    return true;
+                }
+
+                rejectReason = "iip-reservation-changed";
+                return false;
             }
-            catch { }
+            catch
+            {
+                rejectReason = "iip-reservation-failed";
+                return false;
+            }
         }
 
         private static bool TryValidateFinalPlacement(
@@ -955,8 +939,25 @@ namespace WhiskeyRealism.Strategic.Construction
                     string reason;
                     if (TryValidateFinalPlacement(__result, pending, type, owner, out reason, out distances))
                     {
+                        string reserveReason;
+                        if (!TryCommitIipReservation(pending, __result, out reserveReason))
+                        {
+                            string reserveFinalPositionText = __result != null
+                                ? FormatPosition(((Component)__result).transform.position)
+                                : "<none>";
+                            RemoveBuilding(__result);
+                            ClearIipReservation(pending, __result);
+                            PendingTelegraphs.Remove(placeholder);
+                            OnceLog.Warning(
+                                "telegraph-ai:placed-rejected:" + pending.Alliance + ":" + reserveReason,
+                                "[TelegraphAI] alliance=" + pending.Alliance +
+                                " action=placed-rejected reason=" + reserveReason +
+                                " requested=" + FormatPosition(pending.RequestedSite) +
+                                " final=" + reserveFinalPositionText);
+                            return;
+                        }
+
                         UpdateTelegraphConnectionsIfAvailable(__result, pending.Alliance);
-                        KeepIipReservation(pending, __result);
                         PendingTelegraphs.Remove(placeholder);
 
                         Vector3 finalPosition = ((Component)__result).transform.position;
@@ -997,6 +998,48 @@ namespace WhiskeyRealism.Strategic.Construction
                     OnceLog.Warning(
                         "telegraph-ai:place-postfix",
                         "[TelegraphAI] action=placed-warning reason=postfix-failed message=" + ex.Message);
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(CBuilding), "WorkDownConstructionWishes")]
+        private static class WorkDownConstructionWishesPatch
+        {
+            [HarmonyPostfix]
+            private static void Postfix()
+            {
+                try
+                {
+                    if (PendingTelegraphs.Count <= 0)
+                        return;
+
+                    var stale = new List<CBuilding>();
+                    foreach (var pair in PendingTelegraphs)
+                    {
+                        if (pair.Key == null || !PlacementPresent(pair.Key))
+                            stale.Add(pair.Key);
+                    }
+
+                    for (int i = 0; i < stale.Count; i++)
+                    {
+                        CBuilding placeholder = stale[i];
+                        PendingTelegraph pending;
+                        if (!PendingTelegraphs.TryGetValue(placeholder, out pending))
+                            continue;
+
+                        ClearIipReservation(pending, null);
+                        PendingTelegraphs.Remove(placeholder);
+                        OnceLog.Warning(
+                            "telegraph-ai:pending-cleanup:" + pending.Alliance,
+                            "[TelegraphAI] alliance=" + pending.Alliance +
+                            " action=pending-cleanup reason=placement-cancelled");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "telegraph-ai:pending-cleanup-failed",
+                        "[TelegraphAI] action=pending-cleanup-warning reason=postfix-failed message=" + ex.Message);
                 }
             }
         }
