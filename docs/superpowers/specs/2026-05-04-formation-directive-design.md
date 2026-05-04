@@ -69,6 +69,13 @@ Primary decompile anchors:
 - `BattleUnits.MoveUnitsToBFLocation(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:94038`
 - `Regiment.CheckEnemyContactCampaign()` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:115560`
 - `Autocalc.StartSkirmishing(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:20598`
+- `Autocalc.EnvolvedUnits.GetTotalStrength(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:18514`
+- `Autocalc.UpdateLandBattleCycle(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:20648`
+- `Autocalc.GetROF(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:21060`
+- `Autocalc.FightUnit(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:21084`
+- `Autocalc.CheckWithdrawal(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:20922`
+- `Autocalc.FinishLandBattle(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:21735`
+- `CampaignArmyPanel.GetReadinessStep(...)` tooltip behavior at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:173590`
 
 Relevant vanilla behavior:
 
@@ -85,6 +92,12 @@ Relevant vanilla behavior:
 - `MoveUnitsToBFLocation` marks participating units as `participatinginbattle`/`inbattle`, stops their current movement, records battle-trigger references, and paths them toward the battlefield.
 - `Regiment.CheckEnemyContactCampaign` can start real campaign-map skirmishing during retreat/withdrawal. If a retreating non-fleet, non-garrison land unit remains close to an enemy inside `enemy.buglerange * GamePrefs.rangefactorskirmishing`, vanilla starts an `Autocalc` skirmishing engine.
 - `Autocalc.StartSkirmishing` creates an autocalc engagement of type `6`; the skirmish engine applies casualty/morale effects until range breaks or neither top unit remains in retreat.
+- `Autocalc.EnvolvedUnits.GetTotalStrength(usefirepower: true)` weights unit strength by weapon firepower, artillery gun/firepower ratios, and fort weapon strength.
+- `UpdateLandBattleCycle` only puts infantry/cavalry-style fighting units into the active line when they are present, not routed, arrived, not withdrawn, and have ammo. Artillery actions require non-routed artillery with ammunition.
+- `FightUnit` uses rate of fire, weapon firepower, stance pairings, weather, experience, cohesion, fatigue, defender cavalry/cunning effects, commander/perk modifiers, fort/terrain/embarkation factors, and elapsed time to produce casualties.
+- `FightUnit` consumes small-arms or artillery ammunition and supply stock, applies morale penalties for low/out-of-ammo, high fatigue, low cohesion, flanking, and unbearable losses, and can rout sub-units.
+- `CheckWithdrawal` ends battles based on points/force performance, reinforcements still to arrive, day/night, and commander initiative.
+- `FinishLandBattle` persists losses, morale, supply averages, service history, weapons captured, commander fame/defame/KIA, national morale effects, and state-support casualty effects.
 
 Current Whiskey gap:
 
@@ -132,12 +145,31 @@ Patches remain read-only with respect to strategic mod state. `StrategicCoordina
 | `Morale` | `groupmorale` |
 | `Readiness` | `CampaignArmyPanel.GetReadinessStep` if safely callable |
 | `Supply` | `groupsupplystate` / supply depots where safely readable |
+| `Ammo` | `groupammo`, `ammo[]`, `groupsupplystate[0]` rifle ammo, `groupsupplystate[1]` artillery ammo |
+| `Provisions` / `Forage` | `groupsupplystate[2]`, `groupsupplystate[3]` |
+| `Fatigue` / condition | `groupfatigue`, `groupcondition`, child `fatigue`, `conditionmen`, `conditionhorses` where safely readable |
+| `Weapons` / firepower | child `weapon`, `GameVars.weapon[weapon].firepower`, `groupstatsguns`, `groupstatsgunsactive` |
 | `CommandRange` | `Regiment.commanderrange` |
 | `BugleRange` | `Regiment.buglerange` |
 | `InBattle` / retreat / pathing | `inbattle`, `onretreat`, `regimentpaths` |
 | `LocalEnemyStrength` | nearby enemy units / `AIArea` strength when available |
 | `LocalFriendlySupport` | nearby friendly top formations and subordinates inside support range |
 | `CanReachSupport` | terrain-restricted reachability where safely inferable |
+
+The directive ledger should compute an `EffectiveCombatPower` approximation, not just compare headcount. The first version can be simple and testable:
+
+```
+EffectiveCombatPower =
+    Strength
+  * MoraleFactor
+  * ReadinessFactor
+  * SupplyAmmoFactor
+  * FatigueConditionFactor
+  * WeaponFirepowerFactor
+  * CommanderFactor
+```
+
+This does not need to duplicate every `Autocalc.FightUnit` detail. It must be close enough to avoid bad strategic choices: exhausted, hungry, low-ammo, low-readiness formations should not be treated as full-strength simply because their paper manpower is high.
 
 `FormationLevel`:
 
@@ -240,6 +272,10 @@ Required inputs:
 - nearby friendly support: support inside `commanderrange`/battle participation range when possible, then theater radius as a weaker fallback;
 - enemy effective strength: enemy group strength and morale/readiness where visible;
 - enemy level: division/corps/army estimate from `unittyp`;
+- ammo and supply state: rifle ammo, artillery ammo, provisions, forage, and overall supply ratio;
+- readiness and movement state: readiness step, pathing, retreat/withdrawal, and whether further operations are legal on hostile terrain;
+- fatigue/condition state: fatigue, cohesion/condition if safely available, and whether the formation has just fought or skirmished;
+- weapon/firepower state: child weapon firepower and gun strength where available, with artillery not counted as useful if artillery ammo is exhausted;
 - terrain/control context: friendly state, enemy state, contested objective, supply/capital/rail/river/port tags;
 - commander profile: aggression, caution/casualty tolerance, initiative where available;
 - faction/era grand strategy;
@@ -252,10 +288,36 @@ Default safety behavior:
 - Corps vs enemy army: allow only as part of aggregated theater force or defensive counterstroke.
 - Army vs enemy army: allow if plan/sector/ratio/commander gates pass.
 - Any low-morale or low-readiness formation: prefer `Recover`, `Hold`, or `Guard`.
+- Any low-ammo or low-supply formation: prefer `Recover`, `Guard`, or `Delay`; block `Mass`/`Counterstroke` unless the target is critical and support is near.
+- Artillery-heavy formations with poor artillery ammunition should not get inflated offensive value from paper gun counts.
+- Fresh but outnumbered CSA formations may still `Delay`/`Screen`; exhausted, low-readiness, or low-ammo CSA formations should not be asked to hold contact just because history says "defensive."
 - Any sector below minimum hold budget: block donation/attack unless sector is explicitly `Concede`.
 - Retreating/withdrawing formations near enemy contact: prefer `Screen`, `Delay`, `Recover`, or `Reinforce` logic that respects vanilla campaign skirmishing risk instead of repeatedly ordering the unit back into decisive contact.
 
 The risk model should be intentionally conservative first. It is better to under-steer and let vanilla act than to create suicidal deterministic behavior.
+
+## Campaign battle/autocalc state mechanics
+
+Campaign engagements are not resolved from manpower alone.
+
+`Autocalc.EnvolvedUnits.GetTotalStrength` can weight strength by firepower. For infantry/cavalry it reads the active weapon's firepower. For artillery it uses weapon firepower and gun count relative to manpower. For fort/garrison combat it can use fort weapon groups and fort condition.
+
+`UpdateLandBattleCycle` divides units into active fighting, reserve, flanking, and artillery buckets. Infantry/cavalry-style units need ammunition to fight. Artillery needs ammunition to fire. Routed, withdrawn, not-yet-arrived, and non-ammo units are excluded from active fighting. That means a formation's campaign-map "strength" can be strategically misleading if ammo, arrival, readiness, morale, or fatigue are bad.
+
+`FightUnit` then applies:
+
+- rate of fire from stance pairings and weather, reduced by low ammo;
+- weapon firepower, artillery firepower by range/guns, and fort/terrain modifiers;
+- experience, cohesion, fatigue, cavalry defender cunning, commander/perk modifiers, and night/embarkation effects;
+- ammo and supply consumption for the firing unit;
+- morale loss from casualties, flanking, low/out-of-ammo, high fatigue, low cohesion, and unbearable losses;
+- rout checks when morale cracks or loss thresholds are exceeded.
+
+`CheckWithdrawal` does not just compare raw headcount. It checks battle points, reinforcement arrivals, day/night, and commander initiative before deciding a side withdraws. `FinishLandBattle` then writes durable consequences: casualties, morale/supply averages, weapons captured, commander fame/defame/KIA, national morale, service history, and state-support effects.
+
+Design consequence:
+
+The formation directive ledger must treat readiness, ammo, supply, fatigue/condition, morale, weapons, and support timing as strategic state. A corps with 20,000 hungry men, low readiness, and depleted ammunition is not equivalent to a fresh 20,000-man corps. A smaller CSA division with good morale, ammunition, nearby support, and a high-cunning commander may be useful as a delaying screen even if it should not seek decisive battle.
 
 ## Campaign skirmishing mechanics
 
@@ -402,6 +464,7 @@ This spec does not implement those surfaces. Later work can use formation direct
 - repeated `Guard` gaps create recruitment intent for local infantry/artillery;
 - repeated `Screen`/`RaidSupport` gaps create cavalry intent;
 - repeated `Mass`/`Reinforce` gaps create logistics/rail/project pressure;
+- repeated `Recover` caused by low ammo/supply creates logistics, depot, railroad, and project pressure;
 - coastal `Guard`/river `Mass` connects to naval/project strategy.
 
 ## Data structures
@@ -430,6 +493,12 @@ public sealed class FormationDirectiveAssignment
     public float OwnEffectiveStrength;
     public float LocalFriendlySupport;
     public float LocalEnemyStrength;
+    public float Readiness;
+    public float Morale;
+    public float Ammo;
+    public float Supply;
+    public float Fatigue;
+    public float WeaponFirepower;
     public bool OffensiveAllowed;
     public bool DefensiveAllowed;
     public bool TransferDonorAllowed;
@@ -459,6 +528,9 @@ Pure tests should cover:
 - division support uses command-range/proximity inputs, not just same-area membership;
 - retreating/withdrawing formation near enemy contact prefers `Screen`/`Delay`/`Recover`/`Reinforce` over renewed attack;
 - CSA outnumbered-but-coherent formation chooses `Delay`/`Screen` instead of automatic retreat when morale/readiness/support permit;
+- low-ammo formation blocks `Mass`/`Counterstroke` and prefers `Recover`/`Guard`/`Delay`;
+- paper-strength advantage is rejected when readiness, morale, supply, ammo, and fatigue make effective combat power unfavorable;
+- artillery-heavy formation with low artillery ammo is not scored as full offensive power;
 - corps can counterstroke when supported and ratio gates pass;
 - army receives `Mass` for active CIC plan target;
 - CSA early profile favors `Hold`/`Screen`/`Guard` over broad offensive action;
@@ -480,7 +552,7 @@ Pure tests should cover:
 Recommended first implementation plan:
 
 1. Add pure formation directive model and tests.
-2. Add runtime snapshot extraction with `unittyp 14/15/16` classification plus `commanderrange`/`buglerange` support inputs.
+2. Add runtime snapshot extraction with `unittyp 14/15/16` classification plus readiness, morale, ammo, supply, fatigue/condition, weapon/firepower, `commanderrange`, and `buglerange` inputs.
 3. Add `StrategicCoordinator.FormationDirectives[alliance]` weekly refresh and bounded summary logging.
 4. Update #15 army-area steering to include independent top divisions while avoiding attached-division spam.
 5. Update #16 army-group steering to use directive-aware eligibility.
@@ -494,6 +566,7 @@ Recommended first implementation plan:
 - Attached divisions are not independently yanked away from parent corps/armies.
 - Division-level attacks against much larger enemy forces are blocked or down-weighted unless support and ratio gates pass.
 - Support logic accounts for `commanderrange`, `buglerange`, and terrain reachability where vanilla exposes them.
+- Engagement logic accounts for readiness, morale, ammo, supply, fatigue/condition, weapon/firepower, and support timing rather than raw headcount alone.
 - Campaign-map skirmishing is treated as an intentional risk/opportunity of screening, probing, retreating, and pursuit behavior.
 - Outnumbered CSA formations can delay or screen intelligently instead of always retreating, but low-morale or unsupported units still disengage.
 - Corps and armies still use vanilla campaign movement surfaces.
