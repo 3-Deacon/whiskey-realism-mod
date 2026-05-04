@@ -20,6 +20,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategyTag.cs" Link="StrategyTag.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\GrandStrategyProfile.cs" Link="GrandStrategyProfile.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\GrandStrategyRegistry.cs" Link="GrandStrategyRegistry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\GrandStrategyPolicyScorer.cs" Link="GrandStrategyPolicyScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveMetadata.cs" Link="ObjectiveMetadata.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveCatalog.cs" Link="ObjectiveCatalog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveStrategyTagger.cs" Link="ObjectiveStrategyTagger.cs" />

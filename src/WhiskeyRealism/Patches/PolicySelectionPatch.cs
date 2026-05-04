@@ -8,13 +8,13 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Patches
 {
     // Vanilla CheckAIPolicyChange walks the active AI personality policy list.
-    // This Prefix intervenes only when a fiscal policy has a clear score win,
-    // or when the vanilla first-available policy is fiscally suppressed.
+    // This Prefix intervenes only when fiscal or grand-strategy policy scoring
+    // has a clear win, or when the vanilla first-available policy is fiscally suppressed.
     [HarmonyPatch(typeof(Policies), "CheckAIPolicyChange")]
     internal static class PolicySelectionPatch
     {
-        private const float MinimumFiscalScore = 0.75f;
-        private const float FiscalWinMargin = 0.35f;
+        private const float MinimumPolicyScore = 0.75f;
+        private const float PolicyWinMargin = 0.35f;
         private static readonly MethodInfo IsDeactivatedMethod = AccessTools.Method(typeof(Policies), "IsDeactivated", new[] { typeof(Policy) });
 
         [HarmonyPrefix]
@@ -42,12 +42,17 @@ namespace WhiskeyRealism.Patches
                 if (personality.id == GamePrefs.emergencyaipolicycredit || personality.id == GamePrefs.emergencyaipolicyrecruiting) return true;
                 if (state.GetActivatedPolicies(includeactsinresearch: true, includegrandpolicies: false, researchedonly: true) > 0) return true;
 
+                var profile = ResolveProfile(alliance);
                 int firstVanillaPolicy = -1;
                 float firstVanillaScore = 0f;
                 int firstNonSuppressedPolicy = -1;
                 float firstNonSuppressedScore = 0f;
+                float firstNonSuppressedFiscalScore = 0f;
+                float firstNonSuppressedStrategyScore = 0f;
                 int bestPolicy = -1;
-                float bestScore = MinimumFiscalScore;
+                float bestScore = MinimumPolicyScore;
+                float bestFiscalScore = 0f;
+                float bestStrategyScore = 0f;
 
                 for (int i = 0; i < personality.policies.Count; i++)
                 {
@@ -55,7 +60,9 @@ namespace WhiskeyRealism.Patches
                     var policy = Policy.GetPolicyFromID(policyId);
                     if (!IsAvailable(state, policy, alliance)) continue;
 
-                    float score = FiscalPolicyScorer.PolicyWeight(intent, alliance, policyId);
+                    float fiscalScore = FiscalPolicyScorer.PolicyWeight(intent, alliance, policyId);
+                    float strategyScore = GrandStrategyPolicyScorer.PolicyWeight(profile, alliance, policyId);
+                    float score = fiscalScore < 0f ? fiscalScore : fiscalScore + strategyScore;
                     if (firstVanillaPolicy < 0)
                     {
                         firstVanillaPolicy = policyId;
@@ -65,20 +72,27 @@ namespace WhiskeyRealism.Patches
                     {
                         firstNonSuppressedPolicy = policyId;
                         firstNonSuppressedScore = score;
+                        firstNonSuppressedFiscalScore = fiscalScore;
+                        firstNonSuppressedStrategyScore = strategyScore;
                     }
 
                     if (score > bestScore)
                     {
                         bestScore = score;
                         bestPolicy = policyId;
+                        bestFiscalScore = fiscalScore;
+                        bestStrategyScore = strategyScore;
                     }
                 }
 
                 string reason = "fiscal-win";
                 int selectedPolicyId = -1;
                 float selectedScore = 0f;
-                if (bestPolicy >= 0 && bestPolicy != firstVanillaPolicy && bestScore >= firstVanillaScore + FiscalWinMargin)
+                float selectedFiscalScore = bestFiscalScore;
+                float selectedStrategyScore = bestStrategyScore;
+                if (bestPolicy >= 0 && bestPolicy != firstVanillaPolicy && bestScore >= firstVanillaScore + PolicyWinMargin)
                 {
+                    reason = bestStrategyScore > bestFiscalScore ? "strategy-win" : "fiscal-win";
                     selectedPolicyId = bestPolicy;
                     selectedScore = bestScore;
                 }
@@ -99,6 +113,8 @@ namespace WhiskeyRealism.Patches
 
                     selectedPolicyId = firstNonSuppressedPolicy;
                     selectedScore = firstNonSuppressedScore;
+                    selectedFiscalScore = firstNonSuppressedFiscalScore;
+                    selectedStrategyScore = firstNonSuppressedStrategyScore;
                 }
                 else
                 {
@@ -113,7 +129,8 @@ namespace WhiskeyRealism.Patches
                 Plugin.Log.LogInfo(
                     $"[Patch:PolicySelection] alliance={alliance} policy={selectedPolicyId} " +
                     $"posture={intent.Posture} vanilla={firstVanillaPolicy} " +
-                    $"vanillaScore={firstVanillaScore:F2} selectedScore={selectedScore:F2} reason={reason}");
+                    $"vanillaScore={firstVanillaScore:F2} selectedScore={selectedScore:F2} " +
+                    $"fiscalScore={selectedFiscalScore:F2} strategyScore={selectedStrategyScore:F2} reason={reason}");
                 return false;
             }
             catch (Exception ex)
@@ -121,6 +138,22 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning("policy-selection:prefix", "[Patch:PolicySelection] prefix failed: " + ex.Message);
                 return true;
             }
+        }
+
+        private static GrandStrategyProfile ResolveProfile(int alliance)
+        {
+            var coordinator = StrategicCoordinator.Instance;
+            EraStage stage = EraStage.Amateur1861;
+            if (coordinator != null
+                && coordinator.Eras != null
+                && alliance >= 0
+                && alliance < coordinator.Eras.Length
+                && coordinator.Eras[alliance] != null)
+            {
+                stage = coordinator.Eras[alliance].Stage;
+            }
+
+            return GrandStrategyRegistry.Resolve(alliance, stage);
         }
 
         private static bool IsAvailable(GameVars.Alliance state, Policy policy, int alliance)
