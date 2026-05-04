@@ -77,6 +77,9 @@ static class Program
             ("construction ledger keeps credit-defense bank", ConstructionLedgerKeepsCreditDefenseBank),
             ("construction ledger suppresses union arms under credit defense", ConstructionLedgerSuppressesUnionArmsUnderCreditDefense),
             ("construction ledger suppresses late csa arms under credit defense", ConstructionLedgerSuppressesLateCsaArmsUnderCreditDefense),
+            ("construction steering boosts ledger top private candidate", ConstructionSteeringBoostsTopPrivateCandidate),
+            ("construction steering suppresses ledger-suppressed candidate", ConstructionSteeringSuppressesSuppressedCandidate),
+            ("construction steering preserves fiscal multiplier when no intent", ConstructionSteeringPreservesFiscalWhenNoIntent),
             ("fast forward scheduler keeps 5x vanilla only", FastForwardSchedulerKeepsFiveXVanillaOnly),
             ("fast forward scheduler boosts high speeds within cap", FastForwardSchedulerBoostsHighSpeedsWithinCap),
             ("fast forward scheduler disables cleanly", FastForwardSchedulerDisablesCleanly),
@@ -1382,6 +1385,69 @@ static class Program
 
         AssertEqual(ConstructionCandidate.None.Name, output.TopPrivateBuilding.Name);
         AssertEqual(ConstructionSuppressionReason.DiscretionaryIndustryCreditDefense, output.Suppressions[0].Reason);
+    }
+
+    private static void ConstructionSteeringBoostsTopPrivateCandidate()
+    {
+        var output = new ConstructionOutput
+        {
+            Posture = ConstructionPosture.FieldSupply,
+            TopPrivateBuilding = new ConstructionCandidate
+            {
+                Kind = ConstructionCandidateKind.PrivateBuilding,
+                BuildingTypeId = 13,
+                Name = "Market",
+                Score = 1.25f,
+                VanillaValid = true
+            }
+        };
+
+        var decision = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output,
+            buildingTypeId: 13,
+            buildingName: "Market",
+            fiscalMultiplier: 1.1f);
+
+        AssertTrue(decision.Multiplier > 1.5f, "expected strong ledger boost for top private candidate");
+        AssertEqual("ledger-top-private", decision.Reason);
+    }
+
+    private static void ConstructionSteeringSuppressesSuppressedCandidate()
+    {
+        var output = new ConstructionOutput
+        {
+            Posture = ConstructionPosture.EmergencyHold,
+            Suppressions = new[]
+            {
+                new ConstructionSuppression
+                {
+                    Kind = ConstructionCandidateKind.PrivateBuilding,
+                    Name = "Factory",
+                    Reason = ConstructionSuppressionReason.EmergencyCreditFloor
+                }
+            }
+        };
+
+        var decision = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output,
+            buildingTypeId: 5,
+            buildingName: "Factory",
+            fiscalMultiplier: 1.2f);
+
+        AssertEqual(0.1f, decision.Multiplier);
+        AssertEqual("suppressed:EmergencyCreditFloor", decision.Reason);
+    }
+
+    private static void ConstructionSteeringPreservesFiscalWhenNoIntent()
+    {
+        var decision = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output: null,
+            buildingTypeId: 13,
+            buildingName: "Market",
+            fiscalMultiplier: 1.35f);
+
+        AssertEqual(1.35f, decision.Multiplier);
+        AssertEqual("fiscal-only", decision.Reason);
     }
 
     private static void FastForwardSchedulerKeepsFiveXVanillaOnly()
