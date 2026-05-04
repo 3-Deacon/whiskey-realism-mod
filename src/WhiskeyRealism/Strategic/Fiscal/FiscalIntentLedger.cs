@@ -54,7 +54,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
             output.LogisticsExpansion = supplyStress && output.Posture != FiscalPosture.EmergencySolvency;
             output.ForceCapWarning = output.Posture == FiscalPosture.EmergencySolvency
                 || supplyStress
-                || input.ArmyUpkeep + input.NavyUpkeep + input.RecruitmentCost + input.SupplyDepotPurchases > input.AnnualBalance;
+                || ForceCostsThreatenBalance(input);
             output.TheaterSupplyPriority = supplyStress ? (input.TopSupplyTheater != null ? input.TopSupplyTheater : string.Empty) : string.Empty;
 
             FillTargets(input, output, options);
@@ -105,6 +105,16 @@ namespace WhiskeyRealism.Strategic.Fiscal
                 || input.TransportPressure >= options.MinimumSupplyProtection
                 || input.LowSupplyFormationCount > 0
                 || input.LowAmmoFormationCount > 0;
+        }
+
+        private static bool ForceCostsThreatenBalance(FiscalInput input)
+        {
+            float forceCosts = -(input.ArmyUpkeep + input.NavyUpkeep + input.RecruitmentCost + input.SupplyDepotPurchases);
+            if (forceCosts <= 0f) return false;
+
+            float nonForceCapacity = input.AnnualBalance + forceCosts;
+            if (nonForceCapacity <= 0f) return true;
+            return forceCosts > nonForceCapacity * 1.25f;
         }
 
         private static FiscalGate ResolveGate(FiscalInput input, int earliestGate, int bondFloor)

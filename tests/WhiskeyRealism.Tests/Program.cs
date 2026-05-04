@@ -42,6 +42,7 @@ static class Program
             ("fiscal enters emergency before bond floor", FiscalEntersEmergencyBeforeBondFloor),
             ("fiscal protects supply before force growth", FiscalProtectsSupplyBeforeForceGrowth),
             ("fiscal force cap suppresses manpower policies", FiscalForceCapSuppressesManpowerPolicies),
+            ("fiscal force costs suppress manpower policies", FiscalForceCostsSuppressManpowerPolicies),
             ("fiscal hysteresis prevents immediate recovery", FiscalHysteresisPreventsImmediateRecovery),
             ("fiscal emergency residue clears after stable weeks", FiscalEmergencyResidueClearsAfterStableWeeks),
             ("construction scorer favors csa banks in balanced posture", ConstructionScorerFavorsCsaBanks),
@@ -629,6 +630,26 @@ static class Program
         float weight = FiscalPolicyScorer.PolicyWeight(output, 1, 136);
 
         AssertTrue(weight < 0f, "force-cap state should suppress CSA draft escalation");
+    }
+
+    private static void FiscalForceCostsSuppressManpowerPolicies()
+    {
+        var input = BuildFiscalInput();
+        input.CurrentRating = 4;
+        input.SupplyPressure = 0.10f;
+        input.LowSupplyFormationCount = 0;
+        input.LowAmmoFormationCount = 0;
+        input.ArmyUpkeep = -50000000f;
+        input.NavyUpkeep = -5000000f;
+        input.RecruitmentCost = -5000000f;
+        input.SupplyDepotPurchases = 0f;
+        input.AnnualBalance = -30000000f;
+
+        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+        float weight = FiscalPolicyScorer.PolicyWeight(output, 1, 136);
+
+        AssertEqual(true, output.ForceCapWarning);
+        AssertTrue(weight < 0f, "force-cost pressure should suppress CSA draft escalation");
     }
 
     private static void FiscalHysteresisPreventsImmediateRecovery()
