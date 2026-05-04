@@ -14,6 +14,7 @@ namespace WhiskeyRealism.Patches
     {
         [ThreadStatic] private static int _zoneDepth;
         [ThreadStatic] private static int _activeAifaction;
+        private static readonly RecruitmentLogGate _logGate = new RecruitmentLogGate();
 
         [HarmonyPatch(typeof(AICampaign), "ZoneRecruiting")]
         internal static class ZoneRecruitingScope
@@ -92,9 +93,13 @@ namespace WhiskeyRealism.Patches
 
                     int old = __result;
                     __result = decision.StateId;
-                    Plugin.Log.LogInfo(
-                        $"[Patch:Recruitment] alliance={alliance} oldState={old} newState={__result} " +
-                        $"needed={strengthneeded} theater={intent.PreferredTheater} reason={decision.Reason}");
+                    string signature = RecruitmentLogGate.Signature(alliance, old, __result, strengthneeded, intent.PreferredTheater, decision.Reason);
+                    if (_logGate.ShouldLog(signature))
+                    {
+                        Plugin.Log.LogInfo(
+                            $"[Patch:Recruitment] alliance={alliance} oldState={old} newState={__result} " +
+                            $"needed={strengthneeded} theater={intent.PreferredTheater} reason={decision.Reason}");
+                    }
                 }
                 catch (Exception ex)
                 {

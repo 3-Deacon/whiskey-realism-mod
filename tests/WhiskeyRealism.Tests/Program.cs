@@ -28,8 +28,10 @@ static class Program
             ("objective catalog maps known wl objectives", ObjectiveCatalogMapsKnownWlObjectives),
             ("objective catalog keeps unknown ids unresolved", ObjectiveCatalogKeepsUnknownIdsUnresolved),
             ("recruitment intent prefers supported volunteers", RecruitmentIntentPrefersSupportedVolunteers),
+            ("recruitment intent does not leave preferred theater for raw pool", RecruitmentIntentDoesNotLeavePreferredTheaterForRawPool),
             ("recruitment intent keeps vanilla when draft would be forced at parity", RecruitmentIntentKeepsVanillaWhenDraftWouldBeForcedAtParity),
             ("recruitment intent avoids enemy states when excluded", RecruitmentIntentAvoidsEnemyStatesWhenExcluded),
+            ("recruitment log gate suppresses repeated replacements", RecruitmentLogGateSuppressesRepeatedReplacements),
             ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
             ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
             ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
@@ -467,6 +469,47 @@ static class Program
         AssertEqual(15, decision.StateId);
     }
 
+    private static void RecruitmentIntentDoesNotLeavePreferredTheaterForRawPool()
+    {
+        var intent = new RecruitmentIntent
+        {
+            AllianceId = 1,
+            PreferredTheater = Theater.East,
+            StrengthRatio = 0.8f,
+            OwnStateSupportFloor = 0.5f
+        };
+        var candidates = new[]
+        {
+            new RecruitmentStateCandidate
+            {
+                StateId = 38,
+                Theater = Theater.East,
+                Volunteers = 2000,
+                Drafts = 0,
+                Support = 0.9f,
+                IsRecruitable = true,
+                IsEnemyState = false,
+                IsLocalArea = true
+            },
+            new RecruitmentStateCandidate
+            {
+                StateId = 0,
+                Theater = Theater.West,
+                Volunteers = 20000,
+                Drafts = 0,
+                Support = 0.9f,
+                IsRecruitable = true,
+                IsEnemyState = false,
+                IsLocalArea = true
+            }
+        };
+
+        var decision = RecruitmentIntentLedger.SelectState(intent, candidates, vanillaStateId: 38, strengthNeeded: 60, excludeEnemyStates: false);
+
+        AssertEqual(false, decision.ShouldReplace);
+        AssertEqual(38, decision.StateId);
+    }
+
     private static void RecruitmentIntentAvoidsEnemyStatesWhenExcluded()
     {
         var intent = new RecruitmentIntent
@@ -506,6 +549,18 @@ static class Program
 
         AssertEqual(true, decision.ShouldReplace);
         AssertEqual(31, decision.StateId);
+    }
+
+    private static void RecruitmentLogGateSuppressesRepeatedReplacements()
+    {
+        var gate = new RecruitmentLogGate();
+        string first = RecruitmentLogGate.Signature(1, 38, 0, 60, Theater.East, "volunteer-high-support");
+        string repeat = RecruitmentLogGate.Signature(1, 38, 0, 60, Theater.East, "volunteer-high-support");
+        string changed = RecruitmentLogGate.Signature(1, 8, 0, 60, Theater.East, "volunteer-high-support");
+
+        AssertEqual(true, gate.ShouldLog(first));
+        AssertEqual(false, gate.ShouldLog(repeat));
+        AssertEqual(true, gate.ShouldLog(changed));
     }
 
     private static void ProjectScorerReplacesWeakCandidate()

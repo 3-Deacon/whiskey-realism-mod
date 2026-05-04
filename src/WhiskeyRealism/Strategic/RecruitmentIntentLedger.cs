@@ -45,9 +45,13 @@ namespace WhiskeyRealism.Strategic
             float bestScore = float.MinValue;
             bool bestUsesDrafts = false;
 
+            bool requirePreferredTheater = HasEligiblePreferredTheater(intent, candidates, strengthNeeded, excludeEnemyStates);
+
             foreach (var candidate in candidates)
             {
                 if (!IsEligible(intent, candidate, strengthNeeded, excludeEnemyStates, out bool usesDrafts))
+                    continue;
+                if (requirePreferredTheater && candidate.Theater != intent.PreferredTheater)
                     continue;
 
                 float score = Score(intent, candidate, strengthNeeded, usesDrafts);
@@ -79,6 +83,23 @@ namespace WhiskeyRealism.Strategic
                 StateId = best.StateId,
                 Reason = Reason(intent, best, bestUsesDrafts)
             };
+        }
+
+        private static bool HasEligiblePreferredTheater(
+            RecruitmentIntent intent,
+            IEnumerable<RecruitmentStateCandidate> candidates,
+            int strengthNeeded,
+            bool excludeEnemyStates)
+        {
+            if (intent.PreferredTheater == Theater.Unknown) return false;
+            foreach (var candidate in candidates)
+            {
+                if (candidate != null &&
+                    candidate.Theater == intent.PreferredTheater &&
+                    IsEligible(intent, candidate, strengthNeeded, excludeEnemyStates, out _))
+                    return true;
+            }
+            return false;
         }
 
         private static bool IsEligible(
@@ -152,6 +173,22 @@ namespace WhiskeyRealism.Strategic
             if (candidate.Theater == intent.PreferredTheater)
                 return "preferred-theater";
             return !usesDrafts ? "volunteer-high-support" : "draft-needed";
+        }
+    }
+
+    public sealed class RecruitmentLogGate
+    {
+        private readonly HashSet<string> _seen = new HashSet<string>();
+
+        public bool ShouldLog(string signature)
+        {
+            if (string.IsNullOrEmpty(signature)) return false;
+            return _seen.Add(signature);
+        }
+
+        public static string Signature(int alliance, int oldState, int newState, int needed, Theater theater, string reason)
+        {
+            return alliance + ":" + oldState + ":" + newState + ":" + needed + ":" + theater + ":" + reason;
         }
     }
 }
