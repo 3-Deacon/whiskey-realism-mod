@@ -23,7 +23,9 @@ namespace WhiskeyRealism.Strategic.Construction
                     suppressions.Add(new ConstructionSuppression
                     {
                         Kind = candidate.Kind,
-                        BuildingTypeId = candidate.BuildingTypeId,
+                        BuildingTypeId = candidate.Kind == ConstructionCandidateKind.PrivateBuilding
+                            ? candidate.BuildingTypeId
+                            : ConstructionSuppression.MissingBuildingTypeId,
                         Name = CandidateName(candidate),
                         Reason = suppressionReason
                     });

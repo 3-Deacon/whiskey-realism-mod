@@ -82,6 +82,11 @@ static class Program
             ("construction steering preserves fiscal multiplier when no intent", ConstructionSteeringPreservesFiscalWhenNoIntent),
             ("construction steering treats nan top score as neutral floor", ConstructionSteeringTreatsNanTopScoreAsNeutralFloor),
             ("construction steering treats nan fiscal multiplier as neutral", ConstructionSteeringTreatsNanFiscalMultiplierAsNeutral),
+            ("construction steering treats infinite top scores as neutral floor", ConstructionSteeringTreatsInfiniteTopScoresAsNeutralFloor),
+            ("construction steering treats infinite fiscal multipliers as neutral", ConstructionSteeringTreatsInfiniteFiscalMultipliersAsNeutral),
+            ("construction steering suppresses id-zero bank by type", ConstructionSteeringSuppressesIdZeroBankByType),
+            ("construction steering ignores same-name id-zero suppression for different type", ConstructionSteeringIgnoresSameNameIdZeroSuppressionForDifferentType),
+            ("construction steering uses missing suppression id name fallback", ConstructionSteeringUsesMissingSuppressionIdNameFallback),
             ("construction steering ignores same-name suppression with different type", ConstructionSteeringIgnoresSameNameSuppressionWithDifferentType),
             ("construction steering leaves non-top field-supply bank fiscal-only", ConstructionSteeringLeavesNonTopFieldSupplyBankFiscalOnly),
             ("fast forward scheduler keeps 5x vanilla only", FastForwardSchedulerKeepsFiveXVanillaOnly),
@@ -1492,6 +1497,140 @@ static class Program
         AssertEqual("fiscal-only", decision.Reason);
     }
 
+    private static void ConstructionSteeringTreatsInfiniteTopScoresAsNeutralFloor()
+    {
+        var output = new ConstructionOutput
+        {
+            Posture = ConstructionPosture.FieldSupply,
+            TopPrivateBuilding = new ConstructionCandidate
+            {
+                Kind = ConstructionCandidateKind.PrivateBuilding,
+                BuildingTypeId = 13,
+                Name = "Market",
+                VanillaValid = true
+            }
+        };
+
+        output.TopPrivateBuilding.Score = float.PositiveInfinity;
+        var positive = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output,
+            buildingTypeId: 13,
+            buildingName: "Market",
+            fiscalMultiplier: 1.1f);
+
+        output.TopPrivateBuilding.Score = float.NegativeInfinity;
+        var negative = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output,
+            buildingTypeId: 13,
+            buildingName: "Market",
+            fiscalMultiplier: 1.1f);
+
+        AssertEqual(1.375f, positive.Multiplier);
+        AssertEqual("ledger-top-private", positive.Reason);
+        AssertEqual(1.375f, negative.Multiplier);
+        AssertEqual("ledger-top-private", negative.Reason);
+    }
+
+    private static void ConstructionSteeringTreatsInfiniteFiscalMultipliersAsNeutral()
+    {
+        var positive = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output: null,
+            buildingTypeId: 13,
+            buildingName: "Market",
+            fiscalMultiplier: float.PositiveInfinity);
+        var negative = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output: null,
+            buildingTypeId: 13,
+            buildingName: "Market",
+            fiscalMultiplier: float.NegativeInfinity);
+
+        AssertEqual(1f, positive.Multiplier);
+        AssertEqual("fiscal-only", positive.Reason);
+        AssertEqual(1f, negative.Multiplier);
+        AssertEqual("fiscal-only", negative.Reason);
+    }
+
+    private static void ConstructionSteeringSuppressesIdZeroBankByType()
+    {
+        var output = new ConstructionOutput
+        {
+            Posture = ConstructionPosture.Infrastructure,
+            Suppressions = new[]
+            {
+                new ConstructionSuppression
+                {
+                    Kind = ConstructionCandidateKind.PrivateBuilding,
+                    BuildingTypeId = 0,
+                    Name = "Bank",
+                    Reason = ConstructionSuppressionReason.EmergencyCreditFloor
+                }
+            }
+        };
+
+        var decision = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output,
+            buildingTypeId: 0,
+            buildingName: "Bank",
+            fiscalMultiplier: 1.5f);
+
+        AssertEqual(0.1f, decision.Multiplier);
+        AssertEqual("suppressed:EmergencyCreditFloor", decision.Reason);
+    }
+
+    private static void ConstructionSteeringIgnoresSameNameIdZeroSuppressionForDifferentType()
+    {
+        var output = new ConstructionOutput
+        {
+            Posture = ConstructionPosture.Infrastructure,
+            Suppressions = new[]
+            {
+                new ConstructionSuppression
+                {
+                    Kind = ConstructionCandidateKind.PrivateBuilding,
+                    BuildingTypeId = 0,
+                    Name = "Bank",
+                    Reason = ConstructionSuppressionReason.EmergencyCreditFloor
+                }
+            }
+        };
+
+        var decision = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output,
+            buildingTypeId: 1,
+            buildingName: "Bank",
+            fiscalMultiplier: 1.2f);
+
+        AssertEqual(1.2f, decision.Multiplier);
+        AssertEqual("fiscal-ledger-neutral", decision.Reason);
+    }
+
+    private static void ConstructionSteeringUsesMissingSuppressionIdNameFallback()
+    {
+        var output = new ConstructionOutput
+        {
+            Posture = ConstructionPosture.Infrastructure,
+            Suppressions = new[]
+            {
+                new ConstructionSuppression
+                {
+                    Kind = ConstructionCandidateKind.PrivateBuilding,
+                    BuildingTypeId = ConstructionSuppression.MissingBuildingTypeId,
+                    Name = "Factory",
+                    Reason = ConstructionSuppressionReason.EmergencyCreditFloor
+                }
+            }
+        };
+
+        var decision = ConstructionSteeringScorer.DecidePrivateMultiplier(
+            output,
+            buildingTypeId: 5,
+            buildingName: "Factory",
+            fiscalMultiplier: 1.2f);
+
+        AssertEqual(0.1f, decision.Multiplier);
+        AssertEqual("suppressed:EmergencyCreditFloor", decision.Reason);
+    }
+
     private static void ConstructionSteeringIgnoresSameNameSuppressionWithDifferentType()
     {
         var output = new ConstructionOutput
@@ -1528,7 +1667,7 @@ static class Program
 
         var decision = ConstructionSteeringScorer.DecidePrivateMultiplier(
             output,
-            buildingTypeId: 2,
+            buildingTypeId: 0,
             buildingName: "State Bank",
             fiscalMultiplier: 1.35f);
 

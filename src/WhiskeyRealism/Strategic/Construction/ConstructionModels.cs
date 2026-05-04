@@ -96,6 +96,8 @@ namespace WhiskeyRealism.Strategic.Construction
 
     public struct ConstructionSuppression
     {
+        public const int MissingBuildingTypeId = -1;
+
         public ConstructionCandidateKind Kind;
         public int BuildingTypeId;
         public string Name;

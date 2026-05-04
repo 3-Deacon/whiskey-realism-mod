@@ -52,10 +52,11 @@ namespace WhiskeyRealism.Strategic.Construction
                 if (suppression.Kind != ConstructionCandidateKind.PrivateBuilding)
                     continue;
 
-                if (suppression.BuildingTypeId != 0 && suppression.BuildingTypeId == buildingTypeId)
+                if (suppression.BuildingTypeId >= 0 && suppression.BuildingTypeId == buildingTypeId)
                     return suppression.Reason;
 
-                if (suppression.BuildingTypeId == 0 && Normalize(suppression.Name) == wanted)
+                if (suppression.BuildingTypeId == ConstructionSuppression.MissingBuildingTypeId &&
+                    Normalize(suppression.Name) == wanted)
                     return suppression.Reason;
             }
             return null;
