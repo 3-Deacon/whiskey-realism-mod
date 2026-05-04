@@ -89,6 +89,9 @@ static class Program
             ("construction steering uses missing suppression id name fallback", ConstructionSteeringUsesMissingSuppressionIdNameFallback),
             ("construction steering ignores same-name suppression with different type", ConstructionSteeringIgnoresSameNameSuppressionWithDifferentType),
             ("construction steering leaves non-top field-supply bank fiscal-only", ConstructionSteeringLeavesNonTopFieldSupplyBankFiscalOnly),
+            ("telegraph intent rejects disconnected candidates", TelegraphIntentRejectsDisconnectedCandidates),
+            ("telegraph intent favors active command corridor", TelegraphIntentFavorsActiveCommandCorridor),
+            ("telegraph intent suppresses emergency noncritical build", TelegraphIntentSuppressesEmergencyNoncriticalBuild),
             ("fast forward scheduler keeps 5x vanilla only", FastForwardSchedulerKeepsFiveXVanillaOnly),
             ("fast forward scheduler boosts high speeds within cap", FastForwardSchedulerBoostsHighSpeedsWithinCap),
             ("fast forward scheduler disables cleanly", FastForwardSchedulerDisablesCleanly),
@@ -1673,6 +1676,59 @@ static class Program
 
         AssertEqual(1.35f, decision.Multiplier);
         AssertEqual("fiscal-ledger-neutral", decision.Reason);
+    }
+
+    private static void TelegraphIntentRejectsDisconnectedCandidates()
+    {
+        var candidate = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = false,
+            SupportingUnitEligible = true,
+            SupportsActiveCommandCorridor = true,
+            SafeRear = true
+        };
+
+        var decision = TelegraphIntentScorer.Score(candidate, ConstructionPosture.FieldSupply);
+
+        AssertEqual(false, decision.ShouldBuild);
+        AssertEqual("not-connected", decision.Reason);
+    }
+
+    private static void TelegraphIntentFavorsActiveCommandCorridor()
+    {
+        var candidate = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = true,
+            SupportingUnitEligible = true,
+            SupportsActiveCommandCorridor = true,
+            SafeRear = true,
+            CommandDelayPressure = 0.8f,
+            FormationImportance = 0.7f
+        };
+
+        var decision = TelegraphIntentScorer.Score(candidate, ConstructionPosture.FieldSupply);
+
+        AssertEqual(true, decision.ShouldBuild);
+        AssertTrue(decision.Score > 1.0f, "expected active telegraph command corridor score above build threshold");
+        AssertEqual("active-command-corridor", decision.Reason);
+    }
+
+    private static void TelegraphIntentSuppressesEmergencyNoncriticalBuild()
+    {
+        var candidate = new TelegraphCandidateFacts
+        {
+            ConnectedToCapitalOrChain = true,
+            SupportingUnitEligible = true,
+            SupportsActiveCommandCorridor = false,
+            SafeRear = true,
+            CommandDelayPressure = 0.4f,
+            FormationImportance = 0.2f
+        };
+
+        var decision = TelegraphIntentScorer.Score(candidate, ConstructionPosture.EmergencyHold);
+
+        AssertEqual(false, decision.ShouldBuild);
+        AssertEqual("emergency-noncritical", decision.Reason);
     }
 
     private static void FastForwardSchedulerKeepsFiveXVanillaOnly()
