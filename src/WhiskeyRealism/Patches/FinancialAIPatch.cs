@@ -61,6 +61,7 @@ namespace WhiskeyRealism.Patches
             else
                 return 0;
 
+            if (NearlyEqual(old, tax[lane])) return 0;
             Plugin.Log.LogInfo($"[Patch:FinancialAI] alliance={alliance} taxLane={lane} old={old:F2} new={tax[lane]:F2} posture={intent.Posture}");
             return 1;
         }
@@ -89,8 +90,14 @@ namespace WhiskeyRealism.Patches
             else
                 return 0;
 
+            if (NearlyEqual(old, subsidies[lane])) return 0;
             Plugin.Log.LogInfo($"[Patch:FinancialAI] alliance={alliance} subsidyLane={lane} old={old:F2} new={subsidies[lane]:F2} posture={intent.Posture}");
             return 1;
+        }
+
+        private static bool NearlyEqual(float left, float right)
+        {
+            return Math.Abs(left - right) < 0.0001f;
         }
     }
 }
