@@ -93,6 +93,13 @@ namespace WhiskeyRealism.Strategic
 
                 var assignment = ledger.GetAssignment(UnitKey(unit));
                 if (assignment == null || !assignment.OutOfArea) continue;
+                if (!FormationDirectiveRuntime.ShouldAllowAreaMovement(allianceId, UnitKey(unit)))
+                {
+                    OnceLog.Info(
+                        $"army-area:{allianceId}:{UnitKey(unit)}:directive-block",
+                        $"[Patch:ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=skip-return-area reason=formation-directive");
+                    continue;
+                }
                 if (!TryGetAnchor(assignment.AssignedAreaKey, out var anchor)) continue;
 
                 SetTheaterPosition(unit, anchor);
@@ -130,7 +137,14 @@ namespace WhiskeyRealism.Strategic
             {
                 int unitType = Convert.ToInt32(AccessTools.Field(unit.GetType(), "unittyp")?.GetValue(unit) ?? -1);
                 bool top = Convert.ToBoolean(AccessTools.Field(unit.GetType(), "istopunit")?.GetValue(unit) ?? false);
-                return top && unitType >= 15 && unitType <= 16;
+                object garrison = AccessTools.Field(unit.GetType(), "garrisonreference")?.GetValue(unit);
+                float strength = ReadFloat(0f, unit, "groupstrengthdirect");
+                if (strength <= 0f) strength = ReadFloat(0f, unit, "groupstrengthactive");
+                return unitType >= 14 &&
+                       unitType <= 16 &&
+                       top &&
+                       garrison == null &&
+                       strength > 1000f;
             }
             catch { return false; }
         }

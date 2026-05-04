@@ -16,6 +16,7 @@ static class Program
             ("historical registry maps Union Tennessee army to Mississippi river corridor", HistoricalRegistryMapsUnionArmyOfTheTennessee),
             ("army area ledger holds historical area", ArmyAreaLedgerHoldsHistoricalArea),
             ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy),
+            ("army area ledger can redirect independent division input", ArmyAreaLedgerCanRedirectIndependentDivisionInput),
             ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
             ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
@@ -186,6 +187,27 @@ static class Program
         var assignment = ledger.GetAssignment("aot");
         AssertEqual("TennesseeGeorgiaCorridor", assignment.AssignedAreaKey);
         AssertEqual(ArmyAreaBehavior.Recover, assignment.Behavior);
+        AssertEqual(true, assignment.OutOfArea);
+    }
+
+    private static void ArmyAreaLedgerCanRedirectIndependentDivisionInput()
+    {
+        var ledger = ArmyAreaLedger.Build(new[]
+        {
+            new ArmyAreaInput
+            {
+                UnitKey = "division",
+                AllianceId = 1,
+                UnitName = "Army of Northern Virginia",
+                CommanderName = "Lee",
+                CurrentAreaKey = "TennesseeGeorgiaCorridor",
+                Strength = 5000f,
+                Readiness = 0.75f
+            }
+        }, planTargetAreaKey: null);
+
+        var assignment = ledger.GetAssignment("division");
+        AssertEqual("VirginiaCapitalCorridor", assignment.AssignedAreaKey);
         AssertEqual(true, assignment.OutOfArea);
     }
 
