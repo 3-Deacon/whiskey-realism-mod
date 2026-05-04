@@ -6,11 +6,11 @@ In W&L the player starts at the bottom — commanding an artillery section, regi
 
 ## Status
 
-**v0.2.1.1 released. v0.2.2 enrichment is implemented on `main`, deployed, and in-game smoke-confirmed through the latest startup/lag fixes; release packaging is the remaining step.**
+**v0.2.2 released. Main is built, deployed, and in-game smoke-confirmed through the latest startup/lag fixes.**
 
 The mod replaces vanilla's random-objective AI with a personality-driven phased-plan strategic engine for both Confederate and Union AI. Released v0.2.1.1 ships 9 active Harmony patches + sidecar JSON persistence. Main-branch v0.2.2 adds battle-history observers, transfer/front-budget steering, capital-defense steering, fiscal economy/construction intent, recruitment state steering, policy/naval grand-strategy timing, default-on fast-forward AI catch-up, weekly CIC strategic review, grand-strategy objective/project steering, historical army operating areas, historical army-group steering using vanilla `ArmyGroup` APIs, and a formation-directive ledger for independent divisions/corps/armies. 25 hand-coded historical-officer personalities, 12 canonical succession events with concrete `AssignCommando` swaps, 4-stage era progression, two-tier CIC + theater-commander hierarchy, player-CIC noninterference gate, startup heartbeat with deferred operational ledgers, W&L command-selection prompt retry, and town/battle war-state observers are in place. Locks the campaign-create menu's Aggressiveness / Historic / Difficulty settings + 5 realism checkboxes to coherent values, with hot-path reflection caching to avoid startup/menu lag.
 
-Latest release: [v0.2.1.1](https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.1.1) — drop the attached `WhiskeyRealism.dll` into your `<GTCW>/BepInEx/plugins/` folder. Requires BepInEx 5.4.x x64 UnityMono.
+Latest release: [v0.2.2](https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.2) — drop the attached `WhiskeyRealism.dll` into your `<GTCW>/BepInEx/plugins/` folder. Requires BepInEx 5.4.x x64 UnityMono.
 
 ## Goals
 
