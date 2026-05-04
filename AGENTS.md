@@ -14,6 +14,7 @@
 > - **Required for every DLL-affecting change:** build, deploy, then verify the deployed DLL matches `dist/WhiskeyRealism.dll` by timestamp/size and `sha256sum`. Do not report an implementation as ready from build output alone.
 > - **Source-of-truth order:** shipped code > [`docs/patch-catalog.md`](docs/patch-catalog.md) > per-patch design doc > umbrella spec > archived plan
 > - **Master handoff:** [`docs/handoff.md`](docs/handoff.md) — read first at session start
+> - **Repository memory:** [`MEMORY.md`](MEMORY.md) — short durable state/index; read after `AGENTS.md` when resuming or updating project context
 > - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
 > - **Parallel sessions are normal.** Another agent may be working concurrently — run `git log --oneline -10` and `git status` before committing to detect parallel work.
 
@@ -87,6 +88,7 @@ Smoke-test paths:
 ```
 whiskey-realism-mod/
 ├── AGENTS.md                       ← this file
+├── MEMORY.md                       ← durable repo memory index (not a substitute for docs/handoff.md)
 ├── CLAUDE.md                       ← symlink to AGENTS.md
 ├── README.md                       ← user-facing
 ├── LICENSE                         ← MIT
