@@ -248,7 +248,8 @@ namespace WhiskeyRealism.Strategic
             {
                 _fiscalMemory[alliance].StableWeeksAboveEmergency = 0;
             }
-            else if (_fiscalMemory[alliance].EmergencyResidue && emergencyRecoveryStable)
+            else if ((_fiscalMemory[alliance].EmergencyResidue ||
+                _fiscalMemory[alliance].PreviousPosture == FiscalPosture.CreditDefense) && emergencyRecoveryStable)
             {
                 _fiscalMemory[alliance].StableWeeksAboveEmergency++;
             }

@@ -36,9 +36,8 @@ namespace WhiskeyRealism.Strategic.Fiscal
             }
             else if (creditDefense || input.Memory.PreviousPosture == FiscalPosture.CreditDefense || input.Memory.EmergencyResidue)
             {
-                bool residueCleared = !input.Memory.EmergencyResidue
-                    || input.Memory.StableWeeksAboveEmergency >= options.EmergencyExitWeeks;
-                bool clearlyRecovered = IsEmergencyRecoveryStable(input, options, earliestGate) && residueCleared;
+                bool stableExit = input.Memory.StableWeeksAboveEmergency >= options.EmergencyExitWeeks;
+                bool clearlyRecovered = IsEmergencyRecoveryStable(input, options, earliestGate) && stableExit;
                 output.Posture = clearlyRecovered ? FiscalPosture.BalancedWar : FiscalPosture.CreditDefense;
             }
             else if (input.AnnualBalance > 1000000f && input.CurrentRating <= earliestGate - 3 && !supplyStress)
