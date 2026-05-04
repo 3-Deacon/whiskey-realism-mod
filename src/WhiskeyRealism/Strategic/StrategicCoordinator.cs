@@ -292,6 +292,9 @@ namespace WhiskeyRealism.Strategic
                         $"[ConstructionTelemetry] alliance={alliance} posture={output.Posture} " +
                         $"{telemetry.Summary(alliance)}");
                 }
+
+                if (ConfigValue(plugin.EnableTelegraphAI))
+                    TelegraphConstructionRuntime.TryStartTelegraph(alliance, output);
             }
             catch (Exception ex)
             {
