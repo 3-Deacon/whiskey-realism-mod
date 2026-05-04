@@ -16,10 +16,22 @@ namespace WhiskeyRealism.Strategic
         public OperationalPlan ActivePlan;
 
         public PersonalityVector Effective(EraStageManager era)
-            => PersonalityVector.Compose(
-                   OfficerPersonality,
-                   era.StageVector,
-                   FactionProfiles.For(AllianceId));
+        {
+            var composed = PersonalityVector.Compose(
+                OfficerPersonality,
+                era.StageVector,
+                FactionProfiles.For(AllianceId));
+
+            bool overrideSettings = Plugin.Instance?.OverrideVanillaSettings?.Value ?? false;
+            int lockedDifficulty = Plugin.Instance?.LockedDifficulty?.Value
+                ?? DifficultyPersonalityModifier.HistoricalHardDifficultyIndex;
+
+            return PersonalityVector.Add(
+                composed,
+                DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
+                    overrideSettings,
+                    lockedDifficulty));
+        }
 
         public bool ReviewPlan(int currentMonth, int currentYear)
         {

@@ -66,7 +66,8 @@ static class Program
             ("fast forward scheduler boosts high speeds within cap", FastForwardSchedulerBoostsHighSpeedsWithinCap),
             ("fast forward scheduler disables cleanly", FastForwardSchedulerDisablesCleanly),
             ("fast forward scheduler stops when frame budget is spent", FastForwardSchedulerStopsWhenFrameBudgetIsSpent),
-            ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples)
+            ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples),
+            ("historical hard difficulty adds casualty tolerance only", HistoricalHardDifficultyAddsCasualtyToleranceOnly)
         };
 
         foreach (var test in tests)
@@ -140,6 +141,34 @@ static class Program
     {
         var ledger = BuildLedger();
         AssertEqual(FrontPosture.Hold, ledger.GetSector("Richmond").Posture);
+    }
+
+    private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
+    {
+        var hard = DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
+            overrideVanillaSettings: true,
+            lockedDifficultyIndex: 3);
+
+        AssertEqual(0f, hard.Aggression);
+        AssertEqual(0f, hard.Caution);
+        AssertEqual(0f, hard.Audacity);
+        AssertEqual(0.10f, hard.CasualtyTolerance);
+        AssertEqual(0f, hard.PoliticalResponsiveness);
+
+        var disabled = DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
+            overrideVanillaSettings: false,
+            lockedDifficultyIndex: 3);
+        AssertEqual(0f, disabled.CasualtyTolerance);
+
+        var veryHard = DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
+            overrideVanillaSettings: true,
+            lockedDifficultyIndex: 4);
+        AssertEqual(0f, veryHard.CasualtyTolerance);
+
+        var outOfRange = DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
+            overrideVanillaSettings: true,
+            lockedDifficultyIndex: 99);
+        AssertEqual(0f, outOfRange.CasualtyTolerance);
     }
 
     private static void NoncriticalUnderstrengthSectorEconomyOfForce()
