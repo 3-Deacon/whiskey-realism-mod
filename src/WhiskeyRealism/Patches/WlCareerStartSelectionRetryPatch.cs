@@ -16,11 +16,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "Update")]
     internal static class WlCareerStartSelectionRetryPatch
     {
-        private const int FirstRetryFrame = 55;
-        private const int RetryEveryFrames = 15;
+        private const int FirstRetryFrame = 50;
+        private const int RetryEveryUnityFrames = 15;
         private const int MaxAttempts = 40;
 
-        private static int _lastAttemptFrame = -1;
+        private static int _lastAttemptUnityFrame = -1;
         private static int _attempts;
         private static object _careerPanel;
         private static FieldInfo _gameFrameField;
@@ -36,14 +36,15 @@ namespace WhiskeyRealism.Patches
                 if (!StrategicCoordinator.WlCareerStartPending())
                 {
                     _attempts = 0;
-                    _lastAttemptFrame = -1;
+                    _lastAttemptUnityFrame = -1;
                     return;
                 }
 
                 int frame = ReadFrame();
                 if (frame < FirstRetryFrame) return;
                 if (_attempts >= MaxAttempts) return;
-                if (_lastAttemptFrame >= 0 && frame - _lastAttemptFrame < RetryEveryFrames) return;
+                int unityFrame = Time.frameCount;
+                if (_lastAttemptUnityFrame >= 0 && unityFrame - _lastAttemptUnityFrame < RetryEveryUnityFrames) return;
 
                 var panel = ResolveCareerPanel();
                 if (panel == null)
@@ -53,13 +54,20 @@ namespace WhiskeyRealism.Patches
                 }
 
                 if (UnitSelectionListVisible(panel)) return;
+                if (_showStartUnitSelectionListMethod == null)
+                {
+                    OnceLog.Warning("wl-start-selection:no-method", "[W&LStartSelection] retry skipped: ShowStartUnitSelectionList method unavailable");
+                    return;
+                }
 
-                _lastAttemptFrame = frame;
+                _lastAttemptUnityFrame = unityFrame;
                 _attempts++;
-                _showStartUnitSelectionListMethod?.Invoke(panel, new object[] { true });
+                _showStartUnitSelectionListMethod.Invoke(panel, new object[] { true });
 
                 if (_attempts == 1 || Plugin.Instance.VerboseLogging.Value)
-                    Plugin.Log.LogInfo($"[W&LStartSelection] retried command-selection popup frame={frame} attempt={_attempts}");
+                    Plugin.Log.LogInfo($"[W&LStartSelection] retried command-selection popup gameFrame={frame} unityFrame={unityFrame} attempt={_attempts} {DescribeWlStatus()}");
+                if (_attempts >= MaxAttempts && !UnitSelectionListVisible(panel))
+                    OnceLog.Warning("wl-start-selection:max-attempts", $"[W&LStartSelection] command-selection popup still hidden after {_attempts} retries; {DescribeWlStatus()}");
             }
             catch (Exception ex)
             {
@@ -98,6 +106,29 @@ namespace WhiskeyRealism.Patches
         {
             var listObject = _unitSelectionListObjectField?.GetValue(panel) as GameObject;
             return listObject != null && listObject.activeInHierarchy;
+        }
+
+        private static string DescribeWlStatus()
+        {
+            try
+            {
+                var dlcType = AccessTools.TypeByName("DLC_WL");
+                var gv = AccessTools.TypeByName("GameVars");
+                bool active = Convert.ToBoolean(AccessTools.Field(dlcType, "dlc_scenarioactive")?.GetValue(null) ?? false);
+                int chosen = Convert.ToInt32(AccessTools.Field(dlcType, "dlc_chosencommander")?.GetValue(null) ?? -1);
+                var commanders = AccessTools.Field(gv, "commander")?.GetValue(null) as IList;
+                bool hasCommand = false;
+                if (commanders != null && chosen >= 0 && chosen < commanders.Count)
+                {
+                    var commander = commanders[chosen];
+                    hasCommand = commander != null && AccessTools.Field(commander.GetType(), "currentcommand")?.GetValue(commander) != null;
+                }
+                return $"active={active} chosen={chosen} commanders={commanders?.Count ?? -1} hasCommand={hasCommand}";
+            }
+            catch
+            {
+                return "status=unavailable";
+            }
         }
     }
 }
