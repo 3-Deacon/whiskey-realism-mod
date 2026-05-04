@@ -150,6 +150,7 @@ Patches remain read-only with respect to strategic mod state. `StrategicCoordina
 
 - `Hold`: remain in assigned area/sector; favor defense; do not donate below minimum budget.
 - `Screen`: cover a front or approach; avoid decisive engagement against superior force.
+- `Delay`: trade space for time through controlled withdrawal, rearguard action, and supported skirmishing without seeking decisive battle.
 - `Guard`: protect rail, town, port, supply depot, crossing, capital approach, or objective anchor.
 - `Probe`: limited forward movement only when enemy strength is low/unknown and support is close.
 - `Reserve`: stay behind the front, available for transfer/counterstroke.
@@ -170,6 +171,7 @@ Independent top-level divisions are local actors, not miniature armies. They may
 
 - `Hold`
 - `Screen`
+- `Delay`
 - `Guard`
 - `Probe`
 - `Reserve`
@@ -193,6 +195,7 @@ Corps are the primary operational maneuver layer. They may receive:
 
 - `Hold`
 - `Screen`
+- `Delay`
 - `Reserve`
 - `Reinforce`
 - `Counterstroke`
@@ -244,15 +247,41 @@ Required inputs:
 
 Default safety behavior:
 
-- Division vs enemy army: block attack; choose `Screen`, `Guard`, `Reinforce`, or `Recover`.
+- Division vs enemy army: block attack; choose `Screen`, `Delay`, `Guard`, `Reinforce`, or `Recover`.
 - Division vs enemy corps: allow only with support and favorable ratio.
 - Corps vs enemy army: allow only as part of aggregated theater force or defensive counterstroke.
 - Army vs enemy army: allow if plan/sector/ratio/commander gates pass.
 - Any low-morale or low-readiness formation: prefer `Recover`, `Hold`, or `Guard`.
 - Any sector below minimum hold budget: block donation/attack unless sector is explicitly `Concede`.
-- Retreating/withdrawing formations near enemy contact: prefer `Screen`, `Recover`, or `Reinforce` logic that respects vanilla campaign skirmishing risk instead of repeatedly ordering the unit back into decisive contact.
+- Retreating/withdrawing formations near enemy contact: prefer `Screen`, `Delay`, `Recover`, or `Reinforce` logic that respects vanilla campaign skirmishing risk instead of repeatedly ordering the unit back into decisive contact.
 
 The risk model should be intentionally conservative first. It is better to under-steer and let vanilla act than to create suicidal deterministic behavior.
+
+## Campaign skirmishing mechanics
+
+`Autocalc.StartSkirmishing` is a narrow campaign-map attrition engine for withdrawal and pursuit. It is not a generic battle substitute.
+
+Start conditions verified in `Regiment.CheckEnemyContactCampaign`:
+
+- the withdrawing/retreating unit has an active path (`regimentpaths > 0`);
+- the unit is land, not fleet, not garrisoned, and not already in a disqualifying battle state;
+- a non-retreating enemy land unit is within `enemy.buglerange * GamePrefs.rangefactorskirmishing`;
+- the enemy has no existing `skirmishingcalculationengine`;
+- vanilla attaches an `Autocalc` component to the enemy unit and calls `StartSkirmishing(enemy, withdrawingUnit)`.
+
+Cycle behavior verified in `Autocalc.UpdateSkirmishing`:
+
+- it runs on `GamePrefs.cycleupdateforautocalcs`;
+- the withdrawing side suffers casualties, morale hits, and supply loss against randomly selected infantry/cavalry/artillery sub-units;
+- withdrawing-side casualties scale with elapsed time, sub-unit strength, `GamePrefs.withdrawal_skirmishingcasualties`, readiness weighting, whether the top unit is in withdrawal, commander cunning, and low morale (`1 - morale`);
+- the pursuing side can also suffer casualties and morale loss, especially when its selected sub-units have low morale;
+- pursuing-side losses are affected by defender guard efficiency and pursuer `groupraidingefficiency`;
+- the skirmish ends when range breaks beyond `buglerange * rangefactorskirmishing`, when neither top unit remains in retreat, or when no suitable sub-units remain;
+- active skirmishing consumes readiness through `GamePrefs.readinessconsumptionskirmishing`.
+
+Design consequence:
+
+Outnumbered does not mean "always retreat." For the CSA especially, the correct behavior is often `Delay` or `Screen`: keep a force in being, make the stronger Union formation spend time/readiness, use high-cunning/high-morale commanders and cavalry-capable formations for controlled contact, and fall back before the skirmish becomes destructive. A low-morale or exhausted unit should disengage; a fresh, supported, historically defensive formation can deliberately delay.
 
 ## Historical weighting matrix
 
@@ -330,6 +359,7 @@ This is intentionally narrower than vanilla's raw `istopunit` army-group eligibi
 Directive effects:
 
 - `Hold`, `Guard`, `Screen`: raise defensive eligibility and lower response threshold.
+- `Delay`: allow defensive movement or controlled withdrawal when direct battle risk is bad but abandoning the sector would be worse.
 - `Reserve`, `Reinforce`: allow commitment if destination risk is higher than source risk.
 - `Recover`: block unless capital/critical objective is threatened.
 - `Concede`: do not spend scarce units defending the sector unless extraction is impossible.
@@ -349,6 +379,7 @@ Future patch should avoid replacing vanilla offensive logic. Preferred shape is 
 Campaign-map skirmishing is a vanilla system, not a tactical-battle placeholder. Directives should use it indirectly:
 
 - `Screen` and `Guard` can allow controlled contact near friendly support, rail, towns, forts, or river/crossing anchors.
+- `Delay` can accept limited skirmish attrition when it preserves a critical sector, buys time for reinforcement, or forces a stronger enemy to spend readiness.
 - `Recover` should avoid repeated retreat/skirmish loops by not reissuing aggressive movement to low-morale withdrawing units.
 - `Probe` should be limited to cases where the formation can disengage or be supported; otherwise it risks becoming an accidental skirmish or battle.
 - `Counterstroke` should consider whether the target is already withdrawing; chasing can create skirmish attrition, which may be desirable for cavalry/strong commanders but bad for exhausted infantry.
@@ -426,7 +457,8 @@ Pure tests should cover:
 - attached division inherits parent posture and is not directly moved by army-area steering;
 - division refuses attack against enemy army without support;
 - division support uses command-range/proximity inputs, not just same-area membership;
-- retreating/withdrawing formation near enemy contact prefers `Screen`/`Recover`/`Reinforce` over renewed attack;
+- retreating/withdrawing formation near enemy contact prefers `Screen`/`Delay`/`Recover`/`Reinforce` over renewed attack;
+- CSA outnumbered-but-coherent formation chooses `Delay`/`Screen` instead of automatic retreat when morale/readiness/support permit;
 - corps can counterstroke when supported and ratio gates pass;
 - army receives `Mass` for active CIC plan target;
 - CSA early profile favors `Hold`/`Screen`/`Guard` over broad offensive action;
@@ -463,6 +495,7 @@ Recommended first implementation plan:
 - Division-level attacks against much larger enemy forces are blocked or down-weighted unless support and ratio gates pass.
 - Support logic accounts for `commanderrange`, `buglerange`, and terrain reachability where vanilla exposes them.
 - Campaign-map skirmishing is treated as an intentional risk/opportunity of screening, probing, retreating, and pursuit behavior.
+- Outnumbered CSA formations can delay or screen intelligently instead of always retreating, but low-morale or unsupported units still disengage.
 - Corps and armies still use vanilla campaign movement surfaces.
 - CSA early behavior reads as defensive, screening, and force-preserving unless a favorable opportunity appears.
 - Union later-war behavior reads as coordinated pressure rather than isolated local attacks.
