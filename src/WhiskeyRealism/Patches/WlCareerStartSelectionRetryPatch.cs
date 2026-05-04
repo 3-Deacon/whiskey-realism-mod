@@ -26,6 +26,8 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _controllerCareerPanelField;
         private static FieldInfo _gameFrameField;
         private static FieldInfo _unitSelectionListObjectField;
+        private static FieldInfo _unitSelectionListContentObjectField;
+        private static FieldInfo _unitLineAppointCommandField;
         private static MethodInfo _showStartUnitSelectionListMethod;
 
         [HarmonyPostfix]
@@ -56,9 +58,12 @@ namespace WhiskeyRealism.Patches
                 }
 
                 CachePanelMembers(panel.GetType());
-                if (UnitSelectionListVisible(panel))
+                bool listVisible = UnitSelectionListVisible(panel);
+                int lineCount = UnitSelectionLineCount(panel);
+                bool listUsable = listVisible && lineCount > 0;
+                if (listUsable)
                 {
-                    OnceLog.Info("wl-start-selection:visible-pending", $"[W&LStartSelection] command-selection list is visible; waiting for player command source={source} gameFrame={frame} unityFrame={unityFrame} {DescribeWlStatus()}");
+                    OnceLog.Info("wl-start-selection:visible-pending", $"[W&LStartSelection] command-selection list is usable; waiting for player command source={source} gameFrame={frame} unityFrame={unityFrame} lines={lineCount} {DescribeWlStatus()}");
                     return;
                 }
                 if (_showStartUnitSelectionListMethod == null)
@@ -68,12 +73,14 @@ namespace WhiskeyRealism.Patches
                 }
                 if (frame < MinReadyCampaignFrame)
                     OnceLog.Info("wl-start-selection:waiting-ready", $"[W&LStartSelection] retry waiting for vanilla frame {MinReadyCampaignFrame} source={source} gameFrame={frame} unityFrame={unityFrame} {DescribeWlStatus()}");
-                if (!RetryGate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: frame, startupDataReady: false, unityFrame: unityFrame)) return;
+                else if (listVisible)
+                    OnceLog.Info("wl-start-selection:visible-empty", $"[W&LStartSelection] command-selection panel is visible but has no selectable rows; retrying source={source} gameFrame={frame} unityFrame={unityFrame} contentActive={UnitSelectionContentActive(panel)} lines={lineCount} {DescribeWlStatus()}");
+                if (!RetryGate.ShouldAttempt(pending: true, listVisible: listUsable, panelAvailable: true, campaignFrame: frame, startupDataReady: false, unityFrame: unityFrame)) return;
 
                 _showStartUnitSelectionListMethod.Invoke(panel, new object[] { true });
 
                 if (RetryGate.Attempts == 1 || Plugin.Instance.VerboseLogging.Value)
-                    Plugin.Log.LogInfo($"[W&LStartSelection] retried command-selection popup source={source} gameFrame={frame} unityFrame={unityFrame} attempt={RetryGate.Attempts} {DescribeWlStatus()}");
+                    Plugin.Log.LogInfo($"[W&LStartSelection] retried command-selection popup source={source} gameFrame={frame} unityFrame={unityFrame} attempt={RetryGate.Attempts} linesBefore={lineCount} linesAfter={UnitSelectionLineCount(panel)} {DescribeWlStatus()}");
                 if (RetryGate.Exhausted && !UnitSelectionListVisible(panel))
                     OnceLog.Warning("wl-start-selection:max-attempts", $"[W&LStartSelection] command-selection popup still hidden after {RetryGate.Attempts} retries; {DescribeWlStatus()}");
             }
@@ -130,6 +137,8 @@ namespace WhiskeyRealism.Patches
         {
             if (panelType == null) return;
             _unitSelectionListObjectField = AccessTools.Field(panelType, "UnitSelectionListObject");
+            _unitSelectionListContentObjectField = AccessTools.Field(panelType, "UnitSelectionListContentObject");
+            _unitLineAppointCommandField = AccessTools.Field(panelType, "unitlineappointcommand");
             _showStartUnitSelectionListMethod = AccessTools.Method(panelType, "ShowStartUnitSelectionList", new[] { typeof(bool) });
         }
 
@@ -137,6 +146,18 @@ namespace WhiskeyRealism.Patches
         {
             var listObject = _unitSelectionListObjectField?.GetValue(panel) as GameObject;
             return listObject != null && listObject.activeInHierarchy;
+        }
+
+        private static bool UnitSelectionContentActive(object panel)
+        {
+            var contentObject = _unitSelectionListContentObjectField?.GetValue(panel) as GameObject;
+            return contentObject != null && contentObject.activeInHierarchy;
+        }
+
+        private static int UnitSelectionLineCount(object panel)
+        {
+            var lines = _unitLineAppointCommandField?.GetValue(panel) as IList;
+            return lines?.Count ?? 0;
         }
 
         private static string DescribeWlStatus()
