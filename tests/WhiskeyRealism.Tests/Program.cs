@@ -43,6 +43,7 @@ static class Program
             ("fiscal protects supply before force growth", FiscalProtectsSupplyBeforeForceGrowth),
             ("fiscal force cap suppresses manpower policies", FiscalForceCapSuppressesManpowerPolicies),
             ("fiscal hysteresis prevents immediate recovery", FiscalHysteresisPreventsImmediateRecovery),
+            ("fiscal emergency residue clears after stable weeks", FiscalEmergencyResidueClearsAfterStableWeeks),
             ("construction scorer favors csa banks in balanced posture", ConstructionScorerFavorsCsaBanks),
             ("construction scorer favors logistics when supply is protected", ConstructionScorerFavorsLogistics),
             ("construction scorer suppresses csa naval under credit defense", ConstructionScorerSuppressesCsaNaval),
@@ -638,6 +639,20 @@ static class Program
         input.Memory.EmergencyResidue = true;
         var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
         AssertEqual(FiscalPosture.CreditDefense, output.Posture);
+    }
+
+    private static void FiscalEmergencyResidueClearsAfterStableWeeks()
+    {
+        var input = BuildFiscalInput();
+        input.CurrentRating = 4;
+        input.AnnualBalance = 500000f;
+        input.Treasury = 2500000f;
+        input.Memory.PreviousPosture = FiscalPosture.CreditDefense;
+        input.Memory.EmergencyResidue = true;
+        input.Memory.StableWeeksAboveEmergency = 2;
+
+        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+        AssertEqual(FiscalPosture.BalancedWar, output.Posture);
     }
 
     private static void ConstructionScorerFavorsCsaBanks()

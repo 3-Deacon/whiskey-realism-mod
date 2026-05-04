@@ -240,8 +240,23 @@ namespace WhiskeyRealism.Strategic
         private void UpdateFiscalIntent(int alliance, EraStage era, int day, int month, int year, bool logHeartbeat)
         {
             var input = FiscalRuntime.BuildInput(alliance, era, _fiscalMemory[alliance]);
-            var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+            var options = new FiscalOptions();
+            var output = FiscalIntentLedger.Compute(input, options);
             FiscalIntents[alliance] = output;
+            bool emergencyRecoveryStable = FiscalIntentLedger.IsEmergencyRecoveryStable(input, options);
+            if (output.Posture == FiscalPosture.EmergencySolvency)
+            {
+                _fiscalMemory[alliance].StableWeeksAboveEmergency = 0;
+            }
+            else if (_fiscalMemory[alliance].EmergencyResidue && emergencyRecoveryStable)
+            {
+                _fiscalMemory[alliance].StableWeeksAboveEmergency++;
+            }
+            else if (!emergencyRecoveryStable)
+            {
+                _fiscalMemory[alliance].StableWeeksAboveEmergency = 0;
+            }
+
             _fiscalMemory[alliance].PreviousPosture = output.Posture;
             _fiscalMemory[alliance].EmergencyResidue = output.Posture == FiscalPosture.EmergencySolvency ||
                 _fiscalMemory[alliance].EmergencyResidue && output.Posture == FiscalPosture.CreditDefense;

@@ -22,11 +22,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
             output.DefendedGate = ResolveGate(input, earliestGate, bondFloor);
             output.MinimumAcceptableRating = earliestGate - options.CreditDefenseEntryBuffer;
 
-            bool supplyStress = input.SupplyPressure >= options.MinimumSupplyProtection
-                || input.AmmoPressure >= options.MinimumSupplyProtection
-                || input.TransportPressure >= options.MinimumSupplyProtection
-                || input.LowSupplyFormationCount > 0
-                || input.LowAmmoFormationCount > 0;
+            bool supplyStress = HasSupplyStress(input, options);
 
             bool emergency = input.CurrentRating >= bondFloor - 1
                 || input.CurrentRating >= earliestGate
@@ -40,9 +36,9 @@ namespace WhiskeyRealism.Strategic.Fiscal
             }
             else if (creditDefense || input.Memory.PreviousPosture == FiscalPosture.CreditDefense || input.Memory.EmergencyResidue)
             {
-                bool clearlyRecovered = input.CurrentRating <= earliestGate - options.CreditDefenseExitBuffer
-                    && input.AnnualBalance >= 0f
-                    && !input.Memory.EmergencyResidue;
+                bool residueCleared = !input.Memory.EmergencyResidue
+                    || input.Memory.StableWeeksAboveEmergency >= options.EmergencyExitWeeks;
+                bool clearlyRecovered = IsEmergencyRecoveryStable(input, options, earliestGate) && residueCleared;
                 output.Posture = clearlyRecovered ? FiscalPosture.BalancedWar : FiscalPosture.CreditDefense;
             }
             else if (input.AnnualBalance > 1000000f && input.CurrentRating <= earliestGate - 3 && !supplyStress)
@@ -76,6 +72,39 @@ namespace WhiskeyRealism.Strategic.Fiscal
                     result = values[i];
             }
             return result == int.MaxValue ? 0 : result;
+        }
+
+        public static bool IsEmergencyRecoveryStable(FiscalInput input, FiscalOptions options)
+        {
+            options = options != null ? options : new FiscalOptions();
+            input = input != null ? input : new FiscalInput();
+
+            int notches = input.RatingNotches <= 0 ? 12 : input.RatingNotches;
+            int bondFloor = notches - 1;
+            int earliestGate = MinPositive(
+                input.EmergencyPolicyFailureRating,
+                input.RecruitmentFailureRating,
+                input.ConstructionFailureRating,
+                input.WeaponFailureRating,
+                bondFloor);
+
+            return IsEmergencyRecoveryStable(input, options, earliestGate);
+        }
+
+        private static bool IsEmergencyRecoveryStable(FiscalInput input, FiscalOptions options, int earliestGate)
+        {
+            return input.CurrentRating <= earliestGate - options.CreditDefenseExitBuffer
+                && input.AnnualBalance >= 0f
+                && input.Treasury >= 0f;
+        }
+
+        private static bool HasSupplyStress(FiscalInput input, FiscalOptions options)
+        {
+            return input.SupplyPressure >= options.MinimumSupplyProtection
+                || input.AmmoPressure >= options.MinimumSupplyProtection
+                || input.TransportPressure >= options.MinimumSupplyProtection
+                || input.LowSupplyFormationCount > 0
+                || input.LowAmmoFormationCount > 0;
         }
 
         private static FiscalGate ResolveGate(FiscalInput input, int earliestGate, int bondFloor)
