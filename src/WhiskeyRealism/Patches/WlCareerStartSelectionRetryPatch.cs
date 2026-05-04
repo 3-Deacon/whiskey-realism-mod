@@ -8,20 +8,19 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla calls CareerInformationPanel.ShowStartUnitSelectionList once at
-    // campaign frame 50. If that one-shot call races panel/list readiness, the
-    // W&L career start can remain paused with no command-selection popup. This
-    // retry is bounded, only active while our own start gate says the player has
-    // no command, and it stops once the unit-selection list is visible.
+    // Vanilla calls CareerInformationPanel.ShowStartUnitSelectionList once near
+    // campaign start, then pauses the campaign. If that one-shot call races
+    // panel/list readiness, the W&L career start can remain paused with no
+    // command-selection popup. This retry is bounded, only active while our own
+    // start gate says the player has no command, and it stops once the
+    // unit-selection list is visible.
     [HarmonyPatch(typeof(AICampaign), "Update")]
     internal static class WlCareerStartSelectionRetryPatch
     {
-        private const int FirstRetryFrame = 50;
         private const int RetryEveryUnityFrames = 15;
-        private const int MaxAttempts = 40;
+        private const int MaxAttempts = 120;
 
-        private static int _lastAttemptUnityFrame = -1;
-        private static int _attempts;
+        private static readonly WlStartSelectionRetryGate RetryGate = new WlStartSelectionRetryGate(MaxAttempts, RetryEveryUnityFrames);
         private static object _careerPanel;
         private static FieldInfo _gameFrameField;
         private static FieldInfo _unitSelectionListObjectField;
@@ -35,16 +34,13 @@ namespace WhiskeyRealism.Patches
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
                 if (!StrategicCoordinator.WlCareerStartPending())
                 {
-                    _attempts = 0;
-                    _lastAttemptUnityFrame = -1;
+                    RetryGate.Reset();
                     return;
                 }
 
+                OnceLog.Info("wl-start-selection", "[W&LStartSelection] retry patch active while command selection is pending");
                 int frame = ReadFrame();
-                if (frame < FirstRetryFrame) return;
-                if (_attempts >= MaxAttempts) return;
                 int unityFrame = Time.frameCount;
-                if (_lastAttemptUnityFrame >= 0 && unityFrame - _lastAttemptUnityFrame < RetryEveryUnityFrames) return;
 
                 var panel = ResolveCareerPanel();
                 if (panel == null)
@@ -59,15 +55,14 @@ namespace WhiskeyRealism.Patches
                     OnceLog.Warning("wl-start-selection:no-method", "[W&LStartSelection] retry skipped: ShowStartUnitSelectionList method unavailable");
                     return;
                 }
+                if (!RetryGate.ShouldAttempt(pending: true, listVisible: false, unityFrame: unityFrame)) return;
 
-                _lastAttemptUnityFrame = unityFrame;
-                _attempts++;
                 _showStartUnitSelectionListMethod.Invoke(panel, new object[] { true });
 
-                if (_attempts == 1 || Plugin.Instance.VerboseLogging.Value)
-                    Plugin.Log.LogInfo($"[W&LStartSelection] retried command-selection popup gameFrame={frame} unityFrame={unityFrame} attempt={_attempts} {DescribeWlStatus()}");
-                if (_attempts >= MaxAttempts && !UnitSelectionListVisible(panel))
-                    OnceLog.Warning("wl-start-selection:max-attempts", $"[W&LStartSelection] command-selection popup still hidden after {_attempts} retries; {DescribeWlStatus()}");
+                if (RetryGate.Attempts == 1 || Plugin.Instance.VerboseLogging.Value)
+                    Plugin.Log.LogInfo($"[W&LStartSelection] retried command-selection popup gameFrame={frame} unityFrame={unityFrame} attempt={RetryGate.Attempts} {DescribeWlStatus()}");
+                if (RetryGate.Exhausted && !UnitSelectionListVisible(panel))
+                    OnceLog.Warning("wl-start-selection:max-attempts", $"[W&LStartSelection] command-selection popup still hidden after {RetryGate.Attempts} retries; {DescribeWlStatus()}");
             }
             catch (Exception ex)
             {

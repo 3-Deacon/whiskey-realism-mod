@@ -21,6 +21,7 @@ static class Program
             ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
+            ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
             ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
@@ -305,6 +306,16 @@ static class Program
         AssertEqual(true, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: true, chosenCommanderId: -1, chosenCommanderHasCommand: false));
         AssertEqual(true, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: true, chosenCommanderId: 12, chosenCommanderHasCommand: false));
         AssertEqual(false, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: true, chosenCommanderId: 12, chosenCommanderHasCommand: true));
+    }
+
+    private static void WlStartSelectionRetryDoesNotDependOnCampaignFrame()
+    {
+        var gate = new WlStartSelectionRetryGate(maxAttempts: 3, retryEveryUnityFrames: 15);
+
+        AssertEqual(true, gate.ShouldAttempt(pending: true, listVisible: false, unityFrame: 1));
+        AssertEqual(false, gate.ShouldAttempt(pending: true, listVisible: false, unityFrame: 10));
+        AssertEqual(true, gate.ShouldAttempt(pending: true, listVisible: false, unityFrame: 16));
+        AssertEqual(false, gate.ShouldAttempt(pending: true, listVisible: true, unityFrame: 31));
     }
 
     private static void ArmyGroupDoctrineRequiresTwoCommittedFormations()

@@ -14,6 +14,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WeeklyCadence.cs" Link="WeeklyCadence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalStartupGate.cs" Link="OperationalStartupGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCareerStartGate.cs" Link="WlCareerStartGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlStartSelectionRetryGate.cs" Link="WlStartSelectionRetryGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersonalityVector.cs" Link="PersonalityVector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DifficultyPersonalityModifier.cs" Link="DifficultyPersonalityModifier.cs" />
