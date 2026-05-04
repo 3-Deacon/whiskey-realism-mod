@@ -32,14 +32,26 @@ namespace WhiskeyRealism.Patches
                 if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
 
                 var ledger = StrategicCoordinator.Instance.ArmyAreas[allianceId];
-                if (ledger == null) return;
+                if (ledger == null)
+                {
+                    OnceLog.Warning(
+                        "armygroup:no-ledger:" + allianceId,
+                        $"[Patch:ArmyGroup] skipped: no army-area ledger for alliance={allianceId}");
+                    return;
+                }
 
                 var plans = ArmyGroupDoctrine.PlanGroups(ledger);
                 if (plans.Count == 0) return;
 
                 var faction = GetFaction(_aifaction);
                 var ownUnits = AccessTools.Field(faction?.GetType(), "ownunits")?.GetValue(faction) as IList;
-                if (ownUnits == null) return;
+                if (ownUnits == null)
+                {
+                    OnceLog.Warning(
+                        "armygroup:no-ownunits:" + allianceId,
+                        $"[Patch:ArmyGroup] skipped: ownunits unavailable for alliance={allianceId}");
+                    return;
+                }
 
                 for (int i = 0; i < plans.Count; i++)
                     ApplyPlan(__instance, allianceId, plans[i], ownUnits);

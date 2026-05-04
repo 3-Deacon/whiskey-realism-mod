@@ -14,10 +14,22 @@ namespace WhiskeyRealism.Strategic
             try
             {
                 var faction = FindFaction(allianceId);
-                if (faction == null) return null;
+                if (faction == null)
+                {
+                    OnceLog.Warning(
+                        "formation-directive:no-faction:" + allianceId,
+                        $"[FormationDirective] build skipped: AICampaign faction not found for alliance={allianceId}");
+                    return null;
+                }
 
                 var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
-                if (ownUnits == null) return null;
+                if (ownUnits == null)
+                {
+                    OnceLog.Warning(
+                        "formation-directive:no-ownunits:" + allianceId,
+                        $"[FormationDirective] build skipped: ownunits unavailable for alliance={allianceId}");
+                    return null;
+                }
 
                 bool grandArmyStructure = GrandArmyStructure(allianceId);
                 var snapshots = new List<FormationSnapshot>();

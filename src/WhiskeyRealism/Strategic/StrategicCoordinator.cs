@@ -220,7 +220,13 @@ namespace WhiskeyRealism.Strategic
         {
             int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
             var ledger = FrontSectorRuntime.BuildForAlliance(alliance, targetObjectiveId);
-            if (ledger == null) return;
+            if (ledger == null)
+            {
+                OnceLog.Warning(
+                    "front-ledger:null:" + alliance,
+                    $"[FrontLedger] update skipped: build returned null for alliance={alliance}");
+                return;
+            }
 
             Fronts[alliance] = ledger;
             string signature = FrontSectorRuntime.Summary(ledger);
@@ -240,7 +246,13 @@ namespace WhiskeyRealism.Strategic
                 planTargetAreaKey = ArmyAreaRuntime.AreaKey(targetPosition.Value);
 
             var ledger = ArmyAreaRuntime.BuildForAlliance(alliance, planTargetAreaKey);
-            if (ledger == null) return;
+            if (ledger == null)
+            {
+                OnceLog.Warning(
+                    "army-area:null:" + alliance,
+                    $"[ArmyArea] update skipped: build returned null for alliance={alliance}");
+                return;
+            }
 
             ArmyAreas[alliance] = ledger;
             string signature = ledger.Summary();
@@ -260,7 +272,13 @@ namespace WhiskeyRealism.Strategic
                 planTargetAreaKey = ArmyAreaRuntime.AreaKey(targetPosition.Value);
 
             var ledger = FormationDirectiveRuntime.BuildForAlliance(alliance, era.Stage, planTargetAreaKey);
-            if (ledger == null) return;
+            if (ledger == null)
+            {
+                OnceLog.Warning(
+                    "formation-directive:null:" + alliance,
+                    $"[FormationDirective] update skipped: build returned null for alliance={alliance}");
+                return;
+            }
 
             FormationDirectives[alliance] = ledger;
             string signature = ledger.Summary();

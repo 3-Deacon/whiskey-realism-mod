@@ -23,10 +23,22 @@ namespace WhiskeyRealism.Strategic
             try
             {
                 var faction = FindFaction(allianceId);
-                if (faction == null) return null;
+                if (faction == null)
+                {
+                    OnceLog.Warning(
+                        "army-area:no-faction:" + allianceId,
+                        $"[ArmyArea] build skipped: AICampaign faction not found for alliance={allianceId}");
+                    return null;
+                }
 
                 var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
-                if (ownUnits == null) return null;
+                if (ownUnits == null)
+                {
+                    OnceLog.Warning(
+                        "army-area:no-ownunits:" + allianceId,
+                        $"[ArmyArea] build skipped: ownunits unavailable for alliance={allianceId}");
+                    return null;
+                }
 
                 var inputs = new List<ArmyAreaInput>();
                 for (int i = 0; i < ownUnits.Count; i++)
@@ -77,13 +89,31 @@ namespace WhiskeyRealism.Strategic
         internal static int ApplyHistoricalAreaOrders(int aifactionIndex, int allianceId)
         {
             var ledger = StrategicCoordinator.Instance?.ArmyAreas?[allianceId];
-            if (ledger == null) return 0;
+            if (ledger == null)
+            {
+                OnceLog.Warning(
+                    "army-area:orders:no-ledger:" + allianceId,
+                    $"[Patch:ArmyArea] historical area orders skipped: no army-area ledger for alliance={allianceId}");
+                return 0;
+            }
 
             var faction = FindFaction(allianceId);
-            if (faction == null) return 0;
+            if (faction == null)
+            {
+                OnceLog.Warning(
+                    "army-area:orders:no-faction:" + allianceId,
+                    $"[Patch:ArmyArea] historical area orders skipped: AICampaign faction not found for alliance={allianceId}");
+                return 0;
+            }
 
             var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
-            if (ownUnits == null) return 0;
+            if (ownUnits == null)
+            {
+                OnceLog.Warning(
+                    "army-area:orders:no-ownunits:" + allianceId,
+                    $"[Patch:ArmyArea] historical area orders skipped: ownunits unavailable for alliance={allianceId}");
+                return 0;
+            }
 
             int issued = 0;
             for (int i = 0; i < ownUnits.Count; i++)

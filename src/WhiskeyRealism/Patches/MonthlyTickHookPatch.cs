@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Util;
@@ -17,20 +18,38 @@ namespace WhiskeyRealism.Patches
                 int day = ReadGameDay();
                 int month = ReadGameMonth();
                 int year  = ReadGameYear();
-                if (day <= 0 || month <= 0 || year <= 0) return;
+                if (day <= 0 || month <= 0 || year <= 0)
+                {
+                    OnceLog.Warning("strategic-cadence:date-unavailable", "[MonthlyTickHookPatch] campaign date unavailable");
+                    return;
+                }
+
+                if (day == _lastNotifiedDay && month == _lastNotifiedMonth && year == _lastNotifiedYear)
+                    return;
+
+                _lastNotifiedDay = day;
+                _lastNotifiedMonth = month;
+                _lastNotifiedYear = year;
 
                 if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
                 StrategicCoordinator.Instance.NotifyDateAdvanced(day, month, year);
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogWarning("[MonthlyTickHookPatch] " + ex.Message);
+                OnceLog.Warning("strategic-cadence:postfix", "[MonthlyTickHookPatch] cadence hook failed: " + ex.Message);
             }
         }
 
         // Cached BattleUnits component reference. GameObject.Find is expensive
         // and we run every frame. Refreshes on null (after scene reloads).
         private static UnityEngine.Component _bunitsCached;
+        private static FieldInfo _bunitsYearField;
+        private static FieldInfo _stormField;
+        private static FieldInfo _stormDayField;
+        private static FieldInfo _stormMonthField;
+        private static int _lastNotifiedDay = -1;
+        private static int _lastNotifiedMonth = -1;
+        private static int _lastNotifiedYear = -1;
 
         private static UnityEngine.Component ResolveBunits()
         {
@@ -42,9 +61,23 @@ namespace WhiskeyRealism.Patches
                 var bunitsType = AccessTools.TypeByName("BattleUnits");
                 if (bunitsType == null) return null;
                 _bunitsCached = go.GetComponent(bunitsType);
+                _stormField = AccessTools.Field(bunitsType, "uniStormSystem");
+                _bunitsYearField = AccessTools.Field(bunitsType, "year");
                 return _bunitsCached;
             }
             catch { return null; }
+        }
+
+        private static object ResolveStorm()
+        {
+            var bunits = ResolveBunits();
+            if (bunits == null || _stormField == null) return null;
+            var storm = _stormField.GetValue(bunits);
+            if (storm == null) return null;
+            var stormType = storm.GetType();
+            if (_stormDayField == null) _stormDayField = AccessTools.Field(stormType, "dayCounter");
+            if (_stormMonthField == null) _stormMonthField = AccessTools.Field(stormType, "monthCounter");
+            return storm;
         }
 
         private static int ReadGameMonth()
@@ -52,13 +85,8 @@ namespace WhiskeyRealism.Patches
             try
             {
                 // Vanilla: bunits.uniStormSystem.monthCounter (1-based; Jan=1).
-                var bunits = ResolveBunits();
-                if (bunits == null) return -1;
-                var stormField = AccessTools.Field(bunits.GetType(), "uniStormSystem");
-                var storm = stormField?.GetValue(bunits);
-                if (storm == null) return -1;
-                var mField = AccessTools.Field(storm.GetType(), "monthCounter");
-                return mField != null ? (int)mField.GetValue(storm) : -1;
+                var storm = ResolveStorm();
+                return storm != null && _stormMonthField != null ? (int)_stormMonthField.GetValue(storm) : -1;
             }
             catch { return -1; }
         }
@@ -68,13 +96,8 @@ namespace WhiskeyRealism.Patches
             try
             {
                 // Vanilla: bunits.uniStormSystem.dayCounter (1-based).
-                var bunits = ResolveBunits();
-                if (bunits == null) return -1;
-                var stormField = AccessTools.Field(bunits.GetType(), "uniStormSystem");
-                var storm = stormField?.GetValue(bunits);
-                if (storm == null) return -1;
-                var dField = AccessTools.Field(storm.GetType(), "dayCounter");
-                return dField != null ? (int)dField.GetValue(storm) : -1;
+                var storm = ResolveStorm();
+                return storm != null && _stormDayField != null ? (int)_stormDayField.GetValue(storm) : -1;
             }
             catch { return -1; }
         }
@@ -87,9 +110,7 @@ namespace WhiskeyRealism.Patches
                 // set on scenario load (decompile line 25326). GameVars.year
                 // exists but is never assigned; that was the v0.2.1 bug.
                 var bunits = ResolveBunits();
-                if (bunits == null) return -1;
-                var yField = AccessTools.Field(bunits.GetType(), "year");
-                return yField != null ? (int)yField.GetValue(bunits) : -1;
+                return bunits != null && _bunitsYearField != null ? (int)_bunitsYearField.GetValue(bunits) : -1;
             }
             catch { return -1; }
         }

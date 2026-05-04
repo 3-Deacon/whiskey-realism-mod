@@ -24,12 +24,24 @@ namespace WhiskeyRealism.Strategic
             try
             {
                 var faction = FindFaction(allianceId);
-                if (faction == null) return null;
+                if (faction == null)
+                {
+                    OnceLog.Warning(
+                        "front-ledger:no-faction:" + allianceId,
+                        $"[FrontLedger] build skipped: AICampaign faction not found for alliance={allianceId}");
+                    return null;
+                }
 
                 var factionType = faction.GetType();
                 var ownUnits = AccessTools.Field(factionType, "ownunits")?.GetValue(faction) as IList;
                 var enemyUnits = AccessTools.Field(factionType, "enemyunits")?.GetValue(faction) as IList;
-                if (ownUnits == null || enemyUnits == null) return null;
+                if (ownUnits == null || enemyUnits == null)
+                {
+                    OnceLog.Warning(
+                        "front-ledger:no-unit-lists:" + allianceId,
+                        $"[FrontLedger] build skipped: ownunits/enemyunits unavailable for alliance={allianceId}");
+                    return null;
+                }
 
                 var targetTheater = Theater.Unknown;
                 var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
