@@ -49,7 +49,12 @@ static class Program
             ("construction scorer favors csa banks in balanced posture", ConstructionScorerFavorsCsaBanks),
             ("construction scorer favors logistics when supply is protected", ConstructionScorerFavorsLogistics),
             ("construction scorer suppresses csa naval under credit defense", ConstructionScorerSuppressesCsaNaval),
-            ("construction scorer floors emergency industrial suppression", ConstructionScorerFloorsEmergencyIndustry)
+            ("construction scorer floors emergency industrial suppression", ConstructionScorerFloorsEmergencyIndustry),
+            ("fast forward scheduler keeps 5x vanilla only", FastForwardSchedulerKeepsFiveXVanillaOnly),
+            ("fast forward scheduler boosts high speeds within cap", FastForwardSchedulerBoostsHighSpeedsWithinCap),
+            ("fast forward scheduler disables cleanly", FastForwardSchedulerDisablesCleanly),
+            ("fast forward scheduler stops when frame budget is spent", FastForwardSchedulerStopsWhenFrameBudgetIsSpent),
+            ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples)
         };
 
         foreach (var test in tests)
@@ -725,6 +730,51 @@ static class Program
     {
         var intent = new FiscalOutput { Posture = FiscalPosture.EmergencySolvency };
         AssertEqual(0.15f, FiscalConstructionScorer.Multiplier(intent, 1, "Naval Industrial Shipyard Foundry", 3));
+    }
+
+    private static void FastForwardSchedulerKeepsFiveXVanillaOnly()
+    {
+        var options = new FastForwardAiOptions();
+        AssertEqual(1, FastForwardAiScheduler.VanillaPasses(1f));
+        AssertEqual(2, FastForwardAiScheduler.VanillaPasses(5f));
+        AssertEqual(0, FastForwardAiScheduler.MaxExtraPasses(5f, options));
+    }
+
+    private static void FastForwardSchedulerBoostsHighSpeedsWithinCap()
+    {
+        var options = new FastForwardAiOptions();
+        AssertEqual(4, FastForwardAiScheduler.VanillaPasses(20f));
+        AssertEqual(7, FastForwardAiScheduler.VanillaPasses(50f));
+        AssertEqual(2, FastForwardAiScheduler.MaxExtraPasses(20f, options));
+        AssertEqual(4, FastForwardAiScheduler.MaxExtraPasses(50f, options));
+    }
+
+    private static void FastForwardSchedulerDisablesCleanly()
+    {
+        var options = new FastForwardAiOptions { Enabled = false };
+        AssertEqual(0, FastForwardAiScheduler.MaxExtraPasses(50f, options));
+        AssertEqual(false, FastForwardAiScheduler.ShouldRunExtraPass(0, 0.1f, 50f, options));
+    }
+
+    private static void FastForwardSchedulerStopsWhenFrameBudgetIsSpent()
+    {
+        var options = new FastForwardAiOptions { MaxExtraPassesAt50x = 4, FrameBudgetMs = 1.5f };
+        AssertEqual(true, FastForwardAiScheduler.ShouldRunExtraPass(3, 1.49f, 50f, options));
+        AssertEqual(false, FastForwardAiScheduler.ShouldRunExtraPass(4, 1.49f, 50f, options));
+        AssertEqual(false, FastForwardAiScheduler.ShouldRunExtraPass(3, 1.5f, 50f, options));
+    }
+
+    private static void FastForwardLogGateSuppressesRepeatedSamples()
+    {
+        var gate = new FastForwardAiLogGate();
+        string first = FastForwardAiScheduler.LogSignature(50f, 7, 4, 4, budgetExhausted: true);
+        string repeat = FastForwardAiScheduler.LogSignature(50f, 7, 2, 4, budgetExhausted: true);
+        string changed = FastForwardAiScheduler.LogSignature(20f, 4, 2, 2, budgetExhausted: false);
+
+        AssertEqual(true, gate.ShouldLog(first));
+        AssertEqual(false, gate.ShouldLog(repeat));
+        AssertEqual(true, gate.ShouldLog(changed));
+        AssertEqual(false, gate.ShouldLog(first));
     }
 
     private static void AssertEqual<T>(T expected, T actual)

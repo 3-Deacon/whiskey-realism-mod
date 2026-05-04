@@ -24,6 +24,10 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> SuccessionTrace;
         internal ConfigEntry<bool> FiscalTrace;
         internal ConfigEntry<bool> FiscalTelemetryCsv;
+        internal ConfigEntry<bool> FastForwardAiCatchUp;
+        internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
+        internal ConfigEntry<int> FastForwardAi20xExtraPasses;
+        internal ConfigEntry<int> FastForwardAi50xExtraPasses;
 
         // Vanilla-settings override — lock Aggressiveness + Historic AI Personality
         // + Difficulty at campaign creation.
@@ -62,6 +66,18 @@ namespace WhiskeyRealism
             FiscalTelemetryCsv = Config.Bind(
                 "Diagnostics", "Fiscal Telemetry Csv", false,
                 "Reserved for future CSV telemetry export. Current fiscal telemetry is emitted to LogOutput.log.");
+            FastForwardAiCatchUp = Config.Bind(
+                "Performance", "Fast Forward AI Catch Up", true,
+                "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");
+            FastForwardAiFrameBudgetMs = Config.Bind(
+                "Performance", "Fast Forward AI Frame Budget Ms", 1.5f,
+                "Maximum wall-clock milliseconds per frame Whiskey may spend on extra fast-forward AI catch-up passes.");
+            FastForwardAi20xExtraPasses = Config.Bind(
+                "Performance", "Fast Forward AI Extra Passes At 20x", 2,
+                "Maximum extra vanilla AICampaign.UpdateUnitAI passes per frame at 20x campaign speed.");
+            FastForwardAi50xExtraPasses = Config.Bind(
+                "Performance", "Fast Forward AI Extra Passes At 50x", 4,
+                "Maximum extra vanilla AICampaign.UpdateUnitAI passes per frame at 50x campaign speed.");
             OverrideVanillaSettings = Config.Bind(
                 "Strategic", "Override Vanilla Settings", true,
                 "When true, Whiskey Realism locks Aggressiveness to Mediocre, Historic AI Personality to true, and Difficulty to the value of LockedDifficulty (default Hard) at campaign creation. " +
