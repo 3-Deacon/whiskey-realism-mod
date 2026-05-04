@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 
 static class Program
@@ -65,6 +66,11 @@ static class Program
             ("construction scorer favors logistics when supply is protected", ConstructionScorerFavorsLogistics),
             ("construction scorer suppresses csa naval under credit defense", ConstructionScorerSuppressesCsaNaval),
             ("construction scorer floors emergency industrial suppression", ConstructionScorerFloorsEmergencyIndustry),
+            ("construction ledger chooses field supply from low-supply pressure", ConstructionLedgerChoosesFieldSupply),
+            ("construction ledger allows csa early arms stress", ConstructionLedgerAllowsCsaEarlyArmsStress),
+            ("construction ledger suppresses csa rail by doctrine", ConstructionLedgerSuppressesCsaRailByDoctrine),
+            ("construction ledger makes emergency hold strict near bond floor", ConstructionLedgerEmergencyHoldNearBondFloor),
+            ("construction ledger signature changes on top candidate", ConstructionLedgerSignatureChangesOnTopCandidate),
             ("fast forward scheduler keeps 5x vanilla only", FastForwardSchedulerKeepsFiveXVanillaOnly),
             ("fast forward scheduler boosts high speeds within cap", FastForwardSchedulerBoostsHighSpeedsWithinCap),
             ("fast forward scheduler disables cleanly", FastForwardSchedulerDisablesCleanly),
@@ -1112,6 +1118,160 @@ static class Program
     {
         var intent = new FiscalOutput { Posture = FiscalPosture.EmergencySolvency };
         AssertEqual(0.15f, FiscalConstructionScorer.Multiplier(intent, 1, "Naval Industrial Shipyard Foundry", 3));
+    }
+
+    private static ConstructionInput BaseConstructionInput(int alliance)
+    {
+        return new ConstructionInput
+        {
+            AllianceId = alliance,
+            EraStage = EraStage.Amateur1861,
+            CurrentChapter = 1,
+            FiscalPosture = FiscalPosture.BalancedWar,
+            FiscalDefendedGate = FiscalGate.Construction,
+            CurrentRating = 3,
+            BondFloorRating = 11,
+            SupplyProtection = false,
+            LogisticsExpansion = false,
+            ForceCapWarning = false,
+            TopSupplyTheater = "",
+            LowSupplyFormationCount = 0,
+            LowAmmoFormationCount = 0,
+            SupplyPressure = 0f,
+            AmmoPressure = 0f,
+            TransportPressure = 0f,
+            CapitalThreat = 0f,
+            ActiveRailroadStarts = 0
+        };
+    }
+
+    private static void ConstructionLedgerChoosesFieldSupply()
+    {
+        var input = BaseConstructionInput(1);
+        input.SupplyProtection = true;
+        input.LogisticsExpansion = true;
+        input.LowSupplyFormationCount = 3;
+        input.TopSupplyTheater = "East";
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 13,
+            Name = "Market",
+            Theater = Theater.East,
+            TransportPressure = 0.75f,
+            SupplyPressure = 0.7f,
+            VanillaValid = true
+        });
+
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        AssertEqual(ConstructionPosture.FieldSupply, output.Posture);
+        AssertEqual(13, output.TopPrivateBuilding.BuildingTypeId);
+        AssertTrue(output.Signature.Contains("FieldSupply"), "expected FieldSupply in signature");
+    }
+
+    private static void ConstructionLedgerAllowsCsaEarlyArmsStress()
+    {
+        var input = BaseConstructionInput(1);
+        input.EraStage = EraStage.Amateur1861;
+        input.FiscalPosture = FiscalPosture.CreditDefense;
+        input.CurrentRating = 6;
+        input.BondFloorRating = 11;
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 10,
+            Name = "Iron Works",
+            Theater = Theater.East,
+            ArmsIndustry = true,
+            SupportsActiveArmyCorridor = true,
+            VanillaValid = true
+        });
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 12,
+            Name = "Factories",
+            Theater = Theater.Coast,
+            ArmsIndustry = false,
+            SupportsActiveArmyCorridor = false,
+            VanillaValid = true
+        });
+
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        AssertEqual(10, output.TopPrivateBuilding.BuildingTypeId);
+        AssertTrue(output.TopPrivateBuilding.Score > 0.5f, "expected early CSA arms industry to remain viable");
+    }
+
+    private static void ConstructionLedgerSuppressesCsaRailByDoctrine()
+    {
+        var input = BaseConstructionInput(1);
+        input.ActiveRailroadStarts = 1;
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.Railroad,
+            Name = "Low value rail",
+            Theater = Theater.West,
+            SupportsActiveArmyCorridor = false,
+            VanillaValid = true
+        });
+
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        AssertEqual(ConstructionCandidate.None.Name, output.TopRailroad.Name);
+        AssertTrue(output.Suppressions.Length > 0, "expected rail suppression");
+    }
+
+    private static void ConstructionLedgerEmergencyHoldNearBondFloor()
+    {
+        var input = BaseConstructionInput(1);
+        input.FiscalPosture = FiscalPosture.EmergencySolvency;
+        input.CurrentRating = 10;
+        input.BondFloorRating = 11;
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 10,
+            Name = "Iron Works",
+            ArmsIndustry = true,
+            SupportsActiveArmyCorridor = true,
+            VanillaValid = true
+        });
+
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        AssertEqual(ConstructionPosture.EmergencyHold, output.Posture);
+        AssertEqual(ConstructionCandidate.None.Name, output.TopPrivateBuilding.Name);
+    }
+
+    private static void ConstructionLedgerSignatureChangesOnTopCandidate()
+    {
+        var input = BaseConstructionInput(0);
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 13,
+            Name = "Market",
+            Theater = Theater.East,
+            TransportPressure = 0.8f,
+            VanillaValid = true
+        });
+        var first = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        input.Candidates.Clear();
+        input.Candidates.Add(new ConstructionCandidate
+        {
+            Kind = ConstructionCandidateKind.PrivateBuilding,
+            BuildingTypeId = 9,
+            Name = "Hospital",
+            Theater = Theater.East,
+            WoundedPressure = 0.9f,
+            VanillaValid = true
+        });
+        var second = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+
+        AssertTrue(first.Signature != second.Signature, "expected signature to change when top candidate changes");
     }
 
     private static void FastForwardSchedulerKeepsFiveXVanillaOnly()
