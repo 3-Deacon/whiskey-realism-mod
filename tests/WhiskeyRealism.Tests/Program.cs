@@ -41,6 +41,7 @@ static class Program
             ("fiscal enters credit defense before gate", FiscalEntersCreditDefenseBeforeGate),
             ("fiscal enters emergency before bond floor", FiscalEntersEmergencyBeforeBondFloor),
             ("fiscal protects supply before force growth", FiscalProtectsSupplyBeforeForceGrowth),
+            ("fiscal force cap suppresses manpower policies", FiscalForceCapSuppressesManpowerPolicies),
             ("fiscal hysteresis prevents immediate recovery", FiscalHysteresisPreventsImmediateRecovery),
             ("construction scorer favors csa banks in balanced posture", ConstructionScorerFavorsCsaBanks),
             ("construction scorer favors logistics when supply is protected", ConstructionScorerFavorsLogistics),
@@ -614,6 +615,19 @@ static class Program
         AssertEqual(true, output.SupplyProtection);
         AssertEqual(true, output.ForceCapWarning);
         AssertEqual("VirginiaCapitalCorridor", output.TheaterSupplyPriority);
+    }
+
+    private static void FiscalForceCapSuppressesManpowerPolicies()
+    {
+        var input = BuildFiscalInput();
+        input.CurrentRating = 10;
+        input.SupplyPressure = 0.80f;
+        input.LowSupplyFormationCount = 5;
+
+        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+        float weight = FiscalPolicyScorer.PolicyWeight(output, 1, 136);
+
+        AssertTrue(weight < 0f, "force-cap state should suppress CSA draft escalation");
     }
 
     private static void FiscalHysteresisPreventsImmediateRecovery()
