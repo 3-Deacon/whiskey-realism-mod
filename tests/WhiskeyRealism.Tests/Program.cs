@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Fiscal;
 
 static class Program
 {
@@ -35,7 +36,12 @@ static class Program
             ("low ammo formation recovers", LowAmmoFormationRecovers),
             ("army masses for plan target when hierarchy exists", ArmyMassesForPlanTargetWhenHierarchyExists),
             ("raid support maps only to cavalry capable formations", RaidSupportMapsOnlyToCavalryCapableFormations),
-            ("formation directive summary changes when assignment changes", FormationDirectiveSummaryChangesWhenAssignmentChanges)
+            ("formation directive summary changes when assignment changes", FormationDirectiveSummaryChangesWhenAssignmentChanges),
+            ("fiscal csa healthy credit stays balanced", FiscalCsaHealthyCreditStaysBalanced),
+            ("fiscal enters credit defense before gate", FiscalEntersCreditDefenseBeforeGate),
+            ("fiscal enters emergency before bond floor", FiscalEntersEmergencyBeforeBondFloor),
+            ("fiscal protects supply before force growth", FiscalProtectsSupplyBeforeForceGrowth),
+            ("fiscal hysteresis prevents immediate recovery", FiscalHysteresisPreventsImmediateRecovery)
         };
 
         foreach (var test in tests)
@@ -535,6 +541,85 @@ static class Program
         string second = FormationDirectiveLedger.Build(new[] { b }, EraStage.Operational1862, null).Summary();
 
         AssertEqual(false, string.Equals(first, second, StringComparison.Ordinal));
+    }
+
+    private static FiscalInput BuildFiscalInput()
+    {
+        return new FiscalInput
+        {
+            AllianceId = 1,
+            EraStage = EraStage.Amateur1861,
+            CurrentChapter = 1,
+            CurrentRating = 4,
+            RatingNotches = 12,
+            EmergencyPolicyFailureRating = 7,
+            RecruitmentFailureRating = 8,
+            ConstructionFailureRating = 8,
+            WeaponFailureRating = 9,
+            Treasury = 15000000f,
+            Debt = 75000000f,
+            AnnualBalance = -5000000f,
+            InterestCost = -3000000f,
+            ArmyUpkeep = -25000000f,
+            NavyUpkeep = -3000000f,
+            RecruitmentCost = -4000000f,
+            SupplyDepotPurchases = -2000000f,
+            SupplyPressure = 0.15f,
+            AmmoPressure = 0.10f,
+            TransportPressure = 0.20f,
+            LowSupplyFormationCount = 0,
+            LowAmmoFormationCount = 0,
+            TopSupplyTheater = "VirginiaCapitalCorridor"
+        };
+    }
+
+    private static void FiscalCsaHealthyCreditStaysBalanced()
+    {
+        var output = FiscalIntentLedger.Compute(BuildFiscalInput(), new FiscalOptions());
+        AssertEqual(FiscalPosture.BalancedWar, output.Posture);
+        AssertEqual(false, output.ForceCapWarning);
+    }
+
+    private static void FiscalEntersCreditDefenseBeforeGate()
+    {
+        var input = BuildFiscalInput();
+        input.CurrentRating = 6;
+        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+        AssertEqual(FiscalPosture.CreditDefense, output.Posture);
+        AssertEqual(FiscalGate.EmergencyPolicy, output.DefendedGate);
+    }
+
+    private static void FiscalEntersEmergencyBeforeBondFloor()
+    {
+        var input = BuildFiscalInput();
+        input.CurrentRating = 11;
+        input.Treasury = -1000000f;
+        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+        AssertEqual(FiscalPosture.EmergencySolvency, output.Posture);
+        AssertEqual(true, output.ForceCapWarning);
+    }
+
+    private static void FiscalProtectsSupplyBeforeForceGrowth()
+    {
+        var input = BuildFiscalInput();
+        input.CurrentRating = 8;
+        input.SupplyPressure = 0.85f;
+        input.LowSupplyFormationCount = 4;
+        input.LowAmmoFormationCount = 2;
+        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+        AssertEqual(true, output.SupplyProtection);
+        AssertEqual(true, output.ForceCapWarning);
+        AssertEqual("VirginiaCapitalCorridor", output.TheaterSupplyPriority);
+    }
+
+    private static void FiscalHysteresisPreventsImmediateRecovery()
+    {
+        var input = BuildFiscalInput();
+        input.CurrentRating = 6;
+        input.Memory.PreviousPosture = FiscalPosture.CreditDefense;
+        input.Memory.EmergencyResidue = true;
+        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+        AssertEqual(FiscalPosture.CreditDefense, output.Posture);
     }
 
     private static void AssertEqual<T>(T expected, T actual)
