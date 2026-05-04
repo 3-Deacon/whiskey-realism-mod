@@ -102,6 +102,8 @@ static class Program
             ("fast forward scheduler boosts high speeds within cap", FastForwardSchedulerBoostsHighSpeedsWithinCap),
             ("fast forward scheduler disables cleanly", FastForwardSchedulerDisablesCleanly),
             ("fast forward scheduler stops when frame budget is spent", FastForwardSchedulerStopsWhenFrameBudgetIsSpent),
+            ("fast forward scheduler throttles after slow frames", FastForwardSchedulerThrottlesAfterSlowFrames),
+            ("fast forward scheduler cooldown expires by frame", FastForwardSchedulerCooldownExpiresByFrame),
             ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples),
             ("historical hard difficulty adds casualty tolerance only", HistoricalHardDifficultyAddsCasualtyToleranceOnly),
             ("perk scorer favors siege armies for fort pressure", PerkScorerFavorsSiegeArmiesForFortPressure),
@@ -1899,6 +1901,27 @@ static class Program
         AssertEqual(true, FastForwardAiScheduler.ShouldRunExtraPass(3, 1.49f, 50f, options));
         AssertEqual(false, FastForwardAiScheduler.ShouldRunExtraPass(4, 1.49f, 50f, options));
         AssertEqual(false, FastForwardAiScheduler.ShouldRunExtraPass(3, 1.5f, 50f, options));
+    }
+
+    private static void FastForwardSchedulerThrottlesAfterSlowFrames()
+    {
+        var options = new FastForwardAiOptions
+        {
+            SlowFrameThresholdMs = 8f,
+            SlowFrameCooldownFrames = 180
+        };
+
+        AssertEqual(false, FastForwardAiScheduler.ShouldThrottleAfterFrame(3.5f, 0f, options));
+        AssertEqual(true, FastForwardAiScheduler.ShouldThrottleAfterFrame(8f, 0f, options));
+        AssertEqual(true, FastForwardAiScheduler.ShouldThrottleAfterFrame(1f, 9f, options));
+        AssertEqual(1180, FastForwardAiScheduler.CooldownUntilFrame(1000, options));
+    }
+
+    private static void FastForwardSchedulerCooldownExpiresByFrame()
+    {
+        AssertEqual(true, FastForwardAiScheduler.InCooldown(1179, 1180));
+        AssertEqual(false, FastForwardAiScheduler.InCooldown(1180, 1180));
+        AssertEqual(false, FastForwardAiScheduler.InCooldown(1181, 1180));
     }
 
     private static void FastForwardLogGateSuppressesRepeatedSamples()

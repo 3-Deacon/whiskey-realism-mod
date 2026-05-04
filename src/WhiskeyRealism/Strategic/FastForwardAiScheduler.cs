@@ -6,6 +6,8 @@ namespace WhiskeyRealism.Strategic
         public int MaxExtraPassesAt20x = 2;
         public int MaxExtraPassesAt50x = 4;
         public float FrameBudgetMs = 1.5f;
+        public float SlowFrameThresholdMs = 8f;
+        public int SlowFrameCooldownFrames = 180;
     }
 
     public static class FastForwardAiScheduler
@@ -31,6 +33,28 @@ namespace WhiskeyRealism.Strategic
             if (completedExtraPasses < 0) completedExtraPasses = 0;
             if (completedExtraPasses >= MaxExtraPasses(gameSpeed, options)) return false;
             return elapsedMs < options.FrameBudgetMs;
+        }
+
+        public static bool ShouldThrottleAfterFrame(float vanillaElapsedMs, float extraElapsedMs, FastForwardAiOptions options)
+        {
+            options = options ?? new FastForwardAiOptions();
+            float threshold = options.SlowFrameThresholdMs;
+            if (float.IsNaN(threshold) || float.IsInfinity(threshold) || threshold <= 0f)
+                threshold = 8f;
+            return vanillaElapsedMs >= threshold || extraElapsedMs >= threshold;
+        }
+
+        public static int CooldownUntilFrame(int currentFrame, FastForwardAiOptions options)
+        {
+            options = options ?? new FastForwardAiOptions();
+            int cooldown = options.SlowFrameCooldownFrames;
+            if (cooldown < 0) cooldown = 0;
+            return currentFrame + cooldown;
+        }
+
+        public static bool InCooldown(int currentFrame, int cooldownUntilFrame)
+        {
+            return currentFrame < cooldownUntilFrame;
         }
 
         public static string LogSignature(float gameSpeed, int vanillaPasses, int extraPasses, int maxExtra, bool budgetExhausted)

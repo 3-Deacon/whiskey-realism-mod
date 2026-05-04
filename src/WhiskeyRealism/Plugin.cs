@@ -38,6 +38,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
         internal ConfigEntry<int> FastForwardAi50xExtraPasses;
+        internal ConfigEntry<float> FastForwardAiSlowFrameThresholdMs;
+        internal ConfigEntry<int> FastForwardAiSlowFrameCooldownFrames;
 
         // Vanilla-settings override — lock Aggressiveness + Historic AI Personality
         // + Difficulty at campaign creation.
@@ -118,6 +120,12 @@ namespace WhiskeyRealism
             FastForwardAi50xExtraPasses = Config.Bind(
                 "Performance", "Fast Forward AI Extra Passes At 50x", 4,
                 "Maximum extra vanilla AICampaign.UpdateUnitAI passes per frame at 50x campaign speed.");
+            FastForwardAiSlowFrameThresholdMs = Config.Bind(
+                "Performance", "Fast Forward AI Slow Frame Threshold Ms", 8f,
+                "When vanilla or extra fast-forward AI work exceeds this many milliseconds, skip extra catch-up passes for a cooldown window and emit a bounded diagnostic.");
+            FastForwardAiSlowFrameCooldownFrames = Config.Bind(
+                "Performance", "Fast Forward AI Slow Frame Cooldown Frames", 180,
+                "Unity frames to skip extra fast-forward AI catch-up after a slow 20x/50x AI frame.");
             OverrideVanillaSettings = Config.Bind(
                 "Strategic", "Override Vanilla Settings", true,
                 "When true, Whiskey Realism locks Aggressiveness to Mediocre, Historic AI Personality to true, and Difficulty to the value of LockedDifficulty (default Hard) at campaign creation. " +
