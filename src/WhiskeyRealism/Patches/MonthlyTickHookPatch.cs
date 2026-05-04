@@ -49,6 +49,7 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _stormField;
         private static FieldInfo _stormDayField;
         private static FieldInfo _stormMonthField;
+        private static FieldInfo _aiFactionField;
         private static int _lastNotifiedDay = -1;
         private static int _lastNotifiedMonth = -1;
         private static int _lastNotifiedYear = -1;
@@ -122,8 +123,9 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var aicType = AccessTools.TypeByName("AICampaign");
-                var list = AccessTools.Field(aicType, "aifaction")?.GetValue(null) as System.Collections.IList;
+                if (_aiFactionField == null)
+                    _aiFactionField = AccessTools.Field(typeof(AICampaign), "aifaction");
+                var list = _aiFactionField?.GetValue(null) as System.Collections.IList;
                 return list != null && list.Count > 0;
             }
             catch { return false; }

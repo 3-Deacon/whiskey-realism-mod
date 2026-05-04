@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Util;
 
@@ -31,11 +32,9 @@ namespace WhiskeyRealism.Patches
             if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
             try
             {
-                OnceLog.Info("settings:checkbox", "HistoricCheckboxLockPatch wired");
-
                 var t = __instance.GetType();
-                var cbField = AccessTools.Field(t, "CheckBoxes");
-                if (cbField?.GetValue(__instance) is not Array cbArr) return;
+                ResolveMembers(t);
+                if (_checkBoxesField?.GetValue(__instance) is not Array cbArr) return;
                 if (cbArr.Length < 2) return;
 
                 var historicCb = cbArr.GetValue(0);
@@ -44,6 +43,12 @@ namespace WhiskeyRealism.Patches
 
                 bool historicWasOff = !ReadIsActive(historicCb);
                 bool dynamicWasOn   = ReadIsActive(dynamicCb);
+                bool alreadyLocked = !historicWasOff && !dynamicWasOn &&
+                    ReadFrozen(historicCb) && ReadFrozen(dynamicCb) &&
+                    LastStatesSynced(__instance);
+                if (alreadyLocked) return;
+
+                OnceLog.Info("settings:checkbox", "HistoricCheckboxLockPatch wired");
 
                 // Force radio-state: Historic ON, Dynamic OFF.
                 ForceCheck(historicCb, true);
@@ -55,8 +60,7 @@ namespace WhiskeyRealism.Patches
 
                 // Sync the lastcheckboxstates cache so vanilla doesn't fire its
                 // change-detected branch on the next call.
-                var lastField = AccessTools.Field(t, "lastcheckboxstates");
-                if (lastField?.GetValue(__instance) is bool[] last && last.Length >= 2)
+                if (_lastCheckboxStatesField?.GetValue(__instance) is bool[] last && last.Length >= 2)
                 {
                     last[0] = true;
                     last[1] = false;
@@ -66,44 +70,85 @@ namespace WhiskeyRealism.Patches
                 // ChooseHistoricPolicies(historic: false). Reverse it.
                 if (historicWasOff || dynamicWasOn)
                 {
-                    var chooseMethod = AccessTools.Method(t, "ChooseHistoricPolicies", new[] { typeof(bool) });
-                    chooseMethod?.Invoke(__instance, new object[] { true });
+                    _chooseHistoricPoliciesMethod?.Invoke(__instance, new object[] { true });
                     Plugin.Log.LogInfo("[Settings] Historic checkbox override: forced back to Historic (player tried to switch to Dynamic)");
                 }
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogWarning("[HistoricCheckboxLockPatch] " + ex.Message);
+                OnceLog.Warning("settings:checkbox:error", "[HistoricCheckboxLockPatch] " + ex.Message);
             }
+        }
+
+        private static void ResolveMembers(Type mainMenuType)
+        {
+            if (_mainMenuType == mainMenuType) return;
+            _mainMenuType = mainMenuType;
+            _checkBoxesField = AccessTools.Field(mainMenuType, "CheckBoxes");
+            _lastCheckboxStatesField = AccessTools.Field(mainMenuType, "lastcheckboxstates");
+            _chooseHistoricPoliciesMethod = AccessTools.Method(mainMenuType, "ChooseHistoricPolicies", new[] { typeof(bool) });
+        }
+
+        private static void ResolveCheckboxMembers(Type checkBoxType)
+        {
+            if (_checkBoxType == checkBoxType) return;
+            _checkBoxType = checkBoxType;
+            _isActiveField = AccessTools.Field(checkBoxType, "isactive");
+            _frozenField = AccessTools.Field(checkBoxType, "frozen");
+            _checkMethod = AccessTools.Method(checkBoxType, "Check", new[] { typeof(bool), typeof(bool) });
+            _freezeMethod = AccessTools.Method(checkBoxType, "Freeze", new[] { typeof(bool) });
+        }
+
+        private static bool LastStatesSynced(object instance)
+        {
+            if (_lastCheckboxStatesField?.GetValue(instance) is bool[] last && last.Length >= 2)
+                return last[0] && !last[1];
+            return false;
         }
 
         private static bool ReadIsActive(object checkBox)
         {
             if (checkBox == null) return false;
-            var f = AccessTools.Field(checkBox.GetType(), "isactive");
-            return f != null && (bool)f.GetValue(checkBox);
+            ResolveCheckboxMembers(checkBox.GetType());
+            return _isActiveField != null && (bool)_isActiveField.GetValue(checkBox);
+        }
+
+        private static bool ReadFrozen(object checkBox)
+        {
+            if (checkBox == null) return false;
+            ResolveCheckboxMembers(checkBox.GetType());
+            return _frozenField != null && (bool)_frozenField.GetValue(checkBox);
         }
 
         private static void ForceCheck(object checkBox, bool desired)
         {
             if (checkBox == null) return;
+            ResolveCheckboxMembers(checkBox.GetType());
             // Vanilla signature: public void Check(bool newstate = true, bool manuallyset = false)
             // (decompile line 186823). Pass both args explicitly.
-            var checkMethod = AccessTools.Method(checkBox.GetType(), "Check", new[] { typeof(bool), typeof(bool) });
-            if (checkMethod != null)
+            if (_checkMethod != null)
             {
-                checkMethod.Invoke(checkBox, new object[] { desired, false });
+                _checkMethod.Invoke(checkBox, new object[] { desired, false });
                 return;
             }
-            var f = AccessTools.Field(checkBox.GetType(), "isactive");
-            f?.SetValue(checkBox, desired);
+            _isActiveField?.SetValue(checkBox, desired);
         }
 
         private static void Freeze(object checkBox, bool freeze)
         {
             if (checkBox == null) return;
-            var freezeMethod = AccessTools.Method(checkBox.GetType(), "Freeze", new[] { typeof(bool) });
-            freezeMethod?.Invoke(checkBox, new object[] { freeze });
+            ResolveCheckboxMembers(checkBox.GetType());
+            _freezeMethod?.Invoke(checkBox, new object[] { freeze });
         }
+
+        private static Type _mainMenuType;
+        private static Type _checkBoxType;
+        private static FieldInfo _checkBoxesField;
+        private static FieldInfo _lastCheckboxStatesField;
+        private static FieldInfo _isActiveField;
+        private static FieldInfo _frozenField;
+        private static MethodInfo _chooseHistoricPoliciesMethod;
+        private static MethodInfo _checkMethod;
+        private static MethodInfo _freezeMethod;
     }
 }

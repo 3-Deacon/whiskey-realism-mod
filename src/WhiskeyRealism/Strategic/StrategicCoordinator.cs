@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic.Fiscal;
@@ -441,19 +442,31 @@ namespace WhiskeyRealism.Strategic
         {
             try
             {
-                var dlcType = AccessTools.TypeByName("DLC_WL");
-                if (dlcType == null) return false;
+                if (_dlcWlType == null) _dlcWlType = AccessTools.TypeByName("DLC_WL");
+                if (_dlcWlType == null) return false;
 
-                bool active = Convert.ToBoolean(AccessTools.Field(dlcType, "dlc_scenarioactive")?.GetValue(null) ?? false);
-                int chosen = Convert.ToInt32(AccessTools.Field(dlcType, "dlc_chosencommander")?.GetValue(null) ?? -1);
+                if (_dlcScenarioActiveField == null) _dlcScenarioActiveField = AccessTools.Field(_dlcWlType, "dlc_scenarioactive");
+                if (_dlcChosenCommanderField == null) _dlcChosenCommanderField = AccessTools.Field(_dlcWlType, "dlc_chosencommander");
+                bool active = Convert.ToBoolean(_dlcScenarioActiveField?.GetValue(null) ?? false);
+                int chosen = Convert.ToInt32(_dlcChosenCommanderField?.GetValue(null) ?? -1);
                 bool hasCommand = false;
 
-                var gv = AccessTools.TypeByName("GameVars");
-                var commanders = AccessTools.Field(gv, "commander")?.GetValue(null) as IList;
+                if (_gameVarsType == null) _gameVarsType = AccessTools.TypeByName("GameVars");
+                if (_gameVarsCommanderField == null) _gameVarsCommanderField = AccessTools.Field(_gameVarsType, "commander");
+                var commanders = _gameVarsCommanderField?.GetValue(null) as IList;
                 if (commanders != null && chosen >= 0 && chosen < commanders.Count)
                 {
                     var commander = commanders[chosen];
-                    hasCommand = commander != null && AccessTools.Field(commander.GetType(), "currentcommand")?.GetValue(commander) != null;
+                    if (commander != null)
+                    {
+                        var commanderType = commander.GetType();
+                        if (_commanderType != commanderType)
+                        {
+                            _commanderType = commanderType;
+                            _commanderCurrentCommandField = AccessTools.Field(commanderType, "currentcommand");
+                        }
+                        hasCommand = _commanderCurrentCommandField?.GetValue(commander) != null;
+                    }
                 }
 
                 return WlCareerStartGate.ShouldDeferStrategicReview(active, chosen, hasCommand);
@@ -464,6 +477,14 @@ namespace WhiskeyRealism.Strategic
                 return false;
             }
         }
+
+        private static Type _dlcWlType;
+        private static Type _gameVarsType;
+        private static Type _commanderType;
+        private static FieldInfo _dlcScenarioActiveField;
+        private static FieldInfo _dlcChosenCommanderField;
+        private static FieldInfo _gameVarsCommanderField;
+        private static FieldInfo _commanderCurrentCommandField;
 
         // Cached snapshot — recomputed once per strategic review to avoid
         // re-reading 3+ towns per faction iteration.

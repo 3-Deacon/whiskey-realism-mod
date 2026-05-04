@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Util;
 
@@ -32,49 +33,144 @@ namespace WhiskeyRealism.Patches
             if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
             try
             {
+                ResolveMembers(__instance.GetType());
+                if (RealismStateAlreadyLocked(__instance)) return;
+
                 OnceLog.Info("settings:realism", "RealismCheckboxesLockPatch wired");
 
-                ForceAndFreezeByName(__instance, "FogOfWarCB",      true);
-                ForceAndFreezeByName(__instance, "OrderDelaysCB",   true);
-                ForceAndFreezeByName(__instance, "FeudsCB",         true);
-                ForceAndFreezeByName(__instance, "FullReadinessCB", true);
-                ForceAndFreezeByName(__instance, "AllAutomanageCB", true);
+                ForceAndFreeze(_fogOfWarField?.GetValue(__instance), true);
+                ForceAndFreeze(_orderDelaysField?.GetValue(__instance), true);
+                ForceAndFreeze(_feudsField?.GetValue(__instance), true);
+                ForceAndFreeze(_fullReadinessField?.GetValue(__instance), true);
+                ForceAndFreeze(_allAutomanageField?.GetValue(__instance), true);
 
                 // Belt-and-suspenders — write the underlying GameVars directly
                 // so a frame's worth of staleness doesn't leak into game logic.
-                var gv = AccessTools.TypeByName("GameVars");
-                AccessTools.Field(gv, "usefow")               ?.SetValue(null, true);
-                AccessTools.Field(gv, "useorderdelays")       ?.SetValue(null, true);
-                AccessTools.Field(gv, "debug_deactivatefeuds")?.SetValue(null, false);
-                AccessTools.Field(gv, "fullreadiness")        ?.SetValue(null, false);
+                _useFowField?.SetValue(null, true);
+                _useOrderDelaysField?.SetValue(null, true);
+                _debugDeactivateFeudsField?.SetValue(null, false);
+                _fullReadinessGameVarField?.SetValue(null, false);
                 // Automanage: vanilla MainMenu.SetAutomanage(true) sets all 6 sub-fields. Call it.
-                var setAutomanage = AccessTools.Method(__instance.GetType(), "SetAutomanage", new[] { typeof(bool) });
-                setAutomanage?.Invoke(__instance, new object[] { true });
+                if (!AutomanageAlreadyOn())
+                    _setAutomanageMethod?.Invoke(__instance, new object[] { true });
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogWarning("[RealismCheckboxesLockPatch] " + ex.Message);
+                OnceLog.Warning("settings:realism:error", "[RealismCheckboxesLockPatch] " + ex.Message);
             }
         }
 
-        private static void ForceAndFreezeByName(object instance, string fieldName, bool desired)
+        private static void ResolveMembers(Type mainMenuType)
+        {
+            if (_mainMenuType == mainMenuType) return;
+            _mainMenuType = mainMenuType;
+            _fogOfWarField = AccessTools.Field(mainMenuType, "FogOfWarCB");
+            _orderDelaysField = AccessTools.Field(mainMenuType, "OrderDelaysCB");
+            _feudsField = AccessTools.Field(mainMenuType, "FeudsCB");
+            _fullReadinessField = AccessTools.Field(mainMenuType, "FullReadinessCB");
+            _allAutomanageField = AccessTools.Field(mainMenuType, "AllAutomanageCB");
+            _setAutomanageMethod = AccessTools.Method(mainMenuType, "SetAutomanage", new[] { typeof(bool) });
+
+            var gv = AccessTools.TypeByName("GameVars");
+            _useFowField = AccessTools.Field(gv, "usefow");
+            _useOrderDelaysField = AccessTools.Field(gv, "useorderdelays");
+            _debugDeactivateFeudsField = AccessTools.Field(gv, "debug_deactivatefeuds");
+            _fullReadinessGameVarField = AccessTools.Field(gv, "fullreadiness");
+            _automanageConstructionPField = AccessTools.Field(gv, "automanageconstructionp");
+            _automanageConstructionGField = AccessTools.Field(gv, "automanageconstructiong");
+            _automanageFinancesField = AccessTools.Field(gv, "automanagefinances");
+            _automanagePoliciesField = AccessTools.Field(gv, "automanagepolicies");
+            _automanageProjectsField = AccessTools.Field(gv, "automanageprojects");
+            _automanageWeaponsField = AccessTools.Field(gv, "automanageweapons");
+        }
+
+        private static bool RealismStateAlreadyLocked(object instance)
+        {
+            return CheckboxLocked(_fogOfWarField?.GetValue(instance), true)
+                && CheckboxLocked(_orderDelaysField?.GetValue(instance), true)
+                && CheckboxLocked(_feudsField?.GetValue(instance), true)
+                && CheckboxLocked(_fullReadinessField?.GetValue(instance), true)
+                && CheckboxLocked(_allAutomanageField?.GetValue(instance), true)
+                && ReadStaticBool(_useFowField) == true
+                && ReadStaticBool(_useOrderDelaysField) == true
+                && ReadStaticBool(_debugDeactivateFeudsField) == false
+                && ReadStaticBool(_fullReadinessGameVarField) == false
+                && AutomanageAlreadyOn();
+        }
+
+        private static bool AutomanageAlreadyOn()
+        {
+            return ReadStaticBool(_automanageConstructionPField) == true
+                && ReadStaticBool(_automanageConstructionGField) == true
+                && ReadStaticBool(_automanageFinancesField) == true
+                && ReadStaticBool(_automanagePoliciesField) == true
+                && ReadStaticBool(_automanageProjectsField) == true
+                && ReadStaticBool(_automanageWeaponsField) == true;
+        }
+
+        private static bool? ReadStaticBool(FieldInfo field)
+        {
+            if (field == null) return null;
+            return field.GetValue(null) as bool?;
+        }
+
+        private static bool CheckboxLocked(object cb, bool desired)
+        {
+            if (cb == null) return false;
+            ResolveCheckboxMembers(cb.GetType());
+            bool active = _isActiveField != null && (bool)_isActiveField.GetValue(cb);
+            bool frozen = _frozenField != null && (bool)_frozenField.GetValue(cb);
+            return active == desired && frozen;
+        }
+
+        private static void ForceAndFreeze(object cb, bool desired)
         {
             try
             {
-                var f = AccessTools.Field(instance.GetType(), fieldName);
-                var cb = f?.GetValue(instance);
                 if (cb == null) return;
 
-                var checkMethod = AccessTools.Method(cb.GetType(), "Check", new[] { typeof(bool), typeof(bool) });
-                checkMethod?.Invoke(cb, new object[] { desired, false });
+                ResolveCheckboxMembers(cb.GetType());
+                _checkMethod?.Invoke(cb, new object[] { desired, false });
 
-                var freezeMethod = AccessTools.Method(cb.GetType(), "Freeze", new[] { typeof(bool) });
-                freezeMethod?.Invoke(cb, new object[] { true });
+                _freezeMethod?.Invoke(cb, new object[] { true });
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogWarning($"[RealismCheckboxesLock] {fieldName}: {ex.Message}");
+                OnceLog.Warning("settings:realism:checkbox", "[RealismCheckboxesLock] " + ex.Message);
             }
         }
+
+        private static void ResolveCheckboxMembers(Type checkBoxType)
+        {
+            if (_checkBoxType == checkBoxType) return;
+            _checkBoxType = checkBoxType;
+            _checkMethod = AccessTools.Method(checkBoxType, "Check", new[] { typeof(bool), typeof(bool) });
+            _freezeMethod = AccessTools.Method(checkBoxType, "Freeze", new[] { typeof(bool) });
+            _isActiveField = AccessTools.Field(checkBoxType, "isactive");
+            _frozenField = AccessTools.Field(checkBoxType, "frozen");
+        }
+
+        private static Type _mainMenuType;
+        private static Type _checkBoxType;
+        private static FieldInfo _fogOfWarField;
+        private static FieldInfo _orderDelaysField;
+        private static FieldInfo _feudsField;
+        private static FieldInfo _fullReadinessField;
+        private static FieldInfo _allAutomanageField;
+        private static FieldInfo _useFowField;
+        private static FieldInfo _useOrderDelaysField;
+        private static FieldInfo _debugDeactivateFeudsField;
+        private static FieldInfo _fullReadinessGameVarField;
+        private static FieldInfo _automanageConstructionPField;
+        private static FieldInfo _automanageConstructionGField;
+        private static FieldInfo _automanageFinancesField;
+        private static FieldInfo _automanagePoliciesField;
+        private static FieldInfo _automanageProjectsField;
+        private static FieldInfo _automanageWeaponsField;
+        private static MethodInfo _setAutomanageMethod;
+        private static MethodInfo _checkMethod;
+        private static MethodInfo _freezeMethod;
+        private static FieldInfo _isActiveField;
+        private static FieldInfo _frozenField;
     }
 }
