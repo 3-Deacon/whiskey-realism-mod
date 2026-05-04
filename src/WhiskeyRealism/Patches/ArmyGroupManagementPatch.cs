@@ -52,7 +52,7 @@ namespace WhiskeyRealism.Patches
 
         private static void ApplyPlan(AICampaign campaign, int allianceId, ArmyGroupPlan plan, IList ownUnits)
         {
-            var units = ResolveUnits(plan, ownUnits);
+            var units = ResolveUnits(plan, ownUnits, allianceId);
             if (units.Count < 2) return;
 
             ArmyGroup group = ExistingGroupFor(units);
@@ -88,6 +88,7 @@ namespace WhiskeyRealism.Patches
                     unassigned.Add(units[i]);
 
             if (unassigned.Count < 2) return;
+            if (!HasCorpsOrArmy(unassigned)) return;
 
             var prefab = AccessTools.Field(typeof(AICampaign), "ArmyGroupPrefab")?.GetValue(campaign) as GameObject;
             if (prefab == null)
@@ -106,14 +107,16 @@ namespace WhiskeyRealism.Patches
             AppointPreferredCommander(allianceId, plan.AreaKey, group, units);
         }
 
-        private static List<Regiment> ResolveUnits(ArmyGroupPlan plan, IList ownUnits)
+        private static List<Regiment> ResolveUnits(ArmyGroupPlan plan, IList ownUnits, int allianceId)
         {
             var result = new List<Regiment>();
             for (int i = 0; i < ownUnits.Count; i++)
             {
                 var unit = ownUnits[i] as Regiment;
                 if (!IsEligibleTopUnit(unit)) continue;
-                if (!plan.UnitKeys.Contains(UnitKey(unit))) continue;
+                string unitKey = UnitKey(unit);
+                if (!plan.UnitKeys.Contains(unitKey)) continue;
+                if (unit.unittyp == 14 && !FormationDirectiveRuntime.AllowsArmyGroupAttachment(allianceId, unitKey)) continue;
                 result.Add(unit);
             }
             return result;
@@ -124,10 +127,18 @@ namespace WhiskeyRealism.Patches
             if ((UnityEngine.Object)(object)unit == (UnityEngine.Object)null) return false;
             if ((UnityEngine.Object)(object)unit.garrisonreference != (UnityEngine.Object)null) return false;
             if (!unit.istopunit) return false;
-            if (unit.unittyp < 15 || unit.unittyp > 16) return false;
+            if (unit.unittyp < 14 || unit.unittyp > 16) return false;
             if (unit.groupstrengthdirect <= 1000f) return false;
             if (unit.inbattle || unit.onretreat) return false;
             return true;
+        }
+
+        private static bool HasCorpsOrArmy(List<Regiment> units)
+        {
+            for (int i = 0; i < units.Count; i++)
+                if (units[i].unittyp >= 15 && units[i].unittyp <= 16)
+                    return true;
+            return false;
         }
 
         private static ArmyGroup ExistingGroupFor(List<Regiment> units)
