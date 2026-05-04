@@ -1,7 +1,18 @@
 # Fiscal Economy AI Design
 
-Status: approved direction, design spec.
-Scope: Slice A enrichment for economy, building, policy, credit-rating, and fiscal decision quality. This does not rewrite the game economy, edit game install data, or create hidden CSA parity bonuses.
+Status: approved direction, review-corrected design spec.
+Scope: Slice A enrichment for economy, building, policy, credit-rating, and fiscal decision quality. This does not rewrite the game economy, edit game install data, or create new hidden CSA parity bonuses.
+
+## Review Corrections
+
+Adversarial review confirmed several vanilla clamps that must shape implementation:
+
+- Vanilla already cushions non-player AI credit pressure by dividing rating pressure by `sqrt(usedcampaignagressiveness)`. Whiskey must acknowledge and preserve this global AI cushion unless a later config explicitly changes it. This is not a CSA-only money tap, but it is a hidden AI credit advantage.
+- Vanilla subsidy raises are capped by `GetAIPersonality(alliance).subsidyfocus[lane]`. Fiscal targets must treat `subsidyfocus` as the ceiling. Do not write to `subsidyfocus` from Harmony patches and do not re-push above it every cycle.
+- Vanilla finance AI skips the final tax lane because its tax raise/cut loops iterate `tax.Length - 1`. In the current tax constants this means land sales. Initial Whiskey finance steering should track land-sales revenue but should not drive that lane unless an explicit later patch owns it.
+- Vanilla stops issuing new bonds when the current rating is already the worst notch. `EmergencySolvency` must trigger before that floor, not after the bond cutoff has already stranded treasury below zero.
+- Banks reduce interest and construction costs, but bank construction is itself rating-gated. The CSA must pre-position banks during `BalancedWar`; waiting until `CreditDefense` can be too late.
+- Fiscal posture must be a small state machine with hysteresis, not a stateless weekly label, or it will oscillate around rating gates.
 
 ## Goal
 
@@ -46,18 +57,24 @@ Credit rating:
 
 - Rating is derived from debt plus deficit pressure:
   - `(-surplus * 1.25) + debt * 4`
+- For non-player AI factions, vanilla divides that pressure by `sqrt(usedcampaignagressiveness)`.
 - This pressure is scaled by year-specific rating thresholds.
 - Policy rating modifiers and project 97 modify the result.
 - Higher rating index means worse credit.
 - Worse credit increases interest.
 - Banks reduce interest through funding-improvement effects.
+- New bonds issue only while treasury is below zero and `currentrating < ratingnotches.Length - 1`.
+- Once the rating reaches the worst notch, vanilla no longer issues the automatic bond tranche.
 
 Hard gates:
 
 - Recruitment is blocked when rating falls below the recruitment threshold.
+- The emergency recruitment-rating form is also used by `Alliance.GetAIPersonality`; it swaps the AI to the emergency low-credit policy chain before normal recruitment is necessarily blocked.
 - Construction is blocked when rating falls below the construction threshold unless enough subsidy funding is already available.
 - Weapon purchases are blocked when rating falls below the weapon-order threshold.
 - Ship construction also checks rating through recruitment/ship chooseability paths.
+- Subsidy increases are clamped by the active AI personality's `subsidyfocus[lane]`.
+- Vanilla AI tax raise/cut loops skip the final tax lane; land sales are not adjusted by vanilla finance AI.
 
 Vanilla AI gap:
 
@@ -99,11 +116,12 @@ Inputs:
 
 - alliance id,
 - era stage and vanilla chapter,
+- previous fiscal posture and emergency residue,
 - current `GrandStrategyProfile`,
 - treasury, debt, balance, interest, current rating,
-- rating thresholds for recruitment, construction, and weapon purchases,
+- rating thresholds for normal recruitment, emergency recruitment-policy personality, construction, weapon purchases, and bond cutoff,
 - tax rates and tax caps,
-- subsidy rates and subsidy caps,
+- subsidy rates, policy caps, and active `subsidyfocus` ceilings,
 - activated policies and projects,
 - army/navy/recruitment/upkeep costs,
 - active plan and front posture,
@@ -113,6 +131,7 @@ Outputs:
 
 - `FiscalPosture`: `Expansion`, `BalancedWar`, `CreditDefense`, `EmergencySolvency`.
 - minimum acceptable rating band.
+- defended gate: `EmergencyPolicy`, `Recruitment`, `Construction`, `WeaponPurchases`, or `BondFloor`.
 - desired tax ranges per lane.
 - desired subsidy ranges per lane.
 - policy priorities.
@@ -125,8 +144,16 @@ Posture definitions:
 
 - `Expansion`: credit is healthy and military situation allows investment.
 - `BalancedWar`: normal wartime spending with rating protected above gates.
-- `CreditDefense`: rating is near a gate; cut low-value subsidies and prioritize credit tools.
-- `EmergencySolvency`: recruitment/construction/weapon gates are threatened or already blocked; stop discretionary spending and pursue funding policies/projects.
+- `CreditDefense`: rating is near the earliest defended gate; cut low-value subsidies, raise bounded revenue lanes, and prioritize credit tools before hard gates close.
+- `EmergencySolvency`: rating is within the emergency band, treasury/bond issuance is at risk, or a hard gate is already closed; stop discretionary spending and pursue immediate funding policies/projects.
+
+Posture state-machine rules:
+
+- Higher rating index means worse credit. Compute the first failure notch for emergency policy personality, normal recruitment, construction, weapon purchases, and bond cutoff.
+- Enter `CreditDefense` at least one notch before the earliest defended gate. Exit only after rating improves at least two notches above that entry band and balance is non-negative or improving for two weekly reviews.
+- Enter `EmergencySolvency` before the worst-notch bond floor, or immediately when any hard gate closes. Exit only after two weekly reviews above the emergency band; keep an emergency residue flag that slows tax/subsidy relaxation.
+- Do not jump directly from `EmergencySolvency` to `Expansion`. Recover through `CreditDefense` or `BalancedWar` first.
+- On a posture transition, a finance patch may correct up to two tax lanes and two subsidy lanes by one vanilla step each. After the transition week, return to one or two total lane corrections per call.
 
 ### FiscalPolicyPriority
 
@@ -148,8 +175,10 @@ CSA timing guardrails:
 
 - Avoid early conscription if volunteer pool and strength ratio are adequate.
 - Prefer credit and import policy before expensive domestic parity spending.
-- Avoid tariff choices that damage foreign-recognition/import strategy unless fiscal emergency requires it.
+- Under `Expansion` or `BalancedWar`, keep CSA tariff targets low while pursuing King Cotton, Free Trade, blockade running, or foreign recognition. Raise tariff pressure only under `CreditDefense` or `EmergencySolvency`.
 - Use War Bonds and Bank Act as credit-protection tools before rating gates collapse.
+- Weight diplomacy projects higher when European intervention probability is rising or when policy 144 / Mexican Intervention can become relevant.
+- In late war, reduce manpower-lane priority when national morale, state support, or draft-support penalties imply that more money will not produce useful replacement strength.
 
 ### FiscalTarget
 
@@ -160,7 +189,10 @@ Tax lanes:
 - tariffs,
 - sales,
 - income,
-- corporate,
+- corporate.
+
+Tracked but not initially driven:
+
 - land sales.
 
 Subsidy lanes:
@@ -176,11 +208,13 @@ Subsidy lanes:
 Rules:
 
 - Tax changes should be bounded to vanilla's step size.
+- Initial implementation should not drive land sales because vanilla AI skips that lane. If later work uses it, the patch must own that lane explicitly and test policy caps.
 - Corporate tax should stay conservative while the AI is trying to grow private industry.
 - Income/sales taxes can rise under `CreditDefense`.
-- Tariffs are faction-strategy dependent: Union can use them more freely; CSA must weigh tariffs against diplomacy/import/cotton strategy.
+- Tariffs are faction-strategy dependent: Union can use them more freely; CSA caps tariff targets under `Expansion` and `BalancedWar` while the cotton/import/intervention strategy is active.
 - Subsidies should not be random. Raise the lane that supports the current fiscal and military plan.
 - Cut low-priority subsidies first when rating nears a gate.
+- Subsidy targets must never exceed `subsidyfocus[lane]`. If a target needs more headroom than `subsidyfocus` permits, express that as a policy priority that raises the relevant cap; do not mutate the personality object from a patch.
 
 ### EconomyConstructionIntent
 
@@ -219,7 +253,7 @@ Union:
 
 CSA:
 
-- banks early when interest/rating is dangerous,
+- banks during `BalancedWar` before interest/rating becomes dangerous,
 - markets/transport where supply corridors matter,
 - supply depots near Richmond/Virginia, Tennessee/Georgia, Mississippi, and key ports,
 - hospitals near high-casualty defensive fronts,
@@ -233,6 +267,14 @@ Suppression rules:
 - Do not build expensive discretionary industry under `EmergencySolvency`.
 - Do not let CSA chase Union-style naval parity.
 - Do not build in exposed areas unless the front posture says `Hold` or `Exploit` and supply/security are adequate.
+- Under `EmergencySolvency`, suppress new naval construction, expensive military projects, and additional recruitment pressure unless they directly protect a capital, port, or active army supply corridor.
+
+Project priority rules:
+
+- CSA diplomacy lane: early arms imports and `Send Envoys` outrank imported warships unless it is late war and a specific river/port-defense plan needs the ship project.
+- CSA military lane: Confederate rifles, logistics, and field-army sustainment outrank naval projects except for immediate river/coastal defense.
+- CSA domestic naval projects are not in the same subsidy lane as diplomacy imports, but they still compete for fiscal room through annual subsidy cost and debt pressure.
+- Union naval projects can stay aggressive while rating remains above protected gates.
 
 ## Patch Surfaces
 
@@ -272,6 +314,8 @@ Preferred shape:
 - Read FiscalIntent target ranges.
 - Move only one or two lanes per call by vanilla step size.
 - Clamp to target range.
+- Clamp subsidy moves to `subsidyfocus[lane]`.
+- Do not repeatedly push a lane that vanilla will immediately clamp back.
 - Do not alter player-controlled finances unless automanage or AI-vs-AI allows it.
 
 Reasons to use Postfix:
@@ -321,9 +365,14 @@ CSA competes through decision quality:
 
 Explicit non-goal:
 
-- No hidden CSA money tap.
+- No new CSA-specific hidden money tap.
 - No equalized Northern/Southern industrial base.
 - No automatic CSA replacement-rate buff detached from policy, supply, and fiscal state.
+
+Vanilla compatibility:
+
+- Preserve the vanilla non-player AI credit-pressure cushion by default.
+- If campaign telemetry later shows the cushion is too strong or too weak, expose a config-gated modifier instead of burying another hidden rule.
 
 Optional later safety valve:
 
@@ -352,21 +401,36 @@ Weekly review:
 2. `FiscalIntentLedger` computes posture and targets.
 3. Patches read ledger output during vanilla AI cycles.
 4. Patches apply bounded corrections.
-5. Logs emit only on posture-signature changes or actual overrides.
+5. Logs emit only on posture-signature changes, monthly telemetry, or actual overrides.
 
 Harmony patches remain read-only with respect to strategic state. The ledger writes happen in weekly review only.
+
+## Fiscal Telemetry
+
+Fiscal balance cannot be judged by feel. Add a bounded telemetry surface before balance tuning:
+
+- Monthly log line: `[FiscalTelemetry] alliance=1 posture=... rating=... treasury=... debt=... balance=... army=... navy=... recruit=... subsidies=... taxes=... project=... construction=...`.
+- Optional config-gated CSV export next to the save sidecar, for baseline-vs-modded campaign comparisons.
+- CSV fields: date, alliance, posture, rating index/name, treasury, debt, annual balance, interest cost, army upkeep, navy upkeep, recruitment cost, subsidy rates, tax rates, top construction candidate, top project candidate, active suppressions.
+- Telemetry must be low volume by default: one row per alliance per month, plus posture-change rows.
 
 ## Testing
 
 Pure tests:
 
 - CSA early healthy credit prefers `BalancedWar` or `Expansion`, not emergency conscription.
-- CSA rating near construction/recruitment gate enters `CreditDefense`.
-- CSA gate-blocked state enters `EmergencySolvency`.
+- CSA rating one notch before the earliest defended gate enters `CreditDefense`.
+- CSA emergency-band or gate-blocked state enters `EmergencySolvency` before the bond floor.
+- Posture hysteresis prevents week-to-week `BalancedWar`/`CreditDefense` oscillation.
+- Emergency residue prevents immediate snap-back to `Expansion` rates.
 - Union healthy credit accepts higher industry/naval/logistics spending.
 - Corporate tax stays lower when industry growth is a priority.
 - CSA diplomacy/import profile suppresses tariff-heavy choices unless emergency.
+- CSA land-sales lane is tracked but unchanged by initial finance patch.
+- Subsidy targets never exceed `subsidyfocus`.
 - Construction scoring prefers banks under high interest, hospitals near wounded pressure, and markets under transport bottlenecks.
+- CSA `BalancedWar` pre-positions at least one bank in major safe theaters before `CreditDefense`.
+- CSA project scoring prefers arms imports/credit/diplomacy over discretionary naval projects under fiscal stress.
 
 Runtime smoke:
 
@@ -375,6 +439,7 @@ Runtime smoke:
 - Financial patch adjusts no more than bounded lane count per call.
 - CSA does not drop below recruitment/construction gates from random subsidy escalation in early smoke.
 - Construction patch logs only candidate boosts, not direct forced construction.
+- Monthly fiscal telemetry emits one bounded line/row per alliance.
 
 Required DLL-affecting verification:
 
@@ -390,6 +455,7 @@ Required DLL-affecting verification:
 - No player finance control is changed unless automanage or AI-vs-AI allows it.
 - CSA remains weaker in raw economy but avoids obviously self-destructive fiscal choices.
 - Union invests its advantage into blockade, logistics, industry, and manpower.
+- Fiscal telemetry is sufficient to compare baseline-vs-modded CSA credit survival, project choices, and construction choices over at least one campaign year.
 - Normal log volume stays low with verbose logging off.
 
 ## Recommended Implementation Sequence
@@ -400,3 +466,21 @@ Required DLL-affecting verification:
 4. Add construction scoring and `EconomyConstructionPatch`.
 5. Connect recruitment/replenishment intent to fiscal posture.
 6. Rebalance after campaign telemetry, not before.
+
+## Verified Vanilla Behavior Appendix
+
+Anchors from `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`; re-check if the decompile is regenerated after a game update.
+
+- `AICampaign.UpdateFinancialAI(int alliance)` begins at line 15352.
+- Bond issue condition checks `treasury < 0f && currentrating < ratingnotches.Length - 1` around line 15362.
+- Vanilla AI tax raise/cut loops use `tax.Length - 1` around lines 15389 and 15408, skipping the final tax lane.
+- Vanilla subsidy raises clamp to `GetAIPersonality(alliance).subsidyfocus[num4]` around lines 15443-15445.
+- `Economy.UpdateMacroEconomy(float)` computes rating pressure around line 32553 and divides non-player AI pressure by `sqrt(usedcampaignagressiveness)` around lines 32555-32557.
+- `Alliance.GetAIPersonality(int alliance)` swaps to the low-credit emergency AI personality when `IsRatingOkForRecruitment(useemergencylevel: true)` fails around line 62719.
+- `Alliance.IsRatingOkForRecruitment/Construction/WeaponPurchases` gates begin around line 62772.
+- `AICampaign.UpdateCompanyFoundations` returns when construction rating is blocked around line 15038, except the subsidy-funded path immediately above can still construct if funding exists.
+- `GameVars` tax constants are `tariffs=0`, `excise=1`, `income=2`, `corporate=3`, `landSales=4` around lines 64323-64331.
+- `Policy.CheckForChapterUpdate()` begins around line 211604. For W&L scenario `002`, vanilla sets chapter 1 at start, chapter 2 after 1862-11-05, and chapter 3 after 1864-11-09 if objective 26 is accomplished and objective 27 is not.
+- `Alliance.GetInterventionProbability(int ofalliance)` begins around line 62823; France requires policy 144 after 1863-06-07.
+- Project 97 improves credit rating through `GetProjectLevel(97) * project_creditrating` around line 32568.
+- Project 103 `Send Envoys` adjusts intervention level around line 212996.
