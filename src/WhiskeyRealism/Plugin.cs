@@ -81,7 +81,7 @@ namespace WhiskeyRealism
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
             EnableConstructionSiteSteering = Config.Bind(
                 "Construction", "Enable Construction Site Steering", false,
-                "Default OFF. Future valve for bestiipplaces site substitution after observation validates it.");
+                "Default OFF. Enables ConstructionIntentLedger private-building probability steering without replacing bestiipplaces or bypassing vanilla gates.");
             EnableSupplyDepotSteering = Config.Bind(
                 "Construction", "Enable Supply Depot Steering", false,
                 "Default OFF. Future valve for supply depot steering after observer telemetry proves safe candidate selection.");
@@ -90,7 +90,7 @@ namespace WhiskeyRealism
                 "Default OFF. Future valve for fort site steering after fort-site and unit-range telemetry prove realizable sites.");
             EnableTelegraphAI = Config.Bind(
                 "Construction", "Enable Telegraph AI", false,
-                "Default OFF. Future valve for conservative connected-chain telegraph construction.");
+                "Default OFF. Enables conservative connected-chain telegraph construction with support-unit and final-placement validation.");
             EnableRailroadSteering = Config.Bind(
                 "Construction", "Enable Railroad Steering", false,
                 "Default OFF. Future valve for per-line railroad steering. Observation remains active through telemetry.");
@@ -102,7 +102,7 @@ namespace WhiskeyRealism
                 "Emit verbose construction candidate and actual-start details.");
             MaxActiveTelegraphConstructionsPerFaction = Config.Bind(
                 "Construction", "Max Active Telegraph Constructions Per Faction", 1,
-                "Future telegraph AI cap. Current slice records the value but does not build telegraphs.");
+                "Caps simultaneously active Whiskey telegraph constructions per faction when Telegraph AI is enabled.");
             MaxRailroadStartsPerFactionPerMonth = Config.Bind(
                 "Construction", "Max Railroad Starts Per Faction Per Month", 1,
                 "Future railroad steering cap. Current slice observes vanilla railroad starts only.");
