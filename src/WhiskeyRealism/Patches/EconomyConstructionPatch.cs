@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Util;
 
@@ -55,6 +56,18 @@ namespace WhiskeyRealism.Patches
                     if (!CandidateEligibleForVanillaPath(alliance, state, place, type)) continue;
 
                     float mult = FiscalConstructionScorer.Multiplier(intent, alliance, type.name, type.subsidytype);
+                    string constructionReason = "fiscal-only";
+                    if (ConstructionSteeringEnabled())
+                    {
+                        var steering = ConstructionSteeringScorer.DecidePrivateMultiplier(
+                            GetConstructionIntent(alliance),
+                            buildingType,
+                            type.name,
+                            mult);
+                        mult = steering.Multiplier;
+                        constructionReason = steering.Reason;
+                    }
+
                     int key = Key(alliance, buildingType);
                     float originalProb = oldProb;
                     BiasStamp previous;
@@ -97,13 +110,46 @@ namespace WhiskeyRealism.Patches
                         Plugin.Log.LogInfo(
                             $"[Patch:EconomyConstruction] alliance={alliance} building={type.name} " +
                             $"oldProb={oldProb:F3} originalProb={originalProb:F3} " +
-                            $"newProb={newProb:F3} posture={intent.Posture}");
+                            $"newProb={newProb:F3} posture={intent.Posture} constructionReason={constructionReason}");
                     }
                 }
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("economy-construction:prefix", "[Patch:EconomyConstruction] prefix failed: " + ex.Message);
+            }
+        }
+
+        private static bool ConstructionSteeringEnabled()
+        {
+            try
+            {
+                return Plugin.Instance != null &&
+                    Plugin.Instance.EnableConstructionSiteSteering != null &&
+                    Plugin.Instance.EnableConstructionSiteSteering.Value;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static ConstructionOutput GetConstructionIntent(int alliance)
+        {
+            try
+            {
+                var coordinator = StrategicCoordinator.Instance;
+                if (coordinator == null || coordinator.ConstructionIntents == null)
+                    return null;
+
+                return alliance >= 0 && alliance < coordinator.ConstructionIntents.Length
+                    ? coordinator.ConstructionIntents[alliance]
+                    : null;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("economy-construction:construction-intent", "[Patch:EconomyConstruction] construction intent read failed: " + ex.Message);
+                return null;
             }
         }
 
