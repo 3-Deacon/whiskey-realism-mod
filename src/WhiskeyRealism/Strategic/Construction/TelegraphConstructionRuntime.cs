@@ -286,13 +286,13 @@ namespace WhiskeyRealism.Strategic.Construction
                 if (battleUnits == null ||
                     battleUnits.frontline2 == null ||
                     battleUnits.frontline2.numberofupdates <= 0)
-                    return true;
+                    return false;
 
                 return battleUnits.frontline2.GetSideOnPosition(position) == alliance;
             }
             catch
             {
-                return true;
+                return false;
             }
         }
 
