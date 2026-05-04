@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Util;
@@ -12,6 +13,7 @@ namespace WhiskeyRealism.Strategic.Construction
         private const float SupportRangeFactor = 0.85f;
         private const float PlacementOriginOffset = 0.12f;
         private const float PlacementSearchEpsilon = 0.5f;
+        private static readonly Dictionary<CBuilding, PendingTelegraph> PendingTelegraphs = new Dictionary<CBuilding, PendingTelegraph>();
 
         public static bool TryStartTelegraph(int alliance, ConstructionOutput construction)
         {
@@ -70,6 +72,42 @@ namespace WhiskeyRealism.Strategic.Construction
                         building.BuildingType + " owner=" + building.Owner);
                     return false;
                 }
+
+                CBuilding.AIPlacement placement;
+                if (!TryFindPlacement(building, candidate.Iip, out placement))
+                {
+                    OnceLog.Warning(
+                        "telegraph-ai:no-placement:" + alliance,
+                        "[TelegraphAI] alliance=" + alliance + " action=start-rejected reason=no-ai-placement");
+                    return false;
+                }
+
+                string reserveReason;
+                if (!TryReserveIip(candidate.Iip, building, out reserveReason))
+                {
+                    RemovePlacement(placement);
+                    RemoveBuilding(building);
+                    OnceLog.Warning(
+                        "telegraph-ai:start-rejected:" + alliance + ":" + reserveReason,
+                        "[TelegraphAI] alliance=" + alliance + " action=start-rejected reason=" + reserveReason);
+                    return false;
+                }
+
+                PendingTelegraphs[building] = new PendingTelegraph
+                {
+                    Alliance = alliance,
+                    Placeholder = building,
+                    SupportUnit = candidate.Unit,
+                    Iip = candidate.Iip,
+                    RequestedSite = candidate.Site,
+                    TelegraphRange = candidate.TelegraphRange,
+                    SupportRange = candidate.ActualSupportRange,
+                    AnchorPosition = candidate.AnchorPosition,
+                    AnchorToRequestedDistance = candidate.AnchorToSiteDistance,
+                    SupportToRequestedDistance = candidate.UnitToSiteDistance,
+                    EffectiveConnectionRange = candidate.EffectiveConnectionRange,
+                    EffectiveSupportRange = candidate.EffectiveSupportRange
+                };
 
                 OnceLog.Info(
                     "telegraph-ai:start:" + alliance,
@@ -165,7 +203,8 @@ namespace WhiskeyRealism.Strategic.Construction
 
             float margin = PlacementSearchMargin();
             float effectiveConnectionRange = (telegraphRange * ConnectionRangeFactor) - margin;
-            float effectiveSupportRange = (unit.buglerange * SupportRangeFactor) - margin;
+            float actualSupportRange = unit.buglerange;
+            float effectiveSupportRange = actualSupportRange * SupportRangeFactor;
             if (effectiveConnectionRange <= 0f)
             {
                 rejectReason = "connection-range-too-small";
@@ -221,6 +260,9 @@ namespace WhiskeyRealism.Strategic.Construction
                 Unit = unit,
                 Iip = iip,
                 Site = site,
+                TelegraphRange = telegraphRange,
+                ActualSupportRange = actualSupportRange,
+                AnchorPosition = anchor,
                 AnchorDistance = anchorDistance,
                 AnchorToSiteDistance = XzDistance(anchor, site),
                 UnitToSiteDistance = XzDistance(unitPosition, site),
@@ -440,6 +482,32 @@ namespace WhiskeyRealism.Strategic.Construction
             }
         }
 
+        private static bool EnemyNearPosition(Vector3 position, int alliance, float range)
+        {
+            try
+            {
+                if (range <= 0f) return true;
+                var units = BattleUnits.campaignunitlist ?? BattleUnits.completeunitlist;
+                if (units == null) return true;
+
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var unit = units[i];
+                    if (unit == null || unit.alliance == alliance) continue;
+                    if (!((Component)unit).gameObject.activeInHierarchy) continue;
+                    if (unit.isrouted) continue;
+                    if (XzDistance(((Component)unit).transform.position, position) <= range)
+                        return true;
+                }
+            }
+            catch
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         private static int CountActiveTelegraphs(int alliance)
         {
             try
@@ -619,6 +687,320 @@ namespace WhiskeyRealism.Strategic.Construction
             }
         }
 
+        private static bool TryReserveIip(IIP iip, CBuilding building, out string rejectReason)
+        {
+            rejectReason = "unknown";
+            try
+            {
+                if (iip == null)
+                {
+                    rejectReason = "iip-null";
+                    return false;
+                }
+
+                var current = iip.currentlyunderconstruction;
+                if (current != null && current != building)
+                {
+                    rejectReason = "iip-reservation-changed";
+                    return false;
+                }
+
+                iip.currentlyunderconstruction = building;
+                return true;
+            }
+            catch
+            {
+                rejectReason = "iip-reservation-failed";
+                return false;
+            }
+        }
+
+        private static bool TryFindPlacement(CBuilding placeholder, IIP iip, out CBuilding.AIPlacement placement)
+        {
+            placement = null;
+            try
+            {
+                if (placeholder == null || CBuilding.aiplacements == null) return false;
+
+                for (int i = 0; i < CBuilding.aiplacements.Count; i++)
+                {
+                    var candidate = CBuilding.aiplacements[i];
+                    if (candidate == null) continue;
+                    if (candidate.buildingtype != CBuilding.id_telegraphstation) continue;
+                    if (candidate.buildingref != placeholder) continue;
+                    if (iip != null && candidate.IIPcalled != iip) continue;
+
+                    placement = candidate;
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            return false;
+        }
+
+        private static bool TryCurrentPendingPlacement(out CBuilding placeholder, out PendingTelegraph pending)
+        {
+            placeholder = null;
+            pending = default(PendingTelegraph);
+            try
+            {
+                if (CBuilding.aiplacements == null || CBuilding.aiplacements.Count <= 0)
+                    return false;
+
+                var placement = CBuilding.aiplacements[0];
+                if (placement == null || placement.buildingtype != CBuilding.id_telegraphstation)
+                    return false;
+
+                placeholder = placement.buildingref;
+                if (placeholder == null) return false;
+                return PendingTelegraphs.TryGetValue(placeholder, out pending);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void RemovePlacement(CBuilding.AIPlacement placement)
+        {
+            try
+            {
+                if (placement == null || CBuilding.aiplacements == null) return;
+                CBuilding.aiplacements.Remove(placement);
+            }
+            catch { }
+        }
+
+        private static void RemoveBuilding(CBuilding building)
+        {
+            try
+            {
+                if (building == null) return;
+                building.RemoveBuilding();
+                BattleUnits.CheckForEmptyBuildingReferences(building);
+            }
+            catch { }
+        }
+
+        private static void ClearIipReservation(PendingTelegraph pending, CBuilding finalBuilding)
+        {
+            try
+            {
+                if (pending.Iip == null) return;
+                var current = pending.Iip.currentlyunderconstruction;
+                if (current == pending.Placeholder || current == finalBuilding)
+                    pending.Iip.currentlyunderconstruction = null;
+            }
+            catch { }
+        }
+
+        private static void KeepIipReservation(PendingTelegraph pending, CBuilding finalBuilding)
+        {
+            try
+            {
+                if (pending.Iip == null || finalBuilding == null) return;
+                var current = pending.Iip.currentlyunderconstruction;
+                if (current == null || current == pending.Placeholder || current == finalBuilding)
+                {
+                    pending.Iip.currentlyunderconstruction = finalBuilding;
+                    return;
+                }
+
+                OnceLog.Warning(
+                    "telegraph-ai:iip-final-reservation:" + pending.Alliance + ":iip-reservation-changed",
+                    "[TelegraphAI] alliance=" + pending.Alliance +
+                    " action=placed-warning reason=iip-reservation-changed");
+            }
+            catch { }
+        }
+
+        private static bool TryValidateFinalPlacement(
+            CBuilding finalBuilding,
+            PendingTelegraph pending,
+            int type,
+            int owner,
+            out string reason,
+            out PlacementDistances distances)
+        {
+            reason = "unknown";
+            distances = default(PlacementDistances);
+            try
+            {
+                if (finalBuilding == null)
+                {
+                    reason = "building-null";
+                    return false;
+                }
+                if (type != CBuilding.id_telegraphstation ||
+                    finalBuilding.BuildingType != CBuilding.id_telegraphstation)
+                {
+                    reason = "wrong-type";
+                    return false;
+                }
+                if (owner != pending.Alliance || finalBuilding.Owner != pending.Alliance)
+                {
+                    reason = "wrong-owner";
+                    return false;
+                }
+
+                Vector3 finalPosition = ((Component)finalBuilding).transform.position;
+                distances.RequestedToFinal = XzDistance(pending.RequestedSite, finalPosition);
+                distances.AnchorToFinal = XzDistance(pending.AnchorPosition, finalPosition);
+
+                if (pending.TelegraphRange <= 0f)
+                {
+                    reason = "telegraph-range-zero";
+                    return false;
+                }
+                if (!ConnectedToCapitalOrChain(pending.Alliance, finalPosition, pending.TelegraphRange))
+                {
+                    reason = "not-connected";
+                    return false;
+                }
+
+                if (pending.SupportUnit == null || pending.SupportRange <= 0f)
+                {
+                    reason = "support-unit-missing";
+                    return false;
+                }
+
+                Vector3 supportPosition = ((Component)pending.SupportUnit).transform.position;
+                distances.SupportToFinal = XzDistance(supportPosition, finalPosition);
+                if (distances.SupportToFinal > pending.SupportRange)
+                {
+                    reason = "support-out-of-range";
+                    return false;
+                }
+
+                if (!SafeRear(finalPosition, pending.Alliance))
+                {
+                    reason = "unsafe-rear";
+                    return false;
+                }
+                if (EnemyNearPosition(finalPosition, pending.Alliance, pending.SupportRange))
+                {
+                    reason = "enemy-nearby";
+                    return false;
+                }
+
+                reason = "ok";
+                return true;
+            }
+            catch
+            {
+                reason = "validation-failed";
+                return false;
+            }
+        }
+
+        private static void UpdateTelegraphConnectionsIfAvailable(CBuilding finalBuilding, int alliance)
+        {
+            try
+            {
+                if (BattleUnits.telegraphstation != null)
+                {
+                    for (int i = 0; i < BattleUnits.telegraphstation.Count; i++)
+                    {
+                        var station = BattleUnits.telegraphstation[i];
+                        if (station == null || station.BuildingType != CBuilding.id_telegraphstation)
+                            continue;
+                        station.UpdateTelegraphConnections();
+                    }
+                }
+
+                var method = AccessTools.Method(typeof(CBuilding), "CheckTelegraphConnection");
+                if (method != null && finalBuilding != null)
+                    method.Invoke(finalBuilding, null);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "telegraph-ai:connection-update:" + alliance,
+                    "[TelegraphAI] alliance=" + alliance +
+                    " action=placed-warning reason=connection-update-failed message=" + ex.Message);
+            }
+        }
+
+        private static string FormatPosition(Vector3 position)
+        {
+            return position.x.ToString("0") + "," + position.z.ToString("0");
+        }
+
+        [HarmonyPatch(typeof(CBuilding), "Place")]
+        private static class PlacePatch
+        {
+            [HarmonyPostfix]
+            private static void Postfix(
+                CBuilding __result,
+                int type,
+                int owner,
+                bool newlycreated,
+                bool pay)
+            {
+                if (type != CBuilding.id_telegraphstation || !newlycreated || pay)
+                    return;
+
+                try
+                {
+                    CBuilding placeholder;
+                    PendingTelegraph pending;
+                    if (!TryCurrentPendingPlacement(out placeholder, out pending))
+                        return;
+
+                    PlacementDistances distances;
+                    string reason;
+                    if (TryValidateFinalPlacement(__result, pending, type, owner, out reason, out distances))
+                    {
+                        UpdateTelegraphConnectionsIfAvailable(__result, pending.Alliance);
+                        KeepIipReservation(pending, __result);
+                        PendingTelegraphs.Remove(placeholder);
+
+                        Vector3 finalPosition = ((Component)__result).transform.position;
+                        string message = "[TelegraphAI] alliance=" + pending.Alliance +
+                            " action=placed requested=" + FormatPosition(pending.RequestedSite) +
+                            " final=" + FormatPosition(finalPosition) +
+                            " requestedFinalDist=" + distances.RequestedToFinal.ToString("F1") +
+                            " anchorFinalDist=" + distances.AnchorToFinal.ToString("F1") +
+                            " supportFinalDist=" + distances.SupportToFinal.ToString("F1");
+                        if (ConstructionVerboseLoggingEnabled())
+                        {
+                            message +=
+                                " anchorRequestedDist=" + pending.AnchorToRequestedDistance.ToString("F1") +
+                                " supportRequestedDist=" + pending.SupportToRequestedDistance.ToString("F1") +
+                                " connectRange=" + pending.EffectiveConnectionRange.ToString("F1") +
+                                " supportRange=" + pending.EffectiveSupportRange.ToString("F1");
+                        }
+
+                        OnceLog.Info("telegraph-ai:placed:" + pending.Alliance, message);
+                        return;
+                    }
+
+                    string finalPositionText = __result != null
+                        ? FormatPosition(((Component)__result).transform.position)
+                        : "<none>";
+                    RemoveBuilding(__result);
+                    ClearIipReservation(pending, __result);
+                    PendingTelegraphs.Remove(placeholder);
+                    OnceLog.Warning(
+                        "telegraph-ai:placed-rejected:" + pending.Alliance + ":" + reason,
+                        "[TelegraphAI] alliance=" + pending.Alliance +
+                        " action=placed-rejected reason=" + reason +
+                        " requested=" + FormatPosition(pending.RequestedSite) +
+                        " final=" + finalPositionText);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "telegraph-ai:place-postfix",
+                        "[TelegraphAI] action=placed-warning reason=postfix-failed message=" + ex.Message);
+                }
+            }
+        }
+
         private static bool IsOwnCampaignGroup(Regiment unit, out string rejectReason)
         {
             rejectReason = "campaign-group-mismatch";
@@ -746,6 +1128,9 @@ namespace WhiskeyRealism.Strategic.Construction
             public Regiment Unit;
             public IIP Iip;
             public Vector3 Site;
+            public float TelegraphRange;
+            public float ActualSupportRange;
+            public Vector3 AnchorPosition;
             public float AnchorDistance;
             public float AnchorToSiteDistance;
             public float UnitToSiteDistance;
@@ -754,6 +1139,29 @@ namespace WhiskeyRealism.Strategic.Construction
             public float EffectiveSupportRange;
             public float CommandDelayPressure;
             public float FormationImportance;
+        }
+
+        private struct PendingTelegraph
+        {
+            public int Alliance;
+            public CBuilding Placeholder;
+            public Regiment SupportUnit;
+            public IIP Iip;
+            public Vector3 RequestedSite;
+            public float TelegraphRange;
+            public float SupportRange;
+            public Vector3 AnchorPosition;
+            public float AnchorToRequestedDistance;
+            public float SupportToRequestedDistance;
+            public float EffectiveConnectionRange;
+            public float EffectiveSupportRange;
+        }
+
+        private struct PlacementDistances
+        {
+            public float RequestedToFinal;
+            public float AnchorToFinal;
+            public float SupportToFinal;
         }
     }
 }
