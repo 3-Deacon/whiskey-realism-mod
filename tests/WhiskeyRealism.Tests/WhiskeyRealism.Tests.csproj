@@ -57,5 +57,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseThreatSignature.cs" Link="DefenseThreatSignature.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefensePackageAggregator.cs" Link="DefensePackageAggregator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseCooldownTable.cs" Link="DefenseCooldownTable.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentInput.cs" Link="DefenseIntentInput.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentLedger.cs" Link="DefenseIntentLedger.cs" />
   </ItemGroup>
 </Project>
