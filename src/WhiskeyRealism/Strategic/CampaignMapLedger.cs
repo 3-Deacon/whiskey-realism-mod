@@ -32,6 +32,7 @@ namespace WhiskeyRealism.Strategic
         public float IncomeTax;
         public CampaignTownRole Roles;
         public Theater Theater = Theater.Unknown;
+        public AssetStrategicRole StrategicRole = AssetStrategicRole.None;
     }
 
     public sealed class CampaignMapState
@@ -70,6 +71,7 @@ namespace WhiskeyRealism.Strategic
         public float Blocked;
         public float Capacity;
         public Theater Theater = Theater.Unknown;
+        public AssetStrategicRole StrategicRole = AssetStrategicRole.None;
     }
 
     public sealed class CampaignMapLedger
@@ -256,7 +258,8 @@ namespace WhiskeyRealism.Strategic
                 RepresentingPopulation = source.RepresentingPopulation,
                 AvailableWorkforceLevel = source.AvailableWorkforceLevel,
                 PrivateWealth = source.PrivateWealth,
-                IncomeTax = source.IncomeTax
+                IncomeTax = source.IncomeTax,
+                StrategicRole = source.StrategicRole
             };
         }
 
@@ -275,7 +278,8 @@ namespace WhiskeyRealism.Strategic
                 Level = source.Level,
                 Condition = source.Condition,
                 Blocked = source.Blocked,
-                Capacity = source.Capacity
+                Capacity = source.Capacity,
+                StrategicRole = source.StrategicRole
             };
         }
 

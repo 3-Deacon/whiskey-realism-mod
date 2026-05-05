@@ -120,7 +120,8 @@ static class Program
             ("perk scorer favors union blockade fleets", PerkScorerFavorsUnionBlockadeFleets),
             ("perk scorer favors csa raiding fleets", PerkScorerFavorsCsaRaidingFleets),
             ("perk scorer skips unavailable candidates", PerkScorerSkipsUnavailableCandidates),
-            ("front sector signature ignores sub-bucket ratio jitter", FrontSectorSignatureIgnoresSubBucketRatioJitter)
+            ("front sector signature ignores sub-bucket ratio jitter", FrontSectorSignatureIgnoresSubBucketRatioJitter),
+            ("asset strategic role flags compose additively", AssetStrategicRoleFlagsComposeAdditively)
         };
 
         foreach (var test in tests)
@@ -2252,6 +2253,15 @@ static class Program
             }
         });
         AssertEqual(a.Signature(), b.Signature());
+    }
+
+    private static void AssetStrategicRoleFlagsComposeAdditively()
+    {
+        var role = AssetStrategicRole.BlockadeRunnerPort | AssetStrategicRole.KeyFort;
+        AssertTrue((role & AssetStrategicRole.BlockadeRunnerPort) != 0, "blockade flag missing");
+        AssertTrue((role & AssetStrategicRole.KeyFort) != 0, "key-fort flag missing");
+        AssertTrue((role & AssetStrategicRole.RearSafePort) == 0, "unset flag should not appear");
+        AssertEqual(AssetStrategicRole.None, default(AssetStrategicRole));
     }
 
     private static void AssertEqual<T>(T expected, T actual)
