@@ -18,6 +18,7 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("factionName")] public string FactionName;
         [JsonProperty("currentEra")]  public string CurrentEra;
         [JsonProperty("cic")]         public CICDto Cic;
+        [JsonProperty("directorMemory")] public DirectorMemoryDto DirectorMemory;
     }
 
     internal class CICDto
@@ -96,5 +97,18 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("commanderName")] public List<string> CommanderName = new List<string>();
         [JsonProperty("casualties")] public List<int> Casualties = new List<int>();
         [JsonProperty("commanderKia")] public List<int> CommanderKia = new List<int>();
+    }
+
+    internal class DirectorMemoryDto
+    {
+        [JsonProperty("pace")]            public int Pace;
+        [JsonProperty("intent")]          public int Intent;
+        [JsonProperty("risk")]            public int Risk;
+        [JsonProperty("theaterPriority")] public int TheaterPriority;
+        [JsonProperty("lastFullRefresh")] public int LastFullRefreshDay = -1;
+        [JsonProperty("capitalStreak")]   public int CapitalDangerStreakDays;
+        [JsonProperty("daysSinceBattle")] public int DaysSinceLastBattle;
+        [JsonProperty("sourceSig")]       public string LastSourceSignature;
+        [JsonProperty("recentEvents")]    public List<string> RecentEventSummaries = new List<string>();
     }
 }
