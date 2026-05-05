@@ -300,6 +300,7 @@ namespace WhiskeyRealism.Strategic
 
         private void RecomputePressure()
         {
+            Pressure = new FormationPressureSummary();
             var areaScores = new Dictionary<string, int>();
             foreach (var assignment in _ordered)
             {

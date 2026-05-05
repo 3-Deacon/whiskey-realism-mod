@@ -98,6 +98,7 @@ static class Program
             ("operational probe escalates after favorable contact", OperationalProbeEscalatesAfterFavorableContact),
             ("operational probe refuses critical hold donor", OperationalProbeRefusesCriticalHoldDonor),
             ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
+            ("recompute pressure resets counters before counting", RecomputePressureResetsCountersBeforeCounting),
             ("operational tempo chapter one delays escalation", OperationalTempoChapterOneDelaysEscalation),
             ("operational tempo late union sustains pressure", OperationalTempoLateUnionSustainsPressure),
             ("operational tempo winter slows probes", OperationalTempoWinterSlowsProbes),
@@ -1773,6 +1774,45 @@ static class Program
         AssertEqual(FormationDirective.Probe, assignment.Directive);
         AssertEqual("limited-contact-probe", assignment.Reason);
         AssertEqual(false, assignment.TransferDonorAllowed);
+    }
+
+    private static void RecomputePressureResetsCountersBeforeCounting()
+    {
+        var snap = new FormationSnapshot
+        {
+            UnitKey = "U1",
+            AllianceId = 0,
+            UnitType = 16,
+            IsTopUnit = true,
+            AreaKey = "RichmondCorridor",
+            SectorKey = "RichmondCorridor",
+            GroupStrengthActive = 8000f,
+            GroupStrengthDirect = 8000f,
+            Morale = 0.2f,
+            Readiness = 0.2f,
+            RifleAmmo = 0.2f,
+            ArtilleryAmmo = 0.2f,
+            Supply = 0.2f
+        };
+        var ledger = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Decisive1863, "RichmondCorridor");
+
+        int recoverAfterBuild = ledger.Pressure.RecoverCount;
+        AssertEqual(1, recoverAfterBuild, "recover after build");
+
+        for (int i = 0; i < 100; i++)
+        {
+            ledger.ApplyOperationalProbe(new OperationalProbeOutput
+            {
+                Decision = OperationalProbeDecision.Probe,
+                SelectedUnitKey = "U1",
+                Reason = "test"
+            });
+        }
+
+        AssertTrue(ledger.Pressure.RecoverCount <= 1,
+            "RecoverCount must be bounded by Assignments.Count after 100 overlays — was " + ledger.Pressure.RecoverCount);
+        AssertTrue(ledger.Pressure.LowSupplyCount <= 1, "LowSupplyCount bounded");
+        AssertTrue(ledger.Pressure.LowAmmoCount <= 1,   "LowAmmoCount bounded");
     }
 
     private static void OperationalTempoChapterOneDelaysEscalation()
