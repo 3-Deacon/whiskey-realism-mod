@@ -373,8 +373,12 @@ namespace WhiskeyRealism.Strategic
                 DefenseIntents[alliance] = output;
 
                 // Refresh the per-alliance "seen this tick" SIF set so the NEXT
-                // tick can detect collapsed entries via VanillaCollapsed.
-                _previousSifSignatures[alliance] = CollectSifSignatures(output);
+                // tick can detect collapsed entries via VanillaCollapsed. Source
+                // from input.Threats — the runtime's observation of vanilla
+                // seainvasionforce is the ground truth, not the builder output
+                // (which may filter Recovered/expired entries before they reach
+                // output.Responses).
+                _previousSifSignatures[alliance] = CollectSifSignatures(input);
 
                 bool verbose = ConfigValue(plugin.VerboseLogging) || ConfigValue(plugin.DefenseIntentVerboseLogging);
                 if (verbose || _defenseIntentSignatures[alliance] != output.Signature)
@@ -457,14 +461,17 @@ namespace WhiskeyRealism.Strategic
             catch { return null; }
         }
 
-        private static HashSet<string> CollectSifSignatures(DefenseIntentLedgerOutput output)
+        private static HashSet<string> CollectSifSignatures(DefenseIntentInput input)
         {
             var set = new HashSet<string>();
-            if (output == null || output.Responses == null) return set;
-            foreach (var r in output.Responses)
+            if (input == null || input.Threats == null) return set;
+            foreach (var t in input.Threats)
             {
-                if (r?.Threat?.Signature == null) continue;
-                if (r.Threat.Signature.StartsWith("sif:")) set.Add(r.Threat.Signature);
+                if (t == null) continue;
+                if (t.Kind != DefenseThreatSourceKind.SeaInvasion) continue;
+                string sig = DefenseThreatSignature.ForSeaInvasion(
+                    t.InvasionForceInstanceId, t.SpotName, t.SourcePortName);
+                set.Add(sig);
             }
             return set;
         }
