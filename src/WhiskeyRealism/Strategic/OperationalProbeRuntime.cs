@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
@@ -19,7 +20,8 @@ namespace WhiskeyRealism.Strategic
             EraStage era,
             int policyChapter,
             int campaignMonth,
-            PersonalityVector personality)
+            PersonalityVector personality,
+            IReadOnlyList<BattleHistoryRecord> battleHistory)
         {
             int objectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
             var target = ObjectiveAdapter.ResolveObjectivePosition(objectiveId);
@@ -50,6 +52,25 @@ namespace WhiskeyRealism.Strategic
                 var assignment = formation.GetAssignment(previous.UnitKey);
                 if (assignment != null)
                     input.CurrentFriendlyStrength = assignment.CombatAvailability;
+            }
+
+            if (target.HasValue)
+            {
+                var contactInput = new ContactEvidenceInput
+                {
+                    ObservingAllianceId = allianceId,
+                    TargetPosition = target.Value,
+                    CurrentEnemyStrength = input.CurrentEnemyStrength,
+                    CurrentFriendlyStrength = input.CurrentFriendlyStrength,
+                    PreviousObservedEnemyStrength = previous?.LastObservedEnemyStrength ?? 0f,
+                    EnemyReactionMultiplier = input.Options.EnemyReactionMultiplier,
+                    EscalateFriendlyRatio = input.Options.EscalateFriendlyRatio,
+                    WithdrawFriendlyRatio = input.Options.WithdrawFriendlyRatio,
+                    BattleHistory = battleHistory,
+                    SpatialMaxDistance = GamePrefs.aimaximumdistancetosearchforunitrelocations,
+                    CurrentDaySerial = daySerial
+                };
+                input.ContactEvidence = ContactEvidenceLedger.Build(contactInput).Evidence;
             }
 
             return input;

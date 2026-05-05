@@ -98,6 +98,7 @@ static class Program
             ("operational probe escalates after favorable contact", OperationalProbeEscalatesAfterFavorableContact),
             ("operational probe refuses critical hold donor", OperationalProbeRefusesCriticalHoldDonor),
             ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
+            ("operational probe stays continuing on no contact even after minimum days", OperationalProbeStaysContinuingOnNoContactAfterMinimumDays),
             ("recompute pressure resets counters before counting", RecomputePressureResetsCountersBeforeCounting),
             ("operational tempo chapter one delays escalation", OperationalTempoChapterOneDelaysEscalation),
             ("operational tempo late union sustains pressure", OperationalTempoLateUnionSustainsPressure),
@@ -1784,6 +1785,30 @@ static class Program
         AssertEqual(FormationDirective.Probe, assignment.Directive);
         AssertEqual("limited-contact-probe", assignment.Reason);
         AssertEqual(false, assignment.TransferDonorAllowed);
+    }
+
+    private static void OperationalProbeStaysContinuingOnNoContactAfterMinimumDays()
+    {
+        var input = BuildProbeInput();
+        input.DaySerial = 107;
+        input.Previous = new OperationalProbeState
+        {
+            ProbeId = "1:VirginiaCapitalCorridor:probe-corps",
+            UnitKey = "probe-corps",
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            SourceSectorKey = "VirginiaCapitalCorridor",
+            StartedDaySerial = 100,
+            LastObservedEnemyStrength = 0f,
+            LastObservedFriendlyStrength = 8000f
+        };
+        input.CurrentEnemyStrength = 0f;
+        input.CurrentFriendlyStrength = 8000f;
+        input.Options = new OperationalProbeOptions { MinimumProbeDays = 3, EscalateFriendlyRatio = 1.8f, WithdrawFriendlyRatio = 0.55f };
+        input.ContactEvidence = ContactEvidence.NoContact;
+
+        var output = OperationalProbeLedger.Build(input);
+        AssertTrue(output.Decision != OperationalProbeDecision.Escalate, "no-contact must not escalate");
+        AssertEqual(OperationalProbeDecision.Probe, output.Decision);
     }
 
     private static void RecomputePressureResetsCountersBeforeCounting()

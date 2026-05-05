@@ -25,7 +25,7 @@ namespace WhiskeyRealism.Strategic
         public float EnemyReactionMultiplier;
         public float EscalateFriendlyRatio;
         public float WithdrawFriendlyRatio;
-        public List<BattleHistoryRecord> BattleHistory;
+        public IReadOnlyList<BattleHistoryRecord> BattleHistory;
         public float SpatialMaxDistance;
         public int CurrentDaySerial;
         public int WithinDays = 7;

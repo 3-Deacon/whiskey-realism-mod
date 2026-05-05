@@ -738,7 +738,8 @@ namespace WhiskeyRealism.Strategic
                     era,
                     SafePolicyChapter(),
                     month,
-                    personality);
+                    personality,
+                    BattleHistory);
 
                 var output = OperationalProbeLedger.Build(input);
                 OperationalProbes[alliance] = output;
