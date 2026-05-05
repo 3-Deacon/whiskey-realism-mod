@@ -27,13 +27,13 @@ Six choices locked during the 2026-05-02 brainstorming session. Reject any spec 
 | 3 | Era × faction × officer personality system. | User explicitly asked for both factions to feel different (faction asymmetry) and history-flavored. |
 | 4 | Triggered-scripted officer succession (~12 events, ~60-80% historical fidelity). | Recognizable patterns without deterministic runs. |
 | 5 | Phased operational plans (2-4 phases, one active per side). | Captures real campaigns (Peninsula, Vicksburg) without combinatorial explosion. |
-| 6 | Weekly + event-triggered cadence; events mark plans dirty (next-tick processing); adjust by default, replan only on assumption-invalidating events. Monthly remains a heartbeat/checkpoint boundary only. | Campaign speed makes monthly command too slow; weekly keeps strategic control responsive without daily thrash. |
+| 6 | Daily + event-triggered cadence; events mark plans dirty (next-tick processing); adjust by default, replan only on assumption-invalidating events. Monthly remains a heartbeat/checkpoint boundary only. | Campaign speed makes monthly command too slow; daily keeps strategic control fully responsive. The Defense Intent Ledger slice migrated the operational tick from weekly to daily on 2026-05-04; `DefenseCooldownTable` idempotency and `FrontSectorRuntime.Signature` bucket coarsening make daily safe from thrash (see `docs/superpowers/specs/2026-05-05-defense-intent-ledger-design.md`). |
 
 ## 3. Architecture — two-tier hierarchy
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  StrategicCoordinator   (singleton, weekly review + monthly heartbeat) │
+│  StrategicCoordinator   (singleton, daily review + monthly heartbeat) │
 │  • runs the 1st-of-month re-eval loop                        │
 │  • listens for event triggers (KIA, town loss, defeat)       │
 └─────────┬────────────────────────────────────┬───────────────┘
@@ -65,7 +65,7 @@ Six choices locked during the 2026-05-02 brainstorming session. Reject any spec 
 
 Without this rule the layers fight each other (CIC says concentrate, theater commander says raid) and AI behavior becomes opaque.
 
-**Read-only mod-state invariant:** Harmony patches **read** mod state, never **write** to it. State writes happen only on weekly strategic review and event-trigger handlers. This is the load-bearing invariant that keeps the bridge debuggable.
+**Read-only mod-state invariant:** Harmony patches **read** mod state, never **write** to it. State writes happen only on daily strategic review and event-trigger handlers. This is the load-bearing invariant that keeps the bridge debuggable.
 
 ### 3.1 W&L player-CIC gate (load-bearing)
 
@@ -247,7 +247,7 @@ public enum PhaseTransition
 
 ### 4.6 Succession events
 
-~12 canonical events. Each = `(date, war-state condition, new officer assignment)`. Fires on weekly strategic review when both gates pass. Won't fire if the named replacement is already in command (idempotent).
+~12 canonical events. Each = `(date, war-state condition, new officer assignment)`. Fires on daily strategic review when both gates pass. Won't fire if the named replacement is already in command (idempotent).
 
 | # | Event | Date | War-state condition |
 |---|---|---|---|
@@ -313,7 +313,7 @@ public static class ObjectiveAdapter
 
 ### 5.1 Strategic cadence
 
-Hooked via Postfix on `AICampaign.Update`. The hook reads `BattleUnits.uniStormSystem.dayCounter/monthCounter` plus `BattleUnits.year`, then self-latches into weekly strategic review buckets and monthly heartbeat boundaries.
+Hooked via Postfix on `AICampaign.Update`. The hook reads `BattleUnits.uniStormSystem.dayCounter/monthCounter` plus `BattleUnits.year`, then fires a daily operational tick via `OnDailyOperationalTick` and a monthly heartbeat on month rollover.
 
 ```
 StrategicCoordinator.RunStrategicReview():
@@ -348,7 +348,7 @@ StrategicCoordinator.OnEventTrigger(faction, eventType, details):
   cic = CICs[faction]
   if eventType invalidates cic.ActivePlan's assumptions:
     cic.ActivePlan.IsDirty = true
-  // events do NOT cause immediate re-eval; next weekly review processes the dirty bit
+  // events do NOT cause immediate re-eval; next daily review processes the dirty bit
 ```
 
 This deferred-processing rule prevents the AI from thrashing on a chain of events within a few game-days.
@@ -390,13 +390,13 @@ TheaterCommander.GetPerkPreference(perkId)     → used by CheckPerkSelection pa
 TheaterCommander.GetRecruitmentTheaterWeight   → used by GetBestRecruitingState patch
 ```
 
-Theater commanders cannot abandon a phase; they only signal completion (target taken/engaged) or failure (force below threshold). Phase-transition decisions belong to the CIC on weekly strategic review.
+Theater commanders cannot abandon a phase; they only signal completion (target taken/engaged) or failure (force below threshold). Phase-transition decisions belong to the CIC on daily strategic review.
 
 ## 6. Bridge layer — Harmony patches
 
 **v0.2.0 actual ship state** (10 active + 1 deferred). Patches numbered with stable ordinals (per `docs/patch-catalog.md`); withdrawn/deferred patches keep their slot. Postfix-preferred; Prefix only when the vanilla method directly mutates state we need to overwrite (#1, #6).
 
-**Current post-v0.2.2 note:** this section preserves the original Slice A design record. The live patch inventory is now authoritative in `docs/patch-catalog.md` and includes #15 `ArmyAreaTheaterPatch`, #16 `ArmyGroupManagementPatch`, weekly strategic review cadence, battle-history observers, front-sector transfer budgets, concrete #3/#4/#5/#6/#7/#8 steering, fiscal/policy/project/construction steering, fast-forward AI catch-up, and W&L command-selection retry.
+**Current post-v0.2.2 note:** this section preserves the original Slice A design record. The live patch inventory is now authoritative in `docs/patch-catalog.md` and includes #15 `ArmyAreaTheaterPatch`, #16 `ArmyGroupManagementPatch`, daily strategic review cadence (migrated from weekly by the Defense Intent Ledger slice on 2026-05-04), battle-history observers, front-sector transfer budgets, concrete #3/#4/#5/#6/#7/#8 steering, fiscal/policy/project/construction steering, fast-forward AI catch-up, and W&L command-selection retry.
 
 **Critical runtime sequencing (added v0.2.1.1 after smoke-test):** before reading any `CampaignObjective` state in `StrategicCoordinator.OnMonthlyTick`, the coordinator invokes `Policy.CheckForChapterUpdate()` via reflection. Vanilla's per-day cycle calls this method to advance `Policy.CurrentChapter` (initial value `-1`) — but on a fresh-campaign first frame, our `OnMonthlyTick` can fire before vanilla's per-day cycle has run. Without this manual invocation, `CurrentChapter == -1` deactivates every objective (their `ObjectiveChapters` lists don't contain `-1`), `CIC.Replan` returns count=0, and plans never build. Decompile reference: `Policy.CheckForChapterUpdate` at line 211604.
 
@@ -409,7 +409,7 @@ Theater commanders cannot abandon a phase; they only signal completion (target t
 | 3-5 | *(originally reserved for v0.2.1)* | — | — | — | — | Superseded by v0.2.2 concrete #3 transfer, #4 defensive-ops, and #5 battle-history observer implementations; see patch catalog. |
 | 6 | `CommanderReplacementPatch` | **Prefix** | `AICampaign.CheckAICommanderReplacements` | 17008 | SuccessionScheduler state | Superseded from gate-only: now applies scripted succession swaps with vanilla `AssignCommando` + `DoCommanderPromotion`; see patch catalog. |
 | 7-8 | *(originally reserved)* | — | — | — | — | Superseded by concrete #7 `PerkSelectionPatch` and #8 `RecruitmentPatch`; see patch catalog. |
-| 9 | `MonthlyTickHookPatch` | Postfix | `AICampaign.Update` | 11159 | — | Drives `StrategicCoordinator.NotifyDateAdvanced` from per-frame `Update`. Coordinator self-latches on 7-day in-game buckets for CIC review/replan and on month rollover for visible heartbeat, so per-frame call rate is fine. |
+| 9 | `MonthlyTickHookPatch` | Postfix | `AICampaign.Update` | 11159 | — | Drives `StrategicCoordinator.NotifyDateAdvanced` from per-frame `Update`. Coordinator fires `OnDailyOperationalTick` once per game-day for CIC review/replan and fires `OnMonthlyTick` on month rollover for the visible heartbeat; per-frame call rate is fine because the coordinator gates on day/month change. |
 
 ### 6.2 Settings-lock patches (added 2026-05-03; spec §3.2)
 
@@ -615,7 +615,7 @@ Documented in:
 
 ## 13. Open questions for implementation phase
 
-1. Historical note: v0.2.0 originally searched for a monthly hook; shipped code uses `AICampaign.Update` and self-latches into weekly review/monthly heartbeat.
+1. Historical note: v0.2.0 originally searched for a monthly hook; shipped code uses `AICampaign.Update` and fires daily operational review plus monthly heartbeat. The operational cadence was weekly through v0.2.2 and migrated to daily by the Defense Intent Ledger slice (2026-05-04).
 2. Identify how `aifaction[i].ownunits` exposes army-group-level top units (`unittyp >= 15`?). Map to TheaterCommander assignment at first encounter.
 3. Identify `CampaignObjective.GetAvailableObjectives` return semantics (cached? per-faction? recomputed on demand?). Plan-scoring depends on this.
 4. Resolved in v0.2.0 smoke: vanilla save folders are CWD-relative to the game install, not `Application.persistentDataPath`; sidecar code must keep using `Path.Combine(folder, "whiskeyrealism.json")`.
