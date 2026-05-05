@@ -236,7 +236,8 @@ static class Program
             ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk),
             ("director memory round trips through dto", DirectorMemoryRoundTripsThroughDto),
             ("cic review plan replans when phase truth says target accomplished", CicReviewPlanReplansWhenPhaseTruthSaysAccomplished),
-            ("director publish clamp suppresses second publish in same real second", DirectorPublishClampSuppressesSecondPublishInSameRealSecond)
+            ("director publish clamp suppresses second publish in same real second", DirectorPublishClampSuppressesSecondPublishInSameRealSecond),
+            ("director raises csa hold ratio under too fast collapse", DirectorRaisesCsaHoldRatioUnderTooFastCollapse)
         };
 
         foreach (var test in tests)
@@ -4992,5 +4993,17 @@ static class Program
         AssertTrue(clamp.TryPublish(stamp), "first publish in second should succeed");
         AssertTrue(!clamp.TryPublish(stamp.AddMilliseconds(50)), "second publish 50ms later should be suppressed");
         AssertTrue(clamp.TryPublish(stamp.AddSeconds(1).AddMilliseconds(1)), "publish past 1s boundary should succeed");
+    }
+
+    private static void DirectorRaisesCsaHoldRatioUnderTooFastCollapse()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 1,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical, IntentBlockedFromPreserve = false },
+            personality: new PersonalityVector());
+        AssertTrue(posture.MinimumHoldRatioModifier > 0f,
+            "TooFastCollapse for CSA must raise MinimumHoldRatio — was " + posture.MinimumHoldRatioModifier);
+        AssertTrue(posture.MinimumHoldRatioModifier <= 0.10f,
+            "MinimumHoldRatioModifier capped at +0.10");
     }
 }

@@ -95,6 +95,27 @@ namespace WhiskeyRealism.Strategic
             posture.EnemyReactionMultiplierModifier      = reactionMod;
             posture.WithdrawFriendlyRatioModifier        = withdrawMod;
             posture.MinimumProbeDaysModifier             = daysMod;
+
+            float holdMod = 0f, concessionMod = 0f;
+            switch (posture.Pace)
+            {
+                case CampaignPace.TooFastCollapse:
+                    holdMod      = +0.10f;
+                    concessionMod = +0.10f;
+                    break;
+                case CampaignPace.Overheated:
+                    holdMod = +0.05f;
+                    break;
+                case CampaignPace.LateWarPressure:
+                    if (posture.AllianceId == 0) concessionMod = -0.03f;
+                    else                          holdMod       = +0.05f;
+                    break;
+                case CampaignPace.TooQuiet:
+                    holdMod = -0.03f;
+                    break;
+            }
+            posture.MinimumHoldRatioModifier = Clamp(holdMod, -0.05f, +0.10f);
+            posture.ConcessionRatioModifier  = Clamp(concessionMod, -0.05f, +0.10f);
         }
 
         public static void ApplyTo(OperationalProbeOptions options, DirectorPosture posture)

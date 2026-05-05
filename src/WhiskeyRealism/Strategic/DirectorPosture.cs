@@ -45,5 +45,10 @@ namespace WhiskeyRealism.Strategic
         public float EscalateFriendlyRatioModifier;
         public float EnemyReactionMultiplierModifier;
         public float WithdrawFriendlyRatioModifier;
+
+        // FrontLedger transfer/hold modifiers — applied on top of FrontLedgerOptions defaults.
+        // Bounded to [-0.05, +0.10].
+        public float MinimumHoldRatioModifier;
+        public float ConcessionRatioModifier;
     }
 }
