@@ -22,6 +22,7 @@ namespace WhiskeyRealism.Strategic
         public FrontSectorLedger[] Fronts = new FrontSectorLedger[2];
         public ArmyAreaLedger[] ArmyAreas = new ArmyAreaLedger[2];
         public FormationDirectiveLedger[] FormationDirectives = new FormationDirectiveLedger[2];
+        public OperationalProbeOutput[] OperationalProbes = new OperationalProbeOutput[2];
         public FiscalOutput[] FiscalIntents = new FiscalOutput[2];
         public ConstructionOutput[] ConstructionIntents = new ConstructionOutput[2];
         public ConstructionTelemetry ConstructionTelemetry = new ConstructionTelemetry();
@@ -49,6 +50,8 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _frontSignatures = new string[2];
         private readonly string[] _armyAreaSignatures = new string[2];
         private readonly string[] _formationDirectiveSignatures = new string[2];
+        private readonly string[] _operationalProbeSignatures = new string[2];
+        private readonly OperationalProbeState[] _operationalProbeStates = new OperationalProbeState[2];
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly string[] _constructionSignatures = new string[2];
         private readonly string[] _formationSourceSignatures = new string[2];
@@ -211,6 +214,7 @@ namespace WhiskeyRealism.Strategic
             double frontMs = 0d;
             double armyAreaMs = 0d;
             double formationMs = 0d;
+            double probeMs = 0d;
             double fiscalMs = 0d;
             double constructionMs = 0d;
             double defenseMs = 0d;
@@ -285,6 +289,12 @@ namespace WhiskeyRealism.Strategic
                         _formationSourceSignatures[alliance] = formationSource;
                     }
 
+                    probeMs += Measure(() =>
+                    {
+                        if (UpdateOperationalProbe(alliance, cic, day, month, year))
+                            formationChanged = true;
+                    });
+
                     string armyAreaSource = ArmyAreaSourceSignature(alliance, cic);
                     if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(day, armyAreaSource, _armyAreaSourceSignatures[alliance], formationChanged))
                     {
@@ -320,7 +330,7 @@ namespace WhiskeyRealism.Strategic
                     $"[DailyOps:Perf] {year}-{month:D2}-{day:D2} " +
                     $"totalMs={totalWatch.Elapsed.TotalMilliseconds:F2} " +
                     $"mapMs={mapMs:F2} frontMs={frontMs:F2} armyAreaMs={armyAreaMs:F2} " +
-                    $"formationMs={formationMs:F2} fiscalMs={fiscalMs:F2} " +
+                    $"formationMs={formationMs:F2} probeMs={probeMs:F2} fiscalMs={fiscalMs:F2} " +
                     $"constructionMs={constructionMs:F2} defenseMs={defenseMs:F2}");
             }
         }
@@ -695,6 +705,64 @@ namespace WhiskeyRealism.Strategic
             return changed;
         }
 
+        private bool UpdateOperationalProbe(int alliance, CIC cic, int day, int month, int year)
+        {
+            try
+            {
+                if (alliance < 0 || alliance >= OperationalProbes.Length) return false;
+                var fronts = alliance < Fronts.Length ? Fronts[alliance] : null;
+                var formation = alliance < FormationDirectives.Length ? FormationDirectives[alliance] : null;
+                if (fronts == null || formation == null) return false;
+
+                int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
+                var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
+                int daySerial = year * 372 + month * 31 + day;
+                var input = OperationalProbeRuntime.BuildInput(
+                    alliance,
+                    cic,
+                    fronts,
+                    formation,
+                    _operationalProbeStates[alliance],
+                    daySerial);
+
+                var output = OperationalProbeLedger.Build(input);
+                OperationalProbes[alliance] = output;
+                if (output.State != null)
+                    _operationalProbeStates[alliance] = output.State;
+                if (output.Decision == OperationalProbeDecision.None ||
+                    output.Decision == OperationalProbeDecision.Withdraw)
+                    _operationalProbeStates[alliance] = null;
+
+                bool overlayChanged = formation.ApplyOperationalProbe(output);
+                string signature = output.Signature();
+                bool changed = StrategicCadencePolicy.SourceChanged(signature, _operationalProbeSignatures[alliance]);
+                if (Plugin.Instance.VerboseLogging.Value || changed)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[OperationalProbe] alliance={alliance} decision={output.Decision} " +
+                        $"unit={output.SelectedUnitKey ?? "<none>"} target={output.TargetAreaKey ?? "<none>"} " +
+                        $"reason={output.Reason ?? ""} mass={output.RequiresMassCommitment}");
+                    _operationalProbeSignatures[alliance] = signature;
+                }
+
+                if (overlayChanged)
+                {
+                    string formationSignature = formation.Summary();
+                    _formationDirectiveSignatures[alliance] = formationSignature;
+                    Plugin.Log.LogInfo($"[FormationDirective] alliance={alliance} operationalProbe={formationSignature}");
+                }
+
+                OperationalProbeRuntime.Run(alliance, output, targetPosition);
+                return changed || overlayChanged;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("operational-probe:update:" + alliance,
+                    "[OperationalProbe] update failed: " + ex.Message);
+                return false;
+            }
+        }
+
         private string FormationSourceSignature(int alliance, CIC cic)
         {
             int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
@@ -707,7 +775,8 @@ namespace WhiskeyRealism.Strategic
         {
             int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
             return "target=" + targetObjectiveId +
-                "|formation=" + (_formationDirectiveSignatures[alliance] ?? "");
+                "|formation=" + (_formationDirectiveSignatures[alliance] ?? "") +
+                "|probe=" + (_operationalProbeSignatures[alliance] ?? "");
         }
 
         private string ConstructionSourceSignature(int alliance)

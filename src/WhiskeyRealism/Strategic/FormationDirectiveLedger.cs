@@ -111,6 +111,56 @@ namespace WhiskeyRealism.Strategic
             return string.Join(",", parts);
         }
 
+        public bool ApplyOperationalProbe(OperationalProbeOutput probe)
+        {
+            if (probe == null || string.IsNullOrEmpty(probe.SelectedUnitKey)) return false;
+            var assignment = GetAssignment(probe.SelectedUnitKey);
+            if (assignment == null) return false;
+
+            switch (probe.Decision)
+            {
+                case OperationalProbeDecision.Probe:
+                    assignment.Directive = FormationDirective.Probe;
+                    assignment.Reason = probe.Reason ?? "operational-probe";
+                    assignment.OffensiveAllowed = false;
+                    assignment.DefensiveAllowed = true;
+                    assignment.TransferDonorAllowed = false;
+                    break;
+
+                case OperationalProbeDecision.Pause:
+                    assignment.Directive = FormationDirective.Delay;
+                    assignment.Reason = probe.Reason ?? "probe-pause";
+                    assignment.OffensiveAllowed = false;
+                    assignment.DefensiveAllowed = true;
+                    assignment.TransferDonorAllowed = false;
+                    break;
+
+                case OperationalProbeDecision.Withdraw:
+                    assignment.Directive = FormationDirective.Recover;
+                    assignment.Reason = probe.Reason ?? "probe-withdraw";
+                    assignment.OffensiveAllowed = false;
+                    assignment.DefensiveAllowed = false;
+                    assignment.TransferDonorAllowed = false;
+                    break;
+
+                case OperationalProbeDecision.Escalate:
+                    assignment.Directive = assignment.Level == FormationLevel.Army
+                        ? FormationDirective.Mass
+                        : FormationDirective.Counterstroke;
+                    assignment.Reason = probe.Reason ?? "probe-escalate";
+                    assignment.OffensiveAllowed = true;
+                    assignment.DefensiveAllowed = true;
+                    assignment.TransferDonorAllowed = false;
+                    break;
+
+                default:
+                    return false;
+            }
+
+            RecomputePressure();
+            return true;
+        }
+
         private void Add(FormationDirectiveAssignment assignment)
         {
             _assignments[assignment.UnitKey] = assignment;

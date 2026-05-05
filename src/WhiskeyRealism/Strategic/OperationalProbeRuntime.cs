@@ -1,0 +1,171 @@
+using System;
+using System.Collections;
+using HarmonyLib;
+using UnityEngine;
+using WhiskeyRealism.Patches;
+using WhiskeyRealism.Util;
+
+namespace WhiskeyRealism.Strategic
+{
+    internal static class OperationalProbeRuntime
+    {
+        internal static OperationalProbeInput BuildInput(
+            int allianceId,
+            CIC cic,
+            FrontSectorLedger fronts,
+            FormationDirectiveLedger formation,
+            OperationalProbeState previous,
+            int daySerial)
+        {
+            int objectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
+            var target = ObjectiveAdapter.ResolveObjectivePosition(objectiveId);
+            string areaKey = target.HasValue ? ArmyAreaRuntime.AreaKey(target.Value) : null;
+            string sectorKey = target.HasValue ? FrontSectorRuntime.SectorKey(target.Value) : null;
+            var targetSector = fronts?.GetSector(sectorKey);
+
+            var input = new OperationalProbeInput
+            {
+                AllianceId = allianceId,
+                DaySerial = daySerial,
+                PlanTargetAreaKey = areaKey,
+                Fronts = fronts,
+                FormationDirectives = formation,
+                Previous = previous,
+                CurrentEnemyStrength = targetSector?.EnemyStrength ?? -1f,
+                CurrentFriendlyStrength = targetSector?.OwnStrength ?? -1f
+            };
+
+            if (previous != null && formation != null)
+            {
+                var assignment = formation.GetAssignment(previous.UnitKey);
+                if (assignment != null)
+                    input.CurrentFriendlyStrength = assignment.CombatAvailability;
+            }
+
+            return input;
+        }
+
+        internal static void Run(int allianceId, OperationalProbeOutput output, Vector3? target)
+        {
+            try
+            {
+                if (allianceId < 0 || allianceId > 1) return;
+                if (output == null || string.IsNullOrEmpty(output.SelectedUnitKey)) return;
+
+                int aifactionIndex = ResolveAifactionIndex(allianceId);
+                if (aifactionIndex < 0) return;
+                var faction = AICampaignReflect.GetFaction(aifactionIndex);
+                if (faction == null) return;
+
+                var factionType = faction.GetType();
+                var ownUnits = AccessTools.Field(factionType, "ownunits")?.GetValue(faction) as IList;
+                var offensive = AccessTools.Field(factionType, "unitsinoffensiveoperations")?.GetValue(faction) as IList;
+                var defensive = AccessTools.Field(factionType, "unitsindefensiveoperations")?.GetValue(faction) as IList;
+                if (ownUnits == null || offensive == null) return;
+
+                var unit = FindUnit(ownUnits, output.SelectedUnitKey);
+                if (unit == null) return;
+
+                if (output.Decision == OperationalProbeDecision.Pause ||
+                    output.Decision == OperationalProbeDecision.Withdraw)
+                {
+                    if (offensive.Contains(unit))
+                    {
+                        offensive.Remove(unit);
+                        Plugin.Log.LogInfo(
+                            $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
+                            $"unit={SafeName(unit)} reason={output.Reason}");
+                    }
+                    return;
+                }
+
+                if (output.Decision != OperationalProbeDecision.Probe &&
+                    output.Decision != OperationalProbeDecision.Escalate)
+                    return;
+                if (!target.HasValue) return;
+                if (defensive != null && defensive.Contains(unit)) return;
+                if (ReadBool(unit, "inbattle") || ReadBool(unit, "onretreat")) return;
+                if (ReadObject(unit, "garrisonreference") != null) return;
+
+                if (AICampaign.MoveUnitTo(unit, target.Value, true) && !offensive.Contains(unit))
+                {
+                    offensive.Add(unit);
+                    Plugin.Log.LogInfo(
+                        $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
+                        $"unit={SafeName(unit)} target={output.TargetAreaKey} reason={output.Reason}");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("operational-probe:run", "[OperationalProbe] runner failed: " + ex.Message);
+            }
+        }
+
+        private static int ResolveAifactionIndex(int allianceId)
+        {
+            var list = AccessTools.Field(typeof(AICampaign), "aifaction")?.GetValue(null) as IList;
+            if (list == null) return -1;
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (AICampaignReflect.GetAllianceId(i) == allianceId) return i;
+            }
+            return -1;
+        }
+
+        private static Regiment FindUnit(IList ownUnits, string unitKey)
+        {
+            for (int i = 0; i < ownUnits.Count; i++)
+            {
+                var unit = ownUnits[i] as Regiment;
+                if (unit == null) continue;
+                if (UnitKey(unit) == unitKey) return unit;
+            }
+            return null;
+        }
+
+        private static string UnitKey(Regiment unit)
+        {
+            return SafeName(unit) + ":" + ReadInt(unit, "commander").ToString();
+        }
+
+        private static string SafeName(UnityEngine.Object obj)
+        {
+            try { return obj != null ? obj.name : "<unknown>"; }
+            catch { return "<unknown>"; }
+        }
+
+        private static int ReadInt(object target, string field)
+        {
+            try
+            {
+                var f = AccessTools.Field(target.GetType(), field);
+                if (f != null) return Convert.ToInt32(f.GetValue(target));
+            }
+            catch { }
+            return -1;
+        }
+
+        private static bool ReadBool(object target, string field)
+        {
+            try
+            {
+                var f = AccessTools.Field(target.GetType(), field);
+                if (f != null) return Convert.ToBoolean(f.GetValue(target));
+            }
+            catch { }
+            return false;
+        }
+
+        private static object ReadObject(object target, string field)
+        {
+            try
+            {
+                return AccessTools.Field(target.GetType(), field)?.GetValue(target);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+}

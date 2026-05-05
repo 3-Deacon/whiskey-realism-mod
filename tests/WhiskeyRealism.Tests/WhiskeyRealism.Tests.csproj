@@ -44,6 +44,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirective.cs" Link="FormationDirective.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationSnapshot.cs" Link="FormationSnapshot.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirectiveLedger.cs" Link="FormationDirectiveLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalProbeLedger.cs" Link="OperationalProbeLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalModels.cs" Link="FiscalModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalIntentLedger.cs" Link="FiscalIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalPolicyScorer.cs" Link="FiscalPolicyScorer.cs" />

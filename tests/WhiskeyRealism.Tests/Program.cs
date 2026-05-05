@@ -89,6 +89,11 @@ static class Program
             ("army masses for plan target when hierarchy exists", ArmyMassesForPlanTargetWhenHierarchyExists),
             ("raid support maps only to cavalry capable formations", RaidSupportMapsOnlyToCavalryCapableFormations),
             ("formation directive summary changes when assignment changes", FormationDirectiveSummaryChangesWhenAssignmentChanges),
+            ("operational probe assigns one bounded same-area formation", OperationalProbeAssignsOneBoundedSameAreaFormation),
+            ("operational probe pauses on enemy reaction", OperationalProbePausesOnEnemyReaction),
+            ("operational probe escalates after favorable contact", OperationalProbeEscalatesAfterFavorableContact),
+            ("operational probe refuses critical hold donor", OperationalProbeRefusesCriticalHoldDonor),
+            ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
             ("fiscal csa healthy credit stays balanced", FiscalCsaHealthyCreditStaysBalanced),
             ("fiscal enters credit defense before gate", FiscalEntersCreditDefenseBeforeGate),
             ("fiscal enters emergency before bond floor", FiscalEntersEmergencyBeforeBondFloor),
@@ -1559,6 +1564,153 @@ static class Program
         string second = FormationDirectiveLedger.Build(new[] { b }, EraStage.Operational1862, null).Summary();
 
         AssertEqual(false, string.Equals(first, second, StringComparison.Ordinal));
+    }
+
+    private static OperationalProbeInput BuildProbeInput()
+    {
+        var front = FrontSectorLedger.Build(new[]
+        {
+            new FrontSectorInput
+            {
+                SectorKey = "VirginiaCapitalCorridor",
+                Theater = Theater.East,
+                OwnStrength = 22000f,
+                EnemyStrength = 14000f,
+                StrategicImportance = 0.8f,
+                IsCritical = false,
+                IsPlanTarget = true,
+                CommanderAudacity = 0.3f,
+                CommanderCaution = 0.2f,
+                AverageMorale = 0.8f,
+                AverageSupply = 0.8f,
+                AverageReadiness = 0.8f
+            },
+            new FrontSectorInput
+            {
+                SectorKey = "Richmond",
+                Theater = Theater.East,
+                OwnStrength = 20000f,
+                EnemyStrength = 18000f,
+                StrategicImportance = 1.0f,
+                IsCritical = true,
+                IsPlanTarget = false,
+                CommanderAudacity = 0.1f,
+                CommanderCaution = 0.5f,
+                AverageMorale = 0.8f,
+                AverageSupply = 0.8f,
+                AverageReadiness = 0.8f
+            }
+        });
+
+        return new OperationalProbeInput
+        {
+            AllianceId = 1,
+            DaySerial = 100,
+            PlanTargetAreaKey = "VirginiaCapitalCorridor",
+            Fronts = front,
+            FormationDirectives = FormationDirectiveLedger.Build(new[]
+            {
+                ProbeSnapshot("probe-corps", 1, 15, 7000f, 5000f, FormationLevel.Division, FrontPosture.Counterstroke, "VirginiaCapitalCorridor"),
+                Snapshot("hold-army", 1, 16, 26000f, 18000f, FormationLevel.Army, FrontPosture.Hold)
+            }, EraStage.Operational1862, "VirginiaCapitalCorridor")
+        };
+    }
+
+    private static FormationSnapshot ProbeSnapshot(
+        string key,
+        int alliance,
+        int unitType,
+        float strength,
+        float enemy,
+        FormationLevel enemyLevel,
+        FrontPosture posture,
+        string sectorKey)
+    {
+        var snapshot = Snapshot(key, alliance, unitType, strength, enemy, enemyLevel, posture);
+        snapshot.SectorKey = sectorKey;
+        return snapshot;
+    }
+
+    private static void OperationalProbeAssignsOneBoundedSameAreaFormation()
+    {
+        var output = OperationalProbeLedger.Build(BuildProbeInput());
+
+        AssertEqual(OperationalProbeDecision.Probe, output.Decision);
+        AssertEqual("probe-corps", output.SelectedUnitKey);
+        AssertEqual("VirginiaCapitalCorridor", output.TargetAreaKey);
+        AssertEqual(false, output.RequiresMassCommitment);
+    }
+
+    private static void OperationalProbePausesOnEnemyReaction()
+    {
+        var input = BuildProbeInput();
+        input.Previous = new OperationalProbeState
+        {
+            ProbeId = "1:VirginiaCapitalCorridor:probe-corps",
+            UnitKey = "probe-corps",
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            StartedDaySerial = 96,
+            LastObservedEnemyStrength = 7000f,
+            LastObservedFriendlyStrength = 7000f
+        };
+        input.CurrentEnemyStrength = 13000f;
+        input.CurrentFriendlyStrength = 8000f;
+
+        var output = OperationalProbeLedger.Build(input);
+
+        AssertEqual(OperationalProbeDecision.Pause, output.Decision);
+        AssertEqual("enemy-reaction", output.Reason);
+        AssertEqual(false, output.RequiresMassCommitment);
+    }
+
+    private static void OperationalProbeEscalatesAfterFavorableContact()
+    {
+        var input = BuildProbeInput();
+        input.DaySerial = 104;
+        input.Previous = new OperationalProbeState
+        {
+            ProbeId = "1:VirginiaCapitalCorridor:probe-corps",
+            UnitKey = "probe-corps",
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            StartedDaySerial = 100,
+            LastObservedEnemyStrength = 7000f,
+            LastObservedFriendlyStrength = 7000f
+        };
+        input.CurrentEnemyStrength = 4000f;
+        input.CurrentFriendlyStrength = 9000f;
+
+        var output = OperationalProbeLedger.Build(input);
+
+        AssertEqual(OperationalProbeDecision.Escalate, output.Decision);
+        AssertEqual(true, output.RequiresMassCommitment);
+    }
+
+    private static void OperationalProbeRefusesCriticalHoldDonor()
+    {
+        var input = BuildProbeInput();
+        input.FormationDirectives = FormationDirectiveLedger.Build(new[]
+        {
+            Snapshot("critical-army", 1, 16, 20000f, 18000f, FormationLevel.Army, FrontPosture.Hold)
+        }, EraStage.Operational1862, "VirginiaCapitalCorridor");
+
+        var output = OperationalProbeLedger.Build(input);
+
+        AssertEqual(OperationalProbeDecision.None, output.Decision);
+        AssertEqual("no-eligible-probe-formation", output.Reason);
+    }
+
+    private static void OperationalProbeOverlaysFormationDirective()
+    {
+        var input = BuildProbeInput();
+        var output = OperationalProbeLedger.Build(input);
+
+        bool changed = input.FormationDirectives.ApplyOperationalProbe(output);
+        var assignment = input.FormationDirectives.GetAssignment("probe-corps");
+
+        AssertEqual(true, changed);
+        AssertEqual(FormationDirective.Probe, assignment.Directive);
+        AssertEqual("limited-contact-probe", assignment.Reason);
+        AssertEqual(false, assignment.TransferDonorAllowed);
     }
 
     private static FiscalInput BuildFiscalInput()

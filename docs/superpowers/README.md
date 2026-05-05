@@ -6,7 +6,7 @@ Slice-level design and execution artifacts. Living-doc state lives in [`docs/han
 
 - [`specs/`](specs/) — **active** design specs (current and upcoming slices).
 - [`specs/archive/`](specs/archive/) — design specs whose implementation has shipped. See the archive [README](specs/archive/README.md) for the index.
-- [`plans/`](plans/) — **active** implementation plans. Current active plan: strategic anti-zerg / theater-integrity runtime smoke follow-up. Tactical Slice B plans exist but are paused until the user explicitly reopens tactical work.
+- [`plans/`](plans/) — **active** implementation plans. Current active plan: strategic operational probe/contact runtime smoke follow-up. Tactical Slice B plans exist but are paused until the user explicitly reopens tactical work.
 - [`plans/archive/`](plans/archive/) — implementation plans whose patches have shipped. See the archive [README](plans/archive/README.md) for the index.
 
 ## Lifecycle
