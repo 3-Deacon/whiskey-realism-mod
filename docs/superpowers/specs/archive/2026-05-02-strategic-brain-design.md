@@ -27,7 +27,7 @@ Six choices locked during the 2026-05-02 brainstorming session. Reject any spec 
 | 3 | Era × faction × officer personality system. | User explicitly asked for both factions to feel different (faction asymmetry) and history-flavored. |
 | 4 | Triggered-scripted officer succession (~12 events, ~60-80% historical fidelity). | Recognizable patterns without deterministic runs. |
 | 5 | Phased operational plans (2-4 phases, one active per side). | Captures real campaigns (Peninsula, Vicksburg) without combinatorial explosion. |
-| 6 | Daily + event-triggered cadence; events mark plans dirty (next-tick processing); adjust by default, replan only on assumption-invalidating events. Monthly remains a heartbeat/checkpoint boundary only. | Campaign speed makes monthly command too slow; daily keeps strategic control fully responsive. The Defense Intent Ledger slice migrated the operational tick from weekly to daily on 2026-05-04; `DefenseCooldownTable` idempotency and `FrontSectorRuntime.Signature` bucket coarsening make daily safe from thrash (see `docs/superpowers/specs/2026-05-05-defense-intent-ledger-design.md`). |
+| 6 | Daily + event-triggered cadence; events mark plans dirty (next-tick processing); adjust by default, replan only on assumption-invalidating events. Monthly remains a heartbeat/checkpoint boundary only. | Campaign speed makes monthly command too slow; daily keeps strategic control fully responsive. The Defense Intent Ledger slice migrated the operational tick from weekly to daily on 2026-05-04; `DefenseCooldownTable` idempotency and `FrontSectorRuntime.Signature` bucket coarsening make daily safe from thrash (see `docs/superpowers/specs/archive/2026-05-05-defense-intent-ledger-design.md`). |
 
 ## 3. Architecture — two-tier hierarchy
 

@@ -6,7 +6,7 @@
 
 **Goal:** Replace GTCW's random campaign-objective AI with a phased, personality-driven strategic engine running both factions through a W&L career, with explicit player-CIC noninterference and JSON-sidecar persistence.
 
-**Architecture:** Two-tier hierarchy — `StrategicCoordinator` (singleton MonoBehaviour, weekly strategic review + monthly heartbeat) drives one `CIC` per AI-controlled faction; each `CIC` holds an `OperationalPlan` and dispatches to per-army-group `TheaterCommander` instances. Mod state is read-only from Harmony patches. Persistence is JSON sidecar inside the per-save folder. Spec: `docs/superpowers/specs/2026-05-02-strategic-brain-design.md`.
+**Architecture:** Two-tier hierarchy — `StrategicCoordinator` (singleton MonoBehaviour, weekly strategic review + monthly heartbeat) drives one `CIC` per AI-controlled faction; each `CIC` holds an `OperationalPlan` and dispatches to per-army-group `TheaterCommander` instances. Mod state is read-only from Harmony patches. Persistence is JSON sidecar inside the per-save folder. Spec: `docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md`.
 
 **Tech Stack:** C# `netstandard2.1`, BepInEx 5.4.21 (`BepInEx.Core` NuGet), HarmonyX 2.10.2 (NuGet), Newtonsoft.Json (game-bundled), Unity 2021 Mono runtime. Pure strategic ledger logic now uses the console harness in `tests/WhiskeyRealism.Tests`; Harmony/game integration still relies on build/deploy/hash verification plus in-game smoke.
 

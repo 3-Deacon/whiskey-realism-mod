@@ -12,7 +12,7 @@
 
 ## Scope
 
-This plan implements the next executable slice from `docs/superpowers/specs/2026-05-04-construction-intent-ledger-design.md`:
+This plan implements the next executable slice from `docs/superpowers/specs/archive/2026-05-04-construction-intent-ledger-design.md`:
 
 - ledger-driven private-building probability steering over #20;
 - conservative telegraph construction AI behind `EnableTelegraphAI`;

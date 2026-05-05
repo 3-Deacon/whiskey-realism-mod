@@ -11,6 +11,7 @@
 > **Quick reference:**
 > - **Build:** `./build.sh` → `dist/WhiskeyRealism.dll`
 > - **Deploy:** `cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"` (game must be closed — Windows holds an exclusive lock on loaded DLLs)
+> - **Test:** `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` (console harness; pure strategic logic only)
 > - **Required for every DLL-affecting change:** build, deploy, then verify the deployed DLL matches `dist/WhiskeyRealism.dll` by timestamp/size and `sha256sum`. Do not report an implementation as ready from build output alone.
 > - **Source-of-truth order:** shipped code > [`docs/patch-catalog.md`](docs/patch-catalog.md) > per-patch design doc > umbrella spec > archived plan
 > - **Master handoff:** [`docs/handoff.md`](docs/handoff.md) — read first at session start
@@ -18,7 +19,7 @@
 > - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
 > - **Parallel sessions are normal.** Another agent may be working concurrently — run `git log --oneline -10` and `git status` before committing to detect parallel work.
 
-> **Current release:** v0.2.2. **Main current:** post-release main includes locked-Hard casualty-tolerance integration, #7 role-aware campaign perk steering, #21 high-speed AI throttle/diagnostics, construction steering Slice B, campaign-map town/state/fort/harbor awareness, proportional capital-defense force sizing, and a hardened #22 W&L command-selection retry on top of v0.2.2, built and deployed (`dist`/BepInEx SHA-256 `15c3e21be80ff6ae9c37225387287576494d86e0d6824251e3c319ef4277dc9d`). Current main includes fiscal economy AI, recruitment state steering, policy/naval grand-strategy timing, default-on fast-forward catch-up, hot-path reflection caching for startup/menu lag, W&L command-selection prompt retry, historical-Hard casualty tolerance routed into `CIC.Effective`, campaign army/fleet perk scoring, private-building steering, optional default-off telegraph AI, and `CampaignMapLedger` classification for active-map towns/states/assets. #22 must not invoke `CareerInformationPanel.ShowStartUnitSelectionList(true)` before vanilla frame 50, and must not treat the outer picker panel as usable unless `unitlineappointcommand` rows exist. Actual #7 perk assignment remains conditional on vanilla perk timing; full non-capital/coastal/patrol defense steering remains the next defense slice. `FormationOffensiveSafetyPatch` remains intentionally deferred until the directive ledger has more runtime soak.
+> **Current state:** see `docs/handoff.md` for the deployed DLL hash, post-release deltas, and active workstream. AGENTS.md intentionally does not duplicate that volatile state — it churns every commit and went stale repeatedly when carried inline here.
 
 ---
 
@@ -26,15 +27,15 @@
 
 A BepInEx plugin for Grand Tactician: The Civil War (1861-1865) that layers surgical Harmony patches on top of vanilla. Initial focus: **Slice A — strategic-brain overhaul** for the Whiskey & Lemons DLC career mode. Replaces the vanilla random-objective campaign AI with an era × faction × officer-personality scoring system that gives both Confederate and Union AI campaigns historical character without scripting them deterministically.
 
-Six locked design choices (see `docs/superpowers/specs/`):
+Six locked design choices (Slice A umbrella spec, archived after ship: [`docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md`](docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md)):
 1. Slice A — strategic brain (campaign layer first; tactical layer is a later slice)
 2. Tier 3 scope — replace existing weak decisions + extend + net-new operational plans
 3. Era × faction × officer (full personality stack)
 4. Triggered-scripted officer succession (~12 historical events; ~60-80% historical fidelity)
 5. Phased operational plans (2-4 phases per plan, one active per side)
-6. Weekly + event-triggered AI cadence; adjust-current-plan by default, replan only on assumption-invalidating events. Monthly is a visible heartbeat/checkpoint boundary only.
+6. Daily + event-triggered AI cadence; adjust-current-plan by default, replan only on assumption-invalidating events. Monthly is a visible heartbeat/checkpoint boundary only. (Migrated from weekly to daily on 2026-05-04 by the Defense Intent Ledger slice; `DefenseCooldownTable` per-cycle idempotency and `FrontSectorRuntime.Signature` 0.5-bucket ratios make daily safe from thrash.)
 
-Design architecture: two-tier hierarchy (CIC + theater commanders), startup heartbeat plus weekly front/army-area/formation-directive ledgers after vanilla `AICampaign.aifaction` initializes, historical army-group steering through vanilla `ArmyGroup` APIs, additive personality composition with `[-1, 1]` clamp, JSON sidecar persistence next to game saves, read-only mod state from Harmony patches.
+Design architecture: two-tier hierarchy (CIC + theater commanders), startup heartbeat plus daily front/army-area/formation-directive/fiscal/construction/defense ledgers after vanilla `AICampaign.aifaction` initializes, historical army-group steering through vanilla `ArmyGroup` APIs, additive personality composition with `[-1, 1]` clamp, JSON sidecar persistence next to game saves, read-only mod state from Harmony patches.
 
 ---
 
@@ -98,29 +99,21 @@ whiskey-realism-mod/
 ├── src/WhiskeyRealism/
 │   ├── WhiskeyRealism.csproj
 │   ├── Plugin.cs                   ← BepInEx entry, ConfigEntry definitions
-│   ├── Strategic/                  ← strategic-brain core types
-│   │   ├── StrategicCoordinator.cs ← weekly strategic review + monthly heartbeat dispatcher
-│   │   ├── CIC.cs                  ← per-faction Commander-in-Chief
-│   │   ├── TheaterCommander.cs     ← per-army-group execution layer
-│   │   ├── OperationalPlan.cs      ← phased plan + phase transitions
-│   │   ├── PersonalityVector.cs    ← 5-dim struct + composition helpers
-│   │   ├── EraStageManager.cs      ← era progression + war-state overrides
-│   │   ├── SuccessionScheduler.cs  ← canonical historical events
-│   │   ├── HistoricalFigureRegistry.cs ← ~25 hand-coded officer profiles
-│   │   ├── FrontSectorLedger.cs / FrontSectorRuntime.cs
-│   │   ├── ArmyAreaDoctrine.cs / ArmyAreaLedger.cs / ArmyAreaRuntime.cs
-│   │   └── ArmyGroupDoctrine.cs
+│   ├── Strategic/                  ← strategic-brain core types: coordinator, CIC + theater commanders, era/personality/succession, per-cadence ledgers (front, army-area, formation-directive, fiscal, construction, defense intent), and supporting catalogs/runtimes. See files in directory; `docs/patch-catalog.md` is the canonical patch ordinal map.
 │   ├── Patches/                    ← Harmony patches; one concern per file
-│   │   └── Harmony patches #1-#16 (see docs/patch-catalog.md)
+│   │   └── Harmony patches #1-#25+ (see docs/patch-catalog.md for the canonical ordinal map; coordinator-driven runtimes are listed there too without ordinals)
 │   └── Util/                       ← shared infrastructure
 │       └── OnceLog / reflection helpers
 ├── docs/
 │   ├── handoff.md                  ← session-start master plan
 │   ├── findings.md                 ← decompile coordinates + reflection gotchas
 │   ├── patch-catalog.md            ← canonical numbered catalog of shipped patches
-│   └── superpowers/                ← per-feature specs + per-plan implementation plans
-│       ├── specs/
-│       └── plans/
+│   └── superpowers/
+│       ├── README.md               ← lifecycle + layout
+│       ├── specs/                  ← active design specs (current/upcoming slices)
+│       │   └── archive/            ← shipped specs (frozen; see archive/README.md)
+│       └── plans/                  ← active implementation plans
+│           └── archive/            ← shipped plans (frozen; see archive/README.md)
 ├── dist/                           ← build output (gitignored)
 └── .claude/settings.json           ← project-local Claude Code permissions
 ```
@@ -146,7 +139,7 @@ whiskey-realism-mod/
 
 - Every Harmony patch class lives under `src/WhiskeyRealism/Patches/`. One concern per file.
 - Wrap reflection lookups in try/catch and log via `Plugin.Log.LogWarning(...)` on failure. **Never throw from a patch.** A single throw on every Postfix tick produces 40k log lines per session.
-- Strategic mod state is **read-only** to Harmony patches. Patches read CIC / TheaterCommander / ledger state and steer existing AI methods. State writes happen only on weekly strategic review and event-trigger handlers.
+- Strategic mod state is **read-only** to Harmony patches. Patches read CIC / TheaterCommander / ledger state and steer existing AI methods. State writes happen only on daily strategic review and event-trigger handlers.
 - Add a header comment explaining what the vanilla method does and what the patch changes.
 
 ### Build
@@ -165,9 +158,18 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 For DLL-affecting changes: build, deploy, verify deployed DLL hash, run GTCW, start a career, observe. After deploy, tail `BepInEx/LogOutput.log` and scan for the per-patch first-fire markers.
 
+The test project at `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` uses **explicit `<Compile Include>` entries** for each strategic source file it consumes — not glob patterns. When you add a new file under `src/WhiskeyRealism/Strategic/` (or a subfolder), add a matching `<Compile Include="..\..\src\WhiskeyRealism\Strategic\<File>.cs" Link="<File>.cs" />` line to the csproj or the test project will not see the new type. Same applies to file deletions (remove the corresponding entry).
+
 ### Game updates
 
 When GTCW patches: re-decompile `Assembly-CSharp.dll`, diff our patch sites, rebuild if signatures unchanged, update `[HarmonyPatch(...)]` attributes if renamed, re-read the new implementation if behavior shifted.
+
+### Doc lifecycle
+
+- **Living docs** churn with shipped state: `docs/handoff.md`, `docs/patch-catalog.md`, `docs/findings.md`, `MEMORY.md`, this `AGENTS.md`, and `README.md`. Update them as work ships.
+- **Specs** under `docs/superpowers/specs/` are point-in-time design artifacts. Move a spec to `docs/superpowers/specs/archive/` once its corresponding patches ship and are smoke-verified. Do not mutate archived specs after shipping; record deltas in `docs/handoff.md` "What just shipped" and the archive `README.md` index.
+- **Plans** under `docs/superpowers/plans/` are execution artifacts. Move them to `docs/superpowers/plans/archive/` once their patches ship.
+- When archiving, rewrite internal `docs/superpowers/{specs,plans}/2026-…` cross-references to the corresponding archive paths so historical traceability stays intact.
 
 ---
 
@@ -176,8 +178,9 @@ When GTCW patches: re-decompile `Assembly-CSharp.dll`, diff our patch sites, reb
 - Don't edit the game install (`/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/`) directly. Mod via plugin only.
 - Don't ship copies of `0Harmony.dll` or any GTCW/Unity DLL with our plugin — BepInEx loads HarmonyX itself, the game loads Unity itself.
 - Don't add Prefix-blocking or Transpiler patches without consulting the user — they're brittle to game updates and easy to get wrong.
-- Don't write Harmony patches that mutate strategic mod state. State writes happen ONLY on weekly strategic review and event-trigger handlers. Patches READ; they don't WRITE.
-- Don't expand workstream scope without an aligned spec. The current single workstream is Slice A (strategic brain). Slices B (tactical brain), C (W&L hierarchy AI), and D (additional historical flavor) are explicitly deferred.
+- Don't write Harmony patches that mutate strategic mod state. State writes happen ONLY on daily strategic review and event-trigger handlers. Patches READ; they don't WRITE. (Targeted candidate-list filtering via Prefix-snapshot/Postfix-restore is permitted as the spec'd Slice 2 enforcement surface — see #25 — but the snapshot/restore must be try/finally-safe.)
+- Don't size per-alliance state arrays to 2 without bound-checking. `AICampaign.aifaction` includes alliance 2 (Europe) — `AICampaignReflect.GetAllianceId(_aifaction)` can return 2, so any `someArray[allianceId]` access where `someArray.Length == 2` must guard with `if (allianceId < 0 || allianceId >= someArray.Length) return;` (or short-circuit alliance > 1 entirely if Europe shouldn't get the treatment).
+- Don't expand workstream scope without an aligned spec. Slice A (strategic brain) is fully shipped. Slice B (tactical brain) is in the design phase — umbrella spec at `docs/superpowers/specs/2026-05-05-tactical-brain-design.md` and vanilla verification at `docs/superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md`; no plan committed yet, no code yet. Slices C (W&L hierarchy AI) and D (additional historical flavor) remain deferred.
 
 ---
 

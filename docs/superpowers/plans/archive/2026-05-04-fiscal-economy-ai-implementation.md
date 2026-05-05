@@ -12,8 +12,8 @@
 
 ## Source Inputs
 
-- Spec: `docs/superpowers/specs/2026-05-04-fiscal-economy-ai-design.md`
-- Formation supply companion: `docs/superpowers/specs/2026-05-04-formation-directive-design.md`
+- Spec: `docs/superpowers/specs/archive/2026-05-04-fiscal-economy-ai-design.md`
+- Formation supply companion: `docs/superpowers/specs/archive/2026-05-04-formation-directive-design.md`
 - Decompile: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`
 - Runtime patch catalog: `docs/patch-catalog.md`
 - Master handoff: `docs/handoff.md`

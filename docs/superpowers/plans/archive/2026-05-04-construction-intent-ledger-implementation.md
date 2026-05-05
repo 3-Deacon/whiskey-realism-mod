@@ -12,7 +12,7 @@
 
 ## Scope
 
-This plan implements only slices 1-2 from `docs/superpowers/specs/2026-05-04-construction-intent-ledger-design.md`:
+This plan implements only slices 1-2 from `docs/superpowers/specs/archive/2026-05-04-construction-intent-ledger-design.md`:
 
 - pure ledger and tests;
 - runtime input extraction;

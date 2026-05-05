@@ -20,7 +20,7 @@ An adversarial review confirmed the vanilla anchors and forced several constrain
 
 This spec depends on the verified vanilla deep dive:
 
-- `docs/superpowers/specs/2026-05-04-construction-vanilla-deep-dive.md`
+- `docs/superpowers/specs/archive/2026-05-04-construction-vanilla-deep-dive.md`
 - decompile source: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`
 
 Key vanilla anchors:

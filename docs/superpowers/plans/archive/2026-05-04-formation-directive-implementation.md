@@ -14,7 +14,7 @@
 
 ## Scope And Ordering
 
-This plan implements the formation-directive slice first because `docs/superpowers/specs/2026-05-04-fiscal-economy-ai-design.md` consumes formation supply/ammo pressure downstream. Fiscal economy planning should wait until this ledger exists or it will have to guess at the military supply signals.
+This plan implements the formation-directive slice first because `docs/superpowers/specs/archive/2026-05-04-fiscal-economy-ai-design.md` consumes formation supply/ammo pressure downstream. Fiscal economy planning should wait until this ledger exists or it will have to guess at the military supply signals.
 
 This plan intentionally does not patch `Autocalc.StartSkirmishing`, does not create a parallel raid engine, and does not rewrite vanilla campaign movement. Offensive blocking is placed behind an explicit late task because it uses a narrow Prefix gate and should only be enabled after the pure ledger, runtime extraction, and #15/#16 integrations are verified.
 
@@ -41,7 +41,7 @@ Modify:
 
 Do not modify:
 
-- `docs/superpowers/specs/2026-05-04-fiscal-economy-ai-design.md` in this plan.
+- `docs/superpowers/specs/archive/2026-05-04-fiscal-economy-ai-design.md` in this plan.
 - Game install files except for normal DLL deployment.
 
 ## Task 1: Pure Formation Types
@@ -1411,7 +1411,7 @@ git commit -m "feat: block unsafe formation offensives"
 **Files:**
 
 - Modify: `docs/handoff.md`
-- Modify: `docs/superpowers/specs/2026-05-04-formation-directive-design.md` only if implementation reveals a corrected contract.
+- Modify: `docs/superpowers/specs/archive/2026-05-04-formation-directive-design.md` only if implementation reveals a corrected contract.
 
 - [ ] **Step 1: Update handoff**
 
@@ -1482,7 +1482,7 @@ Failure triage:
 Run:
 
 ```bash
-git add docs/handoff.md docs/superpowers/specs/2026-05-04-formation-directive-design.md
+git add docs/handoff.md docs/superpowers/specs/archive/2026-05-04-formation-directive-design.md
 git commit -m "docs: record formation directive implementation"
 ```
 

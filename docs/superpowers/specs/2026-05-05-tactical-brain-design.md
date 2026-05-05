@@ -1,7 +1,7 @@
 # Tactical Brain Design
 
-Status: draft umbrella design spec for Slice B.
-Scope: battlefield tactical AI for land battles. This spec covers doctrine, scoring, state, patch surfaces, telemetry, and implementation order. It does not implement code.
+Status: draft umbrella design spec for Slice B, updated after vanilla-anchor and adversarial review.
+Scope: battlefield tactical AI for land battles. This spec covers doctrine, scoring, state, patch surfaces, telemetry, and implementation order. It does not implement code or replace the implementation plans each slice requires.
 
 Vanilla verification: see [`2026-05-05-tactical-brain-vanilla-verification.md`](2026-05-05-tactical-brain-vanilla-verification.md). That pass confirms the required vanilla data and patch surfaces, but marks sector doctrine, local-superiority scoring, contact-aware stale-order handling, reserve-relief timing, and staged withdrawal as new Whiskey behavior rather than existing vanilla logic. It also separates battle-level `macroai` from group-level `ai_stance`; they are different ladders and must not be patched as one state machine.
 
@@ -36,6 +36,14 @@ Verified vanilla anchors:
 - `Regiment` initializes battlefield `commanderrange` and `buglerange` from unit type prefs around lines 112993-113008. A readiness/initiative recalculation exists around line 125838, but the verified block is campaign-path only.
 - `GamePrefs.processingtimegroupstandard`, `processingtimegrouproute`, `buglestandardrecognitiontime`, and `slowdowncourieroutsideradius` load around lines 53336-53344 and have verified uses. `orderdelayforbugles` is declared and loaded but never read in the current decompile, so treat it as dead config unless a later decompile proves otherwise.
 - `BattleUI` passes `useorderdelay: true` for normal player movement orders at line 166163, confirming that tactical movement is expected to respect the order-delay path.
+
+Implementation boundaries from review:
+
+- This document is the Slice B umbrella spec. Do not create a second tactical-brain umbrella spec unless this one is replaced outright.
+- Each behavior slice needs its own implementation plan under `docs/superpowers/plans/`; this spec is too large and too risky to implement as one patch plan.
+- `B1 W&L Feud And Charge Guard` is a narrow control-safety slice. It is not the full doctrine charge gate.
+- Full doctrine charge gating depends on later sector, odds, reserve, strong-point, and artillery context.
+- Runtime behavior patches must be preceded by `B0 Tactical Observer` logs because the sector projection and W&L symptom still need live confirmation.
 
 Historical doctrine inputs:
 
@@ -149,6 +157,8 @@ Plan-to-stance projection:
 | `TurnFlank` | `1 attack` | Main effort is a selected flank sector; center sectors should normally fix or hold. |
 | `AvoidStrongpoint` | `2 defend` or `-1 dynamic` | Avoid direct assault until a bypass, bombardment, or weak point is confirmed. |
 | `OrderlyWithdrawal` | `3 retreat` | Use staged fallback first; call vanilla full-retreat path only when preservation requires it. |
+
+Where a row lists two `macroai` candidates ("X or Y"), the Macro Stance Scoring inputs (odds, contact confidence, losses, terrain, reinforcements, commander profile, time since last change) decide between them. The plan layer commits to the plan; the macro scorer commits to the projection.
 
 `macroai = -1 dynamic` is not "unknown." It is the vanilla initial/dynamic state. B0 telemetry must log it, and later scorers should use it for cautious no-contact/probe plans rather than forcing attack or defend on the first evaluation tick.
 
@@ -356,7 +366,8 @@ Safeguards:
 - use hysteresis so stance does not bounce between attack and retreat;
 - never treat `macroai = -1` as an error or as attack-by-default;
 - never block vanilla hard retreat/end-battle safety;
-- do not force attack if the W&L player-control gate says the AI should not act.
+- do not force attack if the W&L player-control gate says the AI should not act;
+- skip Whiskey bias when vanilla took an early-return override path. `CheckGlobalAIStrategy` short-circuits at decompile lines 6378-6385 when `GameVars.aistrategy >= 0` (debug/dev override, written from the strat dropdown around lines 189140-189152) or when `bunits.sideinformation[sideofai].macroai >= 0` (save-state restore, written from save I/O at lines 74689, 74819, 88254). A Postfix that overwrites `macroai` after either branch will silently clobber an intentional override.
 
 ## Group Stance Ladder
 
@@ -382,12 +393,12 @@ Patch surfaces:
 
 - `AIBattle.MicroAICheckForCharges(...)`;
 - `AIBattle.CheckForFeudGroupActions(...)`;
-- existing `PerformAIActionDLCWL` behavior.
+- existing `PerformAIActionDLCWL` call-site pattern in other tactical methods.
 
-Implementation split:
+Implementation split (see "Implementation boundaries from review" for the cross-cutting B1-vs-doctrine rule):
 
-- `B1 W&L Feud And Charge Guard` is narrow. It should only prevent AI action where W&L/player-subordinate control says vanilla should not act, and it must preserve charge cancellation plus `lastfeudactiontime` updates.
-- Full doctrine charge gating waits for sector, odds, reserve, strongpoint, and artillery context from B3-B7.
+- B1 must preserve `MicroAICheckForCharges` charge cancellation and `lastfeudactiontime` updates on both branches; the guard wraps the action, it does not replace the method body.
+- Before patching either method, rerun a full `PerformAIActionDLCWL` call-site grep against the current decompile. Many tactical methods already use that guard, while the two B1 targets do not; B1 must not double-gate units that arrive via callers that already checked.
 
 Charge should be treated as a late tactical decision, not the default way to close distance.
 
@@ -677,20 +688,39 @@ Whiskey should not edit the Steam install's config directly. Use battleprefs as 
 
 Data tuning is useful for broad pressure. It is not enough for scouting, sector doctrine, reserve relief, personality, or staged withdrawal.
 
-## Implementation Slices
+## Implementation Slices And Plan Documents
 
-This umbrella spec should be implemented in bounded steps:
+This umbrella spec must be implemented in bounded slices, each with its own implementation plan under `docs/superpowers/plans/`. Do not produce a single monolithic Slice B plan; the previous Slice A precedent (`docs/superpowers/plans/2026-05-03-strategic-brain-implementation.md`) is the failure mode this section is preventing.
 
-1. `B0 Tactical Observer`: read-only battle context, command/contact/sector ledgers, order-friction telemetry, no behavior changes.
-2. `B1 W&L Feud And Charge Guard`: narrow guard for player-subordinate auto-advance/charge/feud actions. Do not implement full doctrine charge gating here; preserve vanilla charge cancellation and feud timing side effects.
-3. `B2 Command Hierarchy And Order Friction`: army/corps, division, brigade, and regiment intent cascade with delayed-order rules.
-4. `B3 Tactical Odds Doctrine`: local-superiority, decisive-point, economy-of-force, and inferior-force posture scorer.
-5. `B4 Macro Stance Scorer`: Postfix/clamp global strategy with odds, losses, reinforcements, terrain, and personality.
-6. `B5 Group Sector Stance`: sector-aware hold/screen/fix/probe/attack stance decisions.
-7. `B6 Reserve Relief And Flank Doctrine`: reserve roles, relief triggers, flank guard/refuse behavior.
-8. `B7 Artillery And Strongpoint Doctrine`: bombardment before assault, counterbattery, avoid/attack weak points.
-9. `B8 Withdrawal Doctrine`: staged fallback, rear guard, full retreat safeguards.
-10. `B9 Tuning And Telemetry Soak`: battleprefs validation, bounded logs, runtime smoke matrix.
+Plan file convention: `docs/superpowers/plans/<YYYY-MM-DD>-tactical-<bN>-<short-name>.md`. Example: `docs/superpowers/plans/2026-05-12-tactical-b0-observer.md`. Each plan owns its own task list, validation criteria, and rollback notes; this spec only owns scope, ordering, and risk classification.
+
+Risk rubric (column "Risk" below):
+
+- `none`: no behavior change. Telemetry/log only.
+- `low`: narrow control-safety guard; no scoring or stance changes; preserves all vanilla side effects.
+- `medium`: produces new read-only doctrine state, or biases scorers without overriding hard vanilla safety paths.
+- `high`: actively steers vanilla group/reserve/artillery/retreat decisions; can change battle outcomes; requires both pure tests and runtime smoke before merge.
+
+| # | Plan | Scope | Risk | Hard upstream deps |
+|---:|---|---|---:|---|
+| 1 | `B0 Tactical Observer` | read-only battle context, hierarchy/contact/sector/order-friction extraction, runtime proof of vanilla surfaces | none | — |
+| 2 | `B1 W&L Feud And Charge Guard` | narrow `PerformAIActionDLCWL` control guard for `MicroAICheckForCharges(...)` and `CheckForFeudGroupActions(...)`; preserve cancellation and feud timing side effects | low | `B0` |
+| 3 | `B2 Command Hierarchy And Order Friction` | command-tier ledger, delivered-vs-intended order interpretation, stale-order detection policy | medium | `B0` |
+| 4 | `B3 Tactical Odds Doctrine` | current/projected odds, local-superiority scorer, inferior-force preservation scorer | medium | `B0` |
+| 5 | `B4 Macro Stance Scorer` | bias/clamp `macroai` transitions with `macroai = -1 dynamic` handling and short-circuit-respect (see Macro Stance Scoring safeguards) | medium | `B0`, `B3` |
+| 6 | `B5 Group Sector Stance` | map vanilla objective-chain center/flank/reserve/artillery/screening groups into sector missions and steer group `ai_stance` | high | `B0`, `B2`, `B3` |
+| 7 | `B6 Reserve Relief And Flank Doctrine` | reserve relief, flank guard/refuse behavior, anti-stacking discipline | high | `B2`, `B3`, `B5` |
+| 8 | `B7 Artillery And Strongpoint Doctrine` | bombard strongpoints, avoid direct fortification attacks, attack weak points after suppression | high | `B3`, `B5` |
+| 9 | `B8 Withdrawal Doctrine` | staged withdrawal, rear guard, full retreat thresholds, anti-retreat-loop hysteresis | high | `B2`, `B3`, `B5`, `B6` |
+| 10 | `B9 Tuning And Telemetry Soak` | runtime threshold tuning, smoke matrix, bounded log review, battleprefs validation | medium | all prior |
+
+Plan ordering rules (derived from the dependency column, restated for emphasis):
+
+- `B0` must ship before any behavior patch.
+- `B1` can ship immediately after `B0` because it is a control-safety guard, not full doctrine.
+- `B2` is upstream of every plan that reads or steers order state (`B5`, `B6`, `B8`); ship it before any of them.
+- Full charge, reserve, artillery, and withdrawal doctrine depends on the full `B3`-through-`B7` context, not just `B3` and `B5`. Do not back-fit doctrine into earlier slices to ship sooner.
+- `B8` must not ship before `B3`, `B5`, and `B6` because retreat without sector/reserve context risks game-ruining over-withdrawal.
 
 Each slice should have pure scorer tests before Harmony patch wiring.
 
@@ -790,5 +820,12 @@ Before writing patches, re-read exact current decompile bodies for:
 - `Regiment.GetLastTransmittedPathPos(...)`;
 - `Regiment.SetOrderStatus(...)`;
 - `BattleUnits.SetWaypoint(...)` call sites used by candidate patches.
+
+Before patching `CheckGlobalAIStrategy`, also grep for every writer of the two macroai short-circuit sources:
+
+- `rg "sideinformation\[.*\]\.macroai\s*="` — confirm the save-restore writers and any new gameplay writers.
+- `rg "GameVars\.aistrategy\s*="` — confirm the debug/UI writers.
+
+The B4 Macro Stance Scorer Postfix must detect both branches and skip its bias when vanilla just executed one of them. Treat any newly discovered writer as a candidate override surface, not a Whiskey-clamp target.
 
 Do not rely only on this spec's line anchors when implementing. The shipped game DLL and current decompile remain the source of truth.

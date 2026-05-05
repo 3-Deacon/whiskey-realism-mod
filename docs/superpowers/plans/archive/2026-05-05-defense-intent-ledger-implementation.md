@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the DefenseIntentLedger slice per `docs/superpowers/specs/2026-05-05-defense-intent-ledger-design.md` — a daily strategic-defense ledger that scores coastal/river assets, detects sea/raid/proximity threats, selects proportional response packages with locality-and-escalation discipline, and steers vanilla `CheckForDefensiveOperations` via three patch surfaces (candidate-filter Prefix, Postfix re-issue, custom defensive movement order). Coexists with shipped #4 capital-defense pattern.
+**Goal:** Implement the DefenseIntentLedger slice per `docs/superpowers/specs/archive/2026-05-05-defense-intent-ledger-design.md` — a daily strategic-defense ledger that scores coastal/river assets, detects sea/raid/proximity threats, selects proportional response packages with locality-and-escalation discipline, and steers vanilla `CheckForDefensiveOperations` via three patch surfaces (candidate-filter Prefix, Postfix re-issue, custom defensive movement order). Coexists with shipped #4 capital-defense pattern.
 
 **Architecture:** Three layers, all daily, all signature-skipping. (1) Pure ledger types (`DefenseIntentLedger`, `DefensePackageAggregator`, `DefenseCooldownTable`, `DefenseThreatSignature`) computed from synthetic inputs; (2) `DefenseIntentRuntime` extracts vanilla state via reflection wrappers and feeds the pure builder; (3) Three Harmony surfaces enforce the ledger's verdict — targeted candidate-filter Prefix on `AICampaign.CheckForDefensiveOperations`, paired Postfix re-issue that reverts forbidden cross-map pulls, and a `StrategicCoordinator`-owned custom defensive movement order runner for landings vanilla rate-limited away. Cadence shifts globally from weekly to daily; existing ledgers already signature-skip on unchanged input, so daily firing does not amplify cost outside the new ledger's compute.
 
@@ -2291,15 +2291,15 @@ git commit -m "docs: ship defense intent ledger Slice 1+2"
 ### Task 22: Update strategic-brain umbrella spec + MEMORY.md cadence reference
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-05-02-strategic-brain-design.md`
+- Modify: `docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md`
 - Modify: `MEMORY.md`
 
 - [ ] **Step 1: Update umbrella spec cadence**
 
-In `docs/superpowers/specs/2026-05-02-strategic-brain-design.md`, find the line that reads "Weekly + event-triggered cadence" (or similar) and replace with:
+In `docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md`, find the line that reads "Weekly + event-triggered cadence" (or similar) and replace with:
 
 ```markdown
-**Daily + event-triggered cadence.** CIC strategic review runs on first valid date and every in-game day. Event triggers mark plans dirty; the next daily review processes the dirty bit. Monthly remains only the visible heartbeat/checkpoint boundary. (Defense Intent Ledger slice migrated the cadence from weekly to daily on 2026-05-05; see `docs/superpowers/specs/2026-05-05-defense-intent-ledger-design.md`.)
+**Daily + event-triggered cadence.** CIC strategic review runs on first valid date and every in-game day. Event triggers mark plans dirty; the next daily review processes the dirty bit. Monthly remains only the visible heartbeat/checkpoint boundary. (Defense Intent Ledger slice migrated the cadence from weekly to daily on 2026-05-05; see `docs/superpowers/specs/archive/2026-05-05-defense-intent-ledger-design.md`.)
 ```
 
 If multiple "weekly" references exist in the spec, update each so internal references remain coherent. Skim the spec end-to-end after edits to confirm.
@@ -2327,7 +2327,7 @@ For each hit that refers to operational cadence (not the reasoning about weeks-a
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-05-02-strategic-brain-design.md MEMORY.md
+git add docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md MEMORY.md
 git commit -m "docs: align umbrella spec and memory with daily cadence"
 ```
 

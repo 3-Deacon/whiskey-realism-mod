@@ -48,7 +48,7 @@ The decompile is authoritative for campaign formation levels:
 - `unittyp == 16`: army-level campaign group.
 - `ArmyGroup`: W&L/top command coordination object stored separately in `BattleUnits.armygroups`.
 
-This supersedes the stale mapping in `docs/superpowers/plans/2026-05-03-historical-army-areas-implementation.md`, which described `14/15/16` one level too low. The later grand-strategy spec and decompile agree with the mapping above.
+This supersedes the stale mapping in `docs/superpowers/plans/archive/2026-05-03-historical-army-areas-implementation.md`, which described `14/15/16` one level too low. The later grand-strategy spec and decompile agree with the mapping above.
 
 Primary decompile anchors:
 

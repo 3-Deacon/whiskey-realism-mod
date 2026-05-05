@@ -12,7 +12,7 @@
 
 ## Scope
 
-This plan intentionally implements only the first safe vertical slice from `docs/superpowers/specs/2026-05-03-grand-strategy-and-research-tree-design.md`.
+This plan intentionally implements only the first safe vertical slice from `docs/superpowers/specs/archive/2026-05-03-grand-strategy-and-research-tree-design.md`.
 
 In scope:
 
@@ -1105,7 +1105,7 @@ git commit -m "feat: steer project selection"
 
 **Files:**
 - Modify: `docs/handoff.md`
-- Modify: `docs/superpowers/specs/2026-05-03-grand-strategy-and-research-tree-design.md`
+- Modify: `docs/superpowers/specs/archive/2026-05-03-grand-strategy-and-research-tree-design.md`
 
 - [ ] **Step 1: Run pure tests**
 
@@ -1186,7 +1186,7 @@ Update `docs/handoff.md` with:
 - deployed DLL SHA-256
 - runtime smoke status for `[once:project-selection]`
 
-Update `docs/superpowers/specs/2026-05-03-grand-strategy-and-research-tree-design.md` status line from:
+Update `docs/superpowers/specs/archive/2026-05-03-grand-strategy-and-research-tree-design.md` status line from:
 
 ```markdown
 Status: partially implemented for v0.2.2 sequencing. Front/army-area/army-group steering, formation directives, objective tags, and project steering are live on `origin/main` through #17; policy steering, recruitment intent, and naval intent remain design work.
@@ -1201,7 +1201,7 @@ Status: implemented through post-v0.2.2 main for objective/project steering, pol
 - [ ] **Step 7: Commit docs**
 
 ```bash
-git add docs/handoff.md docs/superpowers/specs/2026-05-03-grand-strategy-and-research-tree-design.md
+git add docs/handoff.md docs/superpowers/specs/archive/2026-05-03-grand-strategy-and-research-tree-design.md
 git commit -m "docs: record project selection smoke state"
 ```
 
