@@ -33,6 +33,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaLedger.cs" Link="ArmyAreaLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BattleHistoryRecord.cs" Link="BattleHistoryRecord.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BattleHistoryQuery.cs" Link="BattleHistoryQuery.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ContactEvidenceLedger.cs" Link="ContactEvidenceLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\TheaterPressureView.cs" Link="TheaterPressureView.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Phase.cs" Link="Phase.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PhaseTruthLedger.cs" Link="PhaseTruthLedger.cs" />

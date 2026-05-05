@@ -213,7 +213,12 @@ static class Program
             ("phase truth replans when objective unavailable", PhaseTruthReplansWhenObjectiveUnavailable),
             ("phase truth recovers when force below threshold", PhaseTruthRecoversWhenForceBelowThreshold),
             ("phase truth deadline expired advances or replans", PhaseTruthDeadlineExpiredAdvancesOrReplans),
-            ("phase truth no contact stays continue", PhaseTruthNoContactStaysContinue)
+            ("phase truth no contact stays continue", PhaseTruthNoContactStaysContinue),
+            ("contact evidence no contact when zero enemy and no battles", ContactEvidenceNoContactWhenZeroEnemyAndNoBattles),
+            ("contact evidence enemy reacted on strength rise", ContactEvidenceEnemyReactedOnStrengthRise),
+            ("contact evidence skirmish observed near target", ContactEvidenceSkirmishObservedNearTarget),
+            ("contact evidence battle observed lost is overmatched", ContactEvidenceBattleObservedLostIsOvermatched),
+            ("contact evidence favorable contact requires presence and ratio", ContactEvidenceFavorableRequiresPresenceAndRatio)
         };
 
         foreach (var test in tests)
@@ -4546,5 +4551,120 @@ static class Program
         var output = PhaseTruthLedger.Evaluate(input);
         AssertEqual(PhaseTruthVerdict.Valid, output.Verdict);
         AssertEqual(PhaseTruthAction.Continue, output.RecommendedAction);
+    }
+
+    private static void ContactEvidenceNoContactWhenZeroEnemyAndNoBattles()
+    {
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            CurrentEnemyStrength = 0f,
+            CurrentFriendlyStrength = 8000f,
+            PreviousObservedEnemyStrength = 0f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>(),
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = 1862 * 372 + 6 * 31 + 6
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.NoContact, output.Evidence);
+        AssertTrue(!output.AllowsEscalation, "no-contact must not allow escalation");
+    }
+
+    private static void ContactEvidenceEnemyReactedOnStrengthRise()
+    {
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            CurrentEnemyStrength = 6000f,
+            CurrentFriendlyStrength = 7000f,
+            PreviousObservedEnemyStrength = 3000f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>(),
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = 1862 * 372 + 6 * 31 + 6
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.EnemyReacted, output.Evidence);
+    }
+
+    private static void ContactEvidenceSkirmishObservedNearTarget()
+    {
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            CurrentEnemyStrength = 1000f,
+            CurrentFriendlyStrength = 1500f,
+            PreviousObservedEnemyStrength = 1000f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>
+            {
+                new BattleHistoryRecord {
+                    BattleName = "skirmish", PositionX = 105f, PositionZ = 105f,
+                    Day = 4, Month = 6, Year = 1862, BattleResultType = 0 // not major
+                }
+            },
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = 1862 * 372 + 6 * 31 + 6
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.SkirmishObserved, output.Evidence);
+    }
+
+    private static void ContactEvidenceBattleObservedLostIsOvermatched()
+    {
+        int daySerial = 1862 * 372 + 6 * 31 + 6;
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            ObservingAllianceId = 0,
+            CurrentEnemyStrength = 5000f,
+            CurrentFriendlyStrength = 6000f,
+            PreviousObservedEnemyStrength = 5000f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>
+            {
+                new BattleHistoryRecord {
+                    BattleName = "majorlost", PositionX = 105f, PositionZ = 105f,
+                    Day = 4, Month = 6, Year = 1862, BattleResultType = 1 /* major */,
+                    AllianceWon = 1 // observer is alliance 0, so this is a loss
+                }
+            },
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = daySerial
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.OvermatchedContact, output.Evidence);
+        AssertTrue(!output.AllowsEscalation, "overmatched must not allow escalation");
+    }
+
+    private static void ContactEvidenceFavorableRequiresPresenceAndRatio()
+    {
+        int daySerial = 1862 * 372 + 6 * 31 + 6;
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            ObservingAllianceId = 0,
+            CurrentEnemyStrength = 1000f,
+            CurrentFriendlyStrength = 2500f,
+            PreviousObservedEnemyStrength = 1000f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>(),
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = daySerial
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.FavorableContact, output.Evidence);
+        AssertTrue(output.AllowsEscalation, "favorable contact allows escalation");
     }
 }
