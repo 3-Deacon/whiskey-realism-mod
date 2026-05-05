@@ -12,6 +12,8 @@ The mod replaces vanilla's random-objective AI with a personality-driven phased-
 
 Existing generated BepInEx config values take precedence over C# defaults. If `<GTCW>/BepInEx/config/dev.kyle.whiskey-realism.cfg` already exists, review that file before expecting new default config descriptions or values to appear.
 
+Developer reference for the current strategic probe tempo layer: [`docs/operational-tempo-doctrine.md`](docs/operational-tempo-doctrine.md).
+
 Latest release: [v0.2.2](https://github.com/3-Deacon/whiskey-realism-mod/releases/tag/v0.2.2) — drop the attached `WhiskeyRealism.dll` into your `<GTCW>/BepInEx/plugins/` folder. Requires BepInEx 5.4.x x64 UnityMono.
 
 ## Goals

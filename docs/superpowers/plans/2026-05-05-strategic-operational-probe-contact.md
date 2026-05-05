@@ -27,6 +27,7 @@ Files:
 - `src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs`
 - `src/WhiskeyRealism/Strategic/FormationDirectiveLedger.cs`
 - `src/WhiskeyRealism/Strategic/StrategicCoordinator.cs`
+- `docs/operational-tempo-doctrine.md`
 - `tests/WhiskeyRealism.Tests/Program.cs`
 - `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`
 

@@ -1,6 +1,6 @@
 # Strategic Anti-Zerg Theater Integrity Plan
 
-Status: implemented, console/build/deploy/hash verified on 2026-05-05; runtime smoke pending after game restart.
+Status: implemented, console/build/deploy/hash verified on 2026-05-05; runtime smoke still pending after game restart. This plan records its implementation checkpoint hash; the current deployed DLL hash is tracked in `docs/handoff.md`.
 
 ## Goal
 
