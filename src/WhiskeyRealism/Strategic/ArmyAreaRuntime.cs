@@ -122,6 +122,26 @@ namespace WhiskeyRealism.Strategic
                 }
                 if (!TryGetAnchor(assignment.AssignedAreaKey, out var anchor)) continue;
 
+                var position = UnitPosition(unit);
+                if (position.HasValue)
+                {
+                    var fronts = StrategicCoordinator.Instance?.Fronts;
+                    var front = fronts != null && allianceId >= 0 && allianceId < fronts.Length
+                        ? fronts[allianceId]
+                        : null;
+                    string sourceSector = FrontSectorRuntime.SectorKey(position.Value);
+                    string destinationSector = FrontSectorRuntime.SectorKey(anchor);
+                    float strength = ReadFloat(0f, unit, "groupstrengthactive", "groupstrengthdirect", "groupstrength", "strength");
+                    var budget = StrategicMovementBudget.EvaluateAreaMovement(front, sourceSector, destinationSector, strength);
+                    if (budget != null && !budget.Allowed)
+                    {
+                        OnceLog.Info(
+                            $"army-area:{allianceId}:{UnitKey(unit)}:budget-block",
+                            $"[Patch:ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=skip-return-area reason={budget.Reason}");
+                        continue;
+                    }
+                }
+
                 SetTheaterPosition(unit, anchor);
                 if (MoveUnitTo(unit, anchor))
                 {

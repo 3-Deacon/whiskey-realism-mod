@@ -1,6 +1,6 @@
 # Tactical Brain Design
 
-Status: draft umbrella design spec for Slice B, updated after vanilla-anchor and adversarial review.
+Status: paused draft umbrella design spec for Slice B. Do not implement from this spec unless the user explicitly reopens tactical work.
 Scope: battlefield tactical AI for land battles. This spec covers doctrine, scoring, state, patch surfaces, telemetry, and implementation order. It does not implement code or replace the implementation plans each slice requires.
 
 Vanilla verification: see [`2026-05-05-tactical-brain-vanilla-verification.md`](2026-05-05-tactical-brain-vanilla-verification.md). That pass confirms the required vanilla data and patch surfaces, but marks sector doctrine, local-superiority scoring, contact-aware stale-order handling, reserve-relief timing, and staged withdrawal as new Whiskey behavior rather than existing vanilla logic. It also separates battle-level `macroai` from group-level `ai_stance`; they are different ladders and must not be patched as one state machine.

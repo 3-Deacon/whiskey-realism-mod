@@ -16,8 +16,8 @@ This file is the project memory index for agents and maintainers. It is intentio
 ## Current Checkpoint
 
 - Current release is `v0.2.2`.
-- **Slice A is fully shipped and verified.** Defense Intent Ledger Slice 1+2 was smoke-validated end-to-end on 2026-05-05 (alliance 2 Europe bound-check fix in commit `e44c0cb`): `[DefenseIntent] custom-order ...` lines emit for both ActiveInvasion and CoastalGuard, shipped #4 capital-defense path coexists, zero warnings/errors. Post-smoke main also includes #26 Campaign AI Governor, dynamic army-area fallback, threatened-priority-area recruitment protection, and #27 Fort Construction Governor. See `docs/handoff.md` for the current deployed DLL SHA-256 (it churns frequently; do not pin it here).
-- **Slice B (tactical brain) is in design/planning phase.** Umbrella spec at `docs/superpowers/specs/2026-05-05-tactical-brain-design.md`; vanilla verification at `docs/superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md`; focused weapons/ammunition adjunct spec at `docs/superpowers/specs/2026-05-05-tactical-weapons-ammunition-design.md`; master sequencing plan at `docs/superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md`. No tactical source code yet.
+- **Strategic layer is the active workstream.** Defense Intent Ledger Slice 1+2 was smoke-validated end-to-end on 2026-05-05, then a later 2026-05-05 strategic anti-zerg/theater-integrity fix was built, deployed, and hash-verified. That fix prevents `AssetProximity` threats from issuing custom movement, requires defense movement candidates to pass formation/front budgets, caps capital-defense packages, extends #25 candidate filtering to the new suppression reasons, and makes #15 return-area movement consult front budget. Runtime smoke still needs a fresh game restart because the current log predates the deployed hash. See `docs/handoff.md` and `docs/superpowers/plans/2026-05-05-strategic-anti-zerg-theater-integrity.md` for the current SHA-256 and smoke boundary.
+- **Slice B (tactical brain) is paused.** Umbrella spec at `docs/superpowers/specs/2026-05-05-tactical-brain-design.md`; vanilla verification at `docs/superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md`; focused weapons/ammunition adjunct spec at `docs/superpowers/specs/2026-05-05-tactical-weapons-ammunition-design.md`; master sequencing plan at `docs/superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md`; B0 observer plan at `docs/superpowers/plans/2026-05-05-tactical-b0-observer.md`. Do not advance tactical code or plans unless the user explicitly reopens tactical work.
 - Default-off telegraph AI (#24) still needs a focused enabled smoke run; that's an opportunistic Slice A follow-up, not a blocker.
 - Slices C (W&L hierarchy AI) and D (additional historical flavor) remain deferred.
 
@@ -34,18 +34,19 @@ This file is the project memory index for agents and maintainers. It is intentio
 - `DefenseCooldownTable._recoveredStarted` is an idempotency guard: set it on the same tick that the cooldown entry transitions from recovering → active to prevent double-triggers across multiple daily ticks.
 - `CampaignMapLedger` is now the active-map source for towns, represented states, forts, sea harbors, and river harbors. Do not reintroduce hardcoded Mississippi/Alabama assumptions for W&L unless the runtime map actually exposes those states.
 - #4 capital-defense add-on should stay proportional: readiness-gated, morale-adjusted, and penalizing gross overmatch for small threats.
+- Strategic anti-zerg doctrine is now load-bearing: `AssetProximity` is observation/local pressure, not an invasion movement trigger; theater/front budgets decide whether units can export; cross-map defense requires a real national emergency; capital defense uses a capped package; and release/return flows must not strand units or strip other theaters.
 - `AICampaign.aifaction` can include alliance 2 (Europe). Per-alliance arrays sized to Union+CSA (length 2) must bound-check against `arr.Length` before indexing; `AICampaignReflect.GetAllianceId(_aifaction)` returns the underlying alliance, which can be 2. Slice 2 patches (#25 + custom-order runner) early-return for `allianceId > 1` rather than indexing.
 - Test project (`tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`) uses explicit `<Compile Include>` entries per source file — there is no glob. Adding a new strategic file requires a matching csproj entry; deleting one requires removing the entry. Build will succeed against stale entries until the file is actually consumed by a test.
 
 ## Current Priorities
 
-1. **Slice B planning**: brainstorm-finalize the existing tactical-brain umbrella spec plus the weapons/ammunition adjunct spec, then write the implementation plan under `docs/superpowers/plans/`. No code until the plan exists.
+1. **Strategic anti-zerg runtime smoke**: restart GTCW with the deployed DLL, tail `LogOutput.log`, and confirm there are no `[DefenseIntent] custom-order ... threat=asset:` lines. See `docs/superpowers/plans/2026-05-05-strategic-anti-zerg-theater-integrity.md`.
 2. Slice A follow-ups (opportunistic, none blocking):
    - Slice 3 guard-budget tuning from runtime telemetry — adjust `GuardBudgetFraction` (default 0.10), `cooldownDays` (default 4), and aggregator thresholds (0.75 / 1.0 / 1.25) per faction/era from observed telemetry.
    - `AssetRoleCatalog` refinement from non-East scenarios — current ~50 entries cover the W&L East-coast smoke; look for `[DefenseIntent:asset] missing-role` lines in CSA Western/Trans-Miss campaigns.
    - Optional telegraph AI smoke with `Enable Telegraph AI = true`.
    - Supply-depot/railroad construction doctrine only after observer data proves the gap. Fort saturation guard #27 has shipped; future fort work should be tuning from runtime `[Patch:FortGovernor]` evidence, not a new broad construction rewrite.
-3. Keep Slices C (W&L hierarchy AI) and D (additional historical flavor) deferred unless the user explicitly redirects.
+3. Keep Slice B tactical work, Slices C (W&L hierarchy AI), and D (additional historical flavor) deferred unless the user explicitly redirects.
 
 ## Update Rules
 

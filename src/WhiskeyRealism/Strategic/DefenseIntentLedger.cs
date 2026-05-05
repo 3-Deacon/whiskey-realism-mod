@@ -153,6 +153,7 @@ namespace WhiskeyRealism.Strategic
                 {
                     Threat = new DefenseThreat
                     {
+                        SourceKind = 0,
                         Signature = assetSig,
                         Posture   = DefensePosture.CoastalGuard,
                         Scale     = ThreatScale.None,
@@ -331,6 +332,14 @@ namespace WhiskeyRealism.Strategic
                     continue;
                 }
 
+                var movementSuppression = StrategicMovementBudget.EvaluateDefenseCandidate(
+                    input, src, posture, scale, c);
+                if (movementSuppression != null)
+                {
+                    preSuppressed.Add(movementSuppression);
+                    continue;
+                }
+
                 // Pre-suppression: critical-front when scale < decisive.
                 if (c.CriticalFront && scale != ThreatScale.DecisiveLanding)
                 {
@@ -343,7 +352,14 @@ namespace WhiskeyRealism.Strategic
             }
 
             // Run aggregator without critical-front candidates first.
-            var pkgResult = DefensePackageAggregator.Select(normalPool, desired, caution, aggression);
+            float packageCap = StrategicMovementBudget.CapitalDefenseCap(input, src);
+            var pkgResult = DefensePackageAggregator.Select(
+                normalPool,
+                desired,
+                caution,
+                aggression,
+                packageCap,
+                "capital-defense-cap");
 
             // Escalation: for decisive landing, check if we need cross-theater candidates.
             // The aggregator already handles AdjacentTheater via tier scoring; we just note
@@ -385,7 +401,13 @@ namespace WhiskeyRealism.Strategic
             // Re-run aggregator if any critical-front candidates were admitted.
             if (needsCritical && criticalFront.Count > 0)
             {
-                pkgResult = DefensePackageAggregator.Select(normalPool, desired, caution, aggression);
+                pkgResult = DefensePackageAggregator.Select(
+                    normalPool,
+                    desired,
+                    caution,
+                    aggression,
+                    packageCap,
+                    "capital-defense-cap");
                 // Re-check escalation reason.
                 foreach (var c in pkgResult.SelectedPackage)
                 {
@@ -406,10 +428,12 @@ namespace WhiskeyRealism.Strategic
             {
                 Threat = new DefenseThreat
                 {
+                    SourceKind      = src.Kind,
                     Signature       = sig,
                     Posture         = posture,
                     Scale           = scale,
                     AssetName       = src.AssetName,
+                    AssetRole       = src.AssetRole,
                     X               = src.X,
                     Z               = src.Z,
                     EnemyStrength   = src.EnemyStrength,
@@ -446,10 +470,12 @@ namespace WhiskeyRealism.Strategic
             {
                 Threat = new DefenseThreat
                 {
+                    SourceKind      = src.Kind,
                     Signature       = sig,
                     Posture         = posture,
                     Scale           = scale,
                     AssetName       = src.AssetName,
+                    AssetRole       = src.AssetRole,
                     X               = src.X,
                     Z               = src.Z,
                     EnemyStrength   = src.EnemyStrength,
@@ -484,6 +510,7 @@ namespace WhiskeyRealism.Strategic
             {
                 Threat = new DefenseThreat
                 {
+                    SourceKind      = 0,
                     Signature       = assetSig,
                     Posture         = DefensePosture.CoastalGuard,
                     Scale           = ThreatScale.None,

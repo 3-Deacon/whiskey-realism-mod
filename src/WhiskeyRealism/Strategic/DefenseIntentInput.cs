@@ -38,7 +38,10 @@ namespace WhiskeyRealism.Strategic
         public DefenseCooldownTable Cooldown = new DefenseCooldownTable();
         public int CooldownDays = 4;
         public float GuardBudgetFraction = 0.10f;
+        public float CapitalDefenseBudgetFraction = 0.18f;
         public float TotalAllianceEffectiveStrength;
+        public FrontSectorLedger FrontLedger;
+        public FormationDirectiveLedger FormationDirectives;
         public List<CampaignMapAsset> GuardCandidateAssets = new List<CampaignMapAsset>();
     }
 }

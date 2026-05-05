@@ -4,10 +4,12 @@ namespace WhiskeyRealism.Strategic
 {
     public sealed class DefenseThreat
     {
+        public DefenseThreatSourceKind SourceKind;
         public string Signature;
         public DefensePosture Posture;
         public ThreatScale Scale;
         public string AssetName;
+        public AssetStrategicRole AssetRole;
         public float X;
         public float Z;
         public float EnemyStrength;
@@ -19,7 +21,10 @@ namespace WhiskeyRealism.Strategic
     public sealed class DefenseCandidate
     {
         public int UnitInstanceId;
+        public string UnitKey;
         public string UnitName;
+        public string AreaKey;
+        public string SectorKey;
         public float X;
         public float Z;
         public float ActiveStrength;
@@ -30,6 +35,10 @@ namespace WhiskeyRealism.Strategic
         public bool InOffensiveOperation;
         public bool PlayerControlled;
         public bool CriticalFront;
+        public bool HasFormationDirective;
+        public bool DefensiveAllowed = true;
+        public bool TransferDonorAllowed = true;
+        public bool DirectMovementAllowed = true;
         public float DistanceToThreat;
         public float Score;
         public float EffectiveStrength;

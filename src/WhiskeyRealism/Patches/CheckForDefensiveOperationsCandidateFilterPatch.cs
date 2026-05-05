@@ -286,6 +286,12 @@ namespace WhiskeyRealism.Patches
                     if (s == null) continue;
                     if (s.Reason != "forbidden-cross-map" &&
                         s.Reason != "critical-front" &&
+                        s.Reason != "asset-proximity-local-only" &&
+                        s.Reason != "national-emergency-required" &&
+                        s.Reason != "formation-directive" &&
+                        s.Reason != "formation-donor" &&
+                        s.Reason != "min-hold" &&
+                        s.Reason != "critical-sector-budget" &&
                         s.Reason != "player-controlled")
                         continue;
                     ids.Add(s.UnitInstanceId);

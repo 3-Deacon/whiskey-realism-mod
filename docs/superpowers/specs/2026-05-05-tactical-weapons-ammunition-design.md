@@ -1,6 +1,6 @@
 # Tactical Weapons And Ammunition Design
 
-Status: draft focused design spec for Slice B adjunct work.
+Status: paused draft focused design spec for Slice B adjunct work. Do not implement from this spec unless the user explicitly reopens tactical work.
 Scope: live-battle infantry weapons, artillery ammunition, projectile behavior, fire discipline, smoke, and autoresolve parity. This spec does not implement code and does not replace the Slice B tactical-brain umbrella spec.
 
 Related specs:

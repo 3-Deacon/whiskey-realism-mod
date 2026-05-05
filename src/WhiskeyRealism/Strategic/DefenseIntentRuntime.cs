@@ -81,6 +81,19 @@ namespace WhiskeyRealism.Strategic
 
             if (input.PlayerIsCIC) return input;
 
+            try
+            {
+                var coordinator = StrategicCoordinator.Instance;
+                if (coordinator != null && allianceId >= 0)
+                {
+                    if (coordinator.Fronts != null && allianceId < coordinator.Fronts.Length)
+                        input.FrontLedger = coordinator.Fronts[allianceId];
+                    if (coordinator.FormationDirectives != null && allianceId < coordinator.FormationDirectives.Length)
+                        input.FormationDirectives = coordinator.FormationDirectives[allianceId];
+                }
+            }
+            catch { }
+
             int aifactionIndex = ResolveAifactionIndex(allianceId);
             if (aifactionIndex < 0) return input;
 
@@ -554,14 +567,8 @@ namespace WhiskeyRealism.Strategic
             var isMovedByPlayer = AccessTools.Method(AccessTools.TypeByName("DLC_WL"), "IsMovedByPlayer", new[] { typeof(Regiment) });
 
             // Look up the front ledger for this alliance once; used for CriticalFront classification.
-            FrontSectorLedger frontLedger = null;
-            try
-            {
-                if (StrategicCoordinator.Instance != null &&
-                    allianceId >= 0 && allianceId < StrategicCoordinator.Instance.Fronts.Length)
-                    frontLedger = StrategicCoordinator.Instance.Fronts[allianceId];
-            }
-            catch { }
+            FrontSectorLedger frontLedger = input.FrontLedger;
+            FormationDirectiveLedger formationLedger = input.FormationDirectives;
 
             for (int i = 0; i < ownUnits.Count; i++)
             {
@@ -610,6 +617,8 @@ namespace WhiskeyRealism.Strategic
                     ? ((Component)regiment).transform.position
                     : ObjectPosition(unit);
                 Theater unitTheater = TheaterClassifier.FromPosition(unitPos.x, unitPos.z);
+                string areaKey = ArmyAreaRuntime.AreaKey(unitPos);
+                string sectorKey = FrontSectorRuntime.SectorKey(unitPos);
 
                 // Readiness step.
                 float readinessStep = 2f;
@@ -703,6 +712,9 @@ namespace WhiskeyRealism.Strategic
                 string unitName = null;
                 try { unitName = ((UnityEngine.Object)unit).name; } catch { }
 
+                string unitKey = UnitKey(unit, unitName);
+                var directive = formationLedger?.GetAssignment(unitKey);
+
                 int strength = regiment != null
                     ? regiment.groupstrengthactive
                     : ReadInt(unit, "groupstrengthactive", 0);
@@ -715,7 +727,10 @@ namespace WhiskeyRealism.Strategic
                 input.Candidates.Add(new DefenseCandidate
                 {
                     UnitInstanceId = unitInstanceId,
+                    UnitKey = unitKey,
                     UnitName = unitName,
+                    AreaKey = areaKey,
+                    SectorKey = sectorKey,
                     X = unitPos.x,
                     Z = unitPos.z,
                     ActiveStrength = (float)strength,
@@ -726,6 +741,10 @@ namespace WhiskeyRealism.Strategic
                     InOffensiveOperation = inOffensive,
                     PlayerControlled = playerControlled,
                     CriticalFront = criticalFront,
+                    HasFormationDirective = directive != null,
+                    DefensiveAllowed = directive == null || directive.DefensiveAllowed,
+                    TransferDonorAllowed = directive == null || directive.TransferDonorAllowed,
+                    DirectMovementAllowed = directive == null || directive.DirectMovementAllowed,
                     DistanceToThreat = minDist == float.MaxValue ? 0f : minDist
                 });
             }
@@ -856,6 +875,13 @@ namespace WhiskeyRealism.Strategic
             }
             catch { }
             return fallback;
+        }
+
+        private static string UnitKey(object unit, string unitName)
+        {
+            string name = string.IsNullOrEmpty(unitName) ? "<unknown>" : unitName;
+            int commander = ReadInt(unit, "commander", -1);
+            return name + ":" + commander.ToString();
         }
 
         // Read an int field from an object via reflection; returns fallback on failure.

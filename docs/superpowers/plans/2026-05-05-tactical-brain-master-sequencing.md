@@ -1,5 +1,7 @@
 # Tactical Brain Master Sequencing Implementation Plan
 
+Status: paused. Do not execute tactical work unless the user explicitly reopens Slice B. Current active plan is `2026-05-05-strategic-anti-zerg-theater-integrity.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Convert the Slice B tactical-brain umbrella spec into a sequential, verifiable implementation track that starts with observer telemetry and then ships bounded behavior slices.

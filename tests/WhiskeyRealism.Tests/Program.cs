@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Tactical;
 
 static class Program
 {
@@ -28,6 +29,12 @@ static class Program
             ("strategic cadence alternates formation by alliance", StrategicCadenceAlternatesFormationByAlliance),
             ("strategic cadence refreshes weekly or on source change", StrategicCadenceRefreshesWeeklyOrSourceChange),
             ("strategic cadence stable source can skip downstream rebuild", StrategicCadenceStableSourceSkipsDownstreamRebuild),
+            ("tactical telemetry maps macro names", TacticalTelemetryMapsMacroNames),
+            ("tactical telemetry summary handles null", TacticalTelemetrySummaryHandlesNull),
+            ("tactical telemetry maps player-order prefix", TacticalTelemetryMapsPlayerOrderPrefix),
+            ("tactical telemetry signature changes on material fields", TacticalTelemetrySignatureChangesOnMaterialFields),
+            ("tactical telemetry throttle suppresses repeated signature", TacticalTelemetryThrottleSuppressesRepeatedSignature),
+            ("tactical telemetry delta formats before after counts", TacticalTelemetryDeltaFormatsBeforeAfterCounts),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
@@ -182,7 +189,12 @@ static class Program
             ("defense ledger debug seainvasionsactive off falls back", DefenseLedgerDebugSeainvasionsactiveOffFallsBack),
             ("defense ledger telemetry signature non-empty and posture-prefixed", DefenseLedgerTelemetrySignaturePopulated),
             ("defense telemetry summary compresses response burst", DefenseTelemetrySummaryCompressesResponseBurst),
-            ("defense ledger does not crash on europe alliance index", DefenseLedgerDoesNotCrashOnEuropeAllianceIndex)
+            ("defense ledger does not crash on europe alliance index", DefenseLedgerDoesNotCrashOnEuropeAllianceIndex),
+            ("defense ledger asset proximity stays local and cannot custom order", DefenseLedgerAssetProximityStaysLocalAndCannotCustomOrder),
+            ("defense ledger donor theater budget blocks critical front export", DefenseLedgerDonorTheaterBudgetBlocksCriticalFrontExport),
+            ("defense ledger formation directive blocks defense movement", DefenseLedgerFormationDirectiveBlocksDefenseMovement),
+            ("defense ledger capital defense package is capped", DefenseLedgerCapitalDefensePackageIsCapped),
+            ("strategic movement budget blocks area export from hold sector", StrategicMovementBudgetBlocksAreaExportFromHoldSector)
         };
 
         foreach (var test in tests)
@@ -314,6 +326,79 @@ static class Program
             "same front signatures should be stable");
         AssertTrue(StrategicCadencePolicy.SourceChanged("front:1", null),
             "missing previous signature should force first rebuild");
+    }
+
+    private static void TacticalTelemetryMapsMacroNames()
+    {
+        AssertEqual("dynamic", TacticalTelemetry.MacroName(-1), "macro -1");
+        AssertEqual("assault", TacticalTelemetry.MacroName(0), "macro 0");
+        AssertEqual("attack", TacticalTelemetry.MacroName(1), "macro 1");
+        AssertEqual("defend", TacticalTelemetry.MacroName(2), "macro 2");
+        AssertEqual("retreat", TacticalTelemetry.MacroName(3), "macro 3");
+        AssertEqual("unknown", TacticalTelemetry.MacroName(99), "macro unknown");
+    }
+
+    private static void TacticalTelemetrySummaryHandlesNull()
+    {
+        string summary = TacticalTelemetry.Summary(TacticalObservedEvent.Macro, null);
+        AssertContains(summary, "[TacticalMacro]", "prefix");
+        AssertContains(summary, "side=-1", "empty side");
+        AssertContains(summary, "macro=unknown", "empty macro");
+        AssertContains(summary, "sectorSource=none", "empty sector source");
+    }
+
+    private static void TacticalTelemetryMapsPlayerOrderPrefix()
+    {
+        string summary = TacticalTelemetry.Summary(TacticalObservedEvent.PlayerOrder, TacticalBattleContext.Empty());
+        AssertContains(summary, "[TacticalPlayerOrder]", "player-order prefix");
+    }
+
+    private static void TacticalTelemetrySignatureChangesOnMaterialFields()
+    {
+        var baseline = new TacticalBattleContext
+        {
+            Side = 1,
+            Alliance = 0,
+            MacroAi = -1,
+            GroupCount = 4,
+            SectorSource = TacticalSectorSource.ObjectiveChain,
+            SectorSignature = "chains=2"
+        };
+        var changed = new TacticalBattleContext
+        {
+            Side = 1,
+            Alliance = 0,
+            MacroAi = 1,
+            GroupCount = 4,
+            SectorSource = TacticalSectorSource.ObjectiveChain,
+            SectorSignature = "chains=2"
+        };
+
+        string a = TacticalTelemetry.Signature(TacticalObservedEvent.Macro, baseline);
+        string b = TacticalTelemetry.Signature(TacticalObservedEvent.Macro, changed);
+        if (a == b) throw new Exception("expected tactical signature to change when macro changes");
+    }
+
+    private static void TacticalTelemetryThrottleSuppressesRepeatedSignature()
+    {
+        var emitted = new Dictionary<string, float>();
+        bool first = TacticalTelemetry.ShouldEmit(emitted, "macro", "sig", 10f, 30f, verbose: false);
+        bool second = TacticalTelemetry.ShouldEmit(emitted, "macro", "sig", 20f, 30f, verbose: false);
+        bool third = TacticalTelemetry.ShouldEmit(emitted, "macro", "sig", 41f, 30f, verbose: false);
+        if (!first) throw new Exception("expected first tactical signature emit");
+        if (second) throw new Exception("expected repeated tactical signature to be throttled");
+        if (!third) throw new Exception("expected tactical signature to emit after throttle window");
+    }
+
+    private static void TacticalTelemetryDeltaFormatsBeforeAfterCounts()
+    {
+        string delta = TacticalTelemetry.Delta(
+            new TacticalObserverSnapshot { GroupCount = 2, ChargingCount = 0, ReserveGroupCount = 1 },
+            new TacticalObserverSnapshot { GroupCount = 2, ChargingCount = 1, ReserveGroupCount = 2 });
+
+        AssertContains(delta, "groups=2->2", "group delta");
+        AssertContains(delta, "charging=0->1", "charging delta");
+        AssertContains(delta, "reserves=1->2", "reserve delta");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
@@ -2933,6 +3018,18 @@ static class Program
             throw new Exception("expected " + expected + " but got " + actual);
     }
 
+    private static void AssertEqual<T>(T expected, T actual, string label)
+    {
+        if (!EqualityComparer<T>.Default.Equals(expected, actual))
+            throw new Exception(label + ": expected " + expected + " got " + actual);
+    }
+
+    private static void AssertContains(string value, string expected, string label)
+    {
+        if (value == null || !value.Contains(expected))
+            throw new Exception(label + ": expected '" + value + "' to contain '" + expected + "'");
+    }
+
     private static void AssertTrue(bool condition, string message)
     {
         if (!condition) throw new Exception(message);
@@ -3152,7 +3249,7 @@ static class Program
             SourcePortName = "boston",
             LandedSignal = true,
             AssetName = "norfolk-harbor",
-            AssetRole = AssetStrategicRole.CapitalApproach,
+            AssetRole = AssetStrategicRole.KeyFort,
             EnemyStrength = 12000f
         });
         // Same-theater understrength division
@@ -3257,8 +3354,11 @@ static class Program
         // Cross-map unit should be suppressed with forbidden-cross-map or overmatch.
         var sup99 = response.Suppressed.Find(s => s.UnitInstanceId == 99);
         AssertTrue(sup99 != null, "expected id=99 to be suppressed");
-        AssertTrue(sup99.Reason == "forbidden-cross-map" || sup99.Reason == "overmatch" || sup99.Reason == "worse-tier",
-            $"expected reason forbidden-cross-map, overmatch, or worse-tier, got {sup99.Reason}");
+        AssertTrue(sup99.Reason == "forbidden-cross-map" ||
+                   sup99.Reason == "overmatch" ||
+                   sup99.Reason == "worse-tier" ||
+                   sup99.Reason == "national-emergency-required",
+            $"expected reason forbidden-cross-map, overmatch, worse-tier, or national-emergency-required, got {sup99.Reason}");
     }
 
     // Test #5: guard budget caps low-value ports.
@@ -3747,6 +3847,246 @@ static class Program
         AssertEqual(2, output.AllianceId);
         AssertTrue(output.Responses != null,
             "Responses list must not be null even for europe alliance");
+    }
+
+    private static void DefenseLedgerAssetProximityStaysLocalAndCannotCustomOrder()
+    {
+        var input = MakeDefenseInput(1);
+        input.Threats.Add(new DefenseThreatSource
+        {
+            Kind = DefenseThreatSourceKind.AssetProximity,
+            AssetKind = CampaignMapAssetKind.SeaHarbor,
+            AssetName = "annapolis-port",
+            EnemyStrength = 9000f,
+            EnemyInstanceIds = new[] { 1, 2, 3 },
+            X = 10f,
+            Z = 10f
+        });
+        input.Candidates.Add(new DefenseCandidate
+        {
+            UnitInstanceId = 1,
+            UnitName = "Local Garrison",
+            ActiveStrength = 4000f,
+            Morale = 0.9f,
+            ReadinessStep = 2f,
+            Theater = Theater.East,
+            Tier = CandidateTier.Local,
+            DistanceToThreat = 20f
+        });
+        input.Candidates.Add(new DefenseCandidate
+        {
+            UnitInstanceId = 2,
+            UnitName = "Distant Army",
+            ActiveStrength = 25000f,
+            Morale = 0.9f,
+            ReadinessStep = 2f,
+            Theater = Theater.West,
+            Tier = CandidateTier.AdjacentTheater,
+            TransferDonorAllowed = true,
+            DirectMovementAllowed = true,
+            DefensiveAllowed = true,
+            DistanceToThreat = 400f
+        });
+
+        var output = DefenseIntentLedger.Build(input);
+
+        AssertTrue(output.Responses.Count >= 1, "expected asset-proximity response");
+        var response = output.Responses[0];
+        AssertEqual(DefenseThreatSourceKind.AssetProximity, response.Threat.SourceKind);
+        AssertTrue(response.SelectedPackage.Find(c => c.UnitInstanceId == 1) != null,
+            "local garrison should remain eligible");
+        AssertTrue(response.SelectedPackage.Find(c => c.UnitInstanceId == 2) == null,
+            "asset proximity must not pull adjacent theater army");
+        var suppressed = response.Suppressed.Find(s => s.UnitInstanceId == 2);
+        AssertTrue(suppressed != null, "adjacent theater army should be suppressed");
+        AssertEqual("asset-proximity-local-only", suppressed.Reason);
+        AssertTrue(!DefenseCustomOrderPolicy.RequiresCustomOrder(response),
+            "asset proximity must never issue custom MoveUnitTo orders");
+    }
+
+    private static void DefenseLedgerDonorTheaterBudgetBlocksCriticalFrontExport()
+    {
+        var input = MakeDefenseInput(1);
+        input.FrontLedger = FrontSectorLedger.Build(new[]
+        {
+            new FrontSectorInput
+            {
+                SectorKey = "ThreatCoast",
+                Theater = Theater.Coast,
+                OwnStrength = 3000f,
+                EnemyStrength = 9000f,
+                StrategicImportance = 0.7f,
+                IsCritical = false
+            },
+            new FrontSectorInput
+            {
+                SectorKey = "VirginiaCapitalCorridor",
+                Theater = Theater.East,
+                OwnStrength = 16000f,
+                EnemyStrength = 13000f,
+                StrategicImportance = 1.0f,
+                IsCritical = true,
+                AverageMorale = 0.8f,
+                AverageReadiness = 0.8f,
+                AverageSupply = 0.8f
+            }
+        }, new FrontLedgerOptions { MinimumHoldRatio = 0.9f, CriticalHoldRatioBonus = 0.25f });
+        input.Threats.Add(new DefenseThreatSource
+        {
+            Kind = DefenseThreatSourceKind.SeaInvasion,
+            InvasionForceInstanceId = 44,
+            SpotName = "norfolk-spot",
+            SourcePortName = "baltimore",
+            LandedSignal = true,
+            AssetName = "richmond-approach",
+            AssetRole = AssetStrategicRole.CapitalApproach,
+            EnemyStrength = 12000f,
+            X = 150f,
+            Z = 200f
+        });
+        input.Candidates.Add(new DefenseCandidate
+        {
+            UnitInstanceId = 1,
+            UnitName = "Eastern Field Army",
+            ActiveStrength = 9000f,
+            Morale = 0.9f,
+            ReadinessStep = 2f,
+            Theater = Theater.East,
+            SectorKey = "VirginiaCapitalCorridor",
+            Tier = CandidateTier.AdjacentTheater,
+            TransferDonorAllowed = true,
+            DirectMovementAllowed = true,
+            DefensiveAllowed = true
+        });
+
+        var output = DefenseIntentLedger.Build(input);
+        var response = output.Responses[0];
+
+        AssertTrue(response.SelectedPackage.Find(c => c.UnitInstanceId == 1) == null,
+            "critical front army must not be exported below hold ratio");
+        var suppressed = response.Suppressed.Find(s => s.UnitInstanceId == 1);
+        AssertTrue(suppressed != null, "expected donor army to be suppressed");
+        AssertTrue(suppressed.Reason == "min-hold" || suppressed.Reason == "critical-sector-budget",
+            $"expected min-hold or critical-sector-budget, got {suppressed.Reason}");
+    }
+
+    private static void DefenseLedgerFormationDirectiveBlocksDefenseMovement()
+    {
+        var input = MakeDefenseInput(1);
+        input.Threats.Add(new DefenseThreatSource
+        {
+            Kind = DefenseThreatSourceKind.SeaInvasion,
+            InvasionForceInstanceId = 55,
+            SpotName = "mobile-spot",
+            SourcePortName = "new-orleans",
+            LandedSignal = true,
+            AssetName = "mobile",
+            AssetRole = AssetStrategicRole.BlockadeRunnerPort,
+            EnemyStrength = 4000f
+        });
+        input.Candidates.Add(new DefenseCandidate
+        {
+            UnitInstanceId = 1,
+            UnitName = "Recovering Corps",
+            ActiveStrength = 9000f,
+            Morale = 0.9f,
+            ReadinessStep = 2f,
+            Tier = CandidateTier.Local,
+            HasFormationDirective = true,
+            DefensiveAllowed = false,
+            DirectMovementAllowed = true,
+            TransferDonorAllowed = true
+        });
+
+        var output = DefenseIntentLedger.Build(input);
+        var response = output.Responses[0];
+
+        AssertEqual(0, response.SelectedPackage.Count);
+        var suppressed = response.Suppressed.Find(s => s.UnitInstanceId == 1);
+        AssertTrue(suppressed != null, "expected directive-blocked unit to be suppressed");
+        AssertEqual("formation-directive", suppressed.Reason);
+    }
+
+    private static void DefenseLedgerCapitalDefensePackageIsCapped()
+    {
+        var input = MakeDefenseInput(1);
+        input.TotalAllianceEffectiveStrength = 60000f;
+        input.CapitalDefenseBudgetFraction = 0.18f;
+        input.Threats.Add(new DefenseThreatSource
+        {
+            Kind = DefenseThreatSourceKind.SeaInvasion,
+            InvasionForceInstanceId = 66,
+            SpotName = "richmond-spot",
+            SourcePortName = "norfolk",
+            LandedSignal = true,
+            AssetName = "richmond",
+            AssetRole = AssetStrategicRole.CapitalApproach,
+            EnemyStrength = 20000f
+        });
+        for (int i = 0; i < 5; i++)
+        {
+            input.Candidates.Add(new DefenseCandidate
+            {
+                UnitInstanceId = 10 + i,
+                UnitName = "Capital Reserve " + i,
+                ActiveStrength = 7000f,
+                Morale = 1f,
+                ReadinessStep = 2f,
+                Theater = Theater.East,
+                Tier = CandidateTier.SameTheater,
+                TransferDonorAllowed = true,
+                DirectMovementAllowed = true,
+                DefensiveAllowed = true
+            });
+        }
+
+        var output = DefenseIntentLedger.Build(input);
+        var response = output.Responses[0];
+
+        float selected = 0f;
+        foreach (var candidate in response.SelectedPackage)
+            selected += candidate.EffectiveStrength;
+
+        AssertTrue(selected <= 10800f, $"capital package should be capped at 10800 effective strength, got {selected}");
+        AssertTrue(response.Suppressed.Find(s => s.Reason == "capital-defense-cap") != null,
+            "expected extra capital candidates to be suppressed by cap");
+    }
+
+    private static void StrategicMovementBudgetBlocksAreaExportFromHoldSector()
+    {
+        var front = FrontSectorLedger.Build(new[]
+        {
+            new FrontSectorInput
+            {
+                SectorKey = "WashingtonDefenses",
+                Theater = Theater.East,
+                OwnStrength = 7000f,
+                EnemyStrength = 9000f,
+                StrategicImportance = 1.0f,
+                IsCritical = true,
+                AverageMorale = 0.8f,
+                AverageReadiness = 0.8f,
+                AverageSupply = 0.8f
+            },
+            new FrontSectorInput
+            {
+                SectorKey = "OhioValley",
+                Theater = Theater.West,
+                OwnStrength = 12000f,
+                EnemyStrength = 6000f,
+                StrategicImportance = 0.5f,
+                IsCritical = false
+            }
+        });
+
+        var decision = StrategicMovementBudget.EvaluateAreaMovement(
+            front,
+            "WashingtonDefenses",
+            "OhioValley",
+            4000f);
+
+        AssertTrue(decision != null && !decision.Allowed, "expected area movement to be blocked");
+        AssertEqual("min-hold", decision.Reason);
     }
 
     // -----------------------------------------------------------------------

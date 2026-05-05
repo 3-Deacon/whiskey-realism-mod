@@ -1,6 +1,6 @@
 # Tactical Brain Vanilla Verification
 
-Status: verification pass for `2026-05-05-tactical-brain-design.md`.
+Status: paused verification pass for `2026-05-05-tactical-brain-design.md`. Keep as reference only unless the user explicitly reopens tactical work.
 Scope: vanilla code confirmation only. This document distinguishes confirmed vanilla surfaces from Whiskey doctrine that still has to be implemented.
 
 Primary source: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.

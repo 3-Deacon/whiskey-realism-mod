@@ -61,4 +61,4 @@ FortConstructionGovernorPatch wired (CheckFortConstruction site filter)
 
 Suppression logs are bounded to avoid spam. No suppression line is expected if no saturated site is presented to vanilla.
 
-Current deployed DLL with #27: `82cb336603df08b3879b3a9873dcb13f48cad6b92ae830dd2bad2e4bb9dfec04`.
+The #27 deployment checkpoint hash was `82cb336603df08b3879b3a9873dcb13f48cad6b92ae830dd2bad2e4bb9dfec04`. It is superseded by the latest deployed DLL hash in `docs/handoff.md`.

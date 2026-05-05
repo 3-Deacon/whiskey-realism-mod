@@ -1,5 +1,7 @@
 # Tactical B0 Observer Implementation Plan
 
+Status: paused. Do not execute tactical observer work unless the user explicitly reopens Slice B. Current active plan is `2026-05-05-strategic-anti-zerg-theater-integrity.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the first Slice B tactical observer: read-only, bounded tactical battle telemetry that proves vanilla runtime shape before any tactical behavior patch lands.
@@ -55,7 +57,7 @@ These anchors were rechecked on 2026-05-05. Re-run the command before code chang
 Run:
 
 ```bash
-rg -n "private void CheckGlobalAIStrategy\(|private void AdjustGroupAIStance\(|private void MicroAICheckForCharges\(|private void CheckForFeudGroupActions\(|private unsafe void CheckUseOfReserves\(|private void LinkReservesToLineGroup\(|private void AssignReserves\(|private void CheckAIBombardment\(|private unsafe void CheckLineFallbacks\(|private unsafe void MicroAICheckForRetreats\(|private static bool PerformAIActionDLCWL\(|public void SetWaypoint\(" /tmp/gt_src/asm/Assembly-CSharp.decompiled.cs
+rg -n "private void CheckGlobalAIStrategy\(|private void AdjustGroupAIStance\(|private void MicroAICheckForCharges\(|private void CheckForFeudGroupActions\(|private unsafe void CheckUseOfReserves\(|private void LinkReservesToLineGroup\(|private void AssignReserves\(|private void CheckAIBombardment\(|private unsafe void CheckLineFallbacks\(|private unsafe void MicroAICheckForRetreats\(|private static bool PerformAIActionDLCWL\(|public void SetWaypoint\(|public unsafe void SetWaypoint\(|public void AddToOrderQueue\(|private void AddOrderCourierline\(" /tmp/gt_src/asm/Assembly-CSharp.decompiled.cs
 ```
 
 Expected current output:
@@ -73,6 +75,9 @@ Expected current output:
 6642:	private void LinkReservesToLineGroup()
 7017:	private void AssignReserves()
 91225:	public void SetWaypoint(GameObject unit, Vector3 targetpos, bool newpath = true, bool doublequick = false, float manualfinalrotation = -1f, bool modifylastwaypoint = false, bool useorderdelay = true, float timetomove = -1f, int direction = -1, bool showmovementoptions = true, bool ignorebattlemonuments = false, bool groupmoveonly = false, bool ignoredisabledships = false, bool checkforreadiness = true, bool clearinterruptionpaths = true)
+91232:	public unsafe void SetWaypoint(Regiment reg, Vector3 targetpos, bool newpath = true, bool doublequick = false, float manualfinalrotation = -1f, bool modifylastwaypoint = false, bool useorderdelay = true, float timetomove = -1f, int direction = -1, bool showmovementoptions = true, bool ignorebattlemonuments = false, bool groupmoveonly = false, bool ignoredisabledships = false, bool checkforreadiness = true, bool clearinterruptionpaths = true)
+124917:	public void AddToOrderQueue(GameObject advisedunit, bool queueprocessingtime = false, int ordertype = 0, float timetomove = -1f, float manualfinalrotation = -1f, bool modifylastwaypoint = false, bool clearpaths = true, bool overridebugle = false, bool _usecover = true, bool _newpath = true)
+125009:	private void AddOrderCourierline(Regiment sourceunit, Regiment _targetunit, bool overridebugle = false, bool secondarycourier = false)
 ```
 
 Key side effects to preserve:
@@ -81,6 +86,7 @@ Key side effects to preserve:
 - `CheckForFeudGroupActions()` can call `bunits.SetWaypoint(... useorderdelay: true ...)` for a feuding group. B0 only observes this; B1 decides whether to gate it.
 - `CheckGlobalAIStrategy()` owns hard retreat/end-battle paths and debug/save-state macro overrides. B0 only logs the resulting state.
 - `AdjustGroupAIStance()` already calls `PerformAIActionDLCWL(unitsused[i])`. B0 only logs group stance changes.
+- `BattleUnits.SetWaypoint(...)` can create delayed player-visible order queues through `Regiment.AddToOrderQueue(...)`; `Regiment.AddOrderCourierline(...)` then records bugle/courier delivery. B0 logs these as `[TacticalPlayerOrder]`, including `dlcw_isundercommander`, so W&L player-subordinate orders can be smoked before any behavior patch.
 
 ## File Structure
 
@@ -126,8 +132,8 @@ Bind them in `Awake()` after the existing diagnostics entries:
 EnableTacticalObserver = Config.Bind(
     "Tactical",
     "Enable Tactical Observer",
-    true,
-    "Default ON for Slice B B0. Emits bounded read-only battle telemetry; does not change tactical AI behavior.");
+    false,
+    "Default OFF for Slice B B0. Emits bounded read-only battle telemetry when enabled; does not change tactical AI behavior.");
 TacticalObserverVerboseLogging = Config.Bind(
     "Tactical",
     "Tactical Observer Verbose Logging",
@@ -193,7 +199,8 @@ namespace WhiskeyRealism.Tactical
         Order = 5,
         Reserve = 6,
         Artillery = 7,
-        Fallback = 8
+        Fallback = 8,
+        PlayerOrder = 9
     }
 
     public sealed class TacticalBattleContext
@@ -385,6 +392,7 @@ namespace WhiskeyRealism.Tactical
                 case TacticalObservedEvent.Reserve: return "[TacticalReserve]";
                 case TacticalObservedEvent.Artillery: return "[TacticalArtillery]";
                 case TacticalObservedEvent.Fallback: return "[TacticalFallback]";
+                case TacticalObservedEvent.PlayerOrder: return "[TacticalPlayerOrder]";
                 default: return "[Tactical]";
             }
         }
@@ -653,9 +661,9 @@ namespace WhiskeyRealism.Patches
 
         [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
         [HarmonyPostfix]
-        internal static void CheckUseOfReservesPostfix(AIBattle __instance)
+        internal static void CheckUseOfReservesPostfix(AIBattle __instance, Regiment aigroup)
         {
-            Observe(__instance, TacticalObservedEvent.Reserve, null, null);
+            Observe(__instance, TacticalObservedEvent.Reserve, null, aigroup);
         }
 
         [HarmonyPatch(typeof(AIBattle), "LinkReservesToLineGroup")]
@@ -674,23 +682,23 @@ namespace WhiskeyRealism.Patches
 
         [HarmonyPatch(typeof(AIBattle), "CheckAIBombardment")]
         [HarmonyPostfix]
-        internal static void CheckAIBombardmentPostfix(AIBattle __instance)
+        internal static void CheckAIBombardmentPostfix(AIBattle __instance, Regiment aigroup)
         {
-            Observe(__instance, TacticalObservedEvent.Artillery, null, null);
+            Observe(__instance, TacticalObservedEvent.Artillery, null, aigroup);
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckLineFallbacks")]
         [HarmonyPostfix]
-        internal static void CheckLineFallbacksPostfix(AIBattle __instance)
+        internal static void CheckLineFallbacksPostfix(AIBattle __instance, Regiment aigroup)
         {
-            Observe(__instance, TacticalObservedEvent.Fallback, null, null);
+            Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
         }
 
         [HarmonyPatch(typeof(AIBattle), "MicroAICheckForRetreats")]
         [HarmonyPostfix]
-        internal static void MicroAICheckForRetreatsPostfix(AIBattle __instance)
+        internal static void MicroAICheckForRetreatsPostfix(AIBattle __instance, Regiment aigroup)
         {
-            Observe(__instance, TacticalObservedEvent.Fallback, null, null);
+            Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
         }
 
         private static void Observe(AIBattle battle, TacticalObservedEvent eventType, TacticalObserverSnapshot before, Regiment group)
@@ -737,20 +745,21 @@ namespace WhiskeyRealism.Patches
             var unitsUsed = SafeList(battle, ref _unitsUsedField, "unitsused");
             var allGroups = SafeList(battle, ref _allGroupsAssignedField, "allgroupsassigned");
             var objectiveChain = SafeList(battle, ref _objectiveChainField, "objectivechain");
+            bool groupScoped = group != null;
 
             context.Side = side;
             context.MacroAi = macro;
             context.Alliance = SafeAlliance(bunits, side);
-            context.GroupCount = CountList(allGroups);
+            context.GroupCount = groupScoped ? 1 : CountList(allGroups);
             context.ObjectiveChainCount = CountList(objectiveChain);
-            context.SectorSource = context.ObjectiveChainCount > 0 ? TacticalSectorSource.ObjectiveChain : TacticalSectorSource.AngleSlice;
+            context.SectorSource = context.ObjectiveChainCount > 0 ? TacticalSectorSource.ObjectiveChain : TacticalSectorSource.None;
             context.SectorSignature = "chains=" + context.ObjectiveChainCount + ",groups=" + context.GroupCount;
-            context.OrderSignature = BuildOrderSignature(unitsUsed);
+            context.OrderSignature = groupScoped ? BuildGroupOrderSignature(group) : BuildOrderSignature(unitsUsed);
             context.ForceBalance = SafeForceBalance(bunits, side);
             context.ReinforcementsWithin24Hours = SafeReinforcements(bunits, side);
 
-            CountUnits(unitsUsed, context);
-            if (group != null) MergeGroupCounts(group, context);
+            if (groupScoped) MergeGroupCounts(group, context);
+            else CountUnits(unitsUsed, context);
 
             return context;
         }
@@ -848,6 +857,25 @@ namespace WhiskeyRealism.Patches
             }
 
             return "moving=" + moving + ",waiting=" + waiting + ",interrupted=" + interrupted;
+        }
+
+        private static string BuildGroupOrderSignature(Regiment group)
+        {
+            if (group == null || group.allattachedunits == null) return "-";
+
+            int moving = 0;
+            int waiting = 0;
+            int interrupted = 0;
+            for (int i = 0; i < group.allattachedunits.Length; i++)
+            {
+                var unit = group.allattachedunits[i];
+                if (unit == null) continue;
+                if (unit.regimentpaths > 0) moving++;
+                if (unit.pathinterrupted) interrupted++;
+                if (unit.regimentpaths <= 0 && unit.movementmode == 0) waiting++;
+            }
+
+            return "group=" + SafeInstanceId(group) + ",moving=" + moving + ",waiting=" + waiting + ",interrupted=" + interrupted;
         }
 
         private static int SafeAlliance(BattleUnits bunits, int side)
@@ -1081,12 +1109,12 @@ rg -n "Enable Tactical Observer|Tactical Observer Verbose Logging|Tactical Obser
 Expected:
 
 ```text
-Enable Tactical Observer = true
+Enable Tactical Observer = false
 Tactical Observer Verbose Logging = false
 Tactical Observer Min Seconds Between Summaries = 30
 ```
 
-Existing config values override C# defaults. If `Enable Tactical Observer = false`, set it true manually for smoke.
+Existing config values override C# defaults. Set `Enable Tactical Observer = true` manually for smoke, then restart the game.
 
 - [ ] **Step 2: Smoke scenario**
 
@@ -1102,7 +1130,7 @@ Ask the user to launch a fresh W&L land battle. Preferred scenario:
 Run:
 
 ```bash
-rg -n "once:tactical-observer|TacticalMacro|TacticalGroup|TacticalFeud|TacticalCharge|TacticalSector|TacticalOrder|TacticalReserve|TacticalArtillery|TacticalFallback|Exception|TargetInvocationException|ERROR|WARN" "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/LogOutput.log"
+rg -n "once:tactical-observer|TacticalMacro|TacticalGroup|TacticalFeud|TacticalCharge|TacticalSector|TacticalOrder|TacticalPlayerOrder|TacticalReserve|TacticalArtillery|TacticalFallback|Exception|TargetInvocationException|ERROR|WARN" "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/LogOutput.log"
 ```
 
 Expected:
@@ -1112,6 +1140,7 @@ Expected:
 - at least one `[TacticalGroup]`;
 - at least one `[TacticalSector]`;
 - at least one `[TacticalOrder]`;
+- at least one `[TacticalPlayerOrder]` in a W&L player-subordinate battle, or an explicit note that no player-subordinate delayed order was issued during that smoke run;
 - at least one of `[TacticalCharge]` or `[TacticalFeud]` if W&L feud/charge paths run;
 - no repeated `Tactical observer ... failed` warnings;
 - no `TargetInvocationException` loop;
@@ -1142,7 +1171,7 @@ B1 cannot start until `[TacticalCharge]` and `[TacticalFeud]` are either observe
 Add a catalog row after #26. Use the next stable ordinal unless maintainers decide observer-only tactical patches should be unnumbered. Recommended row:
 
 ```markdown
-| 27 | `TacticalObserverPatch` | Postfix observers | `Patches/TacticalObserverPatch.cs` | `AIBattle.CheckGlobalAIStrategy` (6314), `AdjustGroupAIStance` (4221), `MicroAICheckForCharges` (4905), `CheckForFeudGroupActions` (4931), `CheckUseOfReserves` (6062), `LinkReservesToLineGroup` (6642), `AssignReserves` (7017), `CheckAIBombardment` (3869), `CheckLineFallbacks` (5118), `MicroAICheckForRetreats` (4817) | Slice B0 observer. Emits bounded read-only tactical telemetry for macro/group stance, charge/feud paths, sector/order signatures, reserves, artillery, fallback, and retreat. Does not alter vanilla battle behavior. |
+| 27 | `TacticalObserverPatch` | Postfix observers | `Patches/TacticalObserverPatch.cs` | `AIBattle.CheckGlobalAIStrategy` (6314), `AdjustGroupAIStance` (4221), `MicroAICheckForCharges` (4905), `CheckForFeudGroupActions` (4931), `CheckUseOfReserves` (6062), `LinkReservesToLineGroup` (6642), `AssignReserves` (7017), `CheckAIBombardment` (3869), `CheckLineFallbacks` (5118), `MicroAICheckForRetreats` (4817), `Regiment.AddToOrderQueue` (124917), `Regiment.AddOrderCourierline` (125009) | Slice B0 observer. Emits bounded read-only tactical telemetry for macro/group stance, charge/feud paths, sector/order signatures, player-subordinate order queue/delivery, reserves, artillery, fallback, and retreat. Does not alter vanilla battle behavior. |
 ```
 
 - [ ] **Step 2: Handoff**
@@ -1229,7 +1258,7 @@ B0 is complete only when all are true:
 - `git diff --check` passes;
 - deployed DLL timestamp/size/hash matches `dist/WhiskeyRealism.dll`;
 - runtime log has `[once:tactical-observer]`;
-- runtime log has bounded `[TacticalMacro]`, `[TacticalGroup]`, `[TacticalSector]`, and `[TacticalOrder]` lines;
+- runtime log has bounded `[TacticalMacro]`, `[TacticalGroup]`, `[TacticalSector]`, `[TacticalOrder]`, and W&L `[TacticalPlayerOrder]` lines when a player-subordinate order is issued;
 - runtime smoke either observes or explicitly records why `[TacticalCharge]`, `[TacticalFeud]`, `[TacticalReserve]`, `[TacticalArtillery]`, or `[TacticalFallback]` did not fire;
 - no repeated tactical observer warnings/errors;
 - docs record the deployed hash and smoke evidence;

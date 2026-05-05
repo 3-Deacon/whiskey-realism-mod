@@ -63,7 +63,7 @@ namespace WhiskeyRealism.Strategic
                 foreach (var response in output.Responses)
                 {
                     if (response?.SelectedPackage == null || response.SelectedPackage.Count == 0) continue;
-                    if (!RequiresCustomOrder(response)) continue;
+                    if (!DefenseCustomOrderPolicy.RequiresCustomOrder(response)) continue;
 
                     string sig = response.Threat?.Signature ?? "<no-sig>";
 
@@ -149,27 +149,6 @@ namespace WhiskeyRealism.Strategic
             catch { return fallbackId.ToString(); }
         }
 
-        private static bool RequiresCustomOrder(DefenseResponse response)
-        {
-            switch (response.Threat.Posture)
-            {
-                case DefensePosture.ActiveInvasion:
-                case DefensePosture.ContainAndCounterattack:
-                    return true;
-                case DefensePosture.CoastalGuard:
-                    foreach (var c in response.SelectedPackage)
-                    {
-                        // Relaxed-filter signal: low morale or unrecovered
-                        // readiness — vanilla downstream gates would reject.
-                        if (c.Morale < ReadGamePrefsFloat("aiminimummoraleformovement", 0.5f)) return true;
-                        if (c.ReadinessStep < 1f) return true;
-                    }
-                    return false;
-                default:
-                    return false;
-            }
-        }
-
         private static Regiment FindUnitByInstanceId(IList ownUnits, int instanceId)
         {
             for (int i = 0; i < ownUnits.Count; i++)
@@ -222,17 +201,5 @@ namespace WhiskeyRealism.Strategic
             return -1;
         }
 
-        private static float ReadGamePrefsFloat(string fieldName, float fallback)
-        {
-            try
-            {
-                var prefsType = AccessTools.TypeByName("GamePrefs");
-                if (prefsType == null) return fallback;
-                var field = AccessTools.Field(prefsType, fieldName);
-                if (field == null) return fallback;
-                return Convert.ToSingle(field.GetValue(null));
-            }
-            catch { return fallback; }
-        }
     }
 }

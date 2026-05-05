@@ -91,8 +91,8 @@ namespace WhiskeyRealism
             EnableTacticalObserver = Config.Bind(
                 "Tactical",
                 "Enable Tactical Observer",
-                true,
-                "Default ON for Slice B B0. Emits bounded read-only battle telemetry; does not change tactical AI behavior.");
+                false,
+                "Default OFF for Slice B B0. Emits bounded read-only battle telemetry when enabled; does not change tactical AI behavior.");
             TacticalObserverVerboseLogging = Config.Bind(
                 "Tactical",
                 "Tactical Observer Verbose Logging",

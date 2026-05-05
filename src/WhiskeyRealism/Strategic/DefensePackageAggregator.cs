@@ -23,7 +23,9 @@ namespace WhiskeyRealism.Strategic
             IEnumerable<DefenseCandidate> candidates,
             float desiredStrength,
             float caution,
-            float aggression)
+            float aggression,
+            float maxEffectiveStrength = 0f,
+            string maxEffectiveReason = "package-cap")
         {
             var result = new DefensePackageResult();
             if (candidates == null) return result;
@@ -56,6 +58,17 @@ namespace WhiskeyRealism.Strategic
 
             foreach (var c in scored)
             {
+                if (maxEffectiveStrength > 0f &&
+                    cumulative + c.EffectiveStrength > maxEffectiveStrength)
+                {
+                    result.Suppressed.Add(new DefenseSuppression
+                    {
+                        UnitInstanceId = c.UnitInstanceId,
+                        Reason = maxEffectiveReason
+                    });
+                    continue;
+                }
+
                 if (cumulative >= desired * StopRatio)
                 {
                     float wouldBe = cumulative + c.EffectiveStrength;
