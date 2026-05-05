@@ -221,7 +221,16 @@ static class Program
             ("contact evidence skirmish observed near target", ContactEvidenceSkirmishObservedNearTarget),
             ("contact evidence battle observed lost is overmatched", ContactEvidenceBattleObservedLostIsOvermatched),
             ("contact evidence favorable contact requires presence and ratio", ContactEvidenceFavorableRequiresPresenceAndRatio),
-            ("persistence dto load tolerates legacy theater commanders field", PersistenceDtoLoadToleratesLegacyTheaterCommanders)
+            ("persistence dto load tolerates legacy theater commanders field", PersistenceDtoLoadToleratesLegacyTheaterCommanders),
+            ("campaign pace too fast collapse on early national morale crash", CampaignPaceTooFastCollapseOnEarlyMoraleCrash),
+            ("campaign pace late war pressure on chapter three", CampaignPaceLateWarPressureOnChapterThree),
+            ("campaign pace overheated on heavy 14-day battle volume", CampaignPaceOverheatedOnHeavy14DayBattles),
+            ("campaign pace too quiet only outside chapter one winter", CampaignPaceTooQuietSuppressedInChapterOneWinter),
+            ("campaign pace stalemated when chapter two front static", CampaignPaceStalematedWhenChapterTwoFrontStatic),
+            ("campaign pace stable default", CampaignPaceStableDefault),
+            ("collapse risk thresholds bound to break morale trigger", CollapseRiskThresholdsBoundToBreakMoraleTrigger),
+            ("director cannot publish preserve for late csa under elevated risk", DirectorCannotPublishPreserveForLateCsaUnderElevatedRisk),
+            ("campaign pace publishes theater priority from highest pressure theater", CampaignPacePublishesTheaterPriorityFromHighestPressureTheater)
         };
 
         foreach (var test in tests)
@@ -4721,6 +4730,127 @@ static class Program
         var output = ContactEvidenceLedger.Build(input);
         AssertEqual(ContactEvidence.FavorableContact, output.Evidence);
         AssertTrue(output.AllowsEscalation, "favorable contact allows escalation");
+    }
+
+    private static CampaignPaceInput BuildPaceInput(
+        int allianceId, int year, int month, int chapter,
+        float ownNationalMorale, float enemyNationalMorale,
+        int battlesIn14Days, int majorBattlesIn14Days,
+        int capitalStreak, int daysSinceFrontChange,
+        bool winter)
+    {
+        return new CampaignPaceInput
+        {
+            AllianceId = allianceId,
+            Year = year, Month = month,
+            PolicyChapter = chapter,
+            OwnNationalMorale = ownNationalMorale,
+            EnemyNationalMorale = enemyNationalMorale,
+            BreakMoraleTrigger = 30f, // arbitrary stable test value
+            MinNationalMoraleSurrender = 18f,
+            BattlesIn14Days = battlesIn14Days,
+            MajorBattlesIn14Days = majorBattlesIn14Days,
+            CapitalDangerStreakDays = capitalStreak,
+            DaysSinceFrontSignatureChange = daysSinceFrontChange,
+            IsWinter = winter
+        };
+    }
+
+    private static void CampaignPaceTooFastCollapseOnEarlyMoraleCrash()
+    {
+        var input = BuildPaceInput(allianceId: 1, year: 1862, month: 6, chapter: 2,
+            ownNationalMorale: 30f * 1.10f, enemyNationalMorale: 90f,
+            battlesIn14Days: 0, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.TooFastCollapse, output.Pace);
+        AssertEqual(CollapseRisk.Critical, output.Risk);
+    }
+
+    private static void CampaignPaceLateWarPressureOnChapterThree()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1864, month: 6, chapter: 3,
+            ownNationalMorale: 80f, enemyNationalMorale: 60f,
+            battlesIn14Days: 0, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 60, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.LateWarPressure, output.Pace);
+    }
+
+    private static void CampaignPaceOverheatedOnHeavy14DayBattles()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 8, chapter: 2,
+            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            battlesIn14Days: 6, majorBattlesIn14Days: 4,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.Overheated, output.Pace);
+    }
+
+    private static void CampaignPaceTooQuietSuppressedInChapterOneWinter()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1861, month: 12, chapter: 1,
+            ownNationalMorale: 95f, enemyNationalMorale: 90f,
+            battlesIn14Days: 0, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 30, winter: true);
+        var output = CampaignPaceLedger.Build(input);
+        AssertTrue(output.Pace != CampaignPace.TooQuiet,
+            "chapter 1 winter is the historically correct quiet state and must not be flagged");
+    }
+
+    private static void CampaignPaceStalematedWhenChapterTwoFrontStatic()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
+            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 75, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.Stalemated, output.Pace);
+    }
+
+    private static void CampaignPaceStableDefault()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
+            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            battlesIn14Days: 2, majorBattlesIn14Days: 1,
+            capitalStreak: 0, daysSinceFrontChange: 10, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.Stable, output.Pace);
+    }
+
+    private static void CollapseRiskThresholdsBoundToBreakMoraleTrigger()
+    {
+        AssertEqual(CollapseRisk.Critical, CampaignPaceLedger.RiskFor(ownMorale: 30f * 1.10f, breakMoraleTrigger: 30f, minSurrender: 18f));
+        AssertEqual(CollapseRisk.Elevated, CampaignPaceLedger.RiskFor(ownMorale: 30f * 1.40f, breakMoraleTrigger: 30f, minSurrender: 18f));
+        AssertEqual(CollapseRisk.Low,      CampaignPaceLedger.RiskFor(ownMorale: 30f * 2.50f, breakMoraleTrigger: 30f, minSurrender: 18f));
+    }
+
+    private static void DirectorCannotPublishPreserveForLateCsaUnderElevatedRisk()
+    {
+        var input = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 3,
+            ownNationalMorale: 30f * 1.40f, enemyNationalMorale: 80f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertTrue(output.Risk >= CollapseRisk.Elevated, "elevated risk expected");
+        AssertTrue(output.IntentBlockedFromPreserve,
+            "1864 CSA under elevated risk must not publish StrategicIntent.Preserve");
+    }
+
+    private static void CampaignPacePublishesTheaterPriorityFromHighestPressureTheater()
+    {
+        var view = new TheaterPressureView();
+        view.OwnStrengthByTheater[Theater.East] = 10000f;
+        view.EnemyStrengthByTheater[Theater.East] = 4000f;
+        view.OwnStrengthByTheater[Theater.West] = 4000f;
+        view.EnemyStrengthByTheater[Theater.West] = 8000f; // West is the hot theater for us
+        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
+            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            battlesIn14Days: 2, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 10, winter: false);
+        input.TheaterPressure = view;
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(Theater.West, output.TheaterPriority);
     }
 
     private static void PersistenceDtoLoadToleratesLegacyTheaterCommanders()

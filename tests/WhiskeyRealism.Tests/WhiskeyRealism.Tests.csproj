@@ -95,5 +95,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPosture.cs" Link="DirectorPosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignPaceLedger.cs" Link="CampaignPaceLedger.cs" />
   </ItemGroup>
 </Project>
