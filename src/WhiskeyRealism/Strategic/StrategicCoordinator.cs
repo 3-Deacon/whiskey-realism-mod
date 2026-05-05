@@ -38,7 +38,7 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly string[] _constructionSignatures = new string[2];
         private string _campaignMapSignature;
-        private readonly WeeklyCadence _operationalCadence = new WeeklyCadence();
+        private readonly DailyCadence _operationalCadence = new DailyCadence();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
 
@@ -125,22 +125,22 @@ namespace WhiskeyRealism.Strategic
             }
 
             if (_operationalCadence.ShouldFire(gameDay, gameMonth, gameYear) && !ranMonthly)
-                OnWeeklyOperationalTick(gameDay, gameMonth, gameYear);
+                OnDailyOperationalTick(gameDay, gameMonth, gameYear);
         }
 
         private bool _forcedAllSuccession;
 
-        public void OnWeeklyOperationalTick(int day, int month, int year)
+        public void OnDailyOperationalTick(int day, int month, int year)
         {
             try
             {
-                OnceLog.Info("weeklyops", "Weekly operational analysis active");
+                OnceLog.Info("dailyops", "Daily operational analysis active");
 
                 RunStrategicReview(day, month, year, logHeartbeat: false);
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogWarning("[WeeklyOps] tick failed: " + ex.Message);
+                Plugin.Log.LogWarning("[DailyOps] tick failed: " + ex.Message);
             }
         }
 
@@ -248,7 +248,7 @@ namespace WhiskeyRealism.Strategic
                 UpdateConstructionIntent(alliance, era.Stage, logHeartbeat);
 
                 if (Plugin.Instance.VerboseLogging.Value && !logHeartbeat)
-                    Plugin.Log.LogInfo($"[WeeklyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
+                    Plugin.Log.LogInfo($"[DailyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
 
                 if (logHeartbeat)
                 {

@@ -14,7 +14,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaDoctrine.cs" Link="ArmyAreaDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalArmyAreaRegistry.cs" Link="HistoricalArmyAreaRegistry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaLedger.cs" Link="ArmyAreaLedger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WeeklyCadence.cs" Link="WeeklyCadence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DailyCadence.cs" Link="DailyCadence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalStartupGate.cs" Link="OperationalStartupGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCareerStartGate.cs" Link="WlCareerStartGate.cs" />

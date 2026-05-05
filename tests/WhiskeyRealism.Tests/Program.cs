@@ -19,7 +19,6 @@ static class Program
             ("army area ledger holds historical area", ArmyAreaLedgerHoldsHistoricalArea),
             ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy),
             ("army area ledger can redirect independent division input", ArmyAreaLedgerCanRedirectIndependentDivisionInput),
-            ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover),
             ("daily cadence fires on first call and day rollover only", DailyCadenceFiresOnFirstCallAndDayRolloverOnly),
             ("daily cadence rejects invalid dates", DailyCadenceRejectsInvalidDates),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
@@ -323,17 +322,6 @@ static class Program
         var assignment = ledger.GetAssignment("division");
         AssertEqual("VirginiaCapitalCorridor", assignment.AssignedAreaKey);
         AssertEqual(true, assignment.OutOfArea);
-    }
-
-    private static void WeeklyCadenceFiresOnFirstSeenWeekAndRollover()
-    {
-        var cadence = new WeeklyCadence();
-
-        AssertEqual(true, cadence.ShouldFire(1, 6, 1861));
-        AssertEqual(false, cadence.ShouldFire(6, 6, 1861));
-        AssertEqual(true, cadence.ShouldFire(8, 6, 1861));
-        AssertEqual(false, cadence.ShouldFire(13, 6, 1861));
-        AssertEqual(true, cadence.ShouldFire(1, 7, 1861));
     }
 
     private static void DailyCadenceFiresOnFirstCallAndDayRolloverOnly()
