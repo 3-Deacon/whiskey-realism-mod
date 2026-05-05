@@ -45,6 +45,7 @@ namespace WhiskeyRealism.Strategic
         internal readonly DirectorMemory[] DirectorMemories = new DirectorMemory[2] { new DirectorMemory(), new DirectorMemory() };
         private readonly DirectorPublishClamp _directorClamp = new DirectorPublishClamp();
         private readonly string[] _directorPostureSignatures = new string[2];
+        private readonly CollapseRisk[] _directorRiskLevels = new CollapseRisk[2] { CollapseRisk.Low, CollapseRisk.Low };
         private readonly FiscalStateMemory[] _fiscalMemory = new FiscalStateMemory[2]
         {
             new FiscalStateMemory(),
@@ -336,6 +337,16 @@ namespace WhiskeyRealism.Strategic
                                 $" intent={newPosture.Intent} risk={newPosture.Risk}" +
                                 $" reason={newPosture.Reason}");
                             _directorPostureSignatures[alliance] = newSig;
+                        }
+                        var prevRisk = _directorRiskLevels[alliance];
+                        if (newPosture.Risk != prevRisk)
+                        {
+                            Plugin.Log.LogInfo($"[CollapseRisk] alliance={alliance} risk={newPosture.Risk} pace={newPosture.Pace}");
+                            _directorRiskLevels[alliance] = newPosture.Risk;
+                        }
+                        if (Plugin.Instance.DirectorVerboseTrace.Value)
+                        {
+                            Plugin.Log.LogInfo($"[Director:trace] alliance={alliance} signature={newPosture.SourceSignature} stale={newPosture.Stale}");
                         }
                     }
                     else

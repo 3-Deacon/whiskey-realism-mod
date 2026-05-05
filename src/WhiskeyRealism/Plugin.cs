@@ -24,6 +24,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> SuccessionTrace;
         internal ConfigEntry<bool> FiscalTrace;
         internal ConfigEntry<bool> FiscalTelemetryCsv;
+        internal ConfigEntry<bool> DirectorVerboseTrace;
         internal ConfigEntry<bool> EnableTacticalObserver;
         internal ConfigEntry<bool> TacticalObserverVerboseLogging;
         internal ConfigEntry<int> TacticalObserverMinSecondsBetweenSummaries;
@@ -88,6 +89,11 @@ namespace WhiskeyRealism
             FiscalTelemetryCsv = Config.Bind(
                 "Diagnostics", "Fiscal Telemetry Csv", false,
                 "Reserved for future CSV telemetry export. Current fiscal telemetry is emitted to LogOutput.log.");
+            DirectorVerboseTrace = Config.Bind(
+                "Telemetry",
+                "Director Verbose Trace",
+                false,
+                "When true, logs detailed Director slice traces every advanced game day. Default off — only [CampaignPace] and [CollapseRisk] level-change lines emit.");
             EnableTacticalObserver = Config.Bind(
                 "Tactical",
                 "Enable Tactical Observer",
