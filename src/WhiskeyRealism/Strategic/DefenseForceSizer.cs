@@ -4,6 +4,13 @@ namespace WhiskeyRealism.Strategic
 {
     public static class DefenseForceSizer
     {
+        public static float ComputeEffective(float activeStrength, float morale, float readinessStep)
+        {
+            return Math.Max(0f, activeStrength) *
+                   Clamp(Math.Max(0.25f, morale), 0.25f, 1.25f) *
+                   ReadinessMultiplier(readinessStep);
+        }
+
         public static float ScoreCandidate(
             float activeStrength,
             float morale,
@@ -15,9 +22,7 @@ namespace WhiskeyRealism.Strategic
             float aggression)
         {
             float desired = Math.Max(1f, desiredStrength);
-            float effective = Math.Max(0f, activeStrength) *
-                Clamp(Math.Max(0.25f, morale), 0.25f, 1.25f) *
-                ReadinessMultiplier(readinessStep);
+            float effective = ComputeEffective(activeStrength, morale, readinessStep);
             float ratio = effective / desired;
 
             float score = Math.Max(0f, distance);

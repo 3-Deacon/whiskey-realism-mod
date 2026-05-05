@@ -32,7 +32,7 @@ namespace WhiskeyRealism.Strategic
             foreach (var c in candidates)
             {
                 if (c == null) continue;
-                c.EffectiveStrength = EffectiveStrength(c);
+                c.EffectiveStrength = DefenseForceSizer.ComputeEffective(c.ActiveStrength, c.Morale, c.ReadinessStep);
                 c.Score = DefenseForceSizer.ScoreCandidate(
                     activeStrength: c.ActiveStrength,
                     morale: c.Morale,
@@ -44,7 +44,11 @@ namespace WhiskeyRealism.Strategic
                     aggression: aggression);
                 scored.Add(c);
             }
-            scored.Sort((a, b) => a.Score.CompareTo(b.Score));
+            scored.Sort((a, b) =>
+            {
+                int s = a.Score.CompareTo(b.Score);
+                return s != 0 ? s : a.UnitInstanceId.CompareTo(b.UnitInstanceId);
+            });
 
             float desired = Math.Max(1f, desiredStrength);
             float cumulative = 0f;
@@ -89,18 +93,5 @@ namespace WhiskeyRealism.Strategic
             return result;
         }
 
-        private static float EffectiveStrength(DefenseCandidate c)
-        {
-            float morale = Clamp(c.Morale, 0.25f, 1.25f);
-            float readiness = c.ReadinessStep < 1f ? 0.25f : (c.ReadinessStep < 2f ? 0.75f : 1f);
-            return Math.Max(0f, c.ActiveStrength) * morale * readiness;
-        }
-
-        private static float Clamp(float v, float lo, float hi)
-        {
-            if (v < lo) return lo;
-            if (v > hi) return hi;
-            return v;
-        }
     }
 }

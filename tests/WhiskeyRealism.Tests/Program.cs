@@ -146,7 +146,8 @@ static class Program
             ("package aggregator picks smaller adequate over remote oversized", PackageAggregatorPicksSmallerAdequateOverRemoteOversized),
             ("package aggregator stops at overshoot guard", PackageAggregatorStopsAtOvershootGuard),
             ("package aggregator emits understrength flag", PackageAggregatorEmitsUnderstrengthFlag),
-            ("package aggregator suppresses overmatch reason", PackageAggregatorSuppressesOvermatchReason)
+            ("package aggregator suppresses overmatch reason", PackageAggregatorSuppressesOvermatchReason),
+            ("package aggregator deterministic order on tied scores", PackageAggregatorDeterministicOrderOnTiedScores)
         };
 
         foreach (var test in tests)
@@ -2636,6 +2637,28 @@ static class Program
         AssertTrue(result.SelectedPackage.Count >= 1, "should select at least one candidate");
         AssertTrue(result.Suppressed.Exists(s => s.UnitInstanceId == 1 && s.Reason == "overmatch"),
             "oversized army should be suppressed for overmatch");
+    }
+
+    private static void PackageAggregatorDeterministicOrderOnTiedScores()
+    {
+        // Two candidates with identical strength/morale/readiness/distance/tier
+        // produce identical scores. The tie-break on UnitInstanceId must put the
+        // lower id first regardless of input enumeration order.
+        var b = MakeDefenseCandidate(id: 7, str: 3000f, mor: 0.85f, ready: 2f, distance: 50f, tier: CandidateTier.Local);
+        var a = MakeDefenseCandidate(id: 3, str: 3000f, mor: 0.85f, ready: 2f, distance: 50f, tier: CandidateTier.Local);
+
+        var resultBA = DefensePackageAggregator.Select(new[] { b, a }, 4500f, 0.2f, 0f);
+        var resultAB = DefensePackageAggregator.Select(new[] { a, b }, 4500f, 0.2f, 0f);
+
+        AssertTrue(resultBA.SelectedPackage.Count == resultAB.SelectedPackage.Count,
+            "package size must be input-order independent");
+        for (int i = 0; i < resultBA.SelectedPackage.Count; i++)
+        {
+            AssertEqual(resultBA.SelectedPackage[i].UnitInstanceId,
+                        resultAB.SelectedPackage[i].UnitInstanceId);
+        }
+        if (resultBA.SelectedPackage.Count > 0)
+            AssertEqual(3, resultBA.SelectedPackage[0].UnitInstanceId);
     }
 
     private static DefenseCandidate MakeDefenseCandidate(int id, float str, float mor, float ready, float distance, CandidateTier tier)
