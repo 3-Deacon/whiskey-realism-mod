@@ -147,7 +147,10 @@ static class Program
             ("package aggregator stops at overshoot guard", PackageAggregatorStopsAtOvershootGuard),
             ("package aggregator emits understrength flag", PackageAggregatorEmitsUnderstrengthFlag),
             ("package aggregator suppresses overmatch reason", PackageAggregatorSuppressesOvermatchReason),
-            ("package aggregator deterministic order on tied scores", PackageAggregatorDeterministicOrderOnTiedScores)
+            ("package aggregator deterministic order on tied scores", PackageAggregatorDeterministicOrderOnTiedScores),
+            ("cooldown table extends on threat re-detection", CooldownTableExtendsOnThreatRedetection),
+            ("cooldown table decrements once per tick", CooldownTableDecrementsOncePerTick),
+            ("cooldown table expires at zero", CooldownTableExpiresAtZero)
         };
 
         foreach (var test in tests)
@@ -2672,5 +2675,35 @@ static class Program
             DistanceToThreat = distance,
             Tier = tier
         };
+    }
+
+    private static void CooldownTableExtendsOnThreatRedetection()
+    {
+        var table = new DefenseCooldownTable();
+        table.MarkActive("sif:42:Hampton:Boston", cooldownDays: 3);
+        table.Tick();
+        table.MarkActive("sif:42:Hampton:Boston", cooldownDays: 3);
+        AssertEqual(3, table.RemainingDays("sif:42:Hampton:Boston"));
+    }
+
+    private static void CooldownTableDecrementsOncePerTick()
+    {
+        var table = new DefenseCooldownTable();
+        table.MarkRecovered("raid:7:wilmington-harbor", cooldownDays: 4);
+        AssertEqual(4, table.RemainingDays("raid:7:wilmington-harbor"));
+        table.Tick();
+        AssertEqual(3, table.RemainingDays("raid:7:wilmington-harbor"));
+        table.Tick();
+        AssertEqual(2, table.RemainingDays("raid:7:wilmington-harbor"));
+    }
+
+    private static void CooldownTableExpiresAtZero()
+    {
+        var table = new DefenseCooldownTable();
+        table.MarkRecovered("asset:SeaHarbor:wilmington-harbor:1,2,3", cooldownDays: 1);
+        table.Tick();
+        AssertEqual(0, table.RemainingDays("asset:SeaHarbor:wilmington-harbor:1,2,3"));
+        AssertTrue(!table.IsActive("asset:SeaHarbor:wilmington-harbor:1,2,3"),
+            "expired entry should report not-active");
     }
 }
