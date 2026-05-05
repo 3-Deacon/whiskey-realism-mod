@@ -5,6 +5,8 @@ Scope: battlefield tactical AI for land battles. This spec covers doctrine, scor
 
 Vanilla verification: see [`2026-05-05-tactical-brain-vanilla-verification.md`](2026-05-05-tactical-brain-vanilla-verification.md). That pass confirms the required vanilla data and patch surfaces, but marks sector doctrine, local-superiority scoring, contact-aware stale-order handling, reserve-relief timing, and staged withdrawal as new Whiskey behavior rather than existing vanilla logic. It also separates battle-level `macroai` from group-level `ai_stance`; they are different ladders and must not be patched as one state machine.
 
+Focused adjunct: see [`2026-05-05-tactical-weapons-ammunition-design.md`](2026-05-05-tactical-weapons-ammunition-design.md) for infantry weapons, artillery ammunition, projectile behavior, smoke, fire discipline, and autoresolve parity. That adjunct is observer-first and should not be merged into the W&L charge-safety slice.
+
 ## Source Findings
 
 This spec is grounded in current Whiskey code, prior Slice B subagent research, and verified vanilla anchors from `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
