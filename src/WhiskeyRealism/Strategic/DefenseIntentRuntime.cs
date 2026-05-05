@@ -54,7 +54,9 @@ namespace WhiskeyRealism.Strategic
             EraStageManager era,
             CampaignMapLedger map,
             DefenseCooldownTable cooldown,
-            float totalAllianceEffectiveStrength)
+            float totalAllianceEffectiveStrength,
+            GrandStrategyProfile profile = null,
+            HashSet<string> previousSifSignatures = null)
         {
             if (cooldown == null)
             {
@@ -90,16 +92,54 @@ namespace WhiskeyRealism.Strategic
             float defOpsRadius = ReadGamePrefsFloat("maxdistancedefensiveoperations", 250f);
             float seaSpotRadius = ReadGamePrefsFloat("seainvasionspotsunitrange", 100f);
 
-            try { ExtractSeaInvasionThreats(input, allianceId, aifactionIndex, map, seaSpotRadius, defOpsRadius); }
+            // Find our capital position once for AssetRoleScorer.capitalDistance computations.
+            // Scan owned towns with IsCapital; fall back to 9999f if none found (CapitalApproach
+            // gate will simply not fire, which is safer than crashing).
+            Vector3 capitalPos = Vector3.zero;
+            bool capitalFound = false;
+            if (map != null)
+            {
+                foreach (var town in map.Towns)
+                {
+                    if (town != null && town.IsCapital && town.Owner == allianceId)
+                    {
+                        capitalPos = new Vector3(town.X, 0f, town.Z);
+                        capitalFound = true;
+                        break;
+                    }
+                }
+            }
+
+            // Build enemy unit position snapshot once, shared across all extractors that
+            // need frontDistance for AssetRoleScorer.  Rebuilding this inside each extractor
+            // independently would give subtly different snapshots; one snapshot per BuildInput
+            // call is the correct semantics.
+            var enemyPositions = new List<Vector3>();
+            try
+            {
+                var enemyUnitsField = AccessTools.Field(faction.GetType(), "enemyunits");
+                var enemyList = enemyUnitsField?.GetValue(faction) as IList;
+                if (enemyList != null)
+                {
+                    for (int j = 0; j < enemyList.Count; j++)
+                    {
+                        var enemy = enemyList[j];
+                        if (enemy != null) enemyPositions.Add(ObjectPosition(enemy));
+                    }
+                }
+            }
+            catch { }
+
+            try { ExtractSeaInvasionThreats(input, allianceId, aifactionIndex, map, seaSpotRadius, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions, previousSifSignatures); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:sif", "[DefenseIntent] sif extract failed: " + ex.Message); }
 
-            try { ExtractRaidForceThreats(input, allianceId, aifactionIndex, map, defOpsRadius); }
+            try { ExtractRaidForceThreats(input, allianceId, aifactionIndex, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:raid", "[DefenseIntent] raid extract failed: " + ex.Message); }
 
-            try { ExtractAssetProximityThreats(input, allianceId, faction, map, seaSpotRadius); }
+            try { ExtractAssetProximityThreats(input, allianceId, faction, map, seaSpotRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:proximity", "[DefenseIntent] proximity extract failed: " + ex.Message); }
 
-            try { ExtractCandidateUnits(input, allianceId, faction, map); }
+            try { ExtractCandidateUnits(input, allianceId, faction, map, defOpsRadius); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:candidates", "[DefenseIntent] candidate extract failed: " + ex.Message); }
 
             try { ExtractGuardCandidateAssets(input, allianceId, map); }
@@ -135,7 +175,10 @@ namespace WhiskeyRealism.Strategic
 
         private static void ExtractSeaInvasionThreats(
             DefenseIntentInput input, int allianceId, int aifactionIndex,
-            CampaignMapLedger map, float seaSpotRadius, float defOpsRadius)
+            CampaignMapLedger map, float seaSpotRadius, float defOpsRadius,
+            GrandStrategyProfile profile, Vector3 capitalPos, bool capitalFound,
+            List<Vector3> enemyPositions,
+            HashSet<string> previousSifSignatures)
         {
             var aicType = AccessTools.TypeByName("AICampaign");
             var sifList = AccessTools.Field(aicType, "seainvasionforce")?.GetValue(null) as IList;
@@ -147,6 +190,11 @@ namespace WhiskeyRealism.Strategic
                 OnceLog.Warning("defense-intent:runtime:sif:no-type", "[DefenseIntent] SeaInvasionForce type not found via reflection");
                 return;
             }
+
+            // TODO(Task 14): wire previousSifSignatures into a tombstone pass when
+            // StrategicCoordinator owns the per-alliance seen-set. For now, the
+            // parameter is accepted and threaded in so the Task 14 caller can pass
+            // a real set without any signature change.
 
             for (int i = 0; i < sifList.Count; i++)
             {
@@ -228,6 +276,18 @@ namespace WhiskeyRealism.Strategic
 
                 int forceStrength = ReadInt(invasionForce, "groupstrengthactive", 0);
 
+                // Derive profile-weighted asset role; OR with catalog role so both flow through.
+                AssetStrategicRole catalogRole = nearestAsset?.StrategicRole ?? AssetStrategicRole.None;
+                AssetStrategicRole assetRole = catalogRole;
+                if (profile != null && nearestAsset != null)
+                {
+                    float capitalDist = capitalFound
+                        ? GetXZDistance(new Vector3(nearestAsset.X, 0f, nearestAsset.Z), capitalPos)
+                        : 9999f;
+                    float frontDist = ComputeFrontDistance(new Vector3(nearestAsset.X, 0f, nearestAsset.Z), enemyPositions);
+                    assetRole |= AssetRoleScorer.Score(nearestAsset, profile, capitalDist, frontDist);
+                }
+
                 input.Threats.Add(new DefenseThreatSource
                 {
                     Kind = DefenseThreatSourceKind.SeaInvasion,
@@ -241,7 +301,7 @@ namespace WhiskeyRealism.Strategic
                     VanillaCollapsed = false,
                     AssetName = nearestAsset?.Name,
                     AssetKind = nearestAsset?.Kind ?? CampaignMapAssetKind.Unknown,
-                    AssetRole = nearestAsset?.StrategicRole ?? AssetStrategicRole.None
+                    AssetRole = assetRole
                 });
             }
         }
@@ -252,7 +312,9 @@ namespace WhiskeyRealism.Strategic
 
         private static void ExtractRaidForceThreats(
             DefenseIntentInput input, int allianceId, int aifactionIndex,
-            CampaignMapLedger map, float defOpsRadius)
+            CampaignMapLedger map, float defOpsRadius,
+            GrandStrategyProfile profile, Vector3 capitalPos, bool capitalFound,
+            List<Vector3> enemyPositions)
         {
             var aicType = AccessTools.TypeByName("AICampaign");
             var raidList = AccessTools.Field(aicType, "raidforces")?.GetValue(null) as IList;
@@ -283,6 +345,18 @@ namespace WhiskeyRealism.Strategic
 
                 int raidStrength = ReadInt(raidGroup, "groupstrengthactive", 0);
 
+                // Derive profile-weighted asset role; OR with catalog role so both flow through.
+                AssetStrategicRole catalogRole = nearestAsset.StrategicRole;
+                AssetStrategicRole assetRole = catalogRole;
+                if (profile != null)
+                {
+                    float capitalDist = capitalFound
+                        ? GetXZDistance(new Vector3(nearestAsset.X, 0f, nearestAsset.Z), capitalPos)
+                        : 9999f;
+                    float frontDist = ComputeFrontDistance(new Vector3(nearestAsset.X, 0f, nearestAsset.Z), enemyPositions);
+                    assetRole |= AssetRoleScorer.Score(nearestAsset, profile, capitalDist, frontDist);
+                }
+
                 input.Threats.Add(new DefenseThreatSource
                 {
                     Kind = DefenseThreatSourceKind.RaidForce,
@@ -290,7 +364,7 @@ namespace WhiskeyRealism.Strategic
                     RaidCurrentState = currentState,
                     AssetName = nearestAsset.Name,
                     AssetKind = nearestAsset.Kind,
-                    AssetRole = nearestAsset.StrategicRole,
+                    AssetRole = assetRole,
                     X = raidPos.x,
                     Z = raidPos.z,
                     EnemyStrength = (float)raidStrength,
@@ -305,7 +379,9 @@ namespace WhiskeyRealism.Strategic
 
         private static void ExtractAssetProximityThreats(
             DefenseIntentInput input, int allianceId, object faction,
-            CampaignMapLedger map, float seaSpotRadius)
+            CampaignMapLedger map, float seaSpotRadius,
+            GrandStrategyProfile profile, Vector3 capitalPos, bool capitalFound,
+            List<Vector3> enemyPositions)
         {
             // Build set of asset names already covered by sif/raid threats to avoid duplicates.
             var coveredAssets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -315,7 +391,11 @@ namespace WhiskeyRealism.Strategic
                     coveredAssets.Add(threat.AssetName);
             }
 
-            // Read enemy units from the faction.
+            // Read enemy units from the faction for per-asset proximity checks.
+            // enemyPositions (shared snapshot from BuildInput) supplies positions for
+            // ComputeFrontDistance; we need instanceId and strength here too, so we
+            // re-read the list.  Two list reads per BuildInput call is acceptable; the
+            // alternative would be a richer shared snapshot type that is harder to read.
             var enemyUnits = AccessTools.Field(faction.GetType(), "enemyunits")?.GetValue(faction) as IList;
             if (enemyUnits == null) return;
 
@@ -368,12 +448,24 @@ namespace WhiskeyRealism.Strategic
                 var topIds = new int[cap];
                 for (int k = 0; k < cap; k++) topIds[k] = nearEnemyIds[k];
 
+                // Derive profile-weighted asset role; OR with catalog role so both flow through.
+                AssetStrategicRole catalogRole = asset.StrategicRole;
+                AssetStrategicRole assetRole = catalogRole;
+                if (profile != null)
+                {
+                    float capitalDist = capitalFound
+                        ? GetXZDistance(assetPos, capitalPos)
+                        : 9999f;
+                    float frontDist = ComputeFrontDistance(assetPos, enemyPositions);
+                    assetRole |= AssetRoleScorer.Score(asset, profile, capitalDist, frontDist);
+                }
+
                 input.Threats.Add(new DefenseThreatSource
                 {
                     Kind = DefenseThreatSourceKind.AssetProximity,
                     AssetName = asset.Name,
                     AssetKind = asset.Kind,
-                    AssetRole = asset.StrategicRole,
+                    AssetRole = assetRole,
                     X = asset.X,
                     Z = asset.Z,
                     EnemyStrength = totalEnemyStrength,
@@ -391,7 +483,7 @@ namespace WhiskeyRealism.Strategic
 
         private static void ExtractCandidateUnits(
             DefenseIntentInput input, int allianceId, object faction,
-            CampaignMapLedger map)
+            CampaignMapLedger map, float defOpsRadius)
         {
             var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
             if (ownUnits == null) return;
@@ -414,6 +506,16 @@ namespace WhiskeyRealism.Strategic
             var raidIsRaidUnit = AccessTools.Method(AccessTools.TypeByName("RaidForce"), "IsRaidUnit");
             var sifGetReference = AccessTools.Method(AccessTools.TypeByName("SeaInvasionForce"), "GetSeaInvasionForceReference");
             var getReadiness = AccessTools.Method(AccessTools.TypeByName("CampaignArmyPanel"), "GetReadinessStep");
+
+            // Look up the front ledger for this alliance once; used for CriticalFront classification.
+            FrontSectorLedger frontLedger = null;
+            try
+            {
+                if (StrategicCoordinator.Instance != null &&
+                    allianceId >= 0 && allianceId < StrategicCoordinator.Instance.Fronts.Length)
+                    frontLedger = StrategicCoordinator.Instance.Fronts[allianceId];
+            }
+            catch { }
 
             for (int i = 0; i < ownUnits.Count; i++)
             {
@@ -473,9 +575,12 @@ namespace WhiskeyRealism.Strategic
                 }
                 catch { }
 
-                // Tier and distance-to-threat classification.
+                // Single-pass tier + closest-threat classification.
+                // Tracks (minDist, closestIndex) to eliminate the float-equality fragility of a
+                // two-pass approach where the second pass does dist != minDist.
                 CandidateTier tier = CandidateTier.CrossMap;
                 float minDist = float.MaxValue;
+                int closestIndex = -1;
 
                 if (threatPositions.Count == 0)
                 {
@@ -484,40 +589,31 @@ namespace WhiskeyRealism.Strategic
                 }
                 else
                 {
-                    // Compute the method handle for GetXZDistance once per unit is fine
-                    // since it's just a field cache lookup inside AccessTools.
                     for (int t = 0; t < threatPositions.Count; t++)
                     {
-                        var (tx, tz, threatTheater) = threatPositions[t];
+                        var (tx, tz, _) = threatPositions[t];
                         float dist = GetXZDistance(unitPos, new Vector3(tx, 0f, tz));
                         if (dist < minDist)
                         {
                             minDist = dist;
-                            // Tier is derived from the closest threat.
+                            closestIndex = t;
                         }
                     }
 
-                    // Derive tier from the closest threat.
-                    for (int t = 0; t < threatPositions.Count; t++)
+                    if (closestIndex >= 0)
                     {
-                        var (tx, tz, threatTheater) = threatPositions[t];
-                        float dist = GetXZDistance(unitPos, new Vector3(tx, 0f, tz));
-                        if (dist != minDist) continue;
-
-                        // Use GamePrefs defOpsRadius for Local threshold — read once here to avoid
-                        // re-reflecting in a tight loop; accept that we re-read from the field accessor.
-                        float localRadius = ReadGamePrefsFloat("maxdistancedefensiveoperations", 250f);
-                        if (dist < localRadius)
+                        var (_, _, closestTheater) = threatPositions[closestIndex];
+                        if (minDist < defOpsRadius)
                         {
                             tier = CandidateTier.Local;
                         }
-                        else if (unitTheater == threatTheater)
+                        else if (unitTheater == closestTheater)
                         {
                             tier = CandidateTier.SameTheater;
                         }
-                        else if (unitTheater != Theater.Unknown && threatTheater != Theater.Unknown &&
+                        else if (unitTheater != Theater.Unknown && closestTheater != Theater.Unknown &&
                                  TheaterAdjacency.TryGetValue(unitTheater, out var adj) &&
-                                 adj.Contains(threatTheater))
+                                 adj.Contains(closestTheater))
                         {
                             tier = CandidateTier.AdjacentTheater;
                         }
@@ -525,7 +621,24 @@ namespace WhiskeyRealism.Strategic
                         {
                             tier = CandidateTier.CrossMap;
                         }
-                        break;
+                    }
+                }
+
+                // CriticalFront: true when the unit's theater maps to a sector that is IsCritical
+                // OR is under a Hold posture (meaning the line must not give ground there).
+                // Gracefully degrades to false when the front ledger is absent.
+                bool criticalFront = false;
+                if (frontLedger != null && unitTheater != Theater.Unknown)
+                {
+                    foreach (var sector in frontLedger.Sectors)
+                    {
+                        if (sector == null) continue;
+                        if (sector.Theater == unitTheater &&
+                            (sector.IsCritical || sector.Posture == FrontPosture.Hold))
+                        {
+                            criticalFront = true;
+                            break;
+                        }
                     }
                 }
 
@@ -553,7 +666,7 @@ namespace WhiskeyRealism.Strategic
                     Tier = tier,
                     InOffensiveOperation = inOffensive,
                     PlayerControlled = playerControlled,
-                    CriticalFront = false, // wired in a later slice
+                    CriticalFront = criticalFront,
                     DistanceToThreat = minDist == float.MaxValue ? 0f : minDist
                 });
             }
@@ -588,6 +701,20 @@ namespace WhiskeyRealism.Strategic
         // ---------------------------------------------------------------------------
         // Shared helpers
         // ---------------------------------------------------------------------------
+
+        // Compute the minimum XZ distance from a position to any known enemy unit.
+        // Used to approximate frontDistance for AssetRoleScorer.Score().
+        // Returns 9999f when the enemy list is empty (scorer gates treat this as "far from front").
+        private static float ComputeFrontDistance(Vector3 pos, List<Vector3> enemyPositions)
+        {
+            float best = 9999f;
+            for (int i = 0; i < enemyPositions.Count; i++)
+            {
+                float d = GetXZDistance(pos, enemyPositions[i]);
+                if (d < best) best = d;
+            }
+            return best;
+        }
 
         // Returns true for assets worth guarding: any non-None strategic role, or
         // a Fort/Harbor with Level >= 2.  Keeps guard-pass focused on meaningful assets.
