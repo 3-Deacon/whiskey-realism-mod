@@ -11,6 +11,7 @@ Current Whiskey anchors:
 
 - `PersonalityVector` and `CIC.Effective(...)` provide the existing faction, era, and commander personality inputs.
 - `FrontSectorLedger`, `ArmyAreaLedger`, `FormationDirectiveLedger`, `CampaignMapLedger`, and formation snapshots provide strategic intent that tactical AI can read.
+- `RealismCheckboxesLockPatch` already forces vanilla order delays on when realism settings are locked, so Slice B should treat delayed orders as a required realism constraint rather than an optional UI feature.
 - Harmony patches must remain surgical and bounded. Patches may read Whiskey state and steer vanilla decisions, but tactical patches must not mutate strategic mod state.
 - The tactical brain is explicitly deferred in the current handoff/memory unless the user redirects. This spec is that redirect into Slice B design.
 
@@ -26,6 +27,13 @@ Verified vanilla anchors:
 - `Autocalc.CheckUnitArrivals()` at line 20878 and `Regiment.GetArrivalTimeToBF(...)` at line 138862 show that reinforcements can arrive into active battles.
 - `TimePanel.SetRetreatTimer(...)` at line 221271 controls the battle retreat timer after retreat is chosen.
 - Prior decompile review found `BattleUnits` tracks strength still to arrive and reinforcement arrivals within the AI retreat decision window. Vanilla already considers reinforcements in some global-retreat logic, but not as a full tactical doctrine.
+- `Regiment.AddOrderCourierline(...)` at line 125009 models bugle and courier order delivery, including horse courier creation when targets are outside bugle range.
+- `Regiment.ProcessOrders()` at line 125173 propagates orders through courier lines and then down to subordinates, so a high-level order can cascade from parent formation to attached units rather than arriving everywhere instantly.
+- `Regiment.GetLastTransmittedPathPos(...)` at line 127552 and `GetLastTransmittedPath(...)` at line 127591 expose the difference between intended paths and transmitted orders while order delay is active.
+- `Regiment.SetOrderStatus(...)` at line 125484, `LaunchGoCommand(...)` at line 125510, and `OrderTimedMovement(...)` at line 125524 show existing order-state timing and execution gates.
+- `Regiment` recalculates `commanderrange` and `buglerange` from unit type, readiness, and commander initiative around line 125838.
+- `GamePrefs.processingtimegroupstandard`, `processingtimegrouproute`, `buglestandardrecognitiontime`, `orderdelayforbugles`, and `slowdowncourieroutsideradius` load around lines 53336-53344 and already provide data-side order-friction hooks.
+- `BattleUI` passes `useorderdelay: true` for normal player movement orders at line 166163, confirming that tactical movement is expected to respect the order-delay path.
 
 Historical doctrine inputs:
 
@@ -34,6 +42,8 @@ Historical doctrine inputs:
 - Casey/Hardee-era Civil War infantry practice supports skirmishers, screening, successive lines, sector command, and echelon/flank protection. The AI should probe and screen before main-body commitment, then attack through selected sectors with support nearby.
 - Cavalry outpost doctrine emphasizes videttes, patrols, observation, reporting enemy strength/direction, and slow skirmishing withdrawal. This maps directly to battle scouting, flank security, and rear-guard behavior.
 - Civil War assault examples such as Pickett's Charge show the failure mode this slice must avoid: large frontal commitment over exposed ground into a prepared position after inadequate confirmation that the enemy was actually broken.
+- Civil War command was layered: army and corps commanders set intent and committed reserves, division commanders managed sectors, brigade commanders maneuvered regiments, and regimental officers executed local fire/movement. The AI should model these tiers instead of allowing a single omniscient battle brain to retask every regiment every tick.
+- Civil War staff officers and couriers carried orders, guided formations into place, and converted commander intent into execution. Signals, bugles, and flags could accelerate local communication, but distance, terrain, staff quality, and headquarters position still imposed delay and friction.
 
 Reference sources:
 
@@ -44,6 +54,10 @@ Reference sources:
 - Cavalry outpost doctrine: https://www.gutenberg.org/ebooks/54515.html.images
 - Civil War infantry tactics summary: https://en.wikipedia.org/wiki/Infantry_in_the_American_Civil_War
 - Pickett's Charge example: https://www.battlefields.org/learn/articles/picketts-charge
+- Civil War command hierarchy, National Park Service: https://www.nps.gov/articles/from-regiment-to-president-the-structure-and-command-of-civil-war-armies.htm
+- Civil War army structure, National Park Service: https://home.nps.gov/kemo/learn/historyculture/army-structure.htm
+- Civil War military staff, American Battlefield Trust: https://www.battlefields.org/learn/articles/military-staff
+- Civil War signal corps, National Park Service: https://home.nps.gov/anti/learn/historyculture/signal.htm
 
 ## Goal
 
@@ -61,6 +75,7 @@ The AI should:
 - avoid fortifications or attack weak points when avoidance is impossible;
 - recognize bad odds such as 4,000 against 12,000 and withdraw if no realistic relief or terrain advantage exists;
 - conduct staged withdrawals with covering troops, not instant all-unit routs;
+- issue tactical intent through army/corps, division, brigade, and regimental command tiers, with realistic order delay and subordinate initiative;
 - make general personality matter as threshold pressure, not as deterministic scripting.
 
 ## Non-Goals
@@ -72,14 +87,16 @@ The AI should:
 - No attempt to make every historical battle replay a scripted historical outcome.
 - No deterministic retreat whenever outnumbered. Odds are one input; terrain, objectives, morale, ammo, casualties, reinforcements, and commander profile also matter.
 - No game-ruining retreat loop. Withdrawal needs hysteresis, cooldowns, and staged execution.
+- No instant whole-army retasking that bypasses vanilla order-delay/courier mechanics.
 
 ## Design Summary
 
 Slice B should be built as a tactical doctrine layer around vanilla, not a battle-AI replacement.
 
-The core addition is a runtime-only tactical brain that produces four read-only outputs for patches:
+The core addition is a runtime-only tactical brain that produces five read-only outputs for patches:
 
 - `TacticalBattlePlan`: the side's current high-level idea for the battle.
+- `TacticalCommandLedger`: hierarchy-aware commander intent, order authority, order age, and communication friction.
 - `TacticalOddsDoctrine`: current/projected odds, local-superiority opportunities, and inferior-force preservation posture.
 - `TacticalSectorLedger`: sector-by-sector contact, strength, terrain, flank, and mission assessment.
 - `TacticalDoctrineDecision`: bounded decisions for macro stance, group stance, reserve relief, bombardment, charge gating, flank security, and withdrawal.
@@ -118,6 +135,50 @@ Outputs:
 - artillery policy;
 - attack/charge permission;
 - withdrawal posture.
+
+## Command Hierarchy And Order Friction
+
+The tactical brain should not command every regiment as if it had a radio. It should model layered authority and the delay created by messengers, horses, bugles, flags, staff work, terrain, and distance.
+
+Create a `TacticalCommandLedger` that tracks command tiers:
+
+- `ArmyOrCorpsCommander`: owns battle plan, main effort, reserve release, full retreat, and major flank/turning decisions.
+- `DivisionCommander`: owns sector mission, division frontage, support line, local reserve, and whether a sector holds, probes, assaults, refuses, or withdraws.
+- `BrigadeCommander`: owns brigade-level maneuver, formation, skirmisher deployment, relief, immediate counterstroke, and local fallback.
+- `RegimentalLeadership`: owns local fire discipline, cover use, immediate morale reaction, charge follow-through, and short fallback inside current orders.
+
+Authority rules:
+
+- army/corps intent changes should be infrequent and high impact;
+- division orders translate the plan into sector missions and should not be rewritten every tick;
+- brigade orders adapt to local contact within the division mission;
+- regiments can react to immediate danger but should not create a new operational plan alone;
+- artillery commanders can displace or choose targets inside the current artillery policy, but major battery relocation should require higher intent unless the guns are threatened.
+
+Order-friction rules:
+
+- orders outside bugle/signal range should be treated as delayed until courier/orderqueue state says they are delivered;
+- when `GameVars.useorderdelays` is true, tactical scoring should use `GetLastTransmittedPathPos(false)` for what a unit has actually been told, and `GetLastTransmittedPathPos(true)` only for intended/future-path analysis;
+- do not repeatedly replace an undelivered order with a new one unless the previous order has become dangerous or impossible;
+- stale orders should be detectable: if an order arrives after contact has changed materially, the subordinate may pause, hold, or ask for new orders instead of blindly executing a suicidal move;
+- high initiative/competence commanders should issue clearer intent and tolerate subordinate local action; low competence or wounded/disrupted commanders should create longer delays, poorer coordination, and more piecemeal execution;
+- staff, telegraph/balloon/perk effects, command range, readiness, and W&L incidents should modify order delay only through existing vanilla surfaces where possible.
+
+Desired command behavior:
+
+- army/corps commander chooses `mainEffort`, `reservePolicy`, and `retreatPolicy`;
+- division commanders assign sectors and coordinate adjacent brigades so attacks are not a blob;
+- brigade commanders deploy skirmishers, form successive lines, relieve battered regiments, and execute limited local attacks;
+- regiments preserve their own frontage, cover, ammo, and morale under current brigade orders;
+- subordinate initiative can save a unit from obvious disaster but cannot freely override strategic intent unless the commander is routed, killed, detached, or out of command.
+
+Acceptance criteria:
+
+- A corps-level plan change should not instantly move every regiment at once.
+- Division and brigade orders should show staggered execution when formations are far apart.
+- Units inside bugle/signal range can react faster than units requiring couriers.
+- A reserve release should propagate from higher command to the reserve formation, then to attached brigades/regiments.
+- A staged withdrawal should issue main-body orders first and rear-guard orders later, with order-delay-aware timing.
 
 ## Intelligence And Scouting
 
@@ -533,6 +594,7 @@ Suggested modifier mapping:
 - high caution raises scouting, bombardment, reserve, and withdrawal preference;
 - high initiative increases flank/probe/counterattack likelihood;
 - high competence reduces blob behavior, improves reserve timing, and reduces bad charges;
+- high leadership/administration/staff quality reduces order friction and improves cross-division timing;
 - high casualty tolerance delays withdrawal and relief slightly, but cannot ignore rout/loss collapse;
 - poor competence increases uncertainty penalties and over/under-reaction risk within bounded limits.
 
@@ -544,6 +606,8 @@ Proposed new namespace:
 
 - `src/WhiskeyRealism/Tactical/TacticalBattleContext.cs`
 - `src/WhiskeyRealism/Tactical/TacticalCommanderProfile.cs`
+- `src/WhiskeyRealism/Tactical/TacticalCommandLedger.cs`
+- `src/WhiskeyRealism/Tactical/TacticalOrderFriction.cs`
 - `src/WhiskeyRealism/Tactical/TacticalContactLedger.cs`
 - `src/WhiskeyRealism/Tactical/TacticalOddsDoctrine.cs`
 - `src/WhiskeyRealism/Tactical/TacticalSectorLedger.cs`
@@ -556,6 +620,7 @@ Patch candidates:
 
 - `BattleMacroStrategyPatch` on `AIBattle.CheckGlobalAIStrategy()`.
 - `BattleGroupStancePatch` on `AIBattle.AdjustGroupAIStance()`.
+- `BattleOrderFrictionPatch` only if vanilla AI movement bypasses order delays in a place that Slice B must steer; otherwise prefer scorer discipline and existing `SetWaypoint(... useorderdelay: true ...)` calls.
 - `BattleChargeGatePatch` on `AIBattle.MicroAICheckForCharges(...)`.
 - `BattleFeudActionGatePatch` on `AIBattle.CheckForFeudGroupActions(...)`.
 - `BattleReserveDoctrinePatch` on reserve assignment/use methods.
@@ -580,15 +645,16 @@ Data tuning is useful for broad pressure. It is not enough for scouting, sector 
 
 This umbrella spec should be implemented in bounded steps:
 
-1. `B0 Tactical Observer`: read-only battle context, sector/contact ledger, telemetry, no behavior changes.
+1. `B0 Tactical Observer`: read-only battle context, command/contact/sector ledgers, order-friction telemetry, no behavior changes.
 2. `B1 W&L Feud And Charge Guard`: narrow guard for player-subordinate auto-charge/feud actions.
-3. `B2 Tactical Odds Doctrine`: local-superiority, decisive-point, economy-of-force, and inferior-force posture scorer.
-4. `B3 Macro Stance Scorer`: Postfix/clamp global strategy with odds, losses, reinforcements, terrain, and personality.
-5. `B4 Group Sector Stance`: sector-aware hold/screen/fix/probe/attack stance decisions.
-6. `B5 Reserve Relief And Flank Doctrine`: reserve roles, relief triggers, flank guard/refuse behavior.
-7. `B6 Artillery And Strongpoint Doctrine`: bombardment before assault, counterbattery, avoid/attack weak points.
-8. `B7 Withdrawal Doctrine`: staged fallback, rear guard, full retreat safeguards.
-9. `B8 Tuning And Telemetry Soak`: battleprefs validation, bounded logs, runtime smoke matrix.
+3. `B2 Command Hierarchy And Order Friction`: army/corps, division, brigade, and regiment intent cascade with delayed-order rules.
+4. `B3 Tactical Odds Doctrine`: local-superiority, decisive-point, economy-of-force, and inferior-force posture scorer.
+5. `B4 Macro Stance Scorer`: Postfix/clamp global strategy with odds, losses, reinforcements, terrain, and personality.
+6. `B5 Group Sector Stance`: sector-aware hold/screen/fix/probe/attack stance decisions.
+7. `B6 Reserve Relief And Flank Doctrine`: reserve roles, relief triggers, flank guard/refuse behavior.
+8. `B7 Artillery And Strongpoint Doctrine`: bombardment before assault, counterbattery, avoid/attack weak points.
+9. `B8 Withdrawal Doctrine`: staged fallback, rear guard, full retreat safeguards.
+10. `B9 Tuning And Telemetry Soak`: battleprefs validation, bounded logs, runtime smoke matrix.
 
 Each slice should have pure scorer tests before Harmony patch wiring.
 
@@ -598,6 +664,7 @@ Telemetry must be bounded and useful:
 
 - one first-fire line per patch;
 - per-side battle-plan summary on plan change;
+- command summary on material hierarchy/order-delay changes;
 - sector summary only when signature changes;
 - retreat decision line only when posture escalates or de-escalates;
 - charge denial/permission summary sampled or OnceLog-gated;
@@ -607,6 +674,7 @@ Example log shape:
 
 ```text
 [TacticalPlan] side=CSA plan=DelayAndPreserve odds=0.34 projected=0.72 terrain=strong relief=82m commander=Johnston
+[TacticalCommand] side=CSA tier=division unit=Hood mission=RefuseRight order=delayed method=courier eta=18m parent=Longstreet
 [TacticalSector] side=USA sector=right mission=Probe own=4200 enemy=2100 conf=0.62 terrain=open flank=open artillery=2
 [TacticalRetreat] side=CSA stage=Screen reason=odds-losses-noRelief current=0.33 projected=0.39 losses=0.18 morale=0.42
 ```
@@ -617,6 +685,11 @@ Pure tests should cover:
 
 - enemy strength estimate from confirmed/recent/inferred contacts;
 - no-contact plan chooses scout/hold, not assault;
+- army/corps intent maps to division sector missions without directly retasking every regiment;
+- division mission maps to brigade actions while preserving subordinate local reaction;
+- orders outside bugle/signal range are delayed and do not affect transmitted path state until delivery;
+- stale delayed orders are paused or downgraded when they arrive into materially changed contact;
+- high initiative/competence reduces friction without making orders instant;
 - superior global odds do not cause all sectors to attack;
 - superior local odds choose one decisive sector and assign economy-of-force missions elsewhere;
 - inferior global odds choose defense/delay before retreat when terrain or relief justifies it;
@@ -638,6 +711,8 @@ Runtime smoke should include:
 - attack against fortified/entrenched objective;
 - reinforcement arrival during battle;
 - artillery-heavy battle;
+- large multi-division battle with order delays on;
+- delayed reserve-release scenario where courier timing matters;
 - W&L player-subordinate battle to confirm auto-charge is gated;
 - outnumbered battle to confirm retreat happens but is staged.
 
@@ -648,6 +723,8 @@ Slice B is successful when:
 - AI no longer commonly opens with all formations rushing the same point without contact.
 - Scout/screen behavior creates small early skirmishes before main commitment.
 - Only selected sectors attack while others hold, fix, screen, or support.
+- Army/corps, division, brigade, and regimental command tiers produce different decisions at the proper scale.
+- Orders propagate with realistic delay and do not create instant whole-army pivots.
 - Superior AI concentrates force at a decisive point instead of attacking everywhere.
 - Inferior AI uses terrain, shortened lines, local counterstrokes, and staged withdrawal instead of standing to annihilation.
 - Reserves relieve damaged units before the line routs when reserves are available.
@@ -672,5 +749,10 @@ Before writing patches, re-read exact current decompile bodies for:
 - `AIBattle.CheckAIBombardment(...)`;
 - `AIBattle.CheckLineFallbacks(...)`;
 - `AIBattle.MicroAICheckForRetreats(...)`.
+- `Regiment.AddOrderCourierline(...)`;
+- `Regiment.ProcessOrders()`;
+- `Regiment.GetLastTransmittedPathPos(...)`;
+- `Regiment.SetOrderStatus(...)`;
+- `BattleUnits.SetWaypoint(...)` call sites used by candidate patches.
 
 Do not rely only on this spec's line anchors when implementing. The shipped game DLL and current decompile remain the source of truth.
