@@ -133,7 +133,9 @@ static class Program
             ("front sector signature ignores sub-bucket ratio jitter", FrontSectorSignatureIgnoresSubBucketRatioJitter),
             ("asset strategic role flags compose additively", AssetStrategicRoleFlagsComposeAdditively),
             ("campaign map ledger applies role catalog to towns and assets", CampaignMapLedgerAppliesRoleCatalog),
-            ("campaign map ledger signature reflects role changes", CampaignMapLedgerSignatureReflectsRoleChanges)
+            ("campaign map ledger signature reflects role changes", CampaignMapLedgerSignatureReflectsRoleChanges),
+            ("defense posture defaults to not-evaluated", DefensePostureDefaultsToNotEvaluated),
+            ("defense threat carries signature and posture", DefenseThreatCarriesSignatureAndPosture)
         };
 
         foreach (var test in tests)
@@ -2459,6 +2461,29 @@ static class Program
 
         AssertTrue(withCatalogHit.Signature != withMiss.Signature,
             "signature must change when asset roles change");
+    }
+
+    private static void DefensePostureDefaultsToNotEvaluated()
+    {
+        AssertEqual(DefensePosture.NotEvaluated, default(DefensePosture));
+        AssertEqual(ThreatScale.None, default(ThreatScale));
+    }
+
+    private static void DefenseThreatCarriesSignatureAndPosture()
+    {
+        var threat = new DefenseThreat
+        {
+            Signature = "sif:1234:Norfolk:Hampton",
+            Posture = DefensePosture.ActiveInvasion,
+            Scale = ThreatScale.Landing,
+            AssetName = "norfolk-harbor",
+            EnemyStrength = 4200f,
+            DesiredStrength = 6500f,
+            EscalationReason = "landed-port-threat"
+        };
+        AssertEqual("sif:1234:Norfolk:Hampton", threat.Signature);
+        AssertEqual(DefensePosture.ActiveInvasion, threat.Posture);
+        AssertEqual(ThreatScale.Landing, threat.Scale);
     }
 
     private static void AssertEqual<T>(T expected, T actual)
