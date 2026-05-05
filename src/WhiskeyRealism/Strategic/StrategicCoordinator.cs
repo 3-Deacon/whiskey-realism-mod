@@ -392,10 +392,10 @@ namespace WhiskeyRealism.Strategic
             }
 
             Fronts[alliance] = ledger;
-            string signature = FrontSectorRuntime.Summary(ledger);
+            string signature = FrontSectorRuntime.Signature(ledger);
             if (Plugin.Instance.VerboseLogging.Value || _frontSignatures[alliance] != signature)
             {
-                Plugin.Log.LogInfo($"[FrontLedger] alliance={alliance} {signature}");
+                Plugin.Log.LogInfo($"[FrontLedger] alliance={alliance} {FrontSectorRuntime.Summary(ledger)}");
                 _frontSignatures[alliance] = signature;
             }
         }

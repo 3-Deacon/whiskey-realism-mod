@@ -130,6 +130,24 @@ namespace WhiskeyRealism.Strategic
             return ledger;
         }
 
+        // Coarse signature for spam-suppression: buckets the strength ratio to the nearest 0.5
+        // so sub-decimal daily fluctuations don't trigger a re-fire. Posture is still included
+        // verbatim so any posture flip (e.g. Delay→Hold) always re-fires. Parts are sorted so
+        // the result is order-independent across recomputes.
+        public string Signature()
+        {
+            if (_ordered.Count == 0) return "empty";
+            var parts = new List<string>(_ordered.Count);
+            foreach (var sector in _ordered)
+            {
+                if (sector == null) continue;
+                float bucket = (float)(Math.Round(sector.StrengthRatio * 2.0) / 2.0);
+                parts.Add($"{sector.SectorKey}:{sector.Posture}:{bucket:F1}");
+            }
+            parts.Sort(StringComparer.Ordinal);
+            return parts.Count == 0 ? "empty" : string.Join(",", parts);
+        }
+
         public FrontSector GetSector(string sectorKey)
         {
             if (sectorKey == null) return null;

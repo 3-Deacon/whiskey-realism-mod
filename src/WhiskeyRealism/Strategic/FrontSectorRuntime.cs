@@ -105,6 +105,15 @@ namespace WhiskeyRealism.Strategic
             return parts.Count == 0 ? "<none>" : string.Join(",", parts);
         }
 
+        // Delegates to FrontSectorLedger.Signature() for testability — the logic lives on the
+        // ledger type (which has no Unity/Harmony dependencies) so the console test harness can
+        // call it directly without mocking HarmonyX reflection machinery.
+        internal static string Signature(FrontSectorLedger ledger)
+        {
+            if (ledger == null) return "empty";
+            return ledger.Signature();
+        }
+
         private static object FindFaction(int allianceId)
         {
             var aicType = AccessTools.TypeByName("AICampaign");

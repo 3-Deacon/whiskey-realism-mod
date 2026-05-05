@@ -119,7 +119,8 @@ static class Program
             ("perk scorer favors raid armies for irregular pressure", PerkScorerFavorsRaidArmiesForIrregularPressure),
             ("perk scorer favors union blockade fleets", PerkScorerFavorsUnionBlockadeFleets),
             ("perk scorer favors csa raiding fleets", PerkScorerFavorsCsaRaidingFleets),
-            ("perk scorer skips unavailable candidates", PerkScorerSkipsUnavailableCandidates)
+            ("perk scorer skips unavailable candidates", PerkScorerSkipsUnavailableCandidates),
+            ("front sector signature ignores sub-bucket ratio jitter", FrontSectorSignatureIgnoresSubBucketRatioJitter)
         };
 
         foreach (var test in tests)
@@ -2208,6 +2209,49 @@ static class Program
             availablePerks: Array.Empty<int>());
 
         AssertEqual(-1, none);
+    }
+
+    private static void FrontSectorSignatureIgnoresSubBucketRatioJitter()
+    {
+        // OwnStrength=1500, EnemyStrength=1000 → ratio 1.5 → bucket 1.5
+        var a = FrontSectorLedger.Build(new[]
+        {
+            new FrontSectorInput
+            {
+                SectorKey = "East",
+                Theater = Theater.East,
+                OwnStrength = 1500f,
+                EnemyStrength = 1000f,
+                StrategicImportance = 0.5f,
+                IsCritical = false,
+                IsPlanTarget = false,
+                CommanderAudacity = 0f,
+                CommanderCaution = 0f,
+                AverageMorale = 0.7f,
+                AverageSupply = 0.7f,
+                AverageReadiness = 0.7f
+            }
+        });
+        // OwnStrength=1530, EnemyStrength=1000 → ratio 1.53 → still bucket 1.5
+        var b = FrontSectorLedger.Build(new[]
+        {
+            new FrontSectorInput
+            {
+                SectorKey = "East",
+                Theater = Theater.East,
+                OwnStrength = 1530f,
+                EnemyStrength = 1000f,
+                StrategicImportance = 0.5f,
+                IsCritical = false,
+                IsPlanTarget = false,
+                CommanderAudacity = 0f,
+                CommanderCaution = 0f,
+                AverageMorale = 0.7f,
+                AverageSupply = 0.7f,
+                AverageReadiness = 0.7f
+            }
+        });
+        AssertEqual(a.Signature(), b.Signature());
     }
 
     private static void AssertEqual<T>(T expected, T actual)
