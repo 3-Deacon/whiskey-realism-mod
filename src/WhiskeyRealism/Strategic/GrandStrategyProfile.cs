@@ -16,6 +16,11 @@ namespace WhiskeyRealism.Strategic
             return tagWeights.TryGetValue(tag, out var weight) ? weight : 0f;
         }
 
+        public bool HasTag(StrategyTag tag)
+        {
+            return WeightFor(tag) > 0f;
+        }
+
         public float ProjectWeightFor(int projectId)
         {
             return projectWeights.TryGetValue(projectId, out var weight) ? weight : 0f;

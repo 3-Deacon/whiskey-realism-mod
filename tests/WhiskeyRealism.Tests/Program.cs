@@ -30,6 +30,11 @@ static class Program
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
             ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
+            ("asset role scorer flags csa blockade port from profile", AssetRoleScorerFlagsCsaBlockadePortFromProfile),
+            ("asset role scorer flags union river hub from profile", AssetRoleScorerFlagsUnionRiverHubFromProfile),
+            ("asset role scorer flags key fort from level", AssetRoleScorerFlagsKeyFortFromLevel),
+            ("asset role scorer flags capital approach by distance", AssetRoleScorerFlagsCapitalApproachByDistance),
+            ("asset role scorer leaves unknown asset alone", AssetRoleScorerLeavesUnknownAssetAlone),
             ("csa early profile favors capital defense and foreign recognition", CsaEarlyProfileFavorsDefenseAndForeignRecognition),
             ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
             ("union early policy scorer favors legal blockade", UnionEarlyPolicyScorerFavorsLegalBlockade),
@@ -2262,6 +2267,81 @@ static class Program
         AssertTrue((role & AssetStrategicRole.KeyFort) != 0, "key-fort flag missing");
         AssertTrue((role & AssetStrategicRole.RearSafePort) == 0, "unset flag should not appear");
         AssertEqual(AssetStrategicRole.None, default(AssetStrategicRole));
+    }
+
+    private static void AssetRoleScorerFlagsCsaBlockadePortFromProfile()
+    {
+        var profile = GrandStrategyRegistry.Resolve(allianceId: 1, stage: EraStage.Amateur1861);
+        var asset = new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor,
+            Name = "wilmington-harbor",
+            StateAbbrev = "NC",
+            Theater = Theater.Coast,
+            Owner = 1,
+            Capacity = 4f,
+            Level = 2
+        };
+        var role = AssetRoleScorer.Score(asset, profile, capitalDistance: 250f, frontDistance: 80f);
+        AssertTrue((role & AssetStrategicRole.BlockadeRunnerPort) != 0,
+            "csa sea port should score blockade-runner when CSA profile has TradeWarfare or ArmsImports");
+    }
+
+    private static void AssetRoleScorerFlagsUnionRiverHubFromProfile()
+    {
+        var profile = GrandStrategyRegistry.Resolve(allianceId: 0, stage: EraStage.Amateur1861);
+        var asset = new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.RiverHarbor,
+            Name = "cairo-harbor",
+            StateAbbrev = "IL",
+            Theater = Theater.River,
+            Owner = 0,
+            Capacity = 2f
+        };
+        var role = AssetRoleScorer.Score(asset, profile, capitalDistance: 800f, frontDistance: 60f);
+        AssertTrue((role & AssetStrategicRole.RiverControlHub) != 0,
+            "union river hub should score river-control when Union profile has RiverControl");
+    }
+
+    private static void AssetRoleScorerFlagsKeyFortFromLevel()
+    {
+        var profile = GrandStrategyRegistry.Resolve(allianceId: 1, stage: EraStage.Amateur1861);
+        var asset = new CampaignMapAsset { Kind = CampaignMapAssetKind.Fort, Name = "f", Level = 2 };
+        var role = AssetRoleScorer.Score(asset, profile, capitalDistance: 9999f, frontDistance: 9999f);
+        AssertTrue((role & AssetStrategicRole.KeyFort) != 0, "level-2 fort should score key-fort");
+
+        var lowFort = new CampaignMapAsset { Kind = CampaignMapAssetKind.Fort, Name = "f", Level = 1 };
+        var lowRole = AssetRoleScorer.Score(lowFort, profile, capitalDistance: 9999f, frontDistance: 9999f);
+        AssertTrue((lowRole & AssetStrategicRole.KeyFort) == 0, "level-1 fort should NOT score key-fort");
+    }
+
+    private static void AssetRoleScorerFlagsCapitalApproachByDistance()
+    {
+        var profile = GrandStrategyRegistry.Resolve(allianceId: 1, stage: EraStage.Amateur1861);
+        var asset = new CampaignMapAsset { Kind = CampaignMapAssetKind.SeaHarbor, Name = "norfolk-harbor" };
+
+        var near = AssetRoleScorer.Score(asset, profile, capitalDistance: 100f, frontDistance: 200f);
+        AssertTrue((near & AssetStrategicRole.CapitalApproach) != 0,
+            "asset within 120 of capital should score capital-approach");
+
+        var far = AssetRoleScorer.Score(asset, profile, capitalDistance: 500f, frontDistance: 200f);
+        AssertTrue((far & AssetStrategicRole.CapitalApproach) == 0,
+            "asset 500 from capital should NOT score capital-approach");
+    }
+
+    private static void AssetRoleScorerLeavesUnknownAssetAlone()
+    {
+        var profile = GrandStrategyRegistry.Resolve(allianceId: 0, stage: EraStage.Amateur1861);
+        var asset = new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor,
+            Name = "unmapped-port",
+            StateAbbrev = "??",
+            Theater = Theater.Unknown
+        };
+        var role = AssetRoleScorer.Score(asset, profile, capitalDistance: 9999f, frontDistance: 9999f);
+        AssertEqual(AssetStrategicRole.None, role);
     }
 
     private static void AssertEqual<T>(T expected, T actual)
