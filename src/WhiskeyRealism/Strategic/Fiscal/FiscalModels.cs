@@ -33,14 +33,14 @@ namespace WhiskeyRealism.Strategic.Fiscal
         public float VanillaStep = 0.05f;
         public int CreditDefenseEntryBuffer = 1;
         public int CreditDefenseExitBuffer = 2;
-        public int EmergencyExitWeeks = 2;
+        public int EmergencyExitStableTicks = 14;
         public float MinimumSupplyProtection = 0.35f;
     }
 
     public sealed class FiscalStateMemory
     {
         public FiscalPosture PreviousPosture = FiscalPosture.BalancedWar;
-        public int StableWeeksAboveEmergency;
+        public int StableTicksAboveEmergency;
         public bool EmergencyResidue;
     }
 

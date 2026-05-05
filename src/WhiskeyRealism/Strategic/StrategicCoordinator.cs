@@ -340,16 +340,16 @@ namespace WhiskeyRealism.Strategic
             bool emergencyRecoveryStable = FiscalIntentLedger.IsEmergencyRecoveryStable(input, options);
             if (output.Posture == FiscalPosture.EmergencySolvency)
             {
-                _fiscalMemory[alliance].StableWeeksAboveEmergency = 0;
+                _fiscalMemory[alliance].StableTicksAboveEmergency = 0;
             }
             else if ((_fiscalMemory[alliance].EmergencyResidue ||
                 _fiscalMemory[alliance].PreviousPosture == FiscalPosture.CreditDefense) && emergencyRecoveryStable)
             {
-                _fiscalMemory[alliance].StableWeeksAboveEmergency++;
+                _fiscalMemory[alliance].StableTicksAboveEmergency++;
             }
             else if (!emergencyRecoveryStable)
             {
-                _fiscalMemory[alliance].StableWeeksAboveEmergency = 0;
+                _fiscalMemory[alliance].StableTicksAboveEmergency = 0;
             }
 
             _fiscalMemory[alliance].PreviousPosture = output.Posture;
