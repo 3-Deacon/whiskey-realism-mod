@@ -3,6 +3,8 @@
 Status: draft umbrella design spec for Slice B.
 Scope: battlefield tactical AI for land battles. This spec covers doctrine, scoring, state, patch surfaces, telemetry, and implementation order. It does not implement code.
 
+Vanilla verification: see [`2026-05-05-tactical-brain-vanilla-verification.md`](2026-05-05-tactical-brain-vanilla-verification.md). That pass confirms the required vanilla data and patch surfaces, but marks sector doctrine, local-superiority scoring, contact-aware stale-order handling, reserve-relief timing, and staged withdrawal as new Whiskey behavior rather than existing vanilla logic.
+
 ## Source Findings
 
 This spec is grounded in current Whiskey code, prior Slice B subagent research, and verified vanilla anchors from `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
@@ -19,8 +21,8 @@ Verified vanilla anchors:
 
 - `AIBattle.CheckGlobalAIStrategy()` at line 6314 owns macro stance transitions. Vanilla stances are `0 assault`, `1 attack`, `2 defend`, and `3 retreat`.
 - `AIBattle.AdjustGroupAIStance()` at line 4221 owns the group stance ladder.
-- `AIBattle.MicroAICheckForCharges(...)` at line 4905 initiates charge behavior, including the `ai_stance == 4` charge path.
-- `AIBattle.CheckForFeudGroupActions(...)` was previously found to skip the W&L `PerformAIActionDLCWL` gate, matching the brigade auto-charge bug.
+- `AIBattle.MicroAICheckForCharges(...)` at line 4905 initiates charge behavior, including the `ai_stance == 4` charge path. It does not call `PerformAIActionDLCWL`, so W&L charge gating must be added explicitly.
+- `AIBattle.CheckForFeudGroupActions(...)` was found to skip the W&L `PerformAIActionDLCWL` gate. This matches the likely brigade auto-charge path, but the exact user-facing bug linkage still needs runtime smoke.
 - `AIBattle.CheckUseOfReserves(...)` at line 6062, `LinkReservesToLineGroup()` at line 6642, and `AssignReserves()` at line 7017 are the reserve surfaces.
 - `AIBattle.CheckLineFallbacks(...)` at line 5118 and `AIBattle.MicroAICheckForRetreats(...)` at line 4817 are the local fallback and retreat surfaces.
 - `AIBattle.CheckAIBombardment(...)` at line 3869 is the artillery bombardment surface.
@@ -31,8 +33,8 @@ Verified vanilla anchors:
 - `Regiment.ProcessOrders()` at line 125173 propagates orders through courier lines and then down to subordinates, so a high-level order can cascade from parent formation to attached units rather than arriving everywhere instantly.
 - `Regiment.GetLastTransmittedPathPos(...)` at line 127552 and `GetLastTransmittedPath(...)` at line 127591 expose the difference between intended paths and transmitted orders while order delay is active.
 - `Regiment.SetOrderStatus(...)` at line 125484, `LaunchGoCommand(...)` at line 125510, and `OrderTimedMovement(...)` at line 125524 show existing order-state timing and execution gates.
-- `Regiment` recalculates `commanderrange` and `buglerange` from unit type, readiness, and commander initiative around line 125838.
-- `GamePrefs.processingtimegroupstandard`, `processingtimegrouproute`, `buglestandardrecognitiontime`, `orderdelayforbugles`, and `slowdowncourieroutsideradius` load around lines 53336-53344 and already provide data-side order-friction hooks.
+- `Regiment` initializes battlefield `commanderrange` and `buglerange` from unit type prefs around lines 112993-113008. A readiness/initiative recalculation exists around line 125838, but the verified block is campaign-path only.
+- `GamePrefs.processingtimegroupstandard`, `processingtimegrouproute`, `buglestandardrecognitiontime`, and `slowdowncourieroutsideradius` load around lines 53336-53344 and have verified uses. `orderdelayforbugles` was found loaded/declared, but no active use site was found in the verification pass.
 - `BattleUI` passes `useorderdelay: true` for normal player movement orders at line 166163, confirming that tactical movement is expected to respect the order-delay path.
 
 Historical doctrine inputs:
