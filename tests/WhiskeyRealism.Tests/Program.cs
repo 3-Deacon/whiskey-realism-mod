@@ -135,7 +135,11 @@ static class Program
             ("campaign map ledger applies role catalog to towns and assets", CampaignMapLedgerAppliesRoleCatalog),
             ("campaign map ledger signature reflects role changes", CampaignMapLedgerSignatureReflectsRoleChanges),
             ("defense posture defaults to not-evaluated", DefensePostureDefaultsToNotEvaluated),
-            ("defense threat carries signature and posture", DefenseThreatCarriesSignatureAndPosture)
+            ("defense threat carries signature and posture", DefenseThreatCarriesSignatureAndPosture),
+            ("threat signature for sif uses instance and spot", ThreatSignatureForSifUsesInstanceAndSpot),
+            ("threat signature for raid uses instance and asset", ThreatSignatureForRaidUsesInstanceAndAsset),
+            ("threat signature for asset uses sorted top-n enemies", ThreatSignatureForAssetUsesSortedTopN),
+            ("threat signature is stable across reordered enemies", ThreatSignatureIsStableAcrossReorderedEnemies)
         };
 
         foreach (var test in tests)
@@ -2484,6 +2488,42 @@ static class Program
         AssertEqual("sif:1234:Norfolk:Hampton", threat.Signature);
         AssertEqual(DefensePosture.ActiveInvasion, threat.Posture);
         AssertEqual(ThreatScale.Landing, threat.Scale);
+    }
+
+    private static void ThreatSignatureForSifUsesInstanceAndSpot()
+    {
+        var sig = DefenseThreatSignature.ForSeaInvasion(
+            invasionForceInstanceId: 42, spotName: "Hampton", sourcePortName: "Boston");
+        AssertEqual("sif:42:Hampton:Boston", sig);
+
+        var nullSpot = DefenseThreatSignature.ForSeaInvasion(
+            invasionForceInstanceId: 42, spotName: null, sourcePortName: null);
+        AssertEqual("sif:42:<no-spot>:<no-port>", nullSpot);
+    }
+
+    private static void ThreatSignatureForRaidUsesInstanceAndAsset()
+    {
+        var sig = DefenseThreatSignature.ForRaid(raidGroupInstanceId: 7, nearestAssetName: "wilmington-harbor");
+        AssertEqual("raid:7:wilmington-harbor", sig);
+    }
+
+    private static void ThreatSignatureForAssetUsesSortedTopN()
+    {
+        var sig = DefenseThreatSignature.ForAsset(
+            assetKind: CampaignMapAssetKind.SeaHarbor,
+            assetName: "vicksburg-harbor",
+            enemyInstanceIds: new[] { 9, 3, 5, 1, 7, 11 },
+            topN: 3);
+        AssertEqual("asset:SeaHarbor:vicksburg-harbor:1,3,5", sig);
+    }
+
+    private static void ThreatSignatureIsStableAcrossReorderedEnemies()
+    {
+        var a = DefenseThreatSignature.ForAsset(
+            CampaignMapAssetKind.RiverHarbor, "memphis-harbor", new[] { 5, 3, 1 }, topN: 5);
+        var b = DefenseThreatSignature.ForAsset(
+            CampaignMapAssetKind.RiverHarbor, "memphis-harbor", new[] { 1, 5, 3 }, topN: 5);
+        AssertEqual(a, b);
     }
 
     private static void AssertEqual<T>(T expected, T actual)
