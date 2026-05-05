@@ -63,5 +63,11 @@ namespace WhiskeyRealism.Strategic
         public float SupplyConstructionBias;
         public float LogisticsBias;
         public float ExpansionDamper;
+
+        // Defense budget modifiers — applied in DefenseIntentRuntime and DefensiveOpsPatch.
+        // GuardBudgetFractionModifier: additive on the 0.10f default; bounded to [-0.05, +0.05].
+        // CapitalDefenseBudgetModifier: additive on the base capital fraction; bounded to [-0.05, +0.10].
+        public float GuardBudgetFractionModifier;
+        public float CapitalDefenseBudgetModifier;
     }
 }

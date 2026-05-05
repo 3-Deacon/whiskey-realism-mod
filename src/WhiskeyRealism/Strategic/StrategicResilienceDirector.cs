@@ -161,6 +161,24 @@ namespace WhiskeyRealism.Strategic
             posture.SupplyConstructionBias = Clamp(supplyBias,      -0.20f, +0.40f);
             posture.LogisticsBias          = Clamp(logisticsBias,   -0.20f, +0.40f);
             posture.ExpansionDamper        = Clamp(expansionDamper,  0f,    +0.50f);
+
+            float guardMod = 0f, capitalMod = 0f;
+            switch (posture.Pace)
+            {
+                case CampaignPace.TooFastCollapse:
+                    capitalMod = +0.10f;
+                    guardMod   = +0.03f;
+                    break;
+                case CampaignPace.Overheated:
+                    guardMod = +0.05f;
+                    break;
+                case CampaignPace.LateWarPressure:
+                    if (posture.AllianceId == 0) guardMod   = -0.03f;
+                    else                          capitalMod = +0.05f;
+                    break;
+            }
+            posture.GuardBudgetFractionModifier  = Clamp(guardMod,   -0.05f, +0.05f);
+            posture.CapitalDefenseBudgetModifier  = Clamp(capitalMod, -0.05f, +0.10f);
         }
 
         public static void ApplyTo(OperationalProbeOptions options, DirectorPosture posture)

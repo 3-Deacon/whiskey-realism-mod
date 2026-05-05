@@ -242,7 +242,9 @@ static class Program
             ("director relaxes union mass ratio under late war pressure", DirectorRelaxesUnionMassRatioUnderLateWarPressure),
             ("director critical risk strongly favors supply construction", DirectorCriticalRiskFavorsSupplyConstruction),
             ("director too quiet healthy fiscal favors logistics", DirectorTooQuietFavorsLogistics),
-            ("director too fast collapse damps expansion", DirectorTooFastCollapseDampsExpansion)
+            ("director too fast collapse damps expansion", DirectorTooFastCollapseDampsExpansion),
+            ("director raises capital defense budget under too fast collapse", DirectorRaisesCapitalDefenseBudgetUnderTooFastCollapse),
+            ("director lowers union guard budget under late war pressure", DirectorLowersUnionGuardUnderLateWarPressure)
         };
 
         foreach (var test in tests)
@@ -5056,5 +5058,25 @@ static class Program
             pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
             personality: new PersonalityVector());
         AssertTrue(posture.ExpansionDamper >= 0.30f, "TooFastCollapse must damp expansion");
+    }
+
+    private static void DirectorRaisesCapitalDefenseBudgetUnderTooFastCollapse()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 1,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
+            personality: new PersonalityVector());
+        AssertTrue(posture.CapitalDefenseBudgetModifier >= 0.05f,
+            "TooFastCollapse must raise capital defense budget");
+    }
+
+    private static void DirectorLowersUnionGuardUnderLateWarPressure()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Low },
+            personality: new PersonalityVector());
+        AssertTrue(posture.GuardBudgetFractionModifier <= 0f,
+            "Union late-war pressure can slightly lower guard for source-sector concentration");
     }
 }

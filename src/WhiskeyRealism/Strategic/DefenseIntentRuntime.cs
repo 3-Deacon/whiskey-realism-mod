@@ -90,6 +90,13 @@ namespace WhiskeyRealism.Strategic
                         input.FrontLedger = coordinator.Fronts[allianceId];
                     if (coordinator.FormationDirectives != null && allianceId < coordinator.FormationDirectives.Length)
                         input.FormationDirectives = coordinator.FormationDirectives[allianceId];
+
+                    // Scale GuardBudgetFraction from director posture.  Default 0.10f is preserved
+                    // when DirectorMemories is absent or posture is null.
+                    var posture = coordinator.DirectorMemories != null && allianceId < coordinator.DirectorMemories.Length
+                        ? coordinator.DirectorMemories[allianceId]?.LastPosture
+                        : null;
+                    input.GuardBudgetFraction = Clamp(0.10f + (posture?.GuardBudgetFractionModifier ?? 0f), 0.05f, 0.15f);
                 }
             }
             catch { }
@@ -934,6 +941,8 @@ namespace WhiskeyRealism.Strategic
             }
             catch { return null; }
         }
+
+        private static float Clamp(float v, float lo, float hi) => v < lo ? lo : (v > hi ? hi : v);
 
         private static Type ResolveAICampaignNestedType(string typeName)
         {
