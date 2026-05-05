@@ -24,6 +24,9 @@ static class Program
             ("army area ledger gives dynamic fallback local doctrine", ArmyAreaLedgerGivesDynamicFallbackLocalDoctrine),
             ("army area ledger lets dynamic fallback counterstroke its local plan area", ArmyAreaLedgerLetsDynamicFallbackCounterstrokeLocalPlanArea),
             ("army area ledger can redirect independent division input", ArmyAreaLedgerCanRedirectIndependentDivisionInput),
+            ("battle history query matches inside spatial and date window", BattleHistoryQueryMatchesInsideSpatialAndDateWindow),
+            ("battle history query rejects outside spatial window", BattleHistoryQueryRejectsOutsideSpatialWindow),
+            ("battle history query rejects outside date window", BattleHistoryQueryRejectsOutsideDateWindow),
             ("daily cadence fires on first call and day rollover only", DailyCadenceFiresOnFirstCallAndDayRolloverOnly),
             ("daily cadence rejects invalid dates", DailyCadenceRejectsInvalidDates),
             ("strategic cadence alternates formation by alliance", StrategicCadenceAlternatesFormationByAlliance),
@@ -618,6 +621,42 @@ static class Program
         var assignment = ledger.GetAssignment("division");
         AssertEqual("VirginiaCapitalCorridor", assignment.AssignedAreaKey);
         AssertEqual(true, assignment.OutOfArea);
+    }
+
+    private static void BattleHistoryQueryMatchesInsideSpatialAndDateWindow()
+    {
+        var history = new List<BattleHistoryRecord>
+        {
+            new BattleHistoryRecord { BattleName = "near", PositionX = 100f, PositionZ = 100f, Day = 5, Month = 6, Year = 1862 }
+        };
+        int currentDay = 1862 * 372 + 6 * 31 + 8;
+        var hits = new List<BattleHistoryRecord>(BattleHistoryQuery.Near(
+            history, new UnityEngine.Vector3(105f, 0f, 105f), 50f, currentDay, withinDays: 7));
+        AssertEqual(1, hits.Count, "expected 1 in-window hit");
+    }
+
+    private static void BattleHistoryQueryRejectsOutsideSpatialWindow()
+    {
+        var history = new List<BattleHistoryRecord>
+        {
+            new BattleHistoryRecord { BattleName = "far", PositionX = 1000f, PositionZ = 1000f, Day = 5, Month = 6, Year = 1862 }
+        };
+        int currentDay = 1862 * 372 + 6 * 31 + 6;
+        var hits = new List<BattleHistoryRecord>(BattleHistoryQuery.Near(
+            history, new UnityEngine.Vector3(0f, 0f, 0f), 50f, currentDay, withinDays: 7));
+        AssertEqual(0, hits.Count, "expected 0 hits beyond spatial window");
+    }
+
+    private static void BattleHistoryQueryRejectsOutsideDateWindow()
+    {
+        var history = new List<BattleHistoryRecord>
+        {
+            new BattleHistoryRecord { BattleName = "old", PositionX = 100f, PositionZ = 100f, Day = 5, Month = 6, Year = 1862 }
+        };
+        int currentDay = 1862 * 372 + 7 * 31 + 5; // ~30 days later
+        var hits = new List<BattleHistoryRecord>(BattleHistoryQuery.Near(
+            history, new UnityEngine.Vector3(105f, 0f, 105f), 50f, currentDay, withinDays: 7));
+        AssertEqual(0, hits.Count, "expected 0 hits beyond date window");
     }
 
     private static void DailyCadenceFiresOnFirstCallAndDayRolloverOnly()

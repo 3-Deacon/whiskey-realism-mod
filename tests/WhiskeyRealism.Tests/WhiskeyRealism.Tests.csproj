@@ -4,7 +4,19 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
+    <RefsDir>$(MSBuildThisFileDirectory)..\..\refs</RefsDir>
   </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="UnityEngine">
+      <HintPath>$(RefsDir)\UnityEngine.dll</HintPath>
+      <Private>true</Private>
+      <CopyLocalSatelliteAssemblies>true</CopyLocalSatelliteAssemblies>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(RefsDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Theater.cs" Link="Theater.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignMapLedger.cs" Link="CampaignMapLedger.cs" />
@@ -19,6 +31,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalArmyAreaRegistry.cs" Link="HistoricalArmyAreaRegistry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DynamicArmyAreaDoctrine.cs" Link="DynamicArmyAreaDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaLedger.cs" Link="ArmyAreaLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BattleHistoryRecord.cs" Link="BattleHistoryRecord.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BattleHistoryQuery.cs" Link="BattleHistoryQuery.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DailyCadence.cs" Link="DailyCadence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategicCadencePolicy.cs" Link="StrategicCadencePolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalStartupGate.cs" Link="OperationalStartupGate.cs" />
