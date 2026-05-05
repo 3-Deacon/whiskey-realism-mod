@@ -52,6 +52,7 @@ All line numbers are in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 | `GetAllStateWithRecruitsPotential` | 10858 | All-with-potential variant |
 | `UpdateSupplyCapacity` | 10773 | Per-zone supply capacity from IIPs + supply depots |
 | `CheckSupplyDepotConstruction` | 14660 | AI builds supply depots |
+| `CheckFortConstruction` | 16347 | AI fort construction; one active order per faction but no area cap once orders finish |
 | `CheckTransferOfUnits` | 17232 | Force consolidation gate |
 | `CheckArmyGroupManagement` | 17706 | High-level army organization |
 | `AssignUnitToDefendCapital` | 11668 / gate at 11791 | Capital-defense assignment; older notes called this `CheckPickDefensiveOps`, but that method name does not exist in current decompile |
@@ -147,6 +148,8 @@ Collected during v0.2.0 / v0.2.1 / v0.2.1.1 smoke-testing. Pattern: many vanilla
 | `Policy.CurrentChapter` initial state | Set by scenario start | Initialized to `-1` (line 29857). Updated by `Policy.CheckForChapterUpdate()` (line 211604) which runs from a per-day cycle. **Must invoke manually** if patch fires before per-day cycle has ticked (typical on fresh-campaign first frame). For W&L scenario "002", CheckForChapterUpdate unconditionally sets `CurrentChapter = 1`. |
 | `BattleUnits.armygroups` populated | At campaign start | Only after vanilla AI promotes a commander to army-group rank (typically meaningful game time). `Commander.IsArmyGroupCommander() == true` requires this. |
 | Vanilla CampaignObjectives for W&L "002" | All 38 from `Config/campaignobjectives.dat` | Only the subset whose `ObjectiveScenario` list contains "002" (~19 of 38). Many are abstract win-conditions; default `mintownobjectives=1` filter excludes them — pass `0`. |
+
+**Fort-construction gotcha (added 2026-05-05):** vanilla `AICampaign.CheckFortConstruction(int)` (line 16347) prevents more than one active fort order per faction via `FortConstructionOrder.IsFactionAlreadyConstructingFort`, and checks existing forts by `GamePrefs.maxdistancetootherfort`. That is not an area cap. Once a fort finishes, the next static `fortconstructionsites` candidate can be used. Capital-defense units use a looser `GamePrefs.maxdistancetootherfort * 0.6f` spacing multiplier, which can produce dense Washington/Richmond fort clusters over repeated completed orders. Whiskey #27 `FortConstructionGovernorPatch` filters saturated `fortconstructionsites` for the current vanilla call, then restores the list; see `docs/fort-construction-governor.md`.
 
 **Army-group steering note (added v0.2.2):** vanilla creates/attaches army groups in `AICampaign.CheckArmyGroupManagement` (line 17705) from top units with non-default `Regiment.theaterposition`. Whiskey #16 `ArmyGroupManagementPatch` now runs after vanilla and uses vanilla `ArmyGroup.AddUnit`, `ArmyGroup.CreateNewArmyGroup`, and `ArmyGroup.AppointCommander` only after the weekly `ArmyAreaLedger` identifies at least two eligible top formations in the same historical operating command. Preferred commanders are appointed only when already attached to that group or unassigned; the patch does not yank unrelated commands across the map.
 

@@ -1,12 +1,12 @@
 # `docs/superpowers/`
 
-Slice-level design and execution artifacts. Living-doc state lives in [`docs/handoff.md`](../handoff.md), [`docs/patch-catalog.md`](../patch-catalog.md), [`docs/findings.md`](../findings.md), and [`MEMORY.md`](../../MEMORY.md).
+Slice-level design and execution artifacts. Living-doc state lives in [`docs/handoff.md`](../handoff.md), [`docs/patch-catalog.md`](../patch-catalog.md), [`docs/findings.md`](../findings.md), [`docs/fort-construction-governor.md`](../fort-construction-governor.md), and [`MEMORY.md`](../../MEMORY.md).
 
 ## Layout
 
 - [`specs/`](specs/) — **active** design specs (current and upcoming slices).
 - [`specs/archive/`](specs/archive/) — design specs whose implementation has shipped. See the archive [README](specs/archive/README.md) for the index.
-- [`plans/`](plans/) — **active** implementation plans (none right now; subagent-driven-development tracks task state).
+- [`plans/`](plans/) — **active** implementation plans. Current active plan: Slice B tactical-brain master sequencing. Focused B-slice plans should be added here as they are written.
 - [`plans/archive/`](plans/archive/) — implementation plans whose patches have shipped. See the archive [README](plans/archive/README.md) for the index.
 
 ## Lifecycle

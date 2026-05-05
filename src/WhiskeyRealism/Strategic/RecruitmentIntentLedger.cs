@@ -6,6 +6,9 @@ namespace WhiskeyRealism.Strategic
     {
         public int AllianceId;
         public Theater PreferredTheater = Theater.Unknown;
+        public string ProtectedAreaKey;
+        public float ProtectedAreaThreatLevel;
+        public float ProtectedAreaThreatThreshold = 0.35f;
         public float StrengthRatio = 1f;
         public float OwnStateSupportFloor = 0.5f;
         public bool AllowDraftReplacement;
@@ -15,6 +18,7 @@ namespace WhiskeyRealism.Strategic
     {
         public int StateId;
         public Theater Theater;
+        public string AreaKey;
         public int Volunteers;
         public int Drafts;
         public float Support;
@@ -45,11 +49,15 @@ namespace WhiskeyRealism.Strategic
             float bestScore = float.MinValue;
             bool bestUsesDrafts = false;
 
+            bool requireProtectedArea = HasThreatenedProtectedArea(intent) &&
+                                        HasEligibleProtectedArea(intent, candidates, strengthNeeded, excludeEnemyStates);
             bool requirePreferredTheater = HasEligiblePreferredTheater(intent, candidates, strengthNeeded, excludeEnemyStates);
 
             foreach (var candidate in candidates)
             {
                 if (!IsEligible(intent, candidate, strengthNeeded, excludeEnemyStates, out bool usesDrafts))
+                    continue;
+                if (requireProtectedArea && !AreaMatches(candidate, intent.ProtectedAreaKey))
                     continue;
                 if (requirePreferredTheater && candidate.Theater != intent.PreferredTheater)
                     continue;
@@ -64,6 +72,9 @@ namespace WhiskeyRealism.Strategic
             }
 
             if (best == null)
+                return Keep(vanillaStateId);
+
+            if (requireProtectedArea && !AreaMatches(best, intent.ProtectedAreaKey))
                 return Keep(vanillaStateId);
 
             if (intent.PreferredTheater != Theater.Unknown && best.Theater != intent.PreferredTheater)
@@ -86,6 +97,29 @@ namespace WhiskeyRealism.Strategic
                 StateId = best.StateId,
                 Reason = Reason(intent, best, bestUsesDrafts)
             };
+        }
+
+        private static bool HasThreatenedProtectedArea(RecruitmentIntent intent)
+        {
+            return intent != null &&
+                   !string.IsNullOrEmpty(intent.ProtectedAreaKey) &&
+                   intent.ProtectedAreaThreatLevel >= intent.ProtectedAreaThreatThreshold;
+        }
+
+        private static bool HasEligibleProtectedArea(
+            RecruitmentIntent intent,
+            IEnumerable<RecruitmentStateCandidate> candidates,
+            int strengthNeeded,
+            bool excludeEnemyStates)
+        {
+            foreach (var candidate in candidates)
+            {
+                if (candidate != null &&
+                    AreaMatches(candidate, intent.ProtectedAreaKey) &&
+                    IsEligible(intent, candidate, strengthNeeded, excludeEnemyStates, out _))
+                    return true;
+            }
+            return false;
         }
 
         private static bool HasEligiblePreferredTheater(
@@ -137,6 +171,7 @@ namespace WhiskeyRealism.Strategic
         {
             float score = candidate.Support * 2.0f;
             if (candidate.Theater == intent.PreferredTheater) score += 1.0f;
+            if (HasThreatenedProtectedArea(intent) && AreaMatches(candidate, intent.ProtectedAreaKey)) score += 1.5f;
             if (candidate.IsLocalArea) score += 0.35f;
             if (candidate.Volunteers >= strengthNeeded) score += 0.55f;
             if (usesDrafts) score -= 0.75f;
@@ -171,11 +206,22 @@ namespace WhiskeyRealism.Strategic
 
         private static string Reason(RecruitmentIntent intent, RecruitmentStateCandidate candidate, bool usesDrafts)
         {
+            if (HasThreatenedProtectedArea(intent) && AreaMatches(candidate, intent.ProtectedAreaKey) && !usesDrafts)
+                return "protected-area-volunteers";
+            if (HasThreatenedProtectedArea(intent) && AreaMatches(candidate, intent.ProtectedAreaKey))
+                return "protected-area-drafts";
             if (candidate.Theater == intent.PreferredTheater && !usesDrafts)
                 return "preferred-theater-volunteers";
             if (candidate.Theater == intent.PreferredTheater)
                 return "preferred-theater";
             return !usesDrafts ? "volunteer-high-support" : "draft-needed";
+        }
+
+        private static bool AreaMatches(RecruitmentStateCandidate candidate, string areaKey)
+        {
+            return candidate != null &&
+                   !string.IsNullOrEmpty(candidate.AreaKey) &&
+                   string.Equals(candidate.AreaKey, areaKey, System.StringComparison.OrdinalIgnoreCase);
         }
     }
 

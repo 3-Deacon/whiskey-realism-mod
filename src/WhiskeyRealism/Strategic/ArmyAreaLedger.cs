@@ -21,6 +21,12 @@ namespace WhiskeyRealism.Strategic
                 if (input == null || string.IsNullOrEmpty(input.UnitKey)) continue;
 
                 var doctrine = HistoricalArmyAreaRegistry.Resolve(input.AllianceId, input.UnitName, input.CommanderName);
+                if (doctrine.PrimaryAreaKey == "Unassigned" &&
+                    !HistoricalArmyAreaRegistry.IsInactiveFullWarCommand(input.AllianceId, input.UnitName))
+                {
+                    doctrine = DynamicArmyAreaDoctrine.FromCurrentArea(input.AllianceId, input.CurrentAreaKey);
+                }
+
                 bool inPreferredArea = Contains(doctrine.PreferredAreaKeys, input.CurrentAreaKey);
                 bool planTargetsThisArea = !string.IsNullOrEmpty(planTargetAreaKey) &&
                                            Contains(doctrine.PreferredAreaKeys, planTargetAreaKey);
@@ -42,6 +48,13 @@ namespace WhiskeyRealism.Strategic
                 {
                     assignment.Behavior = ArmyAreaBehavior.Recover;
                     assignment.Reason = "outside-historical-area";
+                }
+                else if (DynamicArmyAreaDoctrine.IsDynamic(doctrine) && planTargetsThisArea && input.Readiness >= 0.65f && input.Strength >= 10000f)
+                {
+                    assignment.Behavior = doctrine.OffensiveBias >= doctrine.DefensiveBias
+                        ? ArmyAreaBehavior.Exploit
+                        : ArmyAreaBehavior.Counterstroke;
+                    assignment.Reason = "plan-target-dynamic-area";
                 }
                 else if (planTargetsThisArea && input.Readiness >= 0.65f && input.Strength >= 15000f && doctrine.OffensiveBias > doctrine.DefensiveBias)
                 {

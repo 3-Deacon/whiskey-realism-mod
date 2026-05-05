@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
@@ -47,6 +48,11 @@ namespace WhiskeyRealism.Patches
         // Dedup set for revert log lines — key "<allianceId>|<threatSig>|<unitId>".
         // First revert per tuple logs unconditionally; subsequent reverts only under verbose.
         private static readonly HashSet<string> _revertLogged = new HashSet<string>();
+        private static readonly Dictionary<Type, FieldInfo> _ownUnitsFields =
+            new Dictionary<Type, FieldInfo>();
+        private static readonly Dictionary<Type, FieldInfo> _defensiveOpsFields =
+            new Dictionary<Type, FieldInfo>();
+        private static MethodInfo _removeDefensiveOperationMethod;
 
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction)
@@ -73,8 +79,8 @@ namespace WhiskeyRealism.Patches
                 var faction = AICampaignReflect.GetFaction(_aifaction);
                 if (faction == null) return;
 
-                var ownUnitsField = AccessTools.Field(faction.GetType(), "ownunits");
-                var defOpsField = AccessTools.Field(faction.GetType(), "unitsindefensiveoperations");
+                var ownUnitsField = GetOwnUnitsField(faction.GetType());
+                var defOpsField = GetDefensiveOpsField(faction.GetType());
                 var ownUnits = ownUnitsField?.GetValue(faction) as IList;
                 var defOps = defOpsField?.GetValue(faction) as IList;
                 if (ownUnits == null || defOps == null) return;
@@ -166,7 +172,7 @@ namespace WhiskeyRealism.Patches
                 // unchanged to everything that runs after CheckForDefensiveOperations.
                 if (_ownUnitsSnapshot.TryGetValue(_aifaction, out var snapshot))
                 {
-                    var ownUnitsField = AccessTools.Field(faction.GetType(), "ownunits");
+                    var ownUnitsField = GetOwnUnitsField(faction.GetType());
                     var ownUnits = ownUnitsField?.GetValue(faction) as IList;
                     if (ownUnits != null)
                     {
@@ -193,7 +199,7 @@ namespace WhiskeyRealism.Patches
                             var forbidden = CollectForbiddenIds(output, out var _unusedReasons, out var _unusedSigs);
                             if (forbidden.Count > 0)
                             {
-                                var defOpsField = AccessTools.Field(faction.GetType(), "unitsindefensiveoperations");
+                                var defOpsField = GetDefensiveOpsField(faction.GetType());
                                 var defOps = defOpsField?.GetValue(faction) as IList;
                                 _priorTheaterPositionByUnitId.TryGetValue(_aifaction, out var priorPositions);
                                 _suppressionReasonByUnitId.TryGetValue(_aifaction, out var suppressionReasons);
@@ -298,13 +304,16 @@ namespace WhiskeyRealism.Patches
             {
                 // AICampaign.DefensiveOperation is a private nested class with a static
                 // RemoveUnit(Regiment) method (decompile line 10097).
-                var nested = AccessTools.Inner(typeof(AICampaign), "DefensiveOperation");
-                var method = nested != null
-                    ? AccessTools.Method(nested, "RemoveUnit", new[] { typeof(Regiment) })
-                    : null;
-                if (method != null)
+                if (_removeDefensiveOperationMethod == null)
                 {
-                    method.Invoke(null, new object[] { unit });
+                    var nested = AccessTools.Inner(typeof(AICampaign), "DefensiveOperation");
+                    _removeDefensiveOperationMethod = nested != null
+                        ? AccessTools.Method(nested, "RemoveUnit", new[] { typeof(Regiment) })
+                        : null;
+                }
+                if (_removeDefensiveOperationMethod != null)
+                {
+                    _removeDefensiveOperationMethod.Invoke(null, new object[] { unit });
                 }
                 else
                 {
@@ -348,6 +357,24 @@ namespace WhiskeyRealism.Patches
             // that prevents the same (alliance, threat-sig, unit) tuple from spamming
             // across ticks. Cross-campaign bleed is accepted as a known limitation
             // (same as _firstAssignmentLogged in CoastalDefenseCustomOrderRunner).
+        }
+
+        private static FieldInfo GetOwnUnitsField(Type factionType)
+        {
+            if (factionType == null) return null;
+            if (_ownUnitsFields.TryGetValue(factionType, out var field)) return field;
+            field = AccessTools.Field(factionType, "ownunits");
+            _ownUnitsFields[factionType] = field;
+            return field;
+        }
+
+        private static FieldInfo GetDefensiveOpsField(Type factionType)
+        {
+            if (factionType == null) return null;
+            if (_defensiveOpsFields.TryGetValue(factionType, out var field)) return field;
+            field = AccessTools.Field(factionType, "unitsindefensiveoperations");
+            _defensiveOpsFields[factionType] = field;
+            return field;
         }
     }
 }

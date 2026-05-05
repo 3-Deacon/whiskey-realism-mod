@@ -114,7 +114,6 @@ namespace WhiskeyRealism.Strategic
                 var assignment = GetAssignment(allianceId, unitKey);
                 if (assignment == null) return true;
                 if (!assignment.DirectMovementAllowed) return false;
-                if (assignment.Directive == FormationDirective.Recover) return false;
                 if (assignment.Directive == FormationDirective.Delay) return false;
                 if (assignment.Directive == FormationDirective.Concede) return false;
                 return true;

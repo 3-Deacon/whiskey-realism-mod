@@ -69,6 +69,64 @@ namespace WhiskeyRealism.Strategic
             return ledger;
         }
 
+        internal static string DynamicSignature()
+        {
+            unchecked
+            {
+                int hash = 17;
+                try
+                {
+                    if (BattleUnits.towns != null)
+                    {
+                        for (int i = 0; i < BattleUnits.towns.Count; i++)
+                        {
+                            var town = BattleUnits.towns[i];
+                            if (town == null) continue;
+                            hash = hash * 31 + town.Owner;
+                            hash = hash * 31 + town.state;
+                            hash = hash * 31 + (town.IsCapital ? 1 : 0);
+                        }
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    if (BattleUnits.harbors != null)
+                    {
+                        for (int i = 0; i < BattleUnits.harbors.Count; i++)
+                        {
+                            var harbor = BattleUnits.harbors[i];
+                            if (harbor == null) continue;
+                            hash = hash * 31 + harbor.allianceowner;
+                            hash = hash * 31 + harbor.BuildingLevel;
+                            hash = hash * 31 + Mathf.RoundToInt(harbor.condition * 10f);
+                            hash = hash * 31 + Mathf.RoundToInt(harbor.blocked * 10f);
+                        }
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    if (BattleUnits.fort != null)
+                    {
+                        for (int i = 0; i < BattleUnits.fort.Count; i++)
+                        {
+                            var fort = BattleUnits.fort[i];
+                            if (fort == null) continue;
+                            hash = hash * 31 + fort.Owner;
+                            hash = hash * 31 + fort.level;
+                            hash = hash * 31 + Mathf.RoundToInt(fort.Condition * 10f);
+                        }
+                    }
+                }
+                catch { }
+
+                return hash.ToString("X");
+            }
+        }
+
         private static void LogMissingRoles(CampaignMapLedger ledger)
         {
             if (ledger == null || ledger.Assets == null) return;

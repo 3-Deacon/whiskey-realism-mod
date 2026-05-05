@@ -14,6 +14,7 @@ namespace WhiskeyRealism.Strategic
             { "VirginiaCapitalCorridor", new Vector3(1263f, 0f, -1010f) },
             { "WashingtonDefenses", new Vector3(1350f, 0f, -631f) },
             { "ShenandoahValley", new Vector3(1107f, 0f, -555f) },
+            { "NorthwestVirginia", new Vector3(702f, 0f, -696f) },
             { "MarylandPennsylvaniaCorridor", new Vector3(1195f, 0f, -426f) },
             { "CoastalCarolinaVirginia", new Vector3(1451f, 0f, -1233f) },
             { "CarolinaInterior", new Vector3(750f, 0f, -1600f) },
@@ -73,14 +74,7 @@ namespace WhiskeyRealism.Strategic
 
         internal static string AreaKey(Vector3 position)
         {
-            if (position.x < -200f) return "TransMississippi";
-            if (position.x > 1420f && position.z < -1120f) return "CoastalCarolinaVirginia";
-            if (position.x > 1225f && position.z > -725f) return "WashingtonDefenses";
-            if (position.x > 950f && position.x < 1225f && position.z > -760f && position.z < -400f) return "ShenandoahValley";
-            if (position.x > 1150f && position.z > -450f) return "MarylandPennsylvaniaCorridor";
-            if (position.x > 1050f && position.z < -850f) return "VirginiaCapitalCorridor";
-            if (position.z < -1250f) return "CarolinaInterior";
-            return "OhioValley";
+            return ArmyAreaClassifier.FromPosition(position.x, position.z);
         }
 
         internal static bool TryGetAnchor(string areaKey, out Vector3 anchor)

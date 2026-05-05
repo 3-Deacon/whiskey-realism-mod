@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Reflection;
 using BepInEx.Configuration;
 using HarmonyLib;
@@ -50,7 +51,11 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _formationDirectiveSignatures = new string[2];
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly string[] _constructionSignatures = new string[2];
+        private readonly string[] _formationSourceSignatures = new string[2];
+        private readonly string[] _armyAreaSourceSignatures = new string[2];
+        private readonly string[] _constructionSourceSignatures = new string[2];
         private string _campaignMapSignature;
+        private string _campaignMapDynamicSignature;
         private readonly DailyCadence _operationalCadence = new DailyCadence();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
@@ -201,6 +206,15 @@ namespace WhiskeyRealism.Strategic
 
         private void RunStrategicReview(int day, int month, int year, bool logHeartbeat)
         {
+            var totalWatch = Stopwatch.StartNew();
+            double mapMs = 0d;
+            double frontMs = 0d;
+            double armyAreaMs = 0d;
+            double formationMs = 0d;
+            double fiscalMs = 0d;
+            double constructionMs = 0d;
+            double defenseMs = 0d;
+
             if (WlCareerStartPending())
             {
                 if (!_wlCareerStartDeferredLogged)
@@ -221,7 +235,7 @@ namespace WhiskeyRealism.Strategic
             }
 
             if (operationalRuntimeReady)
-                UpdateCampaignMapLedger(logHeartbeat);
+                mapMs += Measure(() => UpdateCampaignMapLedger(day, logHeartbeat));
 
             for (int alliance = 0; alliance < 2; alliance++)
             {
@@ -251,15 +265,40 @@ namespace WhiskeyRealism.Strategic
                 if (!cic.ReviewPlan(month, year))
                     cic.Replan(era, month, year);
 
+                fiscalMs += Measure(() => UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat));
+                bool frontChanged = false;
+                if (operationalRuntimeReady)
+                    frontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance, cic));
+
+                defenseMs += Measure(() => UpdateDefenseIntent(alliance, era.Stage, day, month, year));
+
+                bool formationChanged = false;
                 if (operationalRuntimeReady)
                 {
-                    UpdateFrontLedger(alliance, cic);
-                    UpdateArmyAreaLedger(alliance, cic);
-                    UpdateFormationDirectiveLedger(alliance, cic, era);
+                    string formationSource = FormationSourceSignature(alliance, cic);
+                    bool runFormation = StrategicCadencePolicy.ShouldRunAlternatingByAlliance(day, alliance) ||
+                        StrategicCadencePolicy.SourceChanged(formationSource, _formationSourceSignatures[alliance]) ||
+                        frontChanged;
+                    if (runFormation)
+                    {
+                        formationMs += Measure(() => formationChanged = UpdateFormationDirectiveLedger(alliance, cic, era));
+                        _formationSourceSignatures[alliance] = formationSource;
+                    }
+
+                    string armyAreaSource = ArmyAreaSourceSignature(alliance, cic);
+                    if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(day, armyAreaSource, _armyAreaSourceSignatures[alliance], formationChanged))
+                    {
+                        armyAreaMs += Measure(() => UpdateArmyAreaLedger(alliance, cic));
+                        _armyAreaSourceSignatures[alliance] = armyAreaSource;
+                    }
                 }
-                UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat);
-                UpdateConstructionIntent(alliance, era.Stage, logHeartbeat);
-                UpdateDefenseIntent(alliance, era.Stage, day, month, year);
+
+                string constructionSource = ConstructionSourceSignature(alliance);
+                if (StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(day, constructionSource, _constructionSourceSignatures[alliance], false))
+                {
+                    constructionMs += Measure(() => UpdateConstructionIntent(alliance, era.Stage, logHeartbeat));
+                    _constructionSourceSignatures[alliance] = constructionSource;
+                }
 
                 if (Plugin.Instance.VerboseLogging.Value && !logHeartbeat)
                     Plugin.Log.LogInfo($"[DailyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
@@ -273,14 +312,55 @@ namespace WhiskeyRealism.Strategic
                         $"succession_fired={Succession.FiredEventIds.Count}");
                 }
             }
+
+            totalWatch.Stop();
+            if (ShouldLogStrategicPerf(totalWatch.Elapsed.TotalMilliseconds))
+            {
+                Plugin.Log.LogInfo(
+                    $"[DailyOps:Perf] {year}-{month:D2}-{day:D2} " +
+                    $"totalMs={totalWatch.Elapsed.TotalMilliseconds:F2} " +
+                    $"mapMs={mapMs:F2} frontMs={frontMs:F2} armyAreaMs={armyAreaMs:F2} " +
+                    $"formationMs={formationMs:F2} fiscalMs={fiscalMs:F2} " +
+                    $"constructionMs={constructionMs:F2} defenseMs={defenseMs:F2}");
+            }
         }
 
-        private void UpdateCampaignMapLedger(bool logHeartbeat)
+        private static double Measure(Action action)
+        {
+            var watch = Stopwatch.StartNew();
+            action();
+            watch.Stop();
+            return watch.Elapsed.TotalMilliseconds;
+        }
+
+        private static bool ShouldLogStrategicPerf(double elapsedMs)
+        {
+            var plugin = Plugin.Instance;
+            if (plugin == null) return false;
+            if (ConfigValue(plugin.VerboseLogging)) return true;
+            float threshold = ConfigValue(plugin.FastForwardAiSlowFrameThresholdMs, 8f);
+            if (float.IsNaN(threshold) || float.IsInfinity(threshold) || threshold <= 0f)
+                threshold = 8f;
+            return elapsedMs >= threshold;
+        }
+
+        private void UpdateCampaignMapLedger(int day, bool logHeartbeat)
         {
             try
             {
+                string dynamicSignature = CampaignMapRuntime.DynamicSignature();
+                bool fullRefresh = CampaignMap == null ||
+                    CampaignMap.Towns.Count == 0 ||
+                    StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(
+                        day,
+                        dynamicSignature,
+                        _campaignMapDynamicSignature,
+                        forceRefresh: false);
+                if (!fullRefresh) return;
+
                 var ledger = CampaignMapRuntime.Build();
                 CampaignMap = ledger;
+                _campaignMapDynamicSignature = dynamicSignature;
                 if (ledger.Signature != _campaignMapSignature)
                 {
                     Plugin.Log.LogInfo("[CampaignMap] " + ledger.Summary());
@@ -381,7 +461,7 @@ namespace WhiskeyRealism.Strategic
                 _previousSifSignatures[alliance] = CollectSifSignatures(input);
 
                 bool verbose = ConfigValue(plugin.VerboseLogging) || ConfigValue(plugin.DefenseIntentVerboseLogging);
-                if (verbose || _defenseIntentSignatures[alliance] != output.Signature)
+                if (verbose)
                 {
                     if (output.Responses != null)
                     {
@@ -394,6 +474,12 @@ namespace WhiskeyRealism.Strategic
                                 $"reason={r.Threat.EscalationReason ?? ""} sig={r.TelemetrySignature ?? ""}");
                         }
                     }
+                    _defenseIntentSignatures[alliance] = output.Signature;
+                }
+                else if (_defenseIntentSignatures[alliance] != output.Signature)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[DefenseIntent] alliance={alliance} {DefenseIntentTelemetry.Summary(output)}");
                     _defenseIntentSignatures[alliance] = output.Signature;
                 }
 
@@ -528,7 +614,7 @@ namespace WhiskeyRealism.Strategic
             catch { return false; }
         }
 
-        private void UpdateFrontLedger(int alliance, CIC cic)
+        private bool UpdateFrontLedger(int alliance, CIC cic)
         {
             int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
             var ledger = FrontSectorRuntime.BuildForAlliance(alliance, targetObjectiveId);
@@ -537,16 +623,18 @@ namespace WhiskeyRealism.Strategic
                 OnceLog.Warning(
                     "front-ledger:null:" + alliance,
                     $"[FrontLedger] update skipped: build returned null for alliance={alliance}");
-                return;
+                return false;
             }
 
             Fronts[alliance] = ledger;
             string signature = FrontSectorRuntime.Signature(ledger);
+            bool changed = StrategicCadencePolicy.SourceChanged(signature, _frontSignatures[alliance]);
             if (Plugin.Instance.VerboseLogging.Value || _frontSignatures[alliance] != signature)
             {
                 Plugin.Log.LogInfo($"[FrontLedger] alliance={alliance} {FrontSectorRuntime.Summary(ledger)}");
                 _frontSignatures[alliance] = signature;
             }
+            return changed;
         }
 
         private void UpdateArmyAreaLedger(int alliance, CIC cic)
@@ -575,7 +663,7 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private void UpdateFormationDirectiveLedger(int alliance, CIC cic, EraStageManager era)
+        private bool UpdateFormationDirectiveLedger(int alliance, CIC cic, EraStageManager era)
         {
             int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
             string planTargetAreaKey = null;
@@ -589,11 +677,12 @@ namespace WhiskeyRealism.Strategic
                 OnceLog.Warning(
                     "formation-directive:null:" + alliance,
                     $"[FormationDirective] update skipped: build returned null for alliance={alliance}");
-                return;
+                return false;
             }
 
             FormationDirectives[alliance] = ledger;
             string signature = ledger.Summary();
+            bool changed = StrategicCadencePolicy.SourceChanged(signature, _formationDirectiveSignatures[alliance]);
             if (Plugin.Instance.VerboseLogging.Value || _formationDirectiveSignatures[alliance] != signature)
             {
                 Plugin.Log.LogInfo(
@@ -603,6 +692,30 @@ namespace WhiskeyRealism.Strategic
                     $"supplyArea={ledger.Pressure.TopSupplyAreaKey ?? "<none>"}");
                 _formationDirectiveSignatures[alliance] = signature;
             }
+            return changed;
+        }
+
+        private string FormationSourceSignature(int alliance, CIC cic)
+        {
+            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
+            return "front=" + (_frontSignatures[alliance] ?? "") +
+                "|target=" + targetObjectiveId +
+                "|defense=" + (_defenseIntentSignatures[alliance] ?? "");
+        }
+
+        private string ArmyAreaSourceSignature(int alliance, CIC cic)
+        {
+            int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
+            return "target=" + targetObjectiveId +
+                "|formation=" + (_formationDirectiveSignatures[alliance] ?? "");
+        }
+
+        private string ConstructionSourceSignature(int alliance)
+        {
+            return "map=" + (_campaignMapSignature ?? "") +
+                "|front=" + (_frontSignatures[alliance] ?? "") +
+                "|formation=" + (_formationDirectiveSignatures[alliance] ?? "") +
+                "|fiscal=" + (_fiscalSignatures[alliance] ?? "");
         }
 
         public void OnEventTrigger(int allianceId, string eventType)
@@ -661,6 +774,15 @@ namespace WhiskeyRealism.Strategic
         }
 
         private static bool ConfigValue(ConfigEntry<bool> entry, bool defaultValue = false)
+        {
+            try
+            {
+                return entry != null ? entry.Value : defaultValue;
+            }
+            catch { return defaultValue; }
+        }
+
+        private static float ConfigValue(ConfigEntry<float> entry, float defaultValue)
         {
             try
             {

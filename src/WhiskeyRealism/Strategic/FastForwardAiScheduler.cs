@@ -10,6 +10,14 @@ namespace WhiskeyRealism.Strategic
         public int SlowFrameCooldownFrames = 180;
     }
 
+    public sealed class CampaignAiGovernorOptions
+    {
+        public bool Enabled;
+        public int MaxPassesAt20x = 2;
+        public int MaxPassesAt50x = 3;
+        public float FrameBudgetMs = 3f;
+    }
+
     public static class FastForwardAiScheduler
     {
         public static int VanillaPasses(float gameSpeed)
@@ -55,6 +63,29 @@ namespace WhiskeyRealism.Strategic
         public static bool InCooldown(int currentFrame, int cooldownUntilFrame)
         {
             return currentFrame < cooldownUntilFrame;
+        }
+
+        public static int GovernedPassCap(float gameSpeed, CampaignAiGovernorOptions options)
+        {
+            int vanilla = VanillaPasses(gameSpeed);
+            options = options ?? new CampaignAiGovernorOptions();
+            if (!options.Enabled) return vanilla;
+            if (gameSpeed >= 50f) return System.Math.Max(1, System.Math.Min(vanilla, options.MaxPassesAt50x));
+            if (gameSpeed >= 20f) return System.Math.Max(1, System.Math.Min(vanilla, options.MaxPassesAt20x));
+            return vanilla;
+        }
+
+        public static bool ShouldRunGovernedPass(
+            int completedPasses,
+            float elapsedMs,
+            float gameSpeed,
+            CampaignAiGovernorOptions options)
+        {
+            if (completedPasses < 0) completedPasses = 0;
+            options = options ?? new CampaignAiGovernorOptions();
+            if (!options.Enabled) return completedPasses < VanillaPasses(gameSpeed);
+            if (elapsedMs >= options.FrameBudgetMs) return false;
+            return completedPasses < GovernedPassCap(gameSpeed, options);
         }
 
         public static string LogSignature(float gameSpeed, int vanillaPasses, int extraPasses, int maxExtra, bool budgetExhausted)

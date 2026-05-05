@@ -9,7 +9,6 @@ namespace WhiskeyRealism.Strategic
             {
                 { 3,  EastCapital(760f, 60f) },     // Richmond
                 { 4,  EastCapital(720f, 160f) },    // Washington
-                { 17, River(Category.RiverControl, -40f, -80f) }, // Mississippi River
                 { 29, East(Category.SupplyHub, 520f, 170f).WithTag(StrategyTag.DefensiveDepth) }, // West Virginia Union
                 { 30, East(Category.SupplyHub, 500f, 120f).WithTag(StrategyTag.DefensiveDepth) }, // West Virginia CSA
                 { 31, East(Category.SupplyHub, 610f, 120f).WithTag(StrategyTag.RailHub) }, // Shenandoah Valley

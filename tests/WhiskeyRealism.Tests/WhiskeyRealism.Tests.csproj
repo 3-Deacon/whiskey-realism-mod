@@ -15,9 +15,12 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseForceSizer.cs" Link="DefenseForceSizer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FrontSectorLedger.cs" Link="FrontSectorLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaDoctrine.cs" Link="ArmyAreaDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaClassifier.cs" Link="ArmyAreaClassifier.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalArmyAreaRegistry.cs" Link="HistoricalArmyAreaRegistry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DynamicArmyAreaDoctrine.cs" Link="DynamicArmyAreaDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyAreaLedger.cs" Link="ArmyAreaLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DailyCadence.cs" Link="DailyCadence.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategicCadencePolicy.cs" Link="StrategicCadencePolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalStartupGate.cs" Link="OperationalStartupGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCareerStartGate.cs" Link="WlCareerStartGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlStartSelectionRetryGate.cs" Link="WlStartSelectionRetryGate.cs" />
@@ -49,6 +52,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionIntentLedger.cs" Link="ConstructionIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionSteeringScorer.cs" Link="ConstructionSteeringScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionProbabilitySanitizer.cs" Link="ConstructionProbabilitySanitizer.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\FortConstructionGovernor.cs" Link="FortConstructionGovernor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\TelegraphIntent.cs" Link="TelegraphIntent.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FinancialAiLogGate.cs" Link="FinancialAiLogGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FastForwardAiScheduler.cs" Link="FastForwardAiScheduler.cs" />
@@ -59,5 +63,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseCooldownTable.cs" Link="DefenseCooldownTable.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentInput.cs" Link="DefenseIntentInput.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentLedger.cs" Link="DefenseIntentLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentTelemetry.cs" Link="DefenseIntentTelemetry.cs" />
   </ItemGroup>
 </Project>

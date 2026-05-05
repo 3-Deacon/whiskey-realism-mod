@@ -19,28 +19,16 @@ namespace WhiskeyRealism.Strategic
                 "VirginiaCapitalCorridor", "ShenandoahValley", "WashingtonDefenses", "MarylandPennsylvaniaCorridor"),
             Doctrine("union-shenandoah", 0, "ShenandoahValley", 0.9f, 0.45f, 0.2f, 0.25f,
                 "ShenandoahValley", "VirginiaCapitalCorridor", "MarylandPennsylvaniaCorridor"),
-            Doctrine("union-cumberland", 0, "TennesseeGeorgiaCorridor", 0.95f, 0.4f, 0.15f, 0.4f,
-                "TennesseeGeorgiaCorridor", "CumberlandGapEastTennessee", "AtlantaCorridor"),
-            Doctrine("union-tennessee", 0, "MississippiRiverCorridor", 1.0f, 0.45f, 0.35f, 0.2f,
-                "MississippiRiverCorridor", "TennesseeGeorgiaCorridor", "AtlantaCorridor"),
-            Doctrine("union-ohio", 0, "CumberlandGapEastTennessee", 0.9f, 0.5f, 0.15f, 0.3f,
-                "CumberlandGapEastTennessee", "KentuckyTennesseeCorridor", "TennesseeGeorgiaCorridor"),
-            Doctrine("union-gulf", 0, "GulfCoastLowerMississippi", 0.9f, 0.55f, 0.2f, 0.2f,
-                "GulfCoastLowerMississippi", "MississippiRiverCorridor", "TransMississippi")
+            Doctrine("union-ohio", 0, "OhioValley", 0.9f, 0.5f, 0.15f, 0.3f,
+                "OhioValley", "NorthwestVirginia", "MarylandPennsylvaniaCorridor")
         };
 
         private static readonly List<ArmyAreaDoctrine> Confederate = new List<ArmyAreaDoctrine>
         {
             Doctrine("csa-anv", 1, "VirginiaCapitalCorridor", 1.0f, 0.3f, 0.35f, 0.45f,
                 "VirginiaCapitalCorridor", "ShenandoahValley", "MarylandPennsylvaniaCorridor", "WashingtonDefenses"),
-            Doctrine("csa-tennessee", 1, "TennesseeGeorgiaCorridor", 1.0f, 0.35f, 0.25f, 0.45f,
-                "TennesseeGeorgiaCorridor", "KentuckyTennesseeCorridor", "AtlantaCorridor", "MississippiRiverCorridor"),
-            Doctrine("csa-mississippi", 1, "MississippiRiverCorridor", 0.9f, 0.45f, 0.2f, 0.35f,
-                "MississippiRiverCorridor", "TennesseeGeorgiaCorridor", "GulfCoastLowerMississippi"),
-            Doctrine("csa-transmiss", 1, "TransMississippi", 0.95f, 0.55f, 0.15f, 0.25f,
-                "TransMississippi", "MissouriArkansasCorridor", "GulfCoastLowerMississippi"),
-            Doctrine("csa-gulf", 1, "GulfCoastLowerMississippi", 0.8f, 0.6f, 0.1f, 0.3f,
-                "GulfCoastLowerMississippi", "MississippiRiverCorridor", "TransMississippi")
+            Doctrine("csa-northwest-va", 1, "NorthwestVirginia", 0.95f, 0.4f, 0.15f, 0.5f,
+                "NorthwestVirginia", "ShenandoahValley")
         };
 
         public static ArmyAreaDoctrine Resolve(int allianceId, string unitName, string commanderName = null)
@@ -57,6 +45,28 @@ namespace WhiskeyRealism.Strategic
             return allianceId == 0 ? FallbackUnion : FallbackConfederate;
         }
 
+        public static bool IsInactiveFullWarCommand(int allianceId, string unitName)
+        {
+            string name = Normalize(unitName);
+            if (allianceId == 0)
+            {
+                return name.Contains("army of the tennessee") ||
+                       name.Contains("army of west tennessee") ||
+                       name.Contains("army of the cumberland") ||
+                       name.Contains("army of the gulf") ||
+                       name.Contains("army of west mississippi");
+            }
+
+            return name.Contains("army of tennessee") ||
+                   name.Contains("army of mississippi") ||
+                   name.Contains("army of the mississippi") ||
+                   name.Contains("trans-mississippi") ||
+                   name.Contains("army of the west") ||
+                   name.Contains("missouri state guard") ||
+                   name.Contains("army of louisiana") ||
+                   name.Contains("army of western louisiana");
+        }
+
         private static bool Matches(string doctrineId, string normalizedUnitName)
         {
             switch (doctrineId)
@@ -66,33 +76,16 @@ namespace WhiskeyRealism.Strategic
                            normalizedUnitName.Contains("army of virginia");
                 case "union-shenandoah":
                     return normalizedUnitName.Contains("shenandoah");
-                case "union-cumberland":
-                    return normalizedUnitName.Contains("army of the cumberland");
-                case "union-tennessee":
-                    return normalizedUnitName.Contains("army of the tennessee") ||
-                           normalizedUnitName.Contains("army of west tennessee");
                 case "union-ohio":
                     return normalizedUnitName.Contains("army of the ohio");
-                case "union-gulf":
-                    return normalizedUnitName.Contains("army of the gulf") ||
-                           normalizedUnitName.Contains("army of west mississippi");
                 case "csa-anv":
                     return normalizedUnitName.Contains("army of northern virginia") ||
                            normalizedUnitName.Contains("army of virginia") ||
                            normalizedUnitName.Contains("army of the potomac") ||
                            normalizedUnitName.Contains("army of the valley");
-                case "csa-tennessee":
-                    return normalizedUnitName.Contains("army of tennessee");
-                case "csa-mississippi":
-                    return normalizedUnitName.Contains("army of mississippi") ||
-                           normalizedUnitName.Contains("army of the mississippi");
-                case "csa-transmiss":
-                    return normalizedUnitName.Contains("trans-mississippi") ||
-                           normalizedUnitName.Contains("army of the west") ||
-                           normalizedUnitName.Contains("missouri state guard");
-                case "csa-gulf":
-                    return normalizedUnitName.Contains("army of louisiana") ||
-                           normalizedUnitName.Contains("army of western louisiana");
+                case "csa-northwest-va":
+                    return normalizedUnitName.Contains("army of the northwest") ||
+                           normalizedUnitName.Contains("porterfield");
                 default:
                     return false;
             }

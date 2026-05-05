@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
@@ -16,6 +17,17 @@ namespace WhiskeyRealism.Patches
     [HarmonyPriority(Priority.High)]
     internal static class DefensiveOpsPatch
     {
+        private static bool _unitAlreadyConstructingResolved;
+        private static MethodInfo _unitAlreadyConstructingMethod;
+        private static bool _sifReferenceResolved;
+        private static MethodInfo _sifReferenceMethod;
+        private static bool _raidIsRaidUnitResolved;
+        private static MethodInfo _raidIsRaidUnitMethod;
+        private static bool _isUnitTakingTownResolved;
+        private static MethodInfo _isUnitTakingTownMethod;
+        private static bool _removeUnitResolved;
+        private static MethodInfo _removeUnitMethod;
+
         [HarmonyPostfix]
         internal static void Postfix(int _aifaction)
         {
@@ -285,14 +297,13 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var type = AccessTools.TypeByName("FortConstructionOrder");
-                var method = type != null ? AccessTools.Method(type, "UnitAlreadyConstructing", new[] { typeof(Regiment) }) : null;
+                var method = ResolveUnitAlreadyConstructingMethod();
                 if (method == null)
                 {
-                    OnceLog.Warning("defensiveops:method:fortconstruct", "DefensiveOpsPatch missing FortConstructionOrder.UnitAlreadyConstructing(Regiment)");
+                    OnceLog.Warning("defensiveops:method:fortconstruct", "DefensiveOpsPatch missing AICampaign.FortConstructionOrder.UnitAlreadyConstructing(Regiment, FortConstructionOrder)");
                     return true;
                 }
-                return (bool)method.Invoke(null, new object[] { unit });
+                return (bool)method.Invoke(null, new object[] { unit, null });
             }
             catch (Exception ex)
             {
@@ -305,8 +316,7 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var type = AccessTools.TypeByName("SeaInvasionForce");
-                var method = type != null ? AccessTools.Method(type, "GetSeaInvasionForceReference", new[] { typeof(Regiment) }) : null;
+                var method = ResolveSeaInvasionForceReferenceMethod();
                 if (method == null)
                 {
                     OnceLog.Warning("defensiveops:method:seainvasion", "DefensiveOpsPatch missing SeaInvasionForce.GetSeaInvasionForceReference(Regiment)");
@@ -325,8 +335,7 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var type = AccessTools.TypeByName("RaidForce");
-                var method = type != null ? AccessTools.Method(type, "IsRaidUnit", new[] { typeof(Regiment) }) : null;
+                var method = ResolveIsRaidUnitMethod();
                 if (method == null)
                 {
                     OnceLog.Warning("defensiveops:method:raid", "DefensiveOpsPatch missing RaidForce.IsRaidUnit(Regiment)");
@@ -345,7 +354,7 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var method = AccessTools.Method(typeof(AICampaign), "IsUnitTakingTown", new[] { typeof(Regiment) });
+                var method = ResolveIsUnitTakingTownMethod();
                 if (method == null)
                 {
                     OnceLog.Warning("defensiveops:method:takingtown", "DefensiveOpsPatch missing AICampaign.IsUnitTakingTown(Regiment)");
@@ -377,8 +386,7 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                var nested = AccessTools.Inner(typeof(AICampaign), "DefensiveOperation");
-                var method = nested != null ? AccessTools.Method(nested, "RemoveUnit", new[] { typeof(Regiment) }) : null;
+                var method = ResolveRemoveUnitMethod();
                 if (method == null)
                 {
                     OnceLog.Warning("defensiveops:method:removeunit", "DefensiveOpsPatch missing DefensiveOperation.RemoveUnit(Regiment)");
@@ -390,6 +398,85 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("defensiveops:method:removeunit", "DefensiveOpsPatch DefensiveOperation.RemoveUnit failed: " + ex.Message);
             }
+        }
+
+        private static MethodInfo ResolveUnitAlreadyConstructingMethod()
+        {
+            if (_unitAlreadyConstructingResolved) return _unitAlreadyConstructingMethod;
+            _unitAlreadyConstructingResolved = true;
+
+            var nested = ResolveAICampaignNestedType("FortConstructionOrder");
+            if (nested == null) return null;
+
+            _unitAlreadyConstructingMethod = AccessTools.Method(
+                nested,
+                "UnitAlreadyConstructing",
+                new[] { typeof(Regiment), nested });
+            return _unitAlreadyConstructingMethod;
+        }
+
+        private static MethodInfo ResolveSeaInvasionForceReferenceMethod()
+        {
+            if (_sifReferenceResolved) return _sifReferenceMethod;
+            _sifReferenceResolved = true;
+
+            var nested = ResolveAICampaignNestedType("SeaInvasionForce");
+            if (nested == null) return null;
+
+            _sifReferenceMethod = AccessTools.Method(
+                nested,
+                "GetSeaInvasionForceReference",
+                new[] { typeof(Regiment) });
+            return _sifReferenceMethod;
+        }
+
+        private static MethodInfo ResolveIsRaidUnitMethod()
+        {
+            if (_raidIsRaidUnitResolved) return _raidIsRaidUnitMethod;
+            _raidIsRaidUnitResolved = true;
+
+            var nested = ResolveAICampaignNestedType("RaidForce");
+            if (nested == null) return null;
+
+            _raidIsRaidUnitMethod = AccessTools.Method(
+                nested,
+                "IsRaidUnit",
+                new[] { typeof(Regiment) });
+            return _raidIsRaidUnitMethod;
+        }
+
+        private static MethodInfo ResolveIsUnitTakingTownMethod()
+        {
+            if (_isUnitTakingTownResolved) return _isUnitTakingTownMethod;
+            _isUnitTakingTownResolved = true;
+
+            _isUnitTakingTownMethod = AccessTools.Method(
+                typeof(AICampaign),
+                "IsUnitTakingTown",
+                new[] { typeof(Regiment) });
+            return _isUnitTakingTownMethod;
+        }
+
+        private static MethodInfo ResolveRemoveUnitMethod()
+        {
+            if (_removeUnitResolved) return _removeUnitMethod;
+            _removeUnitResolved = true;
+
+            var nested = ResolveAICampaignNestedType("DefensiveOperation");
+            if (nested == null) return null;
+
+            _removeUnitMethod = AccessTools.Method(
+                nested,
+                "RemoveUnit",
+                new[] { typeof(Regiment) });
+            return _removeUnitMethod;
+        }
+
+        private static Type ResolveAICampaignNestedType(string typeName)
+        {
+            return AccessTools.Inner(typeof(AICampaign), typeName)
+                ?? AccessTools.TypeByName("AICampaign+" + typeName)
+                ?? AccessTools.TypeByName(typeName);
         }
 
         private static float StrengthGateMultiplier(PersonalityVector personality)

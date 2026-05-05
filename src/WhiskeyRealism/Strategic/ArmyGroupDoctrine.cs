@@ -60,29 +60,14 @@ namespace WhiskeyRealism.Strategic
                 case "csa:VirginiaCapitalCorridor":
                     preference.PreferredLastNames.AddRange(new[] { "Lee", "Johnston", "Beauregard", "Longstreet" });
                     break;
-                case "csa:TennesseeGeorgiaCorridor":
-                    preference.PreferredLastNames.AddRange(new[] { "Johnston", "Bragg", "Hood", "Hardee" });
-                    break;
-                case "csa:MississippiRiverCorridor":
-                    preference.PreferredLastNames.AddRange(new[] { "Pemberton", "Johnston", "Polk" });
-                    break;
-                case "csa:TransMississippi":
-                    preference.PreferredLastNames.AddRange(new[] { "Kirby Smith", "Price", "Magruder" });
+                case "csa:NorthwestVirginia":
+                    preference.PreferredLastNames.AddRange(new[] { "Garnett", "Porterfield", "Lee" });
                     break;
                 case "union:VirginiaCapitalCorridor":
                     preference.PreferredLastNames.AddRange(new[] { "McClellan", "Meade", "Grant", "Hooker" });
                     break;
-                case "union:MississippiRiverCorridor":
-                    preference.PreferredLastNames.AddRange(new[] { "Grant", "Sherman", "McPherson" });
-                    break;
-                case "union:TennesseeGeorgiaCorridor":
-                    preference.PreferredLastNames.AddRange(new[] { "Rosecrans", "Thomas", "Sherman" });
-                    break;
-                case "union:CumberlandGapEastTennessee":
-                    preference.PreferredLastNames.AddRange(new[] { "Buell", "Burnside", "Thomas" });
-                    break;
-                case "union:GulfCoastLowerMississippi":
-                    preference.PreferredLastNames.AddRange(new[] { "Banks", "Butler", "Canby" });
+                case "union:OhioValley":
+                    preference.PreferredLastNames.AddRange(new[] { "McClellan", "Rosecrans", "Buell" });
                     break;
             }
 

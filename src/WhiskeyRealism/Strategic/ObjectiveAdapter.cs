@@ -120,10 +120,7 @@ namespace WhiskeyRealism.Strategic
 
         private static Theater BucketTheaterFromWorldXY(float x, float z)
         {
-            if (x < -200f) return Theater.TransMiss;
-            if (x > 800f && z < -100f) return Theater.Coast;
-            if (x > 600f) return Theater.East;
-            return Theater.West;
+            return TheaterClassifier.FromPosition(x, z);
         }
     }
 }

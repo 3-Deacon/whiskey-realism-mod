@@ -124,7 +124,41 @@ namespace WhiskeyRealism.Patches
             if (ObjectiveCatalog.TryResolve(objectiveId, out var meta) && meta.Theater != Theater.Unknown)
                 intent.PreferredTheater = meta.Theater;
 
+            ApplyProtectedAreaIntent(intent, alliance);
             return intent;
+        }
+
+        private static void ApplyProtectedAreaIntent(RecruitmentIntent intent, int alliance)
+        {
+            string protectedArea = alliance == 1 ? "VirginiaCapitalCorridor" : "WashingtonDefenses";
+            intent.ProtectedAreaKey = protectedArea;
+            intent.ProtectedAreaThreatLevel = ProtectedAreaThreatLevel(alliance, protectedArea);
+            intent.ProtectedAreaThreatThreshold = 0.35f;
+        }
+
+        private static float ProtectedAreaThreatLevel(int alliance, string areaKey)
+        {
+            try
+            {
+                var ledger = StrategicCoordinator.Instance?.FormationDirectives?[alliance];
+                if (ledger == null) return 0f;
+
+                float own = 0f;
+                float enemy = 0f;
+                foreach (var assignment in ledger.Assignments)
+                {
+                    if (assignment == null ||
+                        !string.Equals(assignment.AreaKey, areaKey, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    own += Math.Max(0f, assignment.CombatAvailability);
+                    enemy += Math.Max(0f, assignment.LocalEnemyStrength);
+                }
+
+                if (enemy <= 0f) return 0f;
+                return enemy / Math.Max(1f, own);
+            }
+            catch { return 0f; }
         }
 
         private static float SafeStrengthRatio(int alliance)
@@ -184,6 +218,7 @@ namespace WhiskeyRealism.Patches
                 {
                     StateId = stateId,
                     Theater = StateTheater(stateId),
+                    AreaKey = StateAreaKey(stateId),
                     Volunteers = Math.Max(0, state.volunteers[alliance]),
                     Drafts = Math.Max(0, state.drafts[alliance]),
                     Support = state.support[alliance],
@@ -216,6 +251,28 @@ namespace WhiskeyRealism.Patches
             catch { }
 
             return Theater.Unknown;
+        }
+
+        private static string StateAreaKey(int stateId)
+        {
+            try
+            {
+                if (GameVars.nation == null || stateId < 0 || stateId >= GameVars.nation.Length)
+                    return null;
+
+                var state = GameVars.nation[stateId];
+                if (state == null) return null;
+
+                string name = state.name ?? string.Empty;
+                if (name == "Virginia") return "VirginiaCapitalCorridor";
+                if (name == "District of Columbia") return "WashingtonDefenses";
+                if (name == "Maryland" || name == "Pennsylvania") return "MarylandPennsylvaniaCorridor";
+                if (name == "Ohio") return "OhioValley";
+                if (name == "North Carolina" || name == "South Carolina") return "CarolinaInterior";
+
+                return ArmyAreaClassifier.FromPosition(state.averageposition.x, state.averageposition.z);
+            }
+            catch { return null; }
         }
     }
 }

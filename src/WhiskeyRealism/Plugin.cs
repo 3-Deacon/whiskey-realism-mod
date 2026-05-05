@@ -24,12 +24,16 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> SuccessionTrace;
         internal ConfigEntry<bool> FiscalTrace;
         internal ConfigEntry<bool> FiscalTelemetryCsv;
+        internal ConfigEntry<bool> EnableTacticalObserver;
+        internal ConfigEntry<bool> TacticalObserverVerboseLogging;
+        internal ConfigEntry<int> TacticalObserverMinSecondsBetweenSummaries;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
         internal ConfigEntry<bool> DefenseIntentVerboseLogging;
         internal ConfigEntry<bool> EnableConstructionSiteSteering;
         internal ConfigEntry<bool> EnableSupplyDepotSteering;
         internal ConfigEntry<bool> EnableFortSteering;
+        internal ConfigEntry<bool> FortConstructionGovernorEnabled;
         internal ConfigEntry<bool> EnableTelegraphAI;
         internal ConfigEntry<bool> EnableRailroadSteering;
         internal ConfigEntry<bool> ConstructionTelemetryEnabled;
@@ -42,6 +46,10 @@ namespace WhiskeyRealism
         internal ConfigEntry<int> FastForwardAi50xExtraPasses;
         internal ConfigEntry<float> FastForwardAiSlowFrameThresholdMs;
         internal ConfigEntry<int> FastForwardAiSlowFrameCooldownFrames;
+        internal ConfigEntry<bool> CampaignAiGovernorEnabled;
+        internal ConfigEntry<int> CampaignAiGovernorMaxPasses20x;
+        internal ConfigEntry<int> CampaignAiGovernorMaxPasses50x;
+        internal ConfigEntry<float> CampaignAiGovernorFrameBudgetMs;
 
         // Vanilla-settings override — lock Aggressiveness + Historic AI Personality
         // + Difficulty at campaign creation.
@@ -80,6 +88,21 @@ namespace WhiskeyRealism
             FiscalTelemetryCsv = Config.Bind(
                 "Diagnostics", "Fiscal Telemetry Csv", false,
                 "Reserved for future CSV telemetry export. Current fiscal telemetry is emitted to LogOutput.log.");
+            EnableTacticalObserver = Config.Bind(
+                "Tactical",
+                "Enable Tactical Observer",
+                true,
+                "Default ON for Slice B B0. Emits bounded read-only battle telemetry; does not change tactical AI behavior.");
+            TacticalObserverVerboseLogging = Config.Bind(
+                "Tactical",
+                "Tactical Observer Verbose Logging",
+                false,
+                "Emit lower-throttle tactical observer detail for focused smoke runs. Default observer mode remains signature-gated.");
+            TacticalObserverMinSecondsBetweenSummaries = Config.Bind(
+                "Tactical",
+                "Tactical Observer Min Seconds Between Summaries",
+                30,
+                "Minimum wall-clock seconds between repeated tactical observer summaries with the same signature.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
@@ -102,6 +125,9 @@ namespace WhiskeyRealism
             EnableFortSteering = Config.Bind(
                 "Construction", "Enable Fort Steering", false,
                 "Default OFF. Future valve for fort site steering after fort-site and unit-range telemetry prove realizable sites.");
+            FortConstructionGovernorEnabled = Config.Bind(
+                "Construction", "Fort Construction Governor Enabled", true,
+                "Default ON. Filters saturated vanilla fort construction sites before AICampaign.CheckFortConstruction so either side cannot stack excessive forts in one local area unless threat justifies more.");
             EnableTelegraphAI = Config.Bind(
                 "Construction", "Enable Telegraph AI", false,
                 "Default OFF. Enables conservative connected-chain telegraph construction with support-unit and final-placement validation.");
@@ -138,6 +164,18 @@ namespace WhiskeyRealism
             FastForwardAiSlowFrameCooldownFrames = Config.Bind(
                 "Performance", "Fast Forward AI Slow Frame Cooldown Frames", 180,
                 "Unity frames to skip extra fast-forward AI catch-up after a slow 20x/50x AI frame.");
+            CampaignAiGovernorEnabled = Config.Bind(
+                "Performance", "Campaign AI Governor Enabled", true,
+                "Default ON. Replaces vanilla AICampaign.Update high-speed pass scheduling with a bounded wrapper that preserves vanilla side effects.");
+            CampaignAiGovernorMaxPasses20x = Config.Bind(
+                "Performance", "Campaign AI Governor Max Passes At 20x", 2,
+                "Maximum vanilla AICampaign.UpdateUnitAI passes per frame at 20x when Campaign AI Governor is enabled. Vanilla normally runs 4.");
+            CampaignAiGovernorMaxPasses50x = Config.Bind(
+                "Performance", "Campaign AI Governor Max Passes At 50x", 3,
+                "Maximum vanilla AICampaign.UpdateUnitAI passes per frame at 50x when Campaign AI Governor is enabled. Vanilla normally runs 7.");
+            CampaignAiGovernorFrameBudgetMs = Config.Bind(
+                "Performance", "Campaign AI Governor Frame Budget Ms", 3f,
+                "Maximum wall-clock milliseconds per AICampaign.Update wrapper frame before the governor stops issuing more UpdateUnitAI passes.");
             OverrideVanillaSettings = Config.Bind(
                 "Strategic", "Override Vanilla Settings", true,
                 "When true, Whiskey Realism locks Aggressiveness to Mediocre, Historic AI Personality to true, and Difficulty to the value of LockedDifficulty (default Hard) at campaign creation. " +

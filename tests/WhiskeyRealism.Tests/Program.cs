@@ -15,12 +15,19 @@ static class Program
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
             ("economy source allows concession transfer", EconomySourceAllowsConcessionTransfer),
             ("historical registry maps ANV to Virginia corridor", HistoricalRegistryMapsAnv),
-            ("historical registry maps Union Tennessee army to Mississippi river corridor", HistoricalRegistryMapsUnionArmyOfTheTennessee),
+            ("historical registry maps CSA northwest commands to Allegheny approaches", HistoricalRegistryMapsCsaNorthwest),
+            ("historical registry leaves inactive full-war armies unassigned", HistoricalRegistryLeavesInactiveFullWarArmiesUnassigned),
             ("army area ledger holds historical area", ArmyAreaLedgerHoldsHistoricalArea),
-            ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy),
+            ("army area ledger redirects CSA northwest command to northwest Virginia", ArmyAreaLedgerRedirectsCsaNorthwestCommand),
+            ("army area ledger leaves inactive full-war army in current area", ArmyAreaLedgerLeavesInactiveFullWarArmyInCurrentArea),
+            ("army area ledger gives dynamic fallback local doctrine", ArmyAreaLedgerGivesDynamicFallbackLocalDoctrine),
+            ("army area ledger lets dynamic fallback counterstroke its local plan area", ArmyAreaLedgerLetsDynamicFallbackCounterstrokeLocalPlanArea),
             ("army area ledger can redirect independent division input", ArmyAreaLedgerCanRedirectIndependentDivisionInput),
             ("daily cadence fires on first call and day rollover only", DailyCadenceFiresOnFirstCallAndDayRolloverOnly),
             ("daily cadence rejects invalid dates", DailyCadenceRejectsInvalidDates),
+            ("strategic cadence alternates formation by alliance", StrategicCadenceAlternatesFormationByAlliance),
+            ("strategic cadence refreshes weekly or on source change", StrategicCadenceRefreshesWeeklyOrSourceChange),
+            ("strategic cadence stable source can skip downstream rebuild", StrategicCadenceStableSourceSkipsDownstreamRebuild),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
@@ -46,6 +53,7 @@ static class Program
             ("union early policy scorer favors legal blockade", UnionEarlyPolicyScorerFavorsLegalBlockade),
             ("csa early policy scorer favors trade and recognition over naval parity", CsaEarlyPolicyScorerFavorsTradeAndRecognition),
             ("theater classifier maps wl capitals to east", TheaterClassifierMapsWlCapitalsToEast),
+            ("army area classifier maps W&L northwest Virginia towns", ArmyAreaClassifierMapsWlNorthwestVirginiaTowns),
             ("theater classifier uses state names before broad coordinates", TheaterClassifierUsesStateNamesBeforeCoordinates),
             ("campaign map ledger only maps states represented by towns", CampaignMapLedgerOnlyMapsRepresentedStates),
             ("campaign map ledger ranks owned capitals for defense", CampaignMapLedgerRanksOwnedCapitalsForDefense),
@@ -58,6 +66,8 @@ static class Program
             ("recruitment intent does not leave preferred theater for raw pool", RecruitmentIntentDoesNotLeavePreferredTheaterForRawPool),
             ("recruitment intent keeps vanilla when preferred theater unavailable", RecruitmentIntentKeepsVanillaWhenPreferredTheaterUnavailable),
             ("recruitment intent keeps vanilla when draft would be forced at parity", RecruitmentIntentKeepsVanillaWhenDraftWouldBeForcedAtParity),
+            ("recruitment intent protects threatened priority area", RecruitmentIntentProtectsThreatenedPriorityArea),
+            ("recruitment intent ignores priority area without threat", RecruitmentIntentIgnoresPriorityAreaWithoutThreat),
             ("recruitment intent avoids enemy states when excluded", RecruitmentIntentAvoidsEnemyStatesWhenExcluded),
             ("recruitment log gate suppresses repeated replacements", RecruitmentLogGateSuppressesRepeatedReplacements),
             ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
@@ -96,6 +106,9 @@ static class Program
             ("construction ledger keeps credit-defense bank", ConstructionLedgerKeepsCreditDefenseBank),
             ("construction ledger suppresses union arms under credit defense", ConstructionLedgerSuppressesUnionArmsUnderCreditDefense),
             ("construction ledger suppresses late csa arms under credit defense", ConstructionLedgerSuppressesLateCsaArmsUnderCreditDefense),
+            ("fort governor suppresses saturated low-threat local area", FortGovernorSuppressesSaturatedLowThreatLocalArea),
+            ("fort governor allows threatened capital area up to hard cap", FortGovernorAllowsThreatenedCapitalAreaUpToHardCap),
+            ("fort governor blocks capital area at hard cap", FortGovernorBlocksCapitalAreaAtHardCap),
             ("construction steering boosts ledger top private candidate", ConstructionSteeringCapsTopPrivateCandidate),
             ("construction steering suppresses ledger-suppressed candidate", ConstructionSteeringSuppressesSuppressedCandidate),
             ("construction steering preserves fiscal multiplier when no intent", ConstructionSteeringPreservesFiscalWhenNoIntent),
@@ -124,6 +137,8 @@ static class Program
             ("fast forward scheduler stops when frame budget is spent", FastForwardSchedulerStopsWhenFrameBudgetIsSpent),
             ("fast forward scheduler throttles after slow frames", FastForwardSchedulerThrottlesAfterSlowFrames),
             ("fast forward scheduler cooldown expires by frame", FastForwardSchedulerCooldownExpiresByFrame),
+            ("campaign ai governor caps vanilla passes", CampaignAiGovernorCapsVanillaPasses),
+            ("campaign ai governor respects frame budget before first pass", CampaignAiGovernorRespectsFrameBudgetBeforeFirstPass),
             ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples),
             ("historical hard difficulty adds casualty tolerance only", HistoricalHardDifficultyAddsCasualtyToleranceOnly),
             ("perk scorer favors siege armies for fort pressure", PerkScorerFavorsSiegeArmiesForFortPressure),
@@ -166,6 +181,7 @@ static class Program
             ("defense ledger raidforce coverage", DefenseLedgerRaidforceCoverage),
             ("defense ledger debug seainvasionsactive off falls back", DefenseLedgerDebugSeainvasionsactiveOffFallsBack),
             ("defense ledger telemetry signature non-empty and posture-prefixed", DefenseLedgerTelemetrySignaturePopulated),
+            ("defense telemetry summary compresses response burst", DefenseTelemetrySummaryCompressesResponseBurst),
             ("defense ledger does not crash on europe alliance index", DefenseLedgerDoesNotCrashOnEuropeAllianceIndex)
         };
 
@@ -242,6 +258,64 @@ static class Program
         AssertEqual(FrontPosture.Hold, ledger.GetSector("Richmond").Posture);
     }
 
+    private static void StrategicCadenceAlternatesFormationByAlliance()
+    {
+        AssertTrue(StrategicCadencePolicy.ShouldRunAlternatingByAlliance(day: 1, alliance: 1),
+            "CSA should run on odd days");
+        AssertTrue(!StrategicCadencePolicy.ShouldRunAlternatingByAlliance(day: 1, alliance: 0),
+            "Union should skip odd days without a force refresh");
+        AssertTrue(StrategicCadencePolicy.ShouldRunAlternatingByAlliance(day: 2, alliance: 0),
+            "Union should run on even days");
+        AssertTrue(!StrategicCadencePolicy.ShouldRunAlternatingByAlliance(day: 2, alliance: 1),
+            "CSA should skip even days without a force refresh");
+        AssertTrue(StrategicCadencePolicy.ShouldRunAlternatingByAlliance(day: 2, alliance: 1, forceRefresh: true),
+            "force refresh should override alternating cadence");
+    }
+
+    private static void StrategicCadenceRefreshesWeeklyOrSourceChange()
+    {
+        AssertTrue(StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(
+                day: 1,
+                currentSourceSignature: "sig-a",
+                previousSourceSignature: null,
+                forceRefresh: false),
+            "first source observation should run");
+        AssertTrue(!StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(
+                day: 3,
+                currentSourceSignature: "sig-a",
+                previousSourceSignature: "sig-a",
+                forceRefresh: false),
+            "stable source before weekly boundary should skip");
+        AssertTrue(StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(
+                day: 3,
+                currentSourceSignature: "sig-b",
+                previousSourceSignature: "sig-a",
+                forceRefresh: false),
+            "source change should run immediately");
+        AssertTrue(StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(
+                day: 7,
+                currentSourceSignature: "sig-a",
+                previousSourceSignature: "sig-a",
+                forceRefresh: false),
+            "weekly boundary should run even when source is stable");
+        AssertTrue(StrategicCadencePolicy.ShouldRunWeeklyOrSourceChanged(
+                day: 3,
+                currentSourceSignature: "sig-a",
+                previousSourceSignature: "sig-a",
+                forceRefresh: true),
+            "force refresh should run immediately");
+    }
+
+    private static void StrategicCadenceStableSourceSkipsDownstreamRebuild()
+    {
+        AssertTrue(StrategicCadencePolicy.SourceChanged("front:2", "front:1"),
+            "different front signatures should count as changed");
+        AssertTrue(!StrategicCadencePolicy.SourceChanged("front:1", "front:1"),
+            "same front signatures should be stable");
+        AssertTrue(StrategicCadencePolicy.SourceChanged("front:1", null),
+            "missing previous signature should force first rebuild");
+    }
+
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
     {
         var hard = DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
@@ -299,11 +373,22 @@ static class Program
         AssertTrue(doctrine.PreferredAreaKeys.Contains("ShenandoahValley"), "expected ShenandoahValley preference");
     }
 
-    private static void HistoricalRegistryMapsUnionArmyOfTheTennessee()
+    private static void HistoricalRegistryMapsCsaNorthwest()
     {
-        var doctrine = HistoricalArmyAreaRegistry.Resolve(0, "Army of the Tennessee", "Grant");
-        AssertEqual("MississippiRiverCorridor", doctrine.PrimaryAreaKey);
-        AssertTrue(doctrine.PreferredAreaKeys.Contains("TennesseeGeorgiaCorridor"), "expected TennesseeGeorgiaCorridor preference");
+        var army = HistoricalArmyAreaRegistry.Resolve(1, "Army of the Northwest", "Garnett");
+        AssertEqual("NorthwestVirginia", army.PrimaryAreaKey);
+        AssertTrue(army.PreferredAreaKeys.Contains("ShenandoahValley"), "expected Shenandoah fallback preference");
+
+        var porterfield = HistoricalArmyAreaRegistry.Resolve(1, "Porterfield's Division", "Porterfield");
+        AssertEqual("NorthwestVirginia", porterfield.PrimaryAreaKey);
+    }
+
+    private static void HistoricalRegistryLeavesInactiveFullWarArmiesUnassigned()
+    {
+        AssertEqual("Unassigned", HistoricalArmyAreaRegistry.Resolve(0, "Army of the Tennessee", "Grant").PrimaryAreaKey);
+        AssertEqual("Unassigned", HistoricalArmyAreaRegistry.Resolve(1, "Army of Tennessee", "Johnston").PrimaryAreaKey);
+        AssertEqual("Unassigned", HistoricalArmyAreaRegistry.Resolve(1, "Army of Mississippi", "Pemberton").PrimaryAreaKey);
+        AssertEqual("OhioValley", HistoricalArmyAreaRegistry.Resolve(0, "Army of the Ohio", "McClellan").PrimaryAreaKey);
     }
 
     private static void ArmyAreaLedgerHoldsHistoricalArea()
@@ -328,7 +413,29 @@ static class Program
         AssertEqual(false, assignment.OutOfArea);
     }
 
-    private static void ArmyAreaLedgerRedirectsOutOfAreaArmy()
+    private static void ArmyAreaLedgerRedirectsCsaNorthwestCommand()
+    {
+        var ledger = ArmyAreaLedger.Build(new[]
+        {
+            new ArmyAreaInput
+            {
+                UnitKey = "northwest",
+                AllianceId = 1,
+                UnitName = "Army of the Northwest",
+                CommanderName = "Garnett",
+                CurrentAreaKey = "VirginiaCapitalCorridor",
+                Strength = 6000f,
+                Readiness = 0.5f
+            }
+        }, planTargetAreaKey: "VirginiaCapitalCorridor");
+
+        var assignment = ledger.GetAssignment("northwest");
+        AssertEqual("NorthwestVirginia", assignment.AssignedAreaKey);
+        AssertEqual(true, assignment.OutOfArea);
+        AssertEqual(ArmyAreaBehavior.Recover, assignment.Behavior);
+    }
+
+    private static void ArmyAreaLedgerLeavesInactiveFullWarArmyInCurrentArea()
     {
         var ledger = ArmyAreaLedger.Build(new[]
         {
@@ -345,9 +452,57 @@ static class Program
         }, planTargetAreaKey: "VirginiaCapitalCorridor");
 
         var assignment = ledger.GetAssignment("aot");
-        AssertEqual("TennesseeGeorgiaCorridor", assignment.AssignedAreaKey);
-        AssertEqual(ArmyAreaBehavior.Recover, assignment.Behavior);
-        AssertEqual(true, assignment.OutOfArea);
+        AssertEqual("VirginiaCapitalCorridor", assignment.AssignedAreaKey);
+        AssertEqual(ArmyAreaBehavior.Hold, assignment.Behavior);
+        AssertEqual(false, assignment.OutOfArea);
+    }
+
+    private static void ArmyAreaLedgerGivesDynamicFallbackLocalDoctrine()
+    {
+        var ledger = ArmyAreaLedger.Build(new[]
+        {
+            new ArmyAreaInput
+            {
+                UnitKey = "new-corps",
+                AllianceId = 1,
+                UnitName = "2nd Corps",
+                CommanderName = "Jackson",
+                CurrentAreaKey = "NorthwestVirginia",
+                Strength = 9000f,
+                Readiness = 0.6f
+            }
+        }, planTargetAreaKey: "VirginiaCapitalCorridor");
+
+        var assignment = ledger.GetAssignment("new-corps");
+        AssertEqual("csa-dynamic-NorthwestVirginia", assignment.Doctrine.DoctrineId);
+        AssertEqual("NorthwestVirginia", assignment.Doctrine.PrimaryAreaKey);
+        AssertTrue(assignment.Doctrine.PreferredAreaKeys.Contains("ShenandoahValley"), "expected adjacent active-map preference");
+        AssertEqual("NorthwestVirginia", assignment.AssignedAreaKey);
+        AssertEqual(false, assignment.OutOfArea);
+        AssertEqual(ArmyAreaBehavior.Hold, assignment.Behavior);
+    }
+
+    private static void ArmyAreaLedgerLetsDynamicFallbackCounterstrokeLocalPlanArea()
+    {
+        var ledger = ArmyAreaLedger.Build(new[]
+        {
+            new ArmyAreaInput
+            {
+                UnitKey = "new-army",
+                AllianceId = 1,
+                UnitName = "Provisional Army",
+                CommanderName = "Garnett",
+                CurrentAreaKey = "NorthwestVirginia",
+                Strength = 14000f,
+                Readiness = 0.72f
+            }
+        }, planTargetAreaKey: "NorthwestVirginia");
+
+        var assignment = ledger.GetAssignment("new-army");
+        AssertEqual("NorthwestVirginia", assignment.AssignedAreaKey);
+        AssertEqual(false, assignment.OutOfArea);
+        AssertEqual(ArmyAreaBehavior.Counterstroke, assignment.Behavior);
+        AssertEqual("plan-target-dynamic-area", assignment.Reason);
     }
 
     private static void ArmyAreaLedgerCanRedirectIndependentDivisionInput()
@@ -360,7 +515,7 @@ static class Program
                 AllianceId = 1,
                 UnitName = "Army of Northern Virginia",
                 CommanderName = "Lee",
-                CurrentAreaKey = "TennesseeGeorgiaCorridor",
+                CurrentAreaKey = "OhioValley",
                 Strength = 5000f,
                 Readiness = 0.75f
             }
@@ -496,6 +651,10 @@ static class Program
 
         AssertEqual("Lee", preference.PreferredLastNames[0]);
         AssertTrue(preference.PreferredLastNames.Contains("Johnston"), "expected Johnston fallback");
+
+        var northwest = ArmyGroupDoctrine.ResolveCommanderPreference(1, "NorthwestVirginia");
+        AssertEqual("Garnett", northwest.PreferredLastNames[0]);
+        AssertTrue(northwest.PreferredLastNames.Contains("Porterfield"), "expected Porterfield fallback");
     }
 
     private static void UnionEarlyProfileFavorsBlockadeAndRiver()
@@ -572,7 +731,7 @@ static class Program
 
     private static void ObjectiveCatalogMapsKnownWlObjectives()
     {
-        foreach (var id in new[] { 3, 4, 17, 29, 30, 31, 32, 33, 34, 35, 36, 37 })
+        foreach (var id in new[] { 3, 4, 29, 30, 31, 32, 33, 34, 35, 36, 37 })
             AssertTrue(ObjectiveCatalog.TryResolve(id, out _), "expected objective metadata for ID " + id);
 
         AssertTrue(ObjectiveCatalog.TryResolve(3, out var richmond), "expected Richmond objective metadata");
@@ -582,10 +741,7 @@ static class Program
         AssertTrue(richmond.HasTag(StrategyTag.CapitalThreat), "Richmond should carry capital threat");
         AssertTrue(richmond.HasTag(StrategyTag.CapitalDefense), "Richmond should carry capital defense");
 
-        AssertTrue(ObjectiveCatalog.TryResolve(17, out var mississippi), "expected Mississippi River objective metadata");
-        AssertEqual(Theater.River, mississippi.Theater);
-        AssertEqual(Category.RiverControl, mississippi.Category);
-        AssertTrue(mississippi.HasTag(StrategyTag.RiverControl), "Mississippi should carry river control");
+        AssertTrue(!ObjectiveCatalog.TryResolve(17, out _), "W&L active map should not hardcode Mississippi River objective metadata");
 
         AssertTrue(ObjectiveCatalog.TryResolve(35, out var coastalNc), "expected Coastal NC objective metadata");
         AssertEqual(Theater.Coast, coastalNc.Theater);
@@ -603,6 +759,14 @@ static class Program
     {
         AssertEqual(Theater.East, TheaterClassifier.FromPosition(1263f, -1010f));
         AssertEqual(Theater.East, TheaterClassifier.FromPosition(1350f, -631f));
+    }
+
+    private static void ArmyAreaClassifierMapsWlNorthwestVirginiaTowns()
+    {
+        AssertEqual("NorthwestVirginia", ArmyAreaClassifier.FromPosition(703f, -518f));
+        AssertEqual("NorthwestVirginia", ArmyAreaClassifier.FromPosition(740f, -653f));
+        AssertEqual("NorthwestVirginia", ArmyAreaClassifier.FromPosition(702f, -696f));
+        AssertEqual("OhioValley", ArmyAreaClassifier.FromPosition(552f, -310f));
     }
 
     private static void TheaterClassifierUsesStateNamesBeforeCoordinates()
@@ -953,6 +1117,99 @@ static class Program
         AssertEqual(8, exploratory.StateId);
         AssertEqual(false, concrete.ShouldReplace);
         AssertEqual(8, concrete.StateId);
+    }
+
+    private static void RecruitmentIntentProtectsThreatenedPriorityArea()
+    {
+        var intent = new RecruitmentIntent
+        {
+            AllianceId = 1,
+            PreferredTheater = Theater.East,
+            ProtectedAreaKey = "VirginiaCapitalCorridor",
+            ProtectedAreaThreatLevel = 0.8f,
+            ProtectedAreaThreatThreshold = 0.35f,
+            StrengthRatio = 0.85f,
+            OwnStateSupportFloor = 0.5f
+        };
+        var candidates = new[]
+        {
+            new RecruitmentStateCandidate
+            {
+                StateId = 29,
+                Theater = Theater.East,
+                AreaKey = "NorthwestVirginia",
+                Volunteers = 9000,
+                Drafts = 0,
+                Support = 0.9f,
+                IsRecruitable = true,
+                IsEnemyState = false,
+                IsLocalArea = true
+            },
+            new RecruitmentStateCandidate
+            {
+                StateId = 38,
+                Theater = Theater.East,
+                AreaKey = "VirginiaCapitalCorridor",
+                Volunteers = 6000,
+                Drafts = 0,
+                Support = 0.85f,
+                IsRecruitable = true,
+                IsEnemyState = false,
+                IsLocalArea = false
+            }
+        };
+
+        var decision = RecruitmentIntentLedger.SelectState(intent, candidates, vanillaStateId: 29, strengthNeeded: 5000, excludeEnemyStates: false);
+
+        AssertEqual(true, decision.ShouldReplace);
+        AssertEqual(38, decision.StateId);
+        AssertEqual("protected-area-volunteers", decision.Reason);
+    }
+
+    private static void RecruitmentIntentIgnoresPriorityAreaWithoutThreat()
+    {
+        var intent = new RecruitmentIntent
+        {
+            AllianceId = 1,
+            PreferredTheater = Theater.East,
+            ProtectedAreaKey = "VirginiaCapitalCorridor",
+            ProtectedAreaThreatLevel = 0.1f,
+            ProtectedAreaThreatThreshold = 0.35f,
+            StrengthRatio = 0.85f,
+            OwnStateSupportFloor = 0.5f
+        };
+        var candidates = new[]
+        {
+            new RecruitmentStateCandidate
+            {
+                StateId = 29,
+                Theater = Theater.East,
+                AreaKey = "NorthwestVirginia",
+                Volunteers = 9000,
+                Drafts = 0,
+                Support = 0.9f,
+                IsRecruitable = true,
+                IsEnemyState = false,
+                IsLocalArea = true
+            },
+            new RecruitmentStateCandidate
+            {
+                StateId = 38,
+                Theater = Theater.East,
+                AreaKey = "VirginiaCapitalCorridor",
+                Volunteers = 6000,
+                Drafts = 0,
+                Support = 0.85f,
+                IsRecruitable = true,
+                IsEnemyState = false,
+                IsLocalArea = false
+            }
+        };
+
+        var decision = RecruitmentIntentLedger.SelectState(intent, candidates, vanillaStateId: 29, strengthNeeded: 5000, excludeEnemyStates: false);
+
+        AssertEqual(false, decision.ShouldReplace);
+        AssertEqual(29, decision.StateId);
     }
 
     private static void RecruitmentIntentAvoidsEnemyStatesWhenExcluded()
@@ -1655,6 +1912,51 @@ static class Program
         AssertEqual(ConstructionSuppressionReason.DiscretionaryIndustryCreditDefense, output.Suppressions[0].Reason);
     }
 
+    private static void FortGovernorSuppressesSaturatedLowThreatLocalArea()
+    {
+        var decision = FortConstructionGovernor.Decide(new FortConstructionSiteContext
+        {
+            ExistingFortCount = 2,
+            ActiveOrderCount = 0,
+            NearCapital = false,
+            ThreatRatio = 0.1f
+        });
+
+        AssertEqual(false, decision.Allow);
+        AssertEqual("saturated-low-threat", decision.Reason);
+        AssertEqual(2, decision.SoftCap);
+    }
+
+    private static void FortGovernorAllowsThreatenedCapitalAreaUpToHardCap()
+    {
+        var decision = FortConstructionGovernor.Decide(new FortConstructionSiteContext
+        {
+            ExistingFortCount = 4,
+            ActiveOrderCount = 1,
+            NearCapital = true,
+            ThreatRatio = 0.6f
+        });
+
+        AssertEqual(true, decision.Allow);
+        AssertEqual("allowed", decision.Reason);
+        AssertEqual(4, decision.SoftCap);
+        AssertEqual(7, decision.HardCap);
+    }
+
+    private static void FortGovernorBlocksCapitalAreaAtHardCap()
+    {
+        var decision = FortConstructionGovernor.Decide(new FortConstructionSiteContext
+        {
+            ExistingFortCount = 6,
+            ActiveOrderCount = 1,
+            NearCapital = true,
+            ThreatRatio = 1.2f
+        });
+
+        AssertEqual(false, decision.Allow);
+        AssertEqual("hard-cap", decision.Reason);
+    }
+
     private static void ConstructionSteeringCapsTopPrivateCandidate()
     {
         var output = new ConstructionOutput
@@ -2179,6 +2481,35 @@ static class Program
         AssertEqual(true, FastForwardAiScheduler.InCooldown(1179, 1180));
         AssertEqual(false, FastForwardAiScheduler.InCooldown(1180, 1180));
         AssertEqual(false, FastForwardAiScheduler.InCooldown(1181, 1180));
+    }
+
+    private static void CampaignAiGovernorCapsVanillaPasses()
+    {
+        var options = new CampaignAiGovernorOptions
+        {
+            Enabled = true,
+            MaxPassesAt20x = 2,
+            MaxPassesAt50x = 3,
+            FrameBudgetMs = 3f
+        };
+
+        AssertEqual(2, FastForwardAiScheduler.GovernedPassCap(5f, options));
+        AssertEqual(2, FastForwardAiScheduler.GovernedPassCap(20f, options));
+        AssertEqual(3, FastForwardAiScheduler.GovernedPassCap(50f, options));
+    }
+
+    private static void CampaignAiGovernorRespectsFrameBudgetBeforeFirstPass()
+    {
+        var options = new CampaignAiGovernorOptions
+        {
+            Enabled = true,
+            MaxPassesAt50x = 3,
+            FrameBudgetMs = 1.5f
+        };
+
+        AssertEqual(true, FastForwardAiScheduler.ShouldRunGovernedPass(0, 0f, 50f, options));
+        AssertEqual(false, FastForwardAiScheduler.ShouldRunGovernedPass(0, 1.5f, 50f, options));
+        AssertEqual(false, FastForwardAiScheduler.ShouldRunGovernedPass(3, 0f, 50f, options));
     }
 
     private static void FastForwardLogGateSuppressesRepeatedSamples()
@@ -3372,6 +3703,29 @@ static class Program
             AssertTrue(r.TelemetrySignature.StartsWith(expectedPrefix),
                 $"TelemetrySignature '{r.TelemetrySignature}' must start with posture '{expectedPrefix}'");
         }
+    }
+
+    private static void DefenseTelemetrySummaryCompressesResponseBurst()
+    {
+        var output = new DefenseIntentLedgerOutput
+        {
+            AllianceId = 1,
+            Signature = "sig-a"
+        };
+        output.Responses.Add(new DefenseResponse
+        {
+            Threat = new DefenseThreat { Posture = DefensePosture.ActiveInvasion },
+            SelectedPackage = { new DefenseCandidate { UnitInstanceId = 1 } }
+        });
+        output.Responses.Add(new DefenseResponse
+        {
+            Threat = new DefenseThreat { Posture = DefensePosture.CoastalGuard },
+            Suppressed = { new DefenseSuppression { UnitInstanceId = 2, Reason = "forbidden-cross-map" } }
+        });
+
+        string summary = DefenseIntentTelemetry.Summary(output);
+
+        AssertEqual("responses=2 active=1 guard=1 selected=1 suppressed=1 signature=sig-a", summary);
     }
 
     // Test: pure builder must accept allianceId=2 (Europe) without throwing.

@@ -16,3 +16,4 @@ Implementation plans whose patches have shipped and been verified. Frozen artifa
 | [`2026-05-04-construction-steering-slice-b-implementation.md`](2026-05-04-construction-steering-slice-b-implementation.md) | Construction steering Slice B (#20 site bias, #24 telegraph runtime) |
 | [`2026-05-04-perk-selection-steering-implementation.md`](2026-05-04-perk-selection-steering-implementation.md) | #7 role-aware perk steering |
 | [`2026-05-05-defense-intent-ledger-implementation.md`](2026-05-05-defense-intent-ledger-implementation.md) | Defense Intent Ledger Slice 1+2 (#25, `CoastalDefenseCustomOrderRunner`, daily cadence) |
+| [`2026-05-05-campaign-ai-performance-governor.md`](2026-05-05-campaign-ai-performance-governor.md) | Strategic cadence de-jitter + #26 `CampaignAiUpdateGovernorPatch` |

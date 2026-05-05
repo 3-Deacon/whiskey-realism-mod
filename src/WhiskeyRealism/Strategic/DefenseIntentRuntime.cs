@@ -124,7 +124,8 @@ namespace WhiskeyRealism.Strategic
                     for (int j = 0; j < enemyList.Count; j++)
                     {
                         var enemy = enemyList[j];
-                        if (enemy != null) enemyPositions.Add(ObjectPosition(enemy));
+                        if (enemy != null)
+                            enemyPositions.Add(enemy is Component comp ? comp.transform.position : ObjectPosition(enemy));
                     }
                 }
             }
@@ -274,7 +275,9 @@ namespace WhiskeyRealism.Strategic
                 string portName = null;
                 try { portName = ((UnityEngine.Object)sourcePort)?.name; } catch { }
 
-                int forceStrength = ReadInt(invasionForce, "groupstrengthactive", 0);
+                int forceStrength = invasionForce is Regiment invasionRegiment
+                    ? invasionRegiment.groupstrengthactive
+                    : ReadInt(invasionForce, "groupstrengthactive", 0);
 
                 // Derive profile-weighted asset role; OR with catalog role so both flow through.
                 AssetStrategicRole catalogRole = nearestAsset?.StrategicRole ?? AssetStrategicRole.None;
@@ -343,7 +346,9 @@ namespace WhiskeyRealism.Strategic
                 try { raidGroupInstanceId = ((UnityEngine.Object)raidGroup).GetInstanceID(); }
                 catch { }
 
-                int raidStrength = ReadInt(raidGroup, "groupstrengthactive", 0);
+                int raidStrength = raidGroup is Regiment raidRegiment
+                    ? raidRegiment.groupstrengthactive
+                    : ReadInt(raidGroup, "groupstrengthactive", 0);
 
                 // Derive profile-weighted asset role; OR with catalog role so both flow through.
                 AssetStrategicRole catalogRole = nearestAsset.StrategicRole;
@@ -412,16 +417,24 @@ namespace WhiskeyRealism.Strategic
             {
                 var enemy = enemyUnits[j];
                 if (enemy == null) continue;
-                Vector3 ep = ObjectPosition(enemy);
+                var regiment = enemy as Regiment;
+                Vector3 ep = regiment != null
+                    ? ((Component)regiment).transform.position
+                    : ObjectPosition(enemy);
                 int eid = 0;
                 try { eid = ((UnityEngine.Object)enemy).GetInstanceID(); } catch { }
-                float estr = (float)ReadInt(enemy, "groupstrengthactive", 0);
-                float emor = ReadFloat(enemy, "groupmorale", 1f);
+                float estr = regiment != null
+                    ? regiment.groupstrengthactive
+                    : (float)ReadInt(enemy, "groupstrengthactive", 0);
+                float emor = regiment != null
+                    ? regiment.groupmorale
+                    : ReadFloat(enemy, "groupmorale", 1f);
                 enemies.Add((ep, eid, estr, emor));
             }
 
             // "Very close" radius: absolute proximity that bypasses the frontline check.
             float veryCloseRadius = defOpsRadius * 0.4f;
+            var frontline = ResolveReadyFrontline();
 
             foreach (var asset in map.Assets)
             {
@@ -450,7 +463,7 @@ namespace WhiskeyRealism.Strategic
                     // on our side of the front line. Skip enemies across the line that
                     // only fall within the wider defOpsRadius cone.
                     bool veryClose = dist < veryCloseRadius;
-                    bool onOurSide = !veryClose && TryGetFrontlineSide(ep, out int side) && side == allianceId;
+                    bool onOurSide = !veryClose && IsOnFrontlineSide(frontline, ep, allianceId);
                     if (!veryClose && !onOurSide) continue;
 
                     // Use ComputeEffective for a readiness-adjusted strength estimate.
@@ -529,9 +542,16 @@ namespace WhiskeyRealism.Strategic
             }
 
             // Resolve static method handles once.
-            var raidIsRaidUnit = AccessTools.Method(AccessTools.TypeByName("RaidForce"), "IsRaidUnit");
-            var sifGetReference = AccessTools.Method(AccessTools.TypeByName("SeaInvasionForce"), "GetSeaInvasionForceReference");
+            var raidType = ResolveAICampaignNestedType("RaidForce");
+            var sifType = ResolveAICampaignNestedType("SeaInvasionForce");
+            var raidIsRaidUnit = raidType != null
+                ? AccessTools.Method(raidType, "IsRaidUnit", new[] { typeof(Regiment) })
+                : null;
+            var sifGetReference = sifType != null
+                ? AccessTools.Method(sifType, "GetSeaInvasionForceReference", new[] { typeof(Regiment) })
+                : null;
             var getReadiness = AccessTools.Method(AccessTools.TypeByName("CampaignArmyPanel"), "GetReadinessStep");
+            var isMovedByPlayer = AccessTools.Method(AccessTools.TypeByName("DLC_WL"), "IsMovedByPlayer", new[] { typeof(Regiment) });
 
             // Look up the front ledger for this alliance once; used for CriticalFront classification.
             FrontSectorLedger frontLedger = null;
@@ -547,37 +567,48 @@ namespace WhiskeyRealism.Strategic
             {
                 var unit = ownUnits[i];
                 if (unit == null) continue;
+                var regiment = unit as Regiment;
 
                 // Skip retreating or in-battle units.
-                if (ReadBool(unit, "onretreat", false)) continue;
-                if (ReadBool(unit, "inbattle", false)) continue;
+                if (regiment != null)
+                {
+                    if (regiment.onretreat) continue;
+                    if (regiment.inbattle) continue;
+                }
+                else
+                {
+                    if (ReadBool(unit, "onretreat", false)) continue;
+                    if (ReadBool(unit, "inbattle", false)) continue;
+                }
 
                 // Skip units building supply depots.
                 if (constructingDepots != null && constructingDepots.Contains(unit)) continue;
 
                 // Skip raid assets.
-                if (raidIsRaidUnit != null)
+                if (raidIsRaidUnit != null && regiment != null)
                 {
                     try
                     {
-                        bool isRaid = Convert.ToBoolean(raidIsRaidUnit.Invoke(null, new object[] { unit }));
+                        bool isRaid = Convert.ToBoolean(raidIsRaidUnit.Invoke(null, new object[] { regiment }));
                         if (isRaid) continue;
                     }
                     catch { }
                 }
 
                 // Skip sea-invasion force members.
-                if (sifGetReference != null)
+                if (sifGetReference != null && regiment != null)
                 {
                     try
                     {
-                        var sifRef = sifGetReference.Invoke(null, new object[] { unit });
+                        var sifRef = sifGetReference.Invoke(null, new object[] { regiment });
                         if (sifRef != null) continue;
                     }
                     catch { }
                 }
 
-                Vector3 unitPos = ObjectPosition(unit);
+                Vector3 unitPos = regiment != null
+                    ? ((Component)regiment).transform.position
+                    : ObjectPosition(unit);
                 Theater unitTheater = TheaterClassifier.FromPosition(unitPos.x, unitPos.z);
 
                 // Readiness step.
@@ -586,20 +617,18 @@ namespace WhiskeyRealism.Strategic
                 {
                     try
                     {
-                        readinessStep = Convert.ToSingle(getReadiness.Invoke(null, new object[] { unit }));
+                        readinessStep = Convert.ToSingle(getReadiness.Invoke(null, new object[] { regiment ?? unit }));
                     }
                     catch { readinessStep = 2f; }
                 }
 
                 // Player-controlled check (DLC_WL; may not be present in non-W&L scenarios).
                 bool playerControlled = false;
-                try
+                if (isMovedByPlayer != null && regiment != null)
                 {
-                    var isMovedByPlayer = AccessTools.Method(AccessTools.TypeByName("DLC_WL"), "IsMovedByPlayer");
-                    if (isMovedByPlayer != null)
-                        playerControlled = Convert.ToBoolean(isMovedByPlayer.Invoke(null, new object[] { unit }));
+                    try { playerControlled = Convert.ToBoolean(isMovedByPlayer.Invoke(null, new object[] { regiment })); }
+                    catch { }
                 }
-                catch { }
 
                 // Single-pass tier + closest-threat classification.
                 // Tracks (minDist, closestIndex) to eliminate the float-equality fragility of a
@@ -674,8 +703,12 @@ namespace WhiskeyRealism.Strategic
                 string unitName = null;
                 try { unitName = ((UnityEngine.Object)unit).name; } catch { }
 
-                int strength = ReadInt(unit, "groupstrengthactive", 0);
-                float morale = ReadFloat(unit, "groupmorale", 1f);
+                int strength = regiment != null
+                    ? regiment.groupstrengthactive
+                    : ReadInt(unit, "groupstrengthactive", 0);
+                float morale = regiment != null
+                    ? regiment.groupmorale
+                    : ReadFloat(unit, "groupmorale", 1f);
 
                 bool inOffensive = inOffensiveOps != null && inOffensiveOps.Contains(unit);
 
@@ -802,17 +835,11 @@ namespace WhiskeyRealism.Strategic
             return Vector3.zero;
         }
 
-        // XZ-plane distance via Tools.GetXZDistance; falls back to manual calc on failure.
+        // XZ-plane distance. This sits in defense-runtime inner loops, so do not
+        // use reflection here; resolving Tools.GetXZDistance per call caused
+        // multi-second once-per-day campaign freezes.
         private static float GetXZDistance(Vector3 a, Vector3 b)
         {
-            try
-            {
-                var toolsType = AccessTools.TypeByName("Tools");
-                var method = AccessTools.Method(toolsType, "GetXZDistance");
-                if (method != null)
-                    return Convert.ToSingle(method.Invoke(null, new object[] { a, b }));
-            }
-            catch { }
             float dx = a.x - b.x;
             float dz = a.z - b.z;
             return (float)Math.Sqrt(dx * dx + dz * dz);
@@ -882,13 +909,15 @@ namespace WhiskeyRealism.Strategic
             catch { return null; }
         }
 
-        // Returns the frontline side that owns the given position.
-        // Returns false (side = -1) when frontline2 is unavailable or has no updates,
-        // which means the caller's onOurSide check also returns false — a safe default
-        // that does NOT emit a spurious proximity threat.
-        private static bool TryGetFrontlineSide(Vector3 pos, out int side)
+        private static Type ResolveAICampaignNestedType(string typeName)
         {
-            side = -1;
+            return AccessTools.Inner(typeof(AICampaign), typeName)
+                ?? AccessTools.TypeByName("AICampaign+" + typeName)
+                ?? AccessTools.TypeByName(typeName);
+        }
+
+        private static Frontline2 ResolveReadyFrontline()
+        {
             try
             {
                 var battleUnits = UnityEngine.GameObject.Find("GameController")
@@ -896,10 +925,19 @@ namespace WhiskeyRealism.Strategic
                 if (battleUnits == null ||
                     battleUnits.frontline2 == null ||
                     battleUnits.frontline2.numberofupdates <= 0)
-                    return false;
-                side = battleUnits.frontline2.GetSideOnPosition(pos);
-                return true;
+                    return null;
+                return battleUnits.frontline2;
             }
+            catch { return null; }
+        }
+
+        // Returns false when frontline2 is unavailable or has no updates, which
+        // means the caller's onOurSide check also returns false — a safe default
+        // that does NOT emit a spurious proximity threat.
+        private static bool IsOnFrontlineSide(Frontline2 frontline, Vector3 pos, int allianceId)
+        {
+            if (frontline == null) return false;
+            try { return frontline.GetSideOnPosition(pos) == allianceId; }
             catch { return false; }
         }
     }

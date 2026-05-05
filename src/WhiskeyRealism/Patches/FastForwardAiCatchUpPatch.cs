@@ -28,6 +28,7 @@ namespace WhiskeyRealism.Patches
             {
                 if (__instance == null) return;
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
+                if (Plugin.Instance.CampaignAiGovernorEnabled.Value) return;
                 if (GameVars.debug_turnoffcampaignai || GameVars.tutorialactive || GameVars.gamepaused) return;
 
                 float gameSpeed = GameVars.gamespeed;
@@ -109,7 +110,7 @@ namespace WhiskeyRealism.Patches
         {
             return new FastForwardAiOptions
             {
-                Enabled = Plugin.Instance.FastForwardAiCatchUp.Value,
+                Enabled = Plugin.Instance.FastForwardAiCatchUp.Value && !Plugin.Instance.CampaignAiGovernorEnabled.Value,
                 FrameBudgetMs = Math.Max(0f, Plugin.Instance.FastForwardAiFrameBudgetMs.Value),
                 MaxExtraPassesAt20x = Plugin.Instance.FastForwardAi20xExtraPasses.Value,
                 MaxExtraPassesAt50x = Plugin.Instance.FastForwardAi50xExtraPasses.Value,
