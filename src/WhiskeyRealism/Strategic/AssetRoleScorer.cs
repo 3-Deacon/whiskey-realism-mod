@@ -5,6 +5,8 @@ namespace WhiskeyRealism.Strategic
     // All gates are explicit: profile tag presence, asset kind, ownership, and geometric distances.
     public static class AssetRoleScorer
     {
+        private const float CapitalApproachKm = 120f;
+
         public static AssetStrategicRole Score(
             CampaignMapAsset asset,
             GrandStrategyProfile profile,
@@ -39,8 +41,8 @@ namespace WhiskeyRealism.Strategic
             if (asset.Kind == CampaignMapAssetKind.Fort && asset.Level >= 2)
                 role |= AssetStrategicRole.KeyFort;
 
-            // Any asset within 120 km of the faction capital is a capital approach regardless of kind.
-            if (capitalDistance < 120f)
+            // Any asset within CapitalApproachKm of the faction capital is a capital approach regardless of kind.
+            if (capitalDistance < CapitalApproachKm)
                 role |= AssetStrategicRole.CapitalApproach;
 
             return role;
@@ -52,7 +54,7 @@ namespace WhiskeyRealism.Strategic
             float capitalDistance)
         {
             if (town == null || profile == null) return AssetStrategicRole.None;
-            return capitalDistance < 120f ? AssetStrategicRole.CapitalApproach : AssetStrategicRole.None;
+            return capitalDistance < CapitalApproachKm ? AssetStrategicRole.CapitalApproach : AssetStrategicRole.None;
         }
     }
 }

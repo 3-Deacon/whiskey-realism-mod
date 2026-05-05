@@ -34,7 +34,12 @@ static class Program
             ("asset role scorer flags union river hub from profile", AssetRoleScorerFlagsUnionRiverHubFromProfile),
             ("asset role scorer flags key fort from level", AssetRoleScorerFlagsKeyFortFromLevel),
             ("asset role scorer flags capital approach by distance", AssetRoleScorerFlagsCapitalApproachByDistance),
-            ("asset role scorer leaves unknown asset alone", AssetRoleScorerLeavesUnknownAssetAlone),
+            ("asset role scorer returns none when no rules match", AssetRoleScorerReturnsNoneWhenNoRulesMatch),
+            ("asset role scorer flags union forward base from profile", AssetRoleScorerFlagsUnionForwardBaseFromProfile),
+            ("asset role scorer rejects union forward base when enemy owned", AssetRoleScorerRejectsUnionForwardBaseEnemyOwned),
+            ("asset role scorer score town flags capital approach by distance", AssetRoleScorerScoreTownFlagsCapitalApproach),
+            ("asset role catalog overrides scorer for named anchor", AssetRoleCatalogOverridesScorer),
+            ("asset role catalog returns none for unknown name", AssetRoleCatalogReturnsNoneForUnknown),
             ("csa early profile favors capital defense and foreign recognition", CsaEarlyProfileFavorsDefenseAndForeignRecognition),
             ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
             ("union early policy scorer favors legal blockade", UnionEarlyPolicyScorerFavorsLegalBlockade),
@@ -2330,7 +2335,7 @@ static class Program
             "asset 500 from capital should NOT score capital-approach");
     }
 
-    private static void AssetRoleScorerLeavesUnknownAssetAlone()
+    private static void AssetRoleScorerReturnsNoneWhenNoRulesMatch()
     {
         var profile = GrandStrategyRegistry.Resolve(allianceId: 0, stage: EraStage.Amateur1861);
         var asset = new CampaignMapAsset
@@ -2342,6 +2347,70 @@ static class Program
         };
         var role = AssetRoleScorer.Score(asset, profile, capitalDistance: 9999f, frontDistance: 9999f);
         AssertEqual(AssetStrategicRole.None, role);
+    }
+
+    private static void AssetRoleScorerFlagsUnionForwardBaseFromProfile()
+    {
+        var profile = GrandStrategyRegistry.Resolve(allianceId: 0, stage: EraStage.Amateur1861);
+        var asset = new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor,
+            Name = "hampton-roads",
+            StateAbbrev = "VA",
+            Theater = Theater.Coast,
+            Owner = 0,            // Union-owned
+            Capacity = 5f
+        };
+        var role = AssetRoleScorer.Score(asset, profile, capitalDistance: 250f, frontDistance: 80f);
+        AssertTrue((role & AssetStrategicRole.UnionForwardBase) != 0,
+            "union sea port near front should score forward-base when union profile has Blockade or PortAccess");
+    }
+
+    private static void AssetRoleScorerRejectsUnionForwardBaseEnemyOwned()
+    {
+        var profile = GrandStrategyRegistry.Resolve(allianceId: 0, stage: EraStage.Amateur1861);
+        var asset = new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor,
+            Name = "wilmington-harbor",
+            StateAbbrev = "NC",
+            Theater = Theater.Coast,
+            Owner = 1,            // CSA-owned — must NOT count as Union forward base
+            Capacity = 4f
+        };
+        var role = AssetRoleScorer.Score(asset, profile, capitalDistance: 250f, frontDistance: 80f);
+        AssertTrue((role & AssetStrategicRole.UnionForwardBase) == 0,
+            "csa-owned port must not flag UnionForwardBase even when union profile has the tag");
+    }
+
+    private static void AssetRoleScorerScoreTownFlagsCapitalApproach()
+    {
+        var profile = GrandStrategyRegistry.Resolve(allianceId: 1, stage: EraStage.Amateur1861);
+        var town = new CampaignMapTown { CityName = "norfolk", Theater = Theater.Coast };
+
+        var near = AssetRoleScorer.ScoreTown(town, profile, capitalDistance: 100f);
+        AssertTrue((near & AssetStrategicRole.CapitalApproach) != 0,
+            "town within 120 of capital should score capital-approach via ScoreTown");
+
+        var far = AssetRoleScorer.ScoreTown(town, profile, capitalDistance: 500f);
+        AssertEqual(AssetStrategicRole.None, far);
+    }
+
+    private static void AssetRoleCatalogOverridesScorer()
+    {
+        var role = AssetRoleCatalog.Lookup("wilmington-harbor");
+        AssertTrue((role & AssetStrategicRole.BlockadeRunnerPort) != 0, "wilmington should be blockade-runner");
+        AssertTrue((role & AssetStrategicRole.KeyFort) == 0, "wilmington should not be flagged key-fort by name alone");
+
+        var norfolk = AssetRoleCatalog.Lookup("norfolk-harbor");
+        AssertTrue((norfolk & AssetStrategicRole.CapitalApproach) != 0, "norfolk should be capital approach");
+    }
+
+    private static void AssetRoleCatalogReturnsNoneForUnknown()
+    {
+        AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup("unmapped-port"));
+        AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup(null));
+        AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup(""));
     }
 
     private static void AssertEqual<T>(T expected, T actual)
