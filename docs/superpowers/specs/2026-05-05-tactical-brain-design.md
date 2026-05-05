@@ -3,7 +3,7 @@
 Status: draft umbrella design spec for Slice B.
 Scope: battlefield tactical AI for land battles. This spec covers doctrine, scoring, state, patch surfaces, telemetry, and implementation order. It does not implement code.
 
-Vanilla verification: see [`2026-05-05-tactical-brain-vanilla-verification.md`](2026-05-05-tactical-brain-vanilla-verification.md). That pass confirms the required vanilla data and patch surfaces, but marks sector doctrine, local-superiority scoring, contact-aware stale-order handling, reserve-relief timing, and staged withdrawal as new Whiskey behavior rather than existing vanilla logic.
+Vanilla verification: see [`2026-05-05-tactical-brain-vanilla-verification.md`](2026-05-05-tactical-brain-vanilla-verification.md). That pass confirms the required vanilla data and patch surfaces, but marks sector doctrine, local-superiority scoring, contact-aware stale-order handling, reserve-relief timing, and staged withdrawal as new Whiskey behavior rather than existing vanilla logic. It also separates battle-level `macroai` from group-level `ai_stance`; they are different ladders and must not be patched as one state machine.
 
 ## Source Findings
 
@@ -19,14 +19,14 @@ Current Whiskey anchors:
 
 Verified vanilla anchors:
 
-- `AIBattle.CheckGlobalAIStrategy()` at line 6314 owns macro stance transitions. Vanilla stances are `0 assault`, `1 attack`, `2 defend`, and `3 retreat`.
-- `AIBattle.AdjustGroupAIStance()` at line 4221 owns the group stance ladder.
-- `AIBattle.MicroAICheckForCharges(...)` at line 4905 initiates charge behavior, including the `ai_stance == 4` charge path. It does not call `PerformAIActionDLCWL`, so W&L charge gating must be added explicitly.
-- `AIBattle.CheckForFeudGroupActions(...)` was found to skip the W&L `PerformAIActionDLCWL` gate. This matches the likely brigade auto-charge path, but the exact user-facing bug linkage still needs runtime smoke.
+- `AIBattle.CheckGlobalAIStrategy()` at line 6314 owns battle-level `macroai` transitions. Vanilla `macroai` values are `-1 dynamic`, `0 assault`, `1 attack`, `2 defend`, and `3 retreat`.
+- `AIBattle.AdjustGroupAIStance()` at line 4221 owns the separate group-level `ai_stance` ladder. `ai_stance == 4` is the group charge stance; it is not a `macroai` value.
+- `AIBattle.MicroAICheckForCharges(...)` at line 4905 initiates and cancels group charge movement from `ai_stance == 4`, gates on feud state, and writes `lastfeudactiontime` on both branches. It does not call `PerformAIActionDLCWL`, so W&L charge gating must be added explicitly without breaking the cancellation branch.
+- `AIBattle.CheckForFeudGroupActions(...)` was found to skip the W&L `PerformAIActionDLCWL` gate. This matches a likely W&L auto-advance-toward-enemy path, but the exact player-facing "auto-charge" symptom still needs runtime smoke.
 - `AIBattle.CheckUseOfReserves(...)` at line 6062, `LinkReservesToLineGroup()` at line 6642, and `AssignReserves()` at line 7017 are the reserve surfaces.
 - `AIBattle.CheckLineFallbacks(...)` at line 5118 and `AIBattle.MicroAICheckForRetreats(...)` at line 4817 are the local fallback and retreat surfaces.
 - `AIBattle.CheckAIBombardment(...)` at line 3869 is the artillery bombardment surface.
-- `Autocalc.CheckUnitArrivals()` at line 20878 and `Regiment.GetArrivalTimeToBF(...)` at line 138862 show that reinforcements can arrive into active battles.
+- `Regiment.GetArrivalTimeToBF(...)` at line 138862 plus `BattleUnits.sideinformation.strengthtoarrive`, `corpstoarrive`, and `reinforcementarrivalswithin24hrs` show active-battle reinforcement state. `Autocalc.CheckUnitArrivals()` at line 20878 is a related arrival surface, but its live-battle reachability should be rechecked before patching it directly.
 - `TimePanel.SetRetreatTimer(...)` at line 221271 controls the battle retreat timer after retreat is chosen.
 - Prior decompile review found `BattleUnits` tracks strength still to arrive and reinforcement arrivals within the AI retreat decision window. Vanilla already considers reinforcements in some global-retreat logic, but not as a full tactical doctrine.
 - `Regiment.AddOrderCourierline(...)` at line 125009 models bugle and courier order delivery, including horse courier creation when targets are outside bugle range.
@@ -34,7 +34,7 @@ Verified vanilla anchors:
 - `Regiment.GetLastTransmittedPathPos(...)` at line 127552 and `GetLastTransmittedPath(...)` at line 127591 expose the difference between intended paths and transmitted orders while order delay is active.
 - `Regiment.SetOrderStatus(...)` at line 125484, `LaunchGoCommand(...)` at line 125510, and `OrderTimedMovement(...)` at line 125524 show existing order-state timing and execution gates.
 - `Regiment` initializes battlefield `commanderrange` and `buglerange` from unit type prefs around lines 112993-113008. A readiness/initiative recalculation exists around line 125838, but the verified block is campaign-path only.
-- `GamePrefs.processingtimegroupstandard`, `processingtimegrouproute`, `buglestandardrecognitiontime`, and `slowdowncourieroutsideradius` load around lines 53336-53344 and have verified uses. `orderdelayforbugles` was found loaded/declared, but no active use site was found in the verification pass.
+- `GamePrefs.processingtimegroupstandard`, `processingtimegrouproute`, `buglestandardrecognitiontime`, and `slowdowncourieroutsideradius` load around lines 53336-53344 and have verified uses. `orderdelayforbugles` is declared and loaded but never read in the current decompile, so treat it as dead config unless a later decompile proves otherwise.
 - `BattleUI` passes `useorderdelay: true` for normal player movement orders at line 166163, confirming that tactical movement is expected to respect the order-delay path.
 
 Historical doctrine inputs:
@@ -117,7 +117,7 @@ At battle start and after material changes, each AI side forms a broad plan:
 - `AvoidStrongpoint`: do not attack fortifications or heavy-cover positions directly unless objective pressure forces it.
 - `OrderlyWithdrawal`: disengage in phases while covering troops delay.
 
-The plan is not persisted. It is recomputed from current battle state and stabilized by cooldowns so it does not flap every tick.
+The plan is not persisted. It is recomputed from current battle state and stabilized by cooldowns so it does not flap every tick. Tactical state is intentionally runtime-only because active battle units, FOW, path/order state, and objective-chain membership are volatile Unity scene state; persistence would need a separate battle-resume contract before it could be trusted.
 
 Inputs:
 
@@ -137,6 +137,20 @@ Outputs:
 - artillery policy;
 - attack/charge permission;
 - withdrawal posture.
+
+Plan-to-stance projection:
+
+| Tactical plan | Default `macroai` projection | Notes |
+|---|---:|---|
+| `DefendObjective` | `2 defend` | May allow local counterattack at group/sector level without moving battle macro to attack. |
+| `DelayAndPreserve` | `2 defend` or `3 retreat` | Use defend while holding a line for time or relief; move to retreat only after sustained collapse criteria. |
+| `ProbeAndFix` | `-1 dynamic` or `2 defend` | Let vanilla/sector scoring test contact without committing the full battle to attack. |
+| `BombardAndAssaultWeakPoint` | `1 attack`; escalate to `0 assault` only after suppression/weakness confidence | Prevents bombardment plan from becoming immediate all-sector assault. |
+| `TurnFlank` | `1 attack` | Main effort is a selected flank sector; center sectors should normally fix or hold. |
+| `AvoidStrongpoint` | `2 defend` or `-1 dynamic` | Avoid direct assault until a bypass, bombardment, or weak point is confirmed. |
+| `OrderlyWithdrawal` | `3 retreat` | Use staged fallback first; call vanilla full-retreat path only when preservation requires it. |
+
+`macroai = -1 dynamic` is not "unknown." It is the vanilla initial/dynamic state. B0 telemetry must log it, and later scorers should use it for cautious no-contact/probe plans rather than forcing attack or defend on the first evaluation tick.
 
 ## Command Hierarchy And Order Friction
 
@@ -225,6 +239,19 @@ The battlefield should be partitioned into sectors relative to the AI side:
 - reserve/rear;
 - artillery line.
 
+Sector derivation must start from vanilla's existing objective-chain structure, not from freehand map slices. Each vanilla `ObjectiveChain` already tracks a `linegroup_centerunit`, left/right line units, left/right flank units, inner units, reserve groups, artillery groups, screening groups, flank positions, anchored-flank flags, and `flankmovesfactor`. Whiskey's seven-sector ledger should project those into named missions:
+
+| Whiskey sector | Vanilla source |
+|---|---|
+| `left flank` / `right flank` | `objectivechain[i].flankunit[0/1]`, `flankpositions[0/1]`, `anchoredflank[0/1]`, `flankstrength[0/1]` |
+| `left-center` / `right-center` | `linegroup_leftunits`, `linegroup_rightunits`, and `innerunit[0/1]` |
+| `center` | `linegroup_centerunit` and current objective chain target |
+| `reserve/rear` | `reservegroups` plus linked reserve state |
+| `artillery line` | `artillerygroups`, `artillerygroups_centerunit`, left/right artillery groups |
+| `screening line` | `screeninggroups`, `screeninggroups_centerunit`, left/right screening groups |
+
+When no stable `ObjectiveChain` exists yet, B0/B3 should fall back to relative angle slices from `Regiment.UpdateUnitRangeFast(...)` and mark sector confidence low. Later patches should not assign sector missions without recording whether the mission came from an objective chain or from low-confidence angle slicing.
+
 Each sector gets a mission:
 
 - `Screen`: scout, delay, reveal, avoid decisive engagement.
@@ -305,6 +332,7 @@ Patch surface: `AIBattle.CheckGlobalAIStrategy()`.
 
 Vanilla macro stances are too coarse and partly data-driven. Whiskey should add a score layer that biases or clamps vanilla stance transitions:
 
+- `Dynamic`: vanilla `macroai = -1`; preserve as the cautious initial/probe state when contact confidence is low or the observer has not stabilized.
 - `Assault`: only when enemy is weak, disorganized, exposed, low on ammo/morale, or the objective clock demands risk.
 - `Attack`: normal offensive pressure, preferably by sectors.
 - `Defend`: hold ground, recover cohesion, use artillery, prepare reserves.
@@ -326,6 +354,7 @@ The score should include:
 Safeguards:
 
 - use hysteresis so stance does not bounce between attack and retreat;
+- never treat `macroai = -1` as an error or as attack-by-default;
 - never block vanilla hard retreat/end-battle safety;
 - do not force attack if the W&L player-control gate says the AI should not act.
 
@@ -335,7 +364,7 @@ Patch surface: `AIBattle.AdjustGroupAIStance()`.
 
 Group-level stance must become sector- and condition-aware.
 
-Replace raw strength-only behavior with a weighted ladder:
+Replace strength-centered vanilla behavior with a weighted ladder:
 
 - `Screen` when contact is uncertain, unit is light/cavalry/skirmish-capable, or assigned to flank security.
 - `Hold` when defending good terrain, guarding artillery, protecting flank, or low ammo/fatigue makes attack unsound.
@@ -354,6 +383,11 @@ Patch surfaces:
 - `AIBattle.MicroAICheckForCharges(...)`;
 - `AIBattle.CheckForFeudGroupActions(...)`;
 - existing `PerformAIActionDLCWL` behavior.
+
+Implementation split:
+
+- `B1 W&L Feud And Charge Guard` is narrow. It should only prevent AI action where W&L/player-subordinate control says vanilla should not act, and it must preserve charge cancellation plus `lastfeudactiontime` updates.
+- Full doctrine charge gating waits for sector, odds, reserve, strongpoint, and artillery context from B3-B7.
 
 Charge should be treated as a late tactical decision, not the default way to close distance.
 
@@ -375,7 +409,7 @@ Charge denial triggers:
 - the sector mission is `Screen`, `Hold`, `Fix`, `Withdraw`, or `RearGuard`;
 - another nearby unit is already charging the same target and would create a blob.
 
-The W&L auto-charge bug should be a narrow guard patch, not a broad rewrite.
+The W&L auto-advance/charge symptom should be a narrow guard patch, not a broad rewrite.
 
 ## Reserves And Relief
 
@@ -648,7 +682,7 @@ Data tuning is useful for broad pressure. It is not enough for scouting, sector 
 This umbrella spec should be implemented in bounded steps:
 
 1. `B0 Tactical Observer`: read-only battle context, command/contact/sector ledgers, order-friction telemetry, no behavior changes.
-2. `B1 W&L Feud And Charge Guard`: narrow guard for player-subordinate auto-charge/feud actions.
+2. `B1 W&L Feud And Charge Guard`: narrow guard for player-subordinate auto-advance/charge/feud actions. Do not implement full doctrine charge gating here; preserve vanilla charge cancellation and feud timing side effects.
 3. `B2 Command Hierarchy And Order Friction`: army/corps, division, brigade, and regiment intent cascade with delayed-order rules.
 4. `B3 Tactical Odds Doctrine`: local-superiority, decisive-point, economy-of-force, and inferior-force posture scorer.
 5. `B4 Macro Stance Scorer`: Postfix/clamp global strategy with odds, losses, reinforcements, terrain, and personality.
@@ -715,7 +749,7 @@ Runtime smoke should include:
 - artillery-heavy battle;
 - large multi-division battle with order delays on;
 - delayed reserve-release scenario where courier timing matters;
-- W&L player-subordinate battle to confirm auto-charge is gated;
+- W&L player-subordinate battle to confirm auto-advance/charge behavior is gated;
 - outnumbered battle to confirm retreat happens but is staged.
 
 ## Acceptance Criteria
