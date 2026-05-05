@@ -70,7 +70,6 @@ namespace WhiskeyRealism.Strategic
                 var factionType = faction.GetType();
                 var ownUnits = AccessTools.Field(factionType, "ownunits")?.GetValue(faction) as IList;
                 var offensive = AccessTools.Field(factionType, "unitsinoffensiveoperations")?.GetValue(faction) as IList;
-                var defensive = AccessTools.Field(factionType, "unitsindefensiveoperations")?.GetValue(faction) as IList;
                 if (ownUnits == null || offensive == null) return;
 
                 var unit = FindUnit(ownUnits, output.SelectedUnitKey);
@@ -93,9 +92,12 @@ namespace WhiskeyRealism.Strategic
                     output.Decision != OperationalProbeDecision.Escalate)
                     return;
                 if (!target.HasValue) return;
-                if (defensive != null && defensive.Contains(unit)) return;
-                if (ReadBool(unit, "inbattle") || ReadBool(unit, "onretreat")) return;
-                if (ReadObject(unit, "garrisonreference") != null) return;
+                if (!OffensiveAvailabilityWrapper.IsAvailable(aifactionIndex, unit, target.Value))
+                {
+                    OnceLog.Info("operational-probe:gate-blocked:" + allianceId,
+                        $"[OperationalProbe] alliance={allianceId} unit={SafeName(unit)} blocked-by-availability");
+                    return;
+                }
 
                 if (AICampaign.MoveUnitTo(unit, target.Value, true) && !offensive.Contains(unit))
                 {
