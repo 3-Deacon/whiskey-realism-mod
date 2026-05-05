@@ -630,7 +630,7 @@ The strategic-brain slice is "shippable" when:
 
 1. Build is green (0 warnings, 0 errors).
 2. Active bridge-layer patches register and log `[once:...]` first-fire markers in a fresh career; current authoritative count is in `docs/patch-catalog.md`.
-3. Smoke-test scenarios 1-7 pass on a single career playthrough (boot, era=Amateur1861, sidecar round-trip, succession event #1 fires by 1862-05, monthly heartbeat appears, weekly review first-fire appears).
+3. Smoke-test scenarios 1-7 pass on a single career playthrough (boot, era=Amateur1861, sidecar round-trip, succession event #1 fires by 1862-05, monthly heartbeat appears, daily operational review first-fire appears).
 4. JSON sidecar is human-readable and round-trips through save → reload without losing state.
 5. Mod state is observably read-only from patches (no patch mutates `CIC` / `TheaterCommander` state — verified by code review at PR time).
 6. Reflection failures (simulated by deleting a target method's signature in a unit-test stub, or by checking on a manually-corrupted DLL) degrade to vanilla rather than crashing.

@@ -26,7 +26,9 @@ This file is the project memory index for agents and maintainers. It is intentio
 - A visible `UnitSelectionListObject` is not enough. The picker is usable only when private `unitlineappointcommand` rows exist.
 - Existing BepInEx config values override C# defaults after first plugin load; changing `Plugin.cs` defaults alone does not update an existing user's config.
 - DLL-affecting changes are not ready until built, deployed, and verified by matching `sha256sum` between `dist/WhiskeyRealism.dll` and the BepInEx plugin DLL.
-- Harmony patches must not mutate strategic mod state. State writes happen through coordinator/weekly/event paths; patches steer vanilla decisions and log bounded evidence.
+- Harmony patches must not mutate strategic mod state. State writes happen through coordinator/daily/event paths; patches steer vanilla decisions and log bounded evidence.
+- Defense Intent Ledger (2026-05-04) migrated the operational tick from weekly to daily; `EmergencyExitStableTicks=14` rescale and `FrontSectorRuntime.Signature` bucket coarsening make daily safe from thrash.
+- `DefenseCooldownTable._recoveredStarted` is an idempotency guard: set it on the same tick that the cooldown entry transitions from recovering → active to prevent double-triggers across multiple daily ticks.
 - `CampaignMapLedger` is now the active-map source for towns, represented states, forts, sea harbors, and river harbors. Do not reintroduce hardcoded Mississippi/Alabama assumptions for W&L unless the runtime map actually exposes those states.
 - #4 capital-defense add-on should stay proportional: readiness-gated, morale-adjusted, and penalizing gross overmatch for small threats.
 
