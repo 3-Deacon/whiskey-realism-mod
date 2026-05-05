@@ -41,6 +41,12 @@ namespace WhiskeyRealism.Patches
         // Tracks the suppression reason per unit so the revert log is diagnostic.
         private static readonly Dictionary<int, Dictionary<int, string>> _suppressionReasonByUnitId =
             new Dictionary<int, Dictionary<int, string>>();
+        // Tracks the threat signature per unit for revert-log dedup keying.
+        private static readonly Dictionary<int, Dictionary<int, string>> _threatSigByUnitId =
+            new Dictionary<int, Dictionary<int, string>>();
+        // Dedup set for revert log lines — key "<allianceId>|<threatSig>|<unitId>".
+        // First revert per tuple logs unconditionally; subsequent reverts only under verbose.
+        private static readonly HashSet<string> _revertLogged = new HashSet<string>();
 
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction)
@@ -58,7 +64,7 @@ namespace WhiskeyRealism.Patches
                 var output = StrategicCoordinator.Instance?.DefenseIntents?[allianceId];
                 if (output == null || output.Responses == null || output.Responses.Count == 0) return;
 
-                var forbidden = CollectForbiddenIds(output, out var reasonByUnitId);
+                var forbidden = CollectForbiddenIds(output, out var reasonByUnitId, out var threatSigByUnitId);
                 if (forbidden.Count == 0) return;
 
                 var faction = AICampaignReflect.GetFaction(_aifaction);
@@ -90,6 +96,7 @@ namespace WhiskeyRealism.Patches
                 // through a secondary path, Postfix can call MoveUnitTo to revert.
                 var priorPositions = new Dictionary<int, Vector3>();
                 var suppressionReasons = new Dictionary<int, string>();
+                var threatSigs = new Dictionary<int, string>();
                 for (int i = 0; i < ownUnits.Count; i++)
                 {
                     var regiment = ownUnits[i] as Regiment;
@@ -102,9 +109,12 @@ namespace WhiskeyRealism.Patches
                     priorPositions[id] = regiment.theaterposition;
                     if (reasonByUnitId.TryGetValue(id, out var reason))
                         suppressionReasons[id] = reason;
+                    if (threatSigByUnitId.TryGetValue(id, out var sig))
+                        threatSigs[id] = sig;
                 }
                 _priorTheaterPositionByUnitId[_aifaction] = priorPositions;
                 _suppressionReasonByUnitId[_aifaction] = suppressionReasons;
+                _threatSigByUnitId[_aifaction] = threatSigs;
 
                 // Filter the live ownunits in place — remove forbidden references
                 // for the duration of vanilla's call. Walk in reverse to keep
@@ -174,13 +184,15 @@ namespace WhiskeyRealism.Patches
                         var output = StrategicCoordinator.Instance?.DefenseIntents?[allianceId];
                         if (output != null)
                         {
-                            var forbidden = CollectForbiddenIds(output, out var _unusedReasons);
+                            var forbidden = CollectForbiddenIds(output, out var _unusedReasons, out var _unusedSigs);
                             if (forbidden.Count > 0)
                             {
                                 var defOpsField = AccessTools.Field(faction.GetType(), "unitsindefensiveoperations");
                                 var defOps = defOpsField?.GetValue(faction) as IList;
                                 _priorTheaterPositionByUnitId.TryGetValue(_aifaction, out var priorPositions);
                                 _suppressionReasonByUnitId.TryGetValue(_aifaction, out var suppressionReasons);
+                                _threatSigByUnitId.TryGetValue(_aifaction, out var threatSigs);
+                                bool verbose = Plugin.Instance != null && Plugin.Instance.DefenseIntentVerboseLogging.Value;
 
                                 if (defOps != null)
                                 {
@@ -195,6 +207,8 @@ namespace WhiskeyRealism.Patches
                                         var unit = defOps[i] as Regiment;
                                         string reason = "<unknown>";
                                         suppressionReasons?.TryGetValue(id, out reason);
+                                        string sig = "<no-sig>";
+                                        threatSigs?.TryGetValue(id, out sig);
 
                                         defOps.RemoveAt(i);
                                         RemoveFromStaticDefensiveOperation(unit);
@@ -204,10 +218,22 @@ namespace WhiskeyRealism.Patches
                                             SafeMoveUnitTo(unit, priorPos);
                                         }
 
-                                        Plugin.Log.LogInfo(
-                                            $"[DefenseIntent] reverted alliance={allianceId} " +
-                                            $"candidate={(unityObj.name ?? id.ToString())} " +
-                                            $"reason={reason}");
+                                        // Fix B: .name throws MissingReferenceException on destroyed objects.
+                                        string candidateName;
+                                        try { candidateName = unityObj.name; }
+                                        catch { candidateName = id.ToString(); }
+
+                                        // Fix A: dedup revert log by (alliance, threat-sig, unit-id).
+                                        // First revert per tuple is unconditional; subsequent reverts gated on verbose.
+                                        string revertKey = $"{allianceId}|{sig}|{id}";
+                                        bool firstRevert = _revertLogged.Add(revertKey);
+                                        if (firstRevert || verbose)
+                                        {
+                                            Plugin.Log.LogInfo(
+                                                $"[DefenseIntent] reverted alliance={allianceId} " +
+                                                $"candidate={candidateName} " +
+                                                $"reason={reason}");
+                                        }
                                     }
                                 }
                             }
@@ -227,18 +253,22 @@ namespace WhiskeyRealism.Patches
         }
 
         // Collect all UnitInstanceIds that are suppressed for one of the three
-        // forbidden reasons. Also populates reasonByUnitId for diagnostic logging.
+        // forbidden reasons. Also populates reasonByUnitId and threatSigByUnitId
+        // for diagnostic logging and revert-log dedup keying.
         private static HashSet<int> CollectForbiddenIds(
             DefenseIntentLedgerOutput output,
-            out Dictionary<int, string> reasonByUnitId)
+            out Dictionary<int, string> reasonByUnitId,
+            out Dictionary<int, string> threatSigByUnitId)
         {
             reasonByUnitId = new Dictionary<int, string>();
+            threatSigByUnitId = new Dictionary<int, string>();
             var ids = new HashSet<int>();
             if (output?.Responses == null) return ids;
 
             foreach (var r in output.Responses)
             {
                 if (r?.Suppressed == null) continue;
+                string sig = r.Threat?.Signature ?? "<no-sig>";
                 foreach (var s in r.Suppressed)
                 {
                     if (s == null) continue;
@@ -247,8 +277,9 @@ namespace WhiskeyRealism.Patches
                         s.Reason != "player-controlled")
                         continue;
                     ids.Add(s.UnitInstanceId);
-                    // Last reason wins when a unit appears in multiple responses.
+                    // Last reason/sig wins when a unit appears in multiple responses.
                     reasonByUnitId[s.UnitInstanceId] = s.Reason;
+                    threatSigByUnitId[s.UnitInstanceId] = sig;
                 }
             }
             return ids;
@@ -306,6 +337,11 @@ namespace WhiskeyRealism.Patches
             _defensiveOpsBefore.Remove(aifactionIndex);
             _priorTheaterPositionByUnitId.Remove(aifactionIndex);
             _suppressionReasonByUnitId.Remove(aifactionIndex);
+            _threatSigByUnitId.Remove(aifactionIndex);
+            // _revertLogged is intentionally not cleared — it is the persistent dedup set
+            // that prevents the same (alliance, threat-sig, unit) tuple from spamming
+            // across ticks. Cross-campaign bleed is accepted as a known limitation
+            // (same as _firstAssignmentLogged in CoastalDefenseCustomOrderRunner).
         }
     }
 }

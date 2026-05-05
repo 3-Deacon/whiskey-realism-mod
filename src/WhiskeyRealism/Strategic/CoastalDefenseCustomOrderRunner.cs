@@ -24,6 +24,14 @@ namespace WhiskeyRealism.Strategic
         // log lines — keys are "<allianceId>|<threatSignature>|<unitInstanceId>".
         private static readonly HashSet<string> _firstAssignmentLogged = new HashSet<string>();
 
+        // Tracks which unit IDs were assigned per (allianceId, threatSignature) on the
+        // prior tick. Used to detect when a threat signature disappears from the current
+        // tick's output and release the previously-assigned units from defensiveoperations.
+        // Key: allianceId → threatSignature → set of UnitInstanceIds.
+        // Cross-campaign bleed is accepted as a known limitation (same as _firstAssignmentLogged).
+        private static readonly Dictionary<int, Dictionary<string, HashSet<int>>> _assignedByThreat =
+            new Dictionary<int, Dictionary<string, HashSet<int>>>();
+
         internal static void Run(int allianceId, DefenseIntentLedgerOutput output)
         {
             try
@@ -44,10 +52,16 @@ namespace WhiskeyRealism.Strategic
 
                 bool verbose = Plugin.Instance != null && Plugin.Instance.DefenseIntentVerboseLogging.Value;
 
+                // Build this tick's assignment map: signature → set of assigned unit IDs.
+                // Populated during the assignment loop below; used afterwards for release tracking.
+                var thisTick = new Dictionary<string, HashSet<int>>();
+
                 foreach (var response in output.Responses)
                 {
                     if (response?.SelectedPackage == null || response.SelectedPackage.Count == 0) continue;
                     if (!RequiresCustomOrder(response)) continue;
+
+                    string sig = response.Threat?.Signature ?? "<no-sig>";
 
                     foreach (var candidate in response.SelectedPackage)
                     {
@@ -60,24 +74,75 @@ namespace WhiskeyRealism.Strategic
                         SafeMoveUnitTo(unit, anchor);
                         defOps.Add(unit);
 
-                        string logKey = $"{allianceId}|{response.Threat.Signature}|{candidate.UnitInstanceId}";
+                        if (!thisTick.TryGetValue(sig, out var tickSet))
+                        {
+                            tickSet = new HashSet<int>();
+                            thisTick[sig] = tickSet;
+                        }
+                        tickSet.Add(candidate.UnitInstanceId);
+
+                        string logKey = $"{allianceId}|{sig}|{candidate.UnitInstanceId}";
                         bool firstAssignment = _firstAssignmentLogged.Add(logKey);
                         if (firstAssignment || verbose)
                         {
+                            string unitName = SafeName(unit, candidate.UnitInstanceId);
                             Plugin.Log.LogInfo(
                                 $"[DefenseIntent] custom-order alliance={allianceId} " +
-                                $"threat={response.Threat.Signature} " +
-                                $"unit={((UnityEngine.Object)unit).name} " +
+                                $"threat={sig} " +
+                                $"unit={unitName} " +
                                 $"posture={response.Threat.Posture}");
                         }
                     }
                 }
+
+                // Also record threat signatures present this tick even when no
+                // custom order was issued (Recovered responses with empty SelectedPackage
+                // keep units assigned — do NOT release while the threat is still in output).
+                foreach (var response in output.Responses)
+                {
+                    string sig = response?.Threat?.Signature;
+                    if (string.IsNullOrEmpty(sig)) continue;
+                    if (!thisTick.ContainsKey(sig))
+                        thisTick[sig] = new HashSet<int>(); // empty sentinel — signature is still active
+                }
+
+                // Release units for threat signatures that have fully disappeared
+                // from this tick's output (not present in thisTick at all).
+                if (_assignedByThreat.TryGetValue(allianceId, out var prior))
+                {
+                    foreach (var kv in prior)
+                    {
+                        if (thisTick.ContainsKey(kv.Key)) continue; // signature still active — keep units assigned
+                        foreach (var unitId in kv.Value)
+                        {
+                            var unit = FindUnitByInstanceId(ownUnits, unitId);
+                            if (unit == null) continue;
+                            if (!defOps.Contains(unit)) continue;
+                            defOps.Remove(unit);
+                            Plugin.Log.LogInfo(
+                                $"[DefenseIntent] released alliance={allianceId} " +
+                                $"threat={kv.Key} " +
+                                $"unit={SafeName(unit, unitId)}");
+                        }
+                    }
+                }
+
+                // Replace prior tick's map with this tick's — anything not in thisTick
+                // has been released above and will not fire again unless reassigned.
+                _assignedByThreat[allianceId] = thisTick;
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("defense-intent:custom-order:run",
                     "CoastalDefenseCustomOrderRunner.Run failed: " + ex.Message);
             }
+        }
+
+        // Safe name accessor — guards against MissingReferenceException on destroyed objects.
+        private static string SafeName(Regiment unit, int fallbackId)
+        {
+            try { return ((UnityEngine.Object)unit).name; }
+            catch { return fallbackId.ToString(); }
         }
 
         private static bool RequiresCustomOrder(DefenseResponse response)
