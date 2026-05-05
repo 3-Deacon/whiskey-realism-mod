@@ -208,7 +208,12 @@ static class Program
             ("defense ledger donor theater budget blocks critical front export", DefenseLedgerDonorTheaterBudgetBlocksCriticalFrontExport),
             ("defense ledger formation directive blocks defense movement", DefenseLedgerFormationDirectiveBlocksDefenseMovement),
             ("defense ledger capital defense package is capped", DefenseLedgerCapitalDefensePackageIsCapped),
-            ("strategic movement budget blocks area export from hold sector", StrategicMovementBudgetBlocksAreaExportFromHoldSector)
+            ("strategic movement budget blocks area export from hold sector", StrategicMovementBudgetBlocksAreaExportFromHoldSector),
+            ("phase truth advances when target accomplished", PhaseTruthAdvancesWhenTargetAccomplished),
+            ("phase truth replans when objective unavailable", PhaseTruthReplansWhenObjectiveUnavailable),
+            ("phase truth recovers when force below threshold", PhaseTruthRecoversWhenForceBelowThreshold),
+            ("phase truth deadline expired advances or replans", PhaseTruthDeadlineExpiredAdvancesOrReplans),
+            ("phase truth no contact stays continue", PhaseTruthNoContactStaysContinue)
         };
 
         foreach (var test in tests)
@@ -4454,5 +4459,92 @@ static class Program
             CICPersonality = default(PersonalityVector),
             TotalAllianceEffectiveStrength = 60000f
         };
+    }
+
+    // -----------------------------------------------------------------------
+    // PhaseTruthLedger tests
+    // -----------------------------------------------------------------------
+
+    private static void PhaseTruthAdvancesWhenTargetAccomplished()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            TargetAccomplished = true,
+            ObjectiveAvailable = true,
+            TargetSectorOwnStrength = 10000f,
+            RequiredForce = 5000f,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.TargetAccomplished, output.Verdict);
+        AssertEqual(PhaseTruthAction.Advance, output.RecommendedAction);
+    }
+
+    private static void PhaseTruthReplansWhenObjectiveUnavailable()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            TargetAccomplished = false,
+            ObjectiveAvailable = false,
+            TargetSectorOwnStrength = 10000f,
+            RequiredForce = 5000f,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.ObjectiveUnavailable, output.Verdict);
+        AssertEqual(PhaseTruthAction.Replan, output.RecommendedAction);
+    }
+
+    private static void PhaseTruthRecoversWhenForceBelowThreshold()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            TargetAccomplished = false,
+            ObjectiveAvailable = true,
+            TargetSectorOwnStrength = 1000f,
+            RequiredForce = 5000f,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.ForceBelowThreshold, output.Verdict);
+        AssertEqual(PhaseTruthAction.Recover, output.RecommendedAction);
+    }
+
+    private static void PhaseTruthDeadlineExpiredAdvancesOrReplans()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 1, DeadlineYear = 1862 } } },
+            TargetAccomplished = false,
+            ObjectiveAvailable = true,
+            TargetSectorOwnStrength = 10000f,
+            RequiredForce = 5000f,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.DeadlineExpired, output.Verdict);
+        AssertTrue(output.RecommendedAction == PhaseTruthAction.Advance ||
+                   output.RecommendedAction == PhaseTruthAction.Replan,
+                   "deadline expired should advance or replan");
+    }
+
+    private static void PhaseTruthNoContactStaysContinue()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            TargetAccomplished = false,
+            ObjectiveAvailable = true,
+            TargetSectorOwnStrength = 10000f,
+            RequiredForce = 5000f,
+            TargetEngagedRecently = false,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.Valid, output.Verdict);
+        AssertEqual(PhaseTruthAction.Continue, output.RecommendedAction);
     }
 }
