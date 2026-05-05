@@ -139,7 +139,10 @@ static class Program
             ("threat signature for sif uses instance and spot", ThreatSignatureForSifUsesInstanceAndSpot),
             ("threat signature for raid uses instance and asset", ThreatSignatureForRaidUsesInstanceAndAsset),
             ("threat signature for asset uses sorted top-n enemies", ThreatSignatureForAssetUsesSortedTopN),
-            ("threat signature is stable across reordered enemies", ThreatSignatureIsStableAcrossReorderedEnemies)
+            ("threat signature is stable across reordered enemies", ThreatSignatureIsStableAcrossReorderedEnemies),
+            ("threat signature for raid handles null asset", ThreatSignatureForRaidHandlesNullAsset),
+            ("threat signature for asset handles null name", ThreatSignatureForAssetHandlesNullName),
+            ("threat signature for asset clamps topn at one", ThreatSignatureForAssetClampsTopNAtOne)
         };
 
         foreach (var test in tests)
@@ -2524,6 +2527,34 @@ static class Program
         var b = DefenseThreatSignature.ForAsset(
             CampaignMapAssetKind.RiverHarbor, "memphis-harbor", new[] { 1, 5, 3 }, topN: 5);
         AssertEqual(a, b);
+    }
+
+    private static void ThreatSignatureForRaidHandlesNullAsset()
+    {
+        AssertEqual("raid:7:<no-asset>", DefenseThreatSignature.ForRaid(7, null));
+        AssertEqual("raid:7:<no-asset>", DefenseThreatSignature.ForRaid(7, ""));
+    }
+
+    private static void ThreatSignatureForAssetHandlesNullName()
+    {
+        AssertEqual("asset:Fort:<no-asset>:1,2",
+            DefenseThreatSignature.ForAsset(CampaignMapAssetKind.Fort, null, new[] { 2, 1 }, topN: 5));
+        AssertEqual("asset:Fort:<no-asset>:<no-enemies>",
+            DefenseThreatSignature.ForAsset(CampaignMapAssetKind.Fort, "", null, topN: 5));
+        AssertEqual("asset:Fort:<no-asset>:<no-enemies>",
+            DefenseThreatSignature.ForAsset(CampaignMapAssetKind.Fort, "", new int[0], topN: 5));
+    }
+
+    private static void ThreatSignatureForAssetClampsTopNAtOne()
+    {
+        // topN <= 0 must NOT collapse to <no-enemies>; must take at least one ID.
+        var sig = DefenseThreatSignature.ForAsset(
+            CampaignMapAssetKind.SeaHarbor, "norfolk-harbor", new[] { 7, 3, 5 }, topN: 0);
+        AssertEqual("asset:SeaHarbor:norfolk-harbor:3", sig);
+
+        var negativeTopN = DefenseThreatSignature.ForAsset(
+            CampaignMapAssetKind.SeaHarbor, "norfolk-harbor", new[] { 7, 3, 5 }, topN: -2);
+        AssertEqual("asset:SeaHarbor:norfolk-harbor:3", negativeTopN);
     }
 
     private static void AssertEqual<T>(T expected, T actual)
