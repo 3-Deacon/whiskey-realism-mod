@@ -27,6 +27,24 @@ Verified vanilla anchors:
 - `TimePanel.SetRetreatTimer(...)` at line 221271 controls the battle retreat timer after retreat is chosen.
 - Prior decompile review found `BattleUnits` tracks strength still to arrive and reinforcement arrivals within the AI retreat decision window. Vanilla already considers reinforcements in some global-retreat logic, but not as a full tactical doctrine.
 
+Historical doctrine inputs:
+
+- Jomini's useful tactical translation is "mass at the decisive point", not "attack everywhere because total force is larger." For Whiskey, superior AI should seek local superiority in one or two sectors while other sectors fix, hold, or demonstrate.
+- Clausewitz's useful tactical translation is that defense is the stronger form because it uses ground, preparation, and waiting, but a good defense still looks for a counterstroke after the attacker is spent or exposed.
+- Casey/Hardee-era Civil War infantry practice supports skirmishers, screening, successive lines, sector command, and echelon/flank protection. The AI should probe and screen before main-body commitment, then attack through selected sectors with support nearby.
+- Cavalry outpost doctrine emphasizes videttes, patrols, observation, reporting enemy strength/direction, and slow skirmishing withdrawal. This maps directly to battle scouting, flank security, and rear-guard behavior.
+- Civil War assault examples such as Pickett's Charge show the failure mode this slice must avoid: large frontal commitment over exposed ground into a prepared position after inadequate confirmation that the enemy was actually broken.
+
+Reference sources:
+
+- Jomini, `The Art of War`: https://www.gutenberg.org/files/13549/13549-h/13549-h.htm
+- Clausewitz, `On War`: https://www.gutenberg.org/ebooks/1946.html.images
+- Casey, `Infantry Tactics`: https://commons.wikimedia.org/wiki/File:Infantry_tactics,_for_the_instruction,_exercise,_and_man%C5%93uvres_of_the_soldier,_a_company,_line_of_skirmishers,_battalion,_brigade,_or_corps_d%27arm%C3%A9e_(IA_infantrytacticsf02brig).pdf
+- Hardee, `Rifle and Light Infantry Tactics`: https://openlibrary.org/works/OL5804461W/Rifle_and_light_infantry_tactics
+- Cavalry outpost doctrine: https://www.gutenberg.org/ebooks/54515.html.images
+- Civil War infantry tactics summary: https://en.wikipedia.org/wiki/Infantry_in_the_American_Civil_War
+- Pickett's Charge example: https://www.battlefields.org/learn/articles/picketts-charge
+
 ## Goal
 
 Make battlefield AI fight like a commander with a plan instead of collapsing into a blob.
@@ -59,9 +77,10 @@ The AI should:
 
 Slice B should be built as a tactical doctrine layer around vanilla, not a battle-AI replacement.
 
-The core addition is a runtime-only tactical brain that produces three read-only outputs for patches:
+The core addition is a runtime-only tactical brain that produces four read-only outputs for patches:
 
 - `TacticalBattlePlan`: the side's current high-level idea for the battle.
+- `TacticalOddsDoctrine`: current/projected odds, local-superiority opportunities, and inferior-force preservation posture.
 - `TacticalSectorLedger`: sector-by-sector contact, strength, terrain, flank, and mission assessment.
 - `TacticalDoctrineDecision`: bounded decisions for macro stance, group stance, reserve relief, bombardment, charge gating, flank security, and withdrawal.
 
@@ -168,6 +187,55 @@ Sector scoring should consider:
 - objective value;
 - commander personality.
 
+## Odds And Local Superiority Doctrine
+
+The tactical brain should reason from local superiority, not just total battle strength. A larger army should not blob. A smaller army should not passively die in place.
+
+Create a `TacticalOddsDoctrine` that computes:
+
+- `currentGlobalOdds`: active own strength versus estimated active enemy strength.
+- `projectedGlobalOdds`: current odds plus likely own/enemy reinforcements inside the tactical window.
+- `localSectorOdds`: own/enemy strength by sector, with confidence ranges.
+- `decisivePoint`: the sector where local advantage, terrain, objective value, and enemy weakness make action worthwhile.
+- `economyOfForceSectors`: sectors that should hold, fix, screen, or demonstrate with minimum necessary force.
+- `inferiorForcePosture`: whether the weaker side should defend, delay, counterstroke, or withdraw.
+
+Suggested posture bands:
+
+| Estimated odds | Default posture | Doctrine |
+|---|---|---|
+| `>= 2.5:1` local advantage | `DecisiveAttack` | Fix most sectors, assault the decisive sector, keep a reserve, exploit only after collapse. |
+| `1.5:1` to `2.5:1` | `LimitedAttack` | Probe, bombard, flank if safe, attack by sector. |
+| `0.9:1` to `1.5:1` | `Balanced` | Scout, hold good ground, attack only confirmed weak sectors. |
+| `0.6:1` to `0.9:1` | `DefensiveDelay` | Shorten line, use artillery, refuse flanks, counterattack locally. |
+| `< 0.6:1` | `OrderlyWithdrawal` | Cover retreat, preserve artillery, use rear guard, full retreat if no relief. |
+| `< 0.6:1` with strong terrain or near relief | `DelayAndPreserve` | Hold prepared line, avoid charges, buy time for reinforcements or night/objective relief. |
+
+Superior-force behavior:
+
+- choose one main-effort sector and at most one supporting sector;
+- assign non-main sectors to `Hold`, `Fix`, `Screen`, or `Demonstrate`;
+- keep a reserve fraction unless enemy collapse or own flank crisis justifies commitment;
+- prefer flank, gap, exposed artillery, low-morale enemy, or poor-cover sector over a prepared front;
+- bombard or probe strong points before assault;
+- pursue with cavalry/fresh troops only after enemy withdrawal or rout is confirmed.
+
+Inferior-force behavior:
+
+- find a shorter, better defensive line using cover, height, woods, rivers, fortifications, or map edge;
+- refuse threatened flanks and avoid long thin lines;
+- screen and delay with cavalry/skirmishers while the main body forms or withdraws;
+- launch only local counterstrokes against overextended or disordered attackers;
+- relieve battered units before rout when reserves are available;
+- choose staged withdrawal when projected odds, morale, ammo, casualties, and reserve state all point toward decisive defeat.
+
+Hard rules:
+
+- never translate global superiority directly into all-sector attack;
+- never translate global inferiority directly into instant full retreat;
+- local action needs confidence and a route, not just a ratio;
+- personality can shift thresholds but cannot erase hard collapse or hard opportunity.
+
 ## Macro Stance Scoring
 
 Patch surface: `AIBattle.CheckGlobalAIStrategy()`.
@@ -182,6 +250,7 @@ Vanilla macro stances are too coarse and partly data-driven. Whiskey should add 
 The score should include:
 
 - current odds and projected odds including reinforcements;
+- local sector odds and decisive-point confidence;
 - battle objective stakes;
 - own losses and rout risk;
 - enemy weakness or strong-point confidence;
@@ -275,7 +344,9 @@ Reserve discipline:
 
 - do not magnetize reserves into melee simply because a nearby line group is fighting;
 - avoid stacking multiple reserves on the same target;
-- keep at least one reserve uncommitted unless battle plan or emergency requires full commitment;
+- keep at least one reserve uncommitted unless battle plan, breakthrough exploitation, rear-guard duty, or emergency requires full commitment;
+- preserve a reserve fraction when superior so the AI can exploit success without stripping flank security;
+- preserve a reserve fraction when inferior so the AI can relieve a collapsing sector or cover withdrawal;
 - route reserves through safer rear/road paths where possible.
 
 ## Flank Security And Denial
@@ -384,6 +455,7 @@ Doctrine:
 - if reinforcements are close, use existing forces to screen and preserve a line for arrival;
 - do not attack merely because reinforcements exist if they cannot arrive before local collapse;
 - if enemy reinforcements are likely, avoid overcommitting into a trap.
+- if superior now but enemy reinforcements are close, prefer limited attack, flank security, and reserve preservation over full commitment.
 
 Example rule:
 
@@ -473,6 +545,7 @@ Proposed new namespace:
 - `src/WhiskeyRealism/Tactical/TacticalBattleContext.cs`
 - `src/WhiskeyRealism/Tactical/TacticalCommanderProfile.cs`
 - `src/WhiskeyRealism/Tactical/TacticalContactLedger.cs`
+- `src/WhiskeyRealism/Tactical/TacticalOddsDoctrine.cs`
 - `src/WhiskeyRealism/Tactical/TacticalSectorLedger.cs`
 - `src/WhiskeyRealism/Tactical/TacticalBattlePlan.cs`
 - `src/WhiskeyRealism/Tactical/TacticalDoctrineScorer.cs`
@@ -509,12 +582,13 @@ This umbrella spec should be implemented in bounded steps:
 
 1. `B0 Tactical Observer`: read-only battle context, sector/contact ledger, telemetry, no behavior changes.
 2. `B1 W&L Feud And Charge Guard`: narrow guard for player-subordinate auto-charge/feud actions.
-3. `B2 Macro Stance Scorer`: Postfix/clamp global strategy with odds, losses, reinforcements, terrain, and personality.
-4. `B3 Group Sector Stance`: sector-aware hold/screen/fix/probe/attack stance decisions.
-5. `B4 Reserve Relief And Flank Doctrine`: reserve roles, relief triggers, flank guard/refuse behavior.
-6. `B5 Artillery And Strongpoint Doctrine`: bombardment before assault, counterbattery, avoid/attack weak points.
-7. `B6 Withdrawal Doctrine`: staged fallback, rear guard, full retreat safeguards.
-8. `B7 Tuning And Telemetry Soak`: battleprefs validation, bounded logs, runtime smoke matrix.
+3. `B2 Tactical Odds Doctrine`: local-superiority, decisive-point, economy-of-force, and inferior-force posture scorer.
+4. `B3 Macro Stance Scorer`: Postfix/clamp global strategy with odds, losses, reinforcements, terrain, and personality.
+5. `B4 Group Sector Stance`: sector-aware hold/screen/fix/probe/attack stance decisions.
+6. `B5 Reserve Relief And Flank Doctrine`: reserve roles, relief triggers, flank guard/refuse behavior.
+7. `B6 Artillery And Strongpoint Doctrine`: bombardment before assault, counterbattery, avoid/attack weak points.
+8. `B7 Withdrawal Doctrine`: staged fallback, rear guard, full retreat safeguards.
+9. `B8 Tuning And Telemetry Soak`: battleprefs validation, bounded logs, runtime smoke matrix.
 
 Each slice should have pure scorer tests before Harmony patch wiring.
 
@@ -543,6 +617,10 @@ Pure tests should cover:
 
 - enemy strength estimate from confirmed/recent/inferred contacts;
 - no-contact plan chooses scout/hold, not assault;
+- superior global odds do not cause all sectors to attack;
+- superior local odds choose one decisive sector and assign economy-of-force missions elsewhere;
+- inferior global odds choose defense/delay before retreat when terrain or relief justifies it;
+- inferior global odds choose orderly withdrawal when terrain, morale, ammo, reserves, and projected relief are all bad;
 - sector attack chooses one weak sector while neighbors fix/hold;
 - strong point favors bombard/avoid;
 - 4,000 versus 12,000 with no relief chooses withdrawal;
@@ -570,6 +648,8 @@ Slice B is successful when:
 - AI no longer commonly opens with all formations rushing the same point without contact.
 - Scout/screen behavior creates small early skirmishes before main commitment.
 - Only selected sectors attack while others hold, fix, screen, or support.
+- Superior AI concentrates force at a decisive point instead of attacking everywhere.
+- Inferior AI uses terrain, shortened lines, local counterstrokes, and staged withdrawal instead of standing to annihilation.
 - Reserves relieve damaged units before the line routs when reserves are available.
 - Artillery bombards strong points and supports assaults instead of always moving with infantry.
 - AI avoids or works around fortifications when a feasible weak point exists.
