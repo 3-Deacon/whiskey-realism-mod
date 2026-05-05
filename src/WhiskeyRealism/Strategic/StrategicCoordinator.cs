@@ -272,7 +272,8 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 var cic = CICs[alliance];
-                if (!cic.ReviewPlan(month, year))
+                var phaseTruth = BuildPhaseTruth(cic, alliance, day, month, year);
+                if (!cic.ReviewPlanWithTruth(month, year, phaseTruth))
                     cic.Replan(era, month, year);
 
                 fiscalMs += Measure(() => UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat));
@@ -347,6 +348,47 @@ namespace WhiskeyRealism.Strategic
             action();
             watch.Stop();
             return watch.Elapsed.TotalMilliseconds;
+        }
+
+        // Builds a PhaseTruthInput from live game state and evaluates it.
+        // Returns null when the plan or phase is absent (ReviewPlanWithTruth falls back to
+        // the deadline-only ReviewPlan path on null).
+        private PhaseTruthOutput BuildPhaseTruth(CIC cic, int alliance, int day, int month, int year)
+        {
+            if (cic?.ActivePlan?.CurrentPhase == null) return null;
+            var phase = cic.ActivePlan.CurrentPhase;
+            var fronts = alliance < Fronts.Length ? Fronts[alliance] : null;
+            var targetPos = ObjectiveAdapter.ResolveObjectivePosition(phase.TargetObjectiveId);
+            string sectorKey = targetPos.HasValue ? FrontSectorRuntime.SectorKey(targetPos.Value) : null;
+            var sector = fronts?.GetSector(sectorKey);
+            int daySerial = year * 372 + month * 31 + day;
+            bool engagedRecently = false;
+            if (targetPos.HasValue)
+            {
+                foreach (var _ in BattleHistoryQuery.Near(
+                    BattleHistory,
+                    targetPos.Value,
+                    GamePrefs.aimaximumdistancetosearchforunitrelocations,
+                    daySerial,
+                    14))
+                {
+                    engagedRecently = true; break;
+                }
+            }
+            var input = new PhaseTruthInput
+            {
+                Plan                     = cic.ActivePlan,
+                TargetAccomplished       = ObjectiveAdapter.IsAccomplished(phase.TargetObjectiveId),
+                ObjectiveAvailable       = ObjectiveAdapter.IsAvailable(phase.TargetObjectiveId, alliance),
+                TargetPositionResolves   = targetPos.HasValue,
+                TargetEngagedRecently    = engagedRecently,
+                TargetSectorOwnStrength  = sector?.OwnStrength ?? 0f,
+                RequiredForce            = phase.ForceFractionRequired *
+                                           ((sector?.OwnStrength ?? 0f) + (sector?.EnemyStrength ?? 0f)),
+                CurrentMonth             = month,
+                CurrentYear              = year
+            };
+            return PhaseTruthLedger.Evaluate(input);
         }
 
         private static bool ShouldLogStrategicPerf(double elapsedMs)

@@ -41,6 +41,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\TheaterPressureView.cs" Link="TheaterPressureView.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Phase.cs" Link="Phase.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PhaseTruthLedger.cs" Link="PhaseTruthLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicReviewRouter.cs" Link="CicReviewRouter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DailyCadence.cs" Link="DailyCadence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategicCadencePolicy.cs" Link="StrategicCadencePolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalStartupGate.cs" Link="OperationalStartupGate.cs" />

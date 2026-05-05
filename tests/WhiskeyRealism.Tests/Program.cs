@@ -233,7 +233,8 @@ static class Program
             ("campaign pace publishes theater priority from highest pressure theater", CampaignPacePublishesTheaterPriorityFromHighestPressureTheater),
             ("director clamps threshold modifier to half personality delta", DirectorClampsThresholdModifierToHalfPersonalityDelta),
             ("director maps overheated pace to recover-leaning intent", DirectorMapsOverheatedToRecoverLeaning),
-            ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk)
+            ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk),
+            ("cic review plan replans when phase truth says target accomplished", CicReviewPlanReplansWhenPhaseTruthSaysAccomplished)
         };
 
         foreach (var test in tests)
@@ -4910,5 +4911,41 @@ static class Program
             personality: new PersonalityVector { Caution = 0.6f });
         AssertTrue(posture.Intent != StrategicIntent.Preserve,
             "1864 CSA under elevated risk cannot publish Preserve");
+    }
+
+    // Task 13: CicReviewRouter.RouteAction routes Advance → AdvancePhase, which exhausts the
+    // last phase and marks the plan dirty. Single-phase plan: after accomplished truth,
+    // IsDirty=true, return false (signals replan to caller).
+    // CIC.ReviewPlanWithTruth delegates to CicReviewRouter, so this exercises the real routing
+    // logic without requiring BepInEx/HarmonyLib in the test harness.
+    private static void CicReviewPlanReplansWhenPhaseTruthSaysAccomplished()
+    {
+        var plan = new OperationalPlan
+        {
+            CurrentPhaseIndex = 0,
+            PlanDeadlineMonth = 12,
+            PlanDeadlineYear = 1862,
+            IsDirty = false
+        };
+        plan.Phases.Add(new Phase
+        {
+            TargetObjectiveId = 42,
+            ForceFractionRequired = 0.5f,
+            Transition = PhaseTransition.TargetTaken,
+            DeadlineMonth = 12,
+            DeadlineYear = 1862
+        });
+
+        // Accomplished → PhaseTruthAction.Advance → AdvancePhase (no next phase) → IsDirty=true, false
+        var truth = new PhaseTruthOutput
+        {
+            Verdict = PhaseTruthVerdict.TargetAccomplished,
+            RecommendedAction = PhaseTruthAction.Advance,
+            Reason = "target-accomplished"
+        };
+
+        bool result = CicReviewRouter.RouteAction(plan, truth, 6, 1862);
+        AssertTrue(!result, "RouteAction should return false when last phase is exhausted by Advance");
+        AssertTrue(plan.IsDirty, "plan.IsDirty should be true after last phase exhausted by Advance");
     }
 }
