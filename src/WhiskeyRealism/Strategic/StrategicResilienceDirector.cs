@@ -107,6 +107,46 @@ namespace WhiskeyRealism.Strategic
             options.MinimumProbeDays             = ClampInt(options.MinimumProbeDays + (int)Math.Round(posture.MinimumProbeDaysModifier), 1, 9);
         }
 
+        internal static DirectorMemoryDto MemoryToDto(DirectorMemory memory)
+        {
+            if (memory == null) return null;
+            var dto = new DirectorMemoryDto
+            {
+                LastFullRefreshDay     = memory.LastFullRefreshDay,
+                CapitalDangerStreakDays = memory.CapitalDangerStreakDays,
+                DaysSinceLastBattle    = memory.DaysSinceLastBattle,
+                LastSourceSignature    = memory.LastSourceSignature,
+                RecentEventSummaries   = new System.Collections.Generic.List<string>(memory.RecentEventSummaries ?? new System.Collections.Generic.List<string>())
+            };
+            if (memory.LastPosture != null)
+            {
+                dto.Pace           = (int)memory.LastPosture.Pace;
+                dto.Intent         = (int)memory.LastPosture.Intent;
+                dto.Risk           = (int)memory.LastPosture.Risk;
+                dto.TheaterPriority = (int)memory.LastPosture.TheaterPriority;
+            }
+            return dto;
+        }
+
+        internal static DirectorMemory MemoryFromDto(DirectorMemoryDto dto)
+        {
+            var memory = new DirectorMemory();
+            if (dto == null) return memory;
+            memory.LastFullRefreshDay      = dto.LastFullRefreshDay;
+            memory.CapitalDangerStreakDays  = dto.CapitalDangerStreakDays;
+            memory.DaysSinceLastBattle     = dto.DaysSinceLastBattle;
+            memory.LastSourceSignature     = dto.LastSourceSignature;
+            memory.RecentEventSummaries    = dto.RecentEventSummaries ?? new System.Collections.Generic.List<string>();
+            memory.LastPosture = new DirectorPosture
+            {
+                Pace            = (CampaignPace)dto.Pace,
+                Intent          = (StrategicIntent)dto.Intent,
+                Risk            = (CollapseRisk)dto.Risk,
+                TheaterPriority = (Theater)dto.TheaterPriority
+            };
+            return memory;
+        }
+
         private static float Clamp(float v, float lo, float hi) => v < lo ? lo : (v > hi ? hi : v);
         private static int   ClampInt(int v, int lo, int hi)    => v < lo ? lo : (v > hi ? hi : v);
     }

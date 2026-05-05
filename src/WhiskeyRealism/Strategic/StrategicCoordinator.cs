@@ -42,6 +42,7 @@ namespace WhiskeyRealism.Strategic
         internal SuccessionScheduler Succession = new SuccessionScheduler();
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
+        internal readonly DirectorMemory[] DirectorMemories = new DirectorMemory[2] { new DirectorMemory(), new DirectorMemory() };
         private readonly FiscalStateMemory[] _fiscalMemory = new FiscalStateMemory[2]
         {
             new FiscalStateMemory(),
@@ -783,6 +784,10 @@ namespace WhiskeyRealism.Strategic
                     personality,
                     BattleHistory);
 
+                var posture = DirectorMemories[alliance]?.LastPosture;
+                if (posture != null)
+                    StrategicResilienceDirector.ApplyTo(input.Options, posture);
+
                 var output = OperationalProbeLedger.Build(input);
                 OperationalProbes[alliance] = output;
 
@@ -1111,6 +1116,7 @@ namespace WhiskeyRealism.Strategic
                         ActivePlan  = (CICs[alliance].ActivePlan != null) ? PlanToDto(CICs[alliance].ActivePlan) : null
                     }
                 };
+                f.DirectorMemory = StrategicResilienceDirector.MemoryToDto(DirectorMemories[alliance]);
                 dto.Factions.Add(f);
             }
             foreach (var kv in MinorOfficerProfiles)
@@ -1150,6 +1156,7 @@ namespace WhiskeyRealism.Strategic
                     ActivePlan         = (f.Cic?.ActivePlan != null) ? PlanFromDto(f.Cic.ActivePlan, f.FactionId) : null
                 };
                 CICs[f.FactionId] = cic;
+                DirectorMemories[f.FactionId] = StrategicResilienceDirector.MemoryFromDto(f.DirectorMemory);
             }
             MinorOfficerProfiles.Clear();
             foreach (var m in dto.MinorOfficerProfiles)

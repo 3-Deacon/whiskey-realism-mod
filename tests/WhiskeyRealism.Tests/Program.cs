@@ -234,6 +234,7 @@ static class Program
             ("director clamps threshold modifier to half personality delta", DirectorClampsThresholdModifierToHalfPersonalityDelta),
             ("director maps overheated pace to recover-leaning intent", DirectorMapsOverheatedToRecoverLeaning),
             ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk),
+            ("director memory round trips through dto", DirectorMemoryRoundTripsThroughDto),
             ("cic review plan replans when phase truth says target accomplished", CicReviewPlanReplansWhenPhaseTruthSaysAccomplished)
         };
 
@@ -4911,6 +4912,40 @@ static class Program
             personality: new PersonalityVector { Caution = 0.6f });
         AssertTrue(posture.Intent != StrategicIntent.Preserve,
             "1864 CSA under elevated risk cannot publish Preserve");
+    }
+
+    // Task 14: MemoryToDto/MemoryFromDto preserve all key fields including LastPosture enum values
+    // and RecentEventSummaries list. Null DTO input must yield a fresh DirectorMemory.
+    private static void DirectorMemoryRoundTripsThroughDto()
+    {
+        var memory = new DirectorMemory
+        {
+            LastFullRefreshDay = 12345,
+            CapitalDangerStreakDays = 3,
+            DaysSinceLastBattle = 7,
+            LastSourceSignature = "sig-abc",
+            LastPosture = new DirectorPosture
+            {
+                AllianceId = 0,
+                Pace = CampaignPace.LateWarPressure,
+                Intent = StrategicIntent.Concentrate,
+                Risk = CollapseRisk.Low,
+                TheaterPriority = Theater.East
+            }
+        };
+        memory.RecentEventSummaries.Add("battle:east:1864-06-15");
+
+        var dto = StrategicResilienceDirector.MemoryToDto(memory);
+        var rebuilt = StrategicResilienceDirector.MemoryFromDto(dto);
+
+        AssertEqual(memory.LastFullRefreshDay, rebuilt.LastFullRefreshDay);
+        AssertEqual(memory.CapitalDangerStreakDays, rebuilt.CapitalDangerStreakDays);
+        AssertEqual(memory.LastSourceSignature, rebuilt.LastSourceSignature);
+        AssertEqual(memory.LastPosture.Pace, rebuilt.LastPosture.Pace);
+        AssertEqual(memory.LastPosture.Intent, rebuilt.LastPosture.Intent);
+        AssertEqual(memory.LastPosture.Risk, rebuilt.LastPosture.Risk);
+        AssertEqual(memory.LastPosture.TheaterPriority, rebuilt.LastPosture.TheaterPriority);
+        AssertEqual(1, rebuilt.RecentEventSummaries.Count);
     }
 
     // Task 13: CicReviewRouter.RouteAction routes Advance → AdvancePhase, which exhausts the
