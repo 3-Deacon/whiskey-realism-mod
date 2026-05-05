@@ -142,7 +142,11 @@ static class Program
             ("threat signature is stable across reordered enemies", ThreatSignatureIsStableAcrossReorderedEnemies),
             ("threat signature for raid handles null asset", ThreatSignatureForRaidHandlesNullAsset),
             ("threat signature for asset handles null name", ThreatSignatureForAssetHandlesNullName),
-            ("threat signature for asset clamps topn at one", ThreatSignatureForAssetClampsTopNAtOne)
+            ("threat signature for asset clamps topn at one", ThreatSignatureForAssetClampsTopNAtOne),
+            ("package aggregator picks smaller adequate over remote oversized", PackageAggregatorPicksSmallerAdequateOverRemoteOversized),
+            ("package aggregator stops at overshoot guard", PackageAggregatorStopsAtOvershootGuard),
+            ("package aggregator emits understrength flag", PackageAggregatorEmitsUnderstrengthFlag),
+            ("package aggregator suppresses overmatch reason", PackageAggregatorSuppressesOvermatchReason)
         };
 
         foreach (var test in tests)
@@ -2566,5 +2570,84 @@ static class Program
     private static void AssertTrue(bool condition, string message)
     {
         if (!condition) throw new Exception(message);
+    }
+
+    private static void PackageAggregatorPicksSmallerAdequateOverRemoteOversized()
+    {
+        var local1 = MakeDefenseCandidate(id: 1, str: 3000f, mor: 0.85f, ready: 2f, distance: 50f, tier: CandidateTier.Local);
+        var local2 = MakeDefenseCandidate(id: 2, str: 3000f, mor: 0.85f, ready: 2f, distance: 60f, tier: CandidateTier.Local);
+        var crossMap = MakeDefenseCandidate(id: 99, str: 20000f, mor: 0.9f, ready: 2f, distance: 800f, tier: CandidateTier.CrossMap);
+
+        var result = DefensePackageAggregator.Select(
+            candidates: new[] { local1, local2, crossMap },
+            desiredStrength: 4500f,
+            caution: 0.2f,
+            aggression: 0f);
+
+        AssertTrue(result.SelectedPackage.Count >= 1 && result.SelectedPackage.Count <= 2,
+            "should pick 1-2 local candidates, not the cross-map army");
+        AssertTrue(result.Adequate, "package should clear adequate threshold");
+        AssertTrue(!result.Understrength, "should not be understrength");
+        AssertTrue(result.Suppressed.Exists(s => s.UnitInstanceId == 99),
+            "cross-map army should be suppressed");
+        AssertTrue(!result.SelectedPackage.Exists(c => c.UnitInstanceId == 99),
+            "cross-map army must not be in selected package");
+    }
+
+    private static void PackageAggregatorStopsAtOvershootGuard()
+    {
+        var local1 = MakeDefenseCandidate(1, 6000f, 0.9f, 2f, 50f, CandidateTier.Local);
+        var local2 = MakeDefenseCandidate(2, 6000f, 0.9f, 2f, 50f, CandidateTier.Local);
+        var local3 = MakeDefenseCandidate(3, 6000f, 0.9f, 2f, 50f, CandidateTier.Local);
+
+        var result = DefensePackageAggregator.Select(
+            candidates: new[] { local1, local2, local3 },
+            desiredStrength: 5000f,
+            caution: 0.2f, aggression: 0f);
+
+        AssertEqual(1, result.SelectedPackage.Count);
+        AssertTrue(result.Adequate, "single local should clear desired");
+    }
+
+    private static void PackageAggregatorEmitsUnderstrengthFlag()
+    {
+        var local1 = MakeDefenseCandidate(1, 1500f, 0.7f, 1f, 50f, CandidateTier.Local);
+
+        var result = DefensePackageAggregator.Select(
+            candidates: new[] { local1 },
+            desiredStrength: 6000f,
+            caution: 0.2f, aggression: 0f);
+
+        AssertTrue(!result.Adequate, "single understrength brigade should not be adequate");
+        AssertTrue(result.Understrength, "should be flagged understrength");
+        AssertEqual(1, result.SelectedPackage.Count);
+    }
+
+    private static void PackageAggregatorSuppressesOvermatchReason()
+    {
+        var oversized = MakeDefenseCandidate(1, 30000f, 0.9f, 2f, 50f, CandidateTier.Local);
+        var rightSized = MakeDefenseCandidate(2, 2500f, 0.85f, 2f, 60f, CandidateTier.Local);
+
+        var result = DefensePackageAggregator.Select(
+            candidates: new[] { oversized, rightSized },
+            desiredStrength: 2000f,
+            caution: 0.5f, aggression: 0f);
+
+        AssertTrue(result.SelectedPackage.Count >= 1, "should select at least one candidate");
+        AssertTrue(result.Suppressed.Exists(s => s.UnitInstanceId == 1 && s.Reason == "overmatch"),
+            "oversized army should be suppressed for overmatch");
+    }
+
+    private static DefenseCandidate MakeDefenseCandidate(int id, float str, float mor, float ready, float distance, CandidateTier tier)
+    {
+        return new DefenseCandidate
+        {
+            UnitInstanceId = id,
+            ActiveStrength = str,
+            Morale = mor,
+            ReadinessStep = ready,
+            DistanceToThreat = distance,
+            Tier = tier
+        };
     }
 }

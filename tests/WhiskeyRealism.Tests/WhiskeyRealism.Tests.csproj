@@ -55,5 +55,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefensePosture.cs" Link="DefensePosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentTypes.cs" Link="DefenseIntentTypes.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseThreatSignature.cs" Link="DefenseThreatSignature.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefensePackageAggregator.cs" Link="DefensePackageAggregator.cs" />
   </ItemGroup>
 </Project>
