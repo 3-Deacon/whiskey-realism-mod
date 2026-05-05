@@ -122,6 +122,18 @@ whiskey-realism-mod/
 
 ## Operating rules
 
+### Agent workflow modules
+
+Codex supports layered `AGENTS.md` files. It loads this root file first, then any more specific `AGENTS.md` files on the path to the current working directory. If a session starts at repo root, use this section as the index and read the relevant nested guidance before specialized work:
+
+- Patch work: [`src/WhiskeyRealism/Patches/AGENTS.md`](src/WhiskeyRealism/Patches/AGENTS.md)
+- Pure strategic/tactical logic: [`src/WhiskeyRealism/Strategic/AGENTS.md`](src/WhiskeyRealism/Strategic/AGENTS.md)
+- Tests: [`tests/WhiskeyRealism.Tests/AGENTS.md`](tests/WhiskeyRealism.Tests/AGENTS.md)
+- Specs/plans/reviews: [`docs/superpowers/AGENTS.md`](docs/superpowers/AGENTS.md)
+- Review checklist: [`docs/agent-code-review.md`](docs/agent-code-review.md)
+
+Repeatable workflows should become repo skills under `.agents/skills/` instead of more root `AGENTS.md` text.
+
 ### References
 
 - `refs/` holds symlinks into the Steam install. **Do not check binary DLLs into git.**
