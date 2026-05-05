@@ -20,6 +20,8 @@ static class Program
             ("army area ledger redirects out of area army to historical corridor", ArmyAreaLedgerRedirectsOutOfAreaArmy),
             ("army area ledger can redirect independent division input", ArmyAreaLedgerCanRedirectIndependentDivisionInput),
             ("weekly cadence fires on first seen week and week rollover only", WeeklyCadenceFiresOnFirstSeenWeekAndRollover),
+            ("daily cadence fires on first call and day rollover only", DailyCadenceFiresOnFirstCallAndDayRolloverOnly),
+            ("daily cadence rejects invalid dates", DailyCadenceRejectsInvalidDates),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
@@ -332,6 +334,24 @@ static class Program
         AssertEqual(true, cadence.ShouldFire(8, 6, 1861));
         AssertEqual(false, cadence.ShouldFire(13, 6, 1861));
         AssertEqual(true, cadence.ShouldFire(1, 7, 1861));
+    }
+
+    private static void DailyCadenceFiresOnFirstCallAndDayRolloverOnly()
+    {
+        var cadence = new DailyCadence();
+        AssertTrue(cadence.ShouldFire(1, 6, 1861), "first call should fire");
+        AssertTrue(!cadence.ShouldFire(1, 6, 1861), "same day should not fire again");
+        AssertTrue(cadence.ShouldFire(2, 6, 1861), "next day should fire");
+        AssertTrue(cadence.ShouldFire(1, 7, 1861), "month rollover should fire");
+        AssertTrue(cadence.ShouldFire(1, 1, 1862), "year rollover should fire");
+    }
+
+    private static void DailyCadenceRejectsInvalidDates()
+    {
+        var cadence = new DailyCadence();
+        AssertTrue(!cadence.ShouldFire(0, 6, 1861), "day 0 should be ignored");
+        AssertTrue(!cadence.ShouldFire(1, 0, 1861), "month 0 should be ignored");
+        AssertTrue(!cadence.ShouldFire(1, 6, 0), "year 0 should be ignored");
     }
 
     private static void OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay()
