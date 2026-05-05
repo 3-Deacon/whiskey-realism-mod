@@ -138,6 +138,29 @@ namespace WhiskeyRealism.Strategic
             }
             posture.RecoverFloorModifier = Clamp(recoverMod, -0.05f, +0.10f);
             posture.MassRatioModifier    = Clamp(massRatioMod, -0.10f, +0.10f);
+
+            float supplyBias = 0f, logisticsBias = 0f, expansionDamper = 0f;
+            if (posture.Risk == CollapseRisk.Critical) supplyBias += 0.40f;
+            if (posture.Risk == CollapseRisk.Elevated) supplyBias += 0.20f;
+            switch (posture.Pace)
+            {
+                case CampaignPace.Overheated:
+                    supplyBias      += 0.25f;
+                    expansionDamper += 0.20f;
+                    break;
+                case CampaignPace.TooQuiet:
+                    logisticsBias += 0.30f;
+                    break;
+                case CampaignPace.TooFastCollapse:
+                    expansionDamper += 0.50f;
+                    break;
+                case CampaignPace.LateWarPressure:
+                    if (posture.AllianceId == 0) logisticsBias += 0.20f;
+                    break;
+            }
+            posture.SupplyConstructionBias = Clamp(supplyBias,      -0.20f, +0.40f);
+            posture.LogisticsBias          = Clamp(logisticsBias,   -0.20f, +0.40f);
+            posture.ExpansionDamper        = Clamp(expansionDamper,  0f,    +0.50f);
         }
 
         public static void ApplyTo(OperationalProbeOptions options, DirectorPosture posture)

@@ -239,7 +239,10 @@ static class Program
             ("director publish clamp suppresses second publish in same real second", DirectorPublishClampSuppressesSecondPublishInSameRealSecond),
             ("director raises csa hold ratio under too fast collapse", DirectorRaisesCsaHoldRatioUnderTooFastCollapse),
             ("director raises recover floor under overheated", DirectorRaisesRecoverFloorUnderOverheated),
-            ("director relaxes union mass ratio under late war pressure", DirectorRelaxesUnionMassRatioUnderLateWarPressure)
+            ("director relaxes union mass ratio under late war pressure", DirectorRelaxesUnionMassRatioUnderLateWarPressure),
+            ("director critical risk strongly favors supply construction", DirectorCriticalRiskFavorsSupplyConstruction),
+            ("director too quiet healthy fiscal favors logistics", DirectorTooQuietFavorsLogistics),
+            ("director too fast collapse damps expansion", DirectorTooFastCollapseDampsExpansion)
         };
 
         foreach (var test in tests)
@@ -5025,5 +5028,33 @@ static class Program
             pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Low },
             personality: new PersonalityVector());
         AssertTrue(posture.MassRatioModifier < 0f, "Union late-war pressure must lower mass ratio gate");
+    }
+
+    private static void DirectorCriticalRiskFavorsSupplyConstruction()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 1,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
+            personality: new PersonalityVector());
+        AssertTrue(posture.SupplyConstructionBias >= 0.30f,
+            "Critical risk must strongly favor supply — was " + posture.SupplyConstructionBias);
+    }
+
+    private static void DirectorTooQuietFavorsLogistics()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooQuiet, Risk = CollapseRisk.Low },
+            personality: new PersonalityVector());
+        AssertTrue(posture.LogisticsBias >= 0.20f, "TooQuiet must favor logistics");
+    }
+
+    private static void DirectorTooFastCollapseDampsExpansion()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 1,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
+            personality: new PersonalityVector());
+        AssertTrue(posture.ExpansionDamper >= 0.30f, "TooFastCollapse must damp expansion");
     }
 }

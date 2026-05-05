@@ -55,5 +55,13 @@ namespace WhiskeyRealism.Strategic
         // RecoverFloorModifier bounded to [-0.05, +0.10]; MassRatioModifier bounded to [-0.10, +0.10].
         public float RecoverFloorModifier;
         public float MassRatioModifier;
+
+        // Fiscal/construction bias modifiers — applied as multiplier adjustments in scorer call paths.
+        // SupplyConstructionBias: additive; bounded to [-0.20, +0.40].
+        // LogisticsBias: additive; bounded to [-0.20, +0.40].
+        // ExpansionDamper: multiplicative damper; bounded to [0, +0.50].
+        public float SupplyConstructionBias;
+        public float LogisticsBias;
+        public float ExpansionDamper;
     }
 }

@@ -83,6 +83,12 @@ namespace WhiskeyRealism.Patches
                         mult = steering.Multiplier;
                         constructionReason = steering.Reason;
                     }
+                    var directorPosture = GetDirectorPosture(alliance);
+                    if (directorPosture != null)
+                    {
+                        mult = FiscalConstructionScorer.ApplyDirectorBiases(mult, type.name, directorPosture);
+                        mult = ConstructionSteeringScorer.ApplyDirectorBiases(mult, buildingType, type.name, directorPosture);
+                    }
 
                     float originalProb = oldProb;
                     BiasStamp previous;
@@ -172,6 +178,21 @@ namespace WhiskeyRealism.Patches
             catch (Exception ex)
             {
                 OnceLog.Warning("economy-construction:construction-intent", "[Patch:EconomyConstruction] construction intent read failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static DirectorPosture GetDirectorPosture(int alliance)
+        {
+            try
+            {
+                var memories = StrategicCoordinator.Instance?.DirectorMemories;
+                if (memories == null || alliance < 0 || alliance >= memories.Length) return null;
+                return memories[alliance]?.LastPosture;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("economy-construction:director-posture", "[Patch:EconomyConstruction] director posture read failed: " + ex.Message);
                 return null;
             }
         }
