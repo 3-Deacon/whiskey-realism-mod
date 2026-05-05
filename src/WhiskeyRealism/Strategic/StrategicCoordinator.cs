@@ -396,6 +396,10 @@ namespace WhiskeyRealism.Strategic
                     }
                     _defenseIntentSignatures[alliance] = output.Signature;
                 }
+
+                // Issue custom defensive movement orders for active landings and
+                // relaxed-filter guard candidates vanilla won't act on.
+                CoastalDefenseCustomOrderRunner.Run(alliance, output);
             }
             catch (Exception ex)
             {
