@@ -99,6 +99,7 @@ static class Program
             ("operational probe refuses critical hold donor", OperationalProbeRefusesCriticalHoldDonor),
             ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
             ("operational probe stays continuing on no contact even after minimum days", OperationalProbeStaysContinuingOnNoContactAfterMinimumDays),
+            ("operational probe state has single source on coordinator", OperationalProbeStateHasSingleSourceOnCoordinator),
             ("recompute pressure resets counters before counting", RecomputePressureResetsCountersBeforeCounting),
             ("operational tempo chapter one delays escalation", OperationalTempoChapterOneDelaysEscalation),
             ("operational tempo late union sustains pressure", OperationalTempoLateUnionSustainsPressure),
@@ -1810,6 +1811,34 @@ static class Program
         var output = OperationalProbeLedger.Build(input);
         AssertTrue(output.Decision != OperationalProbeDecision.Escalate, "no-contact must not escalate");
         AssertEqual(OperationalProbeDecision.Probe, output.Decision);
+    }
+
+    private static void OperationalProbeStateHasSingleSourceOnCoordinator()
+    {
+        // After Build returns, the output.State must be usable as Previous in a follow-up call.
+        // This tests that OperationalProbeLedger's contract aligns with StrategicCoordinator's
+        // single-source-of-truth pattern: the coordinator owns _operationalProbeStates[alliance],
+        // and output.State references that slot.
+
+        var input = BuildProbeInput();
+        var first = OperationalProbeLedger.Build(input);
+        AssertTrue(first.State != null, "fresh probe should publish a state");
+
+        // Pass the same reference to the next call to confirm it's accepted as Previous.
+        var second = OperationalProbeLedger.Build(new OperationalProbeInput
+        {
+            AllianceId = input.AllianceId,
+            DaySerial = input.DaySerial + 1,
+            PlanTargetAreaKey = input.PlanTargetAreaKey,
+            Fronts = input.Fronts,
+            FormationDirectives = input.FormationDirectives,
+            Previous = first.State, // pass the same reference
+            CurrentEnemyStrength = 1000f,
+            CurrentFriendlyStrength = 4000f,
+            Options = new OperationalProbeOptions()
+        });
+        AssertTrue(second.State != null, "continuing probe publishes state");
+        AssertEqual(first.State.ProbeId, second.State.ProbeId);
     }
 
     private static void RecomputePressureResetsCountersBeforeCounting()

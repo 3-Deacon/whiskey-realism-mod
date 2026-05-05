@@ -743,12 +743,14 @@ namespace WhiskeyRealism.Strategic
 
                 var output = OperationalProbeLedger.Build(input);
                 OperationalProbes[alliance] = output;
-                if (output.State != null)
-                    _operationalProbeStates[alliance] = output.State;
-                if (output.Decision == OperationalProbeDecision.None ||
+
+                bool clearState =
+                    output.Decision == OperationalProbeDecision.None ||
                     output.Decision == OperationalProbeDecision.Withdraw ||
-                    output.Decision == OperationalProbeDecision.Escalate)
-                    _operationalProbeStates[alliance] = null;
+                    output.Decision == OperationalProbeDecision.Escalate;
+
+                _operationalProbeStates[alliance] = clearState ? null : output.State;
+                output.State = _operationalProbeStates[alliance];
 
                 bool overlayChanged = formation.ApplyOperationalProbe(output);
                 string signature = output.Signature();
