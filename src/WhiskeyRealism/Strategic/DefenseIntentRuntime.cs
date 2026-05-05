@@ -136,7 +136,7 @@ namespace WhiskeyRealism.Strategic
             try { ExtractRaidForceThreats(input, allianceId, aifactionIndex, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:raid", "[DefenseIntent] raid extract failed: " + ex.Message); }
 
-            try { ExtractAssetProximityThreats(input, allianceId, faction, map, seaSpotRadius, profile, capitalPos, capitalFound, enemyPositions); }
+            try { ExtractAssetProximityThreats(input, allianceId, faction, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:proximity", "[DefenseIntent] proximity extract failed: " + ex.Message); }
 
             try { ExtractCandidateUnits(input, allianceId, faction, map, defOpsRadius); }
@@ -379,10 +379,17 @@ namespace WhiskeyRealism.Strategic
 
         private static void ExtractAssetProximityThreats(
             DefenseIntentInput input, int allianceId, object faction,
-            CampaignMapLedger map, float seaSpotRadius,
+            CampaignMapLedger map, float defOpsRadius,
             GrandStrategyProfile profile, Vector3 capitalPos, bool capitalFound,
             List<Vector3> enemyPositions)
         {
+            // Proximity radius and frontline gate: vanilla's defensive-operation radius
+            // is the same scale candidate units use to volunteer; using
+            // seainvasionspotsunitrange (the much larger landing-spot radius) caused
+            // every CSA unit on the Virginia frontier to register as a "proximity threat"
+            // against Maryland and New York ports during Slice 1 smoke. The frontline-side
+            // check rejects enemies who haven't actually crossed into our territory.
+
             // Build set of asset names already covered by sif/raid threats to avoid duplicates.
             var coveredAssets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var threat in input.Threats)
@@ -413,6 +420,9 @@ namespace WhiskeyRealism.Strategic
                 enemies.Add((ep, eid, estr, emor));
             }
 
+            // "Very close" radius: absolute proximity that bypasses the frontline check.
+            float veryCloseRadius = defOpsRadius * 0.4f;
+
             foreach (var asset in map.Assets)
             {
                 if (asset == null) continue;
@@ -424,27 +434,43 @@ namespace WhiskeyRealism.Strategic
 
                 Vector3 assetPos = new Vector3(asset.X, 0f, asset.Z);
 
-                // Find enemy units within seaSpotRadius of this asset.
+                // Find enemy units within defOpsRadius of this asset, applying a
+                // frontline-side gate so distant enemies on their own side of the line
+                // don't register as threats against rear-area ports.
                 float totalEnemyStrength = 0f;
+                float maxRawEnemyStrength = 0f;
                 var nearEnemyIds = new List<int>();
                 for (int j = 0; j < enemies.Count; j++)
                 {
                     var (ep, eid, estr, emor) = enemies[j];
                     float dist = GetXZDistance(ep, assetPos);
-                    if (dist < seaSpotRadius)
-                    {
-                        // Use ComputeEffective for a readiness-adjusted strength estimate.
-                        // Readiness not available on enemy units — default to 2f (full).
-                        totalEnemyStrength += DefenseForceSizer.ComputeEffective(estr, emor, 2f);
-                        nearEnemyIds.Add(eid);
-                    }
+                    if (dist >= defOpsRadius) continue;
+
+                    // Gate: enemy must be very close (< 0.4x defOpsRadius) OR confirmed
+                    // on our side of the front line. Skip enemies across the line that
+                    // only fall within the wider defOpsRadius cone.
+                    bool veryClose = dist < veryCloseRadius;
+                    bool onOurSide = !veryClose && TryGetFrontlineSide(ep, out int side) && side == allianceId;
+                    if (!veryClose && !onOurSide) continue;
+
+                    // Use ComputeEffective for a readiness-adjusted strength estimate.
+                    // Readiness not available on enemy units — default to 2f (full).
+                    totalEnemyStrength += DefenseForceSizer.ComputeEffective(estr, emor, 2f);
+                    if (estr > maxRawEnemyStrength) maxRawEnemyStrength = estr;
+                    nearEnemyIds.Add(eid);
                 }
 
                 if (nearEnemyIds.Count == 0) continue;
 
-                // Sort ascending and cap at top 5.
+                // Minimum-strength floor: suppress single-scout artifacts.
+                // Require meaningful aggregate effective strength AND at least one
+                // individually sized unit to distinguish a real force from a stray.
+                if (totalEnemyStrength < 1500f) continue;
+                if (maxRawEnemyStrength < 500f) continue;
+
+                // Sort ascending and cap at top 3 for a tight dedup key.
                 nearEnemyIds.Sort();
-                int cap = Math.Min(5, nearEnemyIds.Count);
+                int cap = Math.Min(3, nearEnemyIds.Count);
                 var topIds = new int[cap];
                 for (int k = 0; k < cap; k++) topIds[k] = nearEnemyIds[k];
 
@@ -854,6 +880,27 @@ namespace WhiskeyRealism.Strategic
                 return field?.GetValue(obj);
             }
             catch { return null; }
+        }
+
+        // Returns the frontline side that owns the given position.
+        // Returns false (side = -1) when frontline2 is unavailable or has no updates,
+        // which means the caller's onOurSide check also returns false — a safe default
+        // that does NOT emit a spurious proximity threat.
+        private static bool TryGetFrontlineSide(Vector3 pos, out int side)
+        {
+            side = -1;
+            try
+            {
+                var battleUnits = UnityEngine.GameObject.Find("GameController")
+                    ?.GetComponent<BattleUnits>();
+                if (battleUnits == null ||
+                    battleUnits.frontline2 == null ||
+                    battleUnits.frontline2.numberofupdates <= 0)
+                    return false;
+                side = battleUnits.frontline2.GetSideOnPosition(pos);
+                return true;
+            }
+            catch { return false; }
         }
     }
 }

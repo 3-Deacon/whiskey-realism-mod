@@ -40,6 +40,7 @@ static class Program
             ("asset role scorer score town flags capital approach by distance", AssetRoleScorerScoreTownFlagsCapitalApproach),
             ("asset role catalog overrides scorer for named anchor", AssetRoleCatalogOverridesScorer),
             ("asset role catalog returns none for unknown name", AssetRoleCatalogReturnsNoneForUnknown),
+            ("asset role catalog resolves real gtcw names", AssetRoleCatalogResolvesRealGtcwNames),
             ("csa early profile favors capital defense and foreign recognition", CsaEarlyProfileFavorsDefenseAndForeignRecognition),
             ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
             ("union early policy scorer favors legal blockade", UnionEarlyPolicyScorerFavorsLegalBlockade),
@@ -2444,6 +2445,21 @@ static class Program
         AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup("unmapped-port"));
         AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup(null));
         AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup(""));
+    }
+
+    private static void AssetRoleCatalogResolvesRealGtcwNames()
+    {
+        AssertTrue((AssetRoleCatalog.Lookup("Fort McHenry") & AssetStrategicRole.KeyFort) != 0,
+            "Fort McHenry should be KeyFort");
+        AssertTrue((AssetRoleCatalog.Lookup("Brooklyn Navy Yard") & AssetStrategicRole.UnionForwardBase) != 0,
+            "Brooklyn Navy Yard should be UnionForwardBase");
+        AssertTrue((AssetRoleCatalog.Lookup("Atlantic City") & AssetStrategicRole.RearSafePort) != 0,
+            "Atlantic City should be RearSafePort");
+        AssertTrue((AssetRoleCatalog.Lookup("baltimore port") & AssetStrategicRole.CapitalApproach) != 0,
+            "case-insensitive lookup should still work");
+        // Backward-compat: old hyphenated keys still resolve
+        AssertTrue((AssetRoleCatalog.Lookup("wilmington-harbor") & AssetStrategicRole.BlockadeRunnerPort) != 0,
+            "legacy hyphenated key should still resolve as fallback");
     }
 
     private static void CampaignMapLedgerAppliesRoleCatalog()
