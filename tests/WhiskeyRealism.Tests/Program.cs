@@ -94,6 +94,10 @@ static class Program
             ("operational probe escalates after favorable contact", OperationalProbeEscalatesAfterFavorableContact),
             ("operational probe refuses critical hold donor", OperationalProbeRefusesCriticalHoldDonor),
             ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
+            ("operational tempo chapter one delays escalation", OperationalTempoChapterOneDelaysEscalation),
+            ("operational tempo late union sustains pressure", OperationalTempoLateUnionSustainsPressure),
+            ("operational tempo winter slows probes", OperationalTempoWinterSlowsProbes),
+            ("operational tempo late csa is more conservative than union", OperationalTempoLateCsaMoreConservativeThanUnion),
             ("fiscal csa healthy credit stays balanced", FiscalCsaHealthyCreditStaysBalanced),
             ("fiscal enters credit defense before gate", FiscalEntersCreditDefenseBeforeGate),
             ("fiscal enters emergency before bond floor", FiscalEntersEmergencyBeforeBondFloor),
@@ -1711,6 +1715,104 @@ static class Program
         AssertEqual(FormationDirective.Probe, assignment.Directive);
         AssertEqual("limited-contact-probe", assignment.Reason);
         AssertEqual(false, assignment.TransferDonorAllowed);
+    }
+
+    private static void OperationalTempoChapterOneDelaysEscalation()
+    {
+        var input = BuildProbeInput();
+        input.DaySerial = 103;
+        input.Options = OperationalTempoDoctrine.For(
+            allianceId: 0,
+            era: EraStage.Amateur1861,
+            policyChapter: 1,
+            campaignMonth: 7,
+            personality: new PersonalityVector());
+        input.Previous = new OperationalProbeState
+        {
+            ProbeId = "0:VirginiaCapitalCorridor:probe-corps",
+            UnitKey = "probe-corps",
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            StartedDaySerial = 100,
+            LastObservedEnemyStrength = 7000f,
+            LastObservedFriendlyStrength = 7000f
+        };
+        input.CurrentEnemyStrength = 4000f;
+        input.CurrentFriendlyStrength = 8500f;
+
+        var output = OperationalProbeLedger.Build(input);
+
+        AssertEqual(OperationalProbeDecision.Probe, output.Decision);
+        AssertEqual("continue-probe", output.Reason);
+    }
+
+    private static void OperationalTempoLateUnionSustainsPressure()
+    {
+        var input = BuildProbeInput();
+        input.DaySerial = 202;
+        input.Options = OperationalTempoDoctrine.For(
+            allianceId: 0,
+            era: EraStage.TotalWar1864,
+            policyChapter: 3,
+            campaignMonth: 6,
+            personality: new PersonalityVector());
+        input.Previous = new OperationalProbeState
+        {
+            ProbeId = "0:VirginiaCapitalCorridor:probe-corps",
+            UnitKey = "probe-corps",
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            StartedDaySerial = 200,
+            LastObservedEnemyStrength = 7000f,
+            LastObservedFriendlyStrength = 7000f
+        };
+        input.CurrentEnemyStrength = 5000f;
+        input.CurrentFriendlyStrength = 8500f;
+
+        var output = OperationalProbeLedger.Build(input);
+
+        AssertEqual(OperationalProbeDecision.Escalate, output.Decision);
+        AssertEqual(true, output.RequiresMassCommitment);
+    }
+
+    private static void OperationalTempoWinterSlowsProbes()
+    {
+        var summer = OperationalTempoDoctrine.For(
+            allianceId: 0,
+            era: EraStage.Operational1862,
+            policyChapter: 2,
+            campaignMonth: 7,
+            personality: new PersonalityVector());
+        var winter = OperationalTempoDoctrine.For(
+            allianceId: 0,
+            era: EraStage.Operational1862,
+            policyChapter: 2,
+            campaignMonth: 1,
+            personality: new PersonalityVector());
+
+        AssertTrue(winter.MinimumProbeDays > summer.MinimumProbeDays,
+            "winter should require a longer probe/operation pause");
+        AssertTrue(winter.MaximumProbeStrengthFraction < summer.MaximumProbeStrengthFraction,
+            "winter should limit probe size");
+    }
+
+    private static void OperationalTempoLateCsaMoreConservativeThanUnion()
+    {
+        var union = OperationalTempoDoctrine.For(
+            allianceId: 0,
+            era: EraStage.TotalWar1864,
+            policyChapter: 3,
+            campaignMonth: 6,
+            personality: new PersonalityVector());
+        var csa = OperationalTempoDoctrine.For(
+            allianceId: 1,
+            era: EraStage.TotalWar1864,
+            policyChapter: 3,
+            campaignMonth: 6,
+            personality: new PersonalityVector());
+
+        AssertTrue(csa.EscalateFriendlyRatio > union.EscalateFriendlyRatio,
+            "late CSA should require better odds to escalate");
+        AssertTrue(csa.MaximumProbeStrengthFraction < union.MaximumProbeStrengthFraction,
+            "late CSA should commit smaller probes than Union");
     }
 
     private static FiscalInput BuildFiscalInput()

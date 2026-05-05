@@ -1,6 +1,6 @@
 # Strategic Operational Probe / Contact Plan
 
-Status: implemented, console/build/deploy/hash verified on 2026-05-05; runtime smoke pending after game restart.
+Status: implemented, console/build/deploy/hash verified on 2026-05-05; chapter/era/season tempo added; runtime smoke pending after game restart.
 
 ## Goal
 
@@ -23,6 +23,7 @@ The missing Whiskey layer was the doctrine loop that decides whether a limited c
 Files:
 
 - `src/WhiskeyRealism/Strategic/OperationalProbeLedger.cs`
+- `src/WhiskeyRealism/Strategic/OperationalTempoDoctrine.cs`
 - `src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs`
 - `src/WhiskeyRealism/Strategic/FormationDirectiveLedger.cs`
 - `src/WhiskeyRealism/Strategic/StrategicCoordinator.cs`
@@ -36,6 +37,8 @@ Behavior:
 - Refuses critical hold donors and oversized formations that would violate the local front budget.
 - Pauses when enemy strength jumps enough to indicate reaction and local odds are not favorable.
 - Escalates only after the minimum probe duration and favorable friendly/enemy ratio.
+- Uses vanilla `Policy.CurrentChapter`, Whiskey era stage, campaign month, faction, and CIC personality to pace operations across the war:
+  1861/chapter 1 delays escalation and commits smaller probes; chapter 2/1862-63 normalizes sustained operations; chapter 3/1864+ lets the Union sustain pressure while making late-war CSA probes more conservative; winter slows probe cadence and reduces probe size.
 - Withdraws when the probe is overmatched.
 - Applies a formation-directive overlay: `Probe`, `Delay`, `Recover`, or `Counterstroke`/`Mass`.
 - Uses `OperationalProbeRuntime` from coordinator cadence to add/remove the selected formation from vanilla `unitsinoffensiveoperations` through vanilla `AICampaign.MoveUnitTo`.
@@ -48,6 +51,10 @@ Behavior:
 - `operational probe escalates after favorable contact`
 - `operational probe refuses critical hold donor`
 - `operational probe overlays formation directive`
+- `operational tempo chapter one delays escalation`
+- `operational tempo late union sustains pressure`
+- `operational tempo winter slows probes`
+- `operational tempo late csa is more conservative than union`
 
 ## Verification
 
@@ -65,8 +72,8 @@ Results:
 
 - Console harness passed.
 - Build passed with 0 warnings / 0 errors.
-- Deployed DLL size matched: `333824` bytes.
-- Deployed SHA-256 matched `dist`: `61dff1bdc0579672fec4744b92536d9650dcedc94be3e7ed1a133ba0fe23e04b`.
+- Deployed DLL size matched: `335360` bytes.
+- Deployed SHA-256 matched `dist`: `677c2f4339662508c99d4b60b7b8d615cfe89b9b9f705d068420a5e1c7642acc`.
 
 ## Runtime Smoke Pending
 

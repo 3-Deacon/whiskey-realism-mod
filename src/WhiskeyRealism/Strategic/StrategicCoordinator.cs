@@ -177,6 +177,12 @@ namespace WhiskeyRealism.Strategic
             catch { /* tolerate — CIC.diag will surface CurrentChapter if still wrong */ }
         }
 
+        private static int SafePolicyChapter()
+        {
+            try { return Policy.CurrentChapter; }
+            catch { return -1; }
+        }
+
         public void OnMonthlyTick(int month, int year)
         {
             try
@@ -717,20 +723,30 @@ namespace WhiskeyRealism.Strategic
                 int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
                 var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
                 int daySerial = year * 372 + month * 31 + day;
+                var eraManager = alliance < Eras.Length ? Eras[alliance] : null;
+                EraStage era = eraManager != null ? eraManager.Stage : EraStage.Amateur1861;
+                PersonalityVector personality = cic != null && eraManager != null
+                    ? cic.Effective(eraManager)
+                    : new PersonalityVector();
                 var input = OperationalProbeRuntime.BuildInput(
                     alliance,
                     cic,
                     fronts,
                     formation,
                     _operationalProbeStates[alliance],
-                    daySerial);
+                    daySerial,
+                    era,
+                    SafePolicyChapter(),
+                    month,
+                    personality);
 
                 var output = OperationalProbeLedger.Build(input);
                 OperationalProbes[alliance] = output;
                 if (output.State != null)
                     _operationalProbeStates[alliance] = output.State;
                 if (output.Decision == OperationalProbeDecision.None ||
-                    output.Decision == OperationalProbeDecision.Withdraw)
+                    output.Decision == OperationalProbeDecision.Withdraw ||
+                    output.Decision == OperationalProbeDecision.Escalate)
                     _operationalProbeStates[alliance] = null;
 
                 bool overlayChanged = formation.ApplyOperationalProbe(output);

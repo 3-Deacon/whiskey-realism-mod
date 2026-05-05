@@ -15,7 +15,11 @@ namespace WhiskeyRealism.Strategic
             FrontSectorLedger fronts,
             FormationDirectiveLedger formation,
             OperationalProbeState previous,
-            int daySerial)
+            int daySerial,
+            EraStage era,
+            int policyChapter,
+            int campaignMonth,
+            PersonalityVector personality)
         {
             int objectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
             var target = ObjectiveAdapter.ResolveObjectivePosition(objectiveId);
@@ -32,7 +36,13 @@ namespace WhiskeyRealism.Strategic
                 FormationDirectives = formation,
                 Previous = previous,
                 CurrentEnemyStrength = targetSector?.EnemyStrength ?? -1f,
-                CurrentFriendlyStrength = targetSector?.OwnStrength ?? -1f
+                CurrentFriendlyStrength = targetSector?.OwnStrength ?? -1f,
+                Options = OperationalTempoDoctrine.For(
+                    allianceId,
+                    era,
+                    policyChapter,
+                    campaignMonth,
+                    personality)
             };
 
             if (previous != null && formation != null)
