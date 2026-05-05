@@ -6,8 +6,11 @@ namespace WhiskeyRealism.Strategic
     /// <summary>
     /// Pure static builder that consumes a <see cref="DefenseIntentInput"/> snapshot and
     /// emits a <see cref="DefenseIntentLedgerOutput"/> with ranked responses for every active
-    /// threat source and every unguarded coastal/river asset.  No I/O, no Unity, no side
-    /// effects other than writing to the caller-supplied cooldown table.
+    /// threat source and every unguarded coastal/river asset.  No I/O, no Unity.
+    /// Side effects: (1) writes counter state on the supplied
+    /// <see cref="DefenseCooldownTable"/>, (2) populates
+    /// <see cref="DefenseCandidate.EffectiveStrength"/> and
+    /// <see cref="DefenseCandidate.Score"/> on each candidate during scoring.
     /// </summary>
     public static class DefenseIntentLedger
     {
@@ -74,7 +77,8 @@ namespace WhiskeyRealism.Strategic
                     // expires.  The caller ticks the table externally between builds.
                     if (!input.Cooldown.IsActive(sig))
                     {
-                        // Cooldown already expired — record nothing; response omitted below.
+                        // Cooldown already expired — emit an empty Recovered response so the
+                        // runtime can release any prior assignment via the threat signature.
                         var emptyResponse = BuildEmptyRecoveredResponse(sig, posture, scale, src, desired);
                         output.Responses.Add(emptyResponse);
                         continue;
@@ -183,6 +187,11 @@ namespace WhiskeyRealism.Strategic
                         });
                     }
                 }
+
+                guardResponse.TelemetrySignature =
+                    $"{DefensePosture.CoastalGuard}|{assetSig}" +
+                    $"|{(int)(CoastalGuardDesired / 1000)}b" +
+                    $"|{guardResponse.SelectedPackage.Count}u|{CandidateTier.SameTheater}";
 
                 guardCumulativeEffective += pkgResult.CumulativeEffective;
                 output.Responses.Add(guardResponse);
@@ -421,6 +430,11 @@ namespace WhiskeyRealism.Strategic
             foreach (var c in pkgResult.SelectedPackage)
                 response.SelectedPackage.Add(c);
 
+            response.TelemetrySignature =
+                $"{response.Threat.Posture}|{response.Threat.Signature}" +
+                $"|{(int)(response.Threat.DesiredStrength / 1000)}b" +
+                $"|{response.SelectedPackage.Count}u|{response.Threat.ResponseRadius}";
+
             return response;
         }
 
@@ -428,7 +442,7 @@ namespace WhiskeyRealism.Strategic
             string sig, DefensePosture posture, ThreatScale scale,
             DefenseThreatSource src, float desired)
         {
-            return new DefenseResponse
+            var r = new DefenseResponse
             {
                 Threat = new DefenseThreat
                 {
@@ -442,6 +456,8 @@ namespace WhiskeyRealism.Strategic
                     DesiredStrength = desired
                 }
             };
+            r.TelemetrySignature = $"{posture}|{sig}|0b|0u|none";
+            return r;
         }
 
         private static List<DefenseCandidate> FilterGuardCandidates(
@@ -490,6 +506,8 @@ namespace WhiskeyRealism.Strategic
                     Reason = "cap-reached"
                 });
             }
+
+            response.TelemetrySignature = $"{DefensePosture.CoastalGuard}|{assetSig}|0b|0u|none";
 
             return response;
         }

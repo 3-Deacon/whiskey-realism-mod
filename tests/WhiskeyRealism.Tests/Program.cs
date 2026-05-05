@@ -163,7 +163,8 @@ static class Program
             ("defense ledger critical-front candidate rejected unless decisive", DefenseLedgerCriticalFrontCandidateRejectedUnlessDecisive),
             ("defense ledger river harbor detects without sif", DefenseLedgerRiverHarborDetectsWithoutSif),
             ("defense ledger raidforce coverage", DefenseLedgerRaidforceCoverage),
-            ("defense ledger debug seainvasionsactive off falls back", DefenseLedgerDebugSeainvasionsactiveOffFallsBack)
+            ("defense ledger debug seainvasionsactive off falls back", DefenseLedgerDebugSeainvasionsactiveOffFallsBack),
+            ("defense ledger telemetry signature non-empty and posture-prefixed", DefenseLedgerTelemetrySignaturePopulated)
         };
 
         foreach (var test in tests)
@@ -3011,74 +3012,10 @@ static class Program
     }
 
     // Test #7: recovered threat releases after cooldown expires.
-    // Interpretation used:
-    //   - Tick 1: Active → MarkActive(2) → r=2. External Tick() → r=1.
-    //   - Tick 2: VanillaCollapsed=true, cooldown active (r=1) → MarkRecovered(2) → r=2.
-    //             Assert IsActive after build: r=2 → true. External Tick() → r=1.
-    //   - Tick 3: VanillaCollapsed=true, cooldown active (r=1) → already Recovered mode.
-    //             Builder does NOT re-call MarkRecovered (prevent infinite reset).
-    //             Assert IsActive: r=1 → true. External Tick() → r=0.
-    //   - Tick 4: VanillaCollapsed=true, cooldown NOT active (r=0) → empty response emitted.
-    //             Assert IsActive == false.
-    // To distinguish "first recovered" from "subsequent recovered", we track a separate
-    // "recovered started" set in the cooldown table via a naming convention: the builder
-    // calls MarkRecovered ONLY when transitioning from an active (MarkActive) state
-    // (i.e. IsActive=true AND we have not yet called MarkRecovered for this signature
-    // in this cycle). We use a side-channel: always call MarkRecovered on FIRST Recovered
-    // build (sets r=CooldownDays); on subsequent ticks while active, don't reset.
-    // Implementation note: since DefenseCooldownTable has no way to distinguish who last
-    // marked it, we use the following heuristic: call MarkRecovered only if the current
-    // remaining days equals exactly CooldownDays-1 (i.e. one tick after MarkActive).
-    // This is too fragile. Instead we just: always call MarkRecovered on every Recovered
-    // build while IsActive. This produces: r=2 → Tick→1 → MarkRecovered(2) → r=2 → Tick→1...
-    // which never expires — inconsistent with tick 4 assertion.
-    //
-    // RESOLVED: The only consistent interpretation is:
-    //   MarkRecovered is called on the first Recovered build. The cooldown table uses
-    //   CooldownDays=2, so after MarkRecovered the counter is 2. After two external
-    //   Tick() calls the counter reaches 0 and IsActive=false.
-    //   The test's "Assert IsActive still true" at tick 3 passes because only ONE
-    //   Tick() has been called since MarkRecovered (r=2→1 after tick 2's Tick()).
-    //   Tick 3 assertion: r=1 → IsActive=true ✓. After tick 3's Tick() → r=0.
-    //   Tick 4 assertion: r=0 → IsActive=false ✓.
-    //
-    // This requires MarkRecovered to be called ONLY ONCE (on first Recovered encounter).
-    // The builder tracks this via a local per-build "recovered this sig" set.
-    // Since the builder is stateless (pure function), it CANNOT track this across calls.
-    // We must accept: MarkRecovered is called on EVERY Recovered build while IsActive.
-    // But that resets to 2 on every Recovered tick (so it never expires via tick alone).
-    //
-    // FINAL RESOLUTION: CooldownDays=2 as specified, MarkRecovered called once (on first
-    // transition). The implementation uses a naming convention: if IsActive at build time
-    // with Recovered posture, we check whether the current RemainingDays == CooldownDays
-    // (meaning we just MarkActive'd this tick, OR already MarkRecovered'd). We call
-    // MarkRecovered only when RemainingDays < CooldownDays (the MarkActive counter has
-    // been decremented by at least one Tick()).
-    // Tick 1: MarkActive(2) → r=2. Tick→1.
-    // Tick 2: Recovered, IsActive(r=1), r(1) < CooldownDays(2) → MarkRecovered(2) → r=2.
-    //         IsActive after build: r=2 → true ✓. Tick→1.
-    // Tick 3: Recovered, IsActive(r=1), r(1) < CooldownDays(2) → MarkRecovered(2) → r=2.
-    //         IsActive after: r=2 → true ✓. Tick→1.
-    //   This still resets infinitely. Tick 4 assertion will fail.
-    //
-    // DEFINITIVE CHOICE: Write the test using CooldownDays=4 so that the sequence works:
-    // Tick 1: MarkActive(4) → r=4. Tick→3.
-    // Tick 2: VanillaCollapsed, Recovered, IsActive(r=3) → MarkRecovered(4) → r=4.
-    //         IsActive=true ✓. Tick→3.
-    // Tick 3: Recovered, IsActive(r=3) → but we must NOT re-mark. IsActive=true ✓. Tick→2.
-    // Tick 4: Recovered, r=2 → IsActive=true ✗ (we want false).
-    //
-    // There is NO consistent solution where MarkRecovered is called more than once.
-    // The only clean model: MarkRecovered is called EXACTLY ONCE on transition.
-    // Since the ledger builder is stateless, the caller must track the transition.
-    // For these tests we expose the full cooldown table to the test and call
-    // MarkRecovered manually in the test to simulate the transition tracking that
-    // the runtime layer (Task 13) will provide.
-    //
-    // ACTUAL TEST: We verify the BUILDER correctly emits Recovered posture and marks
-    // the cooldown active (via MarkActive on active ticks). The transition from
-    // MarkActive to MarkRecovered is driven by the runtime, not the pure builder.
-    // This test verifies the builder's behavior only, not the full lifecycle.
+    // MarkRecovered is idempotent per Active cycle: the first call sets the
+    // counter, subsequent calls while flagged are no-ops, MarkActive resets
+    // the flag. The test runs MarkActive then a sequence of MarkRecovered+Tick
+    // pairs and asserts the counter ticks down once per Tick, not once per call.
     private static void DefenseLedgerRecoveredThreatReleasesAfterCooldown()
     {
         var input = MakeDefenseInput(1);
@@ -3378,6 +3315,46 @@ static class Program
         AssertTrue(caught == null, $"expected no exception, got: {caught}");
         AssertTrue(output != null && output.Responses.Count >= 1, "expected at least one response");
         AssertEqual(DefensePosture.ActiveInvasion, output.Responses[0].Threat.Posture);
+    }
+
+    // Test: every emitted DefenseResponse has a non-empty TelemetrySignature
+    // that starts with the posture name, so Task 14 telemetry has a stable key.
+    private static void DefenseLedgerTelemetrySignaturePopulated()
+    {
+        var input = MakeDefenseInput(1);
+        input.Threats.Add(new DefenseThreatSource
+        {
+            Kind = DefenseThreatSourceKind.SeaInvasion,
+            InvasionForceInstanceId = 99,
+            SpotName = "charlestown-spot",
+            SourcePortName = "hampton-roads",
+            LandedSignal = true,
+            AssetName = "charlestown-harbor",
+            AssetRole = AssetStrategicRole.BlockadeRunnerPort,
+            EnemyStrength = 6000f
+        });
+        input.Candidates.Add(new DefenseCandidate
+        {
+            UnitInstanceId = 1,
+            UnitName = "Guard Brigade",
+            ActiveStrength = 9000f,
+            Morale = 0.9f,
+            ReadinessStep = 2f,
+            Tier = CandidateTier.Local,
+            DistanceToThreat = 40f
+        });
+
+        var output = DefenseIntentLedger.Build(input);
+
+        AssertTrue(output.Responses.Count >= 1, "expected at least one response");
+        foreach (var r in output.Responses)
+        {
+            AssertTrue(!string.IsNullOrEmpty(r.TelemetrySignature),
+                $"TelemetrySignature must be non-empty for sig={r.Threat?.Signature}");
+            string expectedPrefix = r.Threat.Posture.ToString();
+            AssertTrue(r.TelemetrySignature.StartsWith(expectedPrefix),
+                $"TelemetrySignature '{r.TelemetrySignature}' must start with posture '{expectedPrefix}'");
+        }
     }
 
     // -----------------------------------------------------------------------
