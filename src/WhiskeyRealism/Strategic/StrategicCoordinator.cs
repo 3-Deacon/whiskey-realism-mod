@@ -5,6 +5,7 @@ using System.Reflection;
 using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Patches;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Util;
@@ -23,6 +24,18 @@ namespace WhiskeyRealism.Strategic
         public FiscalOutput[] FiscalIntents = new FiscalOutput[2];
         public ConstructionOutput[] ConstructionIntents = new ConstructionOutput[2];
         public ConstructionTelemetry ConstructionTelemetry = new ConstructionTelemetry();
+        public DefenseIntentLedgerOutput[] DefenseIntents = new DefenseIntentLedgerOutput[2];
+        private readonly DefenseCooldownTable[] _defenseCooldowns = new DefenseCooldownTable[2]
+        {
+            new DefenseCooldownTable(),
+            new DefenseCooldownTable()
+        };
+        private readonly string[] _defenseIntentSignatures = new string[2];
+        private readonly HashSet<string>[] _previousSifSignatures = new HashSet<string>[2]
+        {
+            new HashSet<string>(),
+            new HashSet<string>()
+        };
         public CampaignMapLedger CampaignMap = CampaignMapLedger.Build(null);
         internal SuccessionScheduler Succession = new SuccessionScheduler();
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
@@ -246,6 +259,7 @@ namespace WhiskeyRealism.Strategic
                 }
                 UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat);
                 UpdateConstructionIntent(alliance, era.Stage, logHeartbeat);
+                UpdateDefenseIntent(alliance, era.Stage, day, month, year);
 
                 if (Plugin.Instance.VerboseLogging.Value && !logHeartbeat)
                     Plugin.Log.LogInfo($"[DailyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
@@ -329,6 +343,130 @@ namespace WhiskeyRealism.Strategic
                     "construction-intent:update:" + alliance,
                     "[ConstructionIntent] update failed: " + ex.Message);
             }
+        }
+
+        private void UpdateDefenseIntent(int alliance, EraStage era, int day, int month, int year)
+        {
+            try
+            {
+                var plugin = Plugin.Instance;
+                if (plugin == null || !ConfigValue(plugin.EnableDefenseIntentLedger, defaultValue: true)) return;
+                if (alliance < 0 || alliance >= DefenseIntents.Length) return;
+
+                // Tick the cooldown table once per daily review for this alliance.
+                _defenseCooldowns[alliance].Tick();
+
+                float total = ComputeAllianceEffectiveStrength(alliance);
+                var profile = ResolveGrandStrategyProfile(alliance, era);
+
+                var input = DefenseIntentRuntime.BuildInput(
+                    allianceId: alliance,
+                    cic: CICs[alliance],
+                    era: Eras[alliance],
+                    map: CampaignMap,
+                    cooldown: _defenseCooldowns[alliance],
+                    totalAllianceEffectiveStrength: total,
+                    profile: profile,
+                    previousSifSignatures: _previousSifSignatures[alliance]);
+
+                var output = DefenseIntentLedger.Build(input);
+                DefenseIntents[alliance] = output;
+
+                // Refresh the per-alliance "seen this tick" SIF set so the NEXT
+                // tick can detect collapsed entries via VanillaCollapsed.
+                _previousSifSignatures[alliance] = CollectSifSignatures(output);
+
+                bool verbose = ConfigValue(plugin.VerboseLogging) || ConfigValue(plugin.DefenseIntentVerboseLogging);
+                if (verbose || _defenseIntentSignatures[alliance] != output.Signature)
+                {
+                    if (output.Responses != null)
+                    {
+                        foreach (var r in output.Responses)
+                        {
+                            Plugin.Log.LogInfo(
+                                $"[DefenseIntent] alliance={alliance} posture={r.Threat.Posture} " +
+                                $"threat={r.Threat.Signature} enemy={r.Threat.EnemyStrength:F0} " +
+                                $"desired={r.Threat.DesiredStrength:F0} selected={r.SelectedPackage.Count} " +
+                                $"reason={r.Threat.EscalationReason ?? ""} sig={r.TelemetrySignature ?? ""}");
+                        }
+                    }
+                    _defenseIntentSignatures[alliance] = output.Signature;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("defense-intent:update:" + alliance,
+                    "[DefenseIntent] update failed: " + ex.Message);
+            }
+        }
+
+        private float ComputeAllianceEffectiveStrength(int alliance)
+        {
+            try
+            {
+                int aifactionIndex = ResolveAifactionIndexForAlliance(alliance);
+                if (aifactionIndex < 0) return 0f;
+                var faction = AICampaignReflect.GetFaction(aifactionIndex);
+                if (faction == null) return 0f;
+                var ownUnitsField = AccessTools.Field(faction.GetType(), "ownunits");
+                var ownUnits = ownUnitsField?.GetValue(faction) as IList;
+                if (ownUnits == null) return 0f;
+                float total = 0f;
+                for (int i = 0; i < ownUnits.Count; i++)
+                {
+                    var u = ownUnits[i];
+                    if (u == null) continue;
+                    int strength = 0;
+                    float morale = 1f;
+                    try
+                    {
+                        var strengthField = AccessTools.Field(u.GetType(), "groupstrengthactive");
+                        if (strengthField != null) strength = Convert.ToInt32(strengthField.GetValue(u));
+                        var moraleField = AccessTools.Field(u.GetType(), "groupmorale");
+                        if (moraleField != null) morale = Convert.ToSingle(moraleField.GetValue(u));
+                    }
+                    catch { }
+                    float effectiveMorale = morale > 0.25f ? morale : 0.25f;
+                    total += (float)strength * effectiveMorale;
+                }
+                return total;
+            }
+            catch { return 0f; }
+        }
+
+        private static int ResolveAifactionIndexForAlliance(int allianceId)
+        {
+            try
+            {
+                var aicType = AccessTools.TypeByName("AICampaign");
+                var list = AccessTools.Field(aicType, "aifaction")?.GetValue(null) as IList;
+                if (list == null) return -1;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    int aid = AICampaignReflect.GetAllianceId(i);
+                    if (aid == allianceId) return i;
+                }
+            }
+            catch { }
+            return -1;
+        }
+
+        private static GrandStrategyProfile ResolveGrandStrategyProfile(int alliance, EraStage era)
+        {
+            try { return GrandStrategyRegistry.Resolve(alliance, era); }
+            catch { return null; }
+        }
+
+        private static HashSet<string> CollectSifSignatures(DefenseIntentLedgerOutput output)
+        {
+            var set = new HashSet<string>();
+            if (output == null || output.Responses == null) return set;
+            foreach (var r in output.Responses)
+            {
+                if (r?.Threat?.Signature == null) continue;
+                if (r.Threat.Signature.StartsWith("sif:")) set.Add(r.Threat.Signature);
+            }
+            return set;
         }
 
         private void UpdateFiscalIntent(int alliance, EraStage era, int day, int month, int year, bool logHeartbeat)

@@ -25,6 +25,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> FiscalTrace;
         internal ConfigEntry<bool> FiscalTelemetryCsv;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
+        internal ConfigEntry<bool> EnableDefenseIntentLedger;
+        internal ConfigEntry<bool> DefenseIntentVerboseLogging;
         internal ConfigEntry<bool> EnableConstructionSiteSteering;
         internal ConfigEntry<bool> EnableSupplyDepotSteering;
         internal ConfigEntry<bool> EnableFortSteering;
@@ -81,6 +83,16 @@ namespace WhiskeyRealism
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
+            EnableDefenseIntentLedger = Config.Bind(
+                "Defense Intent Ledger",
+                "Enable Defense Intent Ledger",
+                true,
+                "Compute the daily defense ledger (Slice 1 observer). Disable to suppress all [DefenseIntent] output.");
+            DefenseIntentVerboseLogging = Config.Bind(
+                "Defense Intent Ledger",
+                "Defense Intent Verbose Logging",
+                false,
+                "Log per-tick defense intent telemetry even when the signature has not changed.");
             EnableConstructionSiteSteering = Config.Bind(
                 "Construction", "Enable Construction Site Steering", false,
                 "Default OFF. Enables ConstructionIntentLedger private-building probability steering without replacing bestiipplaces or bypassing vanilla gates.");
