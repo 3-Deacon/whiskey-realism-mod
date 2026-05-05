@@ -131,7 +131,9 @@ static class Program
             ("perk scorer favors csa raiding fleets", PerkScorerFavorsCsaRaidingFleets),
             ("perk scorer skips unavailable candidates", PerkScorerSkipsUnavailableCandidates),
             ("front sector signature ignores sub-bucket ratio jitter", FrontSectorSignatureIgnoresSubBucketRatioJitter),
-            ("asset strategic role flags compose additively", AssetStrategicRoleFlagsComposeAdditively)
+            ("asset strategic role flags compose additively", AssetStrategicRoleFlagsComposeAdditively),
+            ("campaign map ledger applies role catalog to towns and assets", CampaignMapLedgerAppliesRoleCatalog),
+            ("campaign map ledger signature reflects role changes", CampaignMapLedgerSignatureReflectsRoleChanges)
         };
 
         foreach (var test in tests)
@@ -2411,6 +2413,52 @@ static class Program
         AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup("unmapped-port"));
         AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup(null));
         AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup(""));
+    }
+
+    private static void CampaignMapLedgerAppliesRoleCatalog()
+    {
+        var towns = new[]
+        {
+            new CampaignMapTown { CityName = "Norfolk", StateId = 1, StateName = "Virginia", IsCapital = false, X = 100f, Z = 100f }
+        };
+        var assets = new[]
+        {
+            new CampaignMapAsset { Kind = CampaignMapAssetKind.SeaHarbor, Name = "wilmington-harbor", StateId = 2, StateName = "North Carolina", X = 200f, Z = 200f },
+            new CampaignMapAsset { Kind = CampaignMapAssetKind.SeaHarbor, Name = "unmapped-port",     StateId = 3, StateName = "South Carolina", X = 300f, Z = 300f }
+        };
+
+        var ledger = CampaignMapLedger.Build(towns, assets);
+
+        AssertTrue(ledger.TryGetTown("Norfolk", out var norfolk), "should resolve Norfolk by name");
+        // Norfolk is a known catalog entry under "norfolk-harbor", but the town is keyed by CityName "Norfolk" — case-insensitive lookup should NOT match a different key. Verify None.
+        AssertEqual(AssetStrategicRole.None, norfolk.StrategicRole);
+
+        var wilmington = ledger.Assets[0];
+        AssertTrue((wilmington.StrategicRole & AssetStrategicRole.BlockadeRunnerPort) != 0,
+            "wilmington-harbor asset should pick up BlockadeRunnerPort from catalog");
+
+        var unmapped = ledger.Assets[1];
+        AssertEqual(AssetStrategicRole.None, unmapped.StrategicRole);
+    }
+
+    private static void CampaignMapLedgerSignatureReflectsRoleChanges()
+    {
+        var asset1 = new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor, Name = "wilmington-harbor",
+            StateId = 1, StateName = "North Carolina", X = 100f, Z = 100f
+        };
+        var asset2 = new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor, Name = "unmapped-port",
+            StateId = 1, StateName = "North Carolina", X = 100f, Z = 100f
+        };
+
+        var withCatalogHit = CampaignMapLedger.Build(null, new[] { asset1 });
+        var withMiss = CampaignMapLedger.Build(null, new[] { asset2 });
+
+        AssertTrue(withCatalogHit.Signature != withMiss.Signature,
+            "signature must change when asset roles change");
     }
 
     private static void AssertEqual<T>(T expected, T actual)

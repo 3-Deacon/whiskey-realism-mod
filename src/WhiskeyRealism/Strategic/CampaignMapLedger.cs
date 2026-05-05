@@ -107,6 +107,7 @@ namespace WhiskeyRealism.Strategic
                     town.Theater = TheaterClassifier.FromStateName(town.StateName);
                     if (town.Theater == Theater.Unknown)
                         town.Theater = TheaterClassifier.FromPosition(town.X, town.Z);
+                    town.StrategicRole = AssetRoleCatalog.Lookup(town.CityName);
 
                     ledger._towns.Add(town);
                     if (!ledger._townByName.ContainsKey(town.CityName))
@@ -128,6 +129,7 @@ namespace WhiskeyRealism.Strategic
                     asset.Theater = TheaterClassifier.FromStateName(asset.StateName);
                     if (asset.Theater == Theater.Unknown)
                         asset.Theater = TheaterClassifier.FromPosition(asset.X, asset.Z);
+                    asset.StrategicRole = AssetRoleCatalog.Lookup(asset.Name);
                     ledger._assets.Add(asset);
                 }
             }
@@ -235,10 +237,15 @@ namespace WhiskeyRealism.Strategic
 
         private string BuildSignature()
         {
+            int roleSum = 0;
+            foreach (var town in _towns) roleSum = unchecked(roleSum * 31 + (int)town.StrategicRole);
+            foreach (var asset in _assets) roleSum = unchecked(roleSum * 31 + (int)asset.StrategicRole);
+
             return _towns.Count + ":" + _states.Count + ":" +
                 _assets.Count + ":" +
                 (BestDefenseTown(0)?.CityName ?? "") + ":" +
-                (BestDefenseTown(1)?.CityName ?? "");
+                (BestDefenseTown(1)?.CityName ?? "") + ":" +
+                "r" + roleSum.ToString("X");
         }
 
         private static CampaignMapTown CopyTown(CampaignMapTown source)

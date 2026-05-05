@@ -64,7 +64,21 @@ namespace WhiskeyRealism.Strategic
                 OnceLog.Warning("campaign-map:assets", "[CampaignMap] asset build failed: " + ex.Message);
             }
 
-            return CampaignMapLedger.Build(towns, assets);
+            var ledger = CampaignMapLedger.Build(towns, assets);
+            LogMissingRoles(ledger);
+            return ledger;
+        }
+
+        private static void LogMissingRoles(CampaignMapLedger ledger)
+        {
+            if (ledger == null || ledger.Assets == null) return;
+            foreach (var asset in ledger.Assets)
+            {
+                if (asset == null || string.IsNullOrEmpty(asset.Name)) continue;
+                if (asset.StrategicRole != AssetStrategicRole.None) continue;
+                OnceLog.Info("defense-intent:asset-no-role:" + asset.Name,
+                    $"[DefenseIntent:asset] missing-role asset={asset.Name} kind={asset.Kind}");
+            }
         }
 
         private static void AddHarborAssets(List<CampaignMapAsset> assets)
