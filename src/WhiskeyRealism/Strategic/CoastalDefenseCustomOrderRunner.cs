@@ -36,6 +36,10 @@ namespace WhiskeyRealism.Strategic
         {
             try
             {
+                // Alliance 2+ (Europe, neutral observers) should never receive custom
+                // defensive movement orders. Our per-alliance state structures are sized
+                // for Union=0 and CSA=1 only; reject anything outside that range.
+                if (allianceId < 0 || allianceId > 1) return;
                 if (output == null || output.Responses == null || output.Responses.Count == 0) return;
 
                 int aifactionIndex = ResolveAifactionIndex(allianceId);

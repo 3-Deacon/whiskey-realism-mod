@@ -165,7 +165,8 @@ static class Program
             ("defense ledger river harbor detects without sif", DefenseLedgerRiverHarborDetectsWithoutSif),
             ("defense ledger raidforce coverage", DefenseLedgerRaidforceCoverage),
             ("defense ledger debug seainvasionsactive off falls back", DefenseLedgerDebugSeainvasionsactiveOffFallsBack),
-            ("defense ledger telemetry signature non-empty and posture-prefixed", DefenseLedgerTelemetrySignaturePopulated)
+            ("defense ledger telemetry signature non-empty and posture-prefixed", DefenseLedgerTelemetrySignaturePopulated),
+            ("defense ledger does not crash on europe alliance index", DefenseLedgerDoesNotCrashOnEuropeAllianceIndex)
         };
 
         foreach (var test in tests)
@@ -3371,6 +3372,27 @@ static class Program
             AssertTrue(r.TelemetrySignature.StartsWith(expectedPrefix),
                 $"TelemetrySignature '{r.TelemetrySignature}' must start with posture '{expectedPrefix}'");
         }
+    }
+
+    // Test: pure builder must accept allianceId=2 (Europe) without throwing.
+    // Vanilla AICampaign.aifaction includes alliance 2 for some CSA-side
+    // scenarios (decompile lines 9226/9249/9271/9367). The runtime arrays on
+    // StrategicCoordinator are length 2 — the bound-check that short-circuits
+    // alliance 2+ lives at the coordinator / patch layer. The builder itself
+    // is alliance-agnostic and must not throw on any non-negative ID.
+    private static void DefenseLedgerDoesNotCrashOnEuropeAllianceIndex()
+    {
+        var input = MakeDefenseInput(allianceId: 2);
+        DefenseIntentLedgerOutput output = null;
+        Exception caught = null;
+        try { output = DefenseIntentLedger.Build(input); }
+        catch (Exception ex) { caught = ex; }
+
+        AssertTrue(caught == null, $"expected no exception for allianceId=2, got: {caught}");
+        AssertTrue(output != null, "Build must return a non-null output for allianceId=2");
+        AssertEqual(2, output.AllianceId);
+        AssertTrue(output.Responses != null,
+            "Responses list must not be null even for europe alliance");
     }
 
     // -----------------------------------------------------------------------

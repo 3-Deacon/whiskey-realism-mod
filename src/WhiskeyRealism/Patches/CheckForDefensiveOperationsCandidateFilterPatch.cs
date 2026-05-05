@@ -60,8 +60,11 @@ namespace WhiskeyRealism.Patches
 
                 int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
                 if (allianceId < 0) return;
+                var coordinator = StrategicCoordinator.Instance;
+                if (coordinator == null || coordinator.DefenseIntents == null) return;
+                if (allianceId >= coordinator.DefenseIntents.Length) return;
 
-                var output = StrategicCoordinator.Instance?.DefenseIntents?[allianceId];
+                var output = coordinator.DefenseIntents[allianceId];
                 if (output == null || output.Responses == null || output.Responses.Count == 0) return;
 
                 var forbidden = CollectForbiddenIds(output, out var reasonByUnitId, out var threatSigByUnitId);
@@ -179,9 +182,12 @@ namespace WhiskeyRealism.Patches
                 if (_defensiveOpsBefore.TryGetValue(_aifaction, out var beforeIds))
                 {
                     int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
-                    if (allianceId >= 0)
+                    var coordinator = StrategicCoordinator.Instance;
+                    if (allianceId >= 0 &&
+                        coordinator?.DefenseIntents != null &&
+                        allianceId < coordinator.DefenseIntents.Length)
                     {
-                        var output = StrategicCoordinator.Instance?.DefenseIntents?[allianceId];
+                        var output = coordinator.DefenseIntents[allianceId];
                         if (output != null)
                         {
                             var forbidden = CollectForbiddenIds(output, out var _unusedReasons, out var _unusedSigs);
