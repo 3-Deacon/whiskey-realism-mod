@@ -1067,15 +1067,6 @@ namespace WhiskeyRealism.Strategic
                         ActivePlan  = (CICs[alliance].ActivePlan != null) ? PlanToDto(CICs[alliance].ActivePlan) : null
                     }
                 };
-                foreach (var tc in CICs[alliance].Theaters)
-                {
-                    f.TheaterCommanders.Add(new TheaterCommanderDto
-                    {
-                        TheaterId   = tc.TheaterId,
-                        OfficerName = tc.OfficerName,
-                        Personality = PersonalityDto.FromVector(tc.Personality)
-                    });
-                }
                 dto.Factions.Add(f);
             }
             foreach (var kv in MinorOfficerProfiles)
@@ -1114,15 +1105,6 @@ namespace WhiskeyRealism.Strategic
                     OfficerPersonality = f.Cic?.Personality?.ToVector() ?? default(PersonalityVector),
                     ActivePlan         = (f.Cic?.ActivePlan != null) ? PlanFromDto(f.Cic.ActivePlan, f.FactionId) : null
                 };
-                foreach (var tc in f.TheaterCommanders)
-                {
-                    cic.Theaters.Add(new TheaterCommander
-                    {
-                        TheaterId   = tc.TheaterId,
-                        OfficerName = tc.OfficerName,
-                        Personality = tc.Personality?.ToVector() ?? default(PersonalityVector)
-                    });
-                }
                 CICs[f.FactionId] = cic;
             }
             MinorOfficerProfiles.Clear();

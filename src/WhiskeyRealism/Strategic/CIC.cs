@@ -12,7 +12,6 @@ namespace WhiskeyRealism.Strategic
         public int OfficerCommanderId;
         public string OfficerName;
         public PersonalityVector OfficerPersonality;
-        public List<TheaterCommander> Theaters = new List<TheaterCommander>();
         public OperationalPlan ActivePlan;
 
         public PersonalityVector Effective(EraStageManager era)
@@ -147,7 +146,7 @@ namespace WhiskeyRealism.Strategic
             var plan = new OperationalPlan
             {
                 CICFactionAllianceId = AllianceId,
-                AssignedTheaterId    = (Theaters.Count > 0 ? Theaters[0].TheaterId : 0),
+                AssignedTheaterId    = 0,
                 CurrentPhaseIndex    = 0,
                 PlanDeadlineMonth    = deadline.month,
                 PlanDeadlineYear     = deadline.year,

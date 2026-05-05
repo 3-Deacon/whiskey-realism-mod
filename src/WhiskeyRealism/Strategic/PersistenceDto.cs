@@ -18,7 +18,6 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("factionName")] public string FactionName;
         [JsonProperty("currentEra")]  public string CurrentEra;
         [JsonProperty("cic")]         public CICDto Cic;
-        [JsonProperty("theaterCommanders")] public List<TheaterCommanderDto> TheaterCommanders = new List<TheaterCommanderDto>();
     }
 
     internal class CICDto
@@ -26,13 +25,6 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("officerName")] public string OfficerName;
         [JsonProperty("personality")] public PersonalityDto Personality;
         [JsonProperty("activePlan")]  public OperationalPlanDto ActivePlan;
-    }
-
-    internal class TheaterCommanderDto
-    {
-        [JsonProperty("theaterId")]   public int TheaterId;
-        [JsonProperty("officerName")] public string OfficerName;
-        [JsonProperty("personality")] public PersonalityDto Personality;
     }
 
     internal class OperationalPlanDto

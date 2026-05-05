@@ -219,7 +219,8 @@ static class Program
             ("contact evidence enemy reacted on strength rise", ContactEvidenceEnemyReactedOnStrengthRise),
             ("contact evidence skirmish observed near target", ContactEvidenceSkirmishObservedNearTarget),
             ("contact evidence battle observed lost is overmatched", ContactEvidenceBattleObservedLostIsOvermatched),
-            ("contact evidence favorable contact requires presence and ratio", ContactEvidenceFavorableRequiresPresenceAndRatio)
+            ("contact evidence favorable contact requires presence and ratio", ContactEvidenceFavorableRequiresPresenceAndRatio),
+            ("persistence dto load tolerates legacy theater commanders field", PersistenceDtoLoadToleratesLegacyTheaterCommanders)
         };
 
         foreach (var test in tests)
@@ -4691,5 +4692,28 @@ static class Program
         var output = ContactEvidenceLedger.Build(input);
         AssertEqual(ContactEvidence.FavorableContact, output.Evidence);
         AssertTrue(output.AllowsEscalation, "favorable contact allows escalation");
+    }
+
+    private static void PersistenceDtoLoadToleratesLegacyTheaterCommanders()
+    {
+        // Old sidecar JSON included a theaterCommanders array on each faction.
+        // After deleting TheaterCommander + FactionDto.TheaterCommanders, Newtonsoft
+        // must silently ignore that field rather than throwing or losing the known fields.
+        string legacyJson = @"{
+            ""version"":1,
+            ""factions"":[
+                {
+                    ""factionId"":0,
+                    ""factionName"":""Union"",
+                    ""currentEra"":""Early"",
+                    ""cic"":{""officerName"":""Lincoln""},
+                    ""theaterCommanders"":[{""theaterId"":1,""officerName"":""Grant""}]
+                }
+            ]
+        }";
+        var dto = Newtonsoft.Json.JsonConvert.DeserializeObject<SidecarDto>(legacyJson);
+        AssertTrue(dto != null, "dto should deserialize");
+        AssertTrue(dto.Factions != null && dto.Factions.Count == 1, "one faction loaded");
+        AssertEqual("Lincoln", dto.Factions[0].Cic.OfficerName);
     }
 }

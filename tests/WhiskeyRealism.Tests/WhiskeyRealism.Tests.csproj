@@ -16,6 +16,10 @@
       <HintPath>$(RefsDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(RefsDir)\Newtonsoft.Json.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Theater.cs" Link="Theater.cs" />
@@ -88,5 +92,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseIntentTelemetry.cs" Link="DefenseIntentTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalBattleContext.cs" Link="TacticalBattleContext.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalTelemetry.cs" Link="TacticalTelemetry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
   </ItemGroup>
 </Project>
