@@ -44,7 +44,19 @@ namespace WhiskeyRealism.Strategic
                     }
                 }
 
-                return FormationDirectiveLedger.Build(snapshots, era, planTargetAreaKey);
+                var memories = StrategicCoordinator.Instance?.DirectorMemories;
+                var posture = (memories != null && allianceId >= 0 && allianceId < memories.Length)
+                    ? memories[allianceId]?.LastPosture
+                    : null;
+                var options = new FormationDirectiveOptions
+                {
+                    RecoverMoraleFloor    = Clamp(0.35f + (posture?.RecoverFloorModifier ?? 0f), 0.20f, 0.50f),
+                    RecoverReadinessFloor = Clamp(0.35f + (posture?.RecoverFloorModifier ?? 0f), 0.20f, 0.50f),
+                    DivisionAttackRatio   = Clamp(1.5f  + (posture?.MassRatioModifier   ?? 0f), 1.20f, 1.80f),
+                    CorpsAttackRatio      = Clamp(1.2f  + (posture?.MassRatioModifier   ?? 0f), 1.00f, 1.50f),
+                    ArmyAttackRatio       = Clamp(1.05f + (posture?.MassRatioModifier   ?? 0f), 0.90f, 1.30f)
+                };
+                return FormationDirectiveLedger.Build(snapshots, era, planTargetAreaKey, options);
             }
             catch (Exception ex)
             {
@@ -445,5 +457,7 @@ namespace WhiskeyRealism.Strategic
             for (int i = 0; i < values.Length; i++) total += Math.Max(0, values[i]);
             return total;
         }
+
+        private static float Clamp(float v, float lo, float hi) => v < lo ? lo : (v > hi ? hi : v);
     }
 }

@@ -50,5 +50,10 @@ namespace WhiskeyRealism.Strategic
         // Bounded to [-0.05, +0.10].
         public float MinimumHoldRatioModifier;
         public float ConcessionRatioModifier;
+
+        // FormationDirective modifiers — applied on top of FormationDirectiveOptions defaults.
+        // RecoverFloorModifier bounded to [-0.05, +0.10]; MassRatioModifier bounded to [-0.10, +0.10].
+        public float RecoverFloorModifier;
+        public float MassRatioModifier;
     }
 }

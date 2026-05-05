@@ -116,6 +116,28 @@ namespace WhiskeyRealism.Strategic
             }
             posture.MinimumHoldRatioModifier = Clamp(holdMod, -0.05f, +0.10f);
             posture.ConcessionRatioModifier  = Clamp(concessionMod, -0.05f, +0.10f);
+
+            float recoverMod = 0f, massRatioMod = 0f;
+            switch (posture.Pace)
+            {
+                case CampaignPace.Overheated:
+                    recoverMod    = +0.07f;
+                    massRatioMod  = +0.05f;
+                    break;
+                case CampaignPace.TooFastCollapse:
+                    recoverMod    = +0.10f;
+                    massRatioMod  = +0.10f;
+                    break;
+                case CampaignPace.LateWarPressure:
+                    if (posture.AllianceId == 0) massRatioMod = -0.10f;
+                    else                          recoverMod   = +0.05f;
+                    break;
+                case CampaignPace.TooQuiet:
+                    recoverMod = -0.03f;
+                    break;
+            }
+            posture.RecoverFloorModifier = Clamp(recoverMod, -0.05f, +0.10f);
+            posture.MassRatioModifier    = Clamp(massRatioMod, -0.10f, +0.10f);
         }
 
         public static void ApplyTo(OperationalProbeOptions options, DirectorPosture posture)

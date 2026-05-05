@@ -3,6 +3,15 @@ using System.Collections.Generic;
 
 namespace WhiskeyRealism.Strategic
 {
+    public sealed class FormationDirectiveOptions
+    {
+        public float RecoverMoraleFloor = 0.35f;
+        public float RecoverReadinessFloor = 0.35f;
+        public float DivisionAttackRatio = 1.5f;
+        public float CorpsAttackRatio = 1.2f;
+        public float ArmyAttackRatio = 1.05f;
+    }
+
     public sealed class FormationDirectiveAssignment
     {
         public string UnitKey;
@@ -51,8 +60,9 @@ namespace WhiskeyRealism.Strategic
         public IReadOnlyList<FormationDirectiveAssignment> Assignments => _ordered;
         public FormationPressureSummary Pressure = new FormationPressureSummary();
 
-        public static FormationDirectiveLedger Build(IEnumerable<FormationSnapshot> snapshots, EraStage era, string planTargetAreaKey)
+        public static FormationDirectiveLedger Build(IEnumerable<FormationSnapshot> snapshots, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options = null)
         {
+            options = options ?? new FormationDirectiveOptions();
             var ledger = new FormationDirectiveLedger();
             if (snapshots == null) return ledger;
 
@@ -68,7 +78,7 @@ namespace WhiskeyRealism.Strategic
                 if (!snapshot.CanReceiveDirectDirective) continue;
                 if (!snapshot.IsTopStrategicFormation) continue;
 
-                var assignment = ResolveTopDirective(snapshot, era, planTargetAreaKey);
+                var assignment = ResolveTopDirective(snapshot, era, planTargetAreaKey, options);
                 ledger.Add(assignment);
             }
 
@@ -167,11 +177,11 @@ namespace WhiskeyRealism.Strategic
             _ordered.Add(assignment);
         }
 
-        private static FormationDirectiveAssignment ResolveTopDirective(FormationSnapshot snapshot, EraStage era, string planTargetAreaKey)
+        private static FormationDirectiveAssignment ResolveTopDirective(FormationSnapshot snapshot, EraStage era, string planTargetAreaKey, FormationDirectiveOptions options)
         {
             var assignment = BaseAssignment(snapshot);
 
-            if (snapshot.Morale < 0.35f || snapshot.Readiness < 0.35f)
+            if (snapshot.Morale < options.RecoverMoraleFloor || snapshot.Readiness < options.RecoverReadinessFloor)
                 return Set(assignment, FormationDirective.Recover, "low-morale-readiness", false, false, false);
 
             if (snapshot.MinimumAmmo < 0.25f || snapshot.Supply < 0.25f)
@@ -207,7 +217,7 @@ namespace WhiskeyRealism.Strategic
                 return Set(assignment, FormationDirective.Mass, "army-plan-target", true, true, false);
 
             if ((snapshot.FrontPosture == FrontPosture.Counterstroke || snapshot.FrontPosture == FrontPosture.Exploit) &&
-                AttackRiskPasses(snapshot))
+                AttackRiskPasses(snapshot, options))
             {
                 var directive = snapshot.FrontPosture == FrontPosture.Exploit ? FormationDirective.Mass : FormationDirective.Counterstroke;
                 return Set(assignment, directive, "risk-gate-passed", true, true, false);
@@ -289,13 +299,13 @@ namespace WhiskeyRealism.Strategic
             return own >= snapshot.LocalEnemyStrength * 1.25f;
         }
 
-        private static bool AttackRiskPasses(FormationSnapshot snapshot)
+        private static bool AttackRiskPasses(FormationSnapshot snapshot, FormationDirectiveOptions options)
         {
             float own = snapshot.GroupStrengthActive + (snapshot.SupportCanReach ? snapshot.LocalFriendlySupportStrength : 0f);
             float ratio = own / Math.Max(1f, snapshot.LocalEnemyStrength);
-            if (snapshot.Level == FormationLevel.Division) return ratio >= 1.5f;
-            if (snapshot.Level == FormationLevel.Corps) return ratio >= 1.2f;
-            return ratio >= 1.05f;
+            if (snapshot.Level == FormationLevel.Division) return ratio >= options.DivisionAttackRatio;
+            if (snapshot.Level == FormationLevel.Corps) return ratio >= options.CorpsAttackRatio;
+            return ratio >= options.ArmyAttackRatio;
         }
 
         private void RecomputePressure()

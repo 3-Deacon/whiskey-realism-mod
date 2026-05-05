@@ -237,7 +237,9 @@ static class Program
             ("director memory round trips through dto", DirectorMemoryRoundTripsThroughDto),
             ("cic review plan replans when phase truth says target accomplished", CicReviewPlanReplansWhenPhaseTruthSaysAccomplished),
             ("director publish clamp suppresses second publish in same real second", DirectorPublishClampSuppressesSecondPublishInSameRealSecond),
-            ("director raises csa hold ratio under too fast collapse", DirectorRaisesCsaHoldRatioUnderTooFastCollapse)
+            ("director raises csa hold ratio under too fast collapse", DirectorRaisesCsaHoldRatioUnderTooFastCollapse),
+            ("director raises recover floor under overheated", DirectorRaisesRecoverFloorUnderOverheated),
+            ("director relaxes union mass ratio under late war pressure", DirectorRelaxesUnionMassRatioUnderLateWarPressure)
         };
 
         foreach (var test in tests)
@@ -5005,5 +5007,23 @@ static class Program
             "TooFastCollapse for CSA must raise MinimumHoldRatio — was " + posture.MinimumHoldRatioModifier);
         AssertTrue(posture.MinimumHoldRatioModifier <= 0.10f,
             "MinimumHoldRatioModifier capped at +0.10");
+    }
+
+    private static void DirectorRaisesRecoverFloorUnderOverheated()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.Overheated, Risk = CollapseRisk.Low },
+            personality: new PersonalityVector());
+        AssertTrue(posture.RecoverFloorModifier > 0f, "overheated must raise recover floor");
+    }
+
+    private static void DirectorRelaxesUnionMassRatioUnderLateWarPressure()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Low },
+            personality: new PersonalityVector());
+        AssertTrue(posture.MassRatioModifier < 0f, "Union late-war pressure must lower mass ratio gate");
     }
 }
