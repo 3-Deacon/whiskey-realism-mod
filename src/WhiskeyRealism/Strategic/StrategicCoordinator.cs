@@ -43,6 +43,8 @@ namespace WhiskeyRealism.Strategic
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
         internal readonly DirectorMemory[] DirectorMemories = new DirectorMemory[2] { new DirectorMemory(), new DirectorMemory() };
+        private readonly DirectorPublishClamp _directorClamp = new DirectorPublishClamp();
+        private readonly string[] _directorPostureSignatures = new string[2];
         private readonly FiscalStateMemory[] _fiscalMemory = new FiscalStateMemory[2]
         {
             new FiscalStateMemory(),
@@ -308,6 +310,39 @@ namespace WhiskeyRealism.Strategic
                     {
                         armyAreaMs += Measure(() => UpdateArmyAreaLedger(alliance, cic));
                         _armyAreaSourceSignatures[alliance] = armyAreaSource;
+                    }
+
+                    // Director daily publish — at most one full refresh per real second across
+                    // both alliances combined (_directorClamp is a single shared instance).
+                    int daySerial = year * 372 + month * 31 + day;
+                    var paceInput  = BuildCampaignPaceInput(alliance, day, month, year);
+                    var paceOutput = CampaignPaceLedger.Build(paceInput);
+                    var personality = cic.Effective(era);
+                    var newPosture  = StrategicResilienceDirector.ProposePosture(alliance, paceOutput, personality);
+                    newPosture.SourceSignature = DirectorSourceSignature(alliance);
+
+                    if (_directorClamp.TryPublish(System.DateTime.UtcNow))
+                    {
+                        DirectorMemories[alliance].LastPosture          = newPosture;
+                        DirectorMemories[alliance].LastFullRefreshDay   = daySerial;
+                        DirectorMemories[alliance].LastSourceSignature  = newPosture.SourceSignature;
+
+                        string previousSig = _directorPostureSignatures[alliance];
+                        string newSig      = newPosture.Pace + "/" + newPosture.Intent + "/" + newPosture.Risk;
+                        if (newSig != previousSig)
+                        {
+                            Plugin.Log.LogInfo(
+                                $"[CampaignPace] alliance={alliance} pace={newPosture.Pace}" +
+                                $" intent={newPosture.Intent} risk={newPosture.Risk}" +
+                                $" reason={newPosture.Reason}");
+                            _directorPostureSignatures[alliance] = newSig;
+                        }
+                    }
+                    else
+                    {
+                        newPosture.Stale = true;
+                        DirectorMemories[alliance].LastPosture =
+                            DirectorMemories[alliance].LastPosture ?? newPosture;
                     }
                 }
 
@@ -853,6 +888,96 @@ namespace WhiskeyRealism.Strategic
                 "|fiscal=" + (_fiscalSignatures[alliance] ?? "");
         }
 
+        // Produces a short signature string that captures the current input
+        // state of the Director for one alliance.  Used for staleness detection
+        // across daily ticks: a mismatch triggers a re-evaluate even when the
+        // real-second clamp would otherwise suppress a publish.
+        private string DirectorSourceSignature(int alliance)
+        {
+            return "front="      + (_frontSignatures[alliance]              ?? "") +
+                "|formation="    + (_formationDirectiveSignatures[alliance] ?? "") +
+                "|defense="      + (_defenseIntentSignatures[alliance]      ?? "") +
+                "|fiscal="       + (_fiscalSignatures[alliance]             ?? "") +
+                "|construction=" + (_constructionSignatures[alliance]       ?? "") +
+                "|probe="        + (_operationalProbeSignatures[alliance]   ?? "") +
+                "|era="          + (Eras[alliance]?.Stage.ToString()        ?? "") +
+                "|chapter="      + SafePolicyChapter();
+        }
+
+        // Reads live morale / prefs via reflection (same pattern as GameVars
+        // commander lookups already in this file).  Falls back to safe defaults
+        // so that a reflection gap silently degrades rather than crashing.
+        private CampaignPaceInput BuildCampaignPaceInput(int alliance, int day, int month, int year)
+        {
+            float ownMorale = 50f, enemyMorale = 50f;
+            float breakTrigger = 30f, minSurrender = 18f;
+            try
+            {
+                if (_gameVarsType == null) _gameVarsType = AccessTools.TypeByName("GameVars");
+                if (_allianceArrayField == null) _allianceArrayField = AccessTools.Field(_gameVarsType, "alliance");
+                var allianceArray = _allianceArrayField?.GetValue(null) as System.Array;
+                if (allianceArray != null)
+                {
+                    int enemyAlliance = 1 - alliance;
+                    var ownEntry   = allianceArray.GetValue(alliance);
+                    var enemyEntry = enemyAlliance < allianceArray.Length ? allianceArray.GetValue(enemyAlliance) : null;
+                    if (ownEntry != null)
+                    {
+                        if (_nationalMoraleField == null)
+                            _nationalMoraleField = AccessTools.Field(ownEntry.GetType(), "nationalmorale");
+                        if (_nationalMoraleField != null)
+                        {
+                            ownMorale = (float)_nationalMoraleField.GetValue(ownEntry);
+                            if (enemyEntry != null)
+                                enemyMorale = (float)_nationalMoraleField.GetValue(enemyEntry);
+                        }
+                    }
+                }
+                if (_gamePrefsType == null) _gamePrefsType = AccessTools.TypeByName("GamePrefs");
+                if (_breakMoraleField == null)
+                    _breakMoraleField = AccessTools.Field(_gamePrefsType, "breakmoraletrigger");
+                if (_minSurrenderField == null)
+                    _minSurrenderField = AccessTools.Field(_gamePrefsType, "minnationalmoralesurrender");
+                if (_breakMoraleField  != null) breakTrigger  = (float)_breakMoraleField.GetValue(null);
+                if (_minSurrenderField != null) minSurrender  = (float)_minSurrenderField.GetValue(null);
+            }
+            catch (Exception)
+            {
+                OnceLog.Warning("director:morale-reflect:" + alliance,
+                    "[Director] nationalmorale/GamePrefs reflection failed; using defaults");
+            }
+
+            int daySerial = year * 372 + month * 31 + day;
+            int battles = 0, majorBattles = 0;
+            foreach (var b in BattleHistory)
+            {
+                int bDay = b.Year * 372 + b.Month * 31 + b.Day;
+                if (bDay <= daySerial && daySerial - bDay <= 14 && b.IsLandBattle)
+                {
+                    battles++;
+                    if (b.IsMajorResult) majorBattles++;
+                }
+            }
+
+            return new CampaignPaceInput
+            {
+                AllianceId                   = alliance,
+                Year                         = year,
+                Month                        = month,
+                PolicyChapter                = SafePolicyChapter(),
+                OwnNationalMorale            = ownMorale,
+                EnemyNationalMorale          = enemyMorale,
+                BreakMoraleTrigger           = breakTrigger,
+                MinNationalMoraleSurrender   = minSurrender,
+                BattlesIn14Days              = battles,
+                MajorBattlesIn14Days         = majorBattles,
+                CapitalDangerStreakDays       = 0,  // TODO: track streak when infra added
+                DaysSinceFrontSignatureChange = 0,  // TODO: stamp when _frontSignatures changes
+                IsWinter                     = month == 12 || month == 1 || month == 2,
+                TheaterPressure              = TheaterPressureView.From(Fronts[alliance])
+            };
+        }
+
         public void OnEventTrigger(int allianceId, string eventType)
         {
             if (allianceId < 0 || allianceId >= CICs.Length) return;
@@ -1006,6 +1131,11 @@ namespace WhiskeyRealism.Strategic
         private static FieldInfo _dlcChosenCommanderField;
         private static FieldInfo _gameVarsCommanderField;
         private static FieldInfo _commanderCurrentCommandField;
+        private static FieldInfo _allianceArrayField;
+        private static FieldInfo _nationalMoraleField;
+        private static Type _gamePrefsType;
+        private static FieldInfo _breakMoraleField;
+        private static FieldInfo _minSurrenderField;
 
         // Cached snapshot — recomputed once per strategic review to avoid
         // re-reading 3+ towns per faction iteration.

@@ -235,7 +235,8 @@ static class Program
             ("director maps overheated pace to recover-leaning intent", DirectorMapsOverheatedToRecoverLeaning),
             ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk),
             ("director memory round trips through dto", DirectorMemoryRoundTripsThroughDto),
-            ("cic review plan replans when phase truth says target accomplished", CicReviewPlanReplansWhenPhaseTruthSaysAccomplished)
+            ("cic review plan replans when phase truth says target accomplished", CicReviewPlanReplansWhenPhaseTruthSaysAccomplished),
+            ("director publish clamp suppresses second publish in same real second", DirectorPublishClampSuppressesSecondPublishInSameRealSecond)
         };
 
         foreach (var test in tests)
@@ -4982,5 +4983,14 @@ static class Program
         bool result = CicReviewRouter.RouteAction(plan, truth, 6, 1862);
         AssertTrue(!result, "RouteAction should return false when last phase is exhausted by Advance");
         AssertTrue(plan.IsDirty, "plan.IsDirty should be true after last phase exhausted by Advance");
+    }
+
+    private static void DirectorPublishClampSuppressesSecondPublishInSameRealSecond()
+    {
+        var clamp = new DirectorPublishClamp();
+        var stamp = new System.DateTime(2026, 5, 5, 12, 0, 0);
+        AssertTrue(clamp.TryPublish(stamp), "first publish in second should succeed");
+        AssertTrue(!clamp.TryPublish(stamp.AddMilliseconds(50)), "second publish 50ms later should be suppressed");
+        AssertTrue(clamp.TryPublish(stamp.AddSeconds(1).AddMilliseconds(1)), "publish past 1s boundary should succeed");
     }
 }

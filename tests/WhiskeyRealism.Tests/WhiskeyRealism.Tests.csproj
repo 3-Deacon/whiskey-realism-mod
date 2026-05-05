@@ -98,5 +98,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignPaceLedger.cs" Link="CampaignPaceLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategicResilienceDirector.cs" Link="StrategicResilienceDirector.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPublishClamp.cs" Link="DirectorPublishClamp.cs" />
   </ItemGroup>
 </Project>
