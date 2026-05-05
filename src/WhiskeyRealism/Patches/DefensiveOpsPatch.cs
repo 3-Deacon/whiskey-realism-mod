@@ -13,6 +13,7 @@ namespace WhiskeyRealism.Patches
     // add one extra eligible group only when the active CIC personality makes
     // the capital-defense strength gate stricter. Vanilla owns the later move.
     [HarmonyPatch(typeof(AICampaign), "AssignUnitToDefendCapital")]
+    [HarmonyPriority(Priority.High)]
     internal static class DefensiveOpsPatch
     {
         [HarmonyPostfix]
@@ -31,6 +32,13 @@ namespace WhiskeyRealism.Patches
                 int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
                 if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
 
+                // Capital is owned exclusively by #4 — short-circuit if no capital
+                // can be resolved so this patch never touches non-capital state.
+                // The defense intent ledger (Slice 2) owns all non-capital coastal
+                // assets; this guard makes the spec's coexistence invariant explicit.
+                if (!TryResolveCapital(allianceId, out var capitalPosition, out var capitalName)) return;
+                var capitalTown = ResolveMapTown(capitalName);
+
                 var cic = StrategicCoordinator.Instance.CICs[allianceId];
                 if (cic == null) return;
 
@@ -39,9 +47,6 @@ namespace WhiskeyRealism.Patches
 
                 var faction = GetFaction(_aifaction);
                 if (faction == null) return;
-
-                if (!TryResolveCapital(allianceId, out var capitalPosition, out var capitalName)) return;
-                var capitalTown = ResolveMapTown(capitalName);
 
                 var ownUnits = ReadList(faction, "ownunits", "defensiveops:field:ownunits");
                 var enemyUnits = ReadList(faction, "enemyunits", "defensiveops:field:enemyunits");
