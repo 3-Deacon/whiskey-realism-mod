@@ -2,16 +2,6 @@ using System.Collections.Generic;
 
 namespace WhiskeyRealism.Strategic
 {
-    // Tracks per-signature cooldown day counts for the defense ledger's
-    // Recovered-posture stabilization buffer. Signatures are owned by
-    // DefenseThreatSignature; the table itself is shape-agnostic.
-    //
-    // MarkActive / MarkRecovered set (or reset) the countdown for a signature.
-    // They are kept as separate methods so call sites carry semantic intent, and
-    // so future tuning can give them different default durations without refactors.
-    //
-    // Tick decrements all active entries by one day and removes any that reach zero.
-    // IsActive / RemainingDays / Clear are read + release helpers.
     public sealed class DefenseCooldownTable
     {
         private readonly Dictionary<string, int> _remaining = new Dictionary<string, int>();
