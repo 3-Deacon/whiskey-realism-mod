@@ -45,6 +45,12 @@ static class Program
             ("wl start selection retry waits for panel before consuming attempt", WlStartSelectionRetryWaitsForPanel),
             ("wl start selection retry waits for vanilla ready frame", WlStartSelectionRetryWaitsForReadyFrame),
             ("wl start selection retry blocks early ready data before frame fifty", WlStartSelectionRetryBlocksEarlyReadyData),
+            ("wl dispatch sanitizer fixes type 56 stance none", WlDispatchSanitizerFixesType56StanceNone),
+            ("wl dispatch sanitizer fixes type 57 stance none", WlDispatchSanitizerFixesType57StanceNone),
+            ("wl dispatch sanitizer fixes type 15 no-orders none", WlDispatchSanitizerFixesType15NoOrdersNone),
+            ("wl dispatch sanitizer ignores non-candidate type", WlDispatchSanitizerIgnoresNonCandidateType),
+            ("wl dispatch sanitizer handles null content", WlDispatchSanitizerHandlesNullContent),
+            ("wl dispatch sanitizer leaves normal content unchanged", WlDispatchSanitizerLeavesNormalContentUnchanged),
             ("wl camp short camp credits normal rest", WlCampShortCampCreditsNormalRest),
             ("wl camp short camp credits wounded rest", WlCampShortCampCreditsWoundedRest),
             ("wl camp short camp credits preserve minimum proportions", WlCampShortCampCreditsPreserveMinimumProportions),
@@ -823,6 +829,57 @@ static class Program
         AssertEqual(0, gate.Attempts);
         AssertEqual(true, gate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: 50, startupDataReady: true, unityFrame: 31));
         AssertEqual(1, gate.Attempts);
+    }
+
+    private static void WlDispatchSanitizerFixesType56StanceNone()
+    {
+        var result = WlDispatchSanitizer.Sanitize(56, "I will carry on according to your instructions that are to none.");
+        AssertEqual("I will hold position and await further instructions.", result.Content);
+        AssertEqual(true, result.Changed);
+        AssertTrue(!result.Content.Contains("to none"), "type 56 sanitized content must not contain stance none fragment");
+    }
+
+    private static void WlDispatchSanitizerFixesType57StanceNone()
+    {
+        var result = WlDispatchSanitizer.Sanitize(57, "I will carry on according to your instructions that are to none.");
+        AssertEqual("I will hold position and await further instructions.", result.Content);
+        AssertEqual(true, result.Changed);
+        AssertTrue(!result.Content.Contains("to none"), "type 57 sanitized content must not contain stance none fragment");
+    }
+
+    private static void WlDispatchSanitizerFixesType15NoOrdersNone()
+    {
+        AssertEqual(true, WlDispatchSanitizer.IsCandidateType(15));
+
+        var result = WlDispatchSanitizer.Sanitize(15, "I will none if no other orders are received");
+        AssertEqual("I will hold position if no other orders are received", result.Content);
+        AssertEqual(true, result.Changed);
+        AssertTrue(!result.Content.Contains("will none"), "type 15 sanitized content must not contain no-orders none fragment");
+    }
+
+    private static void WlDispatchSanitizerIgnoresNonCandidateType()
+    {
+        const string content = "I will carry on according to your instructions that are to none.";
+        AssertEqual(false, WlDispatchSanitizer.IsCandidateType(99));
+
+        var result = WlDispatchSanitizer.Sanitize(99, content);
+        AssertEqual(content, result.Content);
+        AssertEqual(false, result.Changed);
+    }
+
+    private static void WlDispatchSanitizerHandlesNullContent()
+    {
+        var result = WlDispatchSanitizer.Sanitize(56, null);
+        AssertEqual<string>(null, result.Content);
+        AssertEqual(false, result.Changed);
+    }
+
+    private static void WlDispatchSanitizerLeavesNormalContentUnchanged()
+    {
+        const string content = "I will advance at once.";
+        var result = WlDispatchSanitizer.Sanitize(56, content);
+        AssertEqual(content, result.Content);
+        AssertEqual(false, result.Changed);
     }
 
     private static void WlCampShortCampCreditsNormalRest()
