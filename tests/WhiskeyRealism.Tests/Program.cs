@@ -41,6 +41,25 @@ static class Program
             ("wl start selection retry waits for panel before consuming attempt", WlStartSelectionRetryWaitsForPanel),
             ("wl start selection retry waits for vanilla ready frame", WlStartSelectionRetryWaitsForReadyFrame),
             ("wl start selection retry blocks early ready data before frame fifty", WlStartSelectionRetryBlocksEarlyReadyData),
+            ("wl camp short camp credits normal rest", WlCampShortCampCreditsNormalRest),
+            ("wl camp short camp credits wounded rest", WlCampShortCampCreditsWoundedRest),
+            ("wl camp short camp credits preserve minimum proportions", WlCampShortCampCreditsPreserveMinimumProportions),
+            ("wl camp short camp enough time no correction", WlCampShortCampEnoughTimeNoCorrection),
+            ("wl camp short camp zero minimum no correction", WlCampShortCampZeroMinimumNoCorrection),
+            ("wl camp responsive bonus weights recent included station", WlCampResponsiveBonusWeightsRecentIncludedStation),
+            ("wl camp responsive bonus includes companion recent average", WlCampResponsiveBonusIncludesCompanionRecentAverage),
+            ("wl camp responsive bonus partial companion history divides by window", WlCampResponsiveBonusPartialCompanionHistoryDividesByWindow),
+            ("wl camp responsive bonus excluded stations stay vanilla", WlCampResponsiveBonusExcludedStationsStayVanilla),
+            ("wl camp responsive bonus use average false stays vanilla", WlCampResponsiveBonusUseAverageFalseStaysVanilla),
+            ("wl camp responsive bonus nonfinite input stays bounded", WlCampResponsiveBonusNonfiniteInputStaysBounded),
+            ("wl camp unit divisor clamps invalid cached counts", WlCampUnitDivisorClampsInvalidCachedCounts),
+            ("wl camp unit divisor default power softens four and nine units", WlCampUnitDivisorDefaultPowerSoftensFourAndNineUnits),
+            ("wl camp unit modifier clamps negative to zero", WlCampUnitModifierClampsNegativeToZero),
+            ("wl camp unit modifier nonfinite input falls back", WlCampUnitModifierNonfiniteInputFallsBack),
+            ("wl camp unit power one is vanilla equivalent", WlCampUnitPowerOneIsVanillaEquivalent),
+            ("wl camp unit payoff excluded or undivided returns vanilla", WlCampUnitPayoffExcludedOrUndividedReturnsVanilla),
+            ("wl camp short camp nonfinite input no correction", WlCampShortCampNonfiniteInputNoCorrection),
+            ("assert near rejects nonfinite values", AssertNearRejectsNonfiniteValues),
             ("army group doctrine requires two committed formations", ArmyGroupDoctrineRequiresTwoCommittedFormations),
             ("army group doctrine exposes historical commander preference", ArmyGroupDoctrineExposesHistoricalCommanderPreference),
             ("union early profile favors blockade and river control", UnionEarlyProfileFavorsBlockadeAndRiver),
@@ -701,6 +720,195 @@ static class Program
         AssertEqual(0, gate.Attempts);
         AssertEqual(true, gate.ShouldAttempt(pending: true, listVisible: false, panelAvailable: true, campaignFrame: 50, startupDataReady: true, unityFrame: 31));
         AssertEqual(1, gate.Attempts);
+    }
+
+    private static void WlCampShortCampCreditsNormalRest()
+    {
+        var corrected = new float[1];
+        float minimumTotal;
+        bool changed = WlCampRealism.TryCorrectShortCampMinimumCredits(
+            2f, new[] { 3f }, corrected, out minimumTotal);
+        AssertTrue(changed, "expected correction for 2h actual below 3h minimum");
+        AssertNear(3f, minimumTotal, 0.0001f, "minimum total");
+        AssertNear(2f, corrected[0], 0.0001f, "rest credit");
+    }
+
+    private static void WlCampShortCampCreditsWoundedRest()
+    {
+        var corrected = new float[1];
+        float minimumTotal;
+        bool changed = WlCampRealism.TryCorrectShortCampMinimumCredits(
+            2f, new[] { 9f }, corrected, out minimumTotal);
+        AssertTrue(changed, "expected correction for 2h actual below 9h wounded rest minimum");
+        AssertNear(9f, minimumTotal, 0.0001f, "minimum total");
+        AssertNear(2f, corrected[0], 0.0001f, "wounded rest credit");
+    }
+
+    private static void WlCampShortCampCreditsPreserveMinimumProportions()
+    {
+        var corrected = new float[4];
+        float minimumTotal;
+        bool changed = WlCampRealism.TryCorrectShortCampMinimumCredits(
+            3f, new[] { 3f, 1f, 2f, 0f }, corrected, out minimumTotal);
+        AssertTrue(changed, "expected correction for 3h actual below 6h minimum");
+        AssertNear(6f, minimumTotal, 0.0001f, "minimum total");
+        AssertNear(1.5f, corrected[0], 0.0001f, "station 0");
+        AssertNear(0.5f, corrected[1], 0.0001f, "station 1");
+        AssertNear(1.0f, corrected[2], 0.0001f, "station 2");
+        AssertNear(0f, corrected[3], 0.0001f, "station 3");
+        AssertNear(3f, corrected[0] + corrected[1] + corrected[2] + corrected[3], 0.0001f, "sum");
+    }
+
+    private static void WlCampShortCampEnoughTimeNoCorrection()
+    {
+        var corrected = new[] { -99f };
+        float minimumTotal;
+        bool changed = WlCampRealism.TryCorrectShortCampMinimumCredits(
+            3f, new[] { 3f }, corrected, out minimumTotal);
+        AssertTrue(!changed, "expected no correction when actual covers minimum");
+        AssertNear(3f, minimumTotal, 0.0001f, "minimum total");
+        AssertNear(-99f, corrected[0], 0.0001f, "sentinel unchanged");
+    }
+
+    private static void WlCampShortCampZeroMinimumNoCorrection()
+    {
+        var corrected = new[] { -99f, -88f };
+        float minimumTotal;
+        bool changed = WlCampRealism.TryCorrectShortCampMinimumCredits(
+            2f, new[] { 0f, 0f }, corrected, out minimumTotal);
+        AssertTrue(!changed, "expected no correction when minimum total is zero");
+        AssertNear(0f, minimumTotal, 0.0001f, "minimum total");
+        AssertNear(-99f, corrected[0], 0.0001f, "sentinel 0 unchanged");
+        AssertNear(-88f, corrected[1], 0.0001f, "sentinel 1 unchanged");
+    }
+
+    private static void WlCampResponsiveBonusWeightsRecentIncludedStation()
+    {
+        float vanilla = (56f / 30f - 3f) / 5f;
+        float result = WlCampRealism.ComputeResponsiveBonus(
+            6, true, vanilla, 56f / 30f, 0f,
+            new[] { 8f, 8f, 8f, 8f, 8f, 8f, 8f },
+            new float[0],
+            3f, 8f, 7, 0.35f);
+        AssertTrue(result > vanilla, "responsive bonus should exceed long-average vanilla");
+        AssertNear(0.202666f, result, 0.0005f, "responsive bonus");
+    }
+
+    private static void WlCampResponsiveBonusIncludesCompanionRecentAverage()
+    {
+        float vanilla = 0f;
+        float result = WlCampRealism.ComputeResponsiveBonus(
+            1, true, vanilla, 2f, 0f,
+            new[] { 2f, 2f, 2f, 2f, 2f, 2f, 2f },
+            new[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f },
+            2f, 6f, 7, 0.35f);
+        AssertTrue(result > vanilla, "recent companion time should lift bonus");
+        AssertNear(0.0875f, result, 0.0005f, "companion responsive bonus");
+    }
+
+    private static void WlCampResponsiveBonusPartialCompanionHistoryDividesByWindow()
+    {
+        float result = WlCampRealism.ComputeResponsiveBonus(
+            1, true, 0f, 2f, 0f,
+            new float[0],
+            new[] { 4f },
+            2f, 6f, 4, 0.5f);
+        AssertNear(-0.125f, result, 0.0005f, "partial companion history responsive bonus");
+    }
+
+    private static void WlCampResponsiveBonusExcludedStationsStayVanilla()
+    {
+        foreach (var stationId in new[] { 2, 5, 9, 12 })
+        {
+            float result = WlCampRealism.ComputeResponsiveBonus(
+                stationId, true, 0.42f, 0f, 0f,
+                new[] { 99f, 99f, 99f, 99f, 99f, 99f, 99f },
+                new[] { 99f, 99f, 99f, 99f, 99f, 99f, 99f },
+                0f, 1f, 7, 0.35f);
+            AssertNear(0.42f, result, 0.0001f, "excluded station " + stationId);
+        }
+    }
+
+    private static void WlCampResponsiveBonusUseAverageFalseStaysVanilla()
+    {
+        float result = WlCampRealism.ComputeResponsiveBonus(
+            6, false, -0.25f, 0f, 0f,
+            new[] { 99f, 99f, 99f, 99f, 99f, 99f, 99f },
+            new float[0],
+            0f, 1f, 7, 0.35f);
+        AssertNear(-0.25f, result, 0.0001f, "useaverage=false should stay vanilla");
+    }
+
+    private static void WlCampResponsiveBonusNonfiniteInputStaysBounded()
+    {
+        float result = WlCampRealism.ComputeResponsiveBonus(
+            6, true, float.PositiveInfinity, float.NaN, float.NegativeInfinity,
+            new[] { 8f, float.NaN, float.PositiveInfinity },
+            new[] { float.NegativeInfinity, 4f },
+            float.NaN, float.PositiveInfinity, 7, float.NaN);
+        AssertNear(0f, result, 0.0001f, "nonfinite responsive bonus fallback");
+    }
+
+    private static void WlCampUnitDivisorClampsInvalidCachedCounts()
+    {
+        AssertNear(1f, WlCampRealism.EffectiveCommandedUnitDivisor(-1, 0.5f), 0.0001f, "count -1");
+        AssertNear(1f, WlCampRealism.EffectiveCommandedUnitDivisor(0, 0.5f), 0.0001f, "count 0");
+        AssertNear(1f, WlCampRealism.EffectiveCommandedUnitDivisor(1, 0.5f), 0.0001f, "count 1");
+    }
+
+    private static void WlCampUnitDivisorDefaultPowerSoftensFourAndNineUnits()
+    {
+        AssertNear(2f, WlCampRealism.EffectiveCommandedUnitDivisor(4, 0.5f), 0.0001f, "count 4 divisor");
+        AssertNear(3f, WlCampRealism.EffectiveCommandedUnitDivisor(9, 0.5f), 0.0001f, "count 9 divisor");
+        AssertNear(1.5f, WlCampRealism.ComputeUnitPayoffModifier(6, true, 1.25f, 1f, 1f, 4, 0.5f), 0.0001f, "count 4 modifier");
+        AssertNear(1.333333f, WlCampRealism.ComputeUnitPayoffModifier(6, true, 1.111f, 1f, 1f, 9, 0.5f), 0.0005f, "count 9 modifier");
+    }
+
+    private static void WlCampUnitModifierClampsNegativeToZero()
+    {
+        float result = WlCampRealism.ComputeUnitPayoffModifier(7, true, 1f, -1f, 1000f, 1, 0.5f);
+        AssertNear(0f, result, 0.0001f, "negative modifier clamp");
+    }
+
+    private static void WlCampUnitModifierNonfiniteInputFallsBack()
+    {
+        AssertNear(0.66f, WlCampRealism.ComputeUnitPayoffModifier(7, true, 0.66f, float.NaN, 1f, 4, 0.5f), 0.0001f, "nan bonus fallback");
+        AssertNear(0f, WlCampRealism.ComputeUnitPayoffModifier(7, true, float.PositiveInfinity, 1f, 1f, 4, 0.5f), 0.0001f, "nonfinite vanilla fallback");
+        AssertNear(0.66f, WlCampRealism.ComputeUnitPayoffModifier(7, true, 0.66f, 1f, float.PositiveInfinity, 4, 0.5f), 0.0001f, "infinite max fallback");
+    }
+
+    private static void WlCampUnitPowerOneIsVanillaEquivalent()
+    {
+        AssertNear(9f, WlCampRealism.EffectiveCommandedUnitDivisor(9, 1.0f), 0.0001f, "power one divisor");
+        float result = WlCampRealism.ComputeUnitPayoffModifier(8, true, 0f, 1f, 1f, 9, 1.0f);
+        AssertNear(1.111111f, result, 0.0005f, "power one modifier");
+    }
+
+    private static void WlCampUnitPayoffExcludedOrUndividedReturnsVanilla()
+    {
+        AssertNear(0.77f, WlCampRealism.ComputeUnitPayoffModifier(5, true, 0.77f, 1f, 1f, 9, 0.5f), 0.0001f, "station 5 excluded");
+        AssertNear(0.77f, WlCampRealism.ComputeUnitPayoffModifier(9, true, 0.77f, 1f, 1f, 9, 0.5f), 0.0001f, "station 9 excluded");
+        AssertNear(0.77f, WlCampRealism.ComputeUnitPayoffModifier(12, true, 0.77f, 1f, 1f, 9, 0.5f), 0.0001f, "station 12 excluded");
+        AssertNear(0.77f, WlCampRealism.ComputeUnitPayoffModifier(6, false, 0.77f, 1f, 1f, 9, 0.5f), 0.0001f, "undivided included station");
+    }
+
+    private static void WlCampShortCampNonfiniteInputNoCorrection()
+    {
+        var corrected = new[] { -99f, -88f };
+        float minimumTotal;
+        bool changed = WlCampRealism.TryCorrectShortCampMinimumCredits(
+            float.NaN, new[] { 3f, float.PositiveInfinity }, corrected, out minimumTotal);
+        AssertTrue(!changed, "expected no correction for nonfinite actual camp hours");
+        AssertNear(3f, minimumTotal, 0.0001f, "finite minimum total");
+        AssertNear(-99f, corrected[0], 0.0001f, "sentinel 0 unchanged");
+        AssertNear(-88f, corrected[1], 0.0001f, "sentinel 1 unchanged");
+    }
+
+    private static void AssertNearRejectsNonfiniteValues()
+    {
+        AssertThrows(() => AssertNear(float.NaN, float.NaN, 0.0001f, "nan pair"), "nan pair");
+        AssertThrows(() => AssertNear(float.PositiveInfinity, float.PositiveInfinity, 0.0001f, "infinity pair"), "infinity pair");
+        AssertThrows(() => AssertNear(0f, float.NegativeInfinity, 0.0001f, "actual infinity"), "actual infinity");
     }
 
     private static void ArmyGroupDoctrineRequiresTwoCommittedFormations()
@@ -3329,6 +3537,28 @@ static class Program
     private static void AssertTrue(bool condition, string message)
     {
         if (!condition) throw new Exception(message);
+    }
+
+    private static void AssertNear(float expected, float actual, float tolerance, string label)
+    {
+        if (float.IsNaN(expected) || float.IsInfinity(expected) || float.IsNaN(actual) || float.IsInfinity(actual))
+            throw new Exception(label + ": expected finite values but got expected " + expected + " actual " + actual);
+        if (Math.Abs(expected - actual) > tolerance)
+            throw new Exception(label + ": expected " + expected + " got " + actual);
+    }
+
+    private static void AssertThrows(Action action, string label)
+    {
+        try
+        {
+            action();
+        }
+        catch
+        {
+            return;
+        }
+
+        throw new Exception(label + ": expected exception");
     }
 
     private static void PackageAggregatorPicksSmallerAdequateOverRemoteOversized()

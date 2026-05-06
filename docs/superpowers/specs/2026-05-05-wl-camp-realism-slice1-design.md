@@ -230,7 +230,7 @@ Do not apply recent weighting to:
 - `9` Engage in Politics, because prestige scaling is already high leverage;
 - `12` Rest, because health/fitness scaling is already high leverage and the accounting fix already improves short-camp Rest credit.
 
-Responsive weighting must not change vanilla diary/event threshold firing in Slice 1. `Camp.Station.CheckEventTriggers()` and `Diary.CheckDiaryEventFireUp()` both call `GetCurrentBonus(true)` for threshold checks, so the implementation must suppress responsive weighting while those methods are running and return vanilla `__result` in that scope.
+Responsive weighting must not change vanilla diary/event threshold firing in Slice 1. `Camp.Station.CheckEventTriggers()` and `Diary.UpdateEvents()` both call `GetCurrentBonus(true)` for camp-station threshold checks, so the implementation must suppress responsive weighting while those methods are running and return vanilla `__result` in that scope.
 
 Call-site intent:
 
@@ -241,7 +241,7 @@ Call-site intent:
 | camp panel/status icons and tooltips | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:172843`, `:173071`, `:223546` | responsive display for included stations |
 | immediate assignment comparison | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:173091` | vanilla because `useaverage == false` |
 | `Camp.Station.CheckEventTriggers()` | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:171548` | vanilla long average |
-| `Diary.CheckDiaryEventFireUp()` | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:183155` | vanilla long average |
+| `Diary.UpdateEvents()` | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:183155` | vanilla long average |
 
 ## Feature 3: Less Over-Diluted Unit Payoff
 

@@ -41,7 +41,7 @@ Modify:
 - `src/WhiskeyRealism/Plugin.cs` — add bounded W&L Camp config entries.
 - `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` — explicit compile include for the helper.
 - `tests/WhiskeyRealism.Tests/Program.cs` — pure helper tests.
-- `docs/patch-catalog.md` — add patch ordinal after implementation ships, likely `#28` unless parallel work claims it first.
+- `docs/patch-catalog.md` — add patch ordinal after implementation ships, `#29` because `#28` is already `EconomyAllianceDataGuardPatch`.
 - `docs/handoff.md` — record shipped DLL hash and smoke boundary after deploy/hash/runtime check.
 
 ---
@@ -567,7 +567,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        [HarmonyPatch(typeof(Diary), "CheckDiaryEventFireUp")]
+        [HarmonyPatch(typeof(Diary), "UpdateEvents")]
         internal static class DiaryThresholdScopePatch
         {
             [HarmonyPrefix]
@@ -811,10 +811,10 @@ git commit -m "fix: correct W&L camp accounting and payoff tuning"
 In `docs/patch-catalog.md`, add the next free ordinal after `#27`:
 
 ```markdown
-| 28 | `WlCampRealismPatch` | Prefix/Postfix | `Patches/WlCampRealismPatch.cs` | `Camp.EvaluateCampTime` (172034), `Camp.Station.GetCurrentBonus` (171473), `Camp.GetModifier` (172522), `Camp.Station.CheckEventTriggers` (171534), `Diary.CheckDiaryEventFireUp` (182766) | W&L camp Slice 1. Corrects vanilla short-camp minimum allocation by replacing only the last station-history credit entries, refreshes camp status before siege/field caps when safe, adds responsive bonus weighting for safe station/UI/payoff paths while preserving diary/event thresholds, and softens command-count dilution for Drill/Morale/Recruitment/Readiness only. |
+| 29 | `WlCampRealismPatch` | Prefix/Postfix/Finalizer | `Patches/WlCampRealismPatch.cs` | `Camp.EvaluateCampTime` (172034), `Camp.Station.GetCurrentBonus` (171473), `Camp.GetModifier` (172522), `Camp.Station.CheckEventTriggers` (171534), `Diary.UpdateEvents` (183155) | W&L camp Slice 1. Corrects vanilla short-camp minimum allocation by replacing only the last station-history credit entries, refreshes camp status before siege/field caps when safe, adds responsive bonus weighting for safe station/UI/payoff paths while preserving diary/event thresholds, and softens command-count dilution for Drill/Motivate/Recruitment/Readiness only. |
 ```
 
-If another parallel branch has already claimed `#28`, use the next free ordinal and preserve ordinal stability.
+If another parallel branch has already claimed `#29`, use the next free ordinal and preserve ordinal stability.
 
 - [ ] **Step 2: Update handoff after verification**
 
