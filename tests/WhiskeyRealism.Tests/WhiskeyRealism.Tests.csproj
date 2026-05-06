@@ -50,6 +50,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalIntentLedger.cs" Link="FiscalIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalPolicyScorer.cs" Link="FiscalPolicyScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalConstructionScorer.cs" Link="FiscalConstructionScorer.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\EconomyAllianceDataGuard.cs" Link="EconomyAllianceDataGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionModels.cs" Link="ConstructionModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionIntentLedger.cs" Link="ConstructionIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionSteeringScorer.cs" Link="ConstructionSteeringScorer.cs" />

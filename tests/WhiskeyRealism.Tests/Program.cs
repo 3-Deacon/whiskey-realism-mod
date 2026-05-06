@@ -110,6 +110,7 @@ static class Program
             ("fiscal clamps disabled subsidy focus to zero", FiscalClampsDisabledSubsidyFocusToZero),
             ("fiscal clamps negative saved subsidy values", FiscalClampsNegativeSavedSubsidyValues),
             ("financial ai log gate suppresses repeated corrections", FinancialAiLogGateSuppressesRepeatedCorrections),
+            ("economy alliance data guard suppresses only null references", EconomyAllianceDataGuardSuppressesOnlyNullReferences),
             ("construction scorer favors csa banks in balanced posture", ConstructionScorerFavorsCsaBanks),
             ("construction scorer favors logistics when supply is protected", ConstructionScorerFavorsLogistics),
             ("construction scorer suppresses csa naval under credit defense", ConstructionScorerSuppressesCsaNaval),
@@ -1995,6 +1996,13 @@ static class Program
         AssertEqual(true, gate.ShouldLog(first));
         AssertEqual(false, gate.ShouldLog(repeat));
         AssertEqual(true, gate.ShouldLog(changed));
+    }
+
+    private static void EconomyAllianceDataGuardSuppressesOnlyNullReferences()
+    {
+        AssertEqual(true, EconomyAllianceDataGuard.ShouldSuppress(new NullReferenceException()));
+        AssertEqual(false, EconomyAllianceDataGuard.ShouldSuppress(new InvalidOperationException()));
+        AssertEqual(false, EconomyAllianceDataGuard.ShouldSuppress(null));
     }
 
     private static void ConstructionScorerFavorsCsaBanks()
