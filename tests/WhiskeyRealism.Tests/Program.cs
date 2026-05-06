@@ -158,6 +158,7 @@ static class Program
             ("fast forward scheduler cooldown expires by frame", FastForwardSchedulerCooldownExpiresByFrame),
             ("campaign ai governor caps vanilla passes", CampaignAiGovernorCapsVanillaPasses),
             ("campaign ai governor respects frame budget before first pass", CampaignAiGovernorRespectsFrameBudgetBeforeFirstPass),
+            ("campaign ai governor skips paused vanilla update", CampaignAiGovernorSkipsPausedVanillaUpdate),
             ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples),
             ("historical hard difficulty adds casualty tolerance only", HistoricalHardDifficultyAddsCasualtyToleranceOnly),
             ("perk scorer favors siege armies for fort pressure", PerkScorerFavorsSiegeArmiesForFortPressure),
@@ -2883,6 +2884,13 @@ static class Program
         AssertEqual(true, FastForwardAiScheduler.ShouldRunGovernedPass(0, 0f, 50f, options));
         AssertEqual(false, FastForwardAiScheduler.ShouldRunGovernedPass(0, 1.5f, 50f, options));
         AssertEqual(false, FastForwardAiScheduler.ShouldRunGovernedPass(3, 0f, 50f, options));
+    }
+
+    private static void CampaignAiGovernorSkipsPausedVanillaUpdate()
+    {
+        AssertEqual(true, FastForwardAiScheduler.ShouldSkipCampaignAiUpdate(gamePaused: true, gameSpeed: 1f));
+        AssertEqual(true, FastForwardAiScheduler.ShouldSkipCampaignAiUpdate(gamePaused: false, gameSpeed: 0f));
+        AssertEqual(false, FastForwardAiScheduler.ShouldSkipCampaignAiUpdate(gamePaused: false, gameSpeed: 1f));
     }
 
     private static void FastForwardLogGateSuppressesRepeatedSamples()

@@ -10,9 +10,10 @@ namespace WhiskeyRealism.Patches
 {
     // Vanilla AICampaign.Update computes floor(sqrt(GameVars.gamespeed)) and
     // runs that many private UpdateUnitAI passes in one Unity frame. At 20x/50x
-    // this is 4/7 full campaign-AI passes. This Prefix preserves vanilla
-    // initialization and construction side effects while capping high-speed
-    // UpdateUnitAI passes behind config.
+    // this is 4/7 full campaign-AI passes, and still at least one pass when
+    // gamespeed is 0. This Prefix preserves vanilla initialization and
+    // construction side effects while capping high-speed UpdateUnitAI passes
+    // behind config and skipping post-initialization paused updates.
     [HarmonyPatch(typeof(AICampaign), "Update")]
     internal static class CampaignAiUpdateGovernorPatch
     {
@@ -23,12 +24,21 @@ namespace WhiskeyRealism.Patches
             {
                 if (__instance == null) return true;
                 var plugin = Plugin.Instance;
-                if (plugin == null || !plugin.Enabled.Value || !plugin.CampaignAiGovernorEnabled.Value) return true;
-                if (GameVars.gamespeed < 20f) return true;
-                if (GameVars.debug_showcampaignaimapvalues) return true;
+                if (plugin == null || !plugin.Enabled.Value) return true;
                 if (GameVars.debug_turnoffcampaignai) return false;
 
-                if (!Initialized(__instance))
+                bool initialized = Initialized(__instance);
+                if (initialized && FastForwardAiScheduler.ShouldSkipCampaignAiUpdate(GameVars.gamepaused, GameVars.gamespeed))
+                {
+                    OnceLog.Info("campaign-ai-paused", "[Patch:CampaignAIGovernor] paused AICampaign.Update guard active");
+                    return false;
+                }
+
+                if (!plugin.CampaignAiGovernorEnabled.Value) return true;
+                if (GameVars.gamespeed < 20f) return true;
+                if (GameVars.debug_showcampaignaimapvalues) return true;
+
+                if (!initialized)
                 {
                     var initialize = ResolveInitializeAi();
                     if (initialize == null) return true;
