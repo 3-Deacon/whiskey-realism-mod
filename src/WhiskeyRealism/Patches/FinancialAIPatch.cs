@@ -72,15 +72,25 @@ namespace WhiskeyRealism.Patches
         {
             if (lane < 0 || lane >= subsidies.Length || lane >= intent.TargetSubsidyMin.Length || lane >= intent.TargetSubsidyMax.Length) return 0;
             float old = subsidies[lane];
-            float targetMin = intent.TargetSubsidyMin[lane];
-            float targetMax = intent.TargetSubsidyMax[lane];
+            if (!IsFinite(old) || old < 0f || old > 1f)
+            {
+                subsidies[lane] = Clamp01(old);
+                if (NearlyEqual(old, subsidies[lane])) return 0;
+                LogCorrection(alliance, "subsidy", lane, old, subsidies[lane], intent.Posture);
+                return 1;
+            }
+
+            float targetMin = Clamp01(intent.TargetSubsidyMin[lane]);
+            float targetMax = Clamp01(intent.TargetSubsidyMax[lane]);
+            if (targetMin > targetMax) targetMin = targetMax;
             float step = GamePrefs.taxstepsai;
             float? focusCap = null;
 
             if (subsidyFocus != null && lane < subsidyFocus.Length)
             {
-                focusCap = subsidyFocus[lane];
+                focusCap = SubsidyFocusCap(subsidyFocus[lane]);
                 targetMax = UnityEngine.Mathf.Min(targetMax, focusCap.Value);
+                if (targetMin > targetMax) targetMin = targetMax;
             }
 
             if (focusCap.HasValue && old > focusCap.Value)
@@ -92,6 +102,7 @@ namespace WhiskeyRealism.Patches
             else
                 return 0;
 
+            subsidies[lane] = Clamp01(subsidies[lane]);
             if (NearlyEqual(old, subsidies[lane])) return 0;
             LogCorrection(alliance, "subsidy", lane, old, subsidies[lane], intent.Posture);
             return 1;
@@ -110,6 +121,24 @@ namespace WhiskeyRealism.Patches
         private static bool NearlyEqual(float left, float right)
         {
             return Math.Abs(left - right) < 0.0001f;
+        }
+
+        private static float SubsidyFocusCap(float value)
+        {
+            return value < 0f ? 0f : Clamp01(value);
+        }
+
+        private static float Clamp01(float value)
+        {
+            if (!IsFinite(value)) return 0f;
+            if (value < 0f) return 0f;
+            if (value > 1f) return 1f;
+            return value;
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
     }
 }

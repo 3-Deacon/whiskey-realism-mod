@@ -8,7 +8,7 @@ Use this area when the goal is to correct a concrete vanilla failure mode, crash
 
 | ID | Status | Area | Evidence | Current action |
 |---|---|---|---|---|
-| `BUG-ECO-001` | In progress | Fiscal AI | Live `LogOutput.log` showed `[Patch:FinancialAI] alliance=1 subsidyLane=3 ... new=-1.00`; surface is #18 `FinancialAIPatch` over vanilla `AICampaign.UpdateFinancialAI` at decompile line 15352. | Finish guard tests/build/deploy/hash before calling fixed. |
+| `BUG-ECO-001` | In progress | Fiscal AI | Live `LogOutput.log` showed `[Patch:FinancialAI] alliance=1 subsidyLane=3 ... new=-1.00`; surface is #18 `FinancialAIPatch` over vanilla `AICampaign.UpdateFinancialAI` at decompile line 15352. Regression tests cover disabled focus and already-negative saved subsidy values. | Build/deploy/hash, then smoke before marking shipped. |
 | `BUG-ECO-002` | Needs repro | Policy AI | Vanilla `Policies.CheckAIPolicyChange` dereferences `aIPersonality.id` without a null guard at decompile lines 211023-211024. | Reproduce or add a no-op safe guard only if startup evidence shows risk. |
 | `BUG-ECO-003` | Needs repro | Economy tick | Prior smoke notes recorded pre-existing vanilla `Economy.UpdateEconomyAllianceData` Player.log NRE noise; owner method starts at decompile line 32344. | Reacquire exact current Player.log stack before patching. |
 | `BUG-ECO-004` | Backlog | Supply depots | Vanilla `AICampaign.CheckSupplyDepotConstruction` can move low-supply units or call `CBuilding.AddConstructionWish` directly at decompile lines 14659 and 14772. | Add telemetry/design before steering; preserve vanilla unit eligibility and construction queue. |

@@ -144,17 +144,36 @@ namespace WhiskeyRealism.Strategic.Fiscal
             }
 
             for (int i = 0; i < output.TargetSubsidyMax.Length && i < input.SubsidyFocus.Length; i++)
-                if (output.TargetSubsidyMax[i] > input.SubsidyFocus[i])
-                    output.TargetSubsidyMax[i] = input.SubsidyFocus[i];
+            {
+                float cap = SubsidyFocusCap(input.SubsidyFocus[i]);
+                if (output.TargetSubsidyMax[i] > cap)
+                    output.TargetSubsidyMax[i] = cap;
+                if (output.TargetSubsidyMin[i] > output.TargetSubsidyMax[i])
+                    output.TargetSubsidyMin[i] = output.TargetSubsidyMax[i];
+            }
         }
 
         private static void CopyBand(float[] source, float[] min, float[] max)
         {
             for (int i = 0; i < min.Length && i < source.Length; i++)
             {
-                min[i] = source[i];
-                max[i] = source[i];
+                float value = Clamp01(source[i]);
+                min[i] = value;
+                max[i] = value;
             }
+        }
+
+        private static float SubsidyFocusCap(float value)
+        {
+            return value < 0f ? 0f : Clamp01(value);
+        }
+
+        private static float Clamp01(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
+            if (value < 0f) return 0f;
+            if (value > 1f) return 1f;
+            return value;
         }
 
         private static void RaiseTaxBand(FiscalOutput output, int lane, float step)

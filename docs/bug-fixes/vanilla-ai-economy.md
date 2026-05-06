@@ -6,7 +6,7 @@ This queue holds the economy/policy/building issues found during the 2026-05-05 
 
 | ID | Status | Failure mode | Vanilla / patch anchor | Evidence | Narrow fix direction |
 |---|---|---|---|---|---|
-| `BUG-ECO-001` | In progress | Subsidy focus sentinel can leak into live subsidy value. | Vanilla financial AI is `AICampaign.UpdateFinancialAI(int alliance)` at decompile line 15352. Whiskey #18 reads `AIPersonality.subsidyfocus` in `FinancialAIPatch`. | Live `BepInEx/LogOutput.log` showed `subsidyLane=3 old=0.20 new=-1.00` and then `old=-0.95 new=-1.00` for CSA. | Clamp subsidy focus caps: negative focus means disabled lane cap `0`, never a valid subsidy value. Repair already-negative lanes before normal movement. |
+| `BUG-ECO-001` | In progress | Subsidy focus sentinel can leak into live subsidy value. | Vanilla financial AI is `AICampaign.UpdateFinancialAI(int alliance)` at decompile line 15352. Whiskey #18 reads `AIPersonality.subsidyfocus` in `FinancialAIPatch`. | Live `BepInEx/LogOutput.log` showed `subsidyLane=3 old=0.20 new=-1.00` and then `old=-0.95 new=-1.00` for CSA. Regression tests cover disabled focus and already-negative saved subsidy values. | Clamp subsidy focus caps: negative focus means disabled lane cap `0`, never a valid subsidy value. Repair already-negative lanes before normal movement. |
 | `BUG-ECO-002` | Needs repro | Policy selection can crash if AI personality is unavailable. | `Policies.CheckAIPolicyChange(int alliance)` starts at 211015 and dereferences `aIPersonality.id` at 211024 without a null check. | Code-level hazard only in current investigation; no fresh runtime stack was captured. | If startup/runtime logs show this path firing before personality init, add a narrow Prefix false/true guard that preserves vanilla once personality exists. |
 | `BUG-ECO-003` | Needs repro | Economy alliance update emits pre-existing vanilla NRE noise. | `Economy.UpdateEconomyAllianceData(float timediff, bool initialization)` starts at 32344. | Existing handoff notes say Player.log NRE histogram showed only pre-existing vanilla `Economy.UpdateEconomyAllianceData` noise after defense smoke; current Player.log path was not reacquired in this pass. | Reacquire the exact stack and failing field. Do not patch the whole method from a method-name-only log. |
 | `BUG-ECO-004` | Backlog | Supply depot AI is outside current construction steering and can seize field units or place depots directly. | `AICampaign.CheckSupplyDepotConstruction(int _aifaction)` starts at 14659; low-supply unit move at 14767; direct `CBuilding.AddConstructionWish(CBuilding.id_supplydepot, ...)` at 14772; construction queue owner `CBuilding.AddConstructionWish` starts at 97479. | Decompiled behavior confirmed; no current bad runtime sample captured. | Start with observer/telemetry. Any guard should respect supply state, `unitsconstructingsupplydepots`, W&L subordinate control, front budget, and vanilla construction queue side effects. |
@@ -21,7 +21,6 @@ This queue holds the economy/policy/building issues found during the 2026-05-05 
 
 ## Immediate Follow-Up
 
-1. Finish `BUG-ECO-001` as the first Bug Fixes item if the local fiscal guard remains in the working tree.
-2. Add console tests proving negative subsidy focus and already-negative subsidies clamp to `0`.
-3. Run `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`.
-4. For DLL readiness, run `./build.sh`, deploy, and verify `sha256sum` against the BepInEx plugin DLL.
+1. For `BUG-ECO-001`, run `./build.sh`, deploy, and verify `sha256sum` against the BepInEx plugin DLL.
+2. Reacquire current Player.log stack details for `BUG-ECO-003` before patching it.
+3. Keep `BUG-ECO-002`, `BUG-ECO-004`, and `BUG-ECO-005` out of code until runtime evidence justifies a guard.

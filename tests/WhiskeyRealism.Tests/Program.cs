@@ -107,6 +107,8 @@ static class Program
             ("fiscal hysteresis prevents immediate recovery", FiscalHysteresisPreventsImmediateRecovery),
             ("fiscal credit defense requires stable exit ticks", FiscalCreditDefenseRequiresStableExitTicks),
             ("fiscal emergency residue clears after stable ticks", FiscalEmergencyResidueClearsAfterStableTicks),
+            ("fiscal clamps disabled subsidy focus to zero", FiscalClampsDisabledSubsidyFocusToZero),
+            ("fiscal clamps negative saved subsidy values", FiscalClampsNegativeSavedSubsidyValues),
             ("financial ai log gate suppresses repeated corrections", FinancialAiLogGateSuppressesRepeatedCorrections),
             ("construction scorer favors csa banks in balanced posture", ConstructionScorerFavorsCsaBanks),
             ("construction scorer favors logistics when supply is protected", ConstructionScorerFavorsLogistics),
@@ -1957,6 +1959,30 @@ static class Program
 
         var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
         AssertEqual(FiscalPosture.BalancedWar, output.Posture);
+    }
+
+    private static void FiscalClampsDisabledSubsidyFocusToZero()
+    {
+        var input = BuildFiscalInput();
+        input.Subsidies[3] = 0.20f;
+        input.SubsidyFocus[3] = -1f;
+
+        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+
+        AssertEqual(0f, output.TargetSubsidyMin[3]);
+        AssertEqual(0f, output.TargetSubsidyMax[3]);
+    }
+
+    private static void FiscalClampsNegativeSavedSubsidyValues()
+    {
+        var input = BuildFiscalInput();
+        input.Subsidies[3] = -0.95f;
+        input.SubsidyFocus[3] = 0.20f;
+
+        var output = FiscalIntentLedger.Compute(input, new FiscalOptions());
+
+        AssertEqual(0f, output.TargetSubsidyMin[3]);
+        AssertEqual(0f, output.TargetSubsidyMax[3]);
     }
 
     private static void FinancialAiLogGateSuppressesRepeatedCorrections()
