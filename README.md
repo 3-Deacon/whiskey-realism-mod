@@ -41,7 +41,7 @@ To uninstall: delete `WhiskeyRealism.dll` from `BepInEx/plugins/`. Saves remain 
 
 ## Compatibility
 
-**Incompatible with the "Community Hotfixes / QoL Mod"** (Steam community) — that mod replaces `Assembly-CSharp.dll` directly while this mod patches the original via Harmony. They cannot coexist. Long-term plan is to fold the Community Hotfix's bug fixes into this mod so users only need one.
+Whiskey Realism expects the stock game `Assembly-CSharp.dll`. Mods that replace the game's managed DLL directly are unsupported; this mod layers Harmony patches over vanilla instead.
 
 ## License
 

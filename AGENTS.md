@@ -80,7 +80,7 @@ Smoke-test paths:
 
 ## Compatibility notes
 
-**Explicitly incompatible with the "Community Hotfixes / Quality of Life Mod"** distributed via Steam. That mod replaces `Assembly-CSharp.dll` wholesale; this mod is a BepInEx plugin that patches the vanilla DLL via Harmony. They cannot coexist. Long-term: extract Community Hotfix's behavior fixes into our patch suite so users only need this mod.
+Whiskey Realism expects the stock game `Assembly-CSharp.dll`. Mods that replace the game's managed DLL directly are unsupported; this project layers Harmony patches over vanilla instead.
 
 ---
 

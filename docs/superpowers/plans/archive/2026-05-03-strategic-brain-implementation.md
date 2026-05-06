@@ -3332,18 +3332,6 @@ namespace WhiskeyRealism
                 return;
             }
 
-            // Heuristic check for Community Hotfix conflict — they replace
-            // Assembly-CSharp wholesale; if a known sentinel is present we
-            // log a loud warning. (The exact sentinel is identified during
-            // first smoke-test; for now this is a placeholder hook.)
-            try
-            {
-                var hotfixType = AccessTools.TypeByName("CommunityHotfix");
-                if (hotfixType != null)
-                    Log.LogWarning("Community Hotfix detected — Whiskey Realism is INCOMPATIBLE. Strategic patches may not behave as expected.");
-            }
-            catch { /* ignore — best-effort only */ }
-
             _harmony = new Harmony(GUID);
 
             // Strategic-brain bootstrap before patches register so patches
