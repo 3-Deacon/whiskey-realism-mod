@@ -16,11 +16,12 @@ This queue holds the economy/policy/building issues found during the 2026-05-05 
 ## Not Verified
 
 - Post-deploy smoke for `BUG-ECO-003`; verify `[Patch:EconomyAllianceData]` appears at most once and the repeated Player.log NRE stops after a fresh game launch.
+- Post-deploy smoke for `BUG-ECO-001`; verify no new `[Patch:FinancialAI] subsidyLane=3 ... new=-1.00` lines after a fresh game launch.
 - Whether `BUG-ECO-002` can happen in a clean current campaign; it may be unreachable if vanilla always initializes AI personality before policy cadence.
 - Whether `BUG-ECO-004` and `BUG-ECO-005` produce bad decisions in the current W&L active map; both are confirmed unpatched vanilla surfaces, not yet confirmed runtime regressions.
 
 ## Immediate Follow-Up
 
-1. For `BUG-ECO-001` and `BUG-ECO-003`, run `./build.sh`, deploy, and verify `sha256sum` against the BepInEx plugin DLL.
-2. Fresh-launch smoke: confirm no new `subsidyLane ... new=-1.00` lines and confirm `Economy.UpdateEconomyAllianceData` NRE spam stops.
+1. Fresh-launch smoke DLL `ce17af99...`: confirm no new `subsidyLane ... new=-1.00` lines and confirm `Economy.UpdateEconomyAllianceData` NRE spam stops.
+2. If smoke passes, mark `BUG-ECO-001` and `BUG-ECO-003` shipped.
 3. Keep `BUG-ECO-002`, `BUG-ECO-004`, and `BUG-ECO-005` out of code until runtime evidence justifies a guard.
