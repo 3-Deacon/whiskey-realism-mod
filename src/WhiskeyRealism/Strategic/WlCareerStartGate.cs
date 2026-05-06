@@ -6,5 +6,24 @@ namespace WhiskeyRealism.Strategic
         {
             return dlcScenarioActive && (chosenCommanderId < 0 || !chosenCommanderHasCommand);
         }
+
+        public static bool ShouldSkipDiaryEventUpdate(
+            bool dlcScenarioActive,
+            int frame,
+            int chosenCommanderId,
+            bool chosenCommanderRecordReady,
+            bool chosenCommanderHasCommand,
+            bool diaryEventsReady,
+            bool foodReady,
+            bool cardinalPointsReady,
+            bool weatherReady,
+            int updateCycle)
+        {
+            if (!dlcScenarioActive) return false;
+            if (frame < 50) return true;
+            if (chosenCommanderId < 0 || !chosenCommanderRecordReady || !chosenCommanderHasCommand) return true;
+            if (!diaryEventsReady || !foodReady || !cardinalPointsReady) return true;
+            return updateCycle == 1 && !weatherReady;
+        }
     }
 }

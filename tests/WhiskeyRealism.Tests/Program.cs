@@ -41,6 +41,7 @@ static class Program
             ("tactical telemetry delta formats before after counts", TacticalTelemetryDeltaFormatsBeforeAfterCounts),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
+            ("wl diary startup gate defers until diary dependencies are ready", WlDiaryStartupGateDefersUntilReady),
             ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
             ("wl start selection retry waits for panel before consuming attempt", WlStartSelectionRetryWaitsForPanel),
             ("wl start selection retry waits for vanilla ready frame", WlStartSelectionRetryWaitsForReadyFrame),
@@ -207,6 +208,7 @@ static class Program
             ("campaign ai governor skips paused vanilla update", CampaignAiGovernorSkipsPausedVanillaUpdate),
             ("commander assignment guard clears stale previous command", CommanderAssignmentGuardClearsStalePreviousCommand),
             ("campaign filter map guard bounds repeated no progress", CampaignFilterMapGuardBoundsRepeatedNoProgress),
+            ("campaign filter map guard detects assign-filters bootstrap needs", CampaignFilterMapGuardDetectsAssignFiltersBootstrapNeeds),
             ("state handover guard requires decisive support", StateHandoverGuardRequiresDecisiveSupport),
             ("fleet patrol guard resets completed AI patrol", FleetPatrolGuardResetsCompletedAiPatrol),
             ("artillery combine gun transfer preserves source guns", ArtilleryCombineGunTransferPreservesSourceGuns),
@@ -798,6 +800,99 @@ static class Program
         AssertEqual(true, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: true, chosenCommanderId: -1, chosenCommanderHasCommand: false));
         AssertEqual(true, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: true, chosenCommanderId: 12, chosenCommanderHasCommand: false));
         AssertEqual(false, WlCareerStartGate.ShouldDeferStrategicReview(dlcScenarioActive: true, chosenCommanderId: 12, chosenCommanderHasCommand: true));
+    }
+
+    private static void WlDiaryStartupGateDefersUntilReady()
+    {
+        AssertEqual(
+            false,
+            WlCareerStartGate.ShouldSkipDiaryEventUpdate(
+                dlcScenarioActive: false,
+                frame: 50,
+                chosenCommanderId: -1,
+                chosenCommanderRecordReady: false,
+                chosenCommanderHasCommand: false,
+                diaryEventsReady: false,
+                foodReady: false,
+                cardinalPointsReady: false,
+                weatherReady: false,
+                updateCycle: 0),
+            "non-W&L diary updates should remain vanilla-owned");
+
+        AssertEqual(
+            true,
+            WlCareerStartGate.ShouldSkipDiaryEventUpdate(
+                dlcScenarioActive: true,
+                frame: 50,
+                chosenCommanderId: 12,
+                chosenCommanderRecordReady: true,
+                chosenCommanderHasCommand: false,
+                diaryEventsReady: true,
+                foodReady: true,
+                cardinalPointsReady: true,
+                weatherReady: true,
+                updateCycle: 0),
+            "W&L diary updates should wait until the player has a command");
+
+        AssertEqual(
+            true,
+            WlCareerStartGate.ShouldSkipDiaryEventUpdate(
+                dlcScenarioActive: true,
+                frame: 50,
+                chosenCommanderId: 12,
+                chosenCommanderRecordReady: true,
+                chosenCommanderHasCommand: true,
+                diaryEventsReady: false,
+                foodReady: true,
+                cardinalPointsReady: true,
+                weatherReady: true,
+                updateCycle: 0),
+            "W&L diary updates should wait for imported diary events");
+
+        AssertEqual(
+            true,
+            WlCareerStartGate.ShouldSkipDiaryEventUpdate(
+                dlcScenarioActive: true,
+                frame: 50,
+                chosenCommanderId: 12,
+                chosenCommanderRecordReady: true,
+                chosenCommanderHasCommand: true,
+                diaryEventsReady: true,
+                foodReady: false,
+                cardinalPointsReady: true,
+                weatherReady: true,
+                updateCycle: 3),
+            "W&L diary updates should wait for food data before food-quality event cycles");
+
+        AssertEqual(
+            true,
+            WlCareerStartGate.ShouldSkipDiaryEventUpdate(
+                dlcScenarioActive: true,
+                frame: 50,
+                chosenCommanderId: 12,
+                chosenCommanderRecordReady: true,
+                chosenCommanderHasCommand: true,
+                diaryEventsReady: true,
+                foodReady: true,
+                cardinalPointsReady: true,
+                weatherReady: false,
+                updateCycle: 1),
+            "weather cycle should wait for WeatherObj");
+
+        AssertEqual(
+            false,
+            WlCareerStartGate.ShouldSkipDiaryEventUpdate(
+                dlcScenarioActive: true,
+                frame: 50,
+                chosenCommanderId: 12,
+                chosenCommanderRecordReady: true,
+                chosenCommanderHasCommand: true,
+                diaryEventsReady: true,
+                foodReady: true,
+                cardinalPointsReady: true,
+                weatherReady: false,
+                updateCycle: 2),
+            "non-weather cycles should not require WeatherObj once core dependencies are ready");
     }
 
     private static void WlStartSelectionRetryDoesNotDependOnCampaignFrame()
@@ -5106,8 +5201,8 @@ static class Program
     private static void CampaignFilterMapGuardBoundsRepeatedNoProgress()
     {
         var guard = new CampaignFilterMapInitializationGuard(maxRepeatedNoProgressReturns: 3);
-        var stuck = new CampaignFilterMapState(0, 0, 0, 3, 2, 4);
-        var advanced = new CampaignFilterMapState(1, 1, 0, 3, 2, 4);
+        var stuck = new CampaignFilterMapState(0, 0, 0, 3, 2, 2, 4);
+        var advanced = new CampaignFilterMapState(1, 1, 0, 3, 2, 2, 4);
 
         AssertTrue(
             !guard.Observe(initialization: true, result: false, stuck, advanced).ForceComplete,
@@ -5123,8 +5218,75 @@ static class Program
         decision = guard.ObserveException(initialization: true, new InvalidOperationException("boom"), stuck);
         AssertTrue(decision.ForceComplete, "initialization exception should force completion");
 
+        decision = guard.ObserveException(initialization: false, new NullReferenceException("boom"), stuck);
+        AssertTrue(decision.ForceComplete, "runtime null reference should advance one iterator slot and suppress");
+        AssertEqual("runtime-exception:NullReferenceException", decision.Reason);
+
         decision = guard.ObserveException(initialization: false, new InvalidOperationException("boom"), stuck);
-        AssertTrue(!decision.ForceComplete, "non-initialization exception should fall through");
+        AssertTrue(!decision.ForceComplete, "non-null runtime exceptions should fall through");
+
+        guard = new CampaignFilterMapInitializationGuard(
+            maxRepeatedNoProgressReturns: 3,
+            maxRuntimeExceptionSuppressionsPerSignature: 1);
+        decision = guard.ObserveException(initialization: false, new NullReferenceException("boom"), stuck);
+        AssertTrue(decision.ForceComplete, "first runtime null for a cursor signature should suppress");
+        decision = guard.ObserveException(initialization: false, new NullReferenceException("boom"), stuck);
+        AssertTrue(!decision.ForceComplete, "repeated runtime null at the same cursor signature should surface after cap");
+
+        AssertTrue(
+            CampaignFilterMapInitializationGuard.TryAdvanceRuntimeCursor(stuck, out var runtimeAdvanced),
+            "plausible runtime cursor should advance");
+        AssertEqual(new CampaignFilterMapState(1, 1, 0, 3, 2, 2, 4).Signature(), runtimeAdvanced.Signature());
+
+        AssertTrue(
+            CampaignFilterMapInitializationGuard.TryAdvanceRuntimeCursor(
+                new CampaignFilterMapState(2, 1, 3, 3, 2, 2, 4),
+                out var reset),
+            "complete runtime cursor should reset like vanilla");
+        AssertEqual(new CampaignFilterMapState(0, 0, -1, 3, 2, 2, 4).Signature(), reset.Signature());
+
+        AssertTrue(
+            !CampaignFilterMapInitializationGuard.TryAdvanceRuntimeCursor(
+                new CampaignFilterMapState(0, 0, 0, 3, -1, 2, 4),
+                out _),
+            "runtime cursor without smalltown data should not claim safe advancement");
+
+        string diagnostic = CampaignFilterMapInitializationGuard.BuildRuntimeDiagnostic(
+            stuck,
+            runtimeAdvanced,
+            "lists towns=3 smalltowns=2 iips=2 cbuildings=4");
+        AssertContains(diagnostic, "cursor=0/3:0/2:0/2:0/4", "diagnostic should include failing cursor");
+        AssertContains(diagnostic, "next=1/3:1/2:1/2:0/4", "diagnostic should include advanced cursor");
+        AssertContains(diagnostic, "lists towns=3", "diagnostic should include runtime probe summary");
+    }
+
+    private static void CampaignFilterMapGuardDetectsAssignFiltersBootstrapNeeds()
+    {
+        string[] ready = CampaignFilterMapInitializationGuard.GetMissingAssignFiltersMapNames(
+            availableWorkforceReady: true,
+            slaveryReady: true,
+            tradeAndSupplyReady: true,
+            supplyReady: true,
+            availableCapitalReady: true,
+            transportBottlenecksReady: true,
+            marketCapacityReady: true,
+            hospitalsReady: true);
+        AssertEqual(0, ready.Length);
+
+        string[] missing = CampaignFilterMapInitializationGuard.GetMissingAssignFiltersMapNames(
+            availableWorkforceReady: false,
+            slaveryReady: true,
+            tradeAndSupplyReady: false,
+            supplyReady: true,
+            availableCapitalReady: true,
+            transportBottlenecksReady: false,
+            marketCapacityReady: true,
+            hospitalsReady: false);
+        string joined = string.Join(",", missing);
+        AssertContains(joined, "availableworkforce", "assign-filters readiness should name missing workforce map");
+        AssertContains(joined, "tradeandsupply", "assign-filters readiness should name missing trade map");
+        AssertContains(joined, "transportbottlenecks", "assign-filters readiness should name missing bottleneck map");
+        AssertContains(joined, "hospitals", "assign-filters readiness should name missing hospital map");
     }
 
     private static void StateHandoverGuardRequiresDecisiveSupport()

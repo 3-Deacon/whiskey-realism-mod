@@ -1,6 +1,6 @@
 # Tactical B0 Observer Implementation Plan
 
-Status: paused. Do not execute tactical observer work unless the user explicitly reopens Slice B. Current active plan is `2026-05-05-strategic-operational-probe-contact.md`.
+Status: active smoke gate. User explicitly reopened Slice B on 2026-05-06; B0 source is already present on main and deployed locally, but runtime observer smoke is still pending.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -11,6 +11,28 @@ Status: paused. Do not execute tactical observer work unless the user explicitly
 **Tech Stack:** BepInEx 5.4.x x64, HarmonyX, C# netstandard2.1, Unity 2021 Mono, console harness in `tests/WhiskeyRealism.Tests`, vanilla anchors from `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 
 ---
+
+## Current Checkpoint
+
+Rechecked on 2026-05-06 before behavior work:
+
+- Source exists: `src/WhiskeyRealism/Patches/TacticalObserverPatch.cs`, `src/WhiskeyRealism/Tactical/TacticalBattleContext.cs`, and `src/WhiskeyRealism/Tactical/TacticalTelemetry.cs`.
+- Config exists: `Enable Tactical Observer`, `Tactical Observer Verbose Logging`, and `Tactical Observer Min Seconds Between Summaries`. The live BepInEx config currently has `Enable Tactical Observer = false`.
+- Patch catalog now lists observer-only #35. It is not a behavior patch.
+- Vanilla anchors still match the expected line numbers below.
+- `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` passed.
+- `./build.sh` passed with 0 warnings / 0 errors.
+- `git diff --check` passed before docs edits.
+- `dist/WhiskeyRealism.dll` was deployed to the BepInEx plugin folder and SHA-256 matched: `270a73ffbd2a541de2f968fc6580444e3a01997fc6ec9e6a4bbc0ca1db89c268` (380928 bytes).
+
+Remaining B0 work:
+
+1. Enable the observer in `BepInEx/config/dev.kyle.whiskey-realism.cfg` for one focused run.
+2. Start a fresh W&L land battle.
+3. Confirm bounded `[TacticalMacro]`, `[TacticalGroup]`, `[TacticalCharge]`, `[TacticalFeud]`, `[TacticalSector]`, `[TacticalOrder]`, `[TacticalReserve]`, `[TacticalArtillery]`, `[TacticalFallback]`, and `[TacticalPlayerOrder]` lines with no repeated exceptions or Harmony failures.
+4. Disable the observer again if log volume is not acceptable for normal play.
+
+Do not implement B1+ behavior until the smoke evidence above exists.
 
 ## Source Inputs
 

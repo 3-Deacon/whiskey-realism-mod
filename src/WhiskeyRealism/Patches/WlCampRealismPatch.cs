@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
@@ -16,6 +17,10 @@ namespace WhiskeyRealism.Patches
     {
         private static readonly FieldInfo CampTimeHistoryField = AccessTools.Field(typeof(Camp), "camptimehistory");
         private static readonly FieldInfo BattlefieldSetupRefField = AccessTools.Field(typeof(Camp), "battlefieldsetupref");
+        private static readonly FieldInfo DiaryEventsField = AccessTools.Field(typeof(Diary), "diaryevents");
+        private static readonly FieldInfo DiaryCardinalPointsField = AccessTools.Field(typeof(Diary), "cardinalpoints");
+        private static readonly FieldInfo DiaryUpdateCycleField = AccessTools.Field(typeof(Diary), "updatecycle");
+        private static readonly FieldInfo DiaryWeatherField = AccessTools.Field(typeof(Diary), "weather");
         private static int _vanillaThresholdDepth;
         private static string _lastCorrectionSignature;
         private static string _lastModifierSignature;
@@ -79,17 +84,129 @@ namespace WhiskeyRealism.Patches
         internal static class DiaryThresholdScopePatch
         {
             [HarmonyPrefix]
-            internal static void Prefix()
+            internal static bool Prefix(ref bool __state)
             {
+                __state = false;
+                try
+                {
+                    if (ShouldSkipDiaryUpdateEvents())
+                    {
+                        OnceLog.Warning(
+                            "wl-diary-startup:skip",
+                            "[W&LCamp] skipped Diary.UpdateEvents until W&L diary dependencies are ready " + BuildDiaryReadinessDiagnostic());
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("wl-diary-startup:check", "[W&LCamp] diary readiness check failed open: " + ex.Message);
+                }
+
                 _vanillaThresholdDepth++;
+                __state = true;
+                return true;
             }
 
             [HarmonyFinalizer]
-            internal static Exception Finalizer(Exception __exception)
+            internal static Exception Finalizer(Exception __exception, bool __state)
             {
-                if (_vanillaThresholdDepth > 0) _vanillaThresholdDepth--;
+                if (__state && _vanillaThresholdDepth > 0) _vanillaThresholdDepth--;
                 return __exception;
             }
+        }
+
+        private static bool ShouldSkipDiaryUpdateEvents()
+        {
+            int chosenCommanderId = DLC_WL.dlc_chosencommander;
+            bool commanderReady = IsChosenCommanderRecordReady(chosenCommanderId);
+            bool commanderHasCommand = commanderReady && UnityAlive(GameVars.commander[chosenCommanderId].currentcommand);
+            int updateCycle = ReadStaticInt(DiaryUpdateCycleField, -1);
+
+            return WlCareerStartGate.ShouldSkipDiaryEventUpdate(
+                DLC_WL.dlc_scenarioactive,
+                GameVars.frame,
+                chosenCommanderId,
+                commanderReady,
+                commanderHasCommand,
+                DiaryEventsReady(),
+                FoodReady(),
+                CardinalPointsReady(),
+                updateCycle != 1 || WeatherReady(),
+                updateCycle);
+        }
+
+        private static string BuildDiaryReadinessDiagnostic()
+        {
+            int chosenCommanderId = DLC_WL.dlc_chosencommander;
+            bool commanderReady = IsChosenCommanderRecordReady(chosenCommanderId);
+            bool commanderHasCommand = commanderReady && UnityAlive(GameVars.commander[chosenCommanderId].currentcommand);
+            return "frame=" + GameVars.frame +
+                " commander=" + chosenCommanderId +
+                " commanderReady=" + commanderReady +
+                " hasCommand=" + commanderHasCommand +
+                " diaryEvents=" + DiaryEventsReady() +
+                " food=" + FoodReady() +
+                " cardinalPoints=" + CardinalPointsReady() +
+                " weather=" + WeatherReady() +
+                " updateCycle=" + ReadStaticInt(DiaryUpdateCycleField, -1);
+        }
+
+        private static bool IsChosenCommanderRecordReady(int chosenCommanderId)
+        {
+            if (chosenCommanderId < 0) return false;
+            if (GameVars.commander == null) return false;
+            if (chosenCommanderId >= GameVars.commander.Count) return false;
+            return GameVars.commander[chosenCommanderId] != null;
+        }
+
+        private static bool DiaryEventsReady()
+        {
+            var diaryEvents = DiaryEventsField == null ? null : DiaryEventsField.GetValue(null) as IList;
+            if (diaryEvents == null) return false;
+            if (!DiaryEventIndexReady(diaryEvents, Diary.DiaryEvent.weightincrease)) return false;
+            for (int i = 0; i < diaryEvents.Count; i++)
+            {
+                if (diaryEvents[i] == null) return false;
+            }
+            return true;
+        }
+
+        private static bool DiaryEventIndexReady(IList diaryEvents, int eventId)
+        {
+            if (eventId < 0 || eventId >= diaryEvents.Count) return false;
+            return diaryEvents[eventId] != null;
+        }
+
+        private static bool CardinalPointsReady()
+        {
+            var cardinalPoints = DiaryCardinalPointsField == null ? null : DiaryCardinalPointsField.GetValue(null) as IList;
+            return cardinalPoints != null && cardinalPoints.Count >= 8;
+        }
+
+        private static bool FoodReady()
+        {
+            return DLC_WL.food != null && DLC_WL.food.Count > 0;
+        }
+
+        private static bool WeatherReady()
+        {
+            var cachedWeather = DiaryWeatherField == null ? null : DiaryWeatherField.GetValue(null) as Weather;
+            if (UnityAlive(cachedWeather)) return true;
+
+            var weatherObject = UnityEngine.GameObject.Find("WeatherObj");
+            return UnityAlive(weatherObject) && UnityAlive(weatherObject.GetComponent<Weather>());
+        }
+
+        private static int ReadStaticInt(FieldInfo field, int fallback)
+        {
+            if (field == null) return fallback;
+            object value = field.GetValue(null);
+            return value is int i ? i : fallback;
+        }
+
+        private static bool UnityAlive(UnityEngine.Object value)
+        {
+            return value != null;
         }
 
         private static void TryRefreshCurrentStatus()

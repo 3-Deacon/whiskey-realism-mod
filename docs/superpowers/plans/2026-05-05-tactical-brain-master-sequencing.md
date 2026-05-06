@@ -1,6 +1,6 @@
 # Tactical Brain Master Sequencing Implementation Plan
 
-Status: paused. Do not execute tactical work unless the user explicitly reopens Slice B. Current active plan is `2026-05-05-strategic-operational-probe-contact.md`.
+Status: active prep. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer source is present and deployed locally; runtime observer smoke is the gate before any behavior patch.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -29,7 +29,7 @@ Read these before creating any B-slice plan:
 Implementation boundary:
 
 - Do not implement the whole tactical brain from this master plan.
-- Do not ship any behavior patch before `B0 Tactical Observer` is built, deployed, and smoke-reviewed.
+- Do not ship any behavior patch before `B0 Tactical Observer` is smoke-reviewed. B0 source is already built/deployed locally as observer-only #35, but a fresh W&L land-battle smoke is still required.
 - Do not merge the weapons/ammunition adjunct into this master tactical-brain track. The adjunct needs its own observer-first plan after core B0 proves battle telemetry shape.
 - Keep tactical state runtime-only unless a later battle-resume spec is written. Do not write tactical state to `whiskeyrealism.json`.
 - Existing dirty work in unrelated campaign systems must not be reverted while executing any B-slice.
