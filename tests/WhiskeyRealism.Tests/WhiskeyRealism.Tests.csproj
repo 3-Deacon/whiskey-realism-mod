@@ -7,6 +7,10 @@
     <RefsDir>$(MSBuildThisFileDirectory)..\..\refs</RefsDir>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(RefsDir)\Assembly-CSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="UnityEngine">
       <HintPath>$(RefsDir)\UnityEngine.dll</HintPath>
       <Private>true</Private>
@@ -48,6 +52,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCareerStartGate.cs" Link="WlCareerStartGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlStartSelectionRetryGate.cs" Link="WlStartSelectionRetryGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlDispatchSanitizer.cs" Link="WlDispatchSanitizer.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlStrategicOrderBridge.cs" Link="WlStrategicOrderBridge.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersonalityVector.cs" Link="PersonalityVector.cs" />

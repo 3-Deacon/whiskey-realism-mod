@@ -51,6 +51,17 @@ static class Program
             ("wl dispatch sanitizer ignores non-candidate type", WlDispatchSanitizerIgnoresNonCandidateType),
             ("wl dispatch sanitizer handles null content", WlDispatchSanitizerHandlesNullContent),
             ("wl dispatch sanitizer leaves normal content unchanged", WlDispatchSanitizerLeavesNormalContentUnchanged),
+            ("wl bridge inactive allows direct movement", WlBridgeInactiveAllowsDirectMovement),
+            ("wl bridge non-player alliance allows direct movement", WlBridgeNonPlayerAllianceAllowsDirectMovement),
+            ("wl bridge report only under wl player alliance blocks movement", WlBridgeReportOnlyUnderWlPlayerAllianceBlocksMovement),
+            ("wl bridge report only inactive stays not wl", WlBridgeReportOnlyInactiveStaysNotWl),
+            ("wl bridge report only non-player alliance stays direct", WlBridgeReportOnlyNonPlayerAllianceStaysDirect),
+            ("wl bridge player cic skips movement", WlBridgePlayerCicSkipsMovement),
+            ("wl bridge moved by player skips movement", WlBridgeMovedByPlayerSkipsMovement),
+            ("wl bridge eligible under commander issues current order", WlBridgeEligibleUnderCommanderIssuesCurrentOrder),
+            ("wl bridge ineligible under commander blocks direct fallback", WlBridgeIneligibleUnderCommanderBlocksDirectFallback),
+            ("wl bridge failed vanilla call blocks direct fallback", WlBridgeFailedVanillaCallBlocksDirectFallback),
+            ("wl bridge part of player unit not under commander stays direct for c0c", WlBridgePartOfPlayerUnitNotUnderCommanderStaysDirectForC0c),
             ("wl camp short camp credits normal rest", WlCampShortCampCreditsNormalRest),
             ("wl camp short camp credits wounded rest", WlCampShortCampCreditsWoundedRest),
             ("wl camp short camp credits preserve minimum proportions", WlCampShortCampCreditsPreserveMinimumProportions),
@@ -880,6 +891,162 @@ static class Program
         var result = WlDispatchSanitizer.Sanitize(56, content);
         AssertEqual(content, result.Content);
         AssertEqual(false, result.Changed);
+    }
+
+    private static void WlBridgeInactiveAllowsDirectMovement()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.Redeploy,
+            new WlStrategicRoleFacts { WlActive = false, IsPlayerAlliance = true });
+
+        AssertEqual(WlStrategicOrderResult.NotWl, decision.Result);
+        AssertEqual(5, decision.WlOrderType);
+        AssertEqual(true, decision.MayDirectMove);
+        AssertEqual(true, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeNonPlayerAllianceAllowsDirectMovement()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.Redeploy,
+            new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: false));
+
+        AssertEqual(WlStrategicOrderResult.DirectMovementAllowed, decision.Result);
+        AssertEqual(true, decision.MayDirectMove);
+        AssertEqual(true, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeReportOnlyUnderWlPlayerAllianceBlocksMovement()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.ReportOnly,
+            new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true));
+
+        AssertEqual(WlStrategicOrderResult.ReportOnly, decision.Result);
+        AssertEqual(-1, decision.WlOrderType);
+        AssertEqual(false, decision.MayDirectMove);
+        AssertEqual(false, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeReportOnlyInactiveStaysNotWl()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.ReportOnly,
+            new WlStrategicRoleFacts(wlActive: false, isPlayerAlliance: true));
+
+        AssertEqual(WlStrategicOrderResult.NotWl, decision.Result);
+        AssertEqual(true, decision.MayDirectMove);
+        AssertEqual(true, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeReportOnlyNonPlayerAllianceStaysDirect()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.ReportOnly,
+            new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: false));
+
+        AssertEqual(WlStrategicOrderResult.DirectMovementAllowed, decision.Result);
+        AssertEqual(true, decision.MayDirectMove);
+        AssertEqual(true, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgePlayerCicSkipsMovement()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.Offensive,
+            new WlStrategicRoleFacts { WlActive = true, IsPlayerAlliance = true, IsPlayerCic = true });
+
+        AssertEqual(WlStrategicOrderResult.SkippedPlayerCic, decision.Result);
+        AssertEqual(16, decision.WlOrderType);
+        AssertEqual(false, decision.MayDirectMove);
+        AssertEqual(false, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeMovedByPlayerSkipsMovement()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.Probe,
+            new WlStrategicRoleFacts { WlActive = true, IsPlayerAlliance = true, IsMovedByPlayer = true });
+
+        AssertEqual(WlStrategicOrderResult.SkippedPlayerControlled, decision.Result);
+        AssertEqual(5, decision.WlOrderType);
+        AssertEqual(false, decision.MayDirectMove);
+        AssertEqual(false, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeEligibleUnderCommanderIssuesCurrentOrder()
+    {
+        var facts = new WlStrategicRoleFacts
+        {
+            WlActive = true,
+            IsPlayerAlliance = true,
+            IsUnderCommander = true,
+            CurrentCommandIsCampaignGroup = true,
+            CurrentCommandParentIsUnderTargetUnit = true
+        };
+
+        var decision = WlStrategicOrderBridge.Classify(WlStrategicIntent.OffensiveContinuation, facts);
+
+        AssertEqual(WlStrategicOrderResult.IssuedWlCurrentOrder, decision.Result);
+        AssertEqual(6, decision.WlOrderType);
+        AssertEqual(false, decision.MayDirectMove);
+        AssertEqual(false, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeIneligibleUnderCommanderBlocksDirectFallback()
+    {
+        var facts = new WlStrategicRoleFacts
+        {
+            WlActive = true,
+            IsPlayerAlliance = true,
+            IsUnderCommander = true,
+            CurrentCommandIsCampaignGroup = false,
+            CurrentCommandParentIsUnderTargetUnit = true
+        };
+
+        var decision = WlStrategicOrderBridge.Classify(WlStrategicIntent.EngageEnemy, facts);
+
+        AssertEqual(WlStrategicOrderResult.WlCurrentOrderIneligible, decision.Result);
+        AssertEqual(7, decision.WlOrderType);
+        AssertEqual(false, decision.MayDirectMove);
+        AssertEqual(false, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeFailedVanillaCallBlocksDirectFallback()
+    {
+        var facts = new WlStrategicRoleFacts
+        {
+            WlActive = true,
+            IsPlayerAlliance = true,
+            IsUnderCommander = true,
+            CurrentCommandIsCampaignGroup = true,
+            CurrentCommandParentIsUnderTargetUnit = true
+        };
+
+        var decision = WlStrategicOrderBridge.Classify(WlStrategicIntent.DefendCapital, facts, vanillaBridgeSucceeded: false);
+
+        AssertEqual(WlStrategicOrderResult.FailedVanillaBridge, decision.Result);
+        AssertEqual(8, decision.WlOrderType);
+        AssertEqual(false, decision.MayDirectMove);
+        AssertEqual(false, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgePartOfPlayerUnitNotUnderCommanderStaysDirectForC0c()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.ConstructFort,
+            new WlStrategicRoleFacts
+            {
+                WlActive = true,
+                IsPlayerAlliance = true,
+                IsPartOfPlayerUnit = true
+            });
+
+        AssertEqual(WlStrategicOrderResult.DirectMovementAllowed, decision.Result);
+        AssertEqual(9, decision.WlOrderType);
+        AssertEqual(true, decision.MayDirectMove);
+        AssertEqual(true, decision.MayMutateOperationList);
+        AssertTrue(decision.Reason.Contains("part-of-player-unit"), "C0c direct fallback reason should name part-of-player-unit");
     }
 
     private static void WlCampShortCampCreditsNormalRest()
