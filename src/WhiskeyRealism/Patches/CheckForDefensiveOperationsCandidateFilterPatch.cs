@@ -227,7 +227,16 @@ namespace WhiskeyRealism.Patches
 
                                         if (priorPositions != null && priorPositions.TryGetValue(id, out var priorPos))
                                         {
-                                            SafeMoveUnitTo(unit, priorPos);
+                                            if (ShouldAvoidDirectWlRevert(unit, allianceId))
+                                            {
+                                                OnceLog.Info(
+                                                    $"defense-intent:filter:wl-revert-skip:{allianceId}:{id}",
+                                                    $"[DefenseIntent] skipped direct W&L revert alliance={allianceId} candidate={SafeUnitName(unit, id)} reason=player-chain");
+                                            }
+                                            else
+                                            {
+                                                SafeMoveUnitTo(unit, priorPos);
+                                            }
                                         }
 
                                         // Fix B: .name throws MissingReferenceException on destroyed objects.
@@ -350,6 +359,29 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning("defense-intent:filter:moveunitto",
                     "MoveUnitTo on revert failed: " + ex.Message);
             }
+        }
+
+        private static bool ShouldAvoidDirectWlRevert(Regiment unit, int allianceId)
+        {
+            try
+            {
+                if (unit == null) return false;
+                if (!DLC_WL.dlc_scenarioactive) return false;
+                if (allianceId != GameVars.playeralliance || unit.alliance != GameVars.playeralliance) return false;
+                if (DLC_WL.IsCommanderInChief()) return true;
+                if (DLC_WL.IsMovedByPlayer(unit)) return true;
+                return unit.dlcw_isundercommander;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string SafeUnitName(Regiment unit, int fallbackId)
+        {
+            try { return unit != null ? ((UnityEngine.Object)unit).name : fallbackId.ToString(); }
+            catch { return fallbackId.ToString(); }
         }
 
         private static void ClearSnapshots(int aifactionIndex)
