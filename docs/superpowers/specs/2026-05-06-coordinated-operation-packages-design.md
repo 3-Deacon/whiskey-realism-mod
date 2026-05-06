@@ -23,6 +23,7 @@ The result should fit the current strategic/director layer, preserve vanilla ope
 - No global `AICampaign.MoveUnitTo(...)` behavior patch.
 - No Transpiler.
 - No direct movement fallback for W&L player-chain units when the W&L bridge rejects or fails.
+- No fake W&L multi-order fan-out. Vanilla exposes one current-order surface for the player's chain, guarded by `CheckCurrentOrderUpdate(...)`; this slice must respect that limit instead of pretending every selected support unit can receive a visible W&L current order.
 - No player-alliance steering when the player is CIC.
 - No cross-theater donor pulls except where an existing strategic policy explicitly allows them.
 - No new persistent sidecar state for package decisions in the first slice.
@@ -100,6 +101,10 @@ For `calledfromcampaign: true`, it applies a narrow campaign chain guard: `/tmp/
 
 If an order is accepted, vanilla writes `DLC_WL.givenorder`, increments the order session, and shows the order panel: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:8648`.
 
+`WlStrategicOrderBridge.Classify(...)` mirrors that chain guard today. It issues a W&L current order only for player-alliance, non-player-CIC, non-player-moved, `dlcw_isundercommander` units whose current command is the campaign group and whose parent command is under the target unit: `src/WhiskeyRealism/Strategic/WlStrategicOrderBridge.cs:140`.
+
+This creates a hard first-slice constraint: a package can select several nearby units, but only committable units may be counted in its execution ratio. If a W&L support unit is chain-ineligible and direct movement is forbidden, it must be suppressed before the package ratio is accepted. The runtime must not claim a coordinated W&L attack while silently skipping most support units.
+
 ### Confirmed Whiskey: Current Probe Is One Unit
 
 `StrategicCoordinator.UpdateOperationalProbe(...)` builds the probe input, applies `StrategicResilienceDirector.ApplyTo(input.Options, posture)`, overlays the formation directive, and then calls `OperationalProbeRuntime.Run(...)`: `src/WhiskeyRealism/Strategic/StrategicCoordinator.cs:803`.
@@ -141,7 +146,7 @@ Implement B + C from the design discussion:
 - C: create a shared strategic coordinated-operation package engine.
 - B: consume it from Whiskey's operational-probe path and from a vanilla-offensive steering patch.
 
-The shared engine is the foundation. The vanilla-offensive consumer is the riskier part because it touches a live Harmony patch surface. The implementation plan must keep those as separate tasks so the package engine and probe consumer can be tested before the vanilla offensive patch is enabled.
+The shared engine is the foundation, but the implementation plan must include the whole B + C slice: pure package engine, operational-probe consumer, runtime commit path, vanilla offensive steering patch, micro-movement interaction guard, tests, docs, build, deploy, and smoke evidence. The plan may split these into tasks, but it must not ship a diagnostic-only placeholder as the final behavior.
 
 ### Coordinated Operation Engine
 
@@ -161,10 +166,10 @@ The selector input should include:
 
 The selector output should include:
 
-- decision: `None`, `CoordinateAttack`, `Reinforce`, `Delay`, or `Recover`;
+- decision: `None`, `SingleLead`, `CoordinateAttack`, `Reinforce`, `Delay`, or `Recover`;
 - reason;
-- lead unit key;
-- support unit keys;
+- lead stable unit id and display key;
+- support stable unit ids and display keys;
 - suppressed candidates with reasons;
 - package effective strength;
 - target enemy strength;
@@ -179,7 +184,8 @@ Use a dedicated candidate DTO rather than making the selector depend on live `Re
 
 Required candidate fields:
 
-- unit key;
+- stable unit id;
+- display unit key;
 - alliance id;
 - level;
 - directive;
@@ -197,9 +203,15 @@ Required candidate fields:
 - direct movement allowed;
 - inherits from parent;
 - critical sector;
-- front posture.
+- front posture;
+- already in `unitsinoffensiveoperations`;
+- already in `unitsindefensiveoperations`;
+- already in `unitsconstructingsupplydepots`;
+- commit mode: direct movement, W&L current order, or blocked W&L/player-chain.
 
-The runtime adapter can derive these fields from `FormationDirectiveAssignment`, `FrontSectorLedger`, and the new X/Z data.
+The runtime adapter can derive these fields from `FormationDirectiveAssignment`, `FrontSectorLedger`, vanilla operation lists, `WlStrategicOrderBridge.Classify(...)`, and the new X/Z data.
+
+Stable unit id is the canonical identity for selection, tie-breaks, and runtime lookup. Display unit key remains useful for logs. A commander change can alter the current `name:commander` key; it must not invalidate a package selected earlier in the same strategic cycle.
 
 ### Nearby Definition
 
@@ -215,6 +227,8 @@ The default ordering is:
 The exact constants belong in the implementation plan and tests, but the design requirement is clear: support must be spatially local and deterministic. Same-area units that are too far away should not be treated as immediate support.
 
 ### Package Decisions
+
+`SingleLead` means the selector found one committable unit but no eligible support package. This is valid for empty-target probes and W&L chain-limited cases, and it must be logged as single-unit execution instead of reported as a coordinated attack.
 
 `CoordinateAttack` means the lead and supports commit to the same target in the same strategic cycle.
 
@@ -234,9 +248,12 @@ The selector should exclude candidates that are:
 - not allowed to receive direct movement;
 - below readiness, morale, ammo, or supply floors;
 - already assigned to `Guard`, `Hold`, `Recover`, or `Concede`;
+- already present in `unitsinoffensiveoperations`, `unitsindefensiveoperations`, or `unitsconstructingsupplydepots`;
 - in a critical understrength sector;
 - outside nearby distance limits;
 - remote donors when a local adequate package exists.
+
+The selector must also exclude candidates whose commit mode is blocked W&L/player-chain. If excluding blocked candidates reduces the package below its ratio, the result becomes `SingleLead`, `Delay`, or `None`; it must not return `CoordinateAttack` with supports that cannot be committed.
 
 Runtime commit must recheck `OffensiveAvailabilityWrapper.IsAvailable(...)` for every unit before issuing any direct move or W&L current order. The pure selector is advisory, not a substitute for vanilla movement gates.
 
@@ -248,7 +265,7 @@ The scoring should prefer:
 - adequate smaller packages over oversized packages;
 - same-sector support over same-area support;
 - rested and supplied units over depleted units;
-- deterministic tie-break by unit key or stable instance id.
+- deterministic tie-break by stable unit id.
 
 The selector should suppress:
 
@@ -256,19 +273,31 @@ The selector should suppress:
 - worse-tier remote support once a local package is nearly adequate;
 - donors from critical fronts;
 - low-readiness or low-supply units even if raw strength is high.
+- blocked W&L/player-chain candidates before ratio acceptance.
+
+Suppressed candidates are not globally reserved for the rest of the cycle. Only selected/committed unit ids are reserved. Hard exclusions such as critical-sector, live operation-list membership, low readiness, or blocked W&L remain hard because their candidate facts remain true; soft suppressions such as overmatch or worse-tier may be reconsidered for another target in the same cycle.
 
 ### Director Integration
 
 The director layer shapes package thresholds, not package ownership.
 
-Use the current `DirectorPosture` path already feeding `OperationalProbeOptions`:
+Use one posture path. Upstream code builds a `CoordinatedOperationOptions` object once from doctrine plus `DirectorPosture`; the selector consumes only that options object. The selector must not read raw `DirectorPosture` and must not re-apply `StrategicResilienceDirector.ApplyTo(...)`.
 
-- Too quiet or stalled posture may lower the attack ratio slightly and allow one extra local support.
-- Overheated, overextended, or high-risk posture may raise the attack ratio, lower donor caps, and prefer `Reinforce` or `Delay`.
-- Stable posture should use neutral doctrine.
-- Personality remains clamped through the existing director path; do not add another unbounded personality multiplier.
+Donor cap has a concrete shape:
 
-The plan must define concrete option fields and tests for these modifiers.
+- `MaxSupportUnits`: maximum support formations selected behind the lead.
+- `MaxSupportEffectiveStrength`: maximum cumulative effective support strength selected behind the lead.
+- `AllowRemoteTier`: whether same-area but outside immediate command/bugle range support may be considered.
+
+Default first-slice values:
+
+- stable posture: `RequiredAttackRatio = 1.25`, `RequiredReinforceRatio = 0.85`, `MaxSupportUnits = 2`, `MaxSupportEffectiveStrength = desiredStrength * 1.25`, `AllowRemoteTier = false`;
+- too quiet or stalled posture: `RequiredAttackRatio = 1.15`, `RequiredReinforceRatio = 0.75`, `MaxSupportUnits = 3`, `MaxSupportEffectiveStrength = desiredStrength * 1.50`, `AllowRemoteTier = true`;
+- overheated, overextended, or high-risk posture: `RequiredAttackRatio = 1.40`, `RequiredReinforceRatio = 1.00`, `MaxSupportUnits = 1`, `MaxSupportEffectiveStrength = desiredStrength * 0.75`, `AllowRemoteTier = false`.
+
+These values are test targets for the plan, not runtime folklore. Personality remains clamped through the existing director path; do not add another unbounded personality multiplier.
+
+Empty-target probes follow vanilla's rule at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:14374`: if estimated target enemy strength is zero or below, the selector returns `SingleLead` unless the upstream options explicitly set `AllowEmptyTargetPackage = true`. The default is false.
 
 ### Operational Probe Consumer
 
@@ -283,21 +312,25 @@ Expected behavior:
 - favorable contact/escalation: prefer `CoordinateAttack` when the package clears the attack ratio;
 - overmatched contact: remove direct pressure and let the existing pause/withdraw behavior stand.
 
-`FormationDirectiveLedger.ApplyOperationalProbe(...)` must be updated so support units are also marked consistently. A support committed to a package should not remain an unrestricted donor in the same daily cycle.
+`FormationDirectiveLedger.ApplyOperationalProbe(...)` must be updated so support units are also marked consistently. A support committed to a package should not remain an unrestricted donor in the same daily cycle. This applies only to selected supports, not every suppressed candidate.
 
 ### Vanilla Offensive Consumer
 
-Add a vanilla-offensive steering consumer only after the pure package selector and probe consumer pass tests.
+Add a vanilla-offensive steering consumer after the pure package selector and probe consumer pass tests. This is part of the required slice, not a follow-up.
 
 The intended patch surface is `AICampaign.CheckOffensiveMovements(...)` because that is where vanilla builds and commits offensive packages.
 
-The plan must evaluate and choose one of these non-Transpiler options:
+This method is per-unit, not per-alliance. Vanilla calls it for the current offensive unit and then increments `currentoffensiveunitrun`: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:11319`. Therefore the defensive candidate-filter pattern cannot be copied naively.
 
-1. Prefix/Postfix candidate filter with snapshot/restore of `aifaction[_aifaction].ownunits`, matching the existing defensive candidate-filter pattern.
-2. Prefix advisory gate that skips only clearly forbidden lead units and lets vanilla build its own package.
-3. Postfix diagnostic/advisory first, with no behavior change, if the candidate-filter risk is too high after code review.
+The plan must implement a per-cycle cached Prefix/Postfix steering patch, provisionally patch #38 `CoordinatedOffensiveOperationsPatch`:
 
-The design preference is option 1 only if the implementation review proves snapshot/restore is safe for this method. Otherwise, ship option 2 or 3 and keep the behavior change in the Whiskey probe/runtime path.
+1. Build the package/candidate decision once per offensive-cycle signature, keyed by alliance/faction, floating date or faction `lastupdate`, current offensive unit id, target area/sector, and formation/director signatures.
+2. Use that cached decision for subsequent per-unit Prefix calls in the same cycle.
+3. Snapshot/restore `ownunits` only when the cached decision requires filtering for the current lead call.
+4. Keep reflection lookups cached.
+5. Log one bounded perf line if filtering exceeds the existing slow-frame threshold.
+
+If a full candidate filter proves unsafe during implementation review, the plan must still ship a behavior patch by falling back to a Prefix lead gate that blocks clearly forbidden lead units and lets vanilla build packages for allowed leads. It must not end as diagnostic-only behavior.
 
 The patch must preserve vanilla operation-list semantics:
 
@@ -305,11 +338,21 @@ The patch must preserve vanilla operation-list semantics:
 - W&L offensive current orders must not be manually added to `unitsinoffensiveoperations`;
 - defensive/intercept semantics remain owned by the existing defensive workstream.
 
+### Offensive Micro-Movement Interaction
+
+Adding non-W&L support units to `unitsinoffensiveoperations` intentionally hands later continuation movement back to vanilla `UpdateMicroMovementInOffensive(...)`. Vanilla skips units with an active transmitted path, so this should not redirect units before their initial package path is consumed: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:14004`.
+
+First-slice behavior is:
+
+- Whiskey owns the initial coordinated package target.
+- Vanilla owns later offensive continuation after the unit finishes its active path.
+- If runtime smoke proves pre-arrival retargeting, the implementation must add an in-memory package-target guard in the same plan before deploy. The guard can filter package-locked units out of `UpdateMicroMovementInOffensive(...)` until their active path clears, but it must not add sidecar persistence.
+
 ### Runtime Commit Rules
 
 For every selected package unit:
 
-1. Resolve live `Regiment` by unit key.
+1. Resolve live `Regiment` by stable unit id.
 2. Recheck live availability through `OffensiveAvailabilityWrapper`.
 3. Call `WlStrategicOrderBridge.TryIssue(...)`.
 4. If result is `IssuedWlCurrentOrder`, log and do not direct-move.
@@ -319,28 +362,41 @@ For every selected package unit:
 
 Support units should use the same target package point as the lead unless the operation is `Reinforce`, where the plan may use the lead position, enemy position, or target objective depending on available runtime evidence.
 
+Add `WlStrategicIntent.Reinforce` to the W&L bridge and map it to vanilla order type 5. Reinforcement is movement to support/rally; if the package is ready to attack an enemy target, it should be `Offensive` type 16 or `EngageEnemy` type 7 instead.
+
 ### W&L Dispatch And Objective Fit
 
 Coordinated packages should reuse `WlStrategicOrderBridge`. The bridge already owns player-CIC skips, moved-by-player skips, W&L chain eligibility, current-order type mapping, and no direct fallback for rejected W&L orders.
+
+Before accepting a package ratio, the runtime adapter must classify candidate commit mode. A coordinated W&L package may include:
+
+- one visible W&L current-order unit when vanilla's chain guard permits it;
+- directly movable support units that are not W&L player-chain blocked;
+- no blocked W&L player-chain support units in the accepted ratio.
+
+If only one unit is committable, the decision is `SingleLead`, not `CoordinateAttack`.
 
 Target names should avoid the old `"Objective"` placeholder when practical:
 
 1. explicit objective name from the CIC current phase;
 2. target area key;
-3. nearest town/IIP/asset name from the campaign map ledger;
+3. nearest town or asset name from a new minimal resolver over `CampaignMapLedger.Towns` and `CampaignMapLedger.Assets`;
 4. `"Objective"` only as the final fallback.
 
 The existing dispatch sanitizer remains responsible for generic final-waypoint stance text. This package work should not change `GameVars.groupstancename`.
+
+The plan must include a visual/text smoke check that W&L support/order text still passes through the existing dispatch sanitizer and does not reintroduce `"to none"` wording.
 
 ### Logging
 
 Add bounded package logs on signature change:
 
 ```text
-[CoordinatedOps] alliance=1 intent=Attack decision=CoordinateAttack target=Virginia-Eastern ratio=1.42 lead=Army of the Potomac support=2 reason=attack-ratio-passed
+[CoordinatedOps] alliance=1 intent=Attack decision=CoordinateAttack target=Manassas ratio=1.42 lead=Army of the Potomac support=2 reason=attack-ratio-passed
 [CoordinatedOps] alliance=1 unit=II Corps action=wl-current-order type=16 package=...
 [CoordinatedOps] alliance=1 unit=III Corps action=direct-move package=...
 [CoordinatedOps] alliance=1 unit=Reserve Division suppressed=critical-sector
+[CoordinatedOps] alliance=1 intent=Attack decision=SingleLead target=Manassas lead=Army of the Potomac reason=wl-chain-single-committable
 ```
 
 Logs must include enough evidence to answer the user's smoke-test question: "Did nearby forces coordinate or just move independently?"
@@ -356,8 +412,12 @@ If implementation proves that package state must survive save/load beyond vanill
 ## Acceptance Criteria
 
 - Pure tests cover coordinated attack, reinforcement, delay, recover, donor suppression, local-distance ordering, director threshold modifiers, and deterministic tie-breaks.
+- Pure tests cover player-CIC input returning `None`.
+- Pure tests cover W&L blocked support causing `SingleLead`, `Delay`, or `None`, never false `CoordinateAttack`.
+- Pure tests cover empty-target probes returning `SingleLead` by default.
 - `OperationalProbeRuntime` can commit a multi-unit package without direct-moving W&L player-chain units.
-- The vanilla offensive consumer either safely steers candidate eligibility or ships as diagnostic/advisory if behavior steering is not safe.
+- The vanilla offensive consumer ships as behavior: per-cycle cached candidate filtering where safe, or a Prefix lead gate if full filtering is unsafe. Diagnostic-only is not sufficient.
+- New strategic source files are explicitly included in `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`.
 - W&L current-order units in offensive packages are not manually added to `unitsinoffensiveoperations`.
 - Non-W&L direct-moved offensive package units are added to `unitsinoffensiveoperations` only after `MoveUnitTo(...)` succeeds.
 - Player-CIC alliances receive no Whiskey steering.
@@ -379,6 +439,9 @@ Add pure console-harness tests for:
 - overmatch support is suppressed;
 - director "too quiet" posture relaxes the attack threshold within clamp;
 - director high-risk posture tightens donor caps or prefers reinforcement;
+- blocked W&L support is excluded before ratio acceptance;
+- player-CIC input returns no steering;
+- empty-target probe uses `SingleLead`;
 - ties are deterministic;
 - empty/null inputs no-op.
 
