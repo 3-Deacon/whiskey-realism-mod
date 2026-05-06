@@ -142,6 +142,38 @@ namespace WhiskeyRealism.Strategic
                     }
                 }
 
+                var regiment = unit as Regiment;
+                var bridgeDecision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
+                {
+                    AllianceId = allianceId,
+                    AifactionIndex = aifactionIndex,
+                    Unit = regiment,
+                    TargetPosition = anchor,
+                    TargetName = assignment.AssignedAreaKey,
+                    ObjectiveId = -1,
+                    Intent = WlStrategicIntent.Redeploy,
+                    Width = 20f,
+                    Depth = 20f,
+                    SourceSystem = "ArmyArea"
+                });
+
+                if (bridgeDecision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
+                {
+                    issued++;
+                    OnceLog.Info(
+                        $"army-area:{allianceId}:{UnitKey(unit)}:{assignment.AssignedAreaKey}:wl-order",
+                        $"[Patch:ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=wl-current-order area={assignment.AssignedAreaKey} type={bridgeDecision.WlOrderType} reason={assignment.Reason}");
+                    continue;
+                }
+
+                if (!bridgeDecision.MayDirectMove)
+                {
+                    OnceLog.Info(
+                        $"army-area:{allianceId}:{UnitKey(unit)}:{assignment.AssignedAreaKey}:wl-skip:{bridgeDecision.Result}",
+                        $"[Patch:ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=skip-return-area wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
+                    continue;
+                }
+
                 SetTheaterPosition(unit, anchor);
                 if (MoveUnitTo(unit, anchor))
                 {
