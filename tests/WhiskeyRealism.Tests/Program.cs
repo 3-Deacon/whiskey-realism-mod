@@ -128,6 +128,12 @@ static class Program
             ("project doctrine catalog maps representative buckets and lanes", ProjectDoctrineCatalogMapsRepresentativeBucketsAndLanes),
             ("project doctrine catalog maps organization reform aliases", ProjectDoctrineCatalogMapsOrganizationReformAliases),
             ("project doctrine catalog has no lane six or seven entries", ProjectDoctrineCatalogHasNoLaneSixOrSevenEntries),
+            ("project doctrine signals clamp weapon and artillery deficits", ProjectDoctrineSignalsClampWeaponAndArtilleryDeficits),
+            ("project doctrine signals map fiscal posture to credit stress", ProjectDoctrineSignalsMapFiscalPosture),
+            ("project doctrine signals compute late war collapse risk", ProjectDoctrineSignalsComputeLateWarCollapseRisk),
+            ("project doctrine signals keep recognition and port values bounded", ProjectDoctrineSignalsBoundRecognitionAndPort),
+            ("project doctrine signals default blockade pressure is neutral", ProjectDoctrineSignalsDefaultBlockadePressureNeutral),
+            ("project doctrine signals ignore nonfinite logistics pressure side", ProjectDoctrineSignalsIgnoreNonfiniteLogisticsPressureSide),
             ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
             ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
             ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
@@ -2124,6 +2130,99 @@ static class Program
     {
         foreach (var entry in WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.AllActive)
             AssertEqual(false, entry.SubsidyLane == 6 || entry.SubsidyLane == 7);
+    }
+
+    private static void ProjectDoctrineSignalsClampWeaponAndArtilleryDeficits()
+    {
+        var input = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalInput
+        {
+            Alliance = 1,
+            Era = EraStage.Operational1862,
+            FiscalPosture = FiscalPosture.BalancedWar,
+            OwnAverageRifles = 0.25f,
+            EnemyBestAverageRifles = 0.75f,
+            OwnAverageGuns = 0.2f,
+            EnemyBestAverageGuns = 0.4f
+        };
+
+        var signals = WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalBuilder.Build(input);
+
+        AssertNear(0.6667f, signals.WeaponDeficit, 0.01f, "weapon deficit");
+        AssertNear(0.5f, signals.ArtilleryDeficit, 0.01f, "artillery deficit");
+    }
+
+    private static void ProjectDoctrineSignalsMapFiscalPosture()
+    {
+        var input = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalInput
+        {
+            Alliance = 0,
+            Era = EraStage.Amateur1861,
+            FiscalPosture = FiscalPosture.EmergencySolvency
+        };
+
+        var signals = WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalBuilder.Build(input);
+
+        AssertEqual(1f, signals.CreditStress);
+    }
+
+    private static void ProjectDoctrineSignalsComputeLateWarCollapseRisk()
+    {
+        var input = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalInput
+        {
+            Alliance = 1,
+            Era = EraStage.TotalWar1864,
+            FiscalPosture = FiscalPosture.CreditDefense,
+            ManpowerStressInput = 0.8f,
+            StrengthRatio = 0.6f
+        };
+
+        var signals = WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalBuilder.Build(input);
+
+        AssertNear(0.7f, signals.LateWarCollapseRisk, 0.01f, "late war collapse risk");
+    }
+
+    private static void ProjectDoctrineSignalsBoundRecognitionAndPort()
+    {
+        var input = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalInput
+        {
+            Alliance = 1,
+            Era = EraStage.Amateur1861,
+            FiscalPosture = FiscalPosture.BalancedWar,
+            PortViabilityInput = 3f,
+            RecognitionProbability = 2f
+        };
+
+        var signals = WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalBuilder.Build(input);
+
+        AssertEqual(1f, signals.PortViability);
+        AssertEqual(1f, signals.RecognitionWindow);
+    }
+
+    private static void ProjectDoctrineSignalsDefaultBlockadePressureNeutral()
+    {
+        var nullSignals = WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalBuilder.Build(null);
+        AssertEqual(0.5f, nullSignals.BlockadePressure);
+
+        var unionSignals = WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalBuilder.Build(
+            new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalInput { Alliance = 0 });
+        var csaSignals = WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalBuilder.Build(
+            new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalInput { Alliance = 1 });
+
+        AssertEqual(0.5f, unionSignals.BlockadePressure);
+        AssertEqual(0.5f, csaSignals.BlockadePressure);
+    }
+
+    private static void ProjectDoctrineSignalsIgnoreNonfiniteLogisticsPressureSide()
+    {
+        var input = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalInput
+        {
+            SupplyPressure = float.NaN,
+            TransportPressure = 0.7f
+        };
+
+        var signals = WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignalBuilder.Build(input);
+
+        AssertEqual(0.7f, signals.LogisticsTempoNeed);
     }
 
     private static void ProjectScorerReplacesWeakCandidate()
