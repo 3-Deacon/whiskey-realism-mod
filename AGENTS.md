@@ -108,6 +108,7 @@ whiskey-realism-mod/
 │   ├── handoff.md                  ← session-start master plan
 │   ├── findings.md                 ← decompile coordinates + reflection gotchas
 │   ├── patch-catalog.md            ← canonical numbered catalog of shipped patches
+│   ├── bug-fixes/                  ← cross-cutting vanilla bug-fix workstream and backlog
 │   └── superpowers/
 │       ├── README.md               ← lifecycle + layout
 │       ├── specs/                  ← active design specs (current/upcoming slices)
@@ -129,6 +130,7 @@ Codex supports layered `AGENTS.md` files. It loads this root file first, then an
 - Patch work: [`src/WhiskeyRealism/Patches/AGENTS.md`](src/WhiskeyRealism/Patches/AGENTS.md)
 - Pure strategic/tactical logic: [`src/WhiskeyRealism/Strategic/AGENTS.md`](src/WhiskeyRealism/Strategic/AGENTS.md)
 - Tests: [`tests/WhiskeyRealism.Tests/AGENTS.md`](tests/WhiskeyRealism.Tests/AGENTS.md)
+- Bug fixes: [`docs/bug-fixes/AGENTS.md`](docs/bug-fixes/AGENTS.md)
 - Specs/plans/reviews: [`docs/superpowers/AGENTS.md`](docs/superpowers/AGENTS.md)
 - Review checklist: [`docs/agent-code-review.md`](docs/agent-code-review.md)
 
@@ -192,7 +194,7 @@ When GTCW patches: re-decompile `Assembly-CSharp.dll`, diff our patch sites, reb
 - Don't add Prefix-blocking or Transpiler patches without consulting the user — they're brittle to game updates and easy to get wrong.
 - Don't write Harmony patches that mutate strategic mod state. State writes happen ONLY on daily strategic review and event-trigger handlers. Patches READ; they don't WRITE. (Targeted candidate-list filtering via Prefix-snapshot/Postfix-restore is permitted as the spec'd Slice 2 enforcement surface — see #25 — but the snapshot/restore must be try/finally-safe.)
 - Don't size per-alliance state arrays to 2 without bound-checking. `AICampaign.aifaction` includes alliance 2 (Europe) — `AICampaignReflect.GetAllianceId(_aifaction)` can return 2, so any `someArray[allianceId]` access where `someArray.Length == 2` must guard with `if (allianceId < 0 || allianceId >= someArray.Length) return;` (or short-circuit alliance > 1 entirely if Europe shouldn't get the treatment).
-- Don't expand workstream scope without an aligned spec/plan. Current active work is strategic-layer operational probe/contact tempo smoke follow-up; see `docs/superpowers/plans/2026-05-05-strategic-operational-probe-contact.md` and `docs/operational-tempo-doctrine.md`. Slice B (tactical brain) has draft specs and plans, but it is paused unless the user explicitly reopens tactical work. Slices C (W&L hierarchy AI) and D (additional historical flavor) remain deferred.
+- Don't expand workstream scope without an aligned spec/plan. Current active work is strategic-layer operational probe/contact tempo smoke follow-up; see `docs/superpowers/plans/2026-05-05-strategic-operational-probe-contact.md` and `docs/operational-tempo-doctrine.md`. Narrow confirmed vanilla bug fixes may be tracked under `docs/bug-fixes/`, but do not treat broad doctrine or feature work as a bug fix. Slice B (tactical brain) has draft specs and plans, but it is paused unless the user explicitly reopens tactical work. Slices C (W&L hierarchy AI) and D (additional historical flavor) remain deferred.
 
 ---
 

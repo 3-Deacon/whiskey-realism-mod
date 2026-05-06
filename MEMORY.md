@@ -10,6 +10,7 @@ This file is the project memory index for agents and maintainers. It is intentio
 - `MEMORY.md` is not assumed to be auto-loaded by Codex; read it when resuming this repo, investigating prior decisions, or updating handoff state.
 - `docs/handoff.md` is the authoritative long-form session-start handoff.
 - `docs/patch-catalog.md` is the authoritative shipped-patch inventory.
+- `docs/bug-fixes/` is the cross-cutting vanilla bug-fix workstream for narrow confirmed defects and runtime hazards that are not new doctrine slices.
 - `docs/superpowers/specs/` holds active design specs; shipped specs live in `docs/superpowers/specs/archive/` (see archive `README.md` for the index). Same split for `docs/superpowers/plans/`.
 - Source-of-truth order remains: shipped code > `docs/patch-catalog.md` > per-patch design doc > umbrella spec > archived plan.
 
@@ -19,6 +20,7 @@ This file is the project memory index for agents and maintainers. It is intentio
 - **Strategic layer is the active workstream.** Defense Intent Ledger Slice 1+2 was smoke-validated end-to-end on 2026-05-05; strategic anti-zerg/theater-integrity gating then shipped; the latest deployed 2026-05-05 checkpoint adds `OperationalProbeLedger` / `OperationalProbeRuntime` plus `OperationalTempoDoctrine`. That loop commits at most one same-area probe through vanilla `MoveUnitTo` + `unitsinoffensiveoperations`, pauses on enemy reaction, withdraws when overmatched, escalates after favorable contact, refuses critical hold donors, and paces escalation by vanilla `Policy.CurrentChapter`, Whiskey era, campaign month/season, faction, and CIC personality. Runtime smoke still needs a fresh game restart because the current log predates the deployed hash. See `docs/handoff.md`, `docs/operational-tempo-doctrine.md`, and `docs/superpowers/plans/2026-05-05-strategic-operational-probe-contact.md` for the current SHA-256 and smoke boundary.
 - **Slice B (tactical brain) is paused.** Umbrella spec at `docs/superpowers/specs/2026-05-05-tactical-brain-design.md`; vanilla verification at `docs/superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md`; focused weapons/ammunition adjunct spec at `docs/superpowers/specs/2026-05-05-tactical-weapons-ammunition-design.md`; master sequencing plan at `docs/superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md`; B0 observer plan at `docs/superpowers/plans/2026-05-05-tactical-b0-observer.md`. Do not advance tactical code or plans unless the user explicitly reopens tactical work.
 - Default-off telegraph AI (#24) still needs a focused enabled smoke run; that's an opportunistic Slice A follow-up, not a blocker.
+- Bug Fixes now has a durable workstream at `docs/bug-fixes/`. The first seeded queue is `docs/bug-fixes/vanilla-ai-economy.md`: `BUG-ECO-001` tracks the runtime-confirmed fiscal subsidy sentinel leak, while policy null-personality, economy tick NRE, supply-depot construction, and railroad construction remain repro/backlog items.
 - Slices C (W&L hierarchy AI) and D (additional historical flavor) remain deferred.
 
 ## Load-Bearing Runtime Lessons

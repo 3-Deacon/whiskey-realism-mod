@@ -11,6 +11,7 @@
 | **Current shipped version** | **v0.2.2** — Slice A enrichment through #22 verified, tagged, and released on 2026-05-04. |
 | **Main branch current** | Post-v0.2.2 main also includes the post-release Slice A enrichment (construction steering Slice B, fast-forward AI throttle/diagnostics, campaign-map-aware state/theater defense inputs, locked-Hard casualty modifier, Defense Intent Ledger Slice 1+2, optimized daily operational cadence, #26 Campaign AI Governor, dynamic army-area fallback for vanilla-created commands, threatened-priority-area recruitment protection, #27 Fort Construction Governor, strategic anti-zerg/theater-integrity gating, and the strategic operational probe/contact loop with chapter/era/season tempo doctrine). Latest deployed DLL SHA-256: `677c2f4339662508c99d4b60b7b8d615cfe89b9b9f705d068420a5e1c7642acc`. Current log evidence before restart still predates the latest deploy; restart the game before judging runtime behavior from `LogOutput.log`. |
 | **Active workstream** | **Strategic layer only.** The latest shipped work is the operational probe/contact loop: one bounded same-area probe can be committed through vanilla `MoveUnitTo`/`unitsinoffensiveoperations`, enemy reaction pauses instead of mass-pulling, favorable contact can escalate, critical hold sectors cannot donate, and tempo varies by vanilla chapter, Whiskey era, season, faction, and CIC personality across the war. Living reference: [`docs/operational-tempo-doctrine.md`](operational-tempo-doctrine.md). Tactical-brain docs exist but are paused unless the user explicitly reopens Slice B. |
+| **Bug-fix workstream** | Cross-cutting vanilla bug fixes now live under [`docs/bug-fixes/`](bug-fixes/). Current seeded queue: [`docs/bug-fixes/vanilla-ai-economy.md`](bug-fixes/vanilla-ai-economy.md), covering fiscal subsidy sentinel leakage, policy null-personality risk, economy tick NRE follow-up, supply-depot construction, railroad construction, and shipped fort/picker/perf bug-fix precedents. |
 | **Repo** | [`3-Deacon/whiskey-realism-mod`](https://github.com/3-Deacon/whiskey-realism-mod) (public, MIT) |
 | **Last updated** | 2026-05-05 |
 
@@ -29,6 +30,17 @@ We design and ship **one slice at a time.** Each slice goes through: brainstorm 
 | **E — Community Hotfix supersession** | future / open | — | — | v0.6.0+ | ~5 | Long-term path to fold the existing Steam-distributed Community Hotfix mod's behavior fixes (officer auto-replace, recruitment ratios 80/7/13, weapon-range selection, AI passive morale recovery) into Harmony patches so users only need this one mod. Currently *incompatible* — Community Hotfix replaces Assembly-CSharp.dll wholesale. |
 
 **Total target patch count across slices A-E:** ~34. Compare UBoatCrewMod at 108 catalog items as a reference for "how big a Mono Unity AI mod can grow."
+
+## Cross-cutting Bug Fixes
+
+Bug fixes are a separate workstream from the slice roadmap. They are for narrow vanilla failure modes, runtime crash hazards, pathological AI loops, and small guards that should not become a new realism doctrine slice. The index is [`docs/bug-fixes/README.md`](bug-fixes/README.md); the current economy/policy/building queue is [`docs/bug-fixes/vanilla-ai-economy.md`](bug-fixes/vanilla-ai-economy.md).
+
+Current seeded items:
+- `BUG-ECO-001` — in-progress local fiscal guard for subsidy focus `-1` leaking into live subsidy values.
+- `BUG-ECO-002` — `Policies.CheckAIPolicyChange` null-personality hazard; needs repro before patching.
+- `BUG-ECO-003` — pre-existing `Economy.UpdateEconomyAllianceData` NRE note; needs current Player.log stack.
+- `BUG-ECO-004` / `BUG-ECO-005` — supply-depot and railroad construction surfaces; backlog until telemetry proves bad starts.
+- `BUG-BLD-001`, `BUG-UI-001`, `BUG-PERF-001` — shipped bug-fix precedents for fort saturation, W&L picker one-shot, and high-speed vanilla AI pass count.
 
 ### Why this order
 
