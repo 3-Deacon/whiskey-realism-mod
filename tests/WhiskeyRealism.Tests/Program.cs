@@ -146,6 +146,10 @@ static class Program
             ("project doctrine scorer keeps lane intent numeric fields finite", ProjectDoctrineScorerKeepsLaneIntentFinite),
             ("project doctrine scorer does not mark high vanilla only lane critical", ProjectDoctrineScorerIgnoresVanillaOnlyCriticality),
             ("project doctrine scorer marks best doctrine replacement critical", ProjectDoctrineScorerMarksBestDoctrineReplacementCritical),
+            ("project doctrine log gate suppresses repeated signatures", ProjectDoctrineLogGateSuppressesRepeatedSignatures),
+            ("project doctrine log gate ignores empty signatures", ProjectDoctrineLogGateIgnoresEmptySignatures),
+            ("project doctrine starved lane signature includes funding trajectory", ProjectDoctrineStarvedLaneSignatureIncludesFundingTrajectory),
+            ("project lane intent estimates days from observed rate", ProjectLaneIntentEstimatesDaysFromObservedRate),
             ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
             ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
             ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
@@ -2633,6 +2637,102 @@ static class Program
         AssertEqual(true, decision.ShouldReplace);
         AssertEqual(97, decision.ProjectId);
         AssertEqual(true, decision.LaneIntent.CriticalDoctrineProject);
+    }
+
+    private static void ProjectDoctrineLogGateSuppressesRepeatedSignatures()
+    {
+        var gate = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineLogGate();
+        string first = WhiskeyRealism.Strategic.Projects.ProjectDoctrineLogGate.SelectionSignature(1, 4, 11, 6, "strategy-margin");
+        string repeat = WhiskeyRealism.Strategic.Projects.ProjectDoctrineLogGate.SelectionSignature(1, 4, 11, 6, "strategy-margin");
+        string changed = WhiskeyRealism.Strategic.Projects.ProjectDoctrineLogGate.SelectionSignature(1, 4, 11, 118, "strategy-margin");
+
+        AssertEqual(true, gate.ShouldLog(first));
+        AssertEqual(false, gate.ShouldLog(repeat));
+        AssertEqual(true, gate.ShouldLog(changed));
+        AssertEqual(false, gate.ShouldLog(first));
+    }
+
+    private static void ProjectDoctrineLogGateIgnoresEmptySignatures()
+    {
+        var gate = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineLogGate();
+
+        AssertEqual(false, gate.ShouldLog(null));
+        AssertEqual(false, gate.ShouldLog(""));
+        AssertEqual(true, gate.ShouldLog("material"));
+        AssertEqual(false, gate.ShouldLog(""));
+        AssertEqual(false, gate.ShouldLog("material"));
+    }
+
+    private static void ProjectDoctrineStarvedLaneSignatureIncludesFundingTrajectory()
+    {
+        var baseline = new WhiskeyRealism.Strategic.Projects.ProjectLaneIntent
+        {
+            Alliance = 0,
+            SubsidyLane = 4,
+            QueuedProjectId = 100,
+            FundingAvailable = 250f,
+            FundingNeeded = 1000f,
+            NetFundingPerDay = 25f,
+            TimeToFundEstimateDays = 30f,
+            ConstructionCurrentlyWins = true,
+            CriticalDoctrineProject = true
+        };
+
+        var differentFunding = new WhiskeyRealism.Strategic.Projects.ProjectLaneIntent
+        {
+            Alliance = 0,
+            SubsidyLane = 4,
+            QueuedProjectId = 100,
+            FundingAvailable = 300f,
+            FundingNeeded = 1000f,
+            NetFundingPerDay = 25f,
+            TimeToFundEstimateDays = 28f,
+            ConstructionCurrentlyWins = true,
+            CriticalDoctrineProject = true
+        };
+
+        var differentRate = new WhiskeyRealism.Strategic.Projects.ProjectLaneIntent
+        {
+            Alliance = 0,
+            SubsidyLane = 4,
+            QueuedProjectId = 100,
+            FundingAvailable = 250f,
+            FundingNeeded = 1000f,
+            NetFundingPerDay = 50f,
+            TimeToFundEstimateDays = 15f,
+            ConstructionCurrentlyWins = true,
+            CriticalDoctrineProject = true
+        };
+
+        string baselineSignature = WhiskeyRealism.Strategic.Projects.ProjectDoctrineLogGate.StarvedLaneSignature(baseline);
+        AssertEqual(false, baselineSignature == WhiskeyRealism.Strategic.Projects.ProjectDoctrineLogGate.StarvedLaneSignature(differentFunding));
+        AssertEqual(false, baselineSignature == WhiskeyRealism.Strategic.Projects.ProjectDoctrineLogGate.StarvedLaneSignature(differentRate));
+    }
+
+    private static void ProjectLaneIntentEstimatesDaysFromObservedRate()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 0,
+            Era = EraStage.Amateur1861,
+            FiscalPosture = FiscalPosture.BalancedWar
+        };
+
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861),
+            signals,
+            subsidyType: 4,
+            vanillaProjectId: 100,
+            vanillaWeight: 1f,
+            candidates: new ProjectCandidateInput[0],
+            fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts { ProjectId = id, SubsidyLane = 4, Cost = 1000f },
+            fundingAvailable: 250f,
+            netFundingPerDay: 25f,
+            constructionCurrentlyWins: true);
+
+        AssertEqual(30f, decision.LaneIntent.TimeToFundEstimateDays);
+        AssertEqual(true, decision.LaneIntent.ConstructionCurrentlyWins);
     }
 
     private static void ProjectScorerReplacesWeakCandidate()
