@@ -134,6 +134,18 @@ static class Program
             ("project doctrine signals keep recognition and port values bounded", ProjectDoctrineSignalsBoundRecognitionAndPort),
             ("project doctrine signals default blockade pressure is neutral", ProjectDoctrineSignalsDefaultBlockadePressureNeutral),
             ("project doctrine signals ignore nonfinite logistics pressure side", ProjectDoctrineSignalsIgnoreNonfiniteLogisticsPressureSide),
+            ("project doctrine scorer suppresses fully broken market reform", ProjectDoctrineScorerSuppressesMarketReform),
+            ("project doctrine scorer keeps civil order casualty value without raiding value", ProjectDoctrineScorerPartialCivilOrder),
+            ("project doctrine scorer excludes offensive tempo from civil order", ProjectDoctrineScorerExcludesCivilOrderOffensiveTempo),
+            ("project doctrine scorer penalizes out of window projects", ProjectDoctrineScorerPenalizesOutOfWindow),
+            ("project doctrine scorer protects half funded queue", ProjectDoctrineScorerProtectsHalfFundedQueue),
+            ("project doctrine scorer lets suppression bypass hysteresis", ProjectDoctrineScorerSuppressionBypassesHysteresis),
+            ("project doctrine scorer rejects stale candidate lane metadata", ProjectDoctrineScorerRejectsStaleCandidateLane),
+            ("project doctrine scorer will not replace out of window with out of window", ProjectDoctrineScorerRejectsOutOfWindowReplacement),
+            ("project doctrine scorer sanitizes public signal inputs", ProjectDoctrineScorerSanitizesPublicSignals),
+            ("project doctrine scorer keeps lane intent numeric fields finite", ProjectDoctrineScorerKeepsLaneIntentFinite),
+            ("project doctrine scorer does not mark high vanilla only lane critical", ProjectDoctrineScorerIgnoresVanillaOnlyCriticality),
+            ("project doctrine scorer marks best doctrine replacement critical", ProjectDoctrineScorerMarksBestDoctrineReplacementCritical),
             ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
             ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
             ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
@@ -2225,6 +2237,404 @@ static class Program
         AssertEqual(0.7f, signals.LogisticsTempoNeed);
     }
 
+    private static void ProjectDoctrineScorerSuppressesMarketReform()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 0,
+            Era = EraStage.Amateur1861,
+            FiscalPosture = FiscalPosture.BalancedWar
+        };
+
+        var candidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 96, SubsidyType = 1, VanillaWeight = 0.2f }
+        };
+
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861),
+            signals,
+            subsidyType: 1,
+            vanillaProjectId: 98,
+            vanillaWeight: 1f,
+            candidates: candidates,
+            fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts { ProjectId = id, SubsidyLane = 1, Cost = 1000f },
+            fundingAvailable: 0f,
+            netFundingPerDay: 0f,
+            constructionCurrentlyWins: false);
+
+        AssertEqual(true, decision.ShouldReplace);
+        AssertEqual(96, decision.ProjectId);
+        AssertEqual("suppressed-vanilla", decision.Reason);
+    }
+
+    private static void ProjectDoctrineScorerPartialCivilOrder()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 1,
+            Era = EraStage.Decisive1863,
+            FiscalPosture = FiscalPosture.BalancedWar,
+            CivilOrderRisk = 1f
+        };
+
+        float score = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.ScoreDoctrineOnly(107, signals);
+
+        AssertEqual(true, score > 0f);
+        AssertEqual(true, score < 1.5f);
+    }
+
+    private static void ProjectDoctrineScorerExcludesCivilOrderOffensiveTempo()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 1,
+            Era = EraStage.Decisive1863,
+            FiscalPosture = FiscalPosture.BalancedWar,
+            CivilOrderRisk = 0f,
+            ManpowerStress = 0f,
+            OffensiveTempoNeed = 1f
+        };
+
+        float score = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.ScoreDoctrineOnly(107, signals);
+
+        AssertEqual(0f, score);
+    }
+
+    private static void ProjectDoctrineScorerPenalizesOutOfWindow()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 0,
+            Era = EraStage.Amateur1861,
+            FiscalPosture = FiscalPosture.BalancedWar,
+            NavalDeficit = 1f
+        };
+
+        var candidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 31, SubsidyType = 4, VanillaWeight = 0.2f }
+        };
+
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861),
+            signals,
+            subsidyType: 4,
+            vanillaProjectId: 35,
+            vanillaWeight: 1f,
+            candidates: candidates,
+            fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts
+            {
+                ProjectId = id,
+                SubsidyLane = 4,
+                Cost = 1000f,
+                DateFromKnown = id == 35,
+                DateFromYear = id == 35 ? 1864 : 0,
+                DateFromMonth = 1,
+                DateFromDay = 1
+            },
+            fundingAvailable: 0f,
+            netFundingPerDay: 0f,
+            constructionCurrentlyWins: false);
+
+        AssertEqual(true, decision.ShouldReplace);
+        AssertEqual(31, decision.ProjectId);
+    }
+
+    private static void ProjectDoctrineScorerProtectsHalfFundedQueue()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 1,
+            Era = EraStage.Operational1862,
+            FiscalPosture = FiscalPosture.BalancedWar,
+            WeaponDeficit = 1f
+        };
+
+        var candidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 6, SubsidyType = 4, VanillaWeight = 0.8f }
+        };
+
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(1, EraStage.Operational1862),
+            signals,
+            subsidyType: 4,
+            vanillaProjectId: 11,
+            vanillaWeight: 1f,
+            candidates: candidates,
+            fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts { ProjectId = id, SubsidyLane = 4, Cost = 1000f },
+            fundingAvailable: 600f,
+            netFundingPerDay: 20f,
+            constructionCurrentlyWins: false);
+
+        AssertEqual(false, decision.ShouldReplace);
+        AssertEqual(11, decision.ProjectId);
+        AssertEqual("queued-half-funded", decision.Reason);
+        AssertEqual(1, decision.LaneIntent.Alliance);
+        AssertEqual(4, decision.LaneIntent.SubsidyLane);
+        AssertEqual(11, decision.LaneIntent.QueuedProjectId);
+        AssertEqual(600f, decision.LaneIntent.FundingAvailable);
+        AssertEqual(1000f, decision.LaneIntent.FundingNeeded);
+        AssertEqual(20f, decision.LaneIntent.NetFundingPerDay);
+        AssertEqual(20f, decision.LaneIntent.TimeToFundEstimateDays);
+        AssertEqual(false, decision.LaneIntent.ConstructionCurrentlyWins);
+        AssertEqual(true, decision.LaneIntent.CriticalDoctrineProject);
+    }
+
+    private static void ProjectDoctrineScorerSuppressionBypassesHysteresis()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 0,
+            Era = EraStage.Operational1862,
+            FiscalPosture = FiscalPosture.BalancedWar
+        };
+
+        var candidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 96, SubsidyType = 1, VanillaWeight = 0.1f }
+        };
+
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(0, EraStage.Operational1862),
+            signals,
+            subsidyType: 1,
+            vanillaProjectId: 98,
+            vanillaWeight: 1f,
+            candidates: candidates,
+            fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts { ProjectId = id, SubsidyLane = 1, Cost = 1000f },
+            fundingAvailable: 900f,
+            netFundingPerDay: 50f,
+            constructionCurrentlyWins: false);
+
+        AssertEqual(true, decision.ShouldReplace);
+        AssertEqual(96, decision.ProjectId);
+    }
+
+    private static void ProjectDoctrineScorerRejectsStaleCandidateLane()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 1,
+            Era = EraStage.Operational1862,
+            FiscalPosture = FiscalPosture.BalancedWar,
+            WeaponDeficit = 1f,
+            RecognitionWindow = 1f
+        };
+
+        var candidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 103, SubsidyType = 1, VanillaWeight = 10f },
+            new ProjectCandidateInput { ProjectId = 6, SubsidyType = 1, VanillaWeight = 10f }
+        };
+
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(1, EraStage.Operational1862),
+            signals,
+            subsidyType: 1,
+            vanillaProjectId: 96,
+            vanillaWeight: 0.2f,
+            candidates: candidates,
+            fiscalWeight: null,
+            runtimeFacts: id =>
+            {
+                var entry = WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.Get(id);
+                return new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts
+                {
+                    ProjectId = id,
+                    SubsidyLane = entry != null ? entry.SubsidyLane : 1,
+                    Cost = 1000f
+                };
+            },
+            fundingAvailable: 0f,
+            netFundingPerDay: 0f,
+            constructionCurrentlyWins: false);
+
+        AssertEqual(false, decision.ShouldReplace);
+        AssertEqual(96, decision.ProjectId);
+    }
+
+    private static void ProjectDoctrineScorerRejectsOutOfWindowReplacement()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 0,
+            Era = EraStage.Amateur1861,
+            FiscalPosture = FiscalPosture.BalancedWar,
+            NavalDeficit = 1f
+        };
+
+        var candidates = new[]
+        {
+            new ProjectCandidateInput { ProjectId = 31, SubsidyType = 4, VanillaWeight = 10f }
+        };
+
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861),
+            signals,
+            subsidyType: 4,
+            vanillaProjectId: 35,
+            vanillaWeight: 1f,
+            candidates: candidates,
+            fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts
+            {
+                ProjectId = id,
+                SubsidyLane = 4,
+                Cost = 1000f,
+                DateFromKnown = true,
+                DateFromYear = 1864,
+                DateFromMonth = 1,
+                DateFromDay = 1
+            },
+            fundingAvailable: 0f,
+            netFundingPerDay: 0f,
+            constructionCurrentlyWins: false);
+
+        AssertEqual(false, decision.ShouldReplace);
+        AssertEqual(35, decision.ProjectId);
+    }
+
+    private static void ProjectDoctrineScorerSanitizesPublicSignals()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 1,
+            Era = EraStage.Operational1862,
+            FiscalPosture = FiscalPosture.CreditDefense,
+            WeaponDeficit = float.NaN,
+            ArtilleryDeficit = float.PositiveInfinity,
+            NavalDeficit = float.NegativeInfinity,
+            BlockadePressure = float.NaN,
+            PortViability = float.NaN,
+            CreditStress = float.PositiveInfinity,
+            ManpowerStress = float.NaN,
+            LogisticsTempoNeed = float.PositiveInfinity,
+            IndustryGap = float.NaN,
+            AgricultureFoodStress = float.PositiveInfinity,
+            CivilOrderRisk = float.NaN,
+            RecognitionWindow = float.PositiveInfinity,
+            OffensiveTempoNeed = float.NaN,
+            LateWarCollapseRisk = float.NegativeInfinity
+        };
+
+        float score = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.ScoreDoctrineOnly(6, signals);
+        AssertFinite(score, "doctrine-only score");
+
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(1, EraStage.Operational1862),
+            signals,
+            subsidyType: 4,
+            vanillaProjectId: 11,
+            vanillaWeight: float.PositiveInfinity,
+            candidates: new[]
+            {
+                new ProjectCandidateInput { ProjectId = 6, SubsidyType = 4, VanillaWeight = float.NaN }
+            },
+            fiscalWeight: id => float.PositiveInfinity,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts { ProjectId = id, SubsidyLane = 4, Cost = float.NaN },
+            fundingAvailable: float.PositiveInfinity,
+            netFundingPerDay: float.NaN,
+            constructionCurrentlyWins: false);
+
+        AssertFinite(decision.BestScore, "best score");
+        AssertFinite(decision.VanillaScore, "vanilla score");
+        AssertEqual(true, decision.ShouldReplace);
+        AssertEqual(6, decision.ProjectId);
+        AssertEqual(false, decision.LaneIntent.CriticalDoctrineProject);
+    }
+
+    private static void ProjectDoctrineScorerKeepsLaneIntentFinite()
+    {
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861),
+            new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+            {
+                Alliance = 0,
+                Era = EraStage.Amateur1861,
+                FiscalPosture = FiscalPosture.BalancedWar
+            },
+            subsidyType: 1,
+            vanillaProjectId: 96,
+            vanillaWeight: 0f,
+            candidates: null,
+            fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts
+            {
+                ProjectId = id,
+                SubsidyLane = 1,
+                Cost = id == 96 ? float.PositiveInfinity : float.NaN
+            },
+            fundingAvailable: float.NaN,
+            netFundingPerDay: 0f,
+            constructionCurrentlyWins: false);
+
+        AssertFinite(decision.LaneIntent.FundingAvailable, "funding available");
+        AssertFinite(decision.LaneIntent.FundingNeeded, "funding needed");
+        AssertFinite(decision.LaneIntent.NetFundingPerDay, "net funding per day");
+        AssertFinite(decision.LaneIntent.TimeToFundEstimateDays, "time to fund");
+        AssertEqual(WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.MaxTimeToFundEstimateDays, decision.LaneIntent.TimeToFundEstimateDays);
+    }
+
+    private static void ProjectDoctrineScorerIgnoresVanillaOnlyCriticality()
+    {
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861),
+            new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+            {
+                Alliance = 0,
+                Era = EraStage.Amateur1861,
+                FiscalPosture = FiscalPosture.BalancedWar
+            },
+            subsidyType: 1,
+            vanillaProjectId: 96,
+            vanillaWeight: 10f,
+            candidates: null,
+            fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts { ProjectId = id, SubsidyLane = 1, Cost = 1000f },
+            fundingAvailable: 0f,
+            netFundingPerDay: 0f,
+            constructionCurrentlyWins: false);
+
+        AssertEqual(false, decision.LaneIntent.CriticalDoctrineProject);
+    }
+
+    private static void ProjectDoctrineScorerMarksBestDoctrineReplacementCritical()
+    {
+        var signals = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals
+        {
+            Alliance = 0,
+            Era = EraStage.Operational1862,
+            FiscalPosture = FiscalPosture.CreditDefense,
+            CreditStress = 1f
+        };
+
+        var decision = WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.Select(
+            GrandStrategyRegistry.Resolve(0, EraStage.Operational1862),
+            signals,
+            subsidyType: 1,
+            vanillaProjectId: 96,
+            vanillaWeight: 0.1f,
+            candidates: new[]
+            {
+                new ProjectCandidateInput { ProjectId = 97, SubsidyType = 1, VanillaWeight = 0.1f }
+            },
+            fiscalWeight: null,
+            runtimeFacts: id => new WhiskeyRealism.Strategic.Projects.ProjectRuntimeFacts { ProjectId = id, SubsidyLane = 1, Cost = 1000f },
+            fundingAvailable: 0f,
+            netFundingPerDay: 0f,
+            constructionCurrentlyWins: false);
+
+        AssertEqual(true, decision.ShouldReplace);
+        AssertEqual(97, decision.ProjectId);
+        AssertEqual(true, decision.LaneIntent.CriticalDoctrineProject);
+    }
+
     private static void ProjectScorerReplacesWeakCandidate()
     {
         var profile = GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861);
@@ -4282,6 +4692,12 @@ static class Program
     private static void AssertTrue(bool condition, string message)
     {
         if (!condition) throw new Exception(message);
+    }
+
+    private static void AssertFinite(float value, string label)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+            throw new Exception(label + ": expected finite value but got " + value);
     }
 
     private static void AssertNear(float expected, float actual, float tolerance, string label)

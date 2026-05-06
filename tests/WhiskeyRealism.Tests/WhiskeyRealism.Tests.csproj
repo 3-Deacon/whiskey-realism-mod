@@ -73,6 +73,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Projects\ProjectDoctrineCatalog.cs" Link="ProjectDoctrineCatalog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Projects\ProjectDoctrineModels.cs" Link="ProjectDoctrineModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Projects\ProjectDoctrineSignalBuilder.cs" Link="ProjectDoctrineSignalBuilder.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Projects\ProjectDoctrineScorer.cs" Link="ProjectDoctrineScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationLevel.cs" Link="FormationLevel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationDirective.cs" Link="FormationDirective.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FormationSnapshot.cs" Link="FormationSnapshot.cs" />
