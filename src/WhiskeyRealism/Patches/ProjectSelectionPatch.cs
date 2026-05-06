@@ -289,9 +289,26 @@ namespace WhiskeyRealism.Patches
                 int enemy = alliance == 0 ? 1 : 0;
                 if (GameVars.alliance != null && alliance >= 0 && enemy >= 0 && alliance < GameVars.alliance.Length && enemy < GameVars.alliance.Length)
                 {
-                    input.BlockadeRatio = GameVars.alliance[1] != null ? GameVars.alliance[1].averageblockaderatio : 0f;
+                    var ownState = GameVars.alliance[alliance];
+                    var enemyState = GameVars.alliance[enemy];
+
+                    input.BlockadeRatio = GameVars.alliance.Length > 1 && GameVars.alliance[1] != null
+                        ? GameVars.alliance[1].averageblockaderatio
+                        : 0f;
                     input.SupplyPressure = fiscalIntent != null && fiscalIntent.SupplyProtection ? 0.75f : 0f;
                     input.TransportPressure = fiscalIntent != null && fiscalIntent.LogisticsExpansion ? 0.75f : 0f;
+
+                    input.RecognitionProbability = ReadRecognitionProbability(alliance);
+
+                    if (ownState != null && enemyState != null)
+                    {
+                        float ownWeaponProduction = ownState.GetProjectLevel(102);
+                        float enemyWeaponProduction = enemyState.GetProjectLevel(102);
+                        float ownIndustry = ownState.GetProjectLevel(104);
+                        float enemyIndustry = enemyState.GetProjectLevel(104);
+                        input.IndustryGapInput = ProjectDoctrineSignalBuilder.Clamp01(
+                            Math.Max(enemyWeaponProduction + enemyIndustry - ownWeaponProduction - ownIndustry, 0f) / 3f);
+                    }
                 }
             }
             catch (Exception ex)
@@ -300,6 +317,30 @@ namespace WhiskeyRealism.Patches
             }
 
             return ProjectDoctrineSignalBuilder.Build(input);
+        }
+
+        private static float ReadRecognitionProbability(int alliance)
+        {
+            try
+            {
+                if (alliance < 0 || alliance >= 2) return 0f;
+                if (GameVars.alliance == null || GameVars.alliance.Length <= 3) return 0f;
+                if (GameVars.alliance[0] == null || GameVars.alliance[1] == null) return 0f;
+
+                var unionIntervention = GameVars.alliance[0].interventionlevels;
+                var confederateIntervention = GameVars.alliance[1].interventionlevels;
+                if (unionIntervention == null || confederateIntervention == null) return 0f;
+                if (unionIntervention.Length <= 3 || confederateIntervention.Length <= 3) return 0f;
+
+                return Math.Max(
+                    GameVars.Alliance.GetInterventionProbability(2),
+                    GameVars.Alliance.GetInterventionProbability(3));
+            }
+            catch (Exception)
+            {
+                OnceLog.Warning("project-selection:recognition-signal", "[Patch:ProjectSelection] recognition signal unavailable; using neutral value");
+                return 0f;
+            }
         }
 
         private static float ReadVanillaProjectWeight(GameVars.Alliance.AIPersonality aiPersonality, int projectId)
