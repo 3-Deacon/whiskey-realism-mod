@@ -5089,8 +5089,18 @@ static class Program
                 priorCommandExists: true,
                 priorIsAssignedTarget: false,
                 priorCommandCommanderId: 3,
-                assignedCommanderId: 7),
+                assignedCommanderId: 7,
+                vanillaReplacementWillReadPriorCommander: false),
             "a previous unit already reassigned to another commander should not be touched");
+
+        AssertTrue(
+            !CommanderAssignmentGuard.ShouldClearPreviousCommand(
+                priorCommandExists: true,
+                priorIsAssignedTarget: false,
+                priorCommandCommanderId: 7,
+                assignedCommanderId: 7,
+                vanillaReplacementWillReadPriorCommander: true),
+            "vanilla ReplaceCommanderOfUnit still reads the subordinate commander id after AssignCommando");
     }
 
     private static void CampaignFilterMapGuardBoundsRepeatedNoProgress()

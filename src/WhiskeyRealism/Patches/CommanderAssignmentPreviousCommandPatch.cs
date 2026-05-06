@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
@@ -20,7 +21,11 @@ namespace WhiskeyRealism.Patches
             {
                 if (!Enabled() || __instance == null) return;
                 int commanderId = GameVars.commander != null ? GameVars.commander.IndexOf(__instance) : -1;
-                __state = new State(__instance.currentcommand, reg, commanderId);
+                __state = new State(
+                    __instance.currentcommand,
+                    reg,
+                    commanderId,
+                    IsCalledFromReplaceCommanderOfUnit());
             }
             catch (Exception ex)
             {
@@ -42,8 +47,15 @@ namespace WhiskeyRealism.Patches
                         priorCommandExists: true,
                         priorIsAssignedTarget: priorIsTarget,
                         priorCommandCommanderId: prior.commander,
-                        assignedCommanderId: __state.CommanderId))
+                        assignedCommanderId: __state.CommanderId,
+                        vanillaReplacementWillReadPriorCommander: __state.VanillaReplacementWillReadPriorCommander))
                 {
+                    if (__state.VanillaReplacementWillReadPriorCommander)
+                    {
+                        OnceLog.Info(
+                            "commander-previous-command:skip-vanilla-replacement",
+                            "[Patch:CommanderAssignment] skipped stale previous-command clear during vanilla ReplaceCommanderOfUnit");
+                    }
                     return;
                 }
 
@@ -67,17 +79,46 @@ namespace WhiskeyRealism.Patches
             catch { return false; }
         }
 
+        private static bool IsCalledFromReplaceCommanderOfUnit()
+        {
+            try
+            {
+                var trace = new StackTrace(1, false);
+                var frames = trace.GetFrames();
+                if (frames == null) return false;
+
+                for (int i = 0; i < frames.Length; i++)
+                {
+                    var method = frames[i]?.GetMethod();
+                    if (method == null) continue;
+                    if (method.Name == "ReplaceCommanderOfUnit" && method.DeclaringType != null && method.DeclaringType.Name == "BattleUnits")
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
         internal readonly struct State
         {
             internal readonly Regiment PriorCommand;
             internal readonly Regiment TargetCommand;
             internal readonly int CommanderId;
+            internal readonly bool VanillaReplacementWillReadPriorCommander;
 
-            internal State(Regiment priorCommand, Regiment targetCommand, int commanderId)
+            internal State(
+                Regiment priorCommand,
+                Regiment targetCommand,
+                int commanderId,
+                bool vanillaReplacementWillReadPriorCommander)
             {
                 PriorCommand = priorCommand;
                 TargetCommand = targetCommand;
                 CommanderId = commanderId;
+                VanillaReplacementWillReadPriorCommander = vanillaReplacementWillReadPriorCommander;
             }
 
             internal bool Valid => CommanderId >= 0;

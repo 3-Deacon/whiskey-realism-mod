@@ -6,12 +6,14 @@ namespace WhiskeyRealism.Strategic
             bool priorCommandExists,
             bool priorIsAssignedTarget,
             int priorCommandCommanderId,
-            int assignedCommanderId)
+            int assignedCommanderId,
+            bool vanillaReplacementWillReadPriorCommander = false)
         {
             return priorCommandExists
                 && !priorIsAssignedTarget
                 && assignedCommanderId >= 0
-                && priorCommandCommanderId == assignedCommanderId;
+                && priorCommandCommanderId == assignedCommanderId
+                && !vanillaReplacementWillReadPriorCommander;
         }
     }
 }
