@@ -22,7 +22,7 @@ namespace WhiskeyRealism.Strategic
                     return null;
                 }
 
-                var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
+                var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as List<Regiment>;
                 if (ownUnits == null)
                 {
                     OnceLog.Warning(
@@ -32,10 +32,16 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 bool grandArmyStructure = GrandArmyStructure(allianceId);
+
+                // Build spatial area index once per call — avoids O(n²) campaignunitlist scan in PopulateLocalPressure.
+                var unitsByArea = BuildAreaIndex();
+
                 var snapshots = new List<FormationSnapshot>();
                 for (int i = 0; i < ownUnits.Count; i++)
                 {
-                    var snapshot = SnapshotUnit(allianceId, ownUnits[i], grandArmyStructure);
+                    var unit = ownUnits[i];
+                    if (unit == null) continue;
+                    var snapshot = SnapshotUnit(allianceId, unit, grandArmyStructure, unitsByArea);
                     if (snapshot != null)
                     {
                         snapshot.IsPlanTargetArea = !string.IsNullOrEmpty(planTargetAreaKey) &&
@@ -65,51 +71,75 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        internal static FormationSnapshot SnapshotUnit(int allianceId, object unit, bool grandArmyStructure)
+        // Builds a Dictionary<areaKey, List<Regiment>> over top-formation top-units only.
+        // Used to turn the O(n²) PopulateLocalPressure scan into an O(bucket) scan.
+        private static Dictionary<string, List<Regiment>> BuildAreaIndex()
+        {
+            var index = new Dictionary<string, List<Regiment>>(StringComparer.Ordinal);
+            try
+            {
+                if (BattleUnits.campaignunitlist == null) return index;
+                for (int i = 0; i < BattleUnits.campaignunitlist.Count; i++)
+                {
+                    var u = BattleUnits.campaignunitlist[i];
+                    if (!IsTopFormation(u)) continue;
+                    string key = ArmyAreaRuntime.AreaKey(u.transform.position);
+                    if (!index.TryGetValue(key, out var bucket))
+                    {
+                        bucket = new List<Regiment>();
+                        index[key] = bucket;
+                    }
+                    bucket.Add(u);
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("formation-directive:area-index", "[FormationDirective] BuildAreaIndex failed: " + ex.Message);
+            }
+            return index;
+        }
+
+        internal static FormationSnapshot SnapshotUnit(int allianceId, Regiment unit, bool grandArmyStructure,
+            Dictionary<string, List<Regiment>> unitsByArea = null)
         {
             try
             {
                 if (unit == null) return null;
-                int unitType = ReadInt(unit, -1, "unittyp");
-                if (unitType < 14 || unitType > 16) return null;
+                if (unit.unittyp < 14 || unit.unittyp > 16) return null;
 
-                var position = UnitPosition(unit);
                 var snapshot = new FormationSnapshot
                 {
                     UnitKey = UnitKey(unit),
                     ParentUnitKey = ParentUnitKey(unit),
                     AllianceId = allianceId,
-                    UnitName = ObjectName(unit),
+                    UnitName = ((UnityEngine.Object)unit).name,
                     CommanderName = CommanderName(unit),
-                    UnitType = unitType,
-                    IsTopUnit = ReadBool(unit, false, "istopunit"),
-                    IsGarrisoned = ReadObject(unit, "garrisonreference") != null,
+                    UnitType = unit.unittyp,
+                    IsTopUnit = unit.istopunit,
+                    IsGarrisoned = unit.garrisonreference != null,
                     GrandArmyStructureAvailable = grandArmyStructure,
-                    GroupStrengthActive = ReadFloat(unit, 0f, "groupstrengthactive", "groupstrengthdirect", "groupstrength"),
-                    GroupStrengthDirect = ReadFloat(unit, 0f, "groupstrengthdirect", "groupstrengthactive", "groupstrength"),
-                    Morale = FormationSnapshot.Clamp01(ReadFloat(unit, 1f, "groupmorale", "morale")),
-                    Readiness = FormationSnapshot.Clamp01(ReadFloat(unit, 1f, "readiness")),
-                    RifleAmmo = ReadSupplyState(unit, 0, ReadFloat(unit, 1f, "groupammo")),
-                    ArtilleryAmmo = ReadSupplyState(unit, 1, ReadFloat(unit, 1f, "groupammo")),
+                    GroupStrengthActive = Math.Max(0f, unit.groupstrengthactive),
+                    GroupStrengthDirect = Math.Max(0f, unit.groupstrengthdirect),
+                    Morale = FormationSnapshot.Clamp01(unit.groupmorale),
+                    Readiness = FormationSnapshot.Clamp01(unit.readiness),
+                    RifleAmmo = ReadSupplyState(unit, 0, unit.groupammo),
+                    ArtilleryAmmo = ReadSupplyState(unit, 1, unit.groupammo),
                     Supply = ReadSupply(unit),
-                    Fatigue = FormationSnapshot.Clamp01(ReadFloat(unit, 0f, "groupfatigue", "fatigue")),
+                    Fatigue = FormationSnapshot.Clamp01(unit.groupfatigue),
                     WeaponFirepower = EstimateWeaponFirepower(unit),
-                    CommandRange = ReadFloat(unit, 0f, "commanderrange"),
-                    BugleRange = ReadFloat(unit, 0f, "buglerange"),
-                    InBattle = ReadBool(unit, false, "inbattle"),
-                    OnRetreat = ReadBool(unit, false, "onretreat"),
-                    HasActivePath = ReadInt(unit, 0, "regimentpaths") > 0,
+                    CommandRange = unit.commanderrange,
+                    BugleRange = unit.buglerange,
+                    InBattle = unit.inbattle,
+                    OnRetreat = unit.onretreat,
+                    HasActivePath = unit.regimentpaths > 0,
                     IsCavalryCapable = HasCavalryStrength(unit)
                 };
 
-                if (position.HasValue)
-                {
-                    snapshot.AreaKey = ArmyAreaRuntime.AreaKey(position.Value);
-                    snapshot.SectorKey = FrontSectorRuntime.SectorKey(position.Value);
-                    PopulateFrontContext(allianceId, snapshot);
-                }
+                snapshot.AreaKey = ArmyAreaRuntime.AreaKey(unit.transform.position);
+                snapshot.SectorKey = FrontSectorRuntime.SectorKey(unit.transform.position);
+                PopulateFrontContext(allianceId, snapshot);
 
-                PopulateLocalPressure(snapshot, unit, allianceId);
+                PopulateLocalPressure(snapshot, unit, allianceId, unitsByArea);
                 return snapshot;
             }
             catch (Exception ex)
@@ -190,23 +220,24 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private static void PopulateLocalPressure(FormationSnapshot snapshot, object unit, int allianceId)
+        // Populates local pressure from same-area bucket only (avoids full campaignunitlist scan).
+        private static void PopulateLocalPressure(FormationSnapshot snapshot, Regiment unit, int allianceId,
+            Dictionary<string, List<Regiment>> unitsByArea)
         {
             try
             {
-                var position = UnitPosition(unit);
-                if (!position.HasValue || BattleUnits.campaignunitlist == null) return;
+                if (unitsByArea == null || string.IsNullOrEmpty(snapshot.AreaKey)) return;
+                if (!unitsByArea.TryGetValue(snapshot.AreaKey, out var bucket)) return;
 
+                Vector3 position = unit.transform.position;
                 float supportRange = snapshot.CommandRange > 0f ? snapshot.CommandRange : snapshot.BugleRange;
                 float enemyRange = snapshot.BugleRange > 0f ? snapshot.BugleRange * 2f : snapshot.CommandRange;
 
-                for (int i = 0; i < BattleUnits.campaignunitlist.Count; i++)
+                for (int i = 0; i < bucket.Count; i++)
                 {
-                    var other = BattleUnits.campaignunitlist[i];
-                    if (other == null || ReferenceEquals(other, unit)) continue;
-                    if (!IsTopFormation(other)) continue;
-
-                    float distance = Vector3.Distance(position.Value, other.transform.position);
+                    var other = bucket[i];
+                    if (ReferenceEquals(other, unit)) continue;
+                    float distance = Vector3.Distance(position, other.transform.position);
                     if (other.alliance == allianceId)
                     {
                         if (supportRange > 0f && distance <= supportRange)
@@ -239,7 +270,13 @@ namespace WhiskeyRealism.Strategic
             for (int i = 0; i < list.Count; i++)
             {
                 var faction = list[i];
-                if (ReadInt(faction, -1, "allianceid") == allianceId) return faction;
+                var fi = AccessTools.Field(faction.GetType(), "allianceid");
+                if (fi == null) continue;
+                try
+                {
+                    if (Convert.ToInt32(fi.GetValue(faction)) == allianceId) return faction;
+                }
+                catch { }
             }
             return null;
         }
@@ -268,20 +305,15 @@ namespace WhiskeyRealism.Strategic
                    unit.unittyp <= 16;
         }
 
-        private static string ParentUnitKey(object unit)
+        // Uses Unity hierarchy (canonical) — parentregiment GameObject field is not needed.
+        private static string ParentUnitKey(Regiment unit)
         {
             try
             {
-                if (unit is Component component && component.transform.parent != null)
+                if (unit == null) return null;
+                if (unit.transform.parent != null)
                 {
-                    var parent = component.transform.parent.GetComponent<Regiment>();
-                    if (parent != null) return UnitKey(parent);
-                }
-
-                var parentObject = ReadObject(unit, "parentregiment");
-                if (parentObject is GameObject gameObject)
-                {
-                    var parent = gameObject.GetComponent<Regiment>();
+                    var parent = unit.transform.parent.GetComponent<Regiment>();
                     if (parent != null) return UnitKey(parent);
                 }
             }
@@ -292,28 +324,19 @@ namespace WhiskeyRealism.Strategic
             return null;
         }
 
-        private static string UnitKey(object unit)
+        private static string UnitKey(Regiment unit)
         {
-            string name = ObjectName(unit);
-            int commander = ReadInt(unit, -1, "commander");
-            return name + ":" + commander.ToString();
+            return ((UnityEngine.Object)unit).name + ":" + unit.commander.ToString();
         }
 
-        private static string ObjectName(object obj)
-        {
-            var unityObj = obj as UnityEngine.Object;
-            return unityObj != null ? unityObj.name : obj?.ToString() ?? "<unknown>";
-        }
-
-        private static string CommanderName(object unit)
+        private static string CommanderName(Regiment unit)
         {
             try
             {
-                int commanderId = ReadInt(unit, -1, "commander");
-                var commanders = AccessTools.Field(AccessTools.TypeByName("GameVars"), "commander")?.GetValue(null) as IList;
+                int commanderId = unit.commander;
+                var commanders = GameVars.commander;
                 if (commanders == null || commanderId < 0 || commanderId >= commanders.Count) return null;
-                var commander = commanders[commanderId];
-                return AccessTools.Field(commander.GetType(), "combinedname")?.GetValue(commander) as string;
+                return commanders[commanderId].combinedname;
             }
             catch (Exception ex)
             {
@@ -322,23 +345,11 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private static Vector3? UnitPosition(object unit)
-        {
-            if (unit is Component component) return component.transform.position;
-            try
-            {
-                var method = AccessTools.Method(unit.GetType(), "GetPosition");
-                if (method != null) return (Vector3)method.Invoke(unit, null);
-            }
-            catch { }
-            return null;
-        }
-
-        private static float ReadSupplyState(object unit, int index, float fallback)
+        private static float ReadSupplyState(Regiment unit, int index, float fallback)
         {
             try
             {
-                var values = ReadFloatArray(unit, "groupsupplystate");
+                var values = unit.groupsupplystate;
                 if (values != null && index >= 0 && index < values.Length)
                     return FormationSnapshot.Clamp01(values[index]);
             }
@@ -346,11 +357,11 @@ namespace WhiskeyRealism.Strategic
             return FormationSnapshot.Clamp01(fallback);
         }
 
-        private static float ReadSupply(object unit)
+        private static float ReadSupply(Regiment unit)
         {
             try
             {
-                var values = ReadFloatArray(unit, "groupsupplystate");
+                var values = unit.groupsupplystate;
                 if (values != null && values.Length > 3)
                 {
                     float provisions = FormationSnapshot.Clamp01(values[2]);
@@ -362,10 +373,10 @@ namespace WhiskeyRealism.Strategic
             return 1f;
         }
 
-        private static bool HasCavalryStrength(object unit)
+        private static bool HasCavalryStrength(Regiment unit)
         {
-            var values = ReadIntArray(unit, "groupstrengthperunittyp");
-            if (values == null) values = ReadIntArray(unit, "groupstrengthperunittypcampaigndirect");
+            var values = unit.groupstrengthperunittyp;
+            if (values == null) values = unit.groupstrengthperunittypcampaigndirect;
             if (values == null) return false;
 
             int cavalry = values.Length > 1 ? Math.Max(0, values[1]) : 0;
@@ -373,13 +384,16 @@ namespace WhiskeyRealism.Strategic
             return cavalry + mountedArtillery > 0;
         }
 
-        private static float EstimateWeaponFirepower(object unit)
+        private static float EstimateWeaponFirepower(Regiment unit)
         {
-            float direct = ReadFloat(unit, 0f, "groupstrengthperunittypcampaigndirect", "groupstrengthperunittyp");
+            // groupstrengthperunittypcampaigndirect: infantry/cavalry/artillery strength breakdown
+            float direct = Sum(unit.groupstrengthperunittypcampaigndirect);
             if (direct <= 0f)
-                direct = ReadFloat(unit, 0f, "groupstrengthactive", "groupstrengthdirect", "groupstrength");
+                direct = Sum(unit.groupstrengthperunittyp);
+            if (direct <= 0f)
+                direct = Math.Max(0f, unit.groupstrengthactive);
 
-            float guns = ReadFloat(unit, 0f, "groupstatsgunsactive", "groupstatsguns");
+            float guns = Math.Max(0, unit.groupstatsgunsactive);
             return Math.Max(1f, direct + guns * 65f);
         }
 
@@ -389,65 +403,6 @@ namespace WhiskeyRealism.Strategic
             float strength = Math.Max(0f, unit.groupstrengthactive);
             float guns = Math.Max(0, unit.groupstatsgunsactive);
             return strength + guns * 65f;
-        }
-
-        private static object ReadObject(object target, string fieldName)
-        {
-            if (target == null) return null;
-            try { return AccessTools.Field(target.GetType(), fieldName)?.GetValue(target); }
-            catch { return null; }
-        }
-
-        private static int ReadInt(object target, int fallback, params string[] fields)
-        {
-            float value = ReadFloat(target, fallback, fields);
-            return Convert.ToInt32(value);
-        }
-
-        private static bool ReadBool(object target, bool fallback, string fieldName)
-        {
-            if (target == null) return fallback;
-            var field = AccessTools.Field(target.GetType(), fieldName);
-            if (field == null) return fallback;
-            try { return Convert.ToBoolean(field.GetValue(target)); }
-            catch { return fallback; }
-        }
-
-        private static float ReadFloat(object target, float fallback, params string[] fields)
-        {
-            if (target == null) return fallback;
-            for (int i = 0; i < fields.Length; i++)
-            {
-                var field = AccessTools.Field(target.GetType(), fields[i]);
-                if (field == null) continue;
-                try
-                {
-                    var value = field.GetValue(target);
-                    if (value is float[] floats) return Sum(floats);
-                    if (value is int[] ints) return Sum(ints);
-                    return Math.Max(0f, Convert.ToSingle(value));
-                }
-                catch { return fallback; }
-            }
-            return fallback;
-        }
-
-        private static float[] ReadFloatArray(object target, string fieldName)
-        {
-            return ReadObject(target, fieldName) as float[];
-        }
-
-        private static int[] ReadIntArray(object target, string fieldName)
-        {
-            return ReadObject(target, fieldName) as int[];
-        }
-
-        private static float Sum(float[] values)
-        {
-            if (values == null) return 0f;
-            float total = 0f;
-            for (int i = 0; i < values.Length; i++) total += Math.Max(0f, values[i]);
-            return total;
         }
 
         private static float Sum(int[] values)
