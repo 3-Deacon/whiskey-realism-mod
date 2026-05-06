@@ -1,3 +1,5 @@
+using System;
+using System.Reflection;
 using UnityEngine;
 
 namespace WhiskeyRealism.Strategic
@@ -103,6 +105,52 @@ namespace WhiskeyRealism.Strategic
         internal const float DefaultOrderWidth = 20f;
         internal const float DefaultOrderDepth = 20f;
 
+        internal static WlStrategicOrderDecision TryIssue(WlStrategicOrderRequest request)
+        {
+            if (request == null)
+            {
+                return new WlStrategicOrderDecision(
+                    WlStrategicOrderResult.DirectMovementAllowed,
+                    wlOrderType: -1,
+                    mayDirectMove: true,
+                    mayMutateOperationList: true,
+                    reason: "null-request");
+            }
+
+            var facts = BuildFacts(request);
+            var decision = Classify(request.Intent, facts);
+            if (decision.Result != WlStrategicOrderResult.IssuedWlCurrentOrder)
+                return decision;
+
+            int beforeSession = ReadGivenOrdersSession();
+            object beforeOrder = ReadGivenOrder();
+
+            try
+            {
+                AIBattle.CheckCurrentOrderUpdate(
+                    request.Unit,
+                    decision.WlOrderType,
+                    request.TargetPosition,
+                    string.IsNullOrEmpty(request.TargetName) ? "Objective" : request.TargetName,
+                    -1f,
+                    DefaultWidth(request.Intent, request.Width),
+                    DefaultDepth(request.Intent, request.Depth),
+                    calledfromcampaign: true);
+            }
+            catch (Exception ex)
+            {
+                LogVanillaBridgeFailure(request, ex);
+                return Classify(request.Intent, facts, vanillaBridgeSucceeded: false);
+            }
+
+            int afterSession = ReadGivenOrdersSession();
+            object afterOrder = ReadGivenOrder();
+            if (beforeSession == afterSession && ReferenceEquals(beforeOrder, afterOrder))
+                return Classify(request.Intent, facts, vanillaBridgeSucceeded: false);
+
+            return decision;
+        }
+
         internal static WlStrategicOrderDecision Classify(
             WlStrategicIntent intent,
             WlStrategicRoleFacts facts,
@@ -184,6 +232,136 @@ namespace WhiskeyRealism.Strategic
         private static WlStrategicOrderDecision Blocked(WlStrategicOrderResult result, int orderType, string reason)
         {
             return new WlStrategicOrderDecision(result, orderType, mayDirectMove: false, mayMutateOperationList: false, reason);
+        }
+
+        private static WlStrategicRoleFacts BuildFacts(WlStrategicOrderRequest request)
+        {
+            bool wlActive = SafeBool(() => DLC_WL.dlc_scenarioactive);
+            bool isPlayerAlliance = SafeBool(() =>
+                request.Unit != null &&
+                request.Unit.alliance == GameVars.playeralliance &&
+                request.AllianceId == GameVars.playeralliance);
+            bool isPlayerCic =
+                SafeBool(() => DLC_WL.IsCommanderInChief()) ||
+                SafeBool(() => IsPlayerCICViaCoordinator(request.AllianceId, GameVars.playeralliance));
+            bool isMovedByPlayer = SafeBool(() => DLC_WL.IsMovedByPlayer(request.Unit));
+            bool isUnderCommander = SafeBool(() => request.Unit != null && request.Unit.dlcw_isundercommander);
+            bool isPartOfPlayerUnit = SafeBool(() => DLC_WL.IsPlayerPartOfUnit(request.Unit));
+            bool currentCommandIsCampaignGroup = false;
+            bool currentCommandParentIsUnderTargetUnit = false;
+
+            try
+            {
+                Regiment current = GameVars.commander[DLC_WL.dlc_chosencommander].currentcommand;
+                Regiment campaignGroup = BattleUnits.GetCampaignGroup(current);
+                Regiment parent = BattleUnits.GetParentUnit(current);
+
+                currentCommandIsCampaignGroup = current != null && campaignGroup == current;
+                currentCommandParentIsUnderTargetUnit =
+                    parent != null &&
+                    request.Unit != null &&
+                    parent.transform.IsChildOf(request.Unit.transform);
+            }
+            catch
+            {
+                currentCommandIsCampaignGroup = false;
+                currentCommandParentIsUnderTargetUnit = false;
+            }
+
+            return new WlStrategicRoleFacts(
+                wlActive,
+                isPlayerAlliance,
+                isPlayerCic,
+                isMovedByPlayer,
+                isUnderCommander,
+                isPartOfPlayerUnit,
+                currentCommandIsCampaignGroup,
+                currentCommandParentIsUnderTargetUnit);
+        }
+
+        private static bool SafeBool(Func<bool> read)
+        {
+            try { return read(); }
+            catch { return false; }
+        }
+
+        private static void LogVanillaBridgeFailure(WlStrategicOrderRequest request, Exception ex)
+        {
+            string source = string.IsNullOrEmpty(request.SourceSystem) ? string.Empty : " source=" + request.SourceSystem;
+            string keySource = string.IsNullOrEmpty(request.SourceSystem) ? "unknown" : request.SourceSystem;
+            WarnOnce(
+                "wl-order-bridge:vanilla-call:" + keySource,
+                "[W&LOrderBridge] vanilla CheckCurrentOrderUpdate failed" +
+                source +
+                " unit=" + SafeUnitName(request.Unit) +
+                ": " + ex.Message);
+        }
+
+        private static string SafeUnitName(Regiment unit)
+        {
+            try { return unit != null ? unit.name : "null"; }
+            catch { return "unknown"; }
+        }
+
+        private static void WarnOnce(string key, string message)
+        {
+            try
+            {
+                Type onceLogType = typeof(WlStrategicOrderBridge).Assembly.GetType("WhiskeyRealism.Util.OnceLog");
+                MethodInfo warningMethod = onceLogType?.GetMethod(
+                    "Warning",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                    binder: null,
+                    types: new[] { typeof(string), typeof(string) },
+                    modifiers: null);
+                warningMethod?.Invoke(null, new object[] { key, message });
+            }
+            catch
+            {
+            }
+        }
+
+        private static object ReadGivenOrder()
+        {
+            try { return DLC_WL.givenorder; }
+            catch { return null; }
+        }
+
+        private static int ReadGivenOrdersSession()
+        {
+            try
+            {
+                Type givenOrdersType = typeof(DLC_WL).GetNestedType("GivenOrders", BindingFlags.Public | BindingFlags.NonPublic);
+                FieldInfo sessionField = givenOrdersType?.GetField(
+                    "givenorderssession",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (sessionField == null) return -1;
+                return Convert.ToInt32(sessionField.GetValue(null));
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static bool IsPlayerCICViaCoordinator(int allianceId, int playerAlliance)
+        {
+            try
+            {
+                Type coordinatorType = typeof(WlStrategicOrderBridge).Assembly.GetType("WhiskeyRealism.Strategic.StrategicCoordinator");
+                MethodInfo method = coordinatorType?.GetMethod(
+                    "IsPlayerCICOf",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                    binder: null,
+                    types: new[] { typeof(int), typeof(int) },
+                    modifiers: null);
+                if (method == null) return false;
+                return Convert.ToBoolean(method.Invoke(null, new object[] { allianceId, playerAlliance }));
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }
