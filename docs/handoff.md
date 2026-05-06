@@ -15,7 +15,7 @@
 | **Repo** | [`3-Deacon/whiskey-realism-mod`](https://github.com/3-Deacon/whiskey-realism-mod) (public, MIT) |
 | **Last updated** | 2026-05-06 |
 
-> **Active implementation note (2026-05-06):** W&L dispatch/objective bridge C0a has been built, deployed, and hash-verified as DLL `dc9f933e659eb1ab84bb1d755d6d903cd3540781f52e55ff1dad2bcfc4fccc3c`. #36 `DispatchStanceSanitizerPatch` is a narrow Postfix on `Messages.Message.GenerateMessageContent` that removes newly generated stance-0 `"none"` text from player-chain W&L dispatches. It does not claim current-order bridge behavior. C0b/C0c remain follow-up after C0a runtime smoke.
+> **Active implementation note (2026-05-06):** W&L dispatch/objective bridge C0a-C0c has been built, deployed, and hash-verified as DLL `f176bef51049cd79a27f067021754326ff725ebb72417652afda90d6a8577427` (392704 bytes). #36 `DispatchStanceSanitizerPatch` sanitizes newly generated player-chain W&L stance-0 dispatch text. `WlStrategicOrderBridge` now routes eligible operational probe, army-area redeploy, and coastal-defense engage intents through vanilla W&L current orders, and skips failed/ineligible/player-controlled player-chain calls instead of direct-moving. Runtime smoke for bridge-order lines, sanitizer lines, `"to none"` absence, and exception absence is still pending.
 
 ---
 
