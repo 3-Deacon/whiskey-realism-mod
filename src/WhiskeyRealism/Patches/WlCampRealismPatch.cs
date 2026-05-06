@@ -10,7 +10,8 @@ namespace WhiskeyRealism.Patches
     // Vanilla Camp.EvaluateCampTime() converts observed W&L camp time into station histories;
     // Camp.Station.GetCurrentBonus() turns those histories into station payoff; Camp.GetModifier()
     // applies unit-facing station effects. This patch corrects short-camp minimum undercrediting,
-    // adds bounded responsive weighting for safe stations, and softens command-count dilution.
+    // caps Rest's full-reward target, adds bounded responsive weighting for safe stations, and
+    // softens command-count dilution.
     internal static class WlCampRealismPatch
     {
         private static readonly FieldInfo CampTimeHistoryField = AccessTools.Field(typeof(Camp), "camptimehistory");
@@ -42,6 +43,7 @@ namespace WhiskeyRealism.Patches
             [HarmonyPostfix]
             internal static void Postfix(Camp.Station __instance, bool useaverage, ref float __result)
             {
+                TryApplyRestRewardCap(__instance, useaverage, ref __result);
                 TryApplyResponsiveBonus(__instance, useaverage, ref __result);
             }
         }
@@ -141,6 +143,37 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        private static void TryApplyRestRewardCap(Camp.Station station, bool useAverage, ref float result)
+        {
+            try
+            {
+                if (!RestRewardCapEnabled()) return;
+                if (station == null || Camp.stations == null) return;
+                int stationId = Camp.stations.IndexOf(station);
+                if (stationId < 0) return;
+                if (!WlCampRealism.UsesRestRewardCap(stationId)) return;
+                if (!Camp.IsCampStationAvailable(station)) return;
+
+                float stationHours = useAverage ? station.averagetimespent : station.hoursassigned;
+                float companionHours = useAverage ? station.companionaveragetimespent : (station.assignedcompanion < 0 ? 0f : 1f);
+                float old = result;
+                result = WlCampRealism.ComputeRestRewardBonus(
+                    stationId,
+                    result,
+                    stationHours,
+                    companionHours,
+                    station.GetMinTimeBonus(),
+                    station.GetMaxTimeBonus(),
+                    Plugin.Instance.WlCampRestNeutralHours.Value,
+                    Plugin.Instance.WlCampRestMaxRewardHours.Value);
+                TraceBonus(stationId, old, result, "restBonus");
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-camp-realism:rest", "[W&LCamp] rest reward cap failed: " + ex.Message);
+            }
+        }
+
         private static void TryApplyResponsiveBonus(Camp.Station station, bool useAverage, ref float result)
         {
             try
@@ -166,7 +199,7 @@ namespace WhiskeyRealism.Patches
                     station.GetMaxTimeBonus(),
                     Plugin.Instance.WlCampRecentBonusWindowDays.Value,
                     Plugin.Instance.WlCampRecentBonusWeight.Value);
-                TraceBonus(stationId, old, result);
+                TraceBonus(stationId, old, result, "responsiveBonus");
             }
             catch (Exception ex)
             {
@@ -213,6 +246,15 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.EnableWlCampAccountingFix.Value;
         }
 
+        private static bool RestRewardCapEnabled()
+        {
+            return Plugin.Instance != null &&
+                Plugin.Instance.Enabled != null &&
+                Plugin.Instance.Enabled.Value &&
+                Plugin.Instance.EnableWlCampRestRewardCap != null &&
+                Plugin.Instance.EnableWlCampRestRewardCap.Value;
+        }
+
         private static bool ResponsiveEnabled()
         {
             return Plugin.Instance != null &&
@@ -247,15 +289,15 @@ namespace WhiskeyRealism.Patches
                 " correctedCredit=" + newCredit.ToString("F2"));
         }
 
-        private static void TraceBonus(int stationId, float oldBonus, float newBonus)
+        private static void TraceBonus(int stationId, float oldBonus, float newBonus, string label)
         {
             if (!VerboseTrace()) return;
             if (Math.Abs(oldBonus - newBonus) < 0.01f) return;
-            string sig = stationId + ":" + oldBonus.ToString("0.00") + ":" + newBonus.ToString("0.00");
+            string sig = label + ":" + stationId + ":" + oldBonus.ToString("0.00") + ":" + newBonus.ToString("0.00");
             if (_lastBonusSignature == sig) return;
             _lastBonusSignature = sig;
             Plugin.Log.LogInfo("[W&LCamp] station=" + stationId + " vanillaBonus=" + oldBonus.ToString("F2") +
-                " responsiveBonus=" + newBonus.ToString("F2"));
+                " " + label + "=" + newBonus.ToString("F2"));
         }
 
         private static void TraceModifier(int stationId, int commanded, float oldModifier, float newModifier)

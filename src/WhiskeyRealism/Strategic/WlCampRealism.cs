@@ -4,6 +4,8 @@ namespace WhiskeyRealism.Strategic
 {
     internal static class WlCampRealism
     {
+        public const int RestStationId = 12;
+
         public static bool TryCorrectShortCampMinimumCredits(
             float actualCampHours,
             float[] stationMinimumHours,
@@ -49,6 +51,11 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
+        public static bool UsesRestRewardCap(int stationId)
+        {
+            return stationId == RestStationId;
+        }
+
         public static float ComputeResponsiveBonus(
             int stationId,
             bool useAverage,
@@ -74,6 +81,29 @@ namespace WhiskeyRealism.Strategic
             float companionHours = FiniteOr(longCompanionAverage, 0f) * (1f - weight) + recentCompanion * weight;
 
             float bonus = ComputeBonus(stationHours, companionHours, minTimeBonus, maxTimeBonus);
+            return IsFinite(bonus) ? bonus : fallback;
+        }
+
+        public static float ComputeRestRewardBonus(
+            int stationId,
+            float vanillaBonus,
+            float stationHours,
+            float companionHours,
+            float nativeMinTimeBonus,
+            float nativeMaxTimeBonus,
+            float restNeutralHours,
+            float restMaxRewardHours)
+        {
+            float fallback = FiniteOr(vanillaBonus, 0f);
+            if (!UsesRestRewardCap(stationId)) return fallback;
+            if (!IsFinite(nativeMinTimeBonus) || !IsFinite(nativeMaxTimeBonus) || nativeMaxTimeBonus <= nativeMinTimeBonus) return fallback;
+            if (!IsFinite(restNeutralHours) || !IsFinite(restMaxRewardHours)) return fallback;
+
+            float maxRewardHours = restMaxRewardHours;
+            if (maxRewardHours > nativeMaxTimeBonus) maxRewardHours = nativeMaxTimeBonus;
+            if (maxRewardHours <= 0f || restNeutralHours < 0f || restNeutralHours >= maxRewardHours) return fallback;
+
+            float bonus = ComputeBonus(stationHours, companionHours, restNeutralHours, maxRewardHours);
             return IsFinite(bonus) ? bonus : fallback;
         }
 

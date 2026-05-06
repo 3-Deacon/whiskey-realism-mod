@@ -52,6 +52,9 @@ static class Program
             ("wl camp responsive bonus excluded stations stay vanilla", WlCampResponsiveBonusExcludedStationsStayVanilla),
             ("wl camp responsive bonus use average false stays vanilla", WlCampResponsiveBonusUseAverageFalseStaysVanilla),
             ("wl camp responsive bonus nonfinite input stays bounded", WlCampResponsiveBonusNonfiniteInputStaysBounded),
+            ("wl camp rest reward cap makes five hours full reward", WlCampRestRewardCapMakesFiveHoursFullReward),
+            ("wl camp rest reward cap leaves non rest stations vanilla", WlCampRestRewardCapLeavesNonRestStationsVanilla),
+            ("wl camp rest reward cap invalid config falls back", WlCampRestRewardCapInvalidConfigFallsBack),
             ("wl camp unit divisor clamps invalid cached counts", WlCampUnitDivisorClampsInvalidCachedCounts),
             ("wl camp unit divisor default power softens four and nine units", WlCampUnitDivisorDefaultPowerSoftensFourAndNineUnits),
             ("wl camp unit modifier clamps negative to zero", WlCampUnitModifierClampsNegativeToZero),
@@ -847,6 +850,38 @@ static class Program
             new[] { float.NegativeInfinity, 4f },
             float.NaN, float.PositiveInfinity, 7, float.NaN);
         AssertNear(0f, result, 0.0001f, "nonfinite responsive bonus fallback");
+    }
+
+    private static void WlCampRestRewardCapMakesFiveHoursFullReward()
+    {
+        AssertTrue(WlCampRealism.UsesRestRewardCap(12), "station 12 should be Rest");
+        float vanillaAtFiveHours = (5f - 6f) / 3f;
+        float resultAtFive = WlCampRealism.ComputeRestRewardBonus(
+            12, vanillaAtFiveHours, 5f, 0f,
+            6f, 9f, 3f, 5f);
+        float resultAtFour = WlCampRealism.ComputeRestRewardBonus(
+            12, 0f, 4f, 0f,
+            6f, 9f, 3f, 5f);
+
+        AssertNear(1f, resultAtFive, 0.0001f, "five-hour rest bonus");
+        AssertNear(0.5f, resultAtFour, 0.0001f, "four-hour rest bonus");
+    }
+
+    private static void WlCampRestRewardCapLeavesNonRestStationsVanilla()
+    {
+        AssertTrue(!WlCampRealism.UsesRestRewardCap(6), "station 6 should not be Rest");
+        float result = WlCampRealism.ComputeRestRewardBonus(
+            6, 0.42f, 5f, 0f,
+            1.75f, 5f, 3f, 5f);
+        AssertNear(0.42f, result, 0.0001f, "non-rest vanilla fallback");
+    }
+
+    private static void WlCampRestRewardCapInvalidConfigFallsBack()
+    {
+        float result = WlCampRealism.ComputeRestRewardBonus(
+            12, -0.333333f, 5f, 0f,
+            6f, 9f, 5f, 5f);
+        AssertNear(-0.333333f, result, 0.0001f, "invalid neutral/max fallback");
     }
 
     private static void WlCampUnitDivisorClampsInvalidCachedCounts()

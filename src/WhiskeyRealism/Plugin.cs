@@ -51,6 +51,9 @@ namespace WhiskeyRealism
         internal ConfigEntry<int> CampaignAiGovernorMaxPasses50x;
         internal ConfigEntry<float> CampaignAiGovernorFrameBudgetMs;
         internal ConfigEntry<bool> EnableWlCampAccountingFix;
+        internal ConfigEntry<bool> EnableWlCampRestRewardCap;
+        internal ConfigEntry<float> WlCampRestNeutralHours;
+        internal ConfigEntry<float> WlCampRestMaxRewardHours;
         internal ConfigEntry<bool> EnableWlCampResponsiveBonusWeighting;
         internal ConfigEntry<int> WlCampRecentBonusWindowDays;
         internal ConfigEntry<float> WlCampRecentBonusWeight;
@@ -186,9 +189,22 @@ namespace WhiskeyRealism
             EnableWlCampAccountingFix = Config.Bind(
                 "W&L Camp", "Enable W&L Camp Accounting Fix", true,
                 "Default ON. Corrects vanilla short-camp minimum allocation so credited station time sums to actual camp time.");
+            EnableWlCampRestRewardCap = Config.Bind(
+                "W&L Camp", "Enable W&L Camp Rest Reward Cap", true,
+                "Default ON. Replaces vanilla Rest bonus curve of 6h neutral / 9h full reward with a field-duty curve.");
+            WlCampRestNeutralHours = Config.Bind(
+                "W&L Camp", "W&L Camp Rest Neutral Hours", 3f,
+                new ConfigDescription(
+                    "Rest hours treated as neutral before health bonus begins. Vanilla Rest station minimum is 3h.",
+                    new AcceptableValueRange<float>(0f, 5f)));
+            WlCampRestMaxRewardHours = Config.Bind(
+                "W&L Camp", "W&L Camp Rest Max Reward Hours", 5f,
+                new ConfigDescription(
+                    "Rest hours needed for full positive Rest reward. Vanilla Rest max reward is 9h.",
+                    new AcceptableValueRange<float>(3f, 9f)));
             EnableWlCampResponsiveBonusWeighting = Config.Bind(
                 "W&L Camp", "Enable W&L Camp Responsive Bonus Weighting", true,
-                "Default ON. Blends safe camp stations with recent station history so allocation payoff is less delayed. Diary/event thresholds remain vanilla long-average.");
+                "Default ON. Blends safe camp stations with recent station history so allocation payoff is less delayed. Responsive weighting is suppressed inside diary/event threshold checks.");
             WlCampRecentBonusWindowDays = Config.Bind(
                 "W&L Camp", "W&L Camp Recent Bonus Window Days", 7,
                 new ConfigDescription(
