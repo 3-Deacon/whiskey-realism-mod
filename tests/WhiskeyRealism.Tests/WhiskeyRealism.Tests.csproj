@@ -52,6 +52,11 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalPolicyScorer.cs" Link="FiscalPolicyScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalConstructionScorer.cs" Link="FiscalConstructionScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\EconomyAllianceDataGuard.cs" Link="EconomyAllianceDataGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CommanderAssignmentGuard.cs" Link="CommanderAssignmentGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignFilterMapInitializationGuard.cs" Link="CampaignFilterMapInitializationGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\StateHandoverGuard.cs" Link="StateHandoverGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\FleetPatrolResetGuard.cs" Link="FleetPatrolResetGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArtilleryCombineGunTransfer.cs" Link="ArtilleryCombineGunTransfer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionModels.cs" Link="ConstructionModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionIntentLedger.cs" Link="ConstructionIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionSteeringScorer.cs" Link="ConstructionSteeringScorer.cs" />

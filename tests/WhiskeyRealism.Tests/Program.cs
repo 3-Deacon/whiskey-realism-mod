@@ -181,6 +181,11 @@ static class Program
             ("campaign ai governor caps vanilla passes", CampaignAiGovernorCapsVanillaPasses),
             ("campaign ai governor respects frame budget before first pass", CampaignAiGovernorRespectsFrameBudgetBeforeFirstPass),
             ("campaign ai governor skips paused vanilla update", CampaignAiGovernorSkipsPausedVanillaUpdate),
+            ("commander assignment guard clears stale previous command", CommanderAssignmentGuardClearsStalePreviousCommand),
+            ("campaign filter map guard bounds repeated no progress", CampaignFilterMapGuardBoundsRepeatedNoProgress),
+            ("state handover guard requires decisive support", StateHandoverGuardRequiresDecisiveSupport),
+            ("fleet patrol guard resets completed AI patrol", FleetPatrolGuardResetsCompletedAiPatrol),
+            ("artillery combine gun transfer preserves source guns", ArtilleryCombineGunTransferPreservesSourceGuns),
             ("fast forward log gate suppresses repeated samples", FastForwardLogGateSuppressesRepeatedSamples),
             ("historical hard difficulty adds casualty tolerance only", HistoricalHardDifficultyAddsCasualtyToleranceOnly),
             ("perk scorer favors siege armies for fort pressure", PerkScorerFavorsSiegeArmiesForFortPressure),
@@ -4649,6 +4654,119 @@ static class Program
 
         AssertTrue(decision != null && !decision.Allowed, "expected area movement to be blocked");
         AssertEqual("min-hold", decision.Reason);
+    }
+
+    private static void CommanderAssignmentGuardClearsStalePreviousCommand()
+    {
+        AssertTrue(
+            CommanderAssignmentGuard.ShouldClearPreviousCommand(
+                priorCommandExists: true,
+                priorIsAssignedTarget: false,
+                priorCommandCommanderId: 7,
+                assignedCommanderId: 7),
+            "same commander on a different previous unit should be cleared");
+
+        AssertTrue(
+            !CommanderAssignmentGuard.ShouldClearPreviousCommand(
+                priorCommandExists: true,
+                priorIsAssignedTarget: true,
+                priorCommandCommanderId: 7,
+                assignedCommanderId: 7),
+            "the target unit should not be cleared");
+
+        AssertTrue(
+            !CommanderAssignmentGuard.ShouldClearPreviousCommand(
+                priorCommandExists: true,
+                priorIsAssignedTarget: false,
+                priorCommandCommanderId: 3,
+                assignedCommanderId: 7),
+            "a previous unit already reassigned to another commander should not be touched");
+    }
+
+    private static void CampaignFilterMapGuardBoundsRepeatedNoProgress()
+    {
+        var guard = new CampaignFilterMapInitializationGuard(maxRepeatedNoProgressReturns: 3);
+        var stuck = new CampaignFilterMapState(0, 0, 0, 3, 2, 4);
+        var advanced = new CampaignFilterMapState(1, 1, 0, 3, 2, 4);
+
+        AssertTrue(
+            !guard.Observe(initialization: true, result: false, stuck, advanced).ForceComplete,
+            "normal iterator progress should not be forced complete");
+
+        guard = new CampaignFilterMapInitializationGuard(maxRepeatedNoProgressReturns: 3);
+        AssertTrue(!guard.Observe(initialization: true, result: false, stuck, stuck).ForceComplete, "first stuck false should wait");
+        AssertTrue(!guard.Observe(initialization: true, result: false, stuck, stuck).ForceComplete, "second stuck false should wait");
+        var decision = guard.Observe(initialization: true, result: false, stuck, stuck);
+        AssertTrue(decision.ForceComplete, "third repeated no-progress false should force completion");
+        AssertEqual("no-progress", decision.Reason);
+
+        decision = guard.ObserveException(initialization: true, new InvalidOperationException("boom"), stuck);
+        AssertTrue(decision.ForceComplete, "initialization exception should force completion");
+
+        decision = guard.ObserveException(initialization: false, new InvalidOperationException("boom"), stuck);
+        AssertTrue(!decision.ForceComplete, "non-initialization exception should fall through");
+    }
+
+    private static void StateHandoverGuardRequiresDecisiveSupport()
+    {
+        AssertTrue(StateHandoverGuard.AllowsHandover(0, 0.70f, 0.30f), "decisive Union support should allow Union handover");
+        AssertTrue(StateHandoverGuard.AllowsHandover(1, 0.30f, 0.70f), "decisive CSA support should allow CSA handover");
+        AssertTrue(!StateHandoverGuard.AllowsHandover(0, 0.60f, 0.40f), "simple Union majority should not flip state");
+        AssertTrue(!StateHandoverGuard.AllowsHandover(1, 0.45f, 0.55f), "simple CSA majority should not flip state");
+        AssertTrue(!StateHandoverGuard.AllowsHandover(2, 0.80f, 0.20f), "non-USA/CSA alliance should not be handled");
+    }
+
+    private static void FleetPatrolGuardResetsCompletedAiPatrol()
+    {
+        AssertTrue(
+            FleetPatrolResetGuard.ShouldResetAiPatrolToIdle(
+                isPlayerFleet: false,
+                unitType: 17,
+                fleetOrders: 2,
+                regimentPaths: 0,
+                distanceToStart: 0.5f,
+                completionRadius: 1f,
+                isRouted: false,
+                onRetreat: false,
+                inBattle: false,
+                withinRotationProcess: false),
+            "idle AI fleet inside completion radius should reset to normal orders");
+
+        AssertTrue(
+            !FleetPatrolResetGuard.ShouldResetAiPatrolToIdle(
+                isPlayerFleet: true,
+                unitType: 17,
+                fleetOrders: 2,
+                regimentPaths: 0,
+                distanceToStart: 0.5f,
+                completionRadius: 1f,
+                isRouted: false,
+                onRetreat: false,
+                inBattle: false,
+                withinRotationProcess: false),
+            "player patrol orders should not be changed");
+
+        AssertTrue(
+            !FleetPatrolResetGuard.ShouldResetAiPatrolToIdle(
+                isPlayerFleet: false,
+                unitType: 17,
+                fleetOrders: 2,
+                regimentPaths: 1,
+                distanceToStart: 0.5f,
+                completionRadius: 1f,
+                isRouted: false,
+                onRetreat: false,
+                inBattle: false,
+                withinRotationProcess: false),
+            "moving patrol should not be reset");
+    }
+
+    private static void ArtilleryCombineGunTransferPreservesSourceGuns()
+    {
+        AssertEqual(6, ArtilleryCombineGunTransfer.CalculateGunsToTransfer(isArtillery: true, sourceGuns: 6, sourceTotalMen: 100, transferredMen: 100));
+        AssertEqual(3, ArtilleryCombineGunTransfer.CalculateGunsToTransfer(isArtillery: true, sourceGuns: 6, sourceTotalMen: 100, transferredMen: 50));
+        AssertEqual(1, ArtilleryCombineGunTransfer.CalculateGunsToTransfer(isArtillery: true, sourceGuns: 6, sourceTotalMen: 100, transferredMen: 1));
+        AssertEqual(0, ArtilleryCombineGunTransfer.CalculateGunsToTransfer(isArtillery: false, sourceGuns: 6, sourceTotalMen: 100, transferredMen: 100));
     }
 
     // -----------------------------------------------------------------------
