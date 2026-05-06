@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
@@ -121,6 +122,12 @@ static class Program
             ("recruitment intent ignores priority area without threat", RecruitmentIntentIgnoresPriorityAreaWithoutThreat),
             ("recruitment intent avoids enemy states when excluded", RecruitmentIntentAvoidsEnemyStatesWhenExcluded),
             ("recruitment log gate suppresses repeated replacements", RecruitmentLogGateSuppressesRepeatedReplacements),
+            ("project doctrine catalog maps all active vanilla project rows", ProjectDoctrineCatalogMapsAllActiveRows),
+            ("project doctrine catalog entries are immutable through public api", ProjectDoctrineCatalogEntriesAreImmutable),
+            ("project doctrine catalog marks market reform fully broken", ProjectDoctrineCatalogMarksMarketReformBroken),
+            ("project doctrine catalog maps representative buckets and lanes", ProjectDoctrineCatalogMapsRepresentativeBucketsAndLanes),
+            ("project doctrine catalog maps organization reform aliases", ProjectDoctrineCatalogMapsOrganizationReformAliases),
+            ("project doctrine catalog has no lane six or seven entries", ProjectDoctrineCatalogHasNoLaneSixOrSevenEntries),
             ("project scorer replaces weak vanilla candidate", ProjectScorerReplacesWeakCandidate),
             ("project scorer keeps close vanilla candidate", ProjectScorerKeepsCloseCandidate),
             ("project scorer requires margin for empty vanilla slot", ProjectScorerRequiresMarginForEmptyVanillaSlot),
@@ -2024,6 +2031,99 @@ static class Program
         AssertEqual(true, gate.ShouldLog(first));
         AssertEqual(false, gate.ShouldLog(repeat));
         AssertEqual(true, gate.ShouldLog(changed));
+    }
+
+    private static void ProjectDoctrineCatalogMapsAllActiveRows()
+    {
+        var expectedIds = new HashSet<int>();
+        for (int id = 0; id <= 19; id++)
+            expectedIds.Add(id);
+        for (int id = 30; id <= 41; id++)
+            expectedIds.Add(id);
+        for (int id = 88; id <= 124; id++)
+            expectedIds.Add(id);
+
+        var actualIds = new HashSet<int>();
+        foreach (var entry in WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.AllActive)
+        {
+            AssertEqual(true, expectedIds.Contains(entry.ProjectId));
+            AssertEqual(true, actualIds.Add(entry.ProjectId));
+        }
+
+        AssertEqual(69, WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.AllActive.Count);
+        AssertEqual(expectedIds.Count, actualIds.Count);
+        foreach (int expectedId in expectedIds)
+        {
+            AssertEqual(true, actualIds.Contains(expectedId));
+            AssertEqual(true, WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.TryGet(expectedId, out var entry));
+            AssertEqual(expectedId, entry.ProjectId);
+        }
+
+        AssertEqual(true, WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.IsInactiveProjectId(20));
+        AssertEqual(true, WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.IsInactiveProjectId(87));
+        AssertEqual(false, WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.IsInactiveProjectId(88));
+    }
+
+    private static void ProjectDoctrineCatalogEntriesAreImmutable()
+    {
+        var entryType = typeof(WhiskeyRealism.Strategic.Projects.ProjectDoctrineEntry);
+        AssertEqual(0, entryType.GetFields(BindingFlags.Instance | BindingFlags.Public).Length);
+
+        string[] propertyNames = { "ProjectId", "ShortName", "Bucket", "UiSide", "SubsidyLane", "BugReviewState" };
+        foreach (string propertyName in propertyNames)
+        {
+            var property = entryType.GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+            AssertTrue(property != null, propertyName + " should stay public");
+            AssertTrue(property.GetMethod != null, propertyName + " should stay readable");
+            AssertEqual(null, property.SetMethod);
+        }
+    }
+
+    private static void ProjectDoctrineCatalogMarksMarketReformBroken()
+    {
+        var entry = WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.Get(98);
+        AssertEqual(WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.FinanceCreditAdmin, entry.Bucket);
+        AssertEqual(WhiskeyRealism.Strategic.Projects.ProjectBugReviewState.FullyBrokenUntilReviewed, entry.BugReviewState);
+    }
+
+    private static void ProjectDoctrineCatalogMapsRepresentativeBucketsAndLanes()
+    {
+        AssertProjectDoctrine(0, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.ArmsImport, 5);
+        AssertProjectDoctrine(35, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.NavalBlockade, 4);
+        AssertProjectDoctrine(38, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.NavalBlockade, 5);
+        AssertProjectDoctrine(96, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.FinanceCreditAdmin, 1);
+        AssertProjectDoctrine(99, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.LogisticsRail, 3);
+        AssertProjectDoctrine(100, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.LogisticsRail, 4);
+        AssertProjectDoctrine(103, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.DiplomacyTradeRecognition, 5);
+        AssertProjectDoctrine(105, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.AgricultureIndustry, 2);
+        AssertProjectDoctrine(120, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.NavalBlockade, 2);
+        AssertProjectDoctrine(124, WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.ManpowerTrainingCivilOrder, 4);
+    }
+
+    private static void AssertProjectDoctrine(
+        int projectId,
+        WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket expectedBucket,
+        int expectedLane)
+    {
+        var entry = WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.Get(projectId);
+        AssertEqual(projectId, entry.ProjectId);
+        AssertEqual(expectedBucket, entry.Bucket);
+        AssertEqual(expectedLane, entry.SubsidyLane);
+    }
+
+    private static void ProjectDoctrineCatalogMapsOrganizationReformAliases()
+    {
+        var wl = WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.Get(89);
+        var baseScenario = WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.Get(90);
+        AssertEqual(WhiskeyRealism.Strategic.Projects.ProjectDoctrineBucket.ManpowerTrainingCivilOrder, wl.Bucket);
+        AssertEqual(wl.Bucket, baseScenario.Bucket);
+        AssertEqual(wl.SubsidyLane, baseScenario.SubsidyLane);
+    }
+
+    private static void ProjectDoctrineCatalogHasNoLaneSixOrSevenEntries()
+    {
+        foreach (var entry in WhiskeyRealism.Strategic.Projects.ProjectDoctrineCatalog.AllActive)
+            AssertEqual(false, entry.SubsidyLane == 6 || entry.SubsidyLane == 7);
     }
 
     private static void ProjectScorerReplacesWeakCandidate()
