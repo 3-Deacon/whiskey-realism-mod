@@ -1151,6 +1151,9 @@ private static void ProjectDoctrineLogGateSuppressesRepeatedSignatures()
     AssertEqual(true, gate.ShouldLog(first));
     AssertEqual(false, gate.ShouldLog(repeat));
     AssertEqual(true, gate.ShouldLog(changed));
+    AssertEqual(false, gate.ShouldLog(first));
+    AssertEqual(false, gate.ShouldLog(null));
+    AssertEqual(false, gate.ShouldLog(""));
 }
 
 private static void ProjectLaneIntentEstimatesDaysFromObservedRate()
@@ -1199,14 +1202,12 @@ namespace WhiskeyRealism.Strategic.Projects
 {
     public sealed class ProjectDoctrineLogGate
     {
-        private string lastSignature;
+        private readonly System.Collections.Generic.HashSet<string> seenSignatures = new System.Collections.Generic.HashSet<string>();
 
         public bool ShouldLog(string signature)
         {
-            if (string.IsNullOrEmpty(signature)) signature = "empty";
-            if (signature == lastSignature) return false;
-            lastSignature = signature;
-            return true;
+            if (string.IsNullOrEmpty(signature)) return false;
+            return seenSignatures.Add(signature);
         }
 
         public static string SelectionSignature(int alliance, int lane, int oldProjectId, int newProjectId, string reason)
@@ -1217,7 +1218,12 @@ namespace WhiskeyRealism.Strategic.Projects
         public static string StarvedLaneSignature(ProjectLaneIntent intent)
         {
             if (intent == null) return "missing";
-            return intent.Alliance + "|" + intent.SubsidyLane + "|" + intent.QueuedProjectId + "|" + intent.ConstructionCurrentlyWins + "|" + intent.CriticalDoctrineProject;
+            return intent.Alliance + "|" + intent.SubsidyLane + "|" + intent.QueuedProjectId + "|"
+                + intent.FundingAvailable.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + "|"
+                + intent.FundingNeeded.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + "|"
+                + intent.NetFundingPerDay.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "|"
+                + intent.TimeToFundEstimateDays.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "|"
+                + intent.ConstructionCurrentlyWins + "|" + intent.CriticalDoctrineProject;
         }
     }
 }
@@ -1347,12 +1353,12 @@ var decision = ProjectDoctrineScorer.Select(
 
 - [ ] **Step 9: Log starved critical lanes**
 
-After `decision` is computed and before replacement, add:
+After `decision` is computed and before replacement, add a starved-lane observer. In the hot patch, gate this with a stable lane/project/state signature instead of `ProjectDoctrineLogGate.StarvedLaneSignature(decision.LaneIntent)`: that helper intentionally includes funding trajectory fields for non-hot telemetry, and using it here would log again as subsidy funding changes. The patch log may still print current funding values in the message.
 
 ```csharp
 if (decision.LaneIntent != null && decision.LaneIntent.CriticalDoctrineProject && decision.LaneIntent.ConstructionCurrentlyWins)
 {
-    string starvedSignature = ProjectDoctrineLogGate.StarvedLaneSignature(decision.LaneIntent);
+    string starvedSignature = StableStarvedLaneSignature(decision.LaneIntent);
     if (StarvedLaneLogGate.ShouldLog(starvedSignature))
     {
         OnceLog.Info("project-doctrine-starved-lane", "Project doctrine starved-lane observer wired");
@@ -1362,6 +1368,22 @@ if (decision.LaneIntent != null && decision.LaneIntent.CriticalDoctrineProject &
             $"rate={(decision.LaneIntent.NetFundingPerDay > 0f ? decision.LaneIntent.NetFundingPerDay.ToString(\"F0\") : \"unknown\")} " +
             $"constructionWins={decision.LaneIntent.ConstructionCurrentlyWins} reason=starved-critical-project");
     }
+}
+```
+
+Add the local stable signature helper:
+
+```csharp
+private static string StableStarvedLaneSignature(ProjectLaneIntent intent)
+{
+    if (intent == null)
+        return null;
+
+    return intent.Alliance + "|"
+        + intent.SubsidyLane + "|"
+        + intent.QueuedProjectId + "|"
+        + intent.ConstructionCurrentlyWins + "|"
+        + intent.CriticalDoctrineProject;
 }
 ```
 
