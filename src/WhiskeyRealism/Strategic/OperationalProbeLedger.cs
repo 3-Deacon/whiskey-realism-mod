@@ -44,6 +44,7 @@ namespace WhiskeyRealism.Strategic
         public float CurrentEnemyStrength = -1f;
         public float CurrentFriendlyStrength = -1f;
         public OperationalProbeOptions Options = new OperationalProbeOptions();
+        public ContactEvidence ContactEvidence = ContactEvidence.EnemyPresent;
     }
 
     public sealed class OperationalProbeOutput
@@ -161,7 +162,9 @@ namespace WhiskeyRealism.Strategic
                 return output;
             }
 
-            if (age >= options.MinimumProbeDays && ratio >= options.EscalateFriendlyRatio)
+            if (age >= options.MinimumProbeDays && ratio >= options.EscalateFriendlyRatio &&
+                input.ContactEvidence != ContactEvidence.NoContact &&
+                input.ContactEvidence != ContactEvidence.OvermatchedContact)
             {
                 output.Decision = OperationalProbeDecision.Escalate;
                 output.Reason = "favorable-contact";

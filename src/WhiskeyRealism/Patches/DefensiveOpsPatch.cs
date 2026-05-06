@@ -68,6 +68,22 @@ namespace WhiskeyRealism.Patches
                 float required = CalculateRequiredDefense(ownUnits, enemyUnits, capitalDefenders, capitalPosition, personality, capitalTown);
                 if (required <= 0f) return;
 
+                // Scale the capital defense gate by the director's CapitalDefenseBudgetModifier.
+                // A positive modifier (e.g., TooFastCollapse → +0.10) raises the effective strength
+                // gate, causing the patch to add a defender when the vanilla threshold would not.
+                // Default preserved when coordinator or posture is absent.
+                try
+                {
+                    var directorMemories = StrategicCoordinator.Instance?.DirectorMemories;
+                    if (directorMemories != null && allianceId < directorMemories.Length)
+                    {
+                        float capitalMod = directorMemories[allianceId]?.LastPosture?.CapitalDefenseBudgetModifier ?? 0f;
+                        float capitalFraction = Clamp(1f + capitalMod, 0.90f, 1.30f);
+                        required *= capitalFraction;
+                    }
+                }
+                catch { }
+
                 var candidate = FindCandidate(
                     _aifaction,
                     ownUnits,

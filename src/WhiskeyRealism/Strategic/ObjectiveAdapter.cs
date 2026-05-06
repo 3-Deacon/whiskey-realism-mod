@@ -26,6 +26,58 @@ namespace WhiskeyRealism.Strategic
             return derived;
         }
 
+        // Returns true if the CampaignObjective with this ID has its `accomplished` flag set.
+        // Returns false on reflection failure (fail-safe: don't replan from a miss).
+        internal static bool IsAccomplished(int objectiveId)
+        {
+            try
+            {
+                var obj = FindCampaignObjective(objectiveId);
+                if (obj == null) return false;
+                var acc = AccessTools.Field(obj.GetType(), "accomplished")?.GetValue(obj);
+                return acc is bool b && b;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "objective-adapter:accomplished",
+                    "[ObjectiveAdapter] IsAccomplished reflection failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        // Returns true if objectiveId appears in the vanilla GetAvailableObjectives list for
+        // the given alliance. Returns true on reflection failure (fail-safe: don't replan from
+        // a transient miss).
+        internal static bool IsAvailable(int objectiveId, int allianceId)
+        {
+            try
+            {
+                var t = AccessTools.TypeByName("CampaignObjective");
+                if (t == null) return true;
+                // Vanilla signature: GetAvailableObjectives(int allianceid, bool includeaccomplished, int mintownobjectives)
+                var m = AccessTools.Method(t, "GetAvailableObjectives", new[] { typeof(int), typeof(bool), typeof(int) });
+                if (m == null) return true;
+                var list = m.Invoke(null, new object[] { allianceId, false, 0 }) as IList;
+                if (list == null) return true;
+                var idField = AccessTools.Field(t, "UniqueObjectiveID");
+                if (idField == null) return true;
+                foreach (var obj in list)
+                {
+                    if (obj == null) continue;
+                    if ((int)idField.GetValue(obj) == objectiveId) return true;
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "objective-adapter:available",
+                    "[ObjectiveAdapter] IsAvailable reflection failed: " + ex.Message);
+                return true;
+            }
+        }
+
         internal static Vector3? ResolveObjectivePosition(int objectiveId)
         {
             try

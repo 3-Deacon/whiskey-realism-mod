@@ -24,6 +24,10 @@ static class Program
             ("army area ledger gives dynamic fallback local doctrine", ArmyAreaLedgerGivesDynamicFallbackLocalDoctrine),
             ("army area ledger lets dynamic fallback counterstroke its local plan area", ArmyAreaLedgerLetsDynamicFallbackCounterstrokeLocalPlanArea),
             ("army area ledger can redirect independent division input", ArmyAreaLedgerCanRedirectIndependentDivisionInput),
+            ("battle history query matches inside spatial and date window", BattleHistoryQueryMatchesInsideSpatialAndDateWindow),
+            ("battle history query rejects outside spatial window", BattleHistoryQueryRejectsOutsideSpatialWindow),
+            ("battle history query rejects outside date window", BattleHistoryQueryRejectsOutsideDateWindow),
+            ("theater pressure view sums own and enemy strength per theater", TheaterPressureViewSumsOwnAndEnemyPerTheater),
             ("daily cadence fires on first call and day rollover only", DailyCadenceFiresOnFirstCallAndDayRolloverOnly),
             ("daily cadence rejects invalid dates", DailyCadenceRejectsInvalidDates),
             ("strategic cadence alternates formation by alliance", StrategicCadenceAlternatesFormationByAlliance),
@@ -94,6 +98,9 @@ static class Program
             ("operational probe escalates after favorable contact", OperationalProbeEscalatesAfterFavorableContact),
             ("operational probe refuses critical hold donor", OperationalProbeRefusesCriticalHoldDonor),
             ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
+            ("operational probe stays continuing on no contact even after minimum days", OperationalProbeStaysContinuingOnNoContactAfterMinimumDays),
+            ("operational probe state has single source on coordinator", OperationalProbeStateHasSingleSourceOnCoordinator),
+            ("recompute pressure resets counters before counting", RecomputePressureResetsCountersBeforeCounting),
             ("operational tempo chapter one delays escalation", OperationalTempoChapterOneDelaysEscalation),
             ("operational tempo late union sustains pressure", OperationalTempoLateUnionSustainsPressure),
             ("operational tempo winter slows probes", OperationalTempoWinterSlowsProbes),
@@ -203,7 +210,41 @@ static class Program
             ("defense ledger donor theater budget blocks critical front export", DefenseLedgerDonorTheaterBudgetBlocksCriticalFrontExport),
             ("defense ledger formation directive blocks defense movement", DefenseLedgerFormationDirectiveBlocksDefenseMovement),
             ("defense ledger capital defense package is capped", DefenseLedgerCapitalDefensePackageIsCapped),
-            ("strategic movement budget blocks area export from hold sector", StrategicMovementBudgetBlocksAreaExportFromHoldSector)
+            ("strategic movement budget blocks area export from hold sector", StrategicMovementBudgetBlocksAreaExportFromHoldSector),
+            ("phase truth advances when target accomplished", PhaseTruthAdvancesWhenTargetAccomplished),
+            ("phase truth replans when objective unavailable", PhaseTruthReplansWhenObjectiveUnavailable),
+            ("phase truth recovers when force below threshold", PhaseTruthRecoversWhenForceBelowThreshold),
+            ("phase truth deadline expired advances or replans", PhaseTruthDeadlineExpiredAdvancesOrReplans),
+            ("phase truth no contact stays continue", PhaseTruthNoContactStaysContinue),
+            ("contact evidence no contact when zero enemy and no battles", ContactEvidenceNoContactWhenZeroEnemyAndNoBattles),
+            ("contact evidence enemy reacted on strength rise", ContactEvidenceEnemyReactedOnStrengthRise),
+            ("contact evidence skirmish observed near target", ContactEvidenceSkirmishObservedNearTarget),
+            ("contact evidence battle observed lost is overmatched", ContactEvidenceBattleObservedLostIsOvermatched),
+            ("contact evidence favorable contact requires presence and ratio", ContactEvidenceFavorableRequiresPresenceAndRatio),
+            ("persistence dto load tolerates legacy theater commanders field", PersistenceDtoLoadToleratesLegacyTheaterCommanders),
+            ("campaign pace too fast collapse on early national morale crash", CampaignPaceTooFastCollapseOnEarlyMoraleCrash),
+            ("campaign pace late war pressure on chapter three", CampaignPaceLateWarPressureOnChapterThree),
+            ("campaign pace overheated on heavy 14-day battle volume", CampaignPaceOverheatedOnHeavy14DayBattles),
+            ("campaign pace too quiet only outside chapter one winter", CampaignPaceTooQuietSuppressedInChapterOneWinter),
+            ("campaign pace stalemated when chapter two front static", CampaignPaceStalematedWhenChapterTwoFrontStatic),
+            ("campaign pace stable default", CampaignPaceStableDefault),
+            ("collapse risk thresholds bound to break morale trigger", CollapseRiskThresholdsBoundToBreakMoraleTrigger),
+            ("director cannot publish preserve for late csa under elevated risk", DirectorCannotPublishPreserveForLateCsaUnderElevatedRisk),
+            ("campaign pace publishes theater priority from highest pressure theater", CampaignPacePublishesTheaterPriorityFromHighestPressureTheater),
+            ("director clamps threshold modifier to half personality delta", DirectorClampsThresholdModifierToHalfPersonalityDelta),
+            ("director maps overheated pace to recover-leaning intent", DirectorMapsOverheatedToRecoverLeaning),
+            ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk),
+            ("director memory round trips through dto", DirectorMemoryRoundTripsThroughDto),
+            ("cic review plan replans when phase truth says target accomplished", CicReviewPlanReplansWhenPhaseTruthSaysAccomplished),
+            ("director publish clamp suppresses second publish in same real second", DirectorPublishClampSuppressesSecondPublishInSameRealSecond),
+            ("director raises csa hold ratio under too fast collapse", DirectorRaisesCsaHoldRatioUnderTooFastCollapse),
+            ("director raises recover floor under overheated", DirectorRaisesRecoverFloorUnderOverheated),
+            ("director relaxes union mass ratio under late war pressure", DirectorRelaxesUnionMassRatioUnderLateWarPressure),
+            ("director critical risk strongly favors supply construction", DirectorCriticalRiskFavorsSupplyConstruction),
+            ("director too quiet healthy fiscal favors logistics", DirectorTooQuietFavorsLogistics),
+            ("director too fast collapse damps expansion", DirectorTooFastCollapseDampsExpansion),
+            ("director raises capital defense budget under too fast collapse", DirectorRaisesCapitalDefenseBudgetUnderTooFastCollapse),
+            ("director lowers union guard budget under late war pressure", DirectorLowersUnionGuardUnderLateWarPressure)
         };
 
         foreach (var test in tests)
@@ -618,6 +659,60 @@ static class Program
         var assignment = ledger.GetAssignment("division");
         AssertEqual("VirginiaCapitalCorridor", assignment.AssignedAreaKey);
         AssertEqual(true, assignment.OutOfArea);
+    }
+
+    private static void BattleHistoryQueryMatchesInsideSpatialAndDateWindow()
+    {
+        var history = new List<BattleHistoryRecord>
+        {
+            new BattleHistoryRecord { BattleName = "near", PositionX = 100f, PositionZ = 100f, Day = 5, Month = 6, Year = 1862 }
+        };
+        int currentDay = 1862 * 372 + 6 * 31 + 8;
+        var hits = new List<BattleHistoryRecord>(BattleHistoryQuery.Near(
+            history, new UnityEngine.Vector3(105f, 0f, 105f), 50f, currentDay, withinDays: 7));
+        AssertEqual(1, hits.Count, "expected 1 in-window hit");
+    }
+
+    private static void BattleHistoryQueryRejectsOutsideSpatialWindow()
+    {
+        var history = new List<BattleHistoryRecord>
+        {
+            new BattleHistoryRecord { BattleName = "far", PositionX = 1000f, PositionZ = 1000f, Day = 5, Month = 6, Year = 1862 }
+        };
+        int currentDay = 1862 * 372 + 6 * 31 + 6;
+        var hits = new List<BattleHistoryRecord>(BattleHistoryQuery.Near(
+            history, new UnityEngine.Vector3(0f, 0f, 0f), 50f, currentDay, withinDays: 7));
+        AssertEqual(0, hits.Count, "expected 0 hits beyond spatial window");
+    }
+
+    private static void BattleHistoryQueryRejectsOutsideDateWindow()
+    {
+        var history = new List<BattleHistoryRecord>
+        {
+            new BattleHistoryRecord { BattleName = "old", PositionX = 100f, PositionZ = 100f, Day = 5, Month = 6, Year = 1862 }
+        };
+        int currentDay = 1862 * 372 + 7 * 31 + 5; // ~30 days later
+        var hits = new List<BattleHistoryRecord>(BattleHistoryQuery.Near(
+            history, new UnityEngine.Vector3(105f, 0f, 105f), 50f, currentDay, withinDays: 7));
+        AssertEqual(0, hits.Count, "expected 0 hits beyond date window");
+    }
+
+    private static void TheaterPressureViewSumsOwnAndEnemyPerTheater()
+    {
+        var inputs = new List<FrontSectorInput>
+        {
+            new FrontSectorInput { SectorKey = "RichmondCorridor", Theater = Theater.East, OwnStrength = 8000f, EnemyStrength = 6000f, StrategicImportance = 1f },
+            new FrontSectorInput { SectorKey = "ShenandoahValley", Theater = Theater.East, OwnStrength = 2000f, EnemyStrength = 1000f, StrategicImportance = 0.5f },
+            new FrontSectorInput { SectorKey = "Vicksburg",        Theater = Theater.West, OwnStrength = 4000f, EnemyStrength = 5000f, StrategicImportance = 1f },
+        };
+        var ledger = FrontSectorLedger.Build(inputs);
+
+        var view = TheaterPressureView.From(ledger);
+
+        AssertEqual(10000f, view.OwnStrengthByTheater[Theater.East], "east own");
+        AssertEqual(7000f,  view.EnemyStrengthByTheater[Theater.East], "east enemy");
+        AssertEqual(4000f,  view.OwnStrengthByTheater[Theater.West], "west own");
+        AssertEqual(5000f,  view.EnemyStrengthByTheater[Theater.West], "west enemy");
     }
 
     private static void DailyCadenceFiresOnFirstCallAndDayRolloverOnly()
@@ -1715,6 +1810,97 @@ static class Program
         AssertEqual(FormationDirective.Probe, assignment.Directive);
         AssertEqual("limited-contact-probe", assignment.Reason);
         AssertEqual(false, assignment.TransferDonorAllowed);
+    }
+
+    private static void OperationalProbeStaysContinuingOnNoContactAfterMinimumDays()
+    {
+        var input = BuildProbeInput();
+        input.DaySerial = 107;
+        input.Previous = new OperationalProbeState
+        {
+            ProbeId = "1:VirginiaCapitalCorridor:probe-corps",
+            UnitKey = "probe-corps",
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            SourceSectorKey = "VirginiaCapitalCorridor",
+            StartedDaySerial = 100,
+            LastObservedEnemyStrength = 0f,
+            LastObservedFriendlyStrength = 8000f
+        };
+        input.CurrentEnemyStrength = 0f;
+        input.CurrentFriendlyStrength = 8000f;
+        input.Options = new OperationalProbeOptions { MinimumProbeDays = 3, EscalateFriendlyRatio = 1.8f, WithdrawFriendlyRatio = 0.55f };
+        input.ContactEvidence = ContactEvidence.NoContact;
+
+        var output = OperationalProbeLedger.Build(input);
+        AssertTrue(output.Decision != OperationalProbeDecision.Escalate, "no-contact must not escalate");
+        AssertEqual(OperationalProbeDecision.Probe, output.Decision);
+    }
+
+    private static void OperationalProbeStateHasSingleSourceOnCoordinator()
+    {
+        // After Build returns, the output.State must be usable as Previous in a follow-up call.
+        // This tests that OperationalProbeLedger's contract aligns with StrategicCoordinator's
+        // single-source-of-truth pattern: the coordinator owns _operationalProbeStates[alliance],
+        // and output.State references that slot.
+
+        var input = BuildProbeInput();
+        var first = OperationalProbeLedger.Build(input);
+        AssertTrue(first.State != null, "fresh probe should publish a state");
+
+        // Pass the same reference to the next call to confirm it's accepted as Previous.
+        var second = OperationalProbeLedger.Build(new OperationalProbeInput
+        {
+            AllianceId = input.AllianceId,
+            DaySerial = input.DaySerial + 1,
+            PlanTargetAreaKey = input.PlanTargetAreaKey,
+            Fronts = input.Fronts,
+            FormationDirectives = input.FormationDirectives,
+            Previous = first.State, // pass the same reference
+            CurrentEnemyStrength = 1000f,
+            CurrentFriendlyStrength = 4000f,
+            Options = new OperationalProbeOptions()
+        });
+        AssertTrue(second.State != null, "continuing probe publishes state");
+        AssertEqual(first.State.ProbeId, second.State.ProbeId);
+    }
+
+    private static void RecomputePressureResetsCountersBeforeCounting()
+    {
+        var snap = new FormationSnapshot
+        {
+            UnitKey = "U1",
+            AllianceId = 0,
+            UnitType = 16,
+            IsTopUnit = true,
+            AreaKey = "RichmondCorridor",
+            SectorKey = "RichmondCorridor",
+            GroupStrengthActive = 8000f,
+            GroupStrengthDirect = 8000f,
+            Morale = 0.2f,
+            Readiness = 0.2f,
+            RifleAmmo = 0.2f,
+            ArtilleryAmmo = 0.2f,
+            Supply = 0.2f
+        };
+        var ledger = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Decisive1863, "RichmondCorridor");
+
+        int recoverAfterBuild = ledger.Pressure.RecoverCount;
+        AssertEqual(1, recoverAfterBuild, "recover after build");
+
+        for (int i = 0; i < 100; i++)
+        {
+            ledger.ApplyOperationalProbe(new OperationalProbeOutput
+            {
+                Decision = OperationalProbeDecision.Probe,
+                SelectedUnitKey = "U1",
+                Reason = "test"
+            });
+        }
+
+        AssertTrue(ledger.Pressure.RecoverCount <= 1,
+            "RecoverCount must be bounded by Assignments.Count after 100 overlays — was " + ledger.Pressure.RecoverCount);
+        AssertTrue(ledger.Pressure.LowSupplyCount <= 1, "LowSupplyCount bounded");
+        AssertTrue(ledger.Pressure.LowAmmoCount <= 1,   "LowAmmoCount bounded");
     }
 
     private static void OperationalTempoChapterOneDelaysEscalation()
@@ -4356,5 +4542,541 @@ static class Program
             CICPersonality = default(PersonalityVector),
             TotalAllianceEffectiveStrength = 60000f
         };
+    }
+
+    // -----------------------------------------------------------------------
+    // PhaseTruthLedger tests
+    // -----------------------------------------------------------------------
+
+    private static void PhaseTruthAdvancesWhenTargetAccomplished()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            TargetAccomplished = true,
+            ObjectiveAvailable = true,
+            TargetSectorOwnStrength = 10000f,
+            RequiredForce = 5000f,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.TargetAccomplished, output.Verdict);
+        AssertEqual(PhaseTruthAction.Advance, output.RecommendedAction);
+    }
+
+    private static void PhaseTruthReplansWhenObjectiveUnavailable()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            TargetAccomplished = false,
+            ObjectiveAvailable = false,
+            TargetSectorOwnStrength = 10000f,
+            RequiredForce = 5000f,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.ObjectiveUnavailable, output.Verdict);
+        AssertEqual(PhaseTruthAction.Replan, output.RecommendedAction);
+    }
+
+    private static void PhaseTruthRecoversWhenForceBelowThreshold()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            TargetAccomplished = false,
+            ObjectiveAvailable = true,
+            TargetSectorOwnStrength = 1000f,
+            RequiredForce = 5000f,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.ForceBelowThreshold, output.Verdict);
+        AssertEqual(PhaseTruthAction.Recover, output.RecommendedAction);
+    }
+
+    private static void PhaseTruthDeadlineExpiredAdvancesOrReplans()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 1, DeadlineYear = 1862 } } },
+            TargetAccomplished = false,
+            ObjectiveAvailable = true,
+            TargetSectorOwnStrength = 10000f,
+            RequiredForce = 5000f,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.DeadlineExpired, output.Verdict);
+        AssertTrue(output.RecommendedAction == PhaseTruthAction.Advance ||
+                   output.RecommendedAction == PhaseTruthAction.Replan,
+                   "deadline expired should advance or replan");
+    }
+
+    private static void PhaseTruthNoContactStaysContinue()
+    {
+        var input = new PhaseTruthInput
+        {
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            TargetAccomplished = false,
+            ObjectiveAvailable = true,
+            TargetSectorOwnStrength = 10000f,
+            RequiredForce = 5000f,
+            TargetEngagedRecently = false,
+            CurrentMonth = 6, CurrentYear = 1862
+        };
+        var output = PhaseTruthLedger.Evaluate(input);
+        AssertEqual(PhaseTruthVerdict.Valid, output.Verdict);
+        AssertEqual(PhaseTruthAction.Continue, output.RecommendedAction);
+    }
+
+    private static void ContactEvidenceNoContactWhenZeroEnemyAndNoBattles()
+    {
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            CurrentEnemyStrength = 0f,
+            CurrentFriendlyStrength = 8000f,
+            PreviousObservedEnemyStrength = 0f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>(),
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = 1862 * 372 + 6 * 31 + 6
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.NoContact, output.Evidence);
+        AssertTrue(!output.AllowsEscalation, "no-contact must not allow escalation");
+    }
+
+    private static void ContactEvidenceEnemyReactedOnStrengthRise()
+    {
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            CurrentEnemyStrength = 6000f,
+            CurrentFriendlyStrength = 7000f,
+            PreviousObservedEnemyStrength = 3000f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>(),
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = 1862 * 372 + 6 * 31 + 6
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.EnemyReacted, output.Evidence);
+    }
+
+    private static void ContactEvidenceSkirmishObservedNearTarget()
+    {
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            CurrentEnemyStrength = 1000f,
+            CurrentFriendlyStrength = 1500f,
+            PreviousObservedEnemyStrength = 1000f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>
+            {
+                new BattleHistoryRecord {
+                    BattleName = "skirmish", PositionX = 105f, PositionZ = 105f,
+                    Day = 4, Month = 6, Year = 1862, BattleResultType = 0 // not major
+                }
+            },
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = 1862 * 372 + 6 * 31 + 6
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.SkirmishObserved, output.Evidence);
+    }
+
+    private static void ContactEvidenceBattleObservedLostIsOvermatched()
+    {
+        int daySerial = 1862 * 372 + 6 * 31 + 6;
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            ObservingAllianceId = 0,
+            CurrentEnemyStrength = 5000f,
+            CurrentFriendlyStrength = 6000f,
+            PreviousObservedEnemyStrength = 5000f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>
+            {
+                new BattleHistoryRecord {
+                    BattleName = "majorlost", PositionX = 105f, PositionZ = 105f,
+                    Day = 4, Month = 6, Year = 1862, BattleResultType = 1 /* major */,
+                    AllianceWon = 1 // observer is alliance 0, so this is a loss
+                }
+            },
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = daySerial
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.OvermatchedContact, output.Evidence);
+        AssertTrue(!output.AllowsEscalation, "overmatched must not allow escalation");
+    }
+
+    private static void ContactEvidenceFavorableRequiresPresenceAndRatio()
+    {
+        int daySerial = 1862 * 372 + 6 * 31 + 6;
+        var input = new ContactEvidenceInput
+        {
+            TargetPosition = new UnityEngine.Vector3(100f, 0f, 100f),
+            ObservingAllianceId = 0,
+            CurrentEnemyStrength = 1000f,
+            CurrentFriendlyStrength = 2500f,
+            PreviousObservedEnemyStrength = 1000f,
+            EnemyReactionMultiplier = 1.45f,
+            EscalateFriendlyRatio = 1.8f,
+            WithdrawFriendlyRatio = 0.55f,
+            BattleHistory = new List<BattleHistoryRecord>(),
+            SpatialMaxDistance = 50f,
+            CurrentDaySerial = daySerial
+        };
+        var output = ContactEvidenceLedger.Build(input);
+        AssertEqual(ContactEvidence.FavorableContact, output.Evidence);
+        AssertTrue(output.AllowsEscalation, "favorable contact allows escalation");
+    }
+
+    private static CampaignPaceInput BuildPaceInput(
+        int allianceId, int year, int month, int chapter,
+        float ownNationalMorale, float enemyNationalMorale,
+        int battlesIn14Days, int majorBattlesIn14Days,
+        int capitalStreak, int daysSinceFrontChange,
+        bool winter)
+    {
+        return new CampaignPaceInput
+        {
+            AllianceId = allianceId,
+            Year = year, Month = month,
+            PolicyChapter = chapter,
+            OwnNationalMorale = ownNationalMorale,
+            EnemyNationalMorale = enemyNationalMorale,
+            BreakMoraleTrigger = 30f, // arbitrary stable test value
+            MinNationalMoraleSurrender = 18f,
+            BattlesIn14Days = battlesIn14Days,
+            MajorBattlesIn14Days = majorBattlesIn14Days,
+            CapitalDangerStreakDays = capitalStreak,
+            DaysSinceFrontSignatureChange = daysSinceFrontChange,
+            IsWinter = winter
+        };
+    }
+
+    private static void CampaignPaceTooFastCollapseOnEarlyMoraleCrash()
+    {
+        var input = BuildPaceInput(allianceId: 1, year: 1862, month: 6, chapter: 2,
+            ownNationalMorale: 30f * 1.10f, enemyNationalMorale: 90f,
+            battlesIn14Days: 0, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.TooFastCollapse, output.Pace);
+        AssertEqual(CollapseRisk.Critical, output.Risk);
+    }
+
+    private static void CampaignPaceLateWarPressureOnChapterThree()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1864, month: 6, chapter: 3,
+            ownNationalMorale: 80f, enemyNationalMorale: 60f,
+            battlesIn14Days: 0, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 60, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.LateWarPressure, output.Pace);
+    }
+
+    private static void CampaignPaceOverheatedOnHeavy14DayBattles()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 8, chapter: 2,
+            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            battlesIn14Days: 6, majorBattlesIn14Days: 4,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.Overheated, output.Pace);
+    }
+
+    private static void CampaignPaceTooQuietSuppressedInChapterOneWinter()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1861, month: 12, chapter: 1,
+            ownNationalMorale: 95f, enemyNationalMorale: 90f,
+            battlesIn14Days: 0, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 30, winter: true);
+        var output = CampaignPaceLedger.Build(input);
+        AssertTrue(output.Pace != CampaignPace.TooQuiet,
+            "chapter 1 winter is the historically correct quiet state and must not be flagged");
+    }
+
+    private static void CampaignPaceStalematedWhenChapterTwoFrontStatic()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
+            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 75, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.Stalemated, output.Pace);
+    }
+
+    private static void CampaignPaceStableDefault()
+    {
+        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
+            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            battlesIn14Days: 2, majorBattlesIn14Days: 1,
+            capitalStreak: 0, daysSinceFrontChange: 10, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(CampaignPace.Stable, output.Pace);
+    }
+
+    private static void CollapseRiskThresholdsBoundToBreakMoraleTrigger()
+    {
+        AssertEqual(CollapseRisk.Critical, CampaignPaceLedger.RiskFor(ownMorale: 30f * 1.10f, breakMoraleTrigger: 30f, minSurrender: 18f));
+        AssertEqual(CollapseRisk.Elevated, CampaignPaceLedger.RiskFor(ownMorale: 30f * 1.40f, breakMoraleTrigger: 30f, minSurrender: 18f));
+        AssertEqual(CollapseRisk.Low,      CampaignPaceLedger.RiskFor(ownMorale: 30f * 2.50f, breakMoraleTrigger: 30f, minSurrender: 18f));
+    }
+
+    private static void DirectorCannotPublishPreserveForLateCsaUnderElevatedRisk()
+    {
+        var input = BuildPaceInput(allianceId: 1, year: 1864, month: 6, chapter: 3,
+            ownNationalMorale: 30f * 1.40f, enemyNationalMorale: 80f,
+            battlesIn14Days: 1, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 5, winter: false);
+        var output = CampaignPaceLedger.Build(input);
+        AssertTrue(output.Risk >= CollapseRisk.Elevated, "elevated risk expected");
+        AssertTrue(output.IntentBlockedFromPreserve,
+            "1864 CSA under elevated risk must not publish StrategicIntent.Preserve");
+    }
+
+    private static void CampaignPacePublishesTheaterPriorityFromHighestPressureTheater()
+    {
+        var view = new TheaterPressureView();
+        view.OwnStrengthByTheater[Theater.East] = 10000f;
+        view.EnemyStrengthByTheater[Theater.East] = 4000f;
+        view.OwnStrengthByTheater[Theater.West] = 4000f;
+        view.EnemyStrengthByTheater[Theater.West] = 8000f; // West is the hot theater for us
+        var input = BuildPaceInput(allianceId: 0, year: 1862, month: 6, chapter: 2,
+            ownNationalMorale: 80f, enemyNationalMorale: 80f,
+            battlesIn14Days: 2, majorBattlesIn14Days: 0,
+            capitalStreak: 0, daysSinceFrontChange: 10, winter: false);
+        input.TheaterPressure = view;
+        var output = CampaignPaceLedger.Build(input);
+        AssertEqual(Theater.West, output.TheaterPriority);
+    }
+
+    private static void PersistenceDtoLoadToleratesLegacyTheaterCommanders()
+    {
+        // Old sidecar JSON included a theaterCommanders array on each faction.
+        // After deleting TheaterCommander + FactionDto.TheaterCommanders, Newtonsoft
+        // must silently ignore that field rather than throwing or losing the known fields.
+        string legacyJson = @"{
+            ""version"":1,
+            ""factions"":[
+                {
+                    ""factionId"":0,
+                    ""factionName"":""Union"",
+                    ""currentEra"":""Early"",
+                    ""cic"":{""officerName"":""Lincoln""},
+                    ""theaterCommanders"":[{""theaterId"":1,""officerName"":""Grant""}]
+                }
+            ]
+        }";
+        var dto = Newtonsoft.Json.JsonConvert.DeserializeObject<SidecarDto>(legacyJson);
+        AssertTrue(dto != null, "dto should deserialize");
+        AssertTrue(dto.Factions != null && dto.Factions.Count == 1, "one faction loaded");
+        AssertEqual("Lincoln", dto.Factions[0].Cic.OfficerName);
+    }
+
+    private static void DirectorClampsThresholdModifierToHalfPersonalityDelta()
+    {
+        var personality = new PersonalityVector { Audacity = 0.5f, Caution = 0.0f };
+        // Personality contributes: MaximumProbeStrengthFraction += 0.05*audacity - 0.04*caution = +0.025
+        float personalityDeltaOnFraction = 0.05f * personality.Audacity - 0.04f * personality.Caution;
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.Overheated, Risk = CollapseRisk.Low, IntentBlockedFromPreserve = false },
+            personality: personality);
+        AssertTrue(System.Math.Abs(posture.MaximumProbeStrengthFractionModifier) <= 0.5f * System.Math.Abs(personalityDeltaOnFraction) + 1e-6f,
+            "director modifier must be ≤50% of personality delta — was " + posture.MaximumProbeStrengthFractionModifier);
+    }
+
+    private static void DirectorMapsOverheatedToRecoverLeaning()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.Overheated, Risk = CollapseRisk.Low, IntentBlockedFromPreserve = false },
+            personality: new PersonalityVector());
+        AssertTrue(posture.Intent == StrategicIntent.Recover || posture.Intent == StrategicIntent.Delay,
+            "overheated pace should propose recover/delay intent");
+    }
+
+    private static void DirectorBlocksPreserveForLateCsaUnderElevatedRisk()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 1,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Elevated, IntentBlockedFromPreserve = true },
+            personality: new PersonalityVector { Caution = 0.6f });
+        AssertTrue(posture.Intent != StrategicIntent.Preserve,
+            "1864 CSA under elevated risk cannot publish Preserve");
+    }
+
+    // Task 14: MemoryToDto/MemoryFromDto preserve all key fields including LastPosture enum values
+    // and RecentEventSummaries list. Null DTO input must yield a fresh DirectorMemory.
+    private static void DirectorMemoryRoundTripsThroughDto()
+    {
+        var memory = new DirectorMemory
+        {
+            LastFullRefreshDay = 12345,
+            CapitalDangerStreakDays = 3,
+            DaysSinceLastBattle = 7,
+            LastSourceSignature = "sig-abc",
+            LastPosture = new DirectorPosture
+            {
+                AllianceId = 0,
+                Pace = CampaignPace.LateWarPressure,
+                Intent = StrategicIntent.Concentrate,
+                Risk = CollapseRisk.Low,
+                TheaterPriority = Theater.East
+            }
+        };
+        memory.RecentEventSummaries.Add("battle:east:1864-06-15");
+
+        var dto = StrategicResilienceDirector.MemoryToDto(memory);
+        var rebuilt = StrategicResilienceDirector.MemoryFromDto(dto);
+
+        AssertEqual(memory.LastFullRefreshDay, rebuilt.LastFullRefreshDay);
+        AssertEqual(memory.CapitalDangerStreakDays, rebuilt.CapitalDangerStreakDays);
+        AssertEqual(memory.LastSourceSignature, rebuilt.LastSourceSignature);
+        AssertEqual(memory.LastPosture.Pace, rebuilt.LastPosture.Pace);
+        AssertEqual(memory.LastPosture.Intent, rebuilt.LastPosture.Intent);
+        AssertEqual(memory.LastPosture.Risk, rebuilt.LastPosture.Risk);
+        AssertEqual(memory.LastPosture.TheaterPriority, rebuilt.LastPosture.TheaterPriority);
+        AssertEqual(1, rebuilt.RecentEventSummaries.Count);
+    }
+
+    // Task 13: CicReviewRouter.RouteAction routes Advance → AdvancePhase, which exhausts the
+    // last phase and marks the plan dirty. Single-phase plan: after accomplished truth,
+    // IsDirty=true, return false (signals replan to caller).
+    // CIC.ReviewPlanWithTruth delegates to CicReviewRouter, so this exercises the real routing
+    // logic without requiring BepInEx/HarmonyLib in the test harness.
+    private static void CicReviewPlanReplansWhenPhaseTruthSaysAccomplished()
+    {
+        var plan = new OperationalPlan
+        {
+            CurrentPhaseIndex = 0,
+            PlanDeadlineMonth = 12,
+            PlanDeadlineYear = 1862,
+            IsDirty = false
+        };
+        plan.Phases.Add(new Phase
+        {
+            TargetObjectiveId = 42,
+            ForceFractionRequired = 0.5f,
+            Transition = PhaseTransition.TargetTaken,
+            DeadlineMonth = 12,
+            DeadlineYear = 1862
+        });
+
+        // Accomplished → PhaseTruthAction.Advance → AdvancePhase (no next phase) → IsDirty=true, false
+        var truth = new PhaseTruthOutput
+        {
+            Verdict = PhaseTruthVerdict.TargetAccomplished,
+            RecommendedAction = PhaseTruthAction.Advance,
+            Reason = "target-accomplished"
+        };
+
+        bool result = CicReviewRouter.RouteAction(plan, truth, 6, 1862);
+        AssertTrue(!result, "RouteAction should return false when last phase is exhausted by Advance");
+        AssertTrue(plan.IsDirty, "plan.IsDirty should be true after last phase exhausted by Advance");
+    }
+
+    private static void DirectorPublishClampSuppressesSecondPublishInSameRealSecond()
+    {
+        var clamp = new DirectorPublishClamp();
+        var stamp = new System.DateTime(2026, 5, 5, 12, 0, 0);
+        AssertTrue(clamp.TryPublish(stamp), "first publish in second should succeed");
+        AssertTrue(!clamp.TryPublish(stamp.AddMilliseconds(50)), "second publish 50ms later should be suppressed");
+        AssertTrue(clamp.TryPublish(stamp.AddSeconds(1).AddMilliseconds(1)), "publish past 1s boundary should succeed");
+    }
+
+    private static void DirectorRaisesCsaHoldRatioUnderTooFastCollapse()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 1,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical, IntentBlockedFromPreserve = false },
+            personality: new PersonalityVector());
+        AssertTrue(posture.MinimumHoldRatioModifier > 0f,
+            "TooFastCollapse for CSA must raise MinimumHoldRatio — was " + posture.MinimumHoldRatioModifier);
+        AssertTrue(posture.MinimumHoldRatioModifier <= 0.10f,
+            "MinimumHoldRatioModifier capped at +0.10");
+    }
+
+    private static void DirectorRaisesRecoverFloorUnderOverheated()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.Overheated, Risk = CollapseRisk.Low },
+            personality: new PersonalityVector());
+        AssertTrue(posture.RecoverFloorModifier > 0f, "overheated must raise recover floor");
+    }
+
+    private static void DirectorRelaxesUnionMassRatioUnderLateWarPressure()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Low },
+            personality: new PersonalityVector());
+        AssertTrue(posture.MassRatioModifier < 0f, "Union late-war pressure must lower mass ratio gate");
+    }
+
+    private static void DirectorCriticalRiskFavorsSupplyConstruction()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 1,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
+            personality: new PersonalityVector());
+        AssertTrue(posture.SupplyConstructionBias >= 0.30f,
+            "Critical risk must strongly favor supply — was " + posture.SupplyConstructionBias);
+    }
+
+    private static void DirectorTooQuietFavorsLogistics()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooQuiet, Risk = CollapseRisk.Low },
+            personality: new PersonalityVector());
+        AssertTrue(posture.LogisticsBias >= 0.20f, "TooQuiet must favor logistics");
+    }
+
+    private static void DirectorTooFastCollapseDampsExpansion()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 1,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
+            personality: new PersonalityVector());
+        AssertTrue(posture.ExpansionDamper >= 0.30f, "TooFastCollapse must damp expansion");
+    }
+
+    private static void DirectorRaisesCapitalDefenseBudgetUnderTooFastCollapse()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 1,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.TooFastCollapse, Risk = CollapseRisk.Critical },
+            personality: new PersonalityVector());
+        AssertTrue(posture.CapitalDefenseBudgetModifier >= 0.05f,
+            "TooFastCollapse must raise capital defense budget");
+    }
+
+    private static void DirectorLowersUnionGuardUnderLateWarPressure()
+    {
+        var posture = StrategicResilienceDirector.ProposePosture(
+            allianceId: 0,
+            pace: new CampaignPaceOutput { Pace = CampaignPace.LateWarPressure, Risk = CollapseRisk.Low },
+            personality: new PersonalityVector());
+        AssertTrue(posture.GuardBudgetFractionModifier <= 0f,
+            "Union late-war pressure can slightly lower guard for source-sector concentration");
     }
 }

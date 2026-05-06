@@ -12,7 +12,6 @@ namespace WhiskeyRealism.Strategic
         public int OfficerCommanderId;
         public string OfficerName;
         public PersonalityVector OfficerPersonality;
-        public List<TheaterCommander> Theaters = new List<TheaterCommander>();
         public OperationalPlan ActivePlan;
 
         public PersonalityVector Effective(EraStageManager era)
@@ -31,6 +30,30 @@ namespace WhiskeyRealism.Strategic
                 DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
                     overrideSettings,
                     lockedDifficulty));
+        }
+
+        // Consults PhaseTruthOutput to decide how to handle the current plan.
+        // When truth is null, falls back to ReviewPlan (deadline-only logic).
+        // The routing switch is pure logic delegated to CicReviewRouter so it can be tested
+        // without BepInEx/HarmonyLib dependencies in the test harness.
+        public bool ReviewPlanWithTruth(int currentMonth, int currentYear, PhaseTruthOutput truth)
+        {
+            if (ActivePlan == null) return false;
+            if (truth == null) return ReviewPlan(currentMonth, currentYear);
+
+            switch (truth.RecommendedAction)
+            {
+                case PhaseTruthAction.Advance:
+                    return AdvancePhase();
+                case PhaseTruthAction.Replan:
+                case PhaseTruthAction.Recover:
+                case PhaseTruthAction.Fallback:
+                    ActivePlan.IsDirty = true;
+                    return false;
+                case PhaseTruthAction.Continue:
+                default:
+                    return ReviewPlan(currentMonth, currentYear);
+            }
         }
 
         public bool ReviewPlan(int currentMonth, int currentYear)
@@ -147,7 +170,7 @@ namespace WhiskeyRealism.Strategic
             var plan = new OperationalPlan
             {
                 CICFactionAllianceId = AllianceId,
-                AssignedTheaterId    = (Theaters.Count > 0 ? Theaters[0].TheaterId : 0),
+                AssignedTheaterId    = 0,
                 CurrentPhaseIndex    = 0,
                 PlanDeadlineMonth    = deadline.month,
                 PlanDeadlineYear     = deadline.year,

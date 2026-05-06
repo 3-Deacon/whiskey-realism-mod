@@ -3331,4 +3331,44 @@ git commit -m "docs: archive Director spec and plan after ship"
 
 ## Implementation Log
 
-(Filled in as tasks complete. Append the actual deployed SHA-256, any bugs caught + fixed during execution, and runtime smoke evidence here.)
+### 2026-05-05 — Tasks 1–21 implemented and deployed
+
+**Branch:** `feat/strategic-resilience-director` (20 commits: `2349d54` → `8b7b94a`)
+
+**Deployed DLL SHA-256:** `47549752bff914a7ddb32e5ef98869bd0a5f47eca4c7acc0904e0d62082eac65` (357376 bytes; both `dist/` and `BepInEx/plugins/` files match).
+
+**Tests:** 234 PASS / 0 FAIL.
+
+**Build:** 0 warnings / 0 errors.
+
+**Commits in implementation order:**
+
+1. `2349d54` feat: add BattleHistoryQuery spatial+date helper for Director ledgers
+2. `d53b706` feat: add TheaterPressureView aggregating FrontSectorLedger by theater
+3. `8d86829` fix: reset FormationPressureSummary at the start of RecomputePressure
+4. `49148c7` feat: add PhaseTruthLedger so stale objectives stop driving plans
+5. `d484b5a` feat: add ContactEvidenceLedger so probes need real contact to escalate
+6. `bc1ed40` feat: route operational probe through OffensiveAvailabilityWrapper mirroring vanilla gates
+7. `e06fd7c` fix: gate operational-probe escalation on ContactEvidence (no zero-enemy escalation)
+8. `b2fd5b7` refactor: delete unused TheaterCommander class and legacy DTO field
+9. `beb23c4` refactor: make StrategicCoordinator the single owner of operational probe state
+10. `36e97e1` feat: add DirectorPosture types and DirectorMemory persistence DTO
+11. `308f7ff` feat: add CampaignPaceLedger bound to vanilla nationalmorale + chapter scalars
+12. `95b3f33` feat: add StrategicResilienceDirector with personality-clamped threshold modifiers
+13. `d88b799` feat: route CIC plan review through PhaseTruthLedger
+14. `e222dd7` feat: persist DirectorMemory and apply posture threshold modifiers to probe options
+15. `cba7062` feat: wire Director publish clamp + advanced-game-day rolling cycle
+16. `b74ea00` feat: emit [CampaignPace]/[CollapseRisk] telemetry and gate verbose Director trace
+17. `aa421b6` feat: Director modulates FrontSectorLedger transfer/hold thresholds
+18. `e0ffb84` feat: Director modulates formation Recover floor + Mass ratio gates
+19. `7a88c34` feat: Director biases fiscal supply/logistics scoring + dampens expansion under collapse
+20. `8b7b94a` feat: Director modulates defense guard/capital budgets per pace and risk
+
+**Notable in-flight decisions:**
+
+- Task 6 (OffensiveAvailabilityWrapper) intentionally drops the old `inbattle`/`onretreat`/`garrisonreference` ad-hoc guards in favor of vanilla parity. `Escalate` decisions on units already in `unitsinoffensiveoperations` will now be silently blocked by gate 5 of `IsUnitAvailableForOffensiveOperations` — watch smoke for any visible regression in escalation cadence; if observed, the directive overlay still flags `Mass`/`Counterstroke` even when MoveUnitTo is suppressed.
+- Task 13 split the `ReviewPlanWithTruth` switch out into a new `CicReviewRouter` static class so the routing logic could be tested in the console harness without dragging BepInEx/HarmonyLib reflection into test compile.
+- Task 15 used a single shared `DirectorPublishClamp` (not per-alliance) per spec — at most one full publish per real second across all alliances combined.
+- Task 19's bias-classification predicates ("supply", "logistics", "private expansion") use existing `buildingName` substring matching ("depot"/"hospital", "market"/"rail", "bank"/"factory"/"foundry"/"industrial"/"shipyard"/"naval"). No new fields added to candidate types.
+
+**Pending: Task 22 (runtime smoke).** Game launch + log inspection per plan checklist.

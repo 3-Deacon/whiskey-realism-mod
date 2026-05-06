@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
@@ -19,7 +20,8 @@ namespace WhiskeyRealism.Strategic
             EraStage era,
             int policyChapter,
             int campaignMonth,
-            PersonalityVector personality)
+            PersonalityVector personality,
+            IReadOnlyList<BattleHistoryRecord> battleHistory)
         {
             int objectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
             var target = ObjectiveAdapter.ResolveObjectivePosition(objectiveId);
@@ -52,6 +54,25 @@ namespace WhiskeyRealism.Strategic
                     input.CurrentFriendlyStrength = assignment.CombatAvailability;
             }
 
+            if (target.HasValue)
+            {
+                var contactInput = new ContactEvidenceInput
+                {
+                    ObservingAllianceId = allianceId,
+                    TargetPosition = target.Value,
+                    CurrentEnemyStrength = input.CurrentEnemyStrength,
+                    CurrentFriendlyStrength = input.CurrentFriendlyStrength,
+                    PreviousObservedEnemyStrength = previous?.LastObservedEnemyStrength ?? 0f,
+                    EnemyReactionMultiplier = input.Options.EnemyReactionMultiplier,
+                    EscalateFriendlyRatio = input.Options.EscalateFriendlyRatio,
+                    WithdrawFriendlyRatio = input.Options.WithdrawFriendlyRatio,
+                    BattleHistory = battleHistory,
+                    SpatialMaxDistance = GamePrefs.aimaximumdistancetosearchforunitrelocations,
+                    CurrentDaySerial = daySerial
+                };
+                input.ContactEvidence = ContactEvidenceLedger.Build(contactInput).Evidence;
+            }
+
             return input;
         }
 
@@ -70,7 +91,6 @@ namespace WhiskeyRealism.Strategic
                 var factionType = faction.GetType();
                 var ownUnits = AccessTools.Field(factionType, "ownunits")?.GetValue(faction) as IList;
                 var offensive = AccessTools.Field(factionType, "unitsinoffensiveoperations")?.GetValue(faction) as IList;
-                var defensive = AccessTools.Field(factionType, "unitsindefensiveoperations")?.GetValue(faction) as IList;
                 if (ownUnits == null || offensive == null) return;
 
                 var unit = FindUnit(ownUnits, output.SelectedUnitKey);
@@ -93,9 +113,12 @@ namespace WhiskeyRealism.Strategic
                     output.Decision != OperationalProbeDecision.Escalate)
                     return;
                 if (!target.HasValue) return;
-                if (defensive != null && defensive.Contains(unit)) return;
-                if (ReadBool(unit, "inbattle") || ReadBool(unit, "onretreat")) return;
-                if (ReadObject(unit, "garrisonreference") != null) return;
+                if (!OffensiveAvailabilityWrapper.IsAvailable(aifactionIndex, unit, target.Value))
+                {
+                    OnceLog.Info("operational-probe:gate-blocked:" + allianceId,
+                        $"[OperationalProbe] alliance={allianceId} unit={SafeName(unit)} blocked-by-availability");
+                    return;
+                }
 
                 if (AICampaign.MoveUnitTo(unit, target.Value, true) && !offensive.Contains(unit))
                 {

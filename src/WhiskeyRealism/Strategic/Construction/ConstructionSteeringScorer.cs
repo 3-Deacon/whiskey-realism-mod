@@ -62,6 +62,41 @@ namespace WhiskeyRealism.Strategic.Construction
             return null;
         }
 
+        // Applies director posture biases to an already-computed multiplier.
+        // Supply/logistics adjustments are additive; expansion damper is multiplicative.
+        // Returns baseMultiplier unchanged when posture is null.
+        public static float ApplyDirectorBiases(
+            float baseMultiplier,
+            int buildingTypeId,
+            string buildingName,
+            DirectorPosture posture)
+        {
+            if (posture == null) return baseMultiplier;
+            string name = Normalize(buildingName);
+
+            float mult = baseMultiplier;
+            if (IsSupplyOrRecovery(name))              mult += posture.SupplyConstructionBias;
+            if (IsLogisticsBuilding(buildingTypeId, name)) mult += posture.LogisticsBias;
+            if (IsPrivateExpansion(name))              mult *= System.Math.Max(0.05f, 1f - posture.ExpansionDamper);
+
+            return System.Math.Max(0f, mult);
+        }
+
+        private static bool IsSupplyOrRecovery(string normalizedName)
+        {
+            return normalizedName.Contains("depot") || normalizedName.Contains("hospital");
+        }
+
+        private static bool IsPrivateExpansion(string normalizedName)
+        {
+            return normalizedName.Contains("bank") ||
+                   normalizedName.Contains("factory") ||
+                   normalizedName.Contains("foundry") ||
+                   normalizedName.Contains("industrial") ||
+                   normalizedName.Contains("shipyard") ||
+                   normalizedName.Contains("naval");
+        }
+
         private static bool IsLogisticsBuilding(int buildingTypeId, string buildingName)
         {
             string normalized = Normalize(buildingName);

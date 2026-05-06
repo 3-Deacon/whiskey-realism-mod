@@ -79,7 +79,15 @@ namespace WhiskeyRealism.Strategic
                     });
                 }
 
-                return FrontSectorLedger.Build(inputs);
+                var posture = StrategicCoordinator.Instance?.DirectorMemories?[allianceId]?.LastPosture;
+                var options = new FrontLedgerOptions
+                {
+                    MinimumHoldRatio     = Clamp(0.9f  + (posture?.MinimumHoldRatioModifier ?? 0f), 0.5f, 1.0f),
+                    ConcessionRatio      = Clamp(0.55f + (posture?.ConcessionRatioModifier  ?? 0f), 0.4f, 0.7f),
+                    CriticalHoldRatioBonus = 0.2f
+                };
+
+                return FrontSectorLedger.Build(inputs, options);
             }
             catch (Exception ex)
             {
@@ -241,6 +249,13 @@ namespace WhiskeyRealism.Strategic
         {
             if (value < 0f) return 0f;
             if (value > 1f) return 1f;
+            return value;
+        }
+
+        private static float Clamp(float value, float lo, float hi)
+        {
+            if (value < lo) return lo;
+            if (value > hi) return hi;
             return value;
         }
     }
