@@ -120,6 +120,39 @@ namespace WhiskeyRealism.Strategic
                     return;
                 }
 
+                var intent = output.Decision == OperationalProbeDecision.Escalate
+                    ? WlStrategicIntent.Offensive
+                    : WlStrategicIntent.Probe;
+                var bridgeDecision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
+                {
+                    AllianceId = allianceId,
+                    AifactionIndex = aifactionIndex,
+                    Unit = unit,
+                    TargetPosition = target.Value,
+                    TargetName = string.IsNullOrEmpty(output.TargetAreaKey) ? "Objective" : output.TargetAreaKey,
+                    ObjectiveId = -1,
+                    Intent = intent,
+                    Width = 20f,
+                    Depth = 20f,
+                    SourceSystem = "OperationalProbe"
+                });
+
+                if (bridgeDecision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
+                        $"unit={SafeName(unit)} action=wl-current-order type={bridgeDecision.WlOrderType} reason={output.Reason}");
+                    return;
+                }
+
+                if (!bridgeDecision.MayDirectMove)
+                {
+                    OnceLog.Info(
+                        $"operational-probe:wl-skip:{allianceId}:{UnitKey(unit)}:{bridgeDecision.Result}",
+                        $"[OperationalProbe] alliance={allianceId} unit={SafeName(unit)} action=skip-direct-move wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
+                    return;
+                }
+
                 if (AICampaign.MoveUnitTo(unit, target.Value, true) && !offensive.Contains(unit))
                 {
                     offensive.Add(unit);
