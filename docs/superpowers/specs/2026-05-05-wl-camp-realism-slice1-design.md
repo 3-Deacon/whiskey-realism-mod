@@ -53,12 +53,18 @@ modifier = max(0, 1 + bonus * maxbonusmalus / divisor)
 
 Anchor: `Camp.GetModifier(int, bool)`: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:172522`
 
+The history window is config-driven through `GamePrefs.camptimehistorydays`. The native fallback default is `50f`, but the installed W&L config imports `30`:
+
+- native default: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:48396`
+- config import: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:58781`
+- installed value: `/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/Config/dlcwl_config.dat:456`
+
 For unit-facing station effects, vanilla passes `dividebycommandedunits: true` for stations:
 
-- `6` Drill the Troops: training gain, `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:115241`
-- `7` Motivate the Men: morale recovery, `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:127872`
-- `8` Recruitment: replacement inflow, `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:114573`
-- `11` Inspect Readiness: readiness recovery, `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:115274`
+- `6` Drill the Troops: training gain, `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:115246`
+- `7` Motivate the Men: morale recovery, `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:127877`
+- `8` Recruitment: replacement inflow, `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:114577`
+- `11` Inspect Readiness: readiness recovery, `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:115279`
 
 Those effects are divided by `DLC_WL.GetNumberOfCommandedUnits()`, which makes positive investment increasingly hard to feel as command size grows.
 
@@ -148,7 +154,8 @@ Patch surface:
 
 The Prefix should:
 
-- call `Camp.PlayerUnitStatus()` when W&L camp state is initialized;
+- call `Camp.PlayerUnitStatus()` only after `Camp.UpdateCamp()` has refreshed `playercampaignunit` / `armygrp` for the day;
+- guard against missing `battlefieldsetupref`, because `PlayerUnitStatus()` calls `battlefieldsetupref.SearchAutocalcFromMonument(...)` while checking battle status;
 - write the result to `Camp.currentstatus`;
 - catch and log reflection/runtime failures once, then allow vanilla behavior.
 
@@ -160,7 +167,7 @@ The Postfix should:
 4. For each station:
    - if station minimum is positive, corrected credit is `stationMin * actualCampHours / minimumTotal`;
    - otherwise corrected credit is `0`.
-5. Replace only the last station `timehistory` entry added by vanilla.
+5. Replace only the last station `timehistory` entry added by vanilla. Do not add or remove history entries; preserve vanilla rolling-history length.
 6. Leave companion time history untouched. Vanilla already updates companion time before station credited time, and companion assignment is a separate daily choice.
 
 Invariant:
@@ -177,11 +184,14 @@ Patch surface:
 
 - `Camp.Station.GetCurrentBonus(bool useaverage)` Postfix.
 
-Vanilla uses a 30-day average from `GamePrefs.camptimehistorydays`, which makes camp changes slow to feel. Slice 1 should blend vanilla's long average with a short recent average for safe station IDs:
+The installed config uses a 30-day average from `GamePrefs.camptimehistorydays`, which makes camp changes slow to feel. Slice 1 should blend vanilla's long average with a short recent average for safe station IDs:
 
 ```text
-effectiveHours = longAverage * (1 - recentWeight) + recentAverage * recentWeight
+effectiveStationHours = longStationAverage * (1 - recentWeight) + recentStationAverage * recentWeight
+effectiveCompanionHours = longCompanionAverage * (1 - recentWeight) + recentCompanionAverage * recentWeight
 ```
+
+`longStationAverage` and `longCompanionAverage` should use vanilla's already-computed `averagetimespent` and `companionaveragetimespent`. `recentStationAverage` and `recentCompanionAverage` should sum the latest available entries and divide by `CampRecentBonusWindowDays`, not by entry count, so missing companion days still count as zero.
 
 Defaults:
 
@@ -193,11 +203,13 @@ CampRecentBonusWeight = 0.35
 The recomputed bonus uses the same vanilla thresholds and clamp:
 
 ```text
-bonus = clamp((effectiveHours + effectiveCompanionHours - minTimeBonus)
+bonus = clamp((effectiveStationHours + effectiveCompanionHours - minTimeBonus)
               / max(0.001, maxTimeBonus - minTimeBonus), -1, 1)
 ```
 
 Apply only when `useaverage == true`. Immediate UI comparison mode, which passes `useaverage == false`, remains vanilla.
+
+Implementation must resolve the station ID from the native list with `Camp.stations.IndexOf(__instance)` and fall back to the vanilla result if the station cannot be resolved. The nested `Camp.Station` type has no explicit station ID field.
 
 Apply only to station IDs:
 
@@ -233,6 +245,10 @@ Vanilla uses the raw commanded-unit count as the divisor. Slice 1 should use a s
 ```text
 effectiveDivisor = max(1, pow(commandedUnitCount, CampUnitEffectDivisorPower))
 ```
+
+The commanded-unit count comes from `DLC_WL.GetNumberOfCommandedUnits()`, which returns the cached `numberofcommandedunits` value:
+
+- `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:47890`
 
 Default:
 
