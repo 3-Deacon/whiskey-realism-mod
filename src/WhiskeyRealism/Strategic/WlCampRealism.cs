@@ -5,6 +5,8 @@ namespace WhiskeyRealism.Strategic
     internal static class WlCampRealism
     {
         public const int RestStationId = 12;
+        public const float DefaultRestNeutralHours = 3f;
+        public const float DefaultRestMaxRewardHours = 6f;
 
         public static bool TryCorrectShortCampMinimumCredits(
             float actualCampHours,

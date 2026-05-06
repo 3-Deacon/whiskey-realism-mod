@@ -193,12 +193,12 @@ namespace WhiskeyRealism
                 "W&L Camp", "Enable W&L Camp Rest Reward Cap", true,
                 "Default ON. Replaces vanilla Rest bonus curve of 6h neutral / 9h full reward with a field-duty curve.");
             WlCampRestNeutralHours = Config.Bind(
-                "W&L Camp", "W&L Camp Rest Neutral Hours", 3f,
+                "W&L Camp", "W&L Camp Rest Neutral Hours", WlCampRealism.DefaultRestNeutralHours,
                 new ConfigDescription(
                     "Rest hours treated as neutral before health bonus begins. Vanilla Rest station minimum is 3h.",
                     new AcceptableValueRange<float>(0f, 5f)));
             WlCampRestMaxRewardHours = Config.Bind(
-                "W&L Camp", "W&L Camp Rest Max Reward Hours", 5f,
+                "W&L Camp", "W&L Camp Rest Max Reward Hours", WlCampRealism.DefaultRestMaxRewardHours,
                 new ConfigDescription(
                     "Rest hours needed for full positive Rest reward. Vanilla Rest max reward is 9h.",
                     new AcceptableValueRange<float>(3f, 9f)));

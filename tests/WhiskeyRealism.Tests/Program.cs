@@ -52,7 +52,7 @@ static class Program
             ("wl camp responsive bonus excluded stations stay vanilla", WlCampResponsiveBonusExcludedStationsStayVanilla),
             ("wl camp responsive bonus use average false stays vanilla", WlCampResponsiveBonusUseAverageFalseStaysVanilla),
             ("wl camp responsive bonus nonfinite input stays bounded", WlCampResponsiveBonusNonfiniteInputStaysBounded),
-            ("wl camp rest reward cap makes five hours full reward", WlCampRestRewardCapMakesFiveHoursFullReward),
+            ("wl camp rest reward cap makes six hours full reward", WlCampRestRewardCapMakesSixHoursFullReward),
             ("wl camp rest reward cap leaves non rest stations vanilla", WlCampRestRewardCapLeavesNonRestStationsVanilla),
             ("wl camp rest reward cap invalid config falls back", WlCampRestRewardCapInvalidConfigFallsBack),
             ("wl camp unit divisor clamps invalid cached counts", WlCampUnitDivisorClampsInvalidCachedCounts),
@@ -852,19 +852,20 @@ static class Program
         AssertNear(0f, result, 0.0001f, "nonfinite responsive bonus fallback");
     }
 
-    private static void WlCampRestRewardCapMakesFiveHoursFullReward()
+    private static void WlCampRestRewardCapMakesSixHoursFullReward()
     {
         AssertTrue(WlCampRealism.UsesRestRewardCap(12), "station 12 should be Rest");
-        float vanillaAtFiveHours = (5f - 6f) / 3f;
-        float resultAtFive = WlCampRealism.ComputeRestRewardBonus(
-            12, vanillaAtFiveHours, 5f, 0f,
-            6f, 9f, 3f, 5f);
-        float resultAtFour = WlCampRealism.ComputeRestRewardBonus(
-            12, 0f, 4f, 0f,
-            6f, 9f, 3f, 5f);
+        AssertNear(3f, WlCampRealism.DefaultRestNeutralHours, 0.0001f, "default rest neutral");
+        AssertNear(6f, WlCampRealism.DefaultRestMaxRewardHours, 0.0001f, "default rest max reward");
+        float resultAtSix = WlCampRealism.ComputeRestRewardBonus(
+            12, 0f, 6f, 0f,
+            6f, 9f, WlCampRealism.DefaultRestNeutralHours, WlCampRealism.DefaultRestMaxRewardHours);
+        float resultAtFourAndHalf = WlCampRealism.ComputeRestRewardBonus(
+            12, 0f, 4.5f, 0f,
+            6f, 9f, WlCampRealism.DefaultRestNeutralHours, WlCampRealism.DefaultRestMaxRewardHours);
 
-        AssertNear(1f, resultAtFive, 0.0001f, "five-hour rest bonus");
-        AssertNear(0.5f, resultAtFour, 0.0001f, "four-hour rest bonus");
+        AssertNear(1f, resultAtSix, 0.0001f, "six-hour rest bonus");
+        AssertNear(0.5f, resultAtFourAndHalf, 0.0001f, "halfway rest bonus");
     }
 
     private static void WlCampRestRewardCapLeavesNonRestStationsVanilla()
