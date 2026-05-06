@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the Strategic Resilience Director per `docs/superpowers/specs/2026-05-05-strategic-resilience-director-design.md` — a cached, low-frequency posture publisher that turns the strategic system into a war-length pressure model with vanilla-bound collapse thresholds, contact-backed probe escalation, and personality-preserved threshold modifiers.
+**Goal:** Ship the Strategic Resilience Director per `docs/superpowers/specs/archive/2026-05-05-strategic-resilience-director-design.md` — a cached, low-frequency posture publisher that turns the strategic system into a war-length pressure model with vanilla-bound collapse thresholds, contact-backed probe escalation, and personality-preserved threshold modifiers.
 
 **Architecture:** Pure-logic ledgers in `src/WhiskeyRealism/Strategic/` consumed by a single `StrategicResilienceDirector` that publishes one `DirectorPosture` per alliance. Director rides on top of existing executors (CIC, ledgers, vanilla). Read-only-from-Harmony-patches invariant preserved. Required Fixes (RecomputePressure reset, PhaseTruthLedger, ContactEvidenceLedger, vanilla offensive-availability wrapper, theater pressure helper) wire first; architectural cleanup (delete TheaterCommander, single force-availability source, single probe-state source, BattleHistoryQuery helper) lands next; Director on top.
 
@@ -37,7 +37,7 @@ Each bias is bounded: where personality already adjusts the same field, ±50% of
   cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"
   sha256sum dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/WhiskeyRealism.dll"
   ```
-- **Spec:** `docs/superpowers/specs/2026-05-05-strategic-resilience-director-design.md` (582 lines, source of truth for rules)
+- **Spec:** `docs/superpowers/specs/archive/2026-05-05-strategic-resilience-director-design.md` (582 lines, source of truth for rules)
 - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`. Regenerate via `docs/findings.md` if `/tmp` was wiped. Key anchor: `AICampaign.IsUnitAvailableForOffensiveOperations` at line 14080.
 - **Conventions:** one concern per file. Pure ledger types in `Strategic/`. Reflection wrapped in try/catch + `Plugin.Log.LogWarning` or `OnceLog.Warning`. Never throw from a Harmony patch. Strategic mod state read-only to patches.
 - **Commit style:** match existing `git log --oneline -10` (Conventional Commits — `feat:`, `fix:`, `refactor:`).
@@ -3307,7 +3307,7 @@ Add a "What just shipped" entry to `docs/handoff.md` summarizing:
 - [ ] **Step 7: Final commit (if any docs changed)**
 
 ```bash
-git add docs/handoff.md docs/patch-catalog.md docs/superpowers/plans/2026-05-05-strategic-resilience-director.md
+git add docs/handoff.md docs/patch-catalog.md docs/superpowers/plans/archive/2026-05-05-strategic-resilience-director.md
 git commit -m "docs: record Director slice ship + smoke results"
 ```
 
@@ -3316,8 +3316,8 @@ git commit -m "docs: record Director slice ship + smoke results"
 After smoke confirms everything works, follow `AGENTS.md` "Doc lifecycle":
 
 ```bash
-git mv docs/superpowers/specs/2026-05-05-strategic-resilience-director-design.md docs/superpowers/specs/archive/
-git mv docs/superpowers/plans/2026-05-05-strategic-resilience-director.md docs/superpowers/plans/archive/
+git mv docs/superpowers/specs/archive/2026-05-05-strategic-resilience-director-design.md docs/superpowers/specs/archive/
+git mv docs/superpowers/plans/archive/2026-05-05-strategic-resilience-director.md docs/superpowers/plans/archive/
 ```
 
 Update the corresponding `archive/README.md` indexes.

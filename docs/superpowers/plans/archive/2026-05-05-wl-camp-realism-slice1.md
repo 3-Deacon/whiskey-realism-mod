@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship W&L Camp Realism Slice 1 from `docs/superpowers/specs/2026-05-05-wl-camp-realism-slice1-design.md`: correct vanilla short-camp undercrediting, make safe camp bonuses respond faster, and soften command-count dilution for Drill, Motivate, Recruitment, and Readiness.
+**Goal:** Ship W&L Camp Realism Slice 1 from `docs/superpowers/specs/archive/2026-05-05-wl-camp-realism-slice1-design.md`: correct vanilla short-camp undercrediting, make safe camp bonuses respond faster, and soften command-count dilution for Drill, Motivate, Recruitment, and Readiness.
 
 **Architecture:** Put arithmetic in one pure strategic helper and keep all native/Harmony work in one isolated patch concern. The patch preserves vanilla camp save/history shape, companion history, diary/event thresholds, and existing station/action data. Responsive weighting applies to safe gameplay/UI payoff paths but is suppressed while native diary/event threshold methods run.
 
