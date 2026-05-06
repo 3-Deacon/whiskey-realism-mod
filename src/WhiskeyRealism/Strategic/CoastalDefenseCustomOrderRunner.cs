@@ -75,8 +75,36 @@ namespace WhiskeyRealism.Strategic
                         if (IsPlayerControlled(unit)) continue;
 
                         var anchor = new Vector3(response.Threat.X, 0f, response.Threat.Z);
-                        SafeMoveUnitTo(unit, anchor);
-                        defOps.Add(unit);
+                        var bridgeDecision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
+                        {
+                            AllianceId = allianceId,
+                            AifactionIndex = aifactionIndex,
+                            Unit = unit,
+                            TargetPosition = anchor,
+                            TargetName = sig,
+                            ObjectiveId = -1,
+                            Intent = WlStrategicIntent.EngageEnemy,
+                            Width = 20f,
+                            Depth = 20f,
+                            SourceSystem = "CoastalDefense"
+                        });
+
+                        if (bridgeDecision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
+                        {
+                            defOps.Add(unit);
+                        }
+                        else if (bridgeDecision.MayDirectMove)
+                        {
+                            SafeMoveUnitTo(unit, anchor);
+                            defOps.Add(unit);
+                        }
+                        else
+                        {
+                            OnceLog.Info(
+                                $"defense-intent:custom-order:wl-skip:{allianceId}:{sig}:{candidate.UnitInstanceId}:{bridgeDecision.Result}",
+                                $"[DefenseIntent] skipped-wl-custom-order alliance={allianceId} threat={sig} unit={SafeName(unit, candidate.UnitInstanceId)} wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
+                            continue;
+                        }
 
                         if (!thisTick.TryGetValue(sig, out var tickSet))
                         {
