@@ -15,7 +15,7 @@
 | **Repo** | [`3-Deacon/whiskey-realism-mod`](https://github.com/3-Deacon/whiskey-realism-mod) (public, MIT) |
 | **Last updated** | 2026-05-06 |
 
-> **Active implementation note (2026-05-06):** W&L dispatch/objective bridge C0a-C0c has been built, deployed, and hash-verified as DLL `698e889b51a4617a8a1ccef3b4fd49699c5b6d5c7fe794c5c4145162f1959f39` (392704 bytes). #36 `DispatchStanceSanitizerPatch` sanitizes newly generated player-chain W&L stance-0 dispatch text. `WlStrategicOrderBridge` now routes eligible operational probe, army-area redeploy, and coastal-defense engage intents through vanilla W&L current orders, and skips failed/ineligible/player-controlled player-chain calls instead of direct-moving. Runtime smoke for bridge-order lines, sanitizer lines, `"to none"` absence, and exception absence is still pending.
+> **Active implementation note (2026-05-06):** W&L dispatch/objective bridge C0a-C0c has been built, deployed, and hash-verified as DLL `d8b6260b8dfd31dfc5c348e8c0a6393800785a7796a42f914a67bf85e4f1a672` (392704 bytes). #36 `DispatchStanceSanitizerPatch` sanitizes newly generated player-chain W&L stance-0 dispatch text. `WlStrategicOrderBridge` now routes eligible operational probe, army-area redeploy, and coastal-defense engage intents through vanilla W&L current orders, and skips failed/ineligible/player-controlled player-chain calls instead of direct-moving. Runtime smoke for bridge-order lines, sanitizer lines, `"to none"` absence, and exception absence is still pending.
 
 ---
 

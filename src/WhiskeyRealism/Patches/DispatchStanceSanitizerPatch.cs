@@ -28,7 +28,7 @@ namespace WhiskeyRealism.Patches
                 __instance.content = result.Content;
                 OnceLog.Info(
                     "wl-dispatch-sanitizer:sanitized:" + __instance.type,
-                    "[W&LDispatch] sanitized stance text for message type " + __instance.type + ": " + Prefix(result.Content));
+                    "[W&LDispatch] sanitized stance text for message type " + __instance.type + ": " + Preview(result.Content));
             }
             catch (Exception ex)
             {
@@ -49,7 +49,7 @@ namespace WhiskeyRealism.Patches
             return unit.dlcw_isundercommander || DLC_WL.IsPlayerPartOfUnit(unit);
         }
 
-        private static string Prefix(string content)
+        private static string Preview(string content)
         {
             if (string.IsNullOrEmpty(content)) return "";
             return content.Length <= 80 ? content : content.Substring(0, 80);
