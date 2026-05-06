@@ -47,6 +47,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalStartupGate.cs" Link="OperationalStartupGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCareerStartGate.cs" Link="WlCareerStartGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlStartSelectionRetryGate.cs" Link="WlStartSelectionRetryGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersonalityVector.cs" Link="PersonalityVector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DifficultyPersonalityModifier.cs" Link="DifficultyPersonalityModifier.cs" />
@@ -73,6 +74,12 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalIntentLedger.cs" Link="FiscalIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalPolicyScorer.cs" Link="FiscalPolicyScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalConstructionScorer.cs" Link="FiscalConstructionScorer.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\EconomyAllianceDataGuard.cs" Link="EconomyAllianceDataGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CommanderAssignmentGuard.cs" Link="CommanderAssignmentGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignFilterMapInitializationGuard.cs" Link="CampaignFilterMapInitializationGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\StateHandoverGuard.cs" Link="StateHandoverGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\FleetPatrolResetGuard.cs" Link="FleetPatrolResetGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArtilleryCombineGunTransfer.cs" Link="ArtilleryCombineGunTransfer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionModels.cs" Link="ConstructionModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionIntentLedger.cs" Link="ConstructionIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\ConstructionSteeringScorer.cs" Link="ConstructionSteeringScorer.cs" />

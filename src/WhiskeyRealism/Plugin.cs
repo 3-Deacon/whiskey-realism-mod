@@ -51,6 +51,16 @@ namespace WhiskeyRealism
         internal ConfigEntry<int> CampaignAiGovernorMaxPasses20x;
         internal ConfigEntry<int> CampaignAiGovernorMaxPasses50x;
         internal ConfigEntry<float> CampaignAiGovernorFrameBudgetMs;
+        internal ConfigEntry<bool> EnableWlCampAccountingFix;
+        internal ConfigEntry<bool> EnableWlCampRestRewardCap;
+        internal ConfigEntry<float> WlCampRestNeutralHours;
+        internal ConfigEntry<float> WlCampRestMaxRewardHours;
+        internal ConfigEntry<bool> EnableWlCampResponsiveBonusWeighting;
+        internal ConfigEntry<int> WlCampRecentBonusWindowDays;
+        internal ConfigEntry<float> WlCampRecentBonusWeight;
+        internal ConfigEntry<bool> EnableWlCampUnitPayoffTuning;
+        internal ConfigEntry<float> WlCampUnitEffectDivisorPower;
+        internal ConfigEntry<bool> EnableWlCampVerboseTrace;
 
         // Vanilla-settings override — lock Aggressiveness + Historic AI Personality
         // + Difficulty at campaign creation.
@@ -182,6 +192,46 @@ namespace WhiskeyRealism
             CampaignAiGovernorFrameBudgetMs = Config.Bind(
                 "Performance", "Campaign AI Governor Frame Budget Ms", 3f,
                 "Maximum wall-clock milliseconds per AICampaign.Update wrapper frame before the governor stops issuing more UpdateUnitAI passes.");
+            EnableWlCampAccountingFix = Config.Bind(
+                "W&L Camp", "Enable W&L Camp Accounting Fix", true,
+                "Default ON. Corrects vanilla short-camp minimum allocation so credited station time sums to actual camp time.");
+            EnableWlCampRestRewardCap = Config.Bind(
+                "W&L Camp", "Enable W&L Camp Rest Reward Cap", true,
+                "Default ON. Replaces vanilla Rest bonus curve of 6h neutral / 9h full reward with a field-duty curve.");
+            WlCampRestNeutralHours = Config.Bind(
+                "W&L Camp", "W&L Camp Rest Neutral Hours", WlCampRealism.DefaultRestNeutralHours,
+                new ConfigDescription(
+                    "Rest hours treated as neutral before health bonus begins. Vanilla Rest station minimum is 3h.",
+                    new AcceptableValueRange<float>(0f, 5f)));
+            WlCampRestMaxRewardHours = Config.Bind(
+                "W&L Camp", "W&L Camp Rest Max Reward Hours", WlCampRealism.DefaultRestMaxRewardHours,
+                new ConfigDescription(
+                    "Rest hours needed for full positive Rest reward. Vanilla Rest max reward is 9h.",
+                    new AcceptableValueRange<float>(3f, 9f)));
+            EnableWlCampResponsiveBonusWeighting = Config.Bind(
+                "W&L Camp", "Enable W&L Camp Responsive Bonus Weighting", true,
+                "Default ON. Blends safe camp stations with recent station history so allocation payoff is less delayed. Responsive weighting is suppressed inside diary/event threshold checks.");
+            WlCampRecentBonusWindowDays = Config.Bind(
+                "W&L Camp", "W&L Camp Recent Bonus Window Days", 7,
+                new ConfigDescription(
+                    "Recent station-history window used for responsive camp bonus weighting.",
+                    new AcceptableValueRange<int>(3, 14)));
+            WlCampRecentBonusWeight = Config.Bind(
+                "W&L Camp", "W&L Camp Recent Bonus Weight", 0.35f,
+                new ConfigDescription(
+                    "Blend weight for recent camp history. 0 disables responsiveness; 0.5 is the maximum Slice 1 weighting.",
+                    new AcceptableValueRange<float>(0f, 0.5f)));
+            EnableWlCampUnitPayoffTuning = Config.Bind(
+                "W&L Camp", "Enable W&L Camp Unit Payoff Tuning", true,
+                "Default ON. Softens command-count dilution for Drill, Motivate, Recruitment, and Readiness camp modifiers.");
+            WlCampUnitEffectDivisorPower = Config.Bind(
+                "W&L Camp", "W&L Camp Unit Effect Divisor Power", 0.5f,
+                new ConfigDescription(
+                    "Power applied to commanded-unit count for unit-facing camp effects. 0.5 uses square-root scaling; 1.0 is vanilla-equivalent.",
+                    new AcceptableValueRange<float>(0.5f, 1.0f)));
+            EnableWlCampVerboseTrace = Config.Bind(
+                "W&L Camp", "Enable W&L Camp Verbose Trace", false,
+                "Emit bounded W&L camp accounting and modifier trace lines for focused smoke tests.");
             OverrideVanillaSettings = Config.Bind(
                 "Strategic", "Override Vanilla Settings", true,
                 "When true, Whiskey Realism locks Aggressiveness to Mediocre, Historic AI Personality to true, and Difficulty to the value of LockedDifficulty (default Hard) at campaign creation. " +

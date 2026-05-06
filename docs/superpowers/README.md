@@ -1,6 +1,6 @@
 # `docs/superpowers/`
 
-Slice-level design and execution artifacts. Living-doc state lives in [`docs/handoff.md`](../handoff.md), [`docs/patch-catalog.md`](../patch-catalog.md), [`docs/findings.md`](../findings.md), [`docs/fort-construction-governor.md`](../fort-construction-governor.md), [`docs/operational-tempo-doctrine.md`](../operational-tempo-doctrine.md), and [`MEMORY.md`](../../MEMORY.md).
+Slice-level design and execution artifacts. Living-doc state lives in [`docs/handoff.md`](../handoff.md), [`docs/patch-catalog.md`](../patch-catalog.md), [`docs/findings.md`](../findings.md), [`docs/bug-fixes/`](../bug-fixes/), [`docs/fort-construction-governor.md`](../fort-construction-governor.md), [`docs/operational-tempo-doctrine.md`](../operational-tempo-doctrine.md), and [`MEMORY.md`](../../MEMORY.md).
 
 ## Layout
 
@@ -8,6 +8,8 @@ Slice-level design and execution artifacts. Living-doc state lives in [`docs/han
 - [`specs/archive/`](specs/archive/) — design specs whose implementation has shipped. See the archive [README](specs/archive/README.md) for the index.
 - [`plans/`](plans/) — **active** implementation plans. Current active plan: strategic operational probe/contact tempo runtime smoke follow-up. Tactical Slice B plans exist but are paused until the user explicitly reopens tactical work.
 - [`plans/archive/`](plans/archive/) — implementation plans whose patches have shipped. See the archive [README](plans/archive/README.md) for the index.
+
+Cross-cutting vanilla bug fixes do not live here unless they grow into a real design slice. Track those in [`../bug-fixes/`](../bug-fixes/).
 
 ## Lifecycle
 

@@ -88,6 +88,11 @@ namespace WhiskeyRealism.Strategic
             return completedPasses < GovernedPassCap(gameSpeed, options);
         }
 
+        public static bool ShouldSkipCampaignAiUpdate(bool gamePaused, float gameSpeed)
+        {
+            return gamePaused || gameSpeed <= 0f;
+        }
+
         public static string LogSignature(float gameSpeed, int vanillaPasses, int extraPasses, int maxExtra, bool budgetExhausted)
         {
             return ((int)System.Math.Round(gameSpeed)) + "x:" +

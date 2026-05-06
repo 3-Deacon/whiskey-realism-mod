@@ -601,11 +601,7 @@ Pure strategic ledger logic now has a console harness at `tests/WhiskeyRealism.T
 
 ## 11. Compatibility
 
-**Explicitly incompatible with the "Community Hotfixes / Quality of Life Mod"** distributed via Steam. That mod replaces `Assembly-CSharp.dll` wholesale; this mod is a BepInEx plugin that patches the vanilla DLL via Harmony. They cannot coexist safely. Long-term path: extract Community Hotfix's behavior fixes (officer auto-replace, recruitment ratios, weapon-range selection, weapon-range selection, AI passive morale recovery) into this patch suite so users only need this mod.
-
-Documented in:
-- `README.md` Compatibility section.
-- `Plugin.cs.Awake()` will emit a `LogWarning` if it detects Community Hotfix's signature in a future check (TBD in implementation).
+Whiskey Realism expects the stock game `Assembly-CSharp.dll`. Mods that replace the game's managed DLL directly are unsupported; this project layers Harmony patches over vanilla instead.
 
 ## 12. Out of scope (future slices)
 

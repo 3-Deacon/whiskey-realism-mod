@@ -33,7 +33,6 @@ The desired behavior is not simply "longer rifle range" or "more casualties." Th
 - No claim that every weapon data field is active until grep or runtime proves it.
 - No assumption that buck-and-ball exists as a vanilla data flag. Whiskey approximates it through smoothbore doctrine unless a later verified weapon-data field appears.
 - No passive "ammo regenerates after N minutes" behavior while a regiment remains in active contact.
-- No Community Hotfix supersession in this slice. If later needed, fold it into a separate Slice E plan.
 
 ## Source Findings
 

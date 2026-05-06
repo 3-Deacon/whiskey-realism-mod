@@ -1,0 +1,29 @@
+# Vanilla AI Economy, Policy, And Construction Bugs
+
+This queue holds the economy/policy/building issues found during the 2026-05-05 investigation. It is not a design spec. Each item still needs a bounded plan before code unless marked `In progress` or `Shipped`.
+
+## Findings
+
+| ID | Status | Failure mode | Vanilla / patch anchor | Evidence | Narrow fix direction |
+|---|---|---|---|---|---|
+| `BUG-ECO-001` | In progress | Subsidy focus sentinel can leak into live subsidy value. | Vanilla financial AI is `AICampaign.UpdateFinancialAI(int alliance)` at decompile line 15352. Whiskey #18 reads `AIPersonality.subsidyfocus` in `FinancialAIPatch`. | Live `BepInEx/LogOutput.log` showed `subsidyLane=3 old=0.20 new=-1.00` and then `old=-0.95 new=-1.00` for CSA. Regression tests cover disabled focus and already-negative saved subsidy values. | Clamp subsidy focus caps: negative focus means disabled lane cap `0`, never a valid subsidy value. Repair already-negative lanes before normal movement. |
+| `BUG-ECO-002` | Needs repro | Policy selection can crash if AI personality is unavailable. | `Policies.CheckAIPolicyChange(int alliance)` starts at 211015 and dereferences `aIPersonality.id` at 211024 without a null check. | Code-level hazard only in current investigation; no fresh runtime stack was captured. | If startup/runtime logs show this path firing before personality init, add a narrow Prefix false/true guard that preserves vanilla once personality exists. |
+| `BUG-POL-001` | In progress | Policy 36 state handover uses simple support majority instead of decisive state support. | `Policies.LaunchPolicyEffect` policy 36 handover block starts at decompile line 210050; transfer helper `GameVars.SetNationToNewAlliance` starts at 66850. #32 owns the shipped guard. | Decompiled behavior confirmed: every USA/CSA state goes to alliance 0 if `support[0] > support[1]`, otherwise alliance 1. | #32 scopes only policy 36 and blocks `SetNationToNewAlliance` unless receiving-side support is `>=65%` and opposing support is `<=35%`. Build/deploy/hash verified in DLL `7da618bf...`; fresh-launch smoke pending. |
+| `BUG-ECO-003` | In progress | Economy alliance update emits repeated vanilla NRE noise and can trap the filter-map iterator on the same bad entry. | `Economy.UpdateEconomyAllianceData(float timediff, bool initialization)` starts at 32344; current stack reports `[0x00a30]` through `Economy.UpdateFilterMaps` / `BattleUnits.Update`. | Current `Player.log` has 27,100 hits for `Economy.UpdateEconomyAllianceData`; first stack is `/mnt/c/Users/coola/AppData/LocalLow/Grand Tactician/The Civil War (1861-1865)/Player.log` around line 684. Offset aligns with the corporate-building economy aggregation block at decompile lines 32394-32431. | Add a narrow Harmony Finalizer that suppresses only `NullReferenceException` from this vanilla method, logs iterator state once, and lets `UpdateFilterMaps` advance rather than emitting the same stack every frame. |
+| `BUG-ECO-004` | Backlog | Supply depot AI is outside current construction steering and can seize field units or place depots directly. | `AICampaign.CheckSupplyDepotConstruction(int _aifaction)` starts at 14659; low-supply unit move at 14767; direct `CBuilding.AddConstructionWish(CBuilding.id_supplydepot, ...)` at 14772; construction queue owner `CBuilding.AddConstructionWish` starts at 97479. | Decompiled behavior confirmed; no current bad runtime sample captured. | Start with observer/telemetry. Any guard should respect supply state, `unitsconstructingsupplydepots`, W&L subordinate control, front budget, and vanilla construction queue side effects. |
+| `BUG-ECO-005` | Backlog | Railroad starts are random per eligible line, not tied to front logistics, fiscal posture, or active corridors. | `AICampaign.UpdateRailroadConstruction(int alliance, float timediff)` starts at 16052 and loops all railroads at 16067-16072; `BattleUnits.Railroad.StartConstruction` starts at 77818 and only checks built/owned/permitted/check-only gates before start. | Decompiled behavior confirmed; #23 observes railroad starts but no steering patch currently filters them. | Consider a Prefix/filter or pre-start observer only after runtime telemetry shows wasteful starts. CSA rail doctrine cap already exists in `ConstructionIntentLedger`, but it does not currently steer vanilla starts. |
+| `BUG-BLD-001` | Shipped | Fort construction could accumulate dense local/capital clusters over repeated completed orders. | `AICampaign.CheckFortConstruction(int _aifaction)` starts at 16347; #27 `FortConstructionGovernorPatch` owns the shipped guard. | Decompile confirmed vanilla had one active fort order per faction and spacing checks, but no durable area/capital saturation cap. | Already shipped. Tune #27 only from runtime `[Patch:FortGovernor]` evidence. |
+
+## Not Verified
+
+- Post-deploy smoke for `BUG-ECO-003`; verify `[Patch:EconomyAllianceData]` appears at most once and the repeated Player.log NRE stops after a fresh game launch.
+- Post-deploy smoke for `BUG-ECO-001`; verify no new `[Patch:FinancialAI] subsidyLane=3 ... new=-1.00` lines after a fresh game launch.
+- Whether `BUG-ECO-002` can happen in a clean current campaign; it may be unreachable if vanilla always initializes AI personality before policy cadence.
+- Runtime smoke for `BUG-POL-001`; verify no unintended broad state flips on a fresh chapter-1 campaign start.
+- Whether `BUG-ECO-004` and `BUG-ECO-005` produce bad decisions in the current W&L active map; both are confirmed unpatched vanilla surfaces, not yet confirmed runtime regressions.
+
+## Immediate Follow-Up
+
+1. Fresh-launch smoke DLL `ce17af99...`: confirm no new `subsidyLane ... new=-1.00` lines and confirm `Economy.UpdateEconomyAllianceData` NRE spam stops.
+2. If smoke passes, mark `BUG-ECO-001` and `BUG-ECO-003` shipped.
+3. Keep `BUG-ECO-002`, `BUG-ECO-004`, and `BUG-ECO-005` out of code until runtime evidence justifies a guard.
