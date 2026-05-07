@@ -7,6 +7,7 @@ namespace WhiskeyRealism.Strategic
         public string UnitKey;
         public string ParentUnitKey;
         public int AllianceId;
+        public int StableUnitId;
         public string UnitName;
         public string CommanderName;
         public int UnitType;
@@ -15,6 +16,8 @@ namespace WhiskeyRealism.Strategic
         public bool GrandArmyStructureAvailable;
         public string AreaKey;
         public string SectorKey;
+        public float X;
+        public float Z;
         public float GroupStrengthActive;
         public float GroupStrengthDirect;
         public float Morale = 1f;

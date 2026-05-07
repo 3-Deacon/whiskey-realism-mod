@@ -16,9 +16,12 @@ namespace WhiskeyRealism.Strategic
     {
         public string UnitKey;
         public int AllianceId;
+        public int StableUnitId;
         public FormationLevel Level;
         public string AreaKey;
         public string SectorKey;
+        public float X;
+        public float Z;
         public FormationDirective Directive;
         public string Reason;
         public float CombatAvailability;
@@ -117,7 +120,7 @@ namespace WhiskeyRealism.Strategic
             if (_ordered.Count == 0) return "<none>";
             var parts = new List<string>();
             foreach (var assignment in _ordered)
-                parts.Add($"{assignment.UnitKey}:{assignment.Directive}:{assignment.Reason}");
+                parts.Add($"{assignment.UnitKey}:{assignment.StableUnitId}:{assignment.Directive}:{assignment.Reason}:{Math.Round(assignment.X, 1)}:{Math.Round(assignment.Z, 1)}");
             return string.Join(",", parts);
         }
 
@@ -239,9 +242,12 @@ namespace WhiskeyRealism.Strategic
             {
                 UnitKey = snapshot.UnitKey,
                 AllianceId = snapshot.AllianceId,
+                StableUnitId = snapshot.StableUnitId,
                 Level = snapshot.Level,
                 AreaKey = snapshot.AreaKey,
                 SectorKey = snapshot.SectorKey,
+                X = snapshot.X,
+                Z = snapshot.Z,
                 CombatAvailability = availability,
                 ExchangePressure = ExchangePressure(snapshot),
                 LocalFriendlySupport = snapshot.LocalFriendlySupportStrength,

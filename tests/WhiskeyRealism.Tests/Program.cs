@@ -164,6 +164,8 @@ static class Program
             ("army masses for plan target when hierarchy exists", ArmyMassesForPlanTargetWhenHierarchyExists),
             ("raid support maps only to cavalry capable formations", RaidSupportMapsOnlyToCavalryCapableFormations),
             ("formation directive summary changes when assignment changes", FormationDirectiveSummaryChangesWhenAssignmentChanges),
+            ("formation directive carries stable id and position", FormationDirectiveCarriesStableIdAndPosition),
+            ("formation directive summary changes on stable position", FormationDirectiveSummaryChangesOnStablePosition),
             ("operational probe assigns one bounded same-area formation", OperationalProbeAssignsOneBoundedSameAreaFormation),
             ("operational probe pauses on enemy reaction", OperationalProbePausesOnEnemyReaction),
             ("operational probe escalates after favorable contact", OperationalProbeEscalatesAfterFavorableContact),
@@ -2975,6 +2977,38 @@ static class Program
         string second = FormationDirectiveLedger.Build(new[] { b }, EraStage.Operational1862, null).Summary();
 
         AssertEqual(false, string.Equals(first, second, StringComparison.Ordinal));
+    }
+
+    private static void FormationDirectiveCarriesStableIdAndPosition()
+    {
+        var snap = Snapshot("position-corps", 1, 15, 9000f, 5000f, FormationLevel.Corps, FrontPosture.Counterstroke);
+        snap.StableUnitId = 4242;
+        snap.X = 123.5f;
+        snap.Z = -456.25f;
+
+        var ledger = FormationDirectiveLedger.Build(new[] { snap }, EraStage.Operational1862, null);
+        var assignment = ledger.GetAssignment("position-corps");
+
+        AssertEqual(4242, assignment.StableUnitId);
+        AssertNear(123.5f, assignment.X, 0.0001f, "assignment X");
+        AssertNear(-456.25f, assignment.Z, 0.0001f, "assignment Z");
+    }
+
+    private static void FormationDirectiveSummaryChangesOnStablePosition()
+    {
+        var a = Snapshot("position-corps", 1, 15, 9000f, 5000f, FormationLevel.Corps, FrontPosture.Counterstroke);
+        var b = Snapshot("position-corps", 1, 15, 9000f, 5000f, FormationLevel.Corps, FrontPosture.Counterstroke);
+        a.StableUnitId = 1;
+        b.StableUnitId = 1;
+        a.X = 10f;
+        a.Z = 10f;
+        b.X = 40f;
+        b.Z = 10f;
+
+        string first = FormationDirectiveLedger.Build(new[] { a }, EraStage.Operational1862, null).Summary();
+        string second = FormationDirectiveLedger.Build(new[] { b }, EraStage.Operational1862, null).Summary();
+
+        AssertTrue(first != second, "summary must change when stable position changes");
     }
 
     private static OperationalProbeInput BuildProbeInput()
