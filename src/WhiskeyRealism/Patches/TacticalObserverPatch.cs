@@ -1454,8 +1454,10 @@ namespace WhiskeyRealism.Patches
                 if (group == null || group.unittyp <= 13) continue;
 
                 float own = Math.Max(group.groupowninrange, group.groupstrengthaigroup);
-                float enemy = Math.Max(1f, group.groupenemiesinrange);
-                float confidence = group.unitrange != null && group.unitrange.closestenemyunitfarreg != null ? 0.8f : 0.45f;
+                float enemy = Math.Max(0f, Math.Max(group.groupenemiesinrange, MatrixEnemyAngleStrength(group)));
+                bool hasEnemy = enemy > 0f;
+                bool hasClosestEnemy = group.unitrange != null && group.unitrange.closestenemyunitfarreg != null;
+                float confidence = hasEnemy ? (hasClosestEnemy ? 0.8f : 0.55f) : 0.45f;
                 bool flankRisk = group.flanksthreated > 0f || group.outflanked > 0;
                 bool strongPoint = group.covervalue > 0.5f || group.fortinrange;
                 sectors.Add(new TacticalSectorAssessment(

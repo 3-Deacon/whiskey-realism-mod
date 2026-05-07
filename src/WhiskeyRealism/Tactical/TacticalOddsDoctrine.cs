@@ -108,11 +108,12 @@ namespace WhiskeyRealism.Tactical
             float enemyCurrent = Math.Max(
                 input.EnemyStrengthConfirmed,
                 Math.Max(input.EnemyStrengthRecent * 0.75f, input.EnemyStrengthInferred * 0.5f));
-            float current = input.OwnStrength / Math.Max(1f, enemyCurrent);
-            float projected = (input.OwnStrength + input.ReinforcementStrength24h) / Math.Max(1f, enemyCurrent);
+            bool noContact = input.Contact.State == TacticalContactState.None || enemyCurrent <= 0f;
+            float current = noContact ? 0f : input.OwnStrength / Math.Max(1f, enemyCurrent);
+            float projected = noContact ? 0f : (input.OwnStrength + input.ReinforcementStrength24h) / Math.Max(1f, enemyCurrent);
             TacticalInferiorForcePosture posture = TacticalInferiorForcePosture.None;
 
-            if (input.Contact.State == TacticalContactState.None)
+            if (noContact)
             {
                 posture = TacticalInferiorForcePosture.ProbeOrHold;
             }

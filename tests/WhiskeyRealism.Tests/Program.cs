@@ -684,6 +684,8 @@ static class Program
             sectors: Array.Empty<TacticalSectorAssessment>()));
 
         AssertEqual(TacticalInferiorForcePosture.ProbeOrHold, output.InferiorForcePosture, "posture");
+        AssertEqual(0f, output.CurrentGlobalOdds, "no contact current odds");
+        AssertEqual(0f, output.ProjectedGlobalOdds, "no contact projected odds");
         AssertTrue(!output.AllowAssault, "no contact should not permit assault");
     }
 
