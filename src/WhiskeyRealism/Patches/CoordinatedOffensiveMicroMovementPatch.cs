@@ -12,12 +12,19 @@ namespace WhiskeyRealism.Patches
     // retargets units already in unitsinoffensiveoperations toward a nearest
     // area objective. We temporarily remove package-locked units with active
     // paths so their initial coordinated package move is not overwritten before
-    // the path is consumed, then restore the list in Postfix/Finalizer.
+    // the path is consumed, then reinsert only those removed units in
+    // Postfix/Finalizer so vanilla removals of unrelated units survive.
     [HarmonyPatch(typeof(AICampaign), "UpdateMicroMovementInOffensive")]
     internal static class CoordinatedOffensiveMicroMovementPatch
     {
-        private static readonly Dictionary<int, List<object>> _snapshotByFaction =
-            new Dictionary<int, List<object>>();
+        private sealed class RemovedUnit
+        {
+            internal int Index;
+            internal object Unit;
+        }
+
+        private static readonly Dictionary<int, List<RemovedUnit>> _removedByFaction =
+            new Dictionary<int, List<RemovedUnit>>();
 
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction)
@@ -30,20 +37,15 @@ namespace WhiskeyRealism.Patches
                 var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
                 if (offensive == null || offensive.Count == 0) return;
 
-                var snapshot = new List<object>(offensive.Count);
-                for (int i = 0; i < offensive.Count; i++)
-                    snapshot.Add(offensive[i]);
-                _snapshotByFaction[_aifaction] = snapshot;
-
-                int removed = 0;
+                var removed = new List<RemovedUnit>();
                 for (int i = offensive.Count - 1; i >= 0; i--)
                 {
                     var unit = offensive[i] as Regiment;
                     if (unit == null) continue;
                     if (CoordinatedOperationRuntime.IsPackageLocked(unit))
                     {
+                        removed.Add(new RemovedUnit { Index = i, Unit = offensive[i] });
                         offensive.RemoveAt(i);
-                        removed++;
                     }
                     else
                     {
@@ -51,8 +53,8 @@ namespace WhiskeyRealism.Patches
                     }
                 }
 
-                if (removed == 0)
-                    _snapshotByFaction.Remove(_aifaction);
+                if (removed.Count > 0)
+                    _removedByFaction[_aifaction] = removed;
             }
             catch (Exception ex)
             {
@@ -78,7 +80,7 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                if (!_snapshotByFaction.TryGetValue(aifactionIndex, out var snapshot)) return;
+                if (!_removedByFaction.TryGetValue(aifactionIndex, out var removed)) return;
 
                 var faction = AICampaignReflect.GetFaction(aifactionIndex);
                 if (faction == null) return;
@@ -86,9 +88,14 @@ namespace WhiskeyRealism.Patches
                 var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
                 if (offensive == null) return;
 
-                offensive.Clear();
-                for (int i = 0; i < snapshot.Count; i++)
-                    offensive.Add(snapshot[i]);
+                removed.Sort((a, b) => a.Index.CompareTo(b.Index));
+                for (int i = 0; i < removed.Count; i++)
+                {
+                    var unit = removed[i].Unit;
+                    if (unit == null || offensive.Contains(unit)) continue;
+                    int index = Math.Max(0, Math.Min(removed[i].Index, offensive.Count));
+                    offensive.Insert(index, unit);
+                }
             }
             catch (Exception ex)
             {
@@ -97,7 +104,7 @@ namespace WhiskeyRealism.Patches
             }
             finally
             {
-                _snapshotByFaction.Remove(aifactionIndex);
+                _removedByFaction.Remove(aifactionIndex);
             }
         }
     }

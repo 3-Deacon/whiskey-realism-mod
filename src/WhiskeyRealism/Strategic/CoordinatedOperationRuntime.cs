@@ -12,6 +12,21 @@ namespace WhiskeyRealism.Strategic
 {
     internal static class CoordinatedOperationRuntime
     {
+        private sealed class UnitCommitPlan
+        {
+            internal int StableUnitId;
+            internal Regiment Unit;
+            internal WlStrategicIntent Intent;
+            internal WlStrategicOrderDecision Decision;
+        }
+
+        private sealed class DirectCommitRecord
+        {
+            internal Regiment Unit;
+            internal int StableUnitId;
+            internal bool WasInOffensive;
+        }
+
         private static readonly Dictionary<int, string> _packageLockByUnitId =
             new Dictionary<int, string>();
 
@@ -132,24 +147,32 @@ namespace WhiskeyRealism.Strategic
                 var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
                 if (ownUnits == null || offensive == null) return false;
 
-                int expected = 1 + output.SupportStableUnitIds.Count;
+                var plans = BuildCommitPlans(
+                    allianceId,
+                    aifactionIndex,
+                    ownUnits,
+                    output,
+                    target,
+                    targetName,
+                    objectiveId,
+                    intent,
+                    sourceSystem);
+                if (plans == null || plans.Count == 0) return false;
+
                 int committedCount = 0;
-                if (CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.LeadStableUnitId, target, targetName, objectiveId, intent, sourceSystem, output.Signature()))
-                    committedCount++;
-                for (int i = 0; i < output.SupportStableUnitIds.Count; i++)
+                var directRecords = new List<DirectCommitRecord>();
+                for (int i = 0; i < plans.Count; i++)
                 {
-                    var supportIntent = output.Decision == CoordinatedOperationDecision.Reinforce
-                        ? WlStrategicIntent.Reinforce
-                        : intent;
-                    if (CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.SupportStableUnitIds[i], target, targetName, objectiveId, supportIntent, sourceSystem, output.Signature()))
+                    if (CommitUnit(allianceId, aifactionIndex, offensive, plans[i], target, targetName, objectiveId, sourceSystem, output.Signature(), directRecords))
                         committedCount++;
                 }
-                if (committedCount > 0 && committedCount < expected)
+                if (committedCount > 0 && committedCount < plans.Count)
                 {
+                    RollBackDirectCommits(offensive, directRecords, output.Signature());
                     LogInfo(
-                        $"[CoordinatedOps] alliance={allianceId} action=package-partial committed={committedCount}/{expected} package={output.Signature()}");
+                        $"[CoordinatedOps] alliance={allianceId} action=package-partial-rollback committed={committedCount}/{plans.Count} package={output.Signature()}");
                 }
-                return committedCount == expected;
+                return committedCount == plans.Count;
             }
             catch (Exception ex)
             {
@@ -158,11 +181,70 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private static bool CommitUnit(
+        private static List<UnitCommitPlan> BuildCommitPlans(
             int allianceId,
             int aifactionIndex,
             IList ownUnits,
-            IList offensive,
+            CoordinatedOperationOutput output,
+            Vector3 target,
+            string targetName,
+            int objectiveId,
+            WlStrategicIntent intent,
+            string sourceSystem)
+        {
+            var plans = new List<UnitCommitPlan>();
+            if (!AddCommitPlan(
+                    allianceId,
+                    aifactionIndex,
+                    ownUnits,
+                    plans,
+                    output.LeadStableUnitId,
+                    target,
+                    targetName,
+                    objectiveId,
+                    intent,
+                    sourceSystem,
+                    output.Signature()))
+                return null;
+
+            for (int i = 0; i < output.SupportStableUnitIds.Count; i++)
+            {
+                var supportIntent = output.Decision == CoordinatedOperationDecision.Reinforce
+                    ? WlStrategicIntent.Reinforce
+                    : intent;
+                if (!AddCommitPlan(
+                        allianceId,
+                        aifactionIndex,
+                        ownUnits,
+                        plans,
+                        output.SupportStableUnitIds[i],
+                        target,
+                        targetName,
+                        objectiveId,
+                        supportIntent,
+                        sourceSystem,
+                        output.Signature()))
+                    return null;
+            }
+            int wlCurrentOrders = 0;
+            for (int i = 0; i < plans.Count; i++)
+            {
+                if (plans[i].Decision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
+                    wlCurrentOrders++;
+            }
+            if (wlCurrentOrders > 1 || (wlCurrentOrders == 1 && plans.Count > 1))
+            {
+                LogInfo($"[CoordinatedOps] alliance={allianceId} action=preflight-failed reason=wl-current-order-not-atomic package={output.Signature()}");
+                return null;
+            }
+            return plans;
+        }
+
+        private static bool AddCommitPlan(
+            int allianceId,
+            int aifactionIndex,
+            IList ownUnits,
+            List<UnitCommitPlan> plans,
             int stableUnitId,
             Vector3 target,
             string targetName,
@@ -174,16 +256,16 @@ namespace WhiskeyRealism.Strategic
             var unit = FindUnitById(ownUnits, stableUnitId);
             if (unit == null)
             {
-                LogInfo($"[CoordinatedOps] alliance={allianceId} unitId={stableUnitId} action=skip reason=unit-unresolved package={packageSignature}");
+                LogInfo($"[CoordinatedOps] alliance={allianceId} unitId={stableUnitId} action=preflight-failed reason=unit-unresolved package={packageSignature}");
                 return false;
             }
             if (!IsAvailable(aifactionIndex, unit, target))
             {
-                LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=skip reason=availability package={packageSignature}");
+                LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=preflight-failed reason=availability package={packageSignature}");
                 return false;
             }
 
-            var decision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
+            var decision = WlStrategicOrderBridge.ClassifyOnly(new WlStrategicOrderRequest
             {
                 AllianceId = allianceId,
                 AifactionIndex = aifactionIndex,
@@ -196,27 +278,93 @@ namespace WhiskeyRealism.Strategic
                 Depth = 20f,
                 SourceSystem = sourceSystem
             });
-
-            if (decision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
+            if (decision.Result != WlStrategicOrderResult.IssuedWlCurrentOrder && !decision.MayDirectMove)
             {
-                MarkPackageLocked(stableUnitId, packageSignature);
+                LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=preflight-failed wlResult={decision.Result} reason={decision.Reason} package={packageSignature}");
+                return false;
+            }
+
+            plans.Add(new UnitCommitPlan
+            {
+                StableUnitId = stableUnitId,
+                Unit = unit,
+                Intent = intent,
+                Decision = decision
+            });
+            return true;
+        }
+
+        private static bool CommitUnit(
+            int allianceId,
+            int aifactionIndex,
+            IList offensive,
+            UnitCommitPlan plan,
+            Vector3 target,
+            string targetName,
+            int objectiveId,
+            string sourceSystem,
+            string packageSignature,
+            List<DirectCommitRecord> directRecords)
+        {
+            var unit = plan.Unit;
+            if (unit == null) return false;
+
+            if (plan.Decision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
+            {
+                var decision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
+                {
+                    AllianceId = allianceId,
+                    AifactionIndex = aifactionIndex,
+                    Unit = unit,
+                    TargetPosition = target,
+                    TargetName = string.IsNullOrEmpty(targetName) ? "Objective" : targetName,
+                    ObjectiveId = objectiveId,
+                    Intent = plan.Intent,
+                    Width = 20f,
+                    Depth = 20f,
+                    SourceSystem = sourceSystem
+                });
+                if (decision.Result != WlStrategicOrderResult.IssuedWlCurrentOrder)
+                {
+                    LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=skip wlResult={decision.Result} reason={decision.Reason} package={packageSignature}");
+                    return false;
+                }
+                MarkPackageLocked(plan.StableUnitId, packageSignature);
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=wl-current-order type={decision.WlOrderType} package={packageSignature}");
                 return true;
             }
-            if (!decision.MayDirectMove)
-            {
-                LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=skip wlResult={decision.Result} reason={decision.Reason} package={packageSignature}");
-                return false;
-            }
+
             if (AICampaign.MoveUnitTo(unit, target, true))
             {
+                bool wasInOffensive = offensive.Contains(unit);
                 if (!offensive.Contains(unit))
                     offensive.Add(unit);
-                MarkPackageLocked(stableUnitId, packageSignature);
+                directRecords?.Add(new DirectCommitRecord
+                {
+                    Unit = unit,
+                    StableUnitId = plan.StableUnitId,
+                    WasInOffensive = wasInOffensive
+                });
+                MarkPackageLocked(plan.StableUnitId, packageSignature);
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=direct-move package={packageSignature}");
                 return true;
             }
+
+            LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=skip reason=move-failed package={packageSignature}");
             return false;
+        }
+
+        private static void RollBackDirectCommits(IList offensive, List<DirectCommitRecord> records, string packageSignature)
+        {
+            if (offensive == null || records == null || records.Count == 0) return;
+            for (int i = 0; i < records.Count; i++)
+            {
+                var record = records[i];
+                ClearPackageLock(record.Unit);
+                if (!record.WasInOffensive)
+                    offensive.Remove(record.Unit);
+                LogInfo($"[CoordinatedOps] unit={SafeName(record.Unit)} action=direct-rollback package={packageSignature}");
+            }
         }
 
         internal static Regiment FindUnitById(IList ownUnits, int stableUnitId)
