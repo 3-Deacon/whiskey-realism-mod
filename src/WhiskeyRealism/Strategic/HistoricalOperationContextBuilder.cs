@@ -139,9 +139,9 @@ namespace WhiskeyRealism.Strategic
         private static Vector3? ResolveObjectivePosition(int objectiveId)
         {
             if (objectiveId < 0) return null;
-            if (!ObjectiveCatalog.TryResolve(objectiveId, out var metadata))
+            if (!ObjectiveCatalog.TryResolvePosition(objectiveId, out float x, out float z))
                 return null;
-            return new Vector3(metadata.GeographicCentroidX, 0f, metadata.GeographicCentroidY);
+            return new Vector3(x, 0f, z);
         }
     }
 }

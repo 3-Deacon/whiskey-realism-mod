@@ -25,6 +25,20 @@ namespace WhiskeyRealism.Strategic
             return Table.TryGetValue(objectiveId, out metadata);
         }
 
+        public static bool TryResolvePosition(int objectiveId, out float x, out float z)
+        {
+            if (TryResolve(objectiveId, out var metadata))
+            {
+                x = metadata.GeographicCentroidX;
+                z = metadata.GeographicCentroidY;
+                return true;
+            }
+
+            x = 0f;
+            z = 0f;
+            return false;
+        }
+
         private static ObjectiveMetadata EastCapital(float x, float y)
         {
             return ObjectiveStrategyTagger.ApplyDefaultTags(new ObjectiveMetadata

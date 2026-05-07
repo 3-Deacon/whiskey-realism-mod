@@ -117,6 +117,7 @@ static class Program
             ("defense force sizer avoids oversized army for small threat", DefenseForceSizerAvoidsOversizedArmyForSmallThreat),
             ("defense force sizer accepts large force for large threat", DefenseForceSizerAcceptsLargeForceForLargeThreat),
             ("objective catalog maps known wl objectives", ObjectiveCatalogMapsKnownWlObjectives),
+            ("objective catalog exposes known objective positions", ObjectiveCatalogExposesKnownObjectivePositions),
             ("objective catalog keeps unknown ids unresolved", ObjectiveCatalogKeepsUnknownIdsUnresolved),
             ("historical operation catalog exact objective match", HistoricalOperationCatalogExactObjectiveMatch),
             ("historical operation catalog no profile for unmatched objective", HistoricalOperationCatalogNoProfileForUnmatchedObjective),
@@ -1619,6 +1620,19 @@ static class Program
         AssertEqual(Theater.West, saltville.Theater);
         AssertEqual(Category.SupplyHub, saltville.Category);
         AssertTrue(saltville.HasTag(StrategyTag.RailHub), "Saltville should carry supply/rail pressure");
+    }
+
+    private static void ObjectiveCatalogExposesKnownObjectivePositions()
+    {
+        AssertTrue(ObjectiveCatalog.TryResolvePosition(3, out float richmondX, out float richmondZ),
+            "objective 3 should expose a catalog position");
+        AssertNear(760f, richmondX, 0.01f, "objective 3 catalog x");
+        AssertNear(60f, richmondZ, 0.01f, "objective 3 catalog z");
+
+        AssertTrue(ObjectiveCatalog.TryResolvePosition(4, out float washingtonX, out float washingtonZ),
+            "objective 4 should expose a catalog position");
+        AssertNear(720f, washingtonX, 0.01f, "objective 4 catalog x");
+        AssertNear(160f, washingtonZ, 0.01f, "objective 4 catalog z");
     }
 
     private static void TheaterClassifierMapsWlCapitalsToEast()

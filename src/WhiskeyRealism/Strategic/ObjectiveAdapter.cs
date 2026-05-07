@@ -99,6 +99,8 @@ namespace WhiskeyRealism.Strategic
                     "objpos:" + objectiveId,
                     $"[ObjectiveAdapter] position resolve failed for objective ID {objectiveId}: {ex.Message}");
             }
+            if (ObjectiveCatalog.TryResolvePosition(objectiveId, out float x, out float z))
+                return new Vector3(x, 0f, z);
             return null;
         }
 
