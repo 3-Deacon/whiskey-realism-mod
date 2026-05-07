@@ -20,7 +20,8 @@ namespace WhiskeyRealism.Tactical
         Reserve = 6,
         Artillery = 7,
         Fallback = 8,
-        PlayerOrder = 9
+        PlayerOrder = 9,
+        Command = 10
     }
 
     public sealed class TacticalBattleContext
@@ -40,6 +41,7 @@ namespace WhiskeyRealism.Tactical
         public TacticalSectorSource SectorSource { get; set; }
         public string SectorSignature { get; set; }
         public string OrderSignature { get; set; }
+        public string CommandSignature { get; set; }
         public float ForceBalance { get; set; }
         public float ReinforcementsWithin24Hours { get; set; }
 
@@ -52,7 +54,8 @@ namespace WhiskeyRealism.Tactical
                 MacroAi = -99,
                 SectorSource = TacticalSectorSource.None,
                 SectorSignature = "",
-                OrderSignature = ""
+                OrderSignature = "",
+                CommandSignature = ""
             };
         }
     }

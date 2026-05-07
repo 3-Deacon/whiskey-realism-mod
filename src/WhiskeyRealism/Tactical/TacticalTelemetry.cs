@@ -49,7 +49,8 @@ namespace WhiskeyRealism.Tactical
                    " forceBalance=" + FormatFloat(context.ForceBalance) +
                    " reinf24h=" + FormatFloat(context.ReinforcementsWithin24Hours) +
                    " sectorSig=" + Safe(context.SectorSignature) +
-                   " orderSig=" + Safe(context.OrderSignature);
+                   " orderSig=" + Safe(context.OrderSignature) +
+                   " commandSig=" + Safe(context.CommandSignature);
         }
 
         public static string Delta(TacticalObserverSnapshot before, TacticalObserverSnapshot after)
@@ -87,7 +88,8 @@ namespace WhiskeyRealism.Tactical
                    "|" + Bucket(context.ForceBalance) +
                    "|" + Bucket(context.ReinforcementsWithin24Hours) +
                    "|" + Safe(context.SectorSignature) +
-                   "|" + Safe(context.OrderSignature);
+                   "|" + Safe(context.OrderSignature) +
+                   "|" + Safe(context.CommandSignature);
         }
 
         public static bool ShouldEmit(
@@ -130,6 +132,7 @@ namespace WhiskeyRealism.Tactical
                 case TacticalObservedEvent.Artillery: return "[TacticalArtillery]";
                 case TacticalObservedEvent.Fallback: return "[TacticalFallback]";
                 case TacticalObservedEvent.PlayerOrder: return "[TacticalPlayerOrder]";
+                case TacticalObservedEvent.Command: return "[TacticalCommand]";
                 default: return "[Tactical]";
             }
         }

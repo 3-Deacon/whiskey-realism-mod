@@ -26,6 +26,10 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _allGroupsAssignedField;
         private static FieldInfo _objectiveChainField;
         private static FieldInfo _orderedStanceField;
+        private static FieldInfo _parentRegimentField;
+        private static FieldInfo _allianceField;
+        private static FieldInfo _sideField;
+        private static FieldInfo _orderStateField;
 
         [HarmonyPatch(typeof(AIBattle), "CheckGlobalAIStrategy")]
         [HarmonyPostfix]
@@ -142,6 +146,8 @@ namespace WhiskeyRealism.Patches
             Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
         }
 
+        // B2 command/order friction stays read-only: these Postfixes interpret vanilla queue/courier state.
+        // They must not call SetWaypoint, AddToOrderQueue, SetOrderStatus, or mutate Regiment order fields.
         [HarmonyPatch(typeof(Regiment), "AddToOrderQueue")]
         [HarmonyPostfix]
         internal static void AddToOrderQueuePostfix(
@@ -222,10 +228,12 @@ namespace WhiskeyRealism.Patches
             {
                 var target = SafeRegiment(advisedunit);
                 var queued = FindLatestQueuedOrder(issuer, advisedunit, orderType);
+                if (queued == null) return;
+
                 bool sourceUnderCommander = issuer != null && issuer.dlcw_isundercommander;
                 bool targetUnderCommander = target != null && target.dlcw_isundercommander;
                 string relation = OrderRelation(sourceUnderCommander, targetUnderCommander);
-                float delay = queued != null ? queued.processingtime - GameVars.currenttimefromstart : 0f;
+                float delay = queued.processingtime - GameVars.currenttimefromstart;
                 int queueCount = issuer != null && issuer.orderqueue != null ? issuer.orderqueue.Count : -1;
                 string signature = "queued|" + SafeInstanceId(issuer) + "|" + SafeInstanceId(target) + "|" +
                     orderType + "|" + queueCount + "|" + BucketSeconds(delay) + "|" + relation;
@@ -245,6 +253,33 @@ namespace WhiskeyRealism.Patches
                     " newPath=" + newPath +
                     " modifyLast=" + modifyLastWaypoint +
                     " timedMove=" + FormatHours(timeToMove) +
+                    " dlcWl=" + SafeDlcWlActive());
+
+                var friction = TacticalOrderFriction.Evaluate(new TacticalOrderFrictionInput(
+                    orderDelayEnabled: SafeUseOrderDelays(),
+                    queueProcessing: queueProcessingTime,
+                    queueDelayHours: delay,
+                    delivery: TacticalOrderDelivery.Unknown,
+                    deliveryProcessHours: 0f,
+                    courierMissing: false,
+                    orderState: SafeOrderState(target),
+                    intendedPathId: SafePathId(target, true),
+                    transmittedPathId: SafePathId(target, false),
+                    contactChangedMaterially: false,
+                    commanderInitiative01: 0.50f));
+                var command = TacticalCommandLedger.Summarize(
+                    BuildCommanderProfile(issuer),
+                    BuildCommanderProfile(target),
+                    friction);
+
+                EmitDirect(
+                    "TacticalCommandQueued",
+                    "command-queued|" + SafeInstanceId(issuer) + "|" + SafeInstanceId(target) + "|" + command.Signature(),
+                    "[TacticalCommand] event=queued relation=" + relation +
+                    " source=" + SafeUnitName(issuer) +
+                    " target=" + SafeUnitName(target) +
+                    " summary=" + command.Signature() +
+                    " reason=" + command.Reason +
                     " dlcWl=" + SafeDlcWlActive());
             }
             catch (Exception ex)
@@ -266,6 +301,7 @@ namespace WhiskeyRealism.Patches
                 bool targetUnderCommander = lineTarget != null && lineTarget.dlcw_isundercommander;
                 string relation = OrderRelation(sourceUnderCommander, targetUnderCommander);
                 string delivery = line == null ? "unknown" : (line.type == 0 ? "bugle" : "courier");
+                TacticalOrderDelivery deliveryKind = DeliveryKind(delivery);
                 float processTime = line != null ? line.processtime : 0f;
                 string signature = "courier|" + SafeInstanceId(lineSource) + "|" + SafeInstanceId(lineTarget) + "|" +
                     delivery + "|" + BucketSeconds(processTime) + "|" + relation;
@@ -281,6 +317,43 @@ namespace WhiskeyRealism.Patches
                     " delivery=" + delivery +
                     " processHrs=" + FormatHours(processTime) +
                     " secondary=" + secondaryCourier +
+                    " dlcWl=" + SafeDlcWlActive());
+
+                bool courierMissing = line != null &&
+                    deliveryKind == TacticalOrderDelivery.Courier &&
+                    line.lineactive &&
+                    line.courierref == null;
+                var friction = TacticalOrderFriction.Evaluate(new TacticalOrderFrictionInput(
+                    orderDelayEnabled: SafeUseOrderDelays(),
+                    queueProcessing: false,
+                    queueDelayHours: 0f,
+                    delivery: deliveryKind,
+                    deliveryProcessHours: processTime,
+                    courierMissing: courierMissing,
+                    orderState: SafeOrderState(lineTarget),
+                    intendedPathId: SafePathId(lineTarget, true),
+                    transmittedPathId: SafePathId(lineTarget, false),
+                    contactChangedMaterially: false,
+                    commanderInitiative01: 0.50f));
+                var command = TacticalCommandLedger.Summarize(
+                    BuildCommanderProfile(lineSource),
+                    BuildCommanderProfile(lineTarget),
+                    friction);
+
+                EmitDirect(
+                    "TacticalOrderDelivery",
+                    "order-delivery|" + SafeInstanceId(lineSource) + "|" + SafeInstanceId(lineTarget) + "|" +
+                    delivery + "|" + command.Signature(),
+                    "[TacticalOrder] event=delivery relation=" + relation +
+                    " source=" + SafeUnitName(lineSource) +
+                    " target=" + SafeUnitName(lineTarget) +
+                    " delivery=" + delivery +
+                    " friction=" + friction.State +
+                    " delivered=" + friction.IsDelivered +
+                    " delayed=" + friction.IsDelayed +
+                    " pathLag=" + friction.TransmittedPathDiffers +
+                    " pressure=" + FormatHours(friction.DelayPressure) +
+                    " command=" + command.Signature() +
                     " dlcWl=" + SafeDlcWlActive());
             }
             catch (Exception ex)
@@ -632,6 +705,140 @@ namespace WhiskeyRealism.Patches
             {
                 return null;
             }
+        }
+
+        private static TacticalCommanderProfile BuildCommanderProfile(Regiment unit)
+        {
+            if (unit == null)
+            {
+                return TacticalCommanderProfile.FromVanillaShape(
+                    0,
+                    "unknown",
+                    -1,
+                    false,
+                    false,
+                    -1,
+                    -1,
+                    -1,
+                    0.50f);
+            }
+
+            try
+            {
+                return TacticalCommanderProfile.FromVanillaShape(
+                    SafeInstanceId(unit),
+                    SafeUnitName(unit),
+                    unit.unittyp,
+                    unit.istopunit,
+                    unit.dlcw_isundercommander,
+                    SafeParentId(unit),
+                    SafeAlliance(unit),
+                    SafeSide(unit),
+                    0.50f);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-observer:commander-profile", "Tactical commander profile lookup failed: " + ex.Message);
+                return TacticalCommanderProfile.FromVanillaShape(
+                    SafeInstanceId(unit),
+                    SafeUnitName(unit),
+                    -1,
+                    false,
+                    false,
+                    -1,
+                    -1,
+                    -1,
+                    0.50f);
+            }
+        }
+
+        private static int SafePathId(Regiment unit, bool ignoreOrderDelay)
+        {
+            try
+            {
+                return unit != null ? unit.GetLastTransmittedPath(ignoreOrderDelay) : -1;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-observer:path-id", "Tactical path id lookup failed: " + ex.Message);
+                return -1;
+            }
+        }
+
+        private static int SafeParentId(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return -1;
+                if (unit.parentregiment != null)
+                {
+                    var parent = SafeRegiment(unit.parentregiment);
+                    return SafeInstanceId(parent);
+                }
+
+                if (_parentRegimentField == null) _parentRegimentField = AccessTools.Field(typeof(Regiment), "parentregiment");
+                var parentObj = _parentRegimentField != null ? _parentRegimentField.GetValue(unit) as GameObject : null;
+                var reflectedParent = SafeRegiment(parentObj);
+                return SafeInstanceId(reflectedParent);
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static int SafeAlliance(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return -1;
+                if (_allianceField == null) _allianceField = AccessTools.Field(typeof(Regiment), "alliance");
+                if (_allianceField != null) return (int)_allianceField.GetValue(unit);
+                return unit.alliance;
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static int SafeSide(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return -1;
+                if (_sideField == null) _sideField = AccessTools.Field(typeof(Regiment), "side");
+                return _sideField != null ? (int)_sideField.GetValue(unit) : -1;
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static int SafeOrderState(Regiment unit)
+        {
+            return SafeIntField(unit, ref _orderStateField, "orderstate", -1);
+        }
+
+        private static bool SafeUseOrderDelays()
+        {
+            try
+            {
+                return GameVars.useorderdelays;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static TacticalOrderDelivery DeliveryKind(string delivery)
+        {
+            if (delivery == "bugle") return TacticalOrderDelivery.Bugle;
+            if (delivery == "courier") return TacticalOrderDelivery.Courier;
+            if (delivery == "immediate") return TacticalOrderDelivery.Immediate;
+            return TacticalOrderDelivery.Unknown;
         }
 
         private static int CountList(IList list)

@@ -1,6 +1,6 @@
 # Tactical Brain Master Sequencing Implementation Plan
 
-Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard is implemented and hash-deployed locally. Fresh B1 runtime denial smoke was explicitly deferred by user direction on 2026-05-07. B2 command/order-friction now has a standalone execution plan at `docs/superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md`.
+Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard is implemented and hash-deployed locally. Fresh B1 runtime denial smoke was explicitly deferred by user direction on 2026-05-07. B2 command/order-friction is implemented, build/deploy/hash verified, and extends #35 read-only telemetry; no B2 in-game smoke has been run. B3 tactical odds doctrine is next.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -325,7 +325,7 @@ Status: implemented and hash-deployed on 2026-05-07 from the detailed plan at `d
 - Modify: `tests/WhiskeyRealism.Tests/Program.cs`
 - Modify after deploy/smoke: `docs/patch-catalog.md`, `docs/handoff.md`, `MEMORY.md`
 
-- [ ] **Step 1: Add pure tests**
+- [x] **Step 1: Add pure tests**
 
 Tests must cover:
 
@@ -362,14 +362,14 @@ No repeated warnings/errors.
 **Files:**
 
 - Created: `docs/superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md`
-- Future create: `src/WhiskeyRealism/Tactical/TacticalCommandLedger.cs`
-- Future create: `src/WhiskeyRealism/Tactical/TacticalOrderFriction.cs`
+- Created: `src/WhiskeyRealism/Tactical/TacticalCommandLedger.cs`
+- Created: `src/WhiskeyRealism/Tactical/TacticalOrderFriction.cs`
 
-- [ ] **Step 1: Require B0/B1 evidence**
+- [x] **Step 1: Require B0/B1 evidence**
 
 B2 starts only after B0 shipped and B1 either shipped or was explicitly deferred by the user. The plan must cite B0 `[TacticalOrder]` output showing transmitted-path and order-delay fields are readable in runtime.
 
-- [ ] **Step 2: Re-read order-delay anchors**
+- [x] **Step 2: Re-read order-delay anchors**
 
 Read current bodies for:
 
@@ -380,7 +380,7 @@ Read current bodies for:
 - `Regiment.SetOrderStatus(...)` line 125484;
 - `BattleUnits.SetWaypoint(...)` line 91225.
 
-- [ ] **Step 3: Define B2 doctrine**
+- [x] **Step 3: Define B2 doctrine**
 
 B2 creates pure read-only doctrine state:
 
@@ -398,14 +398,14 @@ B2 does not issue movement orders. It only gives later slices a safe interpretat
 
 **Files:**
 
-- Create: `src/WhiskeyRealism/Tactical/TacticalCommanderProfile.cs`
-- Create: `src/WhiskeyRealism/Tactical/TacticalCommandLedger.cs`
-- Create: `src/WhiskeyRealism/Tactical/TacticalOrderFriction.cs`
+- Created: `src/WhiskeyRealism/Tactical/TacticalCommanderProfile.cs`
+- Created: `src/WhiskeyRealism/Tactical/TacticalCommandLedger.cs`
+- Created: `src/WhiskeyRealism/Tactical/TacticalOrderFriction.cs`
 - Modify: `src/WhiskeyRealism/Patches/TacticalObserverPatch.cs`
 - Modify: `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`
 - Modify: `tests/WhiskeyRealism.Tests/Program.cs`
 
-- [ ] **Step 1: Add pure tests**
+- [x] **Step 1: Add pure tests**
 
 Tests must cover:
 
@@ -416,11 +416,11 @@ Tests must cover:
 - stale delayed order downgrades when contact changed materially;
 - high initiative reduces delay pressure without making orders instant.
 
-- [ ] **Step 2: Implement pure ledgers**
+- [x] **Step 2: Implement pure ledgers**
 
 Keep Unity object reads in runtime extraction. Pure ledgers should use DTO inputs so the console harness can test them.
 
-- [ ] **Step 3: Extend B0 telemetry**
+- [x] **Step 3: Extend B0 telemetry**
 
 Add signature-gated `[TacticalCommand]` and `[TacticalOrder]` lines from the B2 ledger. No behavior change.
 

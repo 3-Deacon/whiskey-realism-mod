@@ -123,6 +123,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalBattleContext.cs" Link="TacticalBattleContext.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalTelemetry.cs" Link="TacticalTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalWlActionGuard.cs" Link="TacticalWlActionGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalOrderFriction.cs" Link="TacticalOrderFriction.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommanderProfile.cs" Link="TacticalCommanderProfile.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommandLedger.cs" Link="TacticalCommandLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPosture.cs" Link="DirectorPosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />

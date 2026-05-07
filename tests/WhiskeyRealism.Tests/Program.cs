@@ -37,9 +37,17 @@ static class Program
             ("tactical telemetry maps macro names", TacticalTelemetryMapsMacroNames),
             ("tactical telemetry summary handles null", TacticalTelemetrySummaryHandlesNull),
             ("tactical telemetry maps player-order prefix", TacticalTelemetryMapsPlayerOrderPrefix),
+            ("tactical telemetry maps command prefix", TacticalTelemetryMapsCommandPrefix),
             ("tactical telemetry signature changes on material fields", TacticalTelemetrySignatureChangesOnMaterialFields),
+            ("tactical telemetry signature changes on command signature", TacticalTelemetrySignatureChangesOnCommandSignature),
             ("tactical telemetry throttle suppresses repeated signature", TacticalTelemetryThrottleSuppressesRepeatedSignature),
             ("tactical telemetry delta formats before after counts", TacticalTelemetryDeltaFormatsBeforeAfterCounts),
+            ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
+            ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
+            ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
+            ("tactical order high initiative reduces delay pressure without instant delivery", TacticalOrderHighInitiativeReducesDelayPressureWithoutInstant),
+            ("tactical command army and corps intent does not retask regiments directly", TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly),
+            ("tactical command division mission maps to brigade actions", TacticalCommandDivisionMissionMapsToBrigadeActions),
             ("tactical wl guard allows non wl action", TacticalWlGuardAllowsNonWlAction),
             ("tactical wl guard allows when config disabled", TacticalWlGuardAllowsWhenConfigDisabled),
             ("tactical wl guard denies player subordinate charge initiation", TacticalWlGuardDeniesPlayerSubordinateChargeInitiation),
@@ -520,6 +528,17 @@ static class Program
         AssertContains(summary, "[TacticalPlayerOrder]", "player-order prefix");
     }
 
+    private static void TacticalTelemetryMapsCommandPrefix()
+    {
+        var context = TacticalBattleContext.Empty();
+        context.CommandSignature = "src=Division,tgt=Brigade,scope=SubcommandAction";
+
+        string summary = TacticalTelemetry.Summary(TacticalObservedEvent.Command, context);
+
+        AssertTrue(summary.StartsWith("[TacticalCommand]"), "command prefix");
+        AssertContains(summary, "commandSig=src=Division,tgt=Brigade,scope=SubcommandAction", "command signature");
+    }
+
     private static void TacticalTelemetrySignatureChangesOnMaterialFields()
     {
         var baseline = new TacticalBattleContext
@@ -546,6 +565,18 @@ static class Program
         if (a == b) throw new Exception("expected tactical signature to change when macro changes");
     }
 
+    private static void TacticalTelemetrySignatureChangesOnCommandSignature()
+    {
+        var first = TacticalBattleContext.Empty();
+        first.CommandSignature = "src=Division,tgt=Brigade,scope=SubcommandAction";
+        var second = TacticalBattleContext.Empty();
+        second.CommandSignature = "src=Corps,tgt=Brigade,scope=BlockDirectRegimentRetask";
+
+        string a = TacticalTelemetry.Signature(TacticalObservedEvent.Command, first);
+        string b = TacticalTelemetry.Signature(TacticalObservedEvent.Command, second);
+        if (a == b) throw new Exception("expected tactical signature to change when command signature changes");
+    }
+
     private static void TacticalTelemetryThrottleSuppressesRepeatedSignature()
     {
         var emitted = new Dictionary<string, float>();
@@ -566,6 +597,171 @@ static class Program
         AssertContains(delta, "groups=2->2", "group delta");
         AssertContains(delta, "charging=0->1", "charging delta");
         AssertContains(delta, "reserves=1->2", "reserve delta");
+    }
+
+    private static void TacticalOrderOutsideBugleRangeIsDelayed()
+    {
+        var decision = TacticalOrderFriction.Evaluate(new TacticalOrderFrictionInput(
+            orderDelayEnabled: true,
+            queueProcessing: true,
+            queueDelayHours: 0.20f,
+            delivery: TacticalOrderDelivery.Courier,
+            deliveryProcessHours: 9999999f,
+            courierMissing: false,
+            orderState: 1,
+            intendedPathId: 4,
+            transmittedPathId: 4,
+            contactChangedMaterially: false,
+            commanderInitiative01: 0.50f));
+
+        AssertEqual(TacticalOrderFrictionState.Courier, decision.State, "state");
+        AssertTrue(decision.IsDelayed, "courier order should be delayed");
+        AssertTrue(decision.DelayPressure > 0.10f, "delay pressure should exceed .10");
+    }
+
+    private static void TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed()
+    {
+        var decision = TacticalOrderFriction.Evaluate(new TacticalOrderFrictionInput(
+            orderDelayEnabled: true,
+            queueProcessing: true,
+            queueDelayHours: 0.20f,
+            delivery: TacticalOrderDelivery.Courier,
+            deliveryProcessHours: 0f,
+            courierMissing: false,
+            orderState: 1,
+            intendedPathId: 5,
+            transmittedPathId: 2,
+            contactChangedMaterially: false,
+            commanderInitiative01: 0.50f));
+
+        AssertEqual(TacticalOrderFrictionState.Pending, decision.State, "state");
+        AssertTrue(decision.TransmittedPathDiffers, "transmitted path should differ");
+        AssertTrue(!decision.IsDelivered, "pending order should not be delivered");
+    }
+
+    private static void TacticalOrderStaleDelayedOrderDowngradesOnContactChange()
+    {
+        var decision = TacticalOrderFriction.Evaluate(new TacticalOrderFrictionInput(
+            orderDelayEnabled: true,
+            queueProcessing: true,
+            queueDelayHours: 0.20f,
+            delivery: TacticalOrderDelivery.Courier,
+            deliveryProcessHours: 9999999f,
+            courierMissing: false,
+            orderState: 1,
+            intendedPathId: 4,
+            transmittedPathId: 1,
+            contactChangedMaterially: true,
+            commanderInitiative01: 0.50f));
+
+        AssertEqual(TacticalOrderFrictionState.Stale, decision.State, "state");
+        AssertTrue(decision.IsDelayed, "stale order should remain delayed");
+    }
+
+    private static void TacticalOrderHighInitiativeReducesDelayPressureWithoutInstant()
+    {
+        var low = TacticalOrderFriction.Evaluate(new TacticalOrderFrictionInput(
+            orderDelayEnabled: true,
+            queueProcessing: true,
+            queueDelayHours: 0.20f,
+            delivery: TacticalOrderDelivery.Courier,
+            deliveryProcessHours: 9999999f,
+            courierMissing: false,
+            orderState: 1,
+            intendedPathId: 4,
+            transmittedPathId: 4,
+            contactChangedMaterially: false,
+            commanderInitiative01: 0.10f));
+        var high = TacticalOrderFriction.Evaluate(new TacticalOrderFrictionInput(
+            orderDelayEnabled: true,
+            queueProcessing: true,
+            queueDelayHours: 0.20f,
+            delivery: TacticalOrderDelivery.Courier,
+            deliveryProcessHours: 9999999f,
+            courierMissing: false,
+            orderState: 1,
+            intendedPathId: 4,
+            transmittedPathId: 4,
+            contactChangedMaterially: false,
+            commanderInitiative01: 0.90f));
+
+        AssertTrue(high.DelayPressure < low.DelayPressure, "high initiative should reduce delay pressure");
+        AssertEqual(TacticalOrderFrictionState.Courier, high.State, "state");
+        AssertTrue(!high.IsDelivered, "high initiative should not make courier order instant");
+    }
+
+    private static void TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly()
+    {
+        var army = TacticalCommanderProfile.FromVanillaShape(
+            stableId: 100,
+            displayName: "Army of the Potomac",
+            unitType: 16,
+            isTopUnit: true,
+            underPlayerCommander: true,
+            parentId: -1,
+            alliance: 0,
+            side: 0,
+            initiative01: 0.50f);
+        var regiment = TacticalCommanderProfile.FromVanillaShape(
+            stableId: 101,
+            displayName: "20th Maine",
+            unitType: 0,
+            isTopUnit: false,
+            underPlayerCommander: true,
+            parentId: 15,
+            alliance: 0,
+            side: 0,
+            initiative01: 0.50f);
+
+        var decision = TacticalCommandLedger.DecideOrderScope(army, regiment);
+
+        AssertEqual(TacticalOrderScope.BlockDirectRegimentRetask, decision.Scope, "scope");
+        AssertEqual("army-corps-intent-must-flow-through-subcommand", decision.Reason, "reason");
+
+        var corps = TacticalCommanderProfile.FromVanillaShape(
+            stableId: 102,
+            displayName: "First Corps",
+            unitType: 16,
+            isTopUnit: false,
+            underPlayerCommander: true,
+            parentId: 100,
+            alliance: 0,
+            side: 0,
+            initiative01: 0.50f);
+
+        var corpsDecision = TacticalCommandLedger.DecideOrderScope(corps, regiment);
+
+        AssertEqual(TacticalOrderScope.BlockDirectRegimentRetask, corpsDecision.Scope, "corps scope");
+        AssertEqual("army-corps-intent-must-flow-through-subcommand", corpsDecision.Reason, "corps reason");
+    }
+
+    private static void TacticalCommandDivisionMissionMapsToBrigadeActions()
+    {
+        var division = TacticalCommanderProfile.FromVanillaShape(
+            stableId: 200,
+            displayName: "First Division",
+            unitType: 14,
+            isTopUnit: false,
+            underPlayerCommander: false,
+            parentId: 10,
+            alliance: 1,
+            side: 1,
+            initiative01: 0.50f);
+        var brigade = TacticalCommanderProfile.FromVanillaShape(
+            stableId: 201,
+            displayName: "First Brigade",
+            unitType: 15,
+            isTopUnit: false,
+            underPlayerCommander: false,
+            parentId: 200,
+            alliance: 1,
+            side: 1,
+            initiative01: 0.50f);
+
+        var decision = TacticalCommandLedger.DecideOrderScope(division, brigade);
+
+        AssertEqual(TacticalOrderScope.SubcommandAction, decision.Scope, "scope");
+        AssertEqual("division-to-brigade", decision.Reason, "reason");
     }
 
     private static void TacticalWlGuardAllowsNonWlAction()
