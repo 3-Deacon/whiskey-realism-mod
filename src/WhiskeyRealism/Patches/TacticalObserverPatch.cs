@@ -29,7 +29,91 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _parentRegimentField;
         private static FieldInfo _allianceField;
         private static FieldInfo _sideField;
+        private static bool _sideFieldResolved;
         private static FieldInfo _orderStateField;
+        private static FieldInfo _chainCenterUnitField;
+        private static FieldInfo _currentSetObjectiveField;
+
+        internal readonly struct CurrentOrderState
+        {
+            public CurrentOrderState(TacticalCurrentOrderSignature order, int session)
+            {
+                Order = order;
+                Session = session;
+            }
+
+            public TacticalCurrentOrderSignature Order { get; }
+            public int Session { get; }
+        }
+
+        internal readonly struct CourierQueueState
+        {
+            public CourierQueueState(int queueCount, int appendIndex)
+            {
+                QueueCount = queueCount;
+                AppendIndex = appendIndex;
+            }
+
+            public int QueueCount { get; }
+            public int AppendIndex { get; }
+        }
+
+        internal readonly struct WaypointState
+        {
+            public WaypointState(int pathCount, int queueCount, bool activeMoveOrder, float x, float z)
+            {
+                PathCount = pathCount;
+                QueueCount = queueCount;
+                ActiveMoveOrder = activeMoveOrder;
+                X = x;
+                Z = z;
+            }
+
+            public int PathCount { get; }
+            public int QueueCount { get; }
+            public bool ActiveMoveOrder { get; }
+            public float X { get; }
+            public float Z { get; }
+        }
+
+        internal sealed class ObjectiveMoveState
+        {
+            public readonly List<ObjectiveUnitSnapshot> Units = new List<ObjectiveUnitSnapshot>();
+            public int ExposedChainCount;
+            public Regiment FirstCenter;
+        }
+
+        internal readonly struct ObjectiveUnitSnapshot
+        {
+            public ObjectiveUnitSnapshot(
+                Regiment unit,
+                bool center,
+                int pathCount,
+                float positionX,
+                float positionZ,
+                float waypointX,
+                float waypointZ,
+                int objectiveId)
+            {
+                Unit = unit;
+                Center = center;
+                PathCount = pathCount;
+                PositionX = positionX;
+                PositionZ = positionZ;
+                WaypointX = waypointX;
+                WaypointZ = waypointZ;
+                ObjectiveId = objectiveId;
+            }
+
+            public Regiment Unit { get; }
+            public bool Center { get; }
+            public int PathCount { get; }
+            public float PositionX { get; }
+            public float PositionZ { get; }
+            public float WaypointX { get; }
+            public float WaypointZ { get; }
+            public int ObjectiveId { get; }
+        }
 
         [HarmonyPatch(typeof(AIBattle), "CheckGlobalAIStrategy")]
         [HarmonyPostfix]
@@ -146,6 +230,61 @@ namespace WhiskeyRealism.Patches
             Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
         }
 
+        [HarmonyPatch(typeof(AIBattle), "CheckCurrentOrderUpdate")]
+        [HarmonyPrefix]
+        internal static void CheckCurrentOrderUpdatePrefix(out CurrentOrderState __state)
+        {
+            __state = new CurrentOrderState(ReadGivenOrderSignature(), ReadGivenOrdersSession());
+        }
+
+        [HarmonyPatch(typeof(AIBattle), "CheckCurrentOrderUpdate")]
+        [HarmonyPostfix]
+        internal static void CheckCurrentOrderUpdatePostfix(
+            Regiment unit,
+            int type,
+            Vector3 position,
+            string destinationname,
+            float rotation,
+            bool calledfromcampaign,
+            CurrentOrderState __state)
+        {
+            if (!BugTelemetryEnabled()) return;
+
+            try
+            {
+                var next = ReadGivenOrderSignature();
+                if (next.IsEmpty)
+                    next = new TacticalCurrentOrderSignature(SafeInstanceId(unit), type, position.x, position.z, rotation, destinationname);
+
+                var decision = TacticalBattlefieldBugDiagnostics.ClassifyCurrentOrderReplacement(
+                    calledfromcampaign,
+                    __state.Order,
+                    next,
+                    nearDistance: 110f,
+                    nearRotationDegrees: 35f);
+                int sessionAfter = ReadGivenOrdersSession();
+                bool sessionChanged = __state.Session != sessionAfter;
+
+                if (!decision.IsRisk && !calledfromcampaign && !sessionChanged) return;
+
+                EmitDirect(
+                    "TacticalCurrentOrder",
+                    "current-order|" + SafeInstanceId(unit) + "|" + type + "|" + __state.Session + "|" + sessionAfter + "|" + decision.Reason,
+                    "[TacticalCurrentOrder] calledFromCampaign=" + calledfromcampaign +
+                    " unit=" + SafeUnitName(unit) +
+                    " oldType=" + __state.Order.Type +
+                    " newType=" + next.Type +
+                    " duplicateRisk=" + decision.IsRisk +
+                    " reason=" + decision.Reason +
+                    " sessionBefore=" + __state.Session +
+                    " sessionAfter=" + sessionAfter);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-current-order", "Tactical current-order observer failed: " + ex.Message);
+            }
+        }
+
         // B2 command/order friction stays read-only: these Postfixes interpret vanilla queue/courier state.
         // They must not call SetWaypoint, AddToOrderQueue, SetOrderStatus, or mutate Regiment order fields.
         [HarmonyPatch(typeof(Regiment), "AddToOrderQueue")]
@@ -167,15 +306,88 @@ namespace WhiskeyRealism.Patches
         }
 
         [HarmonyPatch(typeof(Regiment), "AddOrderCourierline")]
+        [HarmonyPrefix]
+        internal static void AddOrderCourierlinePrefix(Regiment __instance, bool secondarycourier, out CourierQueueState __state)
+        {
+            int count = __instance != null && __instance.orderqueue != null ? __instance.orderqueue.Count : 0;
+            __state = new CourierQueueState(count, count - 1);
+        }
+
+        [HarmonyPatch(typeof(Regiment), "AddOrderCourierline")]
         [HarmonyPostfix]
         internal static void AddOrderCourierlinePostfix(
             Regiment __instance,
             Regiment sourceunit,
             Regiment _targetunit,
             bool overridebugle,
-            bool secondarycourier)
+            bool secondarycourier,
+            CourierQueueState __state)
         {
             ObserveCourierLine(__instance, sourceunit, _targetunit, secondarycourier);
+            ObserveCourierQueue(__instance, secondarycourier, __state);
+        }
+
+        [HarmonyPatch(typeof(BattleUnits), "SetWaypoint", new[]
+        {
+            typeof(Regiment), typeof(Vector3), typeof(bool), typeof(bool), typeof(float),
+            typeof(bool), typeof(bool), typeof(float), typeof(int), typeof(bool),
+            typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool)
+        })]
+        [HarmonyPrefix]
+        internal static void SetWaypointPrefix(Regiment reg, out WaypointState __state)
+        {
+            __state = new WaypointState(
+                SafeRegimentPaths(reg),
+                SafeOrderQueueCount(reg),
+                HasActiveMoveOrder(reg),
+                SafeLastWaypointX(reg),
+                SafeLastWaypointZ(reg));
+        }
+
+        [HarmonyPatch(typeof(BattleUnits), "SetWaypoint", new[]
+        {
+            typeof(Regiment), typeof(Vector3), typeof(bool), typeof(bool), typeof(float),
+            typeof(bool), typeof(bool), typeof(float), typeof(int), typeof(bool),
+            typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool)
+        })]
+        [HarmonyPostfix]
+        internal static void SetWaypointPostfix(Regiment reg, bool useorderdelay, WaypointState __state)
+        {
+            ObserveWaypointDrift(reg, useorderdelay, __state);
+        }
+
+        [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
+        [HarmonyPrefix]
+        internal static void CheckUseOfReservesPrefix(Regiment aigroup, out WaypointState __state)
+        {
+            __state = new WaypointState(
+                CountGroupPaths(aigroup),
+                SafeOrderQueueCount(aigroup),
+                HasActiveMoveOrder(aigroup),
+                SafeLastWaypointX(aigroup),
+                SafeLastWaypointZ(aigroup));
+        }
+
+        [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
+        [HarmonyPostfix]
+        internal static void CheckUseOfReservesBugPostfix(Regiment aigroup, WaypointState __state)
+        {
+            ObserveReserveMove(aigroup, __state);
+        }
+
+        [HarmonyPatch(typeof(AIBattle), "UpdateMovingTargets")]
+        [HarmonyPrefix]
+        internal static void UpdateMovingTargetsPrefix(AIBattle __instance, out ObjectiveMoveState __state)
+        {
+            __state = CaptureObjectiveMoveState(__instance);
+        }
+
+        [HarmonyPatch(typeof(AIBattle), "UpdateMovingTargets")]
+        [HarmonyPostfix]
+        internal static void UpdateMovingTargetsPostfix(AIBattle __instance, ObjectiveMoveState __state)
+        {
+            ObserveObjectiveChainMove(__instance);
+            ObserveObjectiveChainMutation(__state);
         }
 
         private static void Observe(AIBattle battle, TacticalObservedEvent eventType, TacticalObserverSnapshot before, Regiment group)
@@ -362,6 +574,261 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        private static void ObserveCourierQueue(Regiment owner, bool secondaryCourier, CourierQueueState state)
+        {
+            if (!BugTelemetryEnabled()) return;
+
+            try
+            {
+                var decision = TacticalBattlefieldBugDiagnostics.ClassifyCourierQueueIndex(
+                    secondaryCourier,
+                    state.QueueCount,
+                    activeQueueIndex: -1,
+                    appendQueueIndex: state.AppendIndex);
+                if (!secondaryCourier && !decision.IsRisk) return;
+
+                EmitDirect(
+                    "TacticalCourierQueue",
+                    "courier-queue|" + SafeInstanceId(owner) + "|" + state.QueueCount + "|" + state.AppendIndex + "|" + decision.Reason,
+                    "[TacticalCourierQueue] owner=" + SafeUnitName(owner) +
+                    " secondary=" + secondaryCourier +
+                    " queueCount=" + state.QueueCount +
+                    " appendIndex=" + state.AppendIndex +
+                    " risk=" + decision.IsRisk +
+                    " reason=" + decision.Reason);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-courier-queue", "Tactical courier queue observer failed: " + ex.Message);
+            }
+        }
+
+        private static void ObserveWaypointDrift(Regiment unit, bool useOrderDelay, WaypointState state)
+        {
+            if (!BugTelemetryEnabled()) return;
+
+            try
+            {
+                int afterPaths = SafeRegimentPaths(unit);
+                int afterQueues = SafeOrderQueueCount(unit);
+                bool queueAdded = afterQueues > state.QueueCount;
+                var decision = TacticalBattlefieldBugDiagnostics.ClassifyDelayedWaypointDrift(
+                    orderDelayEnabled: useOrderDelay,
+                    activeMoveOrder: state.ActiveMoveOrder,
+                    queueAdded: queueAdded,
+                    pathCountBefore: state.PathCount,
+                    pathCountAfter: afterPaths,
+                    xBefore: state.X,
+                    zBefore: state.Z,
+                    xAfter: SafeLastWaypointX(unit),
+                    zAfter: SafeLastWaypointZ(unit));
+                if (!decision.IsRisk) return;
+
+                EmitDirect(
+                    "TacticalWaypointDrift",
+                    "waypoint-drift|" + SafeInstanceId(unit) + "|" + state.PathCount + "|" + afterPaths + "|" + decision.Reason,
+                    "[TacticalWaypointDrift] unit=" + SafeUnitName(unit) +
+                    " useDelay=" + useOrderDelay +
+                    " activeMoveOrder=" + state.ActiveMoveOrder +
+                    " queueBefore=" + state.QueueCount +
+                    " queueAfter=" + afterQueues +
+                    " pathBefore=" + state.PathCount +
+                    " pathAfter=" + afterPaths +
+                    " risk=" + decision.IsRisk +
+                    " reason=" + decision.Reason);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-waypoint-drift", "Tactical waypoint drift observer failed: " + ex.Message);
+            }
+        }
+
+        private static void ObserveReserveMove(Regiment group, WaypointState state)
+        {
+            if (!BugTelemetryEnabled()) return;
+
+            try
+            {
+                int afterPaths = CountGroupPaths(group);
+                var decision = TacticalBattlefieldBugDiagnostics.ClassifyReserveDirectPathBypass(
+                    reserveSupportMove: afterPaths > state.PathCount,
+                    orderDelayEnabled: SafeUseOrderDelays(),
+                    directPathIssued: afterPaths > state.PathCount,
+                    queuedOrderIssued: SafeOrderQueueCount(group) > state.QueueCount,
+                    reserveCandidateCount: CountAttachedUnits(group));
+                if (!decision.IsRisk && afterPaths <= state.PathCount) return;
+
+                EmitDirect(
+                    "TacticalReserveMove",
+                    "reserve-move|" + SafeInstanceId(group) + "|" + state.PathCount + "|" + afterPaths + "|" + decision.Reason,
+                    "[TacticalReserveMove] group=" + SafeUnitName(group) +
+                    " pathBefore=" + state.PathCount +
+                    " pathAfter=" + afterPaths +
+                    " queueBefore=" + state.QueueCount +
+                    " queueAfter=" + SafeOrderQueueCount(group) +
+                    " risk=" + decision.IsRisk +
+                    " reason=" + decision.Reason);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-reserve-move", "Tactical reserve move observer failed: " + ex.Message);
+            }
+        }
+
+        private static void ObserveObjectiveChainMove(AIBattle battle)
+        {
+            if (!BugTelemetryEnabled()) return;
+
+            try
+            {
+                var chain = SafeList(battle, ref _objectiveChainField, "objective" + "chain");
+                if (chain == null || chain.Count <= 0) return;
+
+                int centerUnderCommander = 0;
+                int attachedUnderCommander = 0;
+                Regiment firstCenter = null;
+                for (int i = 0; i < chain.Count; i++)
+                {
+                    Regiment center = SafeRegimentField(chain[i], ref _chainCenterUnitField, "linegroup_centerunit");
+                    if (center == null) continue;
+                    if (firstCenter == null) firstCenter = center;
+                    if (center.dlcw_isundercommander) centerUnderCommander++;
+                    attachedUnderCommander += CountAttachedUnderCommander(center);
+                }
+
+                var decision = TacticalBattlefieldBugDiagnostics.ClassifyObjectiveChainMovement(
+                    objectiveChainMove: true,
+                    centerGroupUnderPlayerCommander: centerUnderCommander > 0,
+                    attachedPlayerSubordinate: attachedUnderCommander > 0,
+                    attachedUnitCount: attachedUnderCommander);
+                if (!decision.IsRisk && attachedUnderCommander <= 0 && centerUnderCommander <= 0) return;
+
+                EmitDirect(
+                    "TacticalObjectiveMove",
+                    "objective-move|" + SafeInstanceId(firstCenter) + "|" + centerUnderCommander + "|" + attachedUnderCommander + "|" + decision.Reason,
+                    "[TacticalObjectiveMove] center=" + SafeUnitName(firstCenter) +
+                    " chains=" + chain.Count +
+                    " centerUnderCommanderCount=" + centerUnderCommander +
+                    " attachedUnderCommanderCount=" + attachedUnderCommander +
+                    " risk=" + decision.IsRisk +
+                    " reason=" + decision.Reason);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-objective-move", "Tactical objective-chain observer failed: " + ex.Message);
+            }
+        }
+
+        private static ObjectiveMoveState CaptureObjectiveMoveState(AIBattle battle)
+        {
+            var state = new ObjectiveMoveState();
+            if (!BugTelemetryEnabled()) return state;
+
+            try
+            {
+                var chain = SafeList(battle, ref _objectiveChainField, "objective" + "chain");
+                if (chain == null || chain.Count <= 0) return state;
+
+                for (int i = 0; i < chain.Count; i++)
+                {
+                    Regiment center = SafeRegimentField(chain[i], ref _chainCenterUnitField, "linegroup_centerunit");
+                    if (center == null) continue;
+
+                    int attachedUnderCommander = CountAttachedUnderCommander(center);
+                    if (!center.dlcw_isundercommander && attachedUnderCommander <= 0) continue;
+
+                    state.ExposedChainCount++;
+                    if (state.FirstCenter == null) state.FirstCenter = center;
+                    state.Units.Add(SnapshotObjectiveUnit(center, center: true));
+
+                    if (center.allattachedunits == null) continue;
+                    for (int j = 0; j < center.allattachedunits.Length; j++)
+                    {
+                        Regiment attached = center.allattachedunits[j];
+                        if (attached != null && attached.dlcw_isundercommander)
+                            state.Units.Add(SnapshotObjectiveUnit(attached, center: false));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-objective-mutation:capture", "Tactical objective-chain mutation capture failed: " + ex.Message);
+            }
+
+            return state;
+        }
+
+        private static void ObserveObjectiveChainMutation(ObjectiveMoveState state)
+        {
+            if (!BugTelemetryEnabled() || state == null || state.Units.Count <= 0) return;
+
+            try
+            {
+                bool centerMutated = false;
+                bool attachedMutated = false;
+                int changed = 0;
+
+                for (int i = 0; i < state.Units.Count; i++)
+                {
+                    ObjectiveUnitSnapshot snapshot = state.Units[i];
+                    if (!ObjectiveSnapshotChanged(snapshot)) continue;
+
+                    changed++;
+                    if (snapshot.Center) centerMutated = true;
+                    else attachedMutated = true;
+                }
+
+                var decision = TacticalBattlefieldBugDiagnostics.ClassifyObjectiveChainMutation(
+                    exposedPlayerSubordinateChain: state.ExposedChainCount > 0,
+                    centerMutated: centerMutated,
+                    attachedPlayerSubordinateMutated: attachedMutated,
+                    changedUnitCount: changed);
+
+                if (!decision.IsRisk && changed <= 0) return;
+
+                EmitDirect(
+                    "TacticalObjectiveMutation",
+                    "objective-mutation|" + SafeInstanceId(state.FirstCenter) + "|" + changed + "|" + centerMutated + "|" + attachedMutated + "|" + decision.Reason,
+                    "[TacticalObjectiveMutation] center=" + SafeUnitName(state.FirstCenter) +
+                    " exposedChains=" + state.ExposedChainCount +
+                    " changedUnits=" + changed +
+                    " centerMutated=" + centerMutated +
+                    " attachedPlayerSubordinateMutated=" + attachedMutated +
+                    " risk=" + decision.IsRisk +
+                    " reason=" + decision.Reason);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-objective-mutation", "Tactical objective-chain mutation observer failed: " + ex.Message);
+            }
+        }
+
+        private static ObjectiveUnitSnapshot SnapshotObjectiveUnit(Regiment unit, bool center)
+        {
+            return new ObjectiveUnitSnapshot(
+                unit,
+                center,
+                SafeRegimentPaths(unit),
+                SafePositionX(unit),
+                SafePositionZ(unit),
+                SafeLastWaypointX(unit),
+                SafeLastWaypointZ(unit),
+                SafeCurrentObjectiveId(unit));
+        }
+
+        private static bool ObjectiveSnapshotChanged(ObjectiveUnitSnapshot snapshot)
+        {
+            Regiment unit = snapshot.Unit;
+            if (unit == null) return false;
+
+            return SafeRegimentPaths(unit) != snapshot.PathCount ||
+                Math.Abs(SafePositionX(unit) - snapshot.PositionX) > 1f ||
+                Math.Abs(SafePositionZ(unit) - snapshot.PositionZ) > 1f ||
+                Math.Abs(SafeLastWaypointX(unit) - snapshot.WaypointX) > 1f ||
+                Math.Abs(SafeLastWaypointZ(unit) - snapshot.WaypointZ) > 1f ||
+                SafeCurrentObjectiveId(unit) != snapshot.ObjectiveId;
+        }
+
         private static void EmitDirect(string key, string signature, string message)
         {
             bool verbose = Plugin.Instance != null && Plugin.Instance.TacticalObserverVerboseLogging.Value;
@@ -449,6 +916,13 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.EnableTacticalObserver.Value;
         }
 
+        private static bool BugTelemetryEnabled()
+        {
+            return Plugin.Instance != null &&
+                Plugin.Instance.Enabled.Value &&
+                Plugin.Instance.EnableTacticalBugTelemetry.Value;
+        }
+
         private static void CountUnits(IList units, TacticalBattleContext context)
         {
             if (units == null || context == null) return;
@@ -520,6 +994,42 @@ namespace WhiskeyRealism.Patches
             }
 
             return "group=" + SafeInstanceId(group) + ",moving=" + moving + ",waiting=" + waiting + ",interrupted=" + interrupted;
+        }
+
+        private static TacticalCurrentOrderSignature ReadGivenOrderSignature()
+        {
+            try
+            {
+                var order = DLC_WL.givenorder;
+                if (order == null) return TacticalCurrentOrderSignature.Empty;
+                return new TacticalCurrentOrderSignature(
+                    SafeInstanceId(order.groupunit),
+                    order.type,
+                    order.position.x,
+                    order.position.z,
+                    order.arearotation,
+                    order.destinationname);
+            }
+            catch
+            {
+                return TacticalCurrentOrderSignature.Empty;
+            }
+        }
+
+        private static int ReadGivenOrdersSession()
+        {
+            try
+            {
+                Type givenOrdersType = typeof(DLC_WL).GetNestedType("GivenOrders", BindingFlags.Public | BindingFlags.NonPublic);
+                FieldInfo sessionField = givenOrdersType != null
+                    ? givenOrdersType.GetField("givenorderssession", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    : null;
+                return sessionField != null ? Convert.ToInt32(sessionField.GetValue(null)) : -1;
+            }
+            catch
+            {
+                return -1;
+            }
         }
 
         private static Regiment.OrderQueue FindLatestQueuedOrder(Regiment issuer, GameObject advisedUnit, int orderType)
@@ -807,7 +1317,12 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (unit == null) return -1;
-                if (_sideField == null) _sideField = AccessTools.Field(typeof(Regiment), "side");
+                if (!_sideFieldResolved)
+                {
+                    _sideField = typeof(Regiment).GetField("side", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    _sideFieldResolved = true;
+                }
+
                 return _sideField != null ? (int)_sideField.GetValue(unit) : -1;
             }
             catch
@@ -819,6 +1334,143 @@ namespace WhiskeyRealism.Patches
         private static int SafeOrderState(Regiment unit)
         {
             return SafeIntField(unit, ref _orderStateField, "orderstate", -1);
+        }
+
+        private static int SafeRegimentPaths(Regiment unit)
+        {
+            try { return unit != null ? unit.regimentpaths : -1; }
+            catch { return -1; }
+        }
+
+        private static int SafeOrderQueueCount(Regiment unit)
+        {
+            try { return unit != null && unit.orderqueue != null ? unit.orderqueue.Count : 0; }
+            catch { return 0; }
+        }
+
+        private static bool HasActiveMoveOrder(Regiment unit)
+        {
+            try
+            {
+                return unit != null &&
+                    unit.ordertypeactive != null &&
+                    unit.ordertypeactive.Length > 1 &&
+                    (unit.ordertypeactive[0] || unit.ordertypeactive[1]);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static float SafeLastWaypointX(Regiment unit)
+        {
+            try { return unit != null ? unit.lastsetwaypointposition.x : 0f; }
+            catch { return 0f; }
+        }
+
+        private static float SafeLastWaypointZ(Regiment unit)
+        {
+            try { return unit != null ? unit.lastsetwaypointposition.z : 0f; }
+            catch { return 0f; }
+        }
+
+        private static float SafePositionX(Regiment unit)
+        {
+            try { return unit != null ? ((Component)unit).transform.position.x : 0f; }
+            catch { return 0f; }
+        }
+
+        private static float SafePositionZ(Regiment unit)
+        {
+            try { return unit != null ? ((Component)unit).transform.position.z : 0f; }
+            catch { return 0f; }
+        }
+
+        private static int SafeCurrentObjectiveId(Regiment unit)
+        {
+            try
+            {
+                var objective = SafeField<UnityEngine.Object>(unit, ref _currentSetObjectiveField, "currentsetobjective");
+                return SafeInstanceId(objective);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static int CountGroupPaths(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.allattachedunits == null) return -1;
+                int paths = 0;
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit != null) paths += Math.Max(0, unit.regimentpaths);
+                }
+
+                return paths;
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static int CountAttachedUnits(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.allattachedunits == null) return 0;
+                int count = 0;
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    if (group.allattachedunits[i] != null) count++;
+                }
+
+                return count;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static int CountAttachedUnderCommander(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.allattachedunits == null) return 0;
+                int count = 0;
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit != null && unit.dlcw_isundercommander) count++;
+                }
+
+                return count;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static Regiment SafeRegimentField(object instance, ref FieldInfo cache, string name)
+        {
+            try
+            {
+                if (instance == null) return null;
+                if (cache == null) cache = AccessTools.Field(instance.GetType(), name);
+                return cache != null ? cache.GetValue(instance) as Regiment : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static bool SafeUseOrderDelays()

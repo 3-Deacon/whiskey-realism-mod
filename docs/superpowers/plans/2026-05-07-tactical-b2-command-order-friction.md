@@ -1,6 +1,6 @@
 # Tactical B2 Command Order Friction Implementation Plan
 
-Status: implemented, console-tested, built, deployed, and hash-verified on 2026-05-07 in DLL `dc028bae2169ca4de00e5af6209f868ae1a3421f3cac6f9bba6cf12743edd8db` (501248 bytes). No B2 in-game smoke has been run. B2 remains read-only #35 telemetry; B3 tactical odds doctrine is next.
+Status: implemented, console-tested, built, deployed, hash-verified, and focused-smoke sampled on 2026-05-07 in DLL `dc028bae2169ca4de00e5af6209f868ae1a3421f3cac6f9bba6cf12743edd8db` (501248 bytes), now superseded locally by tactical bug-remediation/objective-mutation telemetry DLL `9136d14fbea7b2ace5ba034dc673f71b31de2b9d8467c159c49cdbd9052513bd` (524288 bytes). Current focused smoke emitted `[TacticalCommand]` 25 times and `[TacticalOrder]` 116 times. B2 remains read-only #35 telemetry; B3 tactical odds doctrine is next.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -14,7 +14,7 @@ Status: implemented, console-tested, built, deployed, and hash-verified on 2026-
 
 ## Evidence And Scope
 
-This plan has been executed. Fresh B1 in-game denial smoke was explicitly deferred by the user on 2026-05-07, and no B2 in-game smoke has been run, so keep those runtime boundaries visible in `docs/handoff.md`. Do not archive this plan until B2 runtime smoke is either completed or explicitly waived for archival.
+This plan has been executed. Fresh B1 in-game denial smoke was explicitly deferred by the user on 2026-05-07. B2 focused smoke has now confirmed the command/order telemetry surface, so the remaining boundary is that B2 still does not enforce behavior. Do not archive this plan until tactical Slice B docs are closed out or explicitly waived for archival.
 
 Verified vanilla anchors in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`:
 
@@ -1043,7 +1043,7 @@ In `docs/handoff.md`, update the Slice B active line to this state:
 Update the Slice B roadmap notes to include this B2 plan:
 
 ```markdown
-| **B - Tactical brain** | active prep ([design](superpowers/specs/2026-05-05-tactical-brain-design.md) + [vanilla verification](superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md) + [weapons/ammunition adjunct](superpowers/specs/2026-05-05-tactical-weapons-ammunition-design.md)) | active sequencing ([master](superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md), [B0 observer](superpowers/plans/2026-05-05-tactical-b0-observer.md), [B1 guard](superpowers/plans/2026-05-07-tactical-b1-wl-feud-charge-guard.md), [B2 command/order friction](superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md)) | B0 observer closed; B1 built/deployed; B2 built/deployed | v0.3.0 | ~8+ | Next slice is B3 tactical odds doctrine. B2 is read-only command/order-friction interpretation from vanilla order-delay surfaces. |
+| **B - Tactical brain** | active prep ([design](superpowers/specs/2026-05-05-tactical-brain-design.md) + [vanilla verification](superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md) + [weapons/ammunition adjunct](superpowers/specs/2026-05-05-tactical-weapons-ammunition-design.md)) | active sequencing ([master](superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md), [B0 observer](superpowers/plans/2026-05-05-tactical-b0-observer.md), [B1 guard](superpowers/plans/2026-05-07-tactical-b1-wl-feud-charge-guard.md), [B2 command/order friction](superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md), [tactical bug remediation](2026-05-07-tactical-battlefield-bug-remediation.md)) | B0 observer closed; B1 built/deployed; B2 built/deployed/smoke-sampled; bug telemetry built/deployed/smoke-sampled | v0.3.0 | ~8+ | Next slice is B3 tactical odds doctrine. B2 is read-only command/order-friction interpretation from vanilla order-delay surfaces. |
 ```
 
 - [ ] **Step 2: Update patch catalog row #35**
@@ -1057,7 +1057,7 @@ B2 extends this same observer with read-only `[TacticalCommand]` and order-frict
 Update `Pending`:
 
 ```markdown
-Next unreserved patch ordinal is #43. B2 command/order-friction extends #35 observer telemetry; no new patch ordinal is reserved unless implementation adds a new Harmony patch file.
+Next unreserved patch ordinal is now #44 after the later tactical bug-remediation plan added #43. B2 command/order-friction extends #35 observer telemetry and did not reserve a new Harmony patch ordinal.
 ```
 
 - [ ] **Step 3: Run final verification**

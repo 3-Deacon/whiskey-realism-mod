@@ -1,11 +1,13 @@
 # Tactical Brain Design
 
-Status: paused draft umbrella design spec for Slice B. Do not implement from this spec unless the user explicitly reopens tactical work.
+Status: reopened umbrella design spec for Slice B planning. Do not implement directly from this spec; each tactical behavior still needs a slice plan under `docs/superpowers/plans/`.
 Scope: battlefield tactical AI for land battles. This spec covers doctrine, scoring, state, patch surfaces, telemetry, and implementation order. It does not implement code or replace the implementation plans each slice requires.
 
 Vanilla verification: see [`2026-05-05-tactical-brain-vanilla-verification.md`](2026-05-05-tactical-brain-vanilla-verification.md). That pass confirms the required vanilla data and patch surfaces, but marks sector doctrine, local-superiority scoring, contact-aware stale-order handling, reserve-relief timing, and staged withdrawal as new Whiskey behavior rather than existing vanilla logic. It also separates battle-level `macroai` from group-level `ai_stance`; they are different ladders and must not be patched as one state machine.
 
 Focused adjunct: see [`2026-05-05-tactical-weapons-ammunition-design.md`](2026-05-05-tactical-weapons-ammunition-design.md) for infantry weapons, artillery ammunition, projectile behavior, smoke, fire discipline, and autoresolve parity. That adjunct is observer-first and should not be merged into the W&L charge-safety slice.
+
+Runtime smoke delta: focused W&L battle smoke on 2026-05-07 confirmed the B2 command/order telemetry surface and repeated `BUG-TAC-005` objective-chain player-subordinate exposure through `[TacticalObjectiveMove]`. It did not prove actual path/position mutation from that exposure, and it did not exercise #43 fallback/retreat suppression, risky courier queue mismatch, campaign current-order duplication, delayed waypoint drift, or reserve direct-path telemetry. B3 tactical odds doctrine may proceed, but any `UpdateMovingTargets`, courier, `SetWaypoint`, current-order, or reserve behavior patch still needs the additional proof called out in the tactical bug-remediation plan.
 
 ## Source Findings
 
@@ -17,7 +19,7 @@ Current Whiskey anchors:
 - `FrontSectorLedger`, `ArmyAreaLedger`, `FormationDirectiveLedger`, `CampaignMapLedger`, and formation snapshots provide strategic intent that tactical AI can read.
 - `RealismCheckboxesLockPatch` already forces vanilla order delays on when realism settings are locked, so Slice B should treat delayed orders as a required realism constraint rather than an optional UI feature.
 - Harmony patches must remain surgical and bounded. Patches may read Whiskey state and steer vanilla decisions, but tactical patches must not mutate strategic mod state.
-- The tactical brain is explicitly deferred in the current handoff/memory unless the user redirects. This spec is that redirect into Slice B design.
+- The tactical brain is active again as a staged Slice B workstream. This spec is the umbrella design; current implementation still proceeds through per-slice plans.
 
 Verified vanilla anchors:
 
@@ -46,6 +48,7 @@ Implementation boundaries from review:
 - `B1 W&L Feud And Charge Guard` is a narrow control-safety slice. It is not the full doctrine charge gate.
 - Full doctrine charge gating depends on later sector, odds, reserve, strong-point, and artillery context.
 - Runtime behavior patches must be preceded by `B0 Tactical Observer` logs because the sector projection and W&L symptom still need live confirmation.
+- Focused 2026-05-07 runtime logs proved that B2 command/order telemetry is readable in battle (`[TacticalCommand]` and `[TacticalOrder]`) and that objective-chain groups can include player-subordinate attachments. That is enough to update planning priorities, but not enough to patch movement behavior without path/position deltas.
 
 Historical doctrine inputs:
 

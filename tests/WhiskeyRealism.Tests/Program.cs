@@ -48,6 +48,14 @@ static class Program
             ("tactical order high initiative reduces delay pressure without instant delivery", TacticalOrderHighInitiativeReducesDelayPressureWithoutInstant),
             ("tactical command army and corps intent does not retask regiments directly", TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly),
             ("tactical command division mission maps to brigade actions", TacticalCommandDivisionMissionMapsToBrigadeActions),
+            ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
+            ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
+            ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
+            ("tactical diagnostics detect objective chain player subordinate risk", TacticalDiagnosticsDetectObjectiveChainPlayerSubordinateRisk),
+            ("tactical diagnostics detect objective chain movement mutation proof", TacticalDiagnosticsDetectObjectiveChainMovementMutationProof),
+            ("tactical diagnostics detect reserve direct path delay bypass", TacticalDiagnosticsDetectReserveDirectPathDelayBypass),
+            ("tactical diagnostics suppress only tactical null fallback exceptions", TacticalDiagnosticsSuppressOnlyTacticalNullFallbackExceptions),
+            ("tactical diagnostics handle empty null and sanitized values", TacticalDiagnosticsHandleEmptyNullAndSanitizedValues),
             ("tactical wl guard allows non wl action", TacticalWlGuardAllowsNonWlAction),
             ("tactical wl guard allows when config disabled", TacticalWlGuardAllowsWhenConfigDisabled),
             ("tactical wl guard denies player subordinate charge initiation", TacticalWlGuardDeniesPlayerSubordinateChargeInitiation),
@@ -762,6 +770,232 @@ static class Program
 
         AssertEqual(TacticalOrderScope.SubcommandAction, decision.Scope, "scope");
         AssertEqual("division-to-brigade", decision.Reason, "reason");
+    }
+
+    private static void TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk()
+    {
+        var oldOrder = new TacticalCurrentOrderSignature(7, 11, 100f, 200f, 45f, "Hill");
+        var nearOrder = new TacticalCurrentOrderSignature(7, 11, 104f, 202f, 47f, "Hill");
+        var materialOrder = new TacticalCurrentOrderSignature(7, 12, 104f, 202f, 47f, "Hill");
+
+        var duplicate = TacticalBattlefieldBugDiagnostics.ClassifyCurrentOrderReplacement(
+            calledFromCampaign: true,
+            oldOrder: oldOrder,
+            newOrder: nearOrder,
+            nearDistance: 10f,
+            nearRotationDegrees: 5f);
+        var battleCall = TacticalBattlefieldBugDiagnostics.ClassifyCurrentOrderReplacement(
+            calledFromCampaign: false,
+            oldOrder: oldOrder,
+            newOrder: nearOrder,
+            nearDistance: 10f,
+            nearRotationDegrees: 5f);
+        var material = TacticalBattlefieldBugDiagnostics.ClassifyCurrentOrderReplacement(
+            calledFromCampaign: true,
+            oldOrder: oldOrder,
+            newOrder: materialOrder,
+            nearDistance: 10f,
+            nearRotationDegrees: 5f);
+
+        AssertTrue(duplicate.IsRisk, "campaign near replacement should be risky");
+        AssertEqual(TacticalBattlefieldBugObservationKind.CurrentOrderReplacement, duplicate.Kind, "kind");
+        AssertEqual("campaign-duplicate-near", duplicate.Reason, "reason");
+        AssertContains(duplicate.Summary, "[TacticalCurrentOrder]", "summary prefix");
+        AssertTrue(!battleCall.IsRisk, "battle calls should rely on vanilla duplicate guard");
+        AssertTrue(material.IsRisk, "campaign material replacement should still be visible");
+        AssertEqual("campaign-replacement-material-change", material.Reason, "material reason");
+    }
+
+    private static void TacticalDiagnosticsDetectDelayedWaypointDrift()
+    {
+        var drift = TacticalBattlefieldBugDiagnostics.ClassifyDelayedWaypointDrift(
+            orderDelayEnabled: true,
+            activeMoveOrder: true,
+            queueAdded: false,
+            pathCountBefore: 1,
+            pathCountAfter: 2,
+            xBefore: 10f,
+            zBefore: 20f,
+            xAfter: 15f,
+            zAfter: 25f);
+        var queued = TacticalBattlefieldBugDiagnostics.ClassifyDelayedWaypointDrift(
+            orderDelayEnabled: true,
+            activeMoveOrder: true,
+            queueAdded: true,
+            pathCountBefore: 1,
+            pathCountAfter: 2,
+            xBefore: 10f,
+            zBefore: 20f,
+            xAfter: 15f,
+            zAfter: 25f);
+
+        AssertTrue(drift.IsRisk, "path mutation without queue insert should be risky");
+        AssertEqual("path-mutated-without-queue", drift.Reason, "reason");
+        AssertContains(drift.Signature, "paths=1->2", "path counts");
+        AssertTrue(!queued.IsRisk, "queued waypoint changes should not be drift risk");
+    }
+
+    private static void TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk()
+    {
+        var mismatch = TacticalBattlefieldBugDiagnostics.ClassifyCourierQueueIndex(
+            secondaryCourier: true,
+            orderQueueCount: 3,
+            activeQueueIndex: 0,
+            appendQueueIndex: 2);
+        var sameQueue = TacticalBattlefieldBugDiagnostics.ClassifyCourierQueueIndex(
+            secondaryCourier: true,
+            orderQueueCount: 3,
+            activeQueueIndex: 2,
+            appendQueueIndex: 2);
+
+        AssertTrue(mismatch.IsRisk, "secondary courier appended to a different queue should be risky");
+        AssertEqual("secondary-courier-appended-to-latest", mismatch.Reason, "reason");
+        AssertContains(mismatch.Summary, "[TacticalCourierQueue]", "summary prefix");
+        AssertTrue(!sameQueue.IsRisk, "secondary courier on active queue should not be risky");
+    }
+
+    private static void TacticalDiagnosticsDetectObjectiveChainPlayerSubordinateRisk()
+    {
+        var risky = TacticalBattlefieldBugDiagnostics.ClassifyObjectiveChainMovement(
+            objectiveChainMove: true,
+            centerGroupUnderPlayerCommander: false,
+            attachedPlayerSubordinate: true,
+            attachedUnitCount: 4);
+        var aiOnly = TacticalBattlefieldBugDiagnostics.ClassifyObjectiveChainMovement(
+            objectiveChainMove: true,
+            centerGroupUnderPlayerCommander: false,
+            attachedPlayerSubordinate: false,
+            attachedUnitCount: 4);
+        var center = TacticalBattlefieldBugDiagnostics.ClassifyObjectiveChainMovement(
+            objectiveChainMove: true,
+            centerGroupUnderPlayerCommander: true,
+            attachedPlayerSubordinate: false,
+            attachedUnitCount: 4);
+
+        AssertTrue(risky.IsRisk, "objective-chain movement with player-subordinate attachments should be risky");
+        AssertEqual("objective-chain-player-subordinate-attached", risky.Reason, "reason");
+        AssertContains(risky.Signature, "attached=4", "attached count");
+        AssertTrue(!aiOnly.IsRisk, "AI-only objective-chain movement should remain observation-only");
+        AssertTrue(center.IsRisk, "objective-chain movement with player center group should be risky");
+        AssertEqual("objective-chain-player-center-group", center.Reason, "center reason");
+    }
+
+    private static void TacticalDiagnosticsDetectObjectiveChainMovementMutationProof()
+    {
+        var noMutation = TacticalBattlefieldBugDiagnostics.ClassifyObjectiveChainMutation(
+            exposedPlayerSubordinateChain: true,
+            centerMutated: false,
+            attachedPlayerSubordinateMutated: false,
+            changedUnitCount: 0);
+        var centerMutation = TacticalBattlefieldBugDiagnostics.ClassifyObjectiveChainMutation(
+            exposedPlayerSubordinateChain: true,
+            centerMutated: true,
+            attachedPlayerSubordinateMutated: false,
+            changedUnitCount: 1);
+        var attachedMutation = TacticalBattlefieldBugDiagnostics.ClassifyObjectiveChainMutation(
+            exposedPlayerSubordinateChain: true,
+            centerMutated: false,
+            attachedPlayerSubordinateMutated: true,
+            changedUnitCount: 2);
+        var aiOnlyMutation = TacticalBattlefieldBugDiagnostics.ClassifyObjectiveChainMutation(
+            exposedPlayerSubordinateChain: false,
+            centerMutated: true,
+            attachedPlayerSubordinateMutated: true,
+            changedUnitCount: 3);
+
+        AssertTrue(!noMutation.IsRisk, "exposure without path or position mutation should not justify behavior patch");
+        AssertEqual("objective-chain-no-mutation", noMutation.Reason, "no mutation reason");
+        AssertTrue(centerMutation.IsRisk, "center mutation in an exposed chain proves behavior impact");
+        AssertEqual("objective-chain-center-mutated", centerMutation.Reason, "center mutation reason");
+        AssertTrue(attachedMutation.IsRisk, "attached player-subordinate mutation proves behavior impact");
+        AssertEqual("objective-chain-player-subordinate-mutated", attachedMutation.Reason, "attached mutation reason");
+        AssertTrue(!aiOnlyMutation.IsRisk, "AI-only chains should not count as player-subordinate bug proof");
+        AssertContains(attachedMutation.Signature, "changed=2", "changed count");
+    }
+
+    private static void TacticalDiagnosticsDetectReserveDirectPathDelayBypass()
+    {
+        var bypass = TacticalBattlefieldBugDiagnostics.ClassifyReserveDirectPathBypass(
+            reserveSupportMove: true,
+            orderDelayEnabled: true,
+            directPathIssued: true,
+            queuedOrderIssued: false,
+            reserveCandidateCount: 2);
+        var queued = TacticalBattlefieldBugDiagnostics.ClassifyReserveDirectPathBypass(
+            reserveSupportMove: true,
+            orderDelayEnabled: true,
+            directPathIssued: true,
+            queuedOrderIssued: true,
+            reserveCandidateCount: 2);
+
+        AssertTrue(bypass.IsRisk, "reserve direct path should be risky when order delay is bypassed");
+        AssertEqual("reserve-direct-path-bypasses-delay", bypass.Reason, "reason");
+        AssertContains(bypass.Summary, "[TacticalReserveMove]", "summary prefix");
+        AssertTrue(!queued.IsRisk, "queued reserve movement should not be a bypass risk");
+    }
+
+    private static void TacticalDiagnosticsSuppressOnlyTacticalNullFallbackExceptions()
+    {
+        AssertTrue(
+            TacticalBattlefieldBugDiagnostics.ShouldSuppressFallbackRetreatException(
+                "MicroAICheckForRetreats",
+                new NullReferenceException("null attached unit")),
+            "retreat null exception should be suppressed");
+        AssertTrue(
+            TacticalBattlefieldBugDiagnostics.ShouldSuppressFallbackRetreatException(
+                "CheckLineFallbacks",
+                new NullReferenceException("null attached unit")),
+            "line fallback null exception should be suppressed");
+        AssertTrue(
+            !TacticalBattlefieldBugDiagnostics.ShouldSuppressFallbackRetreatException(
+                "MicroAICheckForRetreats",
+                new InvalidOperationException("not null")),
+            "non-null exceptions must propagate");
+        AssertTrue(
+            !TacticalBattlefieldBugDiagnostics.ShouldSuppressFallbackRetreatException(
+                "CheckAIBombardment",
+                new NullReferenceException("different method")),
+            "other tactical methods must propagate");
+    }
+
+    private static void TacticalDiagnosticsHandleEmptyNullAndSanitizedValues()
+    {
+        var empty = TacticalBattlefieldBugDiagnostics.ClassifyCurrentOrderReplacement(
+            calledFromCampaign: true,
+            oldOrder: TacticalCurrentOrderSignature.Empty,
+            newOrder: new TacticalCurrentOrderSignature(7, 11, float.NaN, float.PositiveInfinity, -15f, null),
+            nearDistance: float.NaN,
+            nearRotationDegrees: float.PositiveInfinity);
+        var sanitized = TacticalBattlefieldBugDiagnostics.ClassifyCourierQueueIndex(
+            secondaryCourier: true,
+            orderQueueCount: -3,
+            activeQueueIndex: -1,
+            appendQueueIndex: 2);
+        var before = new TacticalCurrentOrderSignature(7, 11, 100.11f, 200.11f, 45f, "Hill Road");
+        var sameBucket = new TacticalCurrentOrderSignature(7, 11, 100.14f, 200.14f, 45.02f, "Hill Road");
+        var material = new TacticalCurrentOrderSignature(7, 11, 101.11f, 200.11f, 45f, "Hill Road");
+        var unsafeDestination = new TacticalCurrentOrderSignature(7, 11, 100f, 200f, 45f, "Hill\nRoad\tA=B{C}|D");
+        var unsafeDecision = new TacticalBugDiagnosticDecision(
+            TacticalBattlefieldBugObservationKind.CurrentOrderReplacement,
+            isRisk: true,
+            reason: "bad reason\nwith=value",
+            signature: "sig\nline\tvalue");
+
+        AssertTrue(!empty.IsRisk, "empty current order should be safe");
+        AssertEqual("missing-order", empty.Reason, "empty reason");
+        AssertContains(empty.Summary, "dest=-", "null destination should be sanitized");
+        AssertTrue(!sanitized.IsRisk, "invalid queue counts should be safe");
+        AssertContains(sanitized.Signature, "queues=0", "negative queue count should clamp");
+        AssertTrue(!empty.Summary.Contains("NaN"), "summary should not contain NaN");
+        AssertTrue(!empty.Summary.Contains("Infinity"), "summary should not contain Infinity");
+        AssertEqual(before.Signature, sameBucket.Signature, "same bucket signature");
+        AssertTrue(before.Signature != material.Signature, "material position change should alter signature");
+        AssertContains(unsafeDestination.Signature, "dest=Hill_Road_A_B_C__D", "unsafe destination should be sanitized");
+        AssertTrue(!unsafeDestination.Signature.Contains("\n"), "destination signature should be one line");
+        AssertTrue(!unsafeDestination.Signature.Contains("\t"), "destination signature should not contain tabs");
+        AssertTrue(!unsafeDecision.Summary.Contains("\n"), "decision summary should be one line");
+        AssertTrue(!unsafeDecision.Summary.Contains("\t"), "decision summary should not contain tabs");
+        AssertTrue(!unsafeDecision.Reason.Contains("="), "decision reason should not contain equals");
     }
 
     private static void TacticalWlGuardAllowsNonWlAction()

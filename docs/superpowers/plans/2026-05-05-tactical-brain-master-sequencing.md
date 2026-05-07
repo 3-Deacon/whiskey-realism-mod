@@ -1,6 +1,6 @@
 # Tactical Brain Master Sequencing Implementation Plan
 
-Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard is implemented and hash-deployed locally. Fresh B1 runtime denial smoke was explicitly deferred by user direction on 2026-05-07. B2 command/order-friction is implemented, build/deploy/hash verified, and extends #35 read-only telemetry; no B2 in-game smoke has been run. B3 tactical odds doctrine is next.
+Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard is implemented and hash-deployed locally. Fresh B1 runtime denial smoke was explicitly deferred by user direction on 2026-05-07. B2 command/order-friction is implemented, build/deploy/hash verified, extends #35 read-only telemetry, and has focused in-game smoke for `[TacticalCommand]` / `[TacticalOrder]`. Tactical bug-remediation telemetry and default-off #43 fallback/retreat NRE guard are also implemented and hash-deployed; focused smoke confirmed `BUG-TAC-005` objective-chain exposure but did not exercise #43 or prove path/position movement. B3 tactical odds doctrine is next.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

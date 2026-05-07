@@ -28,6 +28,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalObserver;
         internal ConfigEntry<bool> TacticalObserverVerboseLogging;
         internal ConfigEntry<int> TacticalObserverMinSecondsBetweenSummaries;
+        internal ConfigEntry<bool> EnableTacticalBugTelemetry;
+        internal ConfigEntry<bool> EnableTacticalFallbackRetreatNullGuard;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
@@ -121,6 +123,16 @@ namespace WhiskeyRealism
                 "Tactical Observer Min Seconds Between Summaries",
                 30,
                 "Minimum wall-clock seconds between repeated tactical observer summaries with the same signature.");
+            EnableTacticalBugTelemetry = Config.Bind(
+                "Tactical",
+                "Enable Tactical Bug Telemetry",
+                false,
+                "Default OFF. Emits focused read-only telemetry for tactical order/current-order bug hunts; does not change battlefield behavior.");
+            EnableTacticalFallbackRetreatNullGuard = Config.Bind(
+                "Tactical",
+                "Enable Tactical Fallback Retreat Null Guard",
+                false,
+                "Default OFF. Suppresses NullReferenceException from two vanilla tactical fallback/retreat methods during focused bug-smoke runs; all non-null exceptions still propagate.");
             EnableWlTacticalChargeGuard = Config.Bind(
                 "Tactical",
                 "Enable W&L Tactical Charge Guard",

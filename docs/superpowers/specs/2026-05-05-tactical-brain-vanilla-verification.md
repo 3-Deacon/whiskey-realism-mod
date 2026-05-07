@@ -1,6 +1,6 @@
 # Tactical Brain Vanilla Verification
 
-Status: paused verification pass for `2026-05-05-tactical-brain-design.md`. Keep as reference only unless the user explicitly reopens tactical work.
+Status: reopened verification reference for `2026-05-05-tactical-brain-design.md`. Keep this as vanilla/runtime evidence; implement through slice plans, not directly from this file.
 Scope: vanilla code confirmation only. This document distinguishes confirmed vanilla surfaces from Whiskey doctrine that still has to be implemented.
 
 Primary source: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
@@ -17,6 +17,8 @@ Primary source: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 No major Slice B requirement is blocked by missing vanilla data. Vanilla already exposes battle macro stance, group stance, charge, reserve, skirmisher, bombardment, flank, fallback, retreat, terrain, fog-of-war, unit-condition, hierarchy, courier/order-delay, and reinforcement surfaces.
 
 The important boundary is that vanilla does not already contain the historical tactical doctrine requested by the spec. Sector missions, local-superiority doctrine, scout-before-commitment, strongpoint avoidance, reserve relief timing, covered staged withdrawal, and command-tier intent are Whiskey additions that must be built on the confirmed surfaces.
+
+Runtime addendum from focused 2026-05-07 W&L battle smoke: B0/B2/#35 telemetry confirmed live command/order surfaces with `[TacticalCommand]`, `[TacticalOrder]`, `[TacticalPlayerOrder]`, `[TacticalCourierQueue]`, and `[TacticalCurrentOrder]` markers. The same smoke confirmed objective-chain player-subordinate exposure through eleven `[TacticalObjectiveMove]` `risk=True` lines, but did not prove path/position mutation. It did not observe `[TacticalWaypointDrift]`, `[TacticalReserveMove]`, `[Patch:TacticalFallbackRetreatNullGuard]`, `[TacticalChargeGuard]`, or `[TacticalFeudGuard]`.
 
 Spec corrections that matter before implementation:
 
@@ -93,6 +95,8 @@ Only after those observer logs match runtime expectations should behavior patche
 ## Not Verified
 
 - Runtime reproduction of the W&L "auto-charge" symptom. Vanilla evidence supports an ungated auto-advance-toward-enemy path in `CheckForFeudGroupActions()`, but the visible player symptom needs smoke.
+- Runtime proof that objective-chain exposure actually changes a player-subordinate attachment path or position. Exposure is confirmed; movement impact is not.
+- Runtime proof of campaign-call `CheckCurrentOrderUpdate(... calledfromcampaign:true)` duplication, risky courier queue mismatch, delayed waypoint drift, reserve direct-path movement, or fallback/retreat NRE suppression. Focused smoke did not exercise those risk markers.
 - Live-battle reachability of `Autocalc.CheckUnitArrivals()`. Active battle reinforcement state is confirmed through `BattleUnits.sideinformation`; the `Autocalc` method should not be the first patch target until its call path is proven.
 - Final sector geometry quality. Vanilla objective-chain center/flank/reserve/artillery/screening structures are confirmed, but the Whiskey seven-sector projection still needs B0 telemetry before behavior changes.
 - Historical doctrine tuning values. The vanilla surfaces are confirmed; actual thresholds for scouting, withdrawal, reserves, and strongpoint avoidance require runtime soak.
