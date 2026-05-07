@@ -28,6 +28,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalObserver;
         internal ConfigEntry<bool> TacticalObserverVerboseLogging;
         internal ConfigEntry<int> TacticalObserverMinSecondsBetweenSummaries;
+        internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
@@ -120,6 +121,11 @@ namespace WhiskeyRealism
                 "Tactical Observer Min Seconds Between Summaries",
                 30,
                 "Minimum wall-clock seconds between repeated tactical observer summaries with the same signature.");
+            EnableWlTacticalChargeGuard = Config.Bind(
+                "Tactical",
+                "Enable W&L Tactical Charge Guard",
+                false,
+                "Default OFF for Slice B1. When enabled, blocks new ungated W&L AI feud/charge movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");

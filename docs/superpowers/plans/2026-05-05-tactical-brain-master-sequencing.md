@@ -1,6 +1,6 @@
 # Tactical Brain Master Sequencing Implementation Plan
 
-Status: active prep. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer source is present and deployed locally; runtime observer smoke is the gate before any behavior patch.
+Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard is implemented and hash-deployed locally, with fresh runtime denial smoke still pending.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -29,7 +29,7 @@ Read these before creating any B-slice plan:
 Implementation boundary:
 
 - Do not implement the whole tactical brain from this master plan.
-- Do not ship any behavior patch before `B0 Tactical Observer` is smoke-reviewed. B0 source is already built/deployed locally as observer-only #35, but a fresh W&L land-battle smoke is still required.
+- Do not start B2 or later behavior patches until B1 runtime smoke is classified. B0 is closed; B1 is built/deployed but still needs a fresh W&L subordinate battle after restart.
 - Do not merge the weapons/ammunition adjunct into this master tactical-brain track. The adjunct needs its own observer-first plan after core B0 proves battle telemetry shape.
 - Keep tactical state runtime-only unless a later battle-resume spec is written. Do not write tactical state to `whiskeyrealism.json`.
 - Existing dirty work in unrelated campaign systems must not be reverted while executing any B-slice.
@@ -312,6 +312,8 @@ git commit -m "docs: plan tactical b1 wl feud charge guard"
 ```
 
 ## Task 4: B1 W&L Feud And Charge Guard Implementation
+
+Status: implemented and hash-deployed on 2026-05-07 from the detailed plan at `docs/superpowers/plans/2026-05-07-tactical-b1-wl-feud-charge-guard.md`. Runtime denial smoke remains pending after restart.
 
 **Files:**
 

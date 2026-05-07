@@ -40,6 +40,12 @@ static class Program
             ("tactical telemetry signature changes on material fields", TacticalTelemetrySignatureChangesOnMaterialFields),
             ("tactical telemetry throttle suppresses repeated signature", TacticalTelemetryThrottleSuppressesRepeatedSignature),
             ("tactical telemetry delta formats before after counts", TacticalTelemetryDeltaFormatsBeforeAfterCounts),
+            ("tactical wl guard allows non wl action", TacticalWlGuardAllowsNonWlAction),
+            ("tactical wl guard allows when config disabled", TacticalWlGuardAllowsWhenConfigDisabled),
+            ("tactical wl guard denies player subordinate charge initiation", TacticalWlGuardDeniesPlayerSubordinateChargeInitiation),
+            ("tactical wl guard allows charge cancellation", TacticalWlGuardAllowsChargeCancellation),
+            ("tactical wl guard denies feud move with attached subordinate", TacticalWlGuardDeniesFeudMoveWithAttachedSubordinate),
+            ("tactical wl guard allows ai chain feud move", TacticalWlGuardAllowsAiChainFeudMove),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl diary startup gate defers until diary dependencies are ready", WlDiaryStartupGateDefersUntilReady),
@@ -560,6 +566,90 @@ static class Program
         AssertContains(delta, "groups=2->2", "group delta");
         AssertContains(delta, "charging=0->1", "charging delta");
         AssertContains(delta, "reserves=1->2", "reserve delta");
+    }
+
+    private static void TacticalWlGuardAllowsNonWlAction()
+    {
+        var decision = TacticalWlActionGuard.Decide(
+            configEnabled: true,
+            dlcScenarioActive: false,
+            action: TacticalWlGuardAction.ChargeInitiation,
+            unitUnderCommander: true,
+            groupUnderCommander: true,
+            attachedUnitUnderCommander: true);
+
+        AssertTrue(decision.Allow, "non-W&L scenarios must remain vanilla");
+        AssertEqual("wl-inactive", decision.Reason, "reason");
+    }
+
+    private static void TacticalWlGuardAllowsWhenConfigDisabled()
+    {
+        var decision = TacticalWlActionGuard.Decide(
+            configEnabled: false,
+            dlcScenarioActive: true,
+            action: TacticalWlGuardAction.ChargeInitiation,
+            unitUnderCommander: true,
+            groupUnderCommander: false,
+            attachedUnitUnderCommander: false);
+
+        AssertTrue(decision.Allow, "disabled config must leave vanilla behavior alone");
+        AssertEqual("config-disabled", decision.Reason, "reason");
+    }
+
+    private static void TacticalWlGuardDeniesPlayerSubordinateChargeInitiation()
+    {
+        var decision = TacticalWlActionGuard.Decide(
+            configEnabled: true,
+            dlcScenarioActive: true,
+            action: TacticalWlGuardAction.ChargeInitiation,
+            unitUnderCommander: true,
+            groupUnderCommander: false,
+            attachedUnitUnderCommander: false);
+
+        AssertTrue(!decision.Allow, "player-subordinate charge initiation should be denied");
+        AssertEqual("player-subordinate", decision.Reason, "reason");
+    }
+
+    private static void TacticalWlGuardAllowsChargeCancellation()
+    {
+        var decision = TacticalWlActionGuard.Decide(
+            configEnabled: true,
+            dlcScenarioActive: true,
+            action: TacticalWlGuardAction.ChargeCancellation,
+            unitUnderCommander: true,
+            groupUnderCommander: true,
+            attachedUnitUnderCommander: true);
+
+        AssertTrue(decision.Allow, "charge cancellation must always be preserved");
+        AssertEqual("preserve-cancellation", decision.Reason, "reason");
+    }
+
+    private static void TacticalWlGuardDeniesFeudMoveWithAttachedSubordinate()
+    {
+        var decision = TacticalWlActionGuard.Decide(
+            configEnabled: true,
+            dlcScenarioActive: true,
+            action: TacticalWlGuardAction.FeudMovement,
+            unitUnderCommander: false,
+            groupUnderCommander: false,
+            attachedUnitUnderCommander: true);
+
+        AssertTrue(!decision.Allow, "feud movement should be denied when the group contains a player-subordinate unit");
+        AssertEqual("player-subordinate-attached", decision.Reason, "reason");
+    }
+
+    private static void TacticalWlGuardAllowsAiChainFeudMove()
+    {
+        var decision = TacticalWlActionGuard.Decide(
+            configEnabled: true,
+            dlcScenarioActive: true,
+            action: TacticalWlGuardAction.FeudMovement,
+            unitUnderCommander: false,
+            groupUnderCommander: false,
+            attachedUnitUnderCommander: false);
+
+        AssertTrue(decision.Allow, "AI-chain feud movement should remain vanilla");
+        AssertEqual("ai-chain", decision.Reason, "reason");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
