@@ -83,9 +83,9 @@ The sidecar carries:
 
 Historical-operation implementation build/deploy/hash was verified in DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes). Current local deployed DLL:
 
-- `dist/WhiskeyRealism.dll`: `54c2adba6796e3fb7fbc826171bac2c7ff71029f8e092fd9fc765bc30892a214`
-- deployed BepInEx plugin: `54c2adba6796e3fb7fbc826171bac2c7ff71029f8e092fd9fc765bc30892a214`
-- size: 583680 bytes
+- `dist/WhiskeyRealism.dll`: `1f5ae70f1ba4c561e2afd9afe8fd571dc122e06967d8055272f8c2842693e857`
+- deployed BepInEx plugin: `1f5ae70f1ba4c561e2afd9afe8fd571dc122e06967d8055272f8c2842693e857`
+- size: 587264 bytes
 - console harness passed
 - `./build.sh` passed with 0 warnings / 0 errors
 

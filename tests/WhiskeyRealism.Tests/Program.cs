@@ -55,6 +55,7 @@ static class Program
             ("tactical odds global superiority selects one decisive sector", TacticalOddsGlobalSuperioritySelectsOneDecisiveSector),
             ("tactical odds inferior no relief preserves force", TacticalOddsInferiorNoReliefPreservesForce),
             ("tactical odds inferior with relief delays", TacticalOddsInferiorWithReliefDelays),
+            ("tactical sector no measured enemy is not weak point", TacticalSectorNoMeasuredEnemyIsNotWeakPoint),
             ("tactical macro dynamic is not attack", TacticalMacroDynamicIsNotAttack),
             ("tactical macro debug override skips", TacticalMacroDebugOverrideSkips),
             ("tactical macro inferior no relief retreats", TacticalMacroInferiorNoReliefRetreats),
@@ -737,6 +738,20 @@ static class Program
             sectors: Array.Empty<TacticalSectorAssessment>()));
 
         AssertEqual(TacticalInferiorForcePosture.DelayOnStrongGround, output.InferiorForcePosture, "posture");
+    }
+
+    private static void TacticalSectorNoMeasuredEnemyIsNotWeakPoint()
+    {
+        var sectors = new[]
+        {
+            new TacticalSectorAssessment(7, TacticalSectorSource.AngleSlice, 5158f, 0f, 0.8f, false, false, TacticalSectorMission.Hold)
+        };
+
+        var result = TacticalSectorLedger.Evaluate(sectors);
+
+        AssertEqual(-1, result.DecisiveSectorId, "no measured enemy cannot be decisive");
+        AssertEqual(TacticalSectorMission.Hold, result.Sectors[0].Mission, "no measured enemy should hold");
+        AssertEqual(0f, result.Sectors[0].Odds, "no measured enemy has no attack odds");
     }
 
     private static TacticalOddsAssessment Odds(

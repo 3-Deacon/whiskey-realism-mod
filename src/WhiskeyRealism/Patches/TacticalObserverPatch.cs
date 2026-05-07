@@ -77,7 +77,10 @@ namespace WhiskeyRealism.Patches
                 int formationOrdered,
                 int lastFormation,
                 int groupFormation,
-                bool marchColumnActive)
+                bool marchColumnActive,
+                bool distanceMarchColumn,
+                int orderState,
+                int lastTransmittedPath)
             {
                 PathCount = pathCount;
                 QueueCount = queueCount;
@@ -94,6 +97,9 @@ namespace WhiskeyRealism.Patches
                 LastFormation = lastFormation;
                 GroupFormation = groupFormation;
                 MarchColumnActive = marchColumnActive;
+                DistanceMarchColumn = distanceMarchColumn;
+                OrderState = orderState;
+                LastTransmittedPath = lastTransmittedPath;
             }
 
             public int PathCount { get; }
@@ -111,6 +117,9 @@ namespace WhiskeyRealism.Patches
             public int LastFormation { get; }
             public int GroupFormation { get; }
             public bool MarchColumnActive { get; }
+            public bool DistanceMarchColumn { get; }
+            public int OrderState { get; }
+            public int LastTransmittedPath { get; }
         }
 
         internal readonly struct PathShapeSummary
@@ -155,6 +164,41 @@ namespace WhiskeyRealism.Patches
             public float FirstZ { get; }
             public float FinalX { get; }
             public float FinalZ { get; }
+        }
+
+        internal readonly struct FormationChangeState
+        {
+            public FormationChangeState(
+                int formation,
+                int formationOrdered,
+                int lastFormation,
+                int groupFormation,
+                bool marchColumnActive,
+                bool distanceMarchColumn,
+                int pathCount,
+                int orderState,
+                int lastTransmittedPath)
+            {
+                Formation = formation;
+                FormationOrdered = formationOrdered;
+                LastFormation = lastFormation;
+                GroupFormation = groupFormation;
+                MarchColumnActive = marchColumnActive;
+                DistanceMarchColumn = distanceMarchColumn;
+                PathCount = pathCount;
+                OrderState = orderState;
+                LastTransmittedPath = lastTransmittedPath;
+            }
+
+            public int Formation { get; }
+            public int FormationOrdered { get; }
+            public int LastFormation { get; }
+            public int GroupFormation { get; }
+            public bool MarchColumnActive { get; }
+            public bool DistanceMarchColumn { get; }
+            public int PathCount { get; }
+            public int OrderState { get; }
+            public int LastTransmittedPath { get; }
         }
 
         internal sealed class ObjectiveMoveState
@@ -433,7 +477,10 @@ namespace WhiskeyRealism.Patches
                 SafeFormationOrdered(reg),
                 SafeLastFormation(reg),
                 SafeGroupFormation(reg),
-                SafeMarchColumnActive(reg));
+                SafeMarchColumnActive(reg),
+                SafeDistanceMarchColumn(reg),
+                SafeOrderState(reg),
+                SafePathId(reg, ignoreOrderDelay: false));
         }
 
         [HarmonyPatch(typeof(BattleUnits), "SetWaypoint", new[]
@@ -475,7 +522,10 @@ namespace WhiskeyRealism.Patches
                 SafeFormationOrdered(aigroup),
                 SafeLastFormation(aigroup),
                 SafeGroupFormation(aigroup),
-                SafeMarchColumnActive(aigroup));
+                SafeMarchColumnActive(aigroup),
+                SafeDistanceMarchColumn(aigroup),
+                SafeOrderState(aigroup),
+                SafePathId(aigroup, ignoreOrderDelay: false));
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
@@ -483,6 +533,23 @@ namespace WhiskeyRealism.Patches
         internal static void CheckUseOfReservesBugPostfix(Regiment aigroup, WaypointState __state)
         {
             ObserveReserveMove(aigroup, __state);
+        }
+
+        [HarmonyPatch(typeof(Regiment), "ChangeRegimentFormation")]
+        [HarmonyPrefix]
+        internal static void ChangeRegimentFormationPrefix(Regiment __instance, out FormationChangeState __state)
+        {
+            __state = SnapshotFormationChange(__instance);
+        }
+
+        [HarmonyPatch(typeof(Regiment), "ChangeRegimentFormation")]
+        [HarmonyPostfix]
+        internal static void ChangeRegimentFormationPostfix(
+            Regiment __instance,
+            GameVars.FormationParam fparam,
+            FormationChangeState __state)
+        {
+            ObserveFormationChange(__instance, fparam, __state);
         }
 
         [HarmonyPatch(typeof(AIBattle), "UpdateMovingTargets")]
@@ -805,6 +872,10 @@ namespace WhiskeyRealism.Patches
                     " lastFormation=" + FormatFormation(state.LastFormation) + "->" + FormatFormation(SafeLastFormation(unit)) +
                     " groupFormation=" + FormatFormation(state.GroupFormation) + "->" + FormatFormation(SafeGroupFormation(unit)) +
                     " marchColumnActive=" + state.MarchColumnActive + "->" + SafeMarchColumnActive(unit) +
+                    " distanceMarchColumn=" + state.DistanceMarchColumn + "->" + SafeDistanceMarchColumn(unit) +
+                    " orderState=" + state.OrderState + "->" + SafeOrderState(unit) +
+                    " transmittedPath=" + state.LastTransmittedPath + "->" + SafePathId(unit, ignoreOrderDelay: false) +
+                    " autoColumnEligible=" + AutoColumnEligible(state) +
                     " newPath=" + newPath +
                     " modifyLast=" + modifyLastWaypoint +
                     " useDelay=" + useOrderDelay +
@@ -815,6 +886,47 @@ namespace WhiskeyRealism.Patches
             catch (Exception ex)
             {
                 OnceLog.Warning("tactical-path-shape", "Tactical path-shape observer failed: " + ex.Message);
+            }
+        }
+
+        private static void ObserveFormationChange(Regiment unit, GameVars.FormationParam fparam, FormationChangeState state)
+        {
+            if (!BugTelemetryEnabled()) return;
+
+            try
+            {
+                int requested = fparam != null ? fparam.newformation : -1;
+                bool relevant =
+                    requested == 3 ||
+                    state.Formation == 3 ||
+                    state.LastFormation == 3 ||
+                    SafeFormation(unit) == 3 ||
+                    SafeLastFormation(unit) == 3 ||
+                    state.DistanceMarchColumn ||
+                    SafeDistanceMarchColumn(unit);
+                if (!relevant) return;
+
+                EmitDirect(
+                    "TacticalFormationChange",
+                    "formation-change|" + SafeInstanceId(unit) + "|" + state.Formation + "|" + SafeFormation(unit) + "|" +
+                    requested + "|" + SafeRegimentPaths(unit) + "|" + SafeDistanceMarchColumn(unit),
+                    "[TacticalFormationChange] unit=" + SafeUnitName(unit) +
+                    " requested=" + FormatFormation(requested) +
+                    " manualSet=" + (fparam != null && fparam.manualset) +
+                    " setOrdered=" + (fparam != null && fparam.setalsoformationorderedvariable) +
+                    " formation=" + FormatFormation(state.Formation) + "->" + FormatFormation(SafeFormation(unit)) +
+                    " orderedFormation=" + FormatFormation(state.FormationOrdered) + "->" + FormatFormation(SafeFormationOrdered(unit)) +
+                    " lastFormation=" + FormatFormation(state.LastFormation) + "->" + FormatFormation(SafeLastFormation(unit)) +
+                    " groupFormation=" + FormatFormation(state.GroupFormation) + "->" + FormatFormation(SafeGroupFormation(unit)) +
+                    " marchColumnActive=" + state.MarchColumnActive + "->" + SafeMarchColumnActive(unit) +
+                    " distanceMarchColumn=" + state.DistanceMarchColumn + "->" + SafeDistanceMarchColumn(unit) +
+                    " paths=" + state.PathCount + "->" + SafeRegimentPaths(unit) +
+                    " orderState=" + state.OrderState + "->" + SafeOrderState(unit) +
+                    " transmittedPath=" + state.LastTransmittedPath + "->" + SafePathId(unit, ignoreOrderDelay: false));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-formation-change", "Tactical formation-change observer failed: " + ex.Message);
             }
         }
 
@@ -1119,8 +1231,8 @@ namespace WhiskeyRealism.Patches
                 vanillaStance,
                 context.MacroAi,
                 sector,
-                wlGuard.Allow,
-                orderFrictionAllows));
+                orderFrictionAllows,
+                wlGuard.Allow));
 
             Plugin.Log.LogInfo("[TacticalDecisionMatrix] event=" + eventType +
                 " row=group index=" + index +
@@ -1150,6 +1262,7 @@ namespace WhiskeyRealism.Patches
                 " formation=" + FormatFormation(SafeFormation(group)) +
                 " orderedFormation=" + FormatFormation(SafeFormationOrdered(group)) +
                 " paths=" + SafeRegimentPaths(group) +
+                " pathInterrupted=" + group.pathinterrupted +
                 " queue=" + SafeOrderQueueCount(group) +
                 " activeMove=" + HasActiveMoveOrder(group) +
                 " receivedFire=" + MatrixReceivedFire(group) +
@@ -1158,7 +1271,7 @@ namespace WhiskeyRealism.Patches
                 " flankThreat=" + BucketForObserver(group.flanksthreated) +
                 " outflanked=" + group.outflanked +
                 " cover=" + BucketForObserver(group.covervalue) +
-                " fort=" + group.fortinrange +
+                " fort=" + (group.fortinrange ? "1" : "0") +
                 " feud=" + group.ai_feudstance +
                 " objective=" + SafeCurrentObjectiveId(group) +
                 " position=" + PointSignature(SafePositionX(group), SafePositionZ(group)) +
@@ -1169,8 +1282,10 @@ namespace WhiskeyRealism.Patches
         private static TacticalSectorAssessment BuildMatrixSector(Regiment group, int index)
         {
             float own = Math.Max(group.groupowninrange, group.groupstrengthaigroup);
-            float enemy = Math.Max(1f, Math.Max(group.groupenemiesinrange, MatrixEnemyAngleStrength(group)));
-            float confidence = group.unitrange != null && group.unitrange.closestenemyunitfarreg != null ? 0.8f : 0.45f;
+            float enemy = Math.Max(0f, Math.Max(group.groupenemiesinrange, MatrixEnemyAngleStrength(group)));
+            bool hasEnemy = enemy > 0f;
+            bool hasClosestEnemy = group.unitrange != null && group.unitrange.closestenemyunitfarreg != null;
+            float confidence = hasEnemy ? (hasClosestEnemy ? 0.8f : 0.55f) : 0.45f;
             bool flankRisk = group.flanksthreated > 0f || group.outflanked > 0;
             bool strongPoint = group.covervalue > 0.5f || group.fortinrange;
             var sector = new TacticalSectorAssessment(
@@ -1966,6 +2081,20 @@ namespace WhiskeyRealism.Patches
             catch { return -1; }
         }
 
+        private static FormationChangeState SnapshotFormationChange(Regiment unit)
+        {
+            return new FormationChangeState(
+                SafeFormation(unit),
+                SafeFormationOrdered(unit),
+                SafeLastFormation(unit),
+                SafeGroupFormation(unit),
+                SafeMarchColumnActive(unit),
+                SafeDistanceMarchColumn(unit),
+                SafeRegimentPaths(unit),
+                SafeOrderState(unit),
+                SafePathId(unit, ignoreOrderDelay: false));
+        }
+
         private static int SafeFormation(Regiment unit)
         {
             try { return unit != null ? unit.formation : -1; }
@@ -1998,6 +2127,28 @@ namespace WhiskeyRealism.Patches
                 if (_changeToMarchColumnActiveField == null)
                     _changeToMarchColumnActiveField = AccessTools.Field(typeof(Regiment), "changetomarchcolumnactive");
                 return _changeToMarchColumnActiveField != null && (bool)_changeToMarchColumnActiveField.GetValue(unit);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool SafeDistanceMarchColumn(Regiment unit)
+        {
+            try { return unit != null && unit.distancemarchcolumn; }
+            catch { return false; }
+        }
+
+        private static bool AutoColumnEligible(WaypointState state)
+        {
+            try
+            {
+                return state.MarchColumnActive &&
+                    state.Formation != 3 &&
+                    state.PathCount <= 0 &&
+                    XzDistance(state.StartX, state.StartZ, state.TargetX, state.TargetZ) > GamePrefs.mindistanceformarchcolumn &&
+                    (state.MovementMode == 0 || state.MovementMode == 3);
             }
             catch
             {

@@ -1,6 +1,6 @@
 # Tactical Battlefield Bug Remediation Implementation Plan
 
-Status: implemented, console-tested, built, deployed, hash-verified, and focused-smoke sampled on 2026-05-07. Current deployed DLL is `54c2adba6796e3fb7fbc826171bac2c7ff71029f8e092fd9fc765bc30892a214` (583680 bytes). Focused W&L battle smoke on the prior telemetry DLL confirmed B2 command/order telemetry and repeated `BUG-TAC-005` objective-chain exposure; user field observation escalated that to #46 objective-chain W&L guard. The current DLL also adds removable `[TacticalDecisionMatrix]` rows. The loaded old DLL produced `[TacticalPathShape] reason=backward-first-segment`, so `BUG-TAC-010` is now proof-backed.
+Status: implemented, console-tested, built, deployed, hash-verified, and focused-smoke sampled on 2026-05-07. Current deployed DLL is `1f5ae70f1ba4c561e2afd9afe8fd571dc122e06967d8055272f8c2842693e857` (587264 bytes). Focused W&L battle smoke on the prior telemetry DLL confirmed B2 command/order telemetry and repeated `BUG-TAC-005` objective-chain exposure; user field observation escalated that to #46 objective-chain W&L guard. The current DLL also adds removable `[TacticalDecisionMatrix]` rows. The loaded old DLL produced `[TacticalPathShape] reason=backward-first-segment`, so `BUG-TAC-010` is now proof-backed.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

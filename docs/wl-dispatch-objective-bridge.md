@@ -42,6 +42,6 @@ Patch catalog entries:
 
 ## Runtime Evidence
 
-The bridge implementation was build/deploy/hash verified in the historical-operation DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes). Current local deployed DLL is `54c2adba6796e3fb7fbc826171bac2c7ff71029f8e092fd9fc765bc30892a214` (583680 bytes), which includes later Slice B1/B2 tactical work, B3 odds telemetry, default-off B4/B5 tactical behavior valves, default-off tactical bug-remediation telemetry/#43 guard, and `[TacticalPathShape]` proof telemetry.
+The bridge implementation was build/deploy/hash verified in the historical-operation DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes). Current local deployed DLL is `1f5ae70f1ba4c561e2afd9afe8fd571dc122e06967d8055272f8c2842693e857` (587264 bytes), which includes later Slice B1/B2 tactical work, B3 odds telemetry, default-off B4/B5 tactical behavior valves, default-off tactical bug-remediation telemetry/#43 guard, and `[TacticalPathShape]` proof telemetry.
 
 Fresh gameplay smoke for newly generated `[W&LDispatch]` sanitizer lines, bridge-order lines, and absence of newly generated `"to none"` text remains pending on the current DLL. Do not claim runtime text/order success until `BepInEx/LogOutput.log` comes from a restart after the current deploy.

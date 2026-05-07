@@ -45,7 +45,7 @@ namespace WhiskeyRealism.Tactical
         public bool StrongPoint { get; }
         public bool FlankRisk { get; }
         public TacticalSectorMission Mission { get; }
-        public float Odds { get { return OwnStrength / Math.Max(1f, EnemyStrength); } }
+        public float Odds { get { return EnemyStrength <= 0f ? 0f : OwnStrength / Math.Max(1f, EnemyStrength); } }
 
         public TacticalSectorAssessment WithMission(TacticalSectorMission mission)
         {
@@ -104,6 +104,7 @@ namespace WhiskeyRealism.Tactical
             float bestScore = 0f;
             for (int i = 0; i < sectors.Length; i++)
             {
+                if (sectors[i].EnemyStrength <= 0f) continue;
                 float score = sectors[i].Odds * sectors[i].Confidence;
                 if (sectors[i].StrongPoint) score *= 0.65f;
                 if (sectors[i].FlankRisk) score *= 0.55f;
