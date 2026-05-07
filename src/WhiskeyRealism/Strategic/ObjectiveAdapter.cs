@@ -102,6 +102,23 @@ namespace WhiskeyRealism.Strategic
             return null;
         }
 
+        internal static string ResolveObjectiveName(int objectiveId)
+        {
+            try
+            {
+                var obj = FindCampaignObjective(objectiveId);
+                if (obj == null) return null;
+                return AccessTools.Field(obj.GetType(), "ObjectiveName")?.GetValue(obj) as string;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "objname:" + objectiveId,
+                    $"[ObjectiveAdapter] name resolve failed for objective ID {objectiveId}: {ex.Message}");
+                return null;
+            }
+        }
+
         private static ObjectiveMetadata Derive(object campaignObjective)
         {
             try

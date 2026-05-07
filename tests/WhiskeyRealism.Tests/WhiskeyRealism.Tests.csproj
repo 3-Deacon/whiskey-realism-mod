@@ -7,6 +7,9 @@
     <RefsDir>$(MSBuildThisFileDirectory)..\..\refs</RefsDir>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="HarmonyX" Version="2.10.2" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="Assembly-CSharp">
       <HintPath>$(RefsDir)\Assembly-CSharp.dll</HintPath>
       <Private>true</Private>
@@ -82,6 +85,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalTempoDoctrine.cs" Link="OperationalTempoDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationalProbeLedger.cs" Link="OperationalProbeLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CoordinatedOperationPackageLedger.cs" Link="CoordinatedOperationPackageLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CoordinatedOperationRuntime.cs" Link="CoordinatedOperationRuntime.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\AICampaignReflect.cs" Link="AICampaignReflect.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalModels.cs" Link="FiscalModels.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalIntentLedger.cs" Link="FiscalIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalPolicyScorer.cs" Link="FiscalPolicyScorer.cs" />
