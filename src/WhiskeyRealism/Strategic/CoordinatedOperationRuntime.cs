@@ -93,6 +93,7 @@ namespace WhiskeyRealism.Strategic
             CoordinatedOperationOutput output,
             Vector3 target,
             string targetName,
+            int objectiveId,
             WlStrategicIntent intent,
             string sourceSystem)
         {
@@ -109,13 +110,13 @@ namespace WhiskeyRealism.Strategic
                 var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
                 if (ownUnits == null || offensive == null) return false;
 
-                bool committed = CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.LeadStableUnitId, target, targetName, intent, sourceSystem, output.Signature());
+                bool committed = CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.LeadStableUnitId, target, targetName, objectiveId, intent, sourceSystem, output.Signature());
                 for (int i = 0; i < output.SupportStableUnitIds.Count; i++)
                 {
                     var supportIntent = output.Decision == CoordinatedOperationDecision.Reinforce
                         ? WlStrategicIntent.Reinforce
                         : intent;
-                    committed |= CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.SupportStableUnitIds[i], target, targetName, supportIntent, sourceSystem, output.Signature());
+                    committed |= CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.SupportStableUnitIds[i], target, targetName, objectiveId, supportIntent, sourceSystem, output.Signature());
                 }
                 return committed;
             }
@@ -134,6 +135,7 @@ namespace WhiskeyRealism.Strategic
             int stableUnitId,
             Vector3 target,
             string targetName,
+            int objectiveId,
             WlStrategicIntent intent,
             string sourceSystem,
             string packageSignature)
@@ -153,7 +155,7 @@ namespace WhiskeyRealism.Strategic
                 Unit = unit,
                 TargetPosition = target,
                 TargetName = string.IsNullOrEmpty(targetName) ? "Objective" : targetName,
-                ObjectiveId = -1,
+                ObjectiveId = objectiveId,
                 Intent = intent,
                 Width = 20f,
                 Depth = 20f,

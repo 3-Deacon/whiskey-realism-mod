@@ -37,6 +37,7 @@ namespace WhiskeyRealism.Strategic
     {
         public int AllianceId;
         public int DaySerial;
+        public int ObjectiveId = -1;
         public string PlanTargetAreaKey;
         public FrontSectorLedger Fronts;
         public FormationDirectiveLedger FormationDirectives;
@@ -51,6 +52,7 @@ namespace WhiskeyRealism.Strategic
     public sealed class OperationalProbeOutput
     {
         public int AllianceId;
+        public int ObjectiveId = -1;
         public OperationalProbeDecision Decision;
         public string Reason;
         public string ProbeId;
@@ -83,6 +85,7 @@ namespace WhiskeyRealism.Strategic
 
             var options = input.Options ?? new OperationalProbeOptions();
             output.AllianceId = input.AllianceId;
+            output.ObjectiveId = input.ObjectiveId;
             output.TargetAreaKey = input.PlanTargetAreaKey;
 
             if (string.IsNullOrEmpty(input.PlanTargetAreaKey))

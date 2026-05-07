@@ -33,6 +33,7 @@ namespace WhiskeyRealism.Strategic
             {
                 AllianceId = allianceId,
                 DaySerial = daySerial,
+                ObjectiveId = objectiveId,
                 PlanTargetAreaKey = areaKey,
                 Fronts = fronts,
                 FormationDirectives = formation,
@@ -113,6 +114,12 @@ namespace WhiskeyRealism.Strategic
                     return;
                 if (!target.HasValue) return;
 
+                string targetName = CoordinatedOperationRuntime.ResolveTargetName(
+                    output.ObjectiveId,
+                    output.TargetAreaKey,
+                    StrategicCoordinator.Instance?.CampaignMap,
+                    target.Value);
+
                 if (output.Package != null &&
                     output.Package.Decision != CoordinatedOperationDecision.None &&
                     output.Package.Decision != CoordinatedOperationDecision.Delay &&
@@ -123,7 +130,8 @@ namespace WhiskeyRealism.Strategic
                         aifactionIndex,
                         output.Package,
                         target.Value,
-                        string.IsNullOrEmpty(output.TargetAreaKey) ? "Objective" : output.TargetAreaKey,
+                        targetName,
+                        output.ObjectiveId,
                         output.Decision == OperationalProbeDecision.Escalate
                             ? WlStrategicIntent.Offensive
                             : WlStrategicIntent.Probe,
@@ -132,14 +140,14 @@ namespace WhiskeyRealism.Strategic
                     {
                         Plugin.Log.LogInfo(
                             $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
-                            $"target={output.Package.TargetName ?? output.TargetAreaKey} ratio={output.Package.Ratio:0.00} " +
+                            $"target={targetName} ratio={output.Package.Ratio:0.00} " +
                             $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
                     }
                     else
                     {
                         Plugin.Log.LogWarning(
                             $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
-                            $"action=package-no-commit target={output.Package.TargetName ?? output.TargetAreaKey} " +
+                            $"action=package-no-commit target={targetName} " +
                             $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
                     }
                     return;
@@ -163,8 +171,8 @@ namespace WhiskeyRealism.Strategic
                     AifactionIndex = aifactionIndex,
                     Unit = unit,
                     TargetPosition = target.Value,
-                    TargetName = string.IsNullOrEmpty(output.TargetAreaKey) ? "Objective" : output.TargetAreaKey,
-                    ObjectiveId = -1,
+                    TargetName = targetName,
+                    ObjectiveId = output.ObjectiveId,
                     Intent = intent,
                     Width = 20f,
                     Depth = 20f,
@@ -192,7 +200,7 @@ namespace WhiskeyRealism.Strategic
                     offensive.Add(unit);
                     Plugin.Log.LogInfo(
                         $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
-                        $"unit={SafeName(unit)} target={output.TargetAreaKey} reason={output.Reason}");
+                        $"unit={SafeName(unit)} target={targetName} reason={output.Reason}");
                 }
             }
             catch (Exception ex)

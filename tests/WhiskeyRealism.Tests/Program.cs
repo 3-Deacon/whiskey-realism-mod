@@ -177,6 +177,7 @@ static class Program
             ("operational probe support overlay blocks donor", OperationalProbeSupportOverlayBlocksDonor),
             ("operational probe stays continuing on no contact even after minimum days", OperationalProbeStaysContinuingOnNoContactAfterMinimumDays),
             ("operational probe state has single source on coordinator", OperationalProbeStateHasSingleSourceOnCoordinator),
+            ("operational probe copies objective id", OperationalProbeCopiesObjectiveId),
             ("coordinated ops attack selects local support", CoordinatedOpsAttackSelectsLocalSupport),
             ("coordinated ops blocked wl support does not fake attack", CoordinatedOpsBlockedWlSupportDoesNotFakeAttack),
             ("coordinated ops lead selection rejects remote oversized candidate", CoordinatedOpsLeadSelectionRejectsRemoteOversizedCandidate),
@@ -185,6 +186,8 @@ static class Program
             ("coordinated ops reinforce blocks non donor support", CoordinatedOpsReinforceBlocksNonDonorSupport),
             ("coordinated ops wl current order does not require direct movement", CoordinatedOpsWlCurrentOrderDoesNotRequireDirectMovement),
             ("coordinated ops bridge decision maps blocked commit mode", CoordinatedOpsBridgeDecisionMapsBlockedCommitMode),
+            ("coordinated ops nearest map name resolves target", CoordinatedOpsNearestMapNameResolvesTarget),
+            ("coordinated ops target name falls back to area key", CoordinatedOpsTargetNameFallsBackToAreaKey),
             ("coordinated ops empty target is single lead", CoordinatedOpsEmptyTargetIsSingleLead),
             ("coordinated ops high risk tightens donor caps", CoordinatedOpsHighRiskTightensDonorCaps),
             ("coordinated ops player cic returns none", CoordinatedOpsPlayerCicReturnsNone),
@@ -3413,6 +3416,16 @@ static class Program
         AssertEqual(first.State.ProbeId, second.State.ProbeId);
     }
 
+    private static void OperationalProbeCopiesObjectiveId()
+    {
+        var input = BuildProbeInput();
+        input.ObjectiveId = 42;
+
+        var output = OperationalProbeLedger.Build(input);
+
+        AssertEqual(42, output.ObjectiveId);
+    }
+
     private static CoordinatedOperationCandidate OpCandidate(
         int id,
         string key,
@@ -3605,6 +3618,30 @@ static class Program
         AssertEqual(CoordinatedCommitMode.BlockedWlPlayerChain, CoordinatedOperationRuntime.CommitModeFromBridge(blocked));
         AssertEqual(CoordinatedCommitMode.WlCurrentOrder, CoordinatedOperationRuntime.CommitModeFromBridge(issued));
         AssertEqual(CoordinatedCommitMode.DirectMovement, CoordinatedOperationRuntime.CommitModeFromBridge(direct));
+    }
+
+    private static void CoordinatedOpsNearestMapNameResolvesTarget()
+    {
+        var map = CampaignMapLedger.Build(new[]
+        {
+            new CampaignMapTown { CityName = "Richmond", X = 100f, Z = 100f },
+            new CampaignMapTown { CityName = "Manassas", X = 10f, Z = 0f }
+        });
+
+        string name = CoordinatedOperationRuntime.NearestMapName(map, new UnityEngine.Vector3(11f, 0f, 0f));
+
+        AssertEqual("Manassas", name);
+    }
+
+    private static void CoordinatedOpsTargetNameFallsBackToAreaKey()
+    {
+        string name = CoordinatedOperationRuntime.ResolveTargetName(
+            -1,
+            "VirginiaCapitalCorridor",
+            null,
+            new UnityEngine.Vector3(11f, 0f, 0f));
+
+        AssertEqual("VirginiaCapitalCorridor", name);
     }
 
     private static void CoordinatedOpsEmptyTargetIsSingleLead()
