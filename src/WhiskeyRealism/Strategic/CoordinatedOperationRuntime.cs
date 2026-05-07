@@ -43,7 +43,7 @@ namespace WhiskeyRealism.Strategic
             return bestName;
         }
 
-        internal static void CommitPackage(
+        internal static bool CommitPackage(
             int allianceId,
             int aifactionIndex,
             CoordinatedOperationOutput output,
@@ -58,29 +58,31 @@ namespace WhiskeyRealism.Strategic
                     output.Decision == CoordinatedOperationDecision.None ||
                     output.Decision == CoordinatedOperationDecision.Delay ||
                     output.Decision == CoordinatedOperationDecision.Recover)
-                    return;
+                    return false;
                 var faction = AICampaignReflect.GetFaction(aifactionIndex);
-                if (faction == null) return;
+                if (faction == null) return false;
                 var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
                 var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
-                if (ownUnits == null || offensive == null) return;
+                if (ownUnits == null || offensive == null) return false;
 
-                CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.LeadStableUnitId, target, targetName, intent, sourceSystem, output.Signature());
+                bool committed = CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.LeadStableUnitId, target, targetName, intent, sourceSystem, output.Signature());
                 for (int i = 0; i < output.SupportStableUnitIds.Count; i++)
                 {
                     var supportIntent = output.Decision == CoordinatedOperationDecision.Reinforce
                         ? WlStrategicIntent.Reinforce
                         : intent;
-                    CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.SupportStableUnitIds[i], target, targetName, supportIntent, sourceSystem, output.Signature());
+                    committed |= CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.SupportStableUnitIds[i], target, targetName, supportIntent, sourceSystem, output.Signature());
                 }
+                return committed;
             }
             catch (Exception ex)
             {
                 WarnOnce("coordinated-ops:commit", "[CoordinatedOps] commit failed: " + ex.Message);
+                return false;
             }
         }
 
-        private static void CommitUnit(
+        private static bool CommitUnit(
             int allianceId,
             int aifactionIndex,
             IList ownUnits,
@@ -93,11 +95,11 @@ namespace WhiskeyRealism.Strategic
             string packageSignature)
         {
             var unit = FindUnitById(ownUnits, stableUnitId);
-            if (unit == null) return;
+            if (unit == null) return false;
             if (!IsAvailable(aifactionIndex, unit, target))
             {
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=skip reason=availability package={packageSignature}");
-                return;
+                return false;
             }
 
             var decision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
@@ -117,18 +119,21 @@ namespace WhiskeyRealism.Strategic
             if (decision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
             {
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=wl-current-order type={decision.WlOrderType} package={packageSignature}");
-                return;
+                return true;
             }
             if (!decision.MayDirectMove)
             {
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=skip wlResult={decision.Result} reason={decision.Reason} package={packageSignature}");
-                return;
+                return false;
             }
-            if (AICampaign.MoveUnitTo(unit, target, true) && !offensive.Contains(unit))
+            if (AICampaign.MoveUnitTo(unit, target, true))
             {
-                offensive.Add(unit);
+                if (!offensive.Contains(unit))
+                    offensive.Add(unit);
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=direct-move package={packageSignature}");
+                return true;
             }
+            return false;
         }
 
         internal static Regiment FindUnitById(IList ownUnits, int stableUnitId)

@@ -118,7 +118,7 @@ namespace WhiskeyRealism.Strategic
                     output.Package.Decision != CoordinatedOperationDecision.Delay &&
                     output.Package.Decision != CoordinatedOperationDecision.Recover)
                 {
-                    CoordinatedOperationRuntime.CommitPackage(
+                    bool committed = CoordinatedOperationRuntime.CommitPackage(
                         allianceId,
                         aifactionIndex,
                         output.Package,
@@ -128,11 +128,14 @@ namespace WhiskeyRealism.Strategic
                             ? WlStrategicIntent.Offensive
                             : WlStrategicIntent.Probe,
                         "OperationalProbe");
-                    Plugin.Log.LogInfo(
-                        $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
-                        $"target={output.Package.TargetName ?? output.TargetAreaKey} ratio={output.Package.Ratio:0.00} " +
-                        $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
-                    return;
+                    if (committed)
+                    {
+                        Plugin.Log.LogInfo(
+                            $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
+                            $"target={output.Package.TargetName ?? output.TargetAreaKey} ratio={output.Package.Ratio:0.00} " +
+                            $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
+                        return;
+                    }
                 }
 
                 var unit = FindUnit(ownUnits, output.SelectedUnitKey);

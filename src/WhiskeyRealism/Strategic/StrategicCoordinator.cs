@@ -834,7 +834,7 @@ namespace WhiskeyRealism.Strategic
                 if (posture != null)
                     StrategicResilienceDirector.ApplyTo(input.Options, posture);
                 input.PackageOptions = CoordinatedOperationOptions.FromDirector(
-                    Math.Max(1f, input.CurrentEnemyStrength),
+                    OperationalProbeLedger.ResolvePackageDesiredStrength(input),
                     posture);
 
                 var output = OperationalProbeLedger.Build(input);

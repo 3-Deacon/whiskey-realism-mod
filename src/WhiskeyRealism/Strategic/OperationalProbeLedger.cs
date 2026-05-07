@@ -262,9 +262,7 @@ namespace WhiskeyRealism.Strategic
                 return output;
             }
 
-            if (age >= options.MinimumProbeDays &&
-                input.ContactEvidence != ContactEvidence.NoContact &&
-                input.ContactEvidence != ContactEvidence.OvermatchedContact)
+            if (age >= options.MinimumProbeDays && IsFavorablePackageContact(input.ContactEvidence))
             {
                 var package = BuildPackage(input, output, CoordinatedOperationIntent.Attack);
                 if (package.Decision == CoordinatedOperationDecision.CoordinateAttack)
@@ -280,6 +278,42 @@ namespace WhiskeyRealism.Strategic
             output.Decision = OperationalProbeDecision.Probe;
             output.Reason = "continue-probe";
             return output;
+        }
+
+        internal static float ResolvePackageDesiredStrength(OperationalProbeInput input)
+        {
+            if (input == null) return 1f;
+            if (input.CurrentEnemyStrength >= 0f) return input.CurrentEnemyStrength;
+
+            FormationDirectiveAssignment assignment = null;
+            if (input.FormationDirectives != null)
+            {
+                if (input.Previous != null && !string.IsNullOrEmpty(input.Previous.UnitKey))
+                    assignment = input.FormationDirectives.GetAssignment(input.Previous.UnitKey);
+                if (assignment == null && input.Previous != null && !string.IsNullOrEmpty(input.Previous.SourceSectorKey))
+                {
+                    foreach (var candidate in input.FormationDirectives.Assignments)
+                    {
+                        if (candidate == null) continue;
+                        if (string.Equals(candidate.SectorKey, input.Previous.SourceSectorKey, StringComparison.OrdinalIgnoreCase))
+                        {
+                            assignment = candidate;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return assignment != null && assignment.LocalEnemyStrength >= 0f
+                ? assignment.LocalEnemyStrength
+                : 1f;
+        }
+
+        private static bool IsFavorablePackageContact(ContactEvidence evidence)
+        {
+            return evidence == ContactEvidence.SkirmishObserved ||
+                evidence == ContactEvidence.BattleObserved ||
+                evidence == ContactEvidence.FavorableContact;
         }
 
         private static bool EligibleProbeFormation(
