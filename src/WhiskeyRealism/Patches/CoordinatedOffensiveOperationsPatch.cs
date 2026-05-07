@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -15,7 +16,7 @@ namespace WhiskeyRealism.Patches
     // builds and commits offensive operation packages by iterating
     // aifaction[i].ownunits. We cache the Whiskey package decision per
     // faction/lead/signature, filter ownunits only for the active vanilla call,
-    // then restore the list exactly in Postfix.
+    // then restore the list exactly in Postfix/Finalizer.
     [HarmonyPatch(typeof(AICampaign), "CheckOffensiveMovements")]
     internal static class CoordinatedOffensiveOperationsPatch
     {
@@ -103,11 +104,23 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(int _aifaction)
         {
+            RestoreSnapshot(_aifaction, "postfix");
+        }
+
+        [HarmonyFinalizer]
+        internal static Exception Finalizer(Exception __exception, int _aifaction)
+        {
+            RestoreSnapshot(_aifaction, "finalizer");
+            return __exception;
+        }
+
+        private static void RestoreSnapshot(int aifactionIndex, string source)
+        {
             try
             {
-                if (!_snapshots.TryGetValue(_aifaction, out var snapshot)) return;
+                if (!_snapshots.TryGetValue(aifactionIndex, out var snapshot)) return;
 
-                var faction = AICampaignReflect.GetFaction(_aifaction);
+                var faction = AICampaignReflect.GetFaction(aifactionIndex);
                 var ownUnits = faction != null ? GetOwnUnits(faction) : null;
                 if (ownUnits != null)
                 {
@@ -125,21 +138,26 @@ namespace WhiskeyRealism.Patches
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("coordinated-ops:offensive:postfix",
-                    "[CoordinatedOps] offensive Postfix failed: " + ex.Message);
+                OnceLog.Warning("coordinated-ops:offensive:restore:" + source,
+                    "[CoordinatedOps] offensive restore failed: " + ex.Message);
             }
             finally
             {
-                _snapshots.Remove(_aifaction);
+                _snapshots.Remove(aifactionIndex);
             }
         }
 
         private static string BuildSignature(int allianceId, int aifactionIndex, Regiment lead, object faction)
         {
             string formationSig = "-";
+            string formationDataSig = "-";
             var coordinator = StrategicCoordinator.Instance;
             if (coordinator?.FormationDirectives != null && allianceId < coordinator.FormationDirectives.Length)
-                formationSig = coordinator.FormationDirectives[allianceId]?.Summary() ?? "-";
+            {
+                var ledger = coordinator.FormationDirectives[allianceId];
+                formationSig = ledger?.Summary() ?? "-";
+                formationDataSig = AssignmentDataSignature(ledger);
+            }
 
             return allianceId + "|" +
                 aifactionIndex + "|" +
@@ -148,7 +166,9 @@ namespace WhiskeyRealism.Patches
                 ListSignature(GetList(faction, "unitsinoffensiveoperations", _offensiveFields)) + "|" +
                 ListSignature(GetList(faction, "unitsindefensiveoperations", _defensiveFields)) + "|" +
                 ListSignature(GetList(faction, "unitsconstructingsupplydepots", _depotFields)) + "|" +
-                formationSig;
+                formationSig + "|" +
+                formationDataSig + "|" +
+                WlChainSignature();
         }
 
         private static PackageFilterDecision BuildAllowedSet(
@@ -287,6 +307,52 @@ namespace WhiskeyRealism.Patches
             }
             ids.Sort();
             return string.Join(",", ids);
+        }
+
+        private static string AssignmentDataSignature(FormationDirectiveLedger ledger)
+        {
+            if (ledger?.Assignments == null || ledger.Assignments.Count == 0) return "-";
+            var parts = new List<string>();
+            foreach (var assignment in ledger.Assignments)
+            {
+                if (assignment == null) continue;
+                parts.Add(
+                    assignment.StableUnitId + ":" +
+                    Round(assignment.CombatAvailability) + ":" +
+                    Round(assignment.ExchangePressure) + ":" +
+                    Round(assignment.LocalEnemyStrength) + ":" +
+                    Round(assignment.Readiness) + ":" +
+                    Round(assignment.Morale) + ":" +
+                    Round(assignment.Ammo) + ":" +
+                    Round(assignment.Supply) + ":" +
+                    Round(assignment.Fatigue) + ":" +
+                    (assignment.OffensiveAllowed ? "O" : "-") +
+                    (assignment.DefensiveAllowed ? "D" : "-") +
+                    (assignment.TransferDonorAllowed ? "T" : "-") +
+                    (assignment.DirectMovementAllowed ? "M" : "-"));
+            }
+            parts.Sort(StringComparer.Ordinal);
+            return string.Join(",", parts);
+        }
+
+        private static string WlChainSignature()
+        {
+            try
+            {
+                if (!DLC_WL.dlc_scenarioactive) return "wl-off";
+                return GameVars.playeralliance + ":" +
+                    DLC_WL.dlc_chosencommander + ":" +
+                    DLC_WL.IsCommanderInChief();
+            }
+            catch
+            {
+                return "wl-unknown";
+            }
+        }
+
+        private static string Round(float value)
+        {
+            return Math.Round(value, 1).ToString(CultureInfo.InvariantCulture);
         }
 
         private static int StableId(UnityEngine.Object obj)
