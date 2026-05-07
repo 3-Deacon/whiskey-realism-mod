@@ -1,6 +1,6 @@
 # Tactical B3-B5 Odds, Macro, And Sector Doctrine Design
 
-Status: active design for the next Slice B implementation batch.
+Status: implemented and hash-deployed as default-off behavior on 2026-05-07; runtime behavior smoke is still pending before any default-on discussion.
 Scope: B3 tactical odds doctrine, B4 macro stance scorer, and B5 group sector stance. This spec intentionally batches the three coupled pieces so implementation can move without another stop after B3 telemetry, while preserving separate internal gates and rollback points.
 
 ## Decision
@@ -103,6 +103,8 @@ Add two new default-off configs:
 - `Enable Tactical Group Sector Stance = false`
 
 Existing config files override C# defaults after first plugin load, so smoke instructions must include manual config flips.
+
+The default-off state is intentional. B3 is read-only telemetry/doctrine, but B4 writes vanilla battle-level `macroai` and B5 writes group-level `ai_stance`. Those writes change battle behavior, so they must remain off by default until focused runtime smoke proves bounded decision logs, stable Harmony anchors, no repeated exceptions, no player-subordinate retasking, no charge stance 4 writes, and no movement/reserve/artillery/fallback side effects.
 
 ## Telemetry
 

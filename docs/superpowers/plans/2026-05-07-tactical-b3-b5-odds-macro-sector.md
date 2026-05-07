@@ -8,6 +8,8 @@
 
 **Tech Stack:** BepInEx 5.4.x x64, HarmonyX, C# netstandard2.1, Unity 2021 Mono, `tests/WhiskeyRealism.Tests` console harness, vanilla anchors from `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 
+**Current status:** Implemented and hash-deployed on 2026-05-07, but B4/B5 remain default-off until focused in-game smoke. This is required because B4 writes vanilla `macroai` and B5 writes vanilla `ai_stance`; those are behavior changes, unlike B3 read-only odds telemetry. Do not flip the defaults on until logs prove bounded `[TacticalMacroDecision]` / `[TacticalGroupDecision]` output, stable Harmony anchors, no repeated exceptions, no player-subordinate retasking, no charge stance 4 writes, and no movement/reserve/artillery/fallback side effects.
+
 ---
 
 ## Source Inputs

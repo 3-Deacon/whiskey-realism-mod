@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Util;
 
@@ -33,6 +34,7 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _orderStateField;
         private static FieldInfo _chainCenterUnitField;
         private static FieldInfo _currentSetObjectiveField;
+        private static FieldInfo _changeToMarchColumnActiveField;
 
         internal readonly struct CurrentOrderState
         {
@@ -60,13 +62,38 @@ namespace WhiskeyRealism.Patches
 
         internal readonly struct WaypointState
         {
-            public WaypointState(int pathCount, int queueCount, bool activeMoveOrder, float x, float z)
+            public WaypointState(
+                int pathCount,
+                int queueCount,
+                bool activeMoveOrder,
+                float x,
+                float z,
+                float startX,
+                float startZ,
+                float targetX,
+                float targetZ,
+                int movementMode,
+                int formation,
+                int formationOrdered,
+                int lastFormation,
+                int groupFormation,
+                bool marchColumnActive)
             {
                 PathCount = pathCount;
                 QueueCount = queueCount;
                 ActiveMoveOrder = activeMoveOrder;
                 X = x;
                 Z = z;
+                StartX = startX;
+                StartZ = startZ;
+                TargetX = targetX;
+                TargetZ = targetZ;
+                MovementMode = movementMode;
+                Formation = formation;
+                FormationOrdered = formationOrdered;
+                LastFormation = lastFormation;
+                GroupFormation = groupFormation;
+                MarchColumnActive = marchColumnActive;
             }
 
             public int PathCount { get; }
@@ -74,6 +101,60 @@ namespace WhiskeyRealism.Patches
             public bool ActiveMoveOrder { get; }
             public float X { get; }
             public float Z { get; }
+            public float StartX { get; }
+            public float StartZ { get; }
+            public float TargetX { get; }
+            public float TargetZ { get; }
+            public int MovementMode { get; }
+            public int Formation { get; }
+            public int FormationOrdered { get; }
+            public int LastFormation { get; }
+            public int GroupFormation { get; }
+            public bool MarchColumnActive { get; }
+        }
+
+        internal readonly struct PathShapeSummary
+        {
+            public PathShapeSummary(
+                bool pathCreated,
+                int cornerCount,
+                float directDistance,
+                float pathLength,
+                float pathRatio,
+                float firstSegmentDelta,
+                string navStatus,
+                int pathStatus,
+                float firstX,
+                float firstZ,
+                float finalX,
+                float finalZ)
+            {
+                PathCreated = pathCreated;
+                CornerCount = cornerCount;
+                DirectDistance = directDistance;
+                PathLength = pathLength;
+                PathRatio = pathRatio;
+                FirstSegmentDelta = firstSegmentDelta;
+                NavStatus = TacticalCurrentOrderSignature.Safe(navStatus);
+                PathStatus = pathStatus;
+                FirstX = firstX;
+                FirstZ = firstZ;
+                FinalX = finalX;
+                FinalZ = finalZ;
+            }
+
+            public bool PathCreated { get; }
+            public int CornerCount { get; }
+            public float DirectDistance { get; }
+            public float PathLength { get; }
+            public float PathRatio { get; }
+            public float FirstSegmentDelta { get; }
+            public string NavStatus { get; }
+            public int PathStatus { get; }
+            public float FirstX { get; }
+            public float FirstZ { get; }
+            public float FinalX { get; }
+            public float FinalZ { get; }
         }
 
         internal sealed class ObjectiveMoveState
@@ -335,14 +416,24 @@ namespace WhiskeyRealism.Patches
             typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool)
         })]
         [HarmonyPrefix]
-        internal static void SetWaypointPrefix(Regiment reg, out WaypointState __state)
+        internal static void SetWaypointPrefix(Regiment reg, Vector3 targetpos, out WaypointState __state)
         {
             __state = new WaypointState(
                 SafeRegimentPaths(reg),
                 SafeOrderQueueCount(reg),
                 HasActiveMoveOrder(reg),
                 SafeLastWaypointX(reg),
-                SafeLastWaypointZ(reg));
+                SafeLastWaypointZ(reg),
+                SafePositionX(reg),
+                SafePositionZ(reg),
+                targetpos.x,
+                targetpos.z,
+                SafeMovementMode(reg),
+                SafeFormation(reg),
+                SafeFormationOrdered(reg),
+                SafeLastFormation(reg),
+                SafeGroupFormation(reg),
+                SafeMarchColumnActive(reg));
         }
 
         [HarmonyPatch(typeof(BattleUnits), "SetWaypoint", new[]
@@ -352,9 +443,17 @@ namespace WhiskeyRealism.Patches
             typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool)
         })]
         [HarmonyPostfix]
-        internal static void SetWaypointPostfix(Regiment reg, bool useorderdelay, WaypointState __state)
+        internal static void SetWaypointPostfix(
+            Regiment reg,
+            bool newpath,
+            bool modifylastwaypoint,
+            bool useorderdelay,
+            int direction,
+            bool showmovementoptions,
+            WaypointState __state)
         {
             ObserveWaypointDrift(reg, useorderdelay, __state);
+            ObservePathShape(reg, newpath, modifylastwaypoint, useorderdelay, direction, showmovementoptions, __state);
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
@@ -366,7 +465,17 @@ namespace WhiskeyRealism.Patches
                 SafeOrderQueueCount(aigroup),
                 HasActiveMoveOrder(aigroup),
                 SafeLastWaypointX(aigroup),
-                SafeLastWaypointZ(aigroup));
+                SafeLastWaypointZ(aigroup),
+                SafePositionX(aigroup),
+                SafePositionZ(aigroup),
+                0f,
+                0f,
+                SafeMovementMode(aigroup),
+                SafeFormation(aigroup),
+                SafeFormationOrdered(aigroup),
+                SafeLastFormation(aigroup),
+                SafeGroupFormation(aigroup),
+                SafeMarchColumnActive(aigroup));
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
@@ -400,6 +509,7 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Info("tactical-observer", "TacticalObserverPatch wired");
 
                 var context = BuildContext(battle, group);
+                EmitDecisionMatrix(eventType, battle, group, context);
                 string signature = TacticalTelemetry.Signature(eventType, context);
                 bool verbose = Plugin.Instance != null && Plugin.Instance.TacticalObserverVerboseLogging.Value;
                 float minSeconds = Plugin.Instance != null
@@ -644,6 +754,70 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        private static void ObservePathShape(
+            Regiment unit,
+            bool newPath,
+            bool modifyLastWaypoint,
+            bool useOrderDelay,
+            int direction,
+            bool showMovementOptions,
+            WaypointState state)
+        {
+            if (!BugTelemetryEnabled() || !showMovementOptions) return;
+
+            try
+            {
+                int afterPaths = SafeRegimentPaths(unit);
+                var shape = BuildPathShape(unit, state, afterPaths, newPath, modifyLastWaypoint);
+                var decision = TacticalBattlefieldBugDiagnostics.ClassifyPathShape(
+                    showMovementOptions: showMovementOptions,
+                    pathCreated: shape.PathCreated,
+                    cornerCount: shape.CornerCount,
+                    directDistance: shape.DirectDistance,
+                    pathLength: shape.PathLength,
+                    firstSegmentDeltaDegrees: shape.FirstSegmentDelta,
+                    navStatus: shape.NavStatus,
+                    pathStatus: shape.PathStatus,
+                    orderDelayEnabled: useOrderDelay);
+
+                if (!decision.IsRisk && !shape.PathCreated) return;
+
+                EmitDirect(
+                    "TacticalPathShape",
+                    "path-shape|" + SafeInstanceId(unit) + "|" + state.PathCount + "|" + afterPaths + "|" +
+                    BucketForObserver(state.TargetX) + "|" + BucketForObserver(state.TargetZ) + "|" + decision.Reason,
+                    "[TacticalPathShape] unit=" + SafeUnitName(unit) +
+                    " paths=" + state.PathCount + "->" + afterPaths +
+                    " start=" + PointSignature(state.StartX, state.StartZ) +
+                    " target=" + PointSignature(state.TargetX, state.TargetZ) +
+                    " first=" + PointSignature(shape.FirstX, shape.FirstZ) +
+                    " final=" + PointSignature(shape.FinalX, shape.FinalZ) +
+                    " corners=" + shape.CornerCount +
+                    " direct=" + BucketForObserver(shape.DirectDistance) +
+                    " length=" + BucketForObserver(shape.PathLength) +
+                    " ratio=" + BucketForObserver(shape.PathRatio) +
+                    " firstDelta=" + BucketForObserver(shape.FirstSegmentDelta) +
+                    " navStatus=" + shape.NavStatus +
+                    " pathStatus=" + shape.PathStatus +
+                    " moveMode=" + state.MovementMode + "->" + SafeMovementMode(unit) +
+                    " formation=" + FormatFormation(state.Formation) + "->" + FormatFormation(SafeFormation(unit)) +
+                    " orderedFormation=" + FormatFormation(state.FormationOrdered) + "->" + FormatFormation(SafeFormationOrdered(unit)) +
+                    " lastFormation=" + FormatFormation(state.LastFormation) + "->" + FormatFormation(SafeLastFormation(unit)) +
+                    " groupFormation=" + FormatFormation(state.GroupFormation) + "->" + FormatFormation(SafeGroupFormation(unit)) +
+                    " marchColumnActive=" + state.MarchColumnActive + "->" + SafeMarchColumnActive(unit) +
+                    " newPath=" + newPath +
+                    " modifyLast=" + modifyLastWaypoint +
+                    " useDelay=" + useOrderDelay +
+                    " direction=" + direction +
+                    " risk=" + decision.IsRisk +
+                    " reason=" + decision.Reason);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-path-shape", "Tactical path-shape observer failed: " + ex.Message);
+            }
+        }
+
         private static void ObserveReserveMove(Regiment group, WaypointState state)
         {
             if (!BugTelemetryEnabled()) return;
@@ -840,6 +1014,237 @@ namespace WhiskeyRealism.Patches
                 return;
 
             Plugin.Log.LogInfo(message);
+        }
+
+        private static void EmitDecisionMatrix(
+            TacticalObservedEvent eventType,
+            AIBattle battle,
+            Regiment focusGroup,
+            TacticalBattleContext context)
+        {
+            if (!DecisionMatrixEnabled() || battle == null) return;
+
+            try
+            {
+                if (context == null) context = TacticalBattleContext.Empty();
+
+                IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
+                if (units == null || units.Count <= 0)
+                    units = SafeList(battle, ref _allGroupsAssignedField, "allgroupsassigned");
+
+                int maxRows = Plugin.Instance != null
+                    ? Mathf.Clamp(Plugin.Instance.TacticalDecisionMatrixMaxRows.Value, 1, 300)
+                    : 80;
+                float minSeconds = Plugin.Instance != null
+                    ? Mathf.Max(1f, Plugin.Instance.TacticalDecisionMatrixMinSecondsBetweenSnapshots.Value)
+                    : 1f;
+                bool verbose = Plugin.Instance != null && Plugin.Instance.TacticalObserverVerboseLogging.Value;
+                string baseSignature = eventType + "|" + TacticalTelemetry.Signature(eventType, context);
+
+                if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "DecisionMatrixSummary", baseSignature, Time.realtimeSinceStartup, minSeconds, verbose))
+                    return;
+
+                Plugin.Log.LogInfo("[TacticalDecisionMatrix] event=" + eventType +
+                    " row=battle side=" + context.Side +
+                    " alliance=" + context.Alliance +
+                    " macro=" + TacticalTelemetry.MacroName(context.MacroAi) +
+                    " groups=" + context.GroupCount +
+                    " charging=" + context.ChargingCount +
+                    " feud=" + context.FeudGroupCount +
+                    " reserves=" + context.ReserveGroupCount +
+                    " artillery=" + context.ArtilleryGroupCount +
+                    " fallback=" + context.FallbackCount +
+                    " retreating=" + context.RetreatingCount +
+                    " visibleEnemy=" + context.VisibleEnemyCount +
+                    " chains=" + context.ObjectiveChainCount +
+                    " forceBalance=" + BucketForObserver(context.ForceBalance) +
+                    " currentOdds=" + BucketForObserver(context.CurrentGlobalOdds) +
+                    " projectedOdds=" + BucketForObserver(context.ProjectedGlobalOdds) +
+                    " decisive=" + context.DecisiveSectorId +
+                    " odds=" + TacticalCurrentOrderSignature.Safe(context.OddsSummary) +
+                    " cap=" + maxRows +
+                    " dlcWl=" + SafeDlcWlActive());
+
+                if (focusGroup != null)
+                {
+                    EmitDecisionMatrixRow(eventType, context, focusGroup, 0, true);
+                    return;
+                }
+
+                if (units == null || units.Count <= 0) return;
+
+                int emitted = 0;
+                for (int i = 0; i < units.Count && emitted < maxRows; i++)
+                {
+                    var group = units[i] as Regiment;
+                    if (group == null || group.unittyp <= 13) continue;
+                    EmitDecisionMatrixRow(eventType, context, group, i, false);
+                    emitted++;
+                }
+
+                if (units.Count > maxRows)
+                {
+                    Plugin.Log.LogInfo("[TacticalDecisionMatrix] event=" + eventType +
+                        " row=truncated totalCandidates=" + units.Count +
+                        " emitted=" + emitted +
+                        " cap=" + maxRows);
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-decision-matrix", "Tactical decision-matrix observer failed: " + ex.Message);
+            }
+        }
+
+        private static void EmitDecisionMatrixRow(
+            TacticalObservedEvent eventType,
+            TacticalBattleContext context,
+            Regiment group,
+            int index,
+            bool focus)
+        {
+            if (group == null || context == null) return;
+
+            var sector = BuildMatrixSector(group, index);
+            var wlGuard = TacticalWlActionGuard.Decide(
+                true,
+                SafeDlcWlActive(),
+                TacticalWlGuardAction.FeudMovement,
+                group.dlcw_isundercommander,
+                group.dlcw_isundercommander,
+                CountAttachedUnderCommander(group) > 0);
+            bool orderFrictionAllows = MatrixOrderFrictionAllowsChange(group);
+            int vanillaStance = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
+            var stanceDecision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+                vanillaStance,
+                context.MacroAi,
+                sector,
+                wlGuard.Allow,
+                orderFrictionAllows));
+
+            Plugin.Log.LogInfo("[TacticalDecisionMatrix] event=" + eventType +
+                " row=group index=" + index +
+                " focus=" + focus +
+                " side=" + context.Side +
+                " macro=" + TacticalTelemetry.MacroName(context.MacroAi) +
+                " unit=" + SafeUnitName(group) +
+                " type=" + group.unittyp +
+                " top=" + group.istopunit +
+                " underCommander=" + group.dlcw_isundercommander +
+                " attachedUnderCommander=" + CountAttachedUnderCommander(group) +
+                " parent=" + SafeParentId(group) +
+                " aiStance=" + group.ai_stance +
+                " orderedStance=" + vanillaStance +
+                " whiskeyStanceKind=" + stanceDecision.Kind +
+                " whiskeyStance=" + stanceDecision.GroupStance +
+                " whiskeyReason=" + stanceDecision.Reason +
+                " wlGuard=" + (wlGuard.Allow ? "allow" : "deny") + ":" + wlGuard.Reason +
+                " orderFrictionAllows=" + orderFrictionAllows +
+                " sector=" + sector.SectorId +
+                " mission=" + sector.Mission +
+                " sectorOdds=" + BucketForObserver(sector.Odds) +
+                " own=" + BucketForObserver(sector.OwnStrength) +
+                " enemy=" + BucketForObserver(sector.EnemyStrength) +
+                " confidence=" + BucketForObserver(sector.Confidence) +
+                " movement=" + SafeMovementMode(group) +
+                " formation=" + FormatFormation(SafeFormation(group)) +
+                " orderedFormation=" + FormatFormation(SafeFormationOrdered(group)) +
+                " paths=" + SafeRegimentPaths(group) +
+                " queue=" + SafeOrderQueueCount(group) +
+                " activeMove=" + HasActiveMoveOrder(group) +
+                " receivedFire=" + MatrixReceivedFire(group) +
+                " closestEnemy=" + MatrixClosestEnemy(group) +
+                " angleEnemy=" + BucketForObserver(MatrixEnemyAngleStrength(group)) +
+                " flankThreat=" + BucketForObserver(group.flanksthreated) +
+                " outflanked=" + group.outflanked +
+                " cover=" + BucketForObserver(group.covervalue) +
+                " fort=" + group.fortinrange +
+                " feud=" + group.ai_feudstance +
+                " objective=" + SafeCurrentObjectiveId(group) +
+                " position=" + PointSignature(SafePositionX(group), SafePositionZ(group)) +
+                " waypoint=" + PointSignature(SafeLastWaypointX(group), SafeLastWaypointZ(group)) +
+                " orderState=" + SafeOrderState(group));
+        }
+
+        private static TacticalSectorAssessment BuildMatrixSector(Regiment group, int index)
+        {
+            float own = Math.Max(group.groupowninrange, group.groupstrengthaigroup);
+            float enemy = Math.Max(1f, Math.Max(group.groupenemiesinrange, MatrixEnemyAngleStrength(group)));
+            float confidence = group.unitrange != null && group.unitrange.closestenemyunitfarreg != null ? 0.8f : 0.45f;
+            bool flankRisk = group.flanksthreated > 0f || group.outflanked > 0;
+            bool strongPoint = group.covervalue > 0.5f || group.fortinrange;
+            var sector = new TacticalSectorAssessment(
+                index,
+                TacticalSectorSource.AngleSlice,
+                own,
+                enemy,
+                confidence,
+                strongPoint,
+                flankRisk,
+                TacticalSectorMission.Hold);
+            var result = TacticalSectorLedger.Evaluate(new[] { sector });
+            return result.Sectors.Length > 0 ? result.Sectors[0] : sector;
+        }
+
+        private static bool MatrixOrderFrictionAllowsChange(Regiment group)
+        {
+            if (group == null) return false;
+            if (group.regimentpaths > 0 && group.pathinterrupted) return false;
+            if (group.regimentpaths > 0 && group.movementmode == 3) return false;
+            return true;
+        }
+
+        private static bool MatrixReceivedFire(Regiment group)
+        {
+            try
+            {
+                if (group == null) return false;
+                var field = AccessTools.Field(group.GetType(), "receivedfire");
+                var received = field != null ? field.GetValue(group) as IList : null;
+                return received != null && received.Count > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static float MatrixEnemyAngleStrength(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.unitrange == null || group.unitrange.enemystrengthwithinangle == null) return 0f;
+                float total = 0f;
+                for (int i = 0; i < group.unitrange.enemystrengthwithinangle.Length; i++)
+                    total += Math.Max(0f, group.unitrange.enemystrengthwithinangle[i]);
+                return total;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static string MatrixClosestEnemy(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.unitrange == null) return "-";
+                if (group.unitrange.closestenemyunitfarreg != null)
+                    return SafeUnitName(group.unitrange.closestenemyunitfarreg);
+                if (group.unitrange.closestenemyunit != null)
+                {
+                    var nearest = group.unitrange.closestenemyunit as Regiment[];
+                    return nearest != null
+                        ? "enemy-array-" + nearest.Length
+                        : TacticalCurrentOrderSignature.Safe(group.unitrange.closestenemyunit.GetType().Name);
+                }
+                return "-";
+            }
+            catch
+            {
+                return "-";
+            }
         }
 
         private static TacticalBattleContext BuildContext(AIBattle battle, Regiment group)
@@ -1057,6 +1462,14 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null &&
                 Plugin.Instance.Enabled.Value &&
                 Plugin.Instance.EnableTacticalBugTelemetry.Value;
+        }
+
+        private static bool DecisionMatrixEnabled()
+        {
+            return Plugin.Instance != null &&
+                Plugin.Instance.Enabled.Value &&
+                Plugin.Instance.EnableTacticalObserver.Value &&
+                Plugin.Instance.EnableTacticalDecisionMatrixLogging.Value;
         }
 
         private static void CountUnits(IList units, TacticalBattleContext context)
@@ -1545,6 +1958,243 @@ namespace WhiskeyRealism.Patches
         {
             try { return unit != null ? ((Component)unit).transform.position.z : 0f; }
             catch { return 0f; }
+        }
+
+        private static int SafeMovementMode(Regiment unit)
+        {
+            try { return unit != null ? unit.movementmode : -1; }
+            catch { return -1; }
+        }
+
+        private static int SafeFormation(Regiment unit)
+        {
+            try { return unit != null ? unit.formation : -1; }
+            catch { return -1; }
+        }
+
+        private static int SafeFormationOrdered(Regiment unit)
+        {
+            try { return unit != null ? unit.formationordered : -1; }
+            catch { return -1; }
+        }
+
+        private static int SafeLastFormation(Regiment unit)
+        {
+            try { return unit != null ? unit.lastformation : -1; }
+            catch { return -1; }
+        }
+
+        private static int SafeGroupFormation(Regiment unit)
+        {
+            try { return unit != null ? unit.groupformation : -1; }
+            catch { return -1; }
+        }
+
+        private static bool SafeMarchColumnActive(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return false;
+                if (_changeToMarchColumnActiveField == null)
+                    _changeToMarchColumnActiveField = AccessTools.Field(typeof(Regiment), "changetomarchcolumnactive");
+                return _changeToMarchColumnActiveField != null && (bool)_changeToMarchColumnActiveField.GetValue(unit);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string FormatFormation(int formation)
+        {
+            return formation + ":" + FormationName(formation);
+        }
+
+        private static string FormationName(int formation)
+        {
+            switch (formation)
+            {
+                case 0:
+                    return "Line";
+                case 1:
+                    return "Column";
+                case 2:
+                    return "DoubleLine";
+                case 3:
+                    return "MarchColumn";
+                case 4:
+                    return "Skirmish";
+                default:
+                    return "Unknown";
+            }
+        }
+
+        private static PathShapeSummary BuildPathShape(
+            Regiment unit,
+            WaypointState state,
+            int afterPaths,
+            bool newPath,
+            bool modifyLastWaypoint)
+        {
+            if (unit == null || afterPaths <= 0 || unit.regimentpath == null)
+                return EmptyPathShape();
+
+            int startIndex = SelectObservedPathStart(state.PathCount, afterPaths, newPath, modifyLastWaypoint);
+            int endIndex = Math.Min(afterPaths - 1, unit.regimentpath.Length - 1);
+            if (startIndex < 0 || startIndex > endIndex)
+                startIndex = endIndex;
+
+            float direct = XzDistance(state.StartX, state.StartZ, state.TargetX, state.TargetZ);
+            float pathLength = 0f;
+            int corners = 0;
+            bool foundFirst = false;
+            float firstX = 0f;
+            float firstZ = 0f;
+            float finalX = 0f;
+            float finalZ = 0f;
+            float previousX = state.StartX;
+            float previousZ = state.StartZ;
+            string navStatus = "-";
+            int pathStatus = SafePathStatus(unit, endIndex);
+
+            for (int pathIndex = startIndex; pathIndex <= endIndex; pathIndex++)
+            {
+                NavMeshPath path = SafeNavMeshPath(unit, pathIndex);
+                if (path == null || path.corners == null || path.corners.Length <= 0) continue;
+
+                navStatus = SafeNavStatus(path);
+                for (int cornerIndex = 0; cornerIndex < path.corners.Length; cornerIndex++)
+                {
+                    Vector3 corner = path.corners[cornerIndex];
+                    float segment = XzDistance(previousX, previousZ, corner.x, corner.z);
+                    if (segment > 0.1f)
+                    {
+                        pathLength += segment;
+                        previousX = corner.x;
+                        previousZ = corner.z;
+                    }
+
+                    if (!foundFirst && XzDistance(state.StartX, state.StartZ, corner.x, corner.z) > 2f)
+                    {
+                        foundFirst = true;
+                        firstX = corner.x;
+                        firstZ = corner.z;
+                    }
+
+                    finalX = corner.x;
+                    finalZ = corner.z;
+                    corners++;
+                }
+            }
+
+            if (corners <= 0)
+                return EmptyPathShape();
+
+            if (!foundFirst)
+            {
+                firstX = finalX;
+                firstZ = finalZ;
+            }
+
+            float targetAngle = AngleDegrees(state.StartX, state.StartZ, state.TargetX, state.TargetZ);
+            float firstAngle = AngleDegrees(state.StartX, state.StartZ, firstX, firstZ);
+            float delta = AngleDifference(targetAngle, firstAngle);
+            float ratio = direct <= 0.1f ? 0f : pathLength / direct;
+
+            return new PathShapeSummary(
+                pathCreated: true,
+                cornerCount: corners,
+                directDistance: direct,
+                pathLength: pathLength,
+                pathRatio: ratio,
+                firstSegmentDelta: delta,
+                navStatus: navStatus,
+                pathStatus: pathStatus,
+                firstX: firstX,
+                firstZ: firstZ,
+                finalX: finalX,
+                finalZ: finalZ);
+        }
+
+        private static PathShapeSummary EmptyPathShape()
+        {
+            return new PathShapeSummary(false, 0, 0f, 0f, 0f, 0f, "-", -1, 0f, 0f, 0f, 0f);
+        }
+
+        private static int SelectObservedPathStart(int beforePaths, int afterPaths, bool newPath, bool modifyLastWaypoint)
+        {
+            _ = newPath;
+            if (afterPaths <= 0) return -1;
+            if (afterPaths <= beforePaths) return 0;
+            if (modifyLastWaypoint) return Math.Max(0, afterPaths - 1);
+            return Math.Max(0, beforePaths);
+        }
+
+        private static NavMeshPath SafeNavMeshPath(Regiment unit, int pathIndex)
+        {
+            try
+            {
+                if (unit == null || unit.regimentpath == null) return null;
+                if (pathIndex < 0 || pathIndex >= unit.regimentpath.Length) return null;
+                return unit.regimentpath[pathIndex];
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string SafeNavStatus(NavMeshPath path)
+        {
+            try
+            {
+                return path != null ? path.status.ToString() : "-";
+            }
+            catch
+            {
+                return "-";
+            }
+        }
+
+        private static int SafePathStatus(Regiment unit, int pathIndex)
+        {
+            try
+            {
+                if (unit == null || unit.pathstatus == null) return -1;
+                if (pathIndex < 0 || pathIndex >= unit.pathstatus.Length) return -1;
+                return unit.pathstatus[pathIndex];
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static string PointSignature(float x, float z)
+        {
+            return "x=" + BucketForObserver(x) + ",z=" + BucketForObserver(z);
+        }
+
+        private static float XzDistance(float ax, float az, float bx, float bz)
+        {
+            float dx = ax - bx;
+            float dz = az - bz;
+            return Mathf.Sqrt(dx * dx + dz * dz);
+        }
+
+        private static float AngleDegrees(float ax, float az, float bx, float bz)
+        {
+            float dx = bx - ax;
+            float dz = bz - az;
+            if (Mathf.Abs(dx) < 0.001f && Mathf.Abs(dz) < 0.001f) return 0f;
+            float angle = Mathf.Atan2(dx, dz) * Mathf.Rad2Deg;
+            return angle < 0f ? angle + 360f : angle;
+        }
+
+        private static float AngleDifference(float a, float b)
+        {
+            float delta = Mathf.Abs((a - b) % 360f);
+            return delta > 180f ? 360f - delta : delta;
         }
 
         private static int SafeCurrentObjectiveId(Regiment unit)

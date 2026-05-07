@@ -4,7 +4,8 @@ namespace WhiskeyRealism.Tactical
     {
         ChargeInitiation = 0,
         ChargeCancellation = 1,
-        FeudMovement = 2
+        FeudMovement = 2,
+        ObjectiveChainAdvance = 3
     }
 
     public readonly struct TacticalWlGuardDecision

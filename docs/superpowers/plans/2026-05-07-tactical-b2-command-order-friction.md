@@ -1,6 +1,6 @@
 # Tactical B2 Command Order Friction Implementation Plan
 
-Status: implemented, console-tested, built, deployed, hash-verified, and focused-smoke sampled on 2026-05-07 in DLL `dc028bae2169ca4de00e5af6209f868ae1a3421f3cac6f9bba6cf12743edd8db` (501248 bytes), now superseded locally by tactical bug-remediation/objective-mutation telemetry DLL `9136d14fbea7b2ace5ba034dc673f71b31de2b9d8467c159c49cdbd9052513bd` (524288 bytes). Current focused smoke emitted `[TacticalCommand]` 25 times and `[TacticalOrder]` 116 times. B2 remains read-only #35 telemetry; B3 tactical odds doctrine is next.
+Status: implemented, console-tested, built, deployed, hash-verified, and focused-smoke sampled on 2026-05-07 in DLL `dc028bae2169ca4de00e5af6209f868ae1a3421f3cac6f9bba6cf12743edd8db` (501248 bytes), now superseded locally by tactical decision-matrix/objective-guard DLL `54c2adba6796e3fb7fbc826171bac2c7ff71029f8e092fd9fc765bc30892a214` (583680 bytes). Focused smoke emitted `[TacticalCommand]` 25 times and `[TacticalOrder]` 116 times. B2 remains read-only #35 telemetry; #35 now also emits removable `[TacticalDecisionMatrix]` rows; #46 owns objective-chain W&L movement blocking; B4/B5 stay default-off until focused behavior smoke because they write `macroai` / `ai_stance`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -1037,7 +1037,7 @@ git commit -m "feat: observe tactical command order friction"
 In `docs/handoff.md`, update the Slice B active line to this state:
 
 ```markdown
-| **Active workstream** | **Slice B3 tactical odds doctrine is next.** B0 observer smoke closed on 2026-05-07. B1 W&L charge/feud guard is implemented and B1 runtime denial smoke was deferred by user direction on 2026-05-07. B2 command hierarchy/order friction is implemented, console-tested, built, deployed, and hash-matched as read-only #35 telemetry; runtime `[TacticalCommand]` / B2 `[TacticalOrder]` smoke remains useful but is not blocking B3 planning. |
+| **Active workstream** | **Slice B3-B5 tactical odds/macro/sector doctrine is implemented default-off.** B0 observer smoke closed on 2026-05-07. B1 W&L charge/feud guard is implemented and B1 runtime denial smoke was deferred by user direction on 2026-05-07. B2 command hierarchy/order friction is implemented, console-tested, built, deployed, and hash-matched as read-only #35 telemetry. B3 adds read-only `[TacticalOdds]`; B4/B5 are behavior valves and remain off until focused smoke because they write `macroai` / `ai_stance`. |
 ```
 
 Update the Slice B roadmap notes to include this B2 plan:

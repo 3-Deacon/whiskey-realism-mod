@@ -28,6 +28,9 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalObserver;
         internal ConfigEntry<bool> TacticalObserverVerboseLogging;
         internal ConfigEntry<int> TacticalObserverMinSecondsBetweenSummaries;
+        internal ConfigEntry<bool> EnableTacticalDecisionMatrixLogging;
+        internal ConfigEntry<int> TacticalDecisionMatrixMinSecondsBetweenSnapshots;
+        internal ConfigEntry<int> TacticalDecisionMatrixMaxRows;
         internal ConfigEntry<bool> EnableTacticalBugTelemetry;
         internal ConfigEntry<bool> EnableTacticalFallbackRetreatNullGuard;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
@@ -125,6 +128,25 @@ namespace WhiskeyRealism
                 "Tactical Observer Min Seconds Between Summaries",
                 30,
                 "Minimum wall-clock seconds between repeated tactical observer summaries with the same signature.");
+            EnableTacticalDecisionMatrixLogging = Config.Bind(
+                "Tactical",
+                "Enable Tactical Decision Matrix Logging",
+                true,
+                "When Tactical Observer is enabled, emit high-volume [TacticalDecisionMatrix] battle/group rows for tactical AI bug hunts. Disable this switch to remove matrix noise without disabling the rest of the observer.");
+            TacticalDecisionMatrixMinSecondsBetweenSnapshots = Config.Bind(
+                "Tactical",
+                "Tactical Decision Matrix Min Seconds Between Snapshots",
+                1,
+                new ConfigDescription(
+                    "Minimum wall-clock seconds between repeated [TacticalDecisionMatrix] snapshots with the same event signature.",
+                    new AcceptableValueRange<int>(1, 60)));
+            TacticalDecisionMatrixMaxRows = Config.Bind(
+                "Tactical",
+                "Tactical Decision Matrix Max Rows",
+                80,
+                new ConfigDescription(
+                    "Maximum group rows emitted per tactical decision-matrix snapshot. Lower this if LogOutput.log gets too large.",
+                    new AcceptableValueRange<int>(1, 300)));
             EnableTacticalBugTelemetry = Config.Bind(
                 "Tactical",
                 "Enable Tactical Bug Telemetry",
@@ -139,7 +161,7 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable W&L Tactical Charge Guard",
                 false,
-                "Default OFF for Slice B1. When enabled, blocks new ungated W&L AI feud/charge movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
+                "Default OFF for Slice B1/BUG-TAC-005. When enabled, blocks ungated W&L AI feud/charge/objective-chain movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",

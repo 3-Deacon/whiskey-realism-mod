@@ -11,7 +11,8 @@ namespace WhiskeyRealism.Tactical
         CourierQueueIndexMismatch = 3,
         ObjectiveChainPlayerSubordinate = 4,
         ReserveDirectPathBypass = 5,
-        FallbackRetreatException = 6
+        FallbackRetreatException = 6,
+        PathfinderBacktrackShape = 7
     }
 
     public readonly struct TacticalCurrentOrderSignature
@@ -140,6 +141,8 @@ namespace WhiskeyRealism.Tactical
                     return "[TacticalReserveMove]";
                 case TacticalBattlefieldBugObservationKind.FallbackRetreatException:
                     return "[TacticalFallback]";
+                case TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape:
+                    return "[TacticalPathShape]";
                 default:
                     return "[TacticalDiagnostic]";
             }
@@ -307,6 +310,54 @@ namespace WhiskeyRealism.Tactical
         {
             if (!(exception is NullReferenceException)) return false;
             return methodName == "MicroAICheckForRetreats" || methodName == "CheckLineFallbacks";
+        }
+
+        public static TacticalBugDiagnosticDecision ClassifyPathShape(
+            bool showMovementOptions,
+            bool pathCreated,
+            int cornerCount,
+            float directDistance,
+            float pathLength,
+            float firstSegmentDeltaDegrees,
+            string navStatus,
+            int pathStatus,
+            bool orderDelayEnabled)
+        {
+            int corners = TacticalCurrentOrderSignature.ClampCount(cornerCount);
+            float direct = Threshold(directDistance);
+            float length = Threshold(pathLength);
+            float delta = AngleDifference(0f, firstSegmentDeltaDegrees);
+            float ratio = direct <= 0.1f ? 0f : length / direct;
+            string status = TacticalCurrentOrderSignature.Safe(navStatus);
+            string signature = "ui=" + showMovementOptions +
+                " created=" + pathCreated +
+                " corners=" + corners +
+                " direct=" + TacticalCurrentOrderSignature.Bucket(direct) +
+                " length=" + TacticalCurrentOrderSignature.Bucket(length) +
+                " ratio=" + TacticalCurrentOrderSignature.Bucket(ratio) +
+                " firstDelta=" + TacticalCurrentOrderSignature.Bucket(delta) +
+                " navStatus=" + status +
+                " pathStatus=" + pathStatus +
+                " delay=" + orderDelayEnabled;
+
+            if (!showMovementOptions)
+                return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, false, "non-ui-path", signature);
+            if (!pathCreated)
+                return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, false, "no-path-created", signature);
+            if (corners <= 0)
+                return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, false, "no-corners", signature);
+            if (direct < 5f)
+                return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, false, "near-target", signature);
+            if (!string.IsNullOrEmpty(status) && status != "-" && status != "PathComplete")
+                return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, true, "navmesh-noncomplete", signature);
+            if (orderDelayEnabled && pathStatus >= 0 && pathStatus < 2)
+                return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, true, "path-not-transmitted", signature);
+            if (delta > 90f)
+                return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, true, "backward-first-segment", signature);
+            if (ratio >= 1.5f)
+                return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, true, "excessive-path-ratio", signature);
+
+            return Decision(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, false, "path-shape-normal", signature);
         }
 
         private static TacticalBugDiagnosticDecision Decision(

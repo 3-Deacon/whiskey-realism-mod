@@ -67,6 +67,7 @@ static class Program
             ("tactical diagnostics detect objective chain player subordinate risk", TacticalDiagnosticsDetectObjectiveChainPlayerSubordinateRisk),
             ("tactical diagnostics detect objective chain movement mutation proof", TacticalDiagnosticsDetectObjectiveChainMovementMutationProof),
             ("tactical diagnostics detect reserve direct path delay bypass", TacticalDiagnosticsDetectReserveDirectPathDelayBypass),
+            ("tactical diagnostics detect pathfinder backtrack shape", TacticalDiagnosticsDetectPathfinderBacktrackShape),
             ("tactical diagnostics suppress only tactical null fallback exceptions", TacticalDiagnosticsSuppressOnlyTacticalNullFallbackExceptions),
             ("tactical diagnostics handle empty null and sanitized values", TacticalDiagnosticsHandleEmptyNullAndSanitizedValues),
             ("tactical wl guard allows non wl action", TacticalWlGuardAllowsNonWlAction),
@@ -75,6 +76,8 @@ static class Program
             ("tactical wl guard allows charge cancellation", TacticalWlGuardAllowsChargeCancellation),
             ("tactical wl guard denies feud move with attached subordinate", TacticalWlGuardDeniesFeudMoveWithAttachedSubordinate),
             ("tactical wl guard allows ai chain feud move", TacticalWlGuardAllowsAiChainFeudMove),
+            ("tactical wl guard denies objective advance with attached subordinate", TacticalWlGuardDeniesObjectiveAdvanceWithAttachedSubordinate),
+            ("tactical wl guard allows ai chain objective advance", TacticalWlGuardAllowsAiChainObjectiveAdvance),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl diary startup gate defers until diary dependencies are ready", WlDiaryStartupGateDefersUntilReady),
@@ -1160,6 +1163,49 @@ static class Program
         AssertTrue(!queued.IsRisk, "queued reserve movement should not be a bypass risk");
     }
 
+    private static void TacticalDiagnosticsDetectPathfinderBacktrackShape()
+    {
+        var backtrack = TacticalBattlefieldBugDiagnostics.ClassifyPathShape(
+            showMovementOptions: true,
+            pathCreated: true,
+            cornerCount: 4,
+            directDistance: 100f,
+            pathLength: 120f,
+            firstSegmentDeltaDegrees: 135f,
+            navStatus: "PathComplete",
+            pathStatus: 2,
+            orderDelayEnabled: false);
+        var longRoute = TacticalBattlefieldBugDiagnostics.ClassifyPathShape(
+            showMovementOptions: true,
+            pathCreated: true,
+            cornerCount: 5,
+            directDistance: 100f,
+            pathLength: 210f,
+            firstSegmentDeltaDegrees: 20f,
+            navStatus: "PathComplete",
+            pathStatus: 2,
+            orderDelayEnabled: false);
+        var aiPath = TacticalBattlefieldBugDiagnostics.ClassifyPathShape(
+            showMovementOptions: false,
+            pathCreated: true,
+            cornerCount: 4,
+            directDistance: 100f,
+            pathLength: 210f,
+            firstSegmentDeltaDegrees: 135f,
+            navStatus: "PathComplete",
+            pathStatus: 2,
+            orderDelayEnabled: false);
+
+        AssertTrue(backtrack.IsRisk, "player UI path with backward first segment should be risky");
+        AssertEqual(TacticalBattlefieldBugObservationKind.PathfinderBacktrackShape, backtrack.Kind, "kind");
+        AssertEqual("backward-first-segment", backtrack.Reason, "backtrack reason");
+        AssertContains(backtrack.Summary, "[TacticalPathShape]", "summary prefix");
+        AssertTrue(longRoute.IsRisk, "excessive route ratio should be risky");
+        AssertEqual("excessive-path-ratio", longRoute.Reason, "ratio reason");
+        AssertTrue(!aiPath.IsRisk, "AI path shapes should not count as player right-click proof");
+        AssertEqual("non-ui-path", aiPath.Reason, "ai reason");
+    }
+
     private static void TacticalDiagnosticsSuppressOnlyTacticalNullFallbackExceptions()
     {
         AssertTrue(
@@ -1305,6 +1351,34 @@ static class Program
             attachedUnitUnderCommander: false);
 
         AssertTrue(decision.Allow, "AI-chain feud movement should remain vanilla");
+        AssertEqual("ai-chain", decision.Reason, "reason");
+    }
+
+    private static void TacticalWlGuardDeniesObjectiveAdvanceWithAttachedSubordinate()
+    {
+        var decision = TacticalWlActionGuard.Decide(
+            configEnabled: true,
+            dlcScenarioActive: true,
+            action: TacticalWlGuardAction.ObjectiveChainAdvance,
+            unitUnderCommander: false,
+            groupUnderCommander: false,
+            attachedUnitUnderCommander: true);
+
+        AssertTrue(!decision.Allow, "objective-chain advance should be denied when the center group contains a player-subordinate unit");
+        AssertEqual("player-subordinate-attached", decision.Reason, "reason");
+    }
+
+    private static void TacticalWlGuardAllowsAiChainObjectiveAdvance()
+    {
+        var decision = TacticalWlActionGuard.Decide(
+            configEnabled: true,
+            dlcScenarioActive: true,
+            action: TacticalWlGuardAction.ObjectiveChainAdvance,
+            unitUnderCommander: false,
+            groupUnderCommander: false,
+            attachedUnitUnderCommander: false);
+
+        AssertTrue(decision.Allow, "AI-chain objective movement should remain vanilla");
         AssertEqual("ai-chain", decision.Reason, "reason");
     }
 

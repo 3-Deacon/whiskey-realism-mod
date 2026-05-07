@@ -7,7 +7,7 @@ Vanilla verification: see [`2026-05-05-tactical-brain-vanilla-verification.md`](
 
 Focused adjunct: see [`2026-05-05-tactical-weapons-ammunition-design.md`](2026-05-05-tactical-weapons-ammunition-design.md) for infantry weapons, artillery ammunition, projectile behavior, smoke, fire discipline, and autoresolve parity. That adjunct is observer-first and should not be merged into the W&L charge-safety slice.
 
-Runtime smoke delta: focused W&L battle smoke on 2026-05-07 confirmed the B2 command/order telemetry surface and repeated `BUG-TAC-005` objective-chain player-subordinate exposure through `[TacticalObjectiveMove]`. It did not prove actual path/position mutation from that exposure, and it did not exercise #43 fallback/retreat suppression, risky courier queue mismatch, campaign current-order duplication, delayed waypoint drift, or reserve direct-path telemetry. B3 tactical odds doctrine may proceed, but any `UpdateMovingTargets`, courier, `SetWaypoint`, current-order, or reserve behavior patch still needs the additional proof called out in the tactical bug-remediation plan.
+Runtime smoke delta: focused W&L battle smoke on 2026-05-07 confirmed the B2 command/order telemetry surface and repeated `BUG-TAC-005` objective-chain player-subordinate exposure through `[TacticalObjectiveMove]`; user field observation escalated that gap to #46 `BattleObjectiveChainWlGuardPatch`. #35 now also has removable `[TacticalDecisionMatrix]` logging. `[TacticalPathShape] reason=backward-first-segment` has proof-backed `BUG-TAC-010`. B3-B5 odds/macro/sector doctrine is implemented and hash-deployed, but B4/B5 stay default-off because they write vanilla battle state (`macroai` and `ai_stance`). Any courier, current-order, reserve behavior patch, path-shape correction, or default-on tactical stance behavior still needs the additional proof called out in the tactical bug-remediation and B3-B5 plans.
 
 ## Source Findings
 
@@ -728,6 +728,8 @@ Plan ordering rules (derived from the dependency column, restated for emphasis):
 - `B8` must not ship before `B3`, `B5`, and `B6` because retreat without sector/reserve context risks game-ruining over-withdrawal.
 
 Each slice should have pure scorer tests before Harmony patch wiring.
+
+Default policy for tactical behavior: telemetry-only slices can be observed independently, but slices that write vanilla battle state remain default-off until focused runtime smoke proves the write surface is stable. For the current B3-B5 batch, B3 `[TacticalOdds]` is read-only; B4 `macroai` and B5 `ai_stance` writes require explicit config enables for smoke and must not become default-on without evidence.
 
 ## Telemetry
 

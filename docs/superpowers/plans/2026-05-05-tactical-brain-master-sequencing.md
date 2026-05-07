@@ -1,6 +1,6 @@
 # Tactical Brain Master Sequencing Implementation Plan
 
-Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard is implemented and hash-deployed locally. Fresh B1 runtime denial smoke was explicitly deferred by user direction on 2026-05-07. B2 command/order-friction is implemented, build/deploy/hash verified, extends #35 read-only telemetry, and has focused in-game smoke for `[TacticalCommand]` / `[TacticalOrder]`. Tactical bug-remediation telemetry and default-off #43 fallback/retreat NRE guard are also implemented and hash-deployed; focused smoke confirmed `BUG-TAC-005` objective-chain exposure but did not exercise #43 or prove path/position movement. B3 tactical odds doctrine is next.
+Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard, B2 command/order-friction telemetry, B3 odds telemetry, B4/B5 default-off stance behavior, #43 fallback/retreat NRE containment, #35 `[TacticalDecisionMatrix]` logging, and #46 objective-chain W&L guard are implemented and hash-deployed. Restart smoke is pending for `[TacticalDecisionMatrix]` and `[TacticalObjectiveGuard]`. B4/B5 remain default-off because they write vanilla `macroai` / `ai_stance` and need focused runtime smoke before any default-on change.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -425,6 +425,8 @@ Keep Unity object reads in runtime extraction. Pure ledgers should use DTO input
 Add signature-gated `[TacticalCommand]` and `[TacticalOrder]` lines from the B2 ledger. No behavior change.
 
 ## Task 7: B3 Tactical Odds Doctrine Plan
+
+Status update 2026-05-07: B3-B5 were implemented together under `docs/superpowers/plans/2026-05-07-tactical-b3-b5-odds-macro-sector.md`. B3 odds telemetry is read-only; B4/B5 remain default-off because they write vanilla `macroai` / `ai_stance` and still need focused runtime smoke before any default-on change.
 
 **Files:**
 

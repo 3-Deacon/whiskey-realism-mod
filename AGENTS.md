@@ -170,6 +170,7 @@ Use the relevant Superpowers or repo skill before acting when the task matches i
 - Every Harmony patch class lives under `src/WhiskeyRealism/Patches/`. One concern per file.
 - Wrap reflection lookups in try/catch and log via `Plugin.Log.LogWarning(...)` on failure. **Never throw from a patch.** A single throw on every Postfix tick produces 40k log lines per session.
 - Strategic mod state is **read-only** to Harmony patches. Patches read CIC / TheaterCommander / ledger state and steer existing AI methods. State writes happen only on daily strategic review and event-trigger handlers.
+- New tactical behavior patches that write vanilla battle state (`macroai`, `ai_stance`, movement, reserves, artillery, fallback, retreat, or charge state) must ship behind explicit default-off config until a focused in-game smoke proves bounded logs, stable Harmony anchors, no repeated exceptions, no player-subordinate retasking, and no unintended side effects. Read-only telemetry may be enabled separately.
 - Add a header comment explaining what the vanilla method does and what the patch changes.
 
 ### Build
