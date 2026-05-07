@@ -1,5 +1,7 @@
 # W&L Dispatch Objective Bridge Implementation Plan
 
+Status: archived after implementation. Current behavior lives in `docs/wl-dispatch-objective-bridge.md`, shipped code, and `docs/patch-catalog.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the W&L campaign-map `"none"` dispatch bug first, then route Whiskey strategic orders through vanilla W&L current-order semantics for eligible player-chain commands without direct-moving player-controlled commands.
@@ -12,7 +14,7 @@
 
 ## Scope And Checkpoints
 
-This plan implements the active spec `docs/superpowers/specs/2026-05-06-wl-dispatch-objective-bridge-design.md`.
+This plan implemented archived spec `docs/superpowers/specs/archive/2026-05-06-wl-dispatch-objective-bridge-design.md`.
 
 Checkpoint C0a is independently shippable and fixes the user's observed symptom. Do not batch C0a with bridge conversion unless the user explicitly accepts the larger risk.
 

@@ -1,5 +1,7 @@
 # Coordinated Operation Packages Implementation Plan
 
+Status: archived after implementation. Current behavior lives in `docs/coordinated-operation-packages.md`, shipped code, and `docs/patch-catalog.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build coordinated campaign-map attack and reinforcement packages across Whiskey's strategic probe/director layer and vanilla offensive operations, while preserving W&L current-order and vanilla operation-list semantics.
@@ -12,7 +14,7 @@
 
 ## Source Anchors
 
-- Spec: `docs/superpowers/specs/2026-05-06-coordinated-operation-packages-design.md`
+- Spec: `docs/superpowers/specs/archive/2026-05-06-coordinated-operation-packages-design.md`
 - Vanilla offensive package: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:14166`
 - Vanilla offensive scheduler: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:11319`
 - Vanilla offensive operation list commit: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:14378`
@@ -1996,7 +1998,7 @@ git commit -m "feat: guard coordinated offensive micro movement"
 
 **Files:**
 - Modify: `docs/handoff.md`
-- Modify: `docs/superpowers/plans/2026-05-06-coordinated-operation-packages.md` only to check completed boxes if this repo tracks plan progress.
+- Modify: `docs/superpowers/plans/archive/2026-05-06-coordinated-operation-packages.md` only to check completed boxes if this repo tracks plan progress.
 
 - [ ] **Step 1: Run console harness**
 
@@ -2084,7 +2086,7 @@ Add to `docs/handoff.md`:
 - [ ] **Step 8: Commit docs closeout**
 
 ```bash
-git add docs/handoff.md docs/patch-catalog.md docs/superpowers/plans/2026-05-06-coordinated-operation-packages.md
+git add docs/handoff.md docs/patch-catalog.md docs/superpowers/plans/archive/2026-05-06-coordinated-operation-packages.md
 git commit -m "docs: close out coordinated operation packages"
 ```
 

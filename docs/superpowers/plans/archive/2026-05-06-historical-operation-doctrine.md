@@ -1,5 +1,7 @@
 # Historical Operation Doctrine Implementation Plan
 
+Status: archived after implementation. Current behavior lives in `docs/historical-operation-doctrine.md`, shipped code, and `docs/patch-catalog.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add named historical operation doctrine to the existing strategic layer so CIC plans become explicit operation profiles with dynamic contest/recover/exploit behavior, while preserving vanilla objective IDs, vanilla operation-list ownership, and W&L current-order rules.
@@ -22,7 +24,7 @@
 
 ## Source Anchors
 
-- Active spec: `docs/superpowers/specs/2026-05-06-historical-operation-doctrine-design.md`
+- Active spec: `docs/superpowers/specs/archive/2026-05-06-historical-operation-doctrine-design.md`
 - CIC objective scoring and generic plan builder: `src/WhiskeyRealism/Strategic/CIC.cs`
 - Daily review ordering and phase truth input: `src/WhiskeyRealism/Strategic/StrategicCoordinator.cs`
 - Plan and phase models: `src/WhiskeyRealism/Strategic/Phase.cs`
@@ -1279,8 +1281,8 @@ Add one terse line recording:
 - [ ] If implementation ships and smoke passes, archive:
 
 ```text
-docs/superpowers/specs/2026-05-06-historical-operation-doctrine-design.md
-docs/superpowers/plans/2026-05-06-historical-operation-doctrine.md
+docs/superpowers/specs/archive/2026-05-06-historical-operation-doctrine-design.md
+docs/superpowers/plans/archive/2026-05-06-historical-operation-doctrine.md
 ```
 
 Do not archive before build/deploy/hash and runtime smoke.

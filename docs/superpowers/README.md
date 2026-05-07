@@ -1,12 +1,12 @@
 # `docs/superpowers/`
 
-Slice-level design and execution artifacts. Living-doc state lives in [`docs/handoff.md`](../handoff.md), [`docs/patch-catalog.md`](../patch-catalog.md), [`docs/findings.md`](../findings.md), [`docs/bug-fixes/`](../bug-fixes/), [`docs/fort-construction-governor.md`](../fort-construction-governor.md), [`docs/operational-tempo-doctrine.md`](../operational-tempo-doctrine.md), and [`MEMORY.md`](../../MEMORY.md).
+Slice-level design and execution artifacts. Living-doc state lives in [`docs/handoff.md`](../handoff.md), [`docs/patch-catalog.md`](../patch-catalog.md), [`docs/findings.md`](../findings.md), [`docs/bug-fixes/`](../bug-fixes/), [`docs/fort-construction-governor.md`](../fort-construction-governor.md), [`docs/operational-tempo-doctrine.md`](../operational-tempo-doctrine.md), [`docs/wl-dispatch-objective-bridge.md`](../wl-dispatch-objective-bridge.md), [`docs/coordinated-operation-packages.md`](../coordinated-operation-packages.md), [`docs/historical-operation-doctrine.md`](../historical-operation-doctrine.md), and [`MEMORY.md`](../../MEMORY.md).
 
 ## Layout
 
 - [`specs/`](specs/) — **active** design specs (current and upcoming slices).
 - [`specs/archive/`](specs/archive/) — design specs whose implementation has shipped. See the archive [README](specs/archive/README.md) for the index.
-- [`plans/`](plans/) — **active** implementation plans. Current active plan: Slice B0 tactical observer smoke. Strategic project doctrine is archived; coordinated-operation and W&L dispatch plans remain separate active artifacts until their workstreams resume.
+- [`plans/`](plans/) — **active** implementation plans. Current active plan: Slice B0 tactical observer smoke. W&L dispatch bridge, coordinated operation packages, and historical operation doctrine are archived; current behavior lives in the living docs above.
 - [`plans/archive/`](plans/archive/) — implementation plans whose patches have shipped. See the archive [README](plans/archive/README.md) for the index.
 
 Cross-cutting vanilla bug fixes do not live here unless they grow into a real design slice. Track those in [`../bug-fixes/`](../bug-fixes/).

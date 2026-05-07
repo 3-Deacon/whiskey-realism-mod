@@ -1,6 +1,8 @@
 # Coordinated Operation Packages Design
 
-Status: active design spec, docs-only. Created 2026-05-06 after the user asked for nearby forces to coordinate attacks or reinforce through the strategic/director layer.
+Status: archived after implementation. Current behavior lives in `docs/coordinated-operation-packages.md`, shipped code, and `docs/patch-catalog.md`.
+
+Created 2026-05-06 after the user asked for nearby forces to coordinate attacks or reinforce through the strategic/director layer.
 Scope: strategic campaign-map coordination for offensive packages and reinforcement packages. This spec covers design and boundaries only. It is not an implementation plan.
 
 ## Goal

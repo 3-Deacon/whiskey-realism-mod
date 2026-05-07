@@ -1,6 +1,8 @@
 # Historical Operation Doctrine Design
 
-Status: active design spec, docs-only. Created 2026-05-06 after the user approved approach 3: historical operation profiles integrated into CIC planning, with dynamic handling for player-caused outcomes and intelligent enemy contest behavior.
+Status: archived after implementation. Current behavior lives in `docs/historical-operation-doctrine.md`, shipped code, and `docs/patch-catalog.md`.
+
+Created 2026-05-06 after the user approved approach 3: historical operation profiles integrated into CIC planning, with dynamic handling for player-caused outcomes and intelligent enemy contest behavior.
 Scope: strategic campaign-map doctrine. This spec designs the missing layer between objective scoring and coordinated movement execution. It is not an implementation plan.
 
 ## Goal

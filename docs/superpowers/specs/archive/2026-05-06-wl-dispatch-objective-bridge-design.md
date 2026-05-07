@@ -1,6 +1,8 @@
 # W&L Dispatch And Objective Bridge Design
 
-Status: active design spec, docs-only. Created 2026-05-06 after user redirected from tactical prep to campaign-map dispatch/objective behavior.
+Status: archived after implementation. Current behavior lives in `docs/wl-dispatch-objective-bridge.md`, shipped code, and `docs/patch-catalog.md`.
+
+Created 2026-05-06 after user redirected from tactical prep to campaign-map dispatch/objective behavior.
 Scope: campaign strategic layer integration with Whiskey & Lemons career command hierarchy. This spec does not implement code and is not an implementation plan.
 
 ## Goal

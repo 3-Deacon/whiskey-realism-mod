@@ -1,6 +1,6 @@
 # Archived Plans
 
-Implementation plans whose patches have shipped and been verified. Frozen artifacts — kept for traceability, not maintained.
+Implementation plans whose code has shipped. Frozen artifacts — kept for traceability, not maintained. Runtime smoke status belongs in the living docs and handoff.
 
 **Source-of-truth order:** shipped code > [`docs/patch-catalog.md`](../../../patch-catalog.md) > per-patch design doc > umbrella spec > archived plan. If the archive disagrees with shipped code or the patch catalog, trust the code.
 
@@ -22,3 +22,6 @@ Implementation plans whose patches have shipped and been verified. Frozen artifa
 | [`2026-05-05-strategic-resilience-director.md`](2026-05-05-strategic-resilience-director.md) | Strategic Resilience Director (22-task slice + perf hotfix): pure ledgers (`PhaseTruthLedger`, `ContactEvidenceLedger`, `CampaignPaceLedger`, `BattleHistoryQuery`, `TheaterPressureView`), `OffensiveAvailabilityWrapper`, `StrategicResilienceDirector`, `DirectorPublishClamp`, `DirectorMemory` persistence, `CicReviewRouter`, plus posture-modulated probe/transfer/formation/fiscal/construction/defense thresholds; perf hotfix with typed Regiment access + same-area bucket |
 | [`2026-05-05-wl-camp-realism-slice1.md`](2026-05-05-wl-camp-realism-slice1.md) | Patch #29 `WlCampRealismPatch` — short-camp accounting fix, station 12 Rest reward retune, responsive bonus weighting (safe scopes), command-count dilution softening |
 | [`2026-05-06-strategic-project-doctrine.md`](2026-05-06-strategic-project-doctrine.md) | Strategic project doctrine slice: pure `Strategic/Projects` catalog/signals/scorer/log-gate, #17 project-selection doctrine expansion, #39/#40 appointment/unlock observers; build/deploy/hash verified and selection smoke confirmed on DLL `f504f99d...` |
+| [`2026-05-06-wl-dispatch-objective-bridge.md`](2026-05-06-wl-dispatch-objective-bridge.md) | W&L dispatch/objective bridge C0a-C0c: #36 sanitizer plus `WlStrategicOrderBridge`; current behavior in [`docs/wl-dispatch-objective-bridge.md`](../../../wl-dispatch-objective-bridge.md) |
+| [`2026-05-06-coordinated-operation-packages.md`](2026-05-06-coordinated-operation-packages.md) | Coordinated operation packages: package selection/commit, #38 vanilla-offensive filtering, W&L reinforce intent, micro-movement locks; current behavior in [`docs/coordinated-operation-packages.md`](../../../coordinated-operation-packages.md) |
+| [`2026-05-06-historical-operation-doctrine.md`](2026-05-06-historical-operation-doctrine.md) | Historical operation doctrine: explicit catalog/no-profile CIC planning, dynamic phase-truth actions, operation persistence/context/replan memory, no hidden fallback; current behavior in [`docs/historical-operation-doctrine.md`](../../../historical-operation-doctrine.md) |
