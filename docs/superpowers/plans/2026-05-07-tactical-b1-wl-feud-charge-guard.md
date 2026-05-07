@@ -1,5 +1,7 @@
 # Tactical B1 W&L Feud Charge Guard Implementation Plan
 
+Status: implemented, console-tested, built, deployed, and hash-verified on 2026-05-07. Fresh B1 runtime denial smoke was explicitly deferred by user direction; keep it as a useful follow-up, not a blocker for B2/B3.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a config-gated W&L tactical guard that prevents vanilla AI feud/charge movement from issuing new movement intent to player-subordinate units while preserving vanilla cancellation, timing, and AI-vs-AI behavior.

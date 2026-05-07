@@ -81,15 +81,15 @@ The sidecar carries:
 
 ## Runtime Evidence
 
-Current verified build/deploy/hash:
+Historical-operation implementation build/deploy/hash was verified in DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes). Current local deployed DLL:
 
-- `dist/WhiskeyRealism.dll`: `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b`
-- deployed BepInEx plugin: `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b`
-- size: 481280 bytes
+- `dist/WhiskeyRealism.dll`: `dc028bae2169ca4de00e5af6209f868ae1a3421f3cac6f9bba6cf12743edd8db`
+- deployed BepInEx plugin: `dc028bae2169ca4de00e5af6209f868ae1a3421f3cac6f9bba6cf12743edd8db`
+- size: 501248 bytes
 - console harness passed
 - `./build.sh` passed with 0 warnings / 0 errors
 
-Fresh runtime smoke is still pending because the current `BepInEx/LogOutput.log` predates this DLL. Required markers:
+Fresh runtime smoke is still pending on the current deployed DLL. Required markers:
 
 - `[HistoricalOperation] action=select operation=...`
 - or visible `[HistoricalOperation] action=no-profile ...`

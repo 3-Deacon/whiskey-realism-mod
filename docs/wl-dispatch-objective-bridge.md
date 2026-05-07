@@ -42,6 +42,6 @@ Patch catalog entries:
 
 ## Runtime Evidence
 
-Build/deploy/hash verification is current as of DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes).
+The bridge implementation was build/deploy/hash verified in the historical-operation DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes). Current local deployed DLL is `dc028bae2169ca4de00e5af6209f868ae1a3421f3cac6f9bba6cf12743edd8db` (501248 bytes), which includes later Slice B1/B2 tactical work.
 
-Fresh gameplay smoke for newly generated `[W&LDispatch]` sanitizer lines, bridge-order lines, and absence of newly generated `"to none"` text remains pending on the current DLL. Do not claim runtime text/order success until `BepInEx/LogOutput.log` comes from a restart after that deploy.
+Fresh gameplay smoke for newly generated `[W&LDispatch]` sanitizer lines, bridge-order lines, and absence of newly generated `"to none"` text remains pending on the current DLL. Do not claim runtime text/order success until `BepInEx/LogOutput.log` comes from a restart after the current deploy.

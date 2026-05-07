@@ -84,8 +84,8 @@ Current deployed proof:
 
 - `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` passed.
 - `./build.sh` passed with 0 warnings / 0 errors.
-- `dist/WhiskeyRealism.dll` and the deployed BepInEx plugin DLL both have SHA-256 `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b`.
-- `LogOutput.log` still predates that deploy, so runtime smoke remains pending after a game restart.
+- The operational-probe implementation is included in current local deployed DLL `dc028bae2169ca4de00e5af6209f868ae1a3421f3cac6f9bba6cf12743edd8db` (501248 bytes).
+- Operational-probe runtime smoke remains pending after a game restart and a real probe opportunity.
 
 Runtime smoke markers:
 

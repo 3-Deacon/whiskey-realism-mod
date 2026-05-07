@@ -1,5 +1,7 @@
 # Tactical B2 Command Order Friction Implementation Plan
 
+Status: implemented, console-tested, built, deployed, and hash-verified on 2026-05-07 in DLL `dc028bae2169ca4de00e5af6209f868ae1a3421f3cac6f9bba6cf12743edd8db` (501248 bytes). No B2 in-game smoke has been run. B2 remains read-only #35 telemetry; B3 tactical odds doctrine is next.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add read-only command hierarchy and order-friction interpretation for Slice B2, using vanilla W&L order-delay surfaces without issuing or rewriting tactical movement orders.
@@ -12,7 +14,7 @@
 
 ## Evidence And Scope
 
-Use this plan after B1 is built, tested, and deployed. Fresh B1 in-game denial smoke was explicitly deferred by the user on 2026-05-07, so do not make B2 planning depend on that smoke gate. Keep the residual risk visible in `docs/handoff.md`.
+This plan has been executed. Fresh B1 in-game denial smoke was explicitly deferred by the user on 2026-05-07, and no B2 in-game smoke has been run, so keep those runtime boundaries visible in `docs/handoff.md`. Do not archive this plan until B2 runtime smoke is either completed or explicitly waived for archival.
 
 Verified vanilla anchors in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`:
 
@@ -1035,13 +1037,13 @@ git commit -m "feat: observe tactical command order friction"
 In `docs/handoff.md`, update the Slice B active line to this state:
 
 ```markdown
-| **Active workstream** | **Slice B2 command hierarchy/order friction is the next tactical slice.** B1 W&L charge/feud guard is implemented, console-tested, built, deployed, and hash-matched; fresh B1 runtime denial smoke was deferred by user direction on 2026-05-07 and remains useful but not blocking B2. B2 extends #35 observer telemetry only and must not issue movement orders. |
+| **Active workstream** | **Slice B3 tactical odds doctrine is next.** B0 observer smoke closed on 2026-05-07. B1 W&L charge/feud guard is implemented and B1 runtime denial smoke was deferred by user direction on 2026-05-07. B2 command hierarchy/order friction is implemented, console-tested, built, deployed, and hash-matched as read-only #35 telemetry; runtime `[TacticalCommand]` / B2 `[TacticalOrder]` smoke remains useful but is not blocking B3 planning. |
 ```
 
 Update the Slice B roadmap notes to include this B2 plan:
 
 ```markdown
-| **B - Tactical brain** | active prep ([design](superpowers/specs/2026-05-05-tactical-brain-design.md) + [vanilla verification](superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md) + [weapons/ammunition adjunct](superpowers/specs/2026-05-05-tactical-weapons-ammunition-design.md)) | active sequencing ([master](superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md), [B0 observer](superpowers/plans/2026-05-05-tactical-b0-observer.md), [B1 guard](superpowers/plans/2026-05-07-tactical-b1-wl-feud-charge-guard.md), [B2 command/order friction](superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md)) | B0 observer closed; B1 built/deployed; B2 planned | v0.3.0 | ~8+ | B2 is read-only command/order-friction interpretation from vanilla order-delay surfaces. |
+| **B - Tactical brain** | active prep ([design](superpowers/specs/2026-05-05-tactical-brain-design.md) + [vanilla verification](superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md) + [weapons/ammunition adjunct](superpowers/specs/2026-05-05-tactical-weapons-ammunition-design.md)) | active sequencing ([master](superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md), [B0 observer](superpowers/plans/2026-05-05-tactical-b0-observer.md), [B1 guard](superpowers/plans/2026-05-07-tactical-b1-wl-feud-charge-guard.md), [B2 command/order friction](superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md)) | B0 observer closed; B1 built/deployed; B2 built/deployed | v0.3.0 | ~8+ | Next slice is B3 tactical odds doctrine. B2 is read-only command/order-friction interpretation from vanilla order-delay surfaces. |
 ```
 
 - [ ] **Step 2: Update patch catalog row #35**

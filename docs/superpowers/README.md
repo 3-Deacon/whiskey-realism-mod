@@ -6,7 +6,7 @@ Slice-level design and execution artifacts. Living-doc state lives in [`docs/han
 
 - [`specs/`](specs/) — **active** design specs (current and upcoming slices).
 - [`specs/archive/`](specs/archive/) — design specs whose implementation has shipped. See the archive [README](specs/archive/README.md) for the index.
-- [`plans/`](plans/) — **active** implementation plans. Current active plan: Slice B0 tactical observer smoke. W&L dispatch bridge, coordinated operation packages, and historical operation doctrine are archived; current behavior lives in the living docs above.
+- [`plans/`](plans/) — **active** implementation plans. Current active sequence: Slice B tactical brain. B0 observer smoke is closed; B1 W&L charge/feud guard and B2 command/order-friction telemetry are implemented and hash-deployed with runtime B1/B2 smoke deferred; B3 tactical odds doctrine is next. W&L dispatch bridge, coordinated operation packages, and historical operation doctrine are archived; current behavior lives in the living docs above.
 - [`plans/archive/`](plans/archive/) — implementation plans whose patches have shipped. See the archive [README](plans/archive/README.md) for the index.
 
 Cross-cutting vanilla bug fixes do not live here unless they grow into a real design slice. Track those in [`../bug-fixes/`](../bug-fixes/).

@@ -1,6 +1,6 @@
 # Tactical B0 Observer Implementation Plan
 
-Status: active smoke gate. User explicitly reopened Slice B on 2026-05-06; B0 source is already present on main and deployed locally, but runtime observer smoke is still pending.
+Status: smoke closed on 2026-05-07. User explicitly reopened Slice B on 2026-05-06; B0 source is present as #35 `TacticalObserverPatch`, and runtime observer smoke proved the W&L player-subordinate control surface.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -14,6 +14,8 @@ Status: active smoke gate. User explicitly reopened Slice B on 2026-05-06; B0 so
 
 ## Current Checkpoint
 
+B0 runtime smoke is closed. The focused W&L battle log emitted all required `[Tactical*]` families and proved `[TacticalPlayerOrder] relation=ai-to-player-subordinate ... targetUnderCommander=True` with no tactical observer failures, `TargetInvocationException`, or repeated tactical warning lines. B1 and B2 have since been implemented on top of this observer surface.
+
 Rechecked on 2026-05-06 before behavior work:
 
 - Source exists: `src/WhiskeyRealism/Patches/TacticalObserverPatch.cs`, `src/WhiskeyRealism/Tactical/TacticalBattleContext.cs`, and `src/WhiskeyRealism/Tactical/TacticalTelemetry.cs`.
@@ -25,14 +27,7 @@ Rechecked on 2026-05-06 before behavior work:
 - `git diff --check` passed before docs edits.
 - `dist/WhiskeyRealism.dll` was deployed to the BepInEx plugin folder and SHA-256 matched: `270a73ffbd2a541de2f968fc6580444e3a01997fc6ec9e6a4bbc0ca1db89c268` (380928 bytes).
 
-Remaining B0 work:
-
-1. Enable the observer in `BepInEx/config/dev.kyle.whiskey-realism.cfg` for one focused run.
-2. Start a fresh W&L land battle.
-3. Confirm bounded `[TacticalMacro]`, `[TacticalGroup]`, `[TacticalCharge]`, `[TacticalFeud]`, `[TacticalSector]`, `[TacticalOrder]`, `[TacticalReserve]`, `[TacticalArtillery]`, `[TacticalFallback]`, and `[TacticalPlayerOrder]` lines with no repeated exceptions or Harmony failures.
-4. Disable the observer again if log volume is not acceptable for normal play.
-
-Do not implement B1+ behavior until the smoke evidence above exists.
+Remaining B0 work: none. B1 runtime denial smoke and B2 `[TacticalCommand]` / order-friction smoke remain deferred follow-ups, but they do not reopen B0.
 
 ## Source Inputs
 
