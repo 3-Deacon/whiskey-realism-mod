@@ -20,6 +20,7 @@ namespace WhiskeyRealism.Strategic
 
     internal enum WlStrategicOrderResult
     {
+        InvalidRequest,
         NotWl,
         DirectMovementAllowed,
         IssuedWlCurrentOrder,
@@ -111,10 +112,10 @@ namespace WhiskeyRealism.Strategic
             if (request == null)
             {
                 return new WlStrategicOrderDecision(
-                    WlStrategicOrderResult.DirectMovementAllowed,
+                    WlStrategicOrderResult.InvalidRequest,
                     wlOrderType: -1,
-                    mayDirectMove: true,
-                    mayMutateOperationList: true,
+                    mayDirectMove: false,
+                    mayMutateOperationList: false,
                     reason: "null-request");
             }
 
@@ -157,10 +158,10 @@ namespace WhiskeyRealism.Strategic
             if (request == null)
             {
                 return new WlStrategicOrderDecision(
-                    WlStrategicOrderResult.DirectMovementAllowed,
+                    WlStrategicOrderResult.InvalidRequest,
                     wlOrderType: -1,
-                    mayDirectMove: true,
-                    mayMutateOperationList: true,
+                    mayDirectMove: false,
+                    mayMutateOperationList: false,
                     reason: "null-request");
             }
             return Classify(request.Intent, BuildFacts(request));
@@ -200,7 +201,7 @@ namespace WhiskeyRealism.Strategic
             }
 
             if (facts.IsPartOfPlayerUnit)
-                return Allowed(WlStrategicOrderResult.DirectMovementAllowed, orderType, "part-of-player-unit-direct-for-c0c");
+                return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "part-of-player-unit");
 
             return Allowed(WlStrategicOrderResult.DirectMovementAllowed, orderType, "direct-movement-allowed");
         }

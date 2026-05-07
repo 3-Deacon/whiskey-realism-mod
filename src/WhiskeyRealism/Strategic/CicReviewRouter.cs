@@ -23,9 +23,36 @@ namespace WhiskeyRealism.Strategic
                 case PhaseTruthAction.Advance:
                     return AdvancePhase(plan);
 
-                case PhaseTruthAction.Replan:
+                case PhaseTruthAction.Complete:
+                    plan.IsDirty = true;
+                    return false;
+
+                case PhaseTruthAction.Pause:
+                    ApplyOperationPosture(plan, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true);
+                    return true;
+                case PhaseTruthAction.Exploit:
+                    ApplyOperationPosture(plan, OperationPosture.ExploitBreakthrough, allowAttack: true, allowReinforce: true, probeOnly: false);
+                    return true;
+                case PhaseTruthAction.Counterstroke:
+                    ApplyOperationPosture(plan, OperationPosture.Counterstroke, allowAttack: true, allowReinforce: true, probeOnly: false);
+                    return true;
+                case PhaseTruthAction.ScreenAndDelay:
+                    ApplyOperationPosture(plan, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true);
+                    return true;
                 case PhaseTruthAction.Recover:
-                case PhaseTruthAction.Fallback:
+                    ApplyOperationPosture(plan, OperationPosture.Recover, allowAttack: false, allowReinforce: true, probeOnly: true);
+                    return true;
+
+                case PhaseTruthAction.Abort:
+                    plan.IsDirty = true;
+                    return false;
+
+                case PhaseTruthAction.Pivot:
+                    plan.PendingRetarget = true;
+                    plan.PendingRetargetReason = truth.AlternateOperationId;
+                    plan.IsDirty = true;
+                    return false;
+                case PhaseTruthAction.Replan:
                     plan.IsDirty = true;
                     return false;
 
@@ -70,6 +97,24 @@ namespace WhiskeyRealism.Strategic
             }
             plan.IsDirty = true;
             return false;
+        }
+
+        private static void ApplyOperationPosture(
+            OperationalPlan plan,
+            OperationPosture posture,
+            bool allowAttack,
+            bool allowReinforce,
+            bool probeOnly)
+        {
+            if (plan == null) return;
+            plan.OperationPosture = posture;
+            plan.PendingRetarget = false;
+            var phase = plan.CurrentPhase;
+            if (phase == null) return;
+            phase.OperationPosture = posture;
+            phase.AllowCoordinatedAttack = allowAttack;
+            phase.AllowReinforcementPackage = allowReinforce;
+            phase.AllowProbeOnly = probeOnly;
         }
     }
 }

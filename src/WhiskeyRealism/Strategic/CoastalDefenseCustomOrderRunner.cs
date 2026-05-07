@@ -31,6 +31,7 @@ namespace WhiskeyRealism.Strategic
         // Cross-campaign bleed is accepted as a known limitation (same as _firstAssignmentLogged).
         private static readonly Dictionary<int, Dictionary<string, HashSet<int>>> _assignedByThreat =
             new Dictionary<int, Dictionary<string, HashSet<int>>>();
+        private static readonly HashSet<string> _wlCurrentOrderAttempts = new HashSet<string>();
 
         internal static void Run(int allianceId, DefenseIntentLedgerOutput output)
         {
@@ -73,6 +74,12 @@ namespace WhiskeyRealism.Strategic
                         if (unit == null) continue;
                         if (defOps.Contains(unit)) continue;
                         if (IsPlayerControlled(unit)) continue;
+                        string wlCurrentOrderKey = $"{allianceId}|{sig}|{candidate.UnitInstanceId}";
+                        if (_wlCurrentOrderAttempts.Contains(wlCurrentOrderKey))
+                        {
+                            AddThisTick(thisTick, sig, candidate.UnitInstanceId);
+                            continue;
+                        }
 
                         var anchor = new Vector3(response.Threat.X, 0f, response.Threat.Z);
                         var bridgeDecision = WlStrategicOrderBridge.TryIssue(new WlStrategicOrderRequest
@@ -91,27 +98,33 @@ namespace WhiskeyRealism.Strategic
 
                         if (bridgeDecision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
                         {
-                            defOps.Add(unit);
+                            AddThisTick(thisTick, sig, candidate.UnitInstanceId);
+                            _wlCurrentOrderAttempts.Add(wlCurrentOrderKey);
+                            Plugin.Log.LogInfo(
+                                $"[CoastalDefense] alliance={allianceId} action=wl-current-order unit={SafeName(unit, candidate.UnitInstanceId)} reason={bridgeDecision.Reason}");
+                            continue;
                         }
                         else if (bridgeDecision.MayDirectMove)
                         {
-                            SafeMoveUnitTo(unit, anchor);
-                            defOps.Add(unit);
+                            if (!SafeMoveUnitTo(unit, anchor))
+                            {
+                                OnceLog.Info(
+                                    $"defense-intent:custom-order:move-skip:{allianceId}:{sig}:{candidate.UnitInstanceId}",
+                                    $"[CoastalDefense] alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} reason=moveunitto-failed");
+                                continue;
+                            }
+
+                            if (!defOps.Contains(unit)) defOps.Add(unit);
                         }
                         else
                         {
                             OnceLog.Info(
                                 $"defense-intent:custom-order:wl-skip:{allianceId}:{sig}:{candidate.UnitInstanceId}:{bridgeDecision.Result}",
-                                $"[DefenseIntent] skipped-wl-custom-order alliance={allianceId} threat={sig} unit={SafeName(unit, candidate.UnitInstanceId)} wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
+                                $"[CoastalDefense] alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
                             continue;
                         }
 
-                        if (!thisTick.TryGetValue(sig, out var tickSet))
-                        {
-                            tickSet = new HashSet<int>();
-                            thisTick[sig] = tickSet;
-                        }
-                        tickSet.Add(candidate.UnitInstanceId);
+                        AddThisTick(thisTick, sig, candidate.UnitInstanceId);
 
                         string logKey = $"{allianceId}|{sig}|{candidate.UnitInstanceId}";
                         bool firstAssignment = _firstAssignmentLogged.Add(logKey);
@@ -148,6 +161,7 @@ namespace WhiskeyRealism.Strategic
                         foreach (var unitId in kv.Value)
                         {
                             var unit = FindUnitByInstanceId(ownUnits, unitId);
+                            _wlCurrentOrderAttempts.Remove($"{allianceId}|{kv.Key}|{unitId}");
                             if (unit == null) continue;
                             if (!defOps.Contains(unit)) continue;
                             defOps.Remove(unit);
@@ -201,14 +215,28 @@ namespace WhiskeyRealism.Strategic
             catch { return false; }
         }
 
-        private static void SafeMoveUnitTo(Regiment unit, Vector3 position)
+        private static void AddThisTick(
+            Dictionary<string, HashSet<int>> thisTick,
+            string threatSignature,
+            int unitInstanceId)
         {
-            if (unit == null) return;
-            try { AICampaign.MoveUnitTo(unit, position, true); }
+            if (!thisTick.TryGetValue(threatSignature, out var tickSet))
+            {
+                tickSet = new HashSet<int>();
+                thisTick[threatSignature] = tickSet;
+            }
+            tickSet.Add(unitInstanceId);
+        }
+
+        private static bool SafeMoveUnitTo(Regiment unit, Vector3 position)
+        {
+            if (unit == null) return false;
+            try { return AICampaign.MoveUnitTo(unit, position, true); }
             catch (Exception ex)
             {
                 OnceLog.Warning("defense-intent:custom-order:moveunitto",
                     "CoastalDefenseCustomOrderRunner MoveUnitTo failed: " + ex.Message);
+                return false;
             }
         }
 

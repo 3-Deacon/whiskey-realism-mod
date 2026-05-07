@@ -47,6 +47,13 @@ namespace WhiskeyRealism.Strategic
         public OperationalProbeOptions Options = new OperationalProbeOptions();
         public CoordinatedOperationOptions PackageOptions;
         public ContactEvidence ContactEvidence = ContactEvidence.EnemyPresent;
+        public float TargetX;
+        public float TargetZ;
+        public bool HasTargetCoordinates;
+        public OperationPosture OperationPosture = OperationPosture.ProbeAndDevelop;
+        public bool AllowCoordinatedAttack = true;
+        public bool AllowReinforcementPackage = true;
+        public bool AllowProbeOnly;
     }
 
     public sealed class OperationalProbeOutput
@@ -133,6 +140,20 @@ namespace WhiskeyRealism.Strategic
             if (output.Decision == OperationalProbeDecision.Probe ||
                 output.Decision == OperationalProbeDecision.Escalate)
             {
+                if (input.AllowProbeOnly)
+                    return output;
+                if (!input.AllowCoordinatedAttack && output.Decision == OperationalProbeDecision.Escalate)
+                {
+                    output.Package = new CoordinatedOperationOutput
+                    {
+                        Decision = CoordinatedOperationDecision.None,
+                        Reason = "operation-disallows-attack-package"
+                    };
+                    return output;
+                }
+                if (input.ContactEvidence == ContactEvidence.NoContact &&
+                    input.OperationPosture != OperationPosture.ExploitBreakthrough)
+                    return output;
                 output.Package = output.Package ?? BuildPackage(
                     input,
                     output,
@@ -158,8 +179,8 @@ namespace WhiskeyRealism.Strategic
                 TargetName = input.PlanTargetAreaKey,
                 TargetAreaKey = input.PlanTargetAreaKey,
                 TargetSectorKey = probe.SourceSectorKey,
-                TargetX = lead?.X ?? 0f,
-                TargetZ = lead?.Z ?? 0f,
+                TargetX = input.HasTargetCoordinates ? input.TargetX : lead?.X ?? 0f,
+                TargetZ = input.HasTargetCoordinates ? input.TargetZ : lead?.Z ?? 0f,
                 TargetEnemyStrength = enemy,
                 PreferredLeadStableUnitId = StableIdFor(input.FormationDirectives, probe.SelectedUnitKey),
                 Options = input.PackageOptions ?? CoordinatedOperationOptions.StableDefaults(enemy)

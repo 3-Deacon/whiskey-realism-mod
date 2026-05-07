@@ -43,6 +43,7 @@ namespace WhiskeyRealism.Strategic
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
         internal readonly DirectorMemory[] DirectorMemories = new DirectorMemory[2] { new DirectorMemory(), new DirectorMemory() };
+        private readonly OperationDecisionMemory[] OperationMemories = new OperationDecisionMemory[2] { new OperationDecisionMemory(), new OperationDecisionMemory() };
         private readonly DirectorPublishClamp _directorClamp = new DirectorPublishClamp();
         private readonly string[] _directorPostureSignatures = new string[2];
         private readonly CollapseRisk[] _directorRiskLevels = new CollapseRisk[2] { CollapseRisk.Low, CollapseRisk.Low };
@@ -276,9 +277,26 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 var cic = CICs[alliance];
+                int daySerial = year * 372 + month * 31 + day;
+                if (operationalRuntimeReady)
+                    PublishDirectorPosture(alliance, cic, era, day, month, year, daySerial);
+
                 var phaseTruth = BuildPhaseTruth(cic, alliance, day, month, year);
                 if (!cic.ReviewPlanWithTruth(month, year, phaseTruth))
-                    cic.Replan(era, month, year);
+                {
+                    string beforeOperation = cic.ActivePlan?.OperationId;
+                    cic.Replan(
+                        era,
+                        month,
+                        year,
+                        daySerial,
+                        SafePolicyChapter(),
+                        alliance < DirectorMemories.Length ? DirectorMemories[alliance].LastPosture : null,
+                        null);
+                    string afterOperation = cic.ActivePlan?.OperationId;
+                    if (!string.IsNullOrEmpty(afterOperation) && afterOperation != beforeOperation)
+                        OperationMemories[alliance].RecordReplan(daySerial);
+                }
 
                 fiscalMs += Measure(() => UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat));
                 bool frontChanged = false;
@@ -313,48 +331,6 @@ namespace WhiskeyRealism.Strategic
                         _armyAreaSourceSignatures[alliance] = armyAreaSource;
                     }
 
-                    // Director daily publish — at most one full refresh per real second across
-                    // both alliances combined (_directorClamp is a single shared instance).
-                    int daySerial = year * 372 + month * 31 + day;
-                    var paceInput  = BuildCampaignPaceInput(alliance, day, month, year);
-                    var paceOutput = CampaignPaceLedger.Build(paceInput);
-                    var personality = cic.Effective(era);
-                    var newPosture  = StrategicResilienceDirector.ProposePosture(alliance, paceOutput, personality);
-                    newPosture.SourceSignature = DirectorSourceSignature(alliance);
-
-                    if (_directorClamp.TryPublish(System.DateTime.UtcNow))
-                    {
-                        DirectorMemories[alliance].LastPosture          = newPosture;
-                        DirectorMemories[alliance].LastFullRefreshDay   = daySerial;
-                        DirectorMemories[alliance].LastSourceSignature  = newPosture.SourceSignature;
-
-                        string previousSig = _directorPostureSignatures[alliance];
-                        string newSig      = newPosture.Pace + "/" + newPosture.Intent + "/" + newPosture.Risk;
-                        if (newSig != previousSig)
-                        {
-                            Plugin.Log.LogInfo(
-                                $"[CampaignPace] alliance={alliance} pace={newPosture.Pace}" +
-                                $" intent={newPosture.Intent} risk={newPosture.Risk}" +
-                                $" reason={newPosture.Reason}");
-                            _directorPostureSignatures[alliance] = newSig;
-                        }
-                        var prevRisk = _directorRiskLevels[alliance];
-                        if (newPosture.Risk != prevRisk)
-                        {
-                            Plugin.Log.LogInfo($"[CollapseRisk] alliance={alliance} risk={newPosture.Risk} pace={newPosture.Pace}");
-                            _directorRiskLevels[alliance] = newPosture.Risk;
-                        }
-                        if (Plugin.Instance.DirectorVerboseTrace.Value)
-                        {
-                            Plugin.Log.LogInfo($"[Director:trace] alliance={alliance} signature={newPosture.SourceSignature} stale={newPosture.Stale}");
-                        }
-                    }
-                    else
-                    {
-                        newPosture.Stale = true;
-                        DirectorMemories[alliance].LastPosture =
-                            DirectorMemories[alliance].LastPosture ?? newPosture;
-                    }
                 }
 
                 string constructionSource = ConstructionSourceSignature(alliance);
@@ -386,6 +362,50 @@ namespace WhiskeyRealism.Strategic
                     $"mapMs={mapMs:F2} frontMs={frontMs:F2} armyAreaMs={armyAreaMs:F2} " +
                     $"formationMs={formationMs:F2} probeMs={probeMs:F2} fiscalMs={fiscalMs:F2} " +
                     $"constructionMs={constructionMs:F2} defenseMs={defenseMs:F2}");
+            }
+        }
+
+        private void PublishDirectorPosture(int alliance, CIC cic, EraStageManager era, int day, int month, int year, int daySerial)
+        {
+            var paceInput  = BuildCampaignPaceInput(alliance, day, month, year);
+            var paceOutput = CampaignPaceLedger.Build(paceInput);
+            var personality = cic.Effective(era);
+            var newPosture  = StrategicResilienceDirector.ProposePosture(alliance, paceOutput, personality);
+            newPosture.SourceSignature = DirectorSourceSignature(alliance);
+
+            // At most one full refresh per real second across both alliances combined.
+            if (_directorClamp.TryPublish(System.DateTime.UtcNow))
+            {
+                DirectorMemories[alliance].LastPosture          = newPosture;
+                DirectorMemories[alliance].LastFullRefreshDay   = daySerial;
+                DirectorMemories[alliance].LastSourceSignature  = newPosture.SourceSignature;
+
+                string previousSig = _directorPostureSignatures[alliance];
+                string newSig      = newPosture.Pace + "/" + newPosture.Intent + "/" + newPosture.Risk;
+                if (newSig != previousSig)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[CampaignPace] alliance={alliance} pace={newPosture.Pace}" +
+                        $" intent={newPosture.Intent} risk={newPosture.Risk}" +
+                        $" reason={newPosture.Reason}");
+                    _directorPostureSignatures[alliance] = newSig;
+                }
+                var prevRisk = _directorRiskLevels[alliance];
+                if (newPosture.Risk != prevRisk)
+                {
+                    Plugin.Log.LogInfo($"[CollapseRisk] alliance={alliance} risk={newPosture.Risk} pace={newPosture.Pace}");
+                    _directorRiskLevels[alliance] = newPosture.Risk;
+                }
+                if (Plugin.Instance.DirectorVerboseTrace.Value)
+                {
+                    Plugin.Log.LogInfo($"[Director:trace] alliance={alliance} signature={newPosture.SourceSignature} stale={newPosture.Stale}");
+                }
+            }
+            else
+            {
+                newPosture.Stale = true;
+                DirectorMemories[alliance].LastPosture =
+                    DirectorMemories[alliance].LastPosture ?? newPosture;
             }
         }
 
@@ -425,16 +445,38 @@ namespace WhiskeyRealism.Strategic
             var input = new PhaseTruthInput
             {
                 Plan                     = cic.ActivePlan,
+                AllianceId               = alliance,
+                DaySerial                = daySerial,
                 TargetAccomplished       = ObjectiveAdapter.IsAccomplished(phase.TargetObjectiveId),
                 ObjectiveAvailable       = ObjectiveAdapter.IsAvailable(phase.TargetObjectiveId, alliance),
                 TargetPositionResolves   = targetPos.HasValue,
                 TargetEngagedRecently    = engagedRecently,
                 TargetSectorOwnStrength  = sector?.OwnStrength ?? 0f,
+                TargetSectorEnemyStrength = sector?.EnemyStrength ?? 0f,
                 RequiredForce            = phase.ForceFractionRequired *
                                            ((sector?.OwnStrength ?? 0f) + (sector?.EnemyStrength ?? 0f)),
                 CurrentMonth             = month,
                 CurrentYear              = year
             };
+            if (!string.IsNullOrEmpty(cic.ActivePlan.OperationId) &&
+                HistoricalOperationCatalog.TryGetById(cic.ActivePlan.OperationId, out var profile))
+            {
+                input.OperationProfile = profile;
+                input.OperationContext = HistoricalOperationContextBuilder.Build(
+                    alliance,
+                    daySerial,
+                    phase.TargetObjectiveId,
+                    cic.ActivePlan,
+                    null,
+                    fronts,
+                    alliance < DefenseIntents.Length ? DefenseIntents[alliance] : null,
+                    alliance < FormationDirectives.Length ? FormationDirectives[alliance] : null,
+                    CampaignMap,
+                    fronts != null ? TheaterPressureView.From(fronts) : null,
+                    alliance < DirectorMemories.Length ? DirectorMemories[alliance].LastPosture : null,
+                    alliance < OperationMemories.Length ? OperationMemories[alliance] : null,
+                    BattleHistory);
+            }
             return PhaseTruthLedger.Evaluate(input);
         }
 
@@ -1261,6 +1303,8 @@ namespace WhiskeyRealism.Strategic
                     }
                 };
                 f.DirectorMemory = StrategicResilienceDirector.MemoryToDto(DirectorMemories[alliance]);
+                if (f.DirectorMemory != null && alliance < OperationMemories.Length && OperationMemories[alliance] != null)
+                    f.DirectorMemory.RecentOperationReplanDaySerials = OperationMemories[alliance].SnapshotRecentReplans();
                 dto.Factions.Add(f);
             }
             foreach (var kv in MinorOfficerProfiles)
@@ -1301,6 +1345,7 @@ namespace WhiskeyRealism.Strategic
                 };
                 CICs[f.FactionId] = cic;
                 DirectorMemories[f.FactionId] = StrategicResilienceDirector.MemoryFromDto(f.DirectorMemory);
+                OperationMemories[f.FactionId].RestoreRecentReplans(f.DirectorMemory?.RecentOperationReplanDaySerials);
             }
             MinorOfficerProfiles.Clear();
             foreach (var m in dto.MinorOfficerProfiles)
@@ -1380,6 +1425,14 @@ namespace WhiskeyRealism.Strategic
         {
             var dto = new OperationalPlanDto
             {
+                OperationId = p.OperationId,
+                OperationName = p.OperationName,
+                OperationTempo = p.OperationTempo.ToString(),
+                OperationPosture = p.OperationPosture.ToString(),
+                OperationStartedDaySerial = p.OperationStartedDaySerial,
+                OperationLastDecisionDaySerial = p.OperationLastDecisionDaySerial,
+                PendingRetarget = p.PendingRetarget,
+                PendingRetargetReason = p.PendingRetargetReason,
                 AssignedTheaterId = p.AssignedTheaterId,
                 CurrentPhaseIndex = p.CurrentPhaseIndex,
                 PlanDeadlineMonth = p.PlanDeadlineMonth,
@@ -1390,12 +1443,21 @@ namespace WhiskeyRealism.Strategic
             foreach (var ph in p.Phases)
                 dto.Phases.Add(new PhaseDto
                 {
+                    PhaseId               = ph.PhaseId,
+                    PhaseName             = ph.PhaseName,
                     TargetAreaId          = ph.TargetAreaId,
                     TargetObjectiveId     = ph.TargetObjectiveId,
+                    TargetAreaKey         = ph.TargetAreaKey,
+                    TargetSectorKey       = ph.TargetSectorKey,
                     ForceFractionRequired = ph.ForceFractionRequired,
                     Transition            = ph.Transition.ToString(),
                     DeadlineMonth         = ph.DeadlineMonth,
-                    DeadlineYear          = ph.DeadlineYear
+                    DeadlineYear          = ph.DeadlineYear,
+                    OperationPosture      = ph.OperationPosture.ToString(),
+                    AllowCoordinatedAttack = ph.AllowCoordinatedAttack,
+                    AllowReinforcementPackage = ph.AllowReinforcementPackage,
+                    AllowProbeOnly        = ph.AllowProbeOnly,
+                    PhaseStartedDaySerial = ph.PhaseStartedDaySerial
                 });
             return dto;
         }
@@ -1405,6 +1467,12 @@ namespace WhiskeyRealism.Strategic
             var p = new OperationalPlan
             {
                 CICFactionAllianceId = allianceId,
+                OperationId          = dto.OperationId,
+                OperationName        = dto.OperationName,
+                OperationStartedDaySerial = dto.OperationStartedDaySerial,
+                OperationLastDecisionDaySerial = dto.OperationLastDecisionDaySerial,
+                PendingRetarget      = dto.PendingRetarget,
+                PendingRetargetReason = dto.PendingRetargetReason,
                 AssignedTheaterId    = dto.AssignedTheaterId,
                 CurrentPhaseIndex    = dto.CurrentPhaseIndex,
                 PlanDeadlineMonth    = dto.PlanDeadlineMonth,
@@ -1412,17 +1480,29 @@ namespace WhiskeyRealism.Strategic
                 Rationale            = dto.Rationale,
                 IsDirty              = dto.IsDirty
             };
+            Enum.TryParse<OperationTempoPreset>(dto.OperationTempo, out p.OperationTempo);
+            Enum.TryParse<OperationPosture>(dto.OperationPosture, out p.OperationPosture);
             foreach (var ph in dto.Phases)
             {
                 Enum.TryParse<PhaseTransition>(ph.Transition, out var trans);
+                Enum.TryParse<OperationPosture>(ph.OperationPosture, out var posture);
                 p.Phases.Add(new Phase
                 {
+                    PhaseId               = ph.PhaseId,
+                    PhaseName             = ph.PhaseName,
                     TargetAreaId          = ph.TargetAreaId,
                     TargetObjectiveId     = ph.TargetObjectiveId,
+                    TargetAreaKey         = ph.TargetAreaKey,
+                    TargetSectorKey       = ph.TargetSectorKey,
                     ForceFractionRequired = ph.ForceFractionRequired,
                     Transition            = trans,
                     DeadlineMonth         = ph.DeadlineMonth,
                     DeadlineYear          = ph.DeadlineYear,
+                    OperationPosture      = posture,
+                    AllowCoordinatedAttack = ph.AllowCoordinatedAttack,
+                    AllowReinforcementPackage = ph.AllowReinforcementPackage,
+                    AllowProbeOnly        = ph.AllowProbeOnly,
+                    PhaseStartedDaySerial = ph.PhaseStartedDaySerial,
                     Fallback              = null
                 });
             }

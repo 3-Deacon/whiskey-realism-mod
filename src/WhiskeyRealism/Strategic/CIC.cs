@@ -45,9 +45,35 @@ namespace WhiskeyRealism.Strategic
             {
                 case PhaseTruthAction.Advance:
                     return AdvancePhase();
-                case PhaseTruthAction.Replan:
+                case PhaseTruthAction.Complete:
+                    ActivePlan.IsDirty = true;
+                    return false;
+                case PhaseTruthAction.Pause:
+                    MarkOperationDecision(truth, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true, currentMonth: currentMonth, currentYear: currentYear);
+                    return true;
+                case PhaseTruthAction.Abort:
+                    ActivePlan = null;
+                    return false;
+                case PhaseTruthAction.Exploit:
+                    MarkOperationDecision(truth, OperationPosture.ExploitBreakthrough, allowAttack: true, allowReinforce: true, probeOnly: false, currentMonth: currentMonth, currentYear: currentYear);
+                    return true;
+                case PhaseTruthAction.Counterstroke:
+                    MarkOperationDecision(truth, OperationPosture.Counterstroke, allowAttack: true, allowReinforce: true, probeOnly: false, currentMonth: currentMonth, currentYear: currentYear);
+                    return true;
+                case PhaseTruthAction.ScreenAndDelay:
+                    MarkOperationDecision(truth, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true, currentMonth: currentMonth, currentYear: currentYear);
+                    return true;
                 case PhaseTruthAction.Recover:
-                case PhaseTruthAction.Fallback:
+                    MarkOperationDecision(truth, OperationPosture.Recover, allowAttack: false, allowReinforce: true, probeOnly: true, currentMonth: currentMonth, currentYear: currentYear);
+                    return true;
+                case PhaseTruthAction.Pivot:
+                    ActivePlan.PendingRetarget = true;
+                    ActivePlan.PendingRetargetReason = truth.AlternateOperationId;
+                    ActivePlan.IsDirty = true;
+                    return false;
+                case PhaseTruthAction.Replan:
+                    ActivePlan.PendingRetarget = false;
+                    ActivePlan.PendingRetargetReason = null;
                     ActivePlan.IsDirty = true;
                     return false;
                 case PhaseTruthAction.Continue:
@@ -75,6 +101,29 @@ namespace WhiskeyRealism.Strategic
             return true;
         }
 
+        private void MarkOperationDecision(
+            PhaseTruthOutput truth,
+            OperationPosture posture,
+            bool allowAttack,
+            bool allowReinforce,
+            bool probeOnly,
+            int currentMonth,
+            int currentYear)
+        {
+            if (ActivePlan == null) return;
+            ActivePlan.OperationPosture = posture;
+            ActivePlan.OperationLastDecisionDaySerial = currentYear * 372 + currentMonth * 31;
+            ActivePlan.PendingRetarget = false;
+            ActivePlan.PendingRetargetReason = truth?.Reason;
+
+            var phase = ActivePlan.CurrentPhase;
+            if (phase == null) return;
+            phase.OperationPosture = posture;
+            phase.AllowCoordinatedAttack = allowAttack;
+            phase.AllowReinforcementPackage = allowReinforce;
+            phase.AllowProbeOnly = probeOnly;
+        }
+
         public bool AdvancePhase()
         {
             if (ActivePlan == null) return false;
@@ -89,6 +138,26 @@ namespace WhiskeyRealism.Strategic
         }
 
         public void Replan(EraStageManager era, int currentMonth, int currentYear)
+        {
+            int daySerial = currentYear * 372 + currentMonth * 31 + 1;
+            Replan(
+                era,
+                currentMonth,
+                currentYear,
+                daySerial,
+                ResolveCurrentChapter(),
+                null,
+                null);
+        }
+
+        public void Replan(
+            EraStageManager era,
+            int currentMonth,
+            int currentYear,
+            int daySerial,
+            int vanillaChapter,
+            DirectorPosture posture,
+            HistoricalOperationContext context)
         {
             var availableObjectives = GetAvailableObjectivesViaReflection(AllianceId);
             int objCount = availableObjectives?.Count ?? -1;
@@ -113,11 +182,50 @@ namespace WhiskeyRealism.Strategic
             }
 
             scored.Sort((a, b) => b.score.CompareTo(a.score));
-            var top3 = scored.GetRange(0, Math.Min(3, scored.Count));
+            bool doctrineEnabled = Plugin.Instance == null ||
+                Plugin.Instance.EnableHistoricalOperationDoctrine == null ||
+                Plugin.Instance.EnableHistoricalOperationDoctrine.Value;
 
+            if (doctrineEnabled)
+            {
+                string requestedOperationId = ActivePlan?.PendingRetarget == true
+                    ? ActivePlan.PendingRetargetReason
+                    : null;
+                if (!string.IsNullOrEmpty(requestedOperationId))
+                {
+                    var requested = SelectRequestedHistoricalPlan(
+                        requestedOperationId,
+                        scored,
+                        p,
+                        strategy,
+                        currentMonth,
+                        currentYear,
+                        daySerial);
+                    if (requested != null)
+                    {
+                        ActivePlan = requested;
+                        return;
+                    }
+                }
+
+                ActivePlan = SelectHistoricalPlan(
+                    scored,
+                    p,
+                    strategy,
+                    era.Stage,
+                    currentMonth,
+                    currentYear,
+                    daySerial,
+                    vanillaChapter,
+                    posture,
+                    context);
+                return;
+            }
+
+            var top3 = scored.GetRange(0, Math.Min(3, scored.Count));
             var picked = WeightedPick(top3);
 
-            ActivePlan = BuildPlan(picked.obj, picked.meta, p, strategy, currentMonth, currentYear);
+            ActivePlan = BuildLegacyGenericPlan(picked.obj, picked.meta, p, strategy, currentMonth, currentYear);
 
             if (ActivePlan != null && Plugin.Instance.PlanTrace.Value)
             {
@@ -125,6 +233,60 @@ namespace WhiskeyRealism.Strategic
                 for (int i = 0; i < scored.Count && i < 5; i++)
                     Plugin.Log.LogInfo($"  [Plan:scores] obj_id={GetObjectiveId(scored[i].obj)} score={scored[i].score:F2} theater={scored[i].meta.Theater} category={scored[i].meta.Category}");
             }
+        }
+
+        private OperationalPlan SelectRequestedHistoricalPlan(
+            string operationId,
+            List<(object obj, float score, ObjectiveMetadata meta)> scored,
+            PersonalityVector p,
+            GrandStrategyProfile strategy,
+            int currentMonth,
+            int currentYear,
+            int daySerial)
+        {
+            if (!HistoricalOperationCatalog.TryGetById(operationId, out var profile))
+            {
+                Plugin.Log.LogInfo(
+                    $"[HistoricalOperation] alliance={AllianceId} action=no-profile operation={operationId} reason=alternate-not-found");
+                return null;
+            }
+
+            for (int i = 0; i < scored.Count; i++)
+            {
+                int objectiveId = GetObjectiveId(scored[i].obj);
+                if (objectiveId != profile.PrimaryObjectiveId)
+                    continue;
+
+                var match = new HistoricalOperationMatch
+                {
+                    Kind = HistoricalOperationMatchKind.Matched,
+                    Profile = profile,
+                    Score = scored[i].score,
+                    Reason = "requested-pivot"
+                };
+                var plan = BuildHistoricalOperationPlan(
+                    scored[i].obj,
+                    match,
+                    p,
+                    strategy,
+                    currentMonth,
+                    currentYear,
+                    daySerial);
+                if (plan == null)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[HistoricalOperation] alliance={AllianceId} action=no-profile operation={operationId} reason=requested-plan-invalid");
+                    return null;
+                }
+
+                Plugin.Log.LogInfo(
+                    $"[HistoricalOperation] alliance={AllianceId} action=pivot operation={operationId} objective={objectiveId} phase={plan.CurrentPhase?.PhaseId} reason=requested-pivot score={scored[i].score:F2}");
+                return plan;
+            }
+
+            Plugin.Log.LogInfo(
+                $"[HistoricalOperation] alliance={AllianceId} action=no-profile operation={operationId} reason=alternate-objective-unavailable");
+            return null;
         }
 
         private float ScoreObjective(PersonalityVector p, GrandStrategyProfile strategy, ObjectiveMetadata meta)
@@ -152,9 +314,154 @@ namespace WhiskeyRealism.Strategic
             return top[0];
         }
 
-        private OperationalPlan BuildPlan(object pickedObjective, ObjectiveMetadata meta, PersonalityVector p,
-                                           GrandStrategyProfile strategy,
-                                           int currentMonth, int currentYear)
+        private OperationalPlan SelectHistoricalPlan(
+            List<(object obj, float score, ObjectiveMetadata meta)> scored,
+            PersonalityVector p,
+            GrandStrategyProfile strategy,
+            EraStage era,
+            int currentMonth,
+            int currentYear,
+            int daySerial,
+            int vanillaChapter,
+            DirectorPosture posture,
+            HistoricalOperationContext context)
+        {
+            HistoricalOperationMatch bestMatch = null;
+            (object obj, float score, ObjectiveMetadata meta) bestCandidate = default;
+            int limit = Math.Min(5, scored.Count);
+
+            for (int i = 0; i < limit; i++)
+            {
+                int objId = GetObjectiveId(scored[i].obj);
+                var candidate = new HistoricalOperationCandidate
+                {
+                    ObjectiveId = objId,
+                    Objective = scored[i].meta,
+                    ObjectiveScore = scored[i].score
+                };
+                var match = HistoricalOperationCatalog.Resolve(
+                    AllianceId,
+                    era,
+                    vanillaChapter,
+                    currentMonth,
+                    currentYear,
+                    candidate,
+                    strategy,
+                    p,
+                    posture,
+                    context);
+                if (match.Kind != HistoricalOperationMatchKind.Matched)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[HistoricalOperation] alliance={AllianceId} action=no-profile-candidate objective={objId} reason={match.Reason}");
+                    continue;
+                }
+
+                if (bestMatch == null ||
+                    match.Profile.Priority < bestMatch.Profile.Priority ||
+                    (match.Profile.Priority == bestMatch.Profile.Priority && match.Score > bestMatch.Score))
+                {
+                    bestMatch = match;
+                    bestCandidate = scored[i];
+                }
+            }
+
+            if (bestMatch == null)
+            {
+                int topObjective = scored.Count > 0 ? GetObjectiveId(scored[0].obj) : -1;
+                Plugin.Log.LogInfo(
+                    $"[HistoricalOperation] alliance={AllianceId} action=no-profile objective={topObjective} reason=no-explicit-profile");
+                return null;
+            }
+
+            var plan = BuildHistoricalOperationPlan(
+                bestCandidate.obj,
+                bestMatch,
+                p,
+                strategy,
+                currentMonth,
+                currentYear,
+                daySerial);
+            if (plan == null)
+            {
+                Plugin.Log.LogInfo(
+                    $"[HistoricalOperation] alliance={AllianceId} action=no-profile operation={bestMatch.Profile.OperationId} objective={GetObjectiveId(bestCandidate.obj)} reason=plan-invalid");
+                return null;
+            }
+            Plugin.Log.LogInfo(
+                $"[HistoricalOperation] alliance={AllianceId} action=select operation={bestMatch.Profile.OperationId} objective={GetObjectiveId(bestCandidate.obj)} phase={plan.CurrentPhase?.PhaseId} reason={bestMatch.Reason} score={bestMatch.Score:F2}");
+            return plan;
+        }
+
+        private OperationalPlan BuildHistoricalOperationPlan(
+            object pickedObjective,
+            HistoricalOperationMatch match,
+            PersonalityVector p,
+            GrandStrategyProfile strategy,
+            int currentMonth,
+            int currentYear,
+            int daySerial)
+        {
+            var profile = match.Profile;
+            if (!HistoricalOperationCatalog.ValidateProfile(profile, out var reason))
+            {
+                Plugin.Log.LogWarning(
+                    $"[HistoricalOperation] alliance={AllianceId} action=no-profile operation={profile?.OperationId ?? "<null>"} reason={reason}");
+                return null;
+            }
+
+            int monthsAhead = 6;
+            var deadline = AddMonths(currentMonth, currentYear, monthsAhead);
+            var plan = new OperationalPlan
+            {
+                CICFactionAllianceId = AllianceId,
+                AssignedTheaterId = 0,
+                OperationId = profile.OperationId,
+                OperationName = profile.OperationName,
+                OperationTempo = profile.Tempo,
+                OperationPosture = profile.Posture,
+                OperationStartedDaySerial = daySerial,
+                OperationLastDecisionDaySerial = daySerial,
+                CurrentPhaseIndex = 0,
+                PlanDeadlineMonth = deadline.month,
+                PlanDeadlineYear = deadline.year,
+                Rationale = $"operation={profile.OperationId} strategy={strategy.Name} posture={profile.Posture} tempo={profile.Tempo}",
+                IsDirty = false
+            };
+
+            for (int i = 0; i < profile.Phases.Length; i++)
+            {
+                var template = profile.Phases[i];
+                int phaseMonths = Math.Max(1, template.DeadlineDays / 30);
+                var phaseDeadline = AddMonths(currentMonth, currentYear, phaseMonths);
+                var posture = template.Posture == OperationPosture.Inherit ? profile.Posture : template.Posture;
+                plan.Phases.Add(new Phase
+                {
+                    PhaseId = template.PhaseId,
+                    PhaseName = template.PhaseName,
+                    TargetAreaId = template.TargetAreaId,
+                    TargetObjectiveId = template.TargetObjectiveId,
+                    TargetAreaKey = template.TargetAreaKey,
+                    TargetSectorKey = template.TargetSectorKey,
+                    ForceFractionRequired = template.ForceFractionRequired,
+                    Transition = template.Transition,
+                    DeadlineMonth = phaseDeadline.month,
+                    DeadlineYear = phaseDeadline.year,
+                    OperationPosture = posture,
+                    AllowCoordinatedAttack = template.AllowCoordinatedAttack,
+                    AllowReinforcementPackage = template.AllowReinforcementPackage,
+                    AllowProbeOnly = template.AllowProbeOnly,
+                    PhaseStartedDaySerial = daySerial,
+                    Fallback = null
+                });
+            }
+
+            return plan;
+        }
+
+        private OperationalPlan BuildLegacyGenericPlan(object pickedObjective, ObjectiveMetadata meta, PersonalityVector p,
+                                                       GrandStrategyProfile strategy,
+                                                       int currentMonth, int currentYear)
         {
             int objId = GetObjectiveId(pickedObjective);
             int phaseCount = 2;
@@ -174,6 +481,8 @@ namespace WhiskeyRealism.Strategic
                 CurrentPhaseIndex    = 0,
                 PlanDeadlineMonth    = deadline.month,
                 PlanDeadlineYear     = deadline.year,
+                OperationTempo       = OperationTempoPreset.Standard,
+                OperationPosture     = OperationPosture.ProbeAndDevelop,
                 Rationale            = $"strategy={strategy.Name} theater={meta.Theater} category={meta.Category} forceFrac={forceFraction:F2}",
                 IsDirty              = false
             };
@@ -186,6 +495,9 @@ namespace WhiskeyRealism.Strategic
                 Transition             = PhaseTransition.TargetTaken,
                 DeadlineMonth          = deadline.month,
                 DeadlineYear           = deadline.year,
+                OperationPosture        = OperationPosture.ProbeAndDevelop,
+                AllowCoordinatedAttack  = true,
+                AllowReinforcementPackage = true,
                 Fallback               = null
             });
 
@@ -199,6 +511,10 @@ namespace WhiskeyRealism.Strategic
                     Transition            = PhaseTransition.TargetEngaged,
                     DeadlineMonth         = AddMonths(currentMonth, currentYear, monthsAhead / 3).month,
                     DeadlineYear          = AddMonths(currentMonth, currentYear, monthsAhead / 3).year,
+                    OperationPosture       = OperationPosture.ProbeAndDevelop,
+                    AllowCoordinatedAttack = false,
+                    AllowReinforcementPackage = true,
+                    AllowProbeOnly         = true,
                     Fallback              = null
                 });
                 plan.CurrentPhaseIndex = 0;
@@ -220,6 +536,21 @@ namespace WhiskeyRealism.Strategic
             if (campaignObjective == null) return -1;
             var f = AccessTools.Field(campaignObjective.GetType(), "UniqueObjectiveID");
             return f != null ? (int)f.GetValue(campaignObjective) : -1;
+        }
+
+        private static int ResolveCurrentChapter()
+        {
+            try
+            {
+                var t = AccessTools.TypeByName("Policy");
+                var f = t != null ? AccessTools.Field(t, "CurrentChapter") : null;
+                if (f == null) return -1;
+                return (int)f.GetValue(null);
+            }
+            catch
+            {
+                return -1;
+            }
         }
 
         private static IList GetAvailableObjectivesViaReflection(int allianceId)

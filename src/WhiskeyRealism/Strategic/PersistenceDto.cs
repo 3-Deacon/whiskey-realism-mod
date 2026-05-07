@@ -30,6 +30,14 @@ namespace WhiskeyRealism.Strategic
 
     internal class OperationalPlanDto
     {
+        [JsonProperty("operationId")] public string OperationId;
+        [JsonProperty("operationName")] public string OperationName;
+        [JsonProperty("operationTempo")] public string OperationTempo;
+        [JsonProperty("operationPosture")] public string OperationPosture;
+        [JsonProperty("operationStartedDaySerial")] public int OperationStartedDaySerial;
+        [JsonProperty("operationLastDecisionDaySerial")] public int OperationLastDecisionDaySerial;
+        [JsonProperty("pendingRetarget")] public bool PendingRetarget;
+        [JsonProperty("pendingRetargetReason")] public string PendingRetargetReason;
         [JsonProperty("assignedTheaterId")] public int AssignedTheaterId;
         [JsonProperty("phases")] public List<PhaseDto> Phases = new List<PhaseDto>();
         [JsonProperty("currentPhaseIndex")] public int CurrentPhaseIndex;
@@ -41,12 +49,21 @@ namespace WhiskeyRealism.Strategic
 
     internal class PhaseDto
     {
+        [JsonProperty("phaseId")]               public string PhaseId;
+        [JsonProperty("phaseName")]             public string PhaseName;
         [JsonProperty("targetAreaId")]          public int    TargetAreaId;
         [JsonProperty("targetObjectiveId")]     public int    TargetObjectiveId;
+        [JsonProperty("targetAreaKey")]         public string TargetAreaKey;
+        [JsonProperty("targetSectorKey")]       public string TargetSectorKey;
         [JsonProperty("forceFractionRequired")] public float  ForceFractionRequired;
         [JsonProperty("transition")]            public string Transition;
         [JsonProperty("deadlineMonth")]         public int    DeadlineMonth;
         [JsonProperty("deadlineYear")]          public int    DeadlineYear;
+        [JsonProperty("operationPosture")]      public string OperationPosture;
+        [JsonProperty("allowCoordinatedAttack")] public bool  AllowCoordinatedAttack;
+        [JsonProperty("allowReinforcementPackage")] public bool AllowReinforcementPackage;
+        [JsonProperty("allowProbeOnly")]        public bool   AllowProbeOnly;
+        [JsonProperty("phaseStartedDaySerial")] public int    PhaseStartedDaySerial;
     }
 
     internal class PersonalityDto
@@ -110,5 +127,6 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("daysSinceBattle")] public int DaysSinceLastBattle;
         [JsonProperty("sourceSig")]       public string LastSourceSignature;
         [JsonProperty("recentEvents")]    public List<string> RecentEventSummaries = new List<string>();
+        [JsonProperty("recentOperationReplanDaySerials")] public int[] RecentOperationReplanDaySerials;
     }
 }

@@ -15,19 +15,30 @@ namespace WhiskeyRealism.Strategic
     {
         Continue,
         Advance,
+        Complete,
         Recover,
-        Fallback,
+        Pause,
+        Pivot,
+        Abort,
+        Exploit,
+        Counterstroke,
+        ScreenAndDelay,
         Replan
     }
 
     public sealed class PhaseTruthInput
     {
         public OperationalPlan Plan;
+        public HistoricalOperationProfile OperationProfile;
+        public HistoricalOperationContext OperationContext;
+        public int AllianceId;
+        public int DaySerial;
         public bool TargetAccomplished;
         public bool ObjectiveAvailable;
         public bool TargetPositionResolves = true;
         public bool TargetEngagedRecently;
         public float TargetSectorOwnStrength;
+        public float TargetSectorEnemyStrength;
         public float RequiredForce;
         public int CurrentMonth;
         public int CurrentYear;
@@ -38,6 +49,9 @@ namespace WhiskeyRealism.Strategic
         public PhaseTruthVerdict Verdict;
         public PhaseTruthAction RecommendedAction;
         public string Reason;
+        public string OperationId;
+        public string RuleId;
+        public string AlternateOperationId;
     }
 
     public static class PhaseTruthLedger
@@ -55,14 +69,6 @@ namespace WhiskeyRealism.Strategic
 
             var phase = input.Plan.CurrentPhase;
 
-            if (input.TargetAccomplished)
-            {
-                output.Verdict = PhaseTruthVerdict.TargetAccomplished;
-                output.RecommendedAction = PhaseTruthAction.Advance;
-                output.Reason = "target-accomplished";
-                return output;
-            }
-
             if (!input.ObjectiveAvailable || !input.TargetPositionResolves)
             {
                 output.Verdict = input.ObjectiveAvailable
@@ -70,7 +76,15 @@ namespace WhiskeyRealism.Strategic
                     : PhaseTruthVerdict.ObjectiveUnavailable;
                 output.RecommendedAction = PhaseTruthAction.Replan;
                 output.Reason = output.Verdict.ToString();
-                return output;
+                return ApplyOperationRules(input, output);
+            }
+
+            if (input.TargetAccomplished)
+            {
+                output.Verdict = PhaseTruthVerdict.TargetAccomplished;
+                output.RecommendedAction = PhaseTruthAction.Advance;
+                output.Reason = "target-accomplished";
+                return ApplyOperationRules(input, output);
             }
 
             if (input.RequiredForce > 0f && input.TargetSectorOwnStrength < input.RequiredForce)
@@ -78,7 +92,7 @@ namespace WhiskeyRealism.Strategic
                 output.Verdict = PhaseTruthVerdict.ForceBelowThreshold;
                 output.RecommendedAction = PhaseTruthAction.Recover;
                 output.Reason = "force-below-threshold";
-                return output;
+                return ApplyOperationRules(input, output);
             }
 
             bool deadlinePassed =
@@ -91,7 +105,7 @@ namespace WhiskeyRealism.Strategic
                 bool hasNextPhase = input.Plan.CurrentPhaseIndex + 1 < input.Plan.Phases.Count;
                 output.RecommendedAction = hasNextPhase ? PhaseTruthAction.Advance : PhaseTruthAction.Replan;
                 output.Reason = "deadline-expired";
-                return output;
+                return ApplyOperationRules(input, output);
             }
 
             if (input.TargetEngagedRecently)
@@ -99,13 +113,24 @@ namespace WhiskeyRealism.Strategic
                 output.Verdict = PhaseTruthVerdict.TargetEngaged;
                 output.RecommendedAction = PhaseTruthAction.Continue;
                 output.Reason = "target-engaged-let-contact-decide";
-                return output;
+                return ApplyOperationRules(input, output);
             }
 
             output.Verdict = PhaseTruthVerdict.Valid;
             output.RecommendedAction = PhaseTruthAction.Continue;
             output.Reason = "phase-valid";
-            return output;
+            return ApplyOperationRules(input, output);
+        }
+
+        private static PhaseTruthOutput ApplyOperationRules(PhaseTruthInput input, PhaseTruthOutput output)
+        {
+            if (input?.OperationProfile == null) return output;
+            return OperationDynamicRuleEvaluator.Evaluate(
+                output,
+                input.OperationProfile,
+                input.OperationContext,
+                input.AllianceId,
+                input.DaySerial);
         }
     }
 }

@@ -24,11 +24,31 @@ namespace WhiskeyRealism.Patches
 
                 if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.CICs.Length) return true;
                 var cic = StrategicCoordinator.Instance.CICs[allianceId];
-                if (cic == null || cic.ActivePlan == null) return true;
+                if (cic == null) return true;
+                if (cic.ActivePlan == null)
+                {
+                    if (HistoricalDoctrineEnabled())
+                    {
+                        OnceLog.Info(
+                            "pickcampobj:no-profile:" + allianceId,
+                            $"[Patch:PickCampObj] alliance={allianceId} action=skip-vanilla-random reason=no-historical-operation-plan");
+                        return false;
+                    }
+                    return true;
+                }
 
                 var phase = cic.ActivePlan.CurrentPhase;
-                if (phase == null) return true;
-                if (phase.TargetObjectiveId < 0) return true;
+                if (phase == null || phase.TargetObjectiveId < 0)
+                {
+                    if (HistoricalDoctrineEnabled())
+                    {
+                        OnceLog.Info(
+                            "pickcampobj:invalid-plan:" + allianceId,
+                            $"[Patch:PickCampObj] alliance={allianceId} action=skip-vanilla-random reason=invalid-historical-operation-phase");
+                        return false;
+                    }
+                    return true;
+                }
 
                 SetFollowedCampaignObjective(_aifaction, phase.TargetObjectiveId);
                 if (Plugin.Instance.VerboseLogging.Value)
@@ -54,6 +74,13 @@ namespace WhiskeyRealism.Patches
                 return allianceField != null ? (int)allianceField.GetValue(faction) : -1;
             }
             catch { return -1; }
+        }
+
+        private static bool HistoricalDoctrineEnabled()
+        {
+            return Plugin.Instance == null ||
+                Plugin.Instance.EnableHistoricalOperationDoctrine == null ||
+                Plugin.Instance.EnableHistoricalOperationDoctrine.Value;
         }
 
         private static void SetFollowedCampaignObjective(int aifactionIndex, int objectiveId)

@@ -48,6 +48,31 @@ namespace WhiskeyRealism.Strategic
                     personality)
             };
 
+            var phase = cic?.ActivePlan?.CurrentPhase;
+            if (phase != null)
+            {
+                input.OperationPosture = phase.OperationPosture;
+                input.AllowCoordinatedAttack = phase.AllowCoordinatedAttack;
+                input.AllowReinforcementPackage = phase.AllowReinforcementPackage;
+                input.AllowProbeOnly = phase.AllowProbeOnly;
+                if (string.IsNullOrEmpty(cic.ActivePlan.OperationId) &&
+                    !input.AllowCoordinatedAttack &&
+                    !input.AllowReinforcementPackage &&
+                    !input.AllowProbeOnly)
+                {
+                    input.AllowCoordinatedAttack = true;
+                    input.AllowReinforcementPackage = true;
+                }
+                ApplyOperationPosture(input.Options, input.OperationPosture);
+            }
+
+            if (target.HasValue)
+            {
+                input.TargetX = target.Value.x;
+                input.TargetZ = target.Value.z;
+                input.HasTargetCoordinates = true;
+            }
+
             if (previous != null && formation != null)
             {
                 var assignment = formation.GetAssignment(previous.UnitKey);
@@ -75,6 +100,28 @@ namespace WhiskeyRealism.Strategic
             }
 
             return input;
+        }
+
+        private static void ApplyOperationPosture(OperationalProbeOptions options, OperationPosture posture)
+        {
+            if (options == null) return;
+            switch (posture)
+            {
+                case OperationPosture.ProbeAndDevelop:
+                    options.MaximumProbeStrengthFraction -= 0.05f;
+                    break;
+                case OperationPosture.ConcentratedAttack:
+                    options.EscalateFriendlyRatio -= 0.15f;
+                    options.MaximumProbeStrengthFraction += 0.10f;
+                    break;
+                case OperationPosture.ExploitBreakthrough:
+                    options.MinimumProbeDays -= 1;
+                    options.EscalateFriendlyRatio -= 0.20f;
+                    break;
+            }
+            options.MinimumProbeDays = Math.Max(1, options.MinimumProbeDays);
+            options.MaximumProbeStrengthFraction = Math.Max(0.20f, Math.Min(0.70f, options.MaximumProbeStrengthFraction));
+            options.EscalateFriendlyRatio = Math.Max(1.10f, Math.Min(2.50f, options.EscalateFriendlyRatio));
         }
 
         internal static void Run(int allianceId, OperationalProbeOutput output, Vector3? target)

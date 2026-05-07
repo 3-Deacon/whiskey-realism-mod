@@ -29,6 +29,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> TacticalObserverVerboseLogging;
         internal ConfigEntry<int> TacticalObserverMinSecondsBetweenSummaries;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
+        internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
         internal ConfigEntry<bool> DefenseIntentVerboseLogging;
         internal ConfigEntry<bool> EnableConstructionSiteSteering;
@@ -122,6 +123,11 @@ namespace WhiskeyRealism
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
+            EnableHistoricalOperationDoctrine = Config.Bind(
+                "Strategic",
+                "Enable Historical Operation Doctrine",
+                true,
+                "Enable named historical operation doctrine for AI CIC planning. When enabled, catalog misses are logged as NoProfile and do not create generic replacement plans.");
             EnableDefenseIntentLedger = Config.Bind(
                 "Defense Intent Ledger",
                 "Enable Defense Intent Ledger",

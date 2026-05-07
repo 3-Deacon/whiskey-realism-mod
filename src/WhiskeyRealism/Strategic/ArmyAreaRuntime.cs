@@ -174,9 +174,9 @@ namespace WhiskeyRealism.Strategic
                     continue;
                 }
 
-                SetTheaterPosition(unit, anchor);
                 if (MoveUnitTo(unit, anchor))
                 {
+                    SetTheaterPosition(unit, anchor);
                     issued++;
                     OnceLog.Info(
                         $"army-area:{allianceId}:{UnitKey(unit)}:{assignment.AssignedAreaKey}",

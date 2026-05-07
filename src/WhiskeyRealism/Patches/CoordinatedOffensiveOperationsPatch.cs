@@ -26,6 +26,14 @@ namespace WhiskeyRealism.Patches
             internal readonly List<object> OwnUnits = new List<object>();
             internal string Signature;
             internal Stopwatch Watch;
+
+            internal void Restore(IList ownUnits)
+            {
+                if (ownUnits == null) return;
+                ownUnits.Clear();
+                for (int i = 0; i < OwnUnits.Count; i++)
+                    ownUnits.Add(OwnUnits[i]);
+            }
         }
 
         private sealed class PackageFilterDecision
@@ -54,7 +62,7 @@ namespace WhiskeyRealism.Patches
                 "CoordinatedOffensiveOperationsPatch wired (#38)");
 
             IList ownUnits = null;
-            bool blockVanilla = false;
+            bool snapshotRegistered = false;
             try
             {
                 if (unit == null || timediff <= 0f) return;
@@ -73,7 +81,6 @@ namespace WhiskeyRealism.Patches
                 var decision = BuildAllowedSet(allianceId, _aifaction, ownUnits, unit, faction);
 
                 if (!decision.PackageSelected) return;
-                blockVanilla = true;
 
                 var snapshot = new Snapshot
                 {
@@ -83,6 +90,7 @@ namespace WhiskeyRealism.Patches
                 for (int i = 0; i < ownUnits.Count; i++)
                     snapshot.OwnUnits.Add(ownUnits[i]);
                 _snapshots[_aifaction] = snapshot;
+                snapshotRegistered = true;
 
                 bool committed = CoordinatedOperationRuntime.CommitPackage(
                     allianceId,
@@ -116,17 +124,22 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("coordinated-ops:offensive:prefix",
                     "[CoordinatedOps] offensive Prefix failed: " + ex.Message);
-                if (blockVanilla && ownUnits != null)
+                if (snapshotRegistered && _snapshots.TryGetValue(_aifaction, out var snapshot))
                 {
                     try
                     {
-                        ownUnits.Clear();
-                        OnceLog.Warning("coordinated-ops:offensive:block-after-prefix-error",
-                            "[CoordinatedOps] blocked vanilla offensive after selected package Prefix failure");
+                        snapshot.Restore(ownUnits);
+                        _snapshots.Remove(_aifaction);
                     }
                     catch
                     {
                     }
+                }
+                else
+                {
+                    OnceLog.Warning(
+                        "coord-offensive:no-snapshot:" + _aifaction,
+                        "[CoordinatedOps] prefix failed before snapshot; vanilla candidate list left unchanged");
                 }
             }
         }
@@ -153,11 +166,7 @@ namespace WhiskeyRealism.Patches
                 var faction = AICampaignReflect.GetFaction(aifactionIndex);
                 var ownUnits = faction != null ? GetOwnUnits(faction) : null;
                 if (ownUnits != null)
-                {
-                    ownUnits.Clear();
-                    for (int i = 0; i < snapshot.OwnUnits.Count; i++)
-                        ownUnits.Add(snapshot.OwnUnits[i]);
-                }
+                    snapshot.Restore(ownUnits);
 
                 snapshot.Watch?.Stop();
                 if (snapshot.Watch != null && snapshot.Watch.ElapsedMilliseconds > 5L)

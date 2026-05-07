@@ -37,7 +37,7 @@ Runtime flow:
 
 1. `StrategicCoordinator.UpdateOperationalProbe(...)` runs from the daily strategic review after front and formation ledgers are available.
 2. The coordinator passes alliance, active CIC plan target, front ledger, formation directive ledger, prior probe state, day serial, Whiskey era, vanilla `Policy.CurrentChapter`, campaign month, and effective CIC personality into `OperationalProbeRuntime.BuildInput(...)`.
-3. `OperationalProbeRuntime.BuildInput(...)` calls `OperationalTempoDoctrine.For(...)` to set probe duration, probe size, enemy-reaction, escalation, and withdrawal thresholds.
+3. `OperationalProbeRuntime.BuildInput(...)` calls `OperationalTempoDoctrine.For(...)` to set probe duration, probe size, enemy-reaction, escalation, and withdrawal thresholds. If the active phase belongs to a named historical operation, phase metadata then adjusts the runtime contract: `OperationPosture` shapes thresholds, objective target coordinates drive package target X/Z, and `AllowCoordinatedAttack` / `AllowReinforcementPackage` / `AllowProbeOnly` gate package behavior.
 4. `OperationalProbeLedger.Build(...)` returns one of `None`, `Probe`, `Pause`, `Withdraw`, or `Escalate`.
 5. `FormationDirectiveLedger.ApplyOperationalProbe(...)` overlays the formation directive for the selected unit.
 6. `OperationalProbeRuntime.Run(...)` uses vanilla `AICampaign.MoveUnitTo(...)` and `unitsinoffensiveoperations` for `Probe` / `Escalate`, or removes the selected unit from `unitsinoffensiveoperations` for `Pause` / `Withdraw`.
@@ -63,6 +63,7 @@ All thresholds are clamped in `OperationalTempoDoctrine` so bad data cannot crea
 - A probe cannot export a critical hold sector below its minimum hold ratio.
 - Enemy reaction should produce `Pause` rather than pulling formations from other theaters.
 - Favorable contact can produce `Escalate`, but the stored prior probe state is cleared so the same state does not re-escalate forever.
+- Named operation phase flags can force probe-only behavior or disallow coordinated/reinforcement packages; those restrictions are explicit operation doctrine, not silent runtime fallback.
 - Tactical battle AI remains untouched.
 
 ## Verification
@@ -83,7 +84,7 @@ Current deployed proof:
 
 - `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` passed.
 - `./build.sh` passed with 0 warnings / 0 errors.
-- `dist/WhiskeyRealism.dll` and the deployed BepInEx plugin DLL both have SHA-256 `677c2f4339662508c99d4b60b7b8d615cfe89b9b9f705d068420a5e1c7642acc`.
+- `dist/WhiskeyRealism.dll` and the deployed BepInEx plugin DLL both have SHA-256 `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b`.
 - `LogOutput.log` still predates that deploy, so runtime smoke remains pending after a game restart.
 
 Runtime smoke markers:

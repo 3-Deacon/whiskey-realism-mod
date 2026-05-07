@@ -71,6 +71,11 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveCatalog.cs" Link="ObjectiveCatalog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveStrategyTagger.cs" Link="ObjectiveStrategyTagger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveScoring.cs" Link="ObjectiveScoring.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationModels.cs" Link="HistoricalOperationModels.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationCatalog.cs" Link="HistoricalOperationCatalog.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationDynamicRuleEvaluator.cs" Link="OperationDynamicRuleEvaluator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationDecisionMemory.cs" Link="OperationDecisionMemory.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationContextBuilder.cs" Link="HistoricalOperationContextBuilder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\RecruitmentIntentLedger.cs" Link="RecruitmentIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ProjectSelectionScorer.cs" Link="ProjectSelectionScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Projects\ProjectDoctrineCatalog.cs" Link="ProjectDoctrineCatalog.cs" />

@@ -54,6 +54,8 @@ static class Program
             ("wl dispatch sanitizer handles null content", WlDispatchSanitizerHandlesNullContent),
             ("wl dispatch sanitizer leaves normal content unchanged", WlDispatchSanitizerLeavesNormalContentUnchanged),
             ("wl bridge inactive allows direct movement", WlBridgeInactiveAllowsDirectMovement),
+            ("wl bridge null tryissue fails closed", WlBridgeNullTryIssueFailsClosed),
+            ("wl bridge null classify fails closed", WlBridgeNullClassifyFailsClosed),
             ("wl bridge non-player alliance allows direct movement", WlBridgeNonPlayerAllianceAllowsDirectMovement),
             ("wl bridge report only under wl player alliance blocks movement", WlBridgeReportOnlyUnderWlPlayerAllianceBlocksMovement),
             ("wl bridge report only inactive stays not wl", WlBridgeReportOnlyInactiveStaysNotWl),
@@ -65,7 +67,7 @@ static class Program
             ("wl bridge reinforce eligible under commander issues current order", WlBridgeReinforceEligibleUnderCommanderIssuesCurrentOrder),
             ("wl bridge ineligible under commander blocks direct fallback", WlBridgeIneligibleUnderCommanderBlocksDirectFallback),
             ("wl bridge failed vanilla call blocks direct fallback", WlBridgeFailedVanillaCallBlocksDirectFallback),
-            ("wl bridge part of player unit not under commander stays direct for c0c", WlBridgePartOfPlayerUnitNotUnderCommanderStaysDirectForC0c),
+            ("wl bridge part of player unit blocks direct fallback", WlBridgePartOfPlayerUnitBlocksDirectFallback),
             ("wl camp short camp credits normal rest", WlCampShortCampCreditsNormalRest),
             ("wl camp short camp credits wounded rest", WlCampShortCampCreditsWoundedRest),
             ("wl camp short camp credits preserve minimum proportions", WlCampShortCampCreditsPreserveMinimumProportions),
@@ -116,6 +118,11 @@ static class Program
             ("defense force sizer accepts large force for large threat", DefenseForceSizerAcceptsLargeForceForLargeThreat),
             ("objective catalog maps known wl objectives", ObjectiveCatalogMapsKnownWlObjectives),
             ("objective catalog keeps unknown ids unresolved", ObjectiveCatalogKeepsUnknownIdsUnresolved),
+            ("historical operation catalog exact objective match", HistoricalOperationCatalogExactObjectiveMatch),
+            ("historical operation catalog no profile for unmatched objective", HistoricalOperationCatalogNoProfileForUnmatchedObjective),
+            ("historical operation dynamic victory exploits", HistoricalOperationDynamicVictoryExploits),
+            ("historical operation unavailable objective aborts", HistoricalOperationUnavailableObjectiveAborts),
+            ("historical operation dynamic action mutates phase posture", HistoricalOperationDynamicActionMutatesPhasePosture),
             ("recruitment intent prefers supported volunteers", RecruitmentIntentPrefersSupportedVolunteers),
             ("recruitment intent does not leave preferred theater for raw pool", RecruitmentIntentDoesNotLeavePreferredTheaterForRawPool),
             ("recruitment intent keeps vanilla when preferred theater unavailable", RecruitmentIntentKeepsVanillaWhenPreferredTheaterUnavailable),
@@ -1053,6 +1060,22 @@ static class Program
         AssertEqual(true, decision.MayMutateOperationList);
     }
 
+    private static void WlBridgeNullTryIssueFailsClosed()
+    {
+        var decision = WlStrategicOrderBridge.TryIssue(null);
+        AssertEqual(WlStrategicOrderResult.InvalidRequest, decision.Result);
+        AssertEqual(false, decision.MayDirectMove);
+        AssertEqual(false, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeNullClassifyFailsClosed()
+    {
+        var decision = WlStrategicOrderBridge.ClassifyOnly(null);
+        AssertEqual(WlStrategicOrderResult.InvalidRequest, decision.Result);
+        AssertEqual(false, decision.MayDirectMove);
+        AssertEqual(false, decision.MayMutateOperationList);
+    }
+
     private static void WlBridgeNonPlayerAllianceAllowsDirectMovement()
     {
         var decision = WlStrategicOrderBridge.Classify(
@@ -1208,7 +1231,7 @@ static class Program
         AssertEqual(false, decision.MayMutateOperationList);
     }
 
-    private static void WlBridgePartOfPlayerUnitNotUnderCommanderStaysDirectForC0c()
+    private static void WlBridgePartOfPlayerUnitBlocksDirectFallback()
     {
         var decision = WlStrategicOrderBridge.Classify(
             WlStrategicIntent.ConstructFort,
@@ -1219,11 +1242,11 @@ static class Program
                 IsPartOfPlayerUnit = true
             });
 
-        AssertEqual(WlStrategicOrderResult.DirectMovementAllowed, decision.Result);
+        AssertEqual(WlStrategicOrderResult.WlCurrentOrderIneligible, decision.Result);
         AssertEqual(9, decision.WlOrderType);
-        AssertEqual(true, decision.MayDirectMove);
-        AssertEqual(true, decision.MayMutateOperationList);
-        AssertTrue(decision.Reason.Contains("part-of-player-unit"), "C0c direct fallback reason should name part-of-player-unit");
+        AssertEqual(false, decision.MayDirectMove);
+        AssertEqual(false, decision.MayMutateOperationList);
+        AssertTrue(decision.Reason.Contains("part-of-player-unit"), "blocked reason should name part-of-player-unit");
     }
 
     private static void WlCampShortCampCreditsNormalRest()
@@ -1792,6 +1815,130 @@ static class Program
     private static void ObjectiveCatalogKeepsUnknownIdsUnresolved()
     {
         AssertEqual(false, ObjectiveCatalog.TryResolve(9999, out _));
+    }
+
+    private static void HistoricalOperationCatalogExactObjectiveMatch()
+    {
+        AssertTrue(ObjectiveCatalog.TryResolve(3, out var objective), "expected objective 3");
+        var match = HistoricalOperationCatalog.Resolve(
+            allianceId: 0,
+            era: EraStage.Amateur1861,
+            vanillaChapter: 1,
+            month: 7,
+            year: 1861,
+            candidate: new HistoricalOperationCandidate { ObjectiveId = 3, Objective = objective, ObjectiveScore = 10f },
+            strategy: GrandStrategyRegistry.Resolve(0, EraStage.Amateur1861),
+            cicPersonality: default(PersonalityVector),
+            posture: null,
+            context: null);
+
+        AssertEqual(HistoricalOperationMatchKind.Matched, match.Kind);
+        AssertEqual("union-east-pressure", match.Profile.OperationId);
+        AssertTrue(match.Profile.Phases[0].TargetObjectiveId >= 0, "phase must preserve objective id");
+    }
+
+    private static void HistoricalOperationCatalogNoProfileForUnmatchedObjective()
+    {
+        var match = HistoricalOperationCatalog.Resolve(
+            allianceId: 0,
+            era: EraStage.Amateur1861,
+            vanillaChapter: 1,
+            month: 7,
+            year: 1861,
+            candidate: new HistoricalOperationCandidate
+            {
+                ObjectiveId = 999,
+                Objective = ObjectiveMetadata.DefaultDerived(Theater.Unknown, 0f, 0f),
+                ObjectiveScore = 1f
+            },
+            strategy: null,
+            cicPersonality: default(PersonalityVector),
+            posture: null,
+            context: null);
+
+        AssertEqual(HistoricalOperationMatchKind.NoProfile, match.Kind);
+        AssertEqual("no-explicit-profile", match.Reason);
+    }
+
+    private static void HistoricalOperationDynamicVictoryExploits()
+    {
+        AssertTrue(HistoricalOperationCatalog.TryGetById("union-late-pressure", out var profile), "expected late profile");
+        var output = OperationDynamicRuleEvaluator.Evaluate(
+            new PhaseTruthOutput
+            {
+                Verdict = PhaseTruthVerdict.Valid,
+                RecommendedAction = PhaseTruthAction.Continue,
+                Reason = "phase-valid"
+            },
+            profile,
+            new HistoricalOperationContext
+            {
+                MajorFriendlyVictoryNearTarget = true,
+                TargetSectorOwnStrength = 20000f,
+                TargetSectorEnemyStrength = 10000f,
+                TargetSectorRatio = 2f
+            },
+            allianceId: 0,
+            daySerial: 1864 * 372);
+
+        AssertEqual(PhaseTruthAction.Exploit, output.RecommendedAction);
+        AssertEqual("friendly-victory-exploit", output.RuleId);
+    }
+
+    private static void HistoricalOperationUnavailableObjectiveAborts()
+    {
+        AssertTrue(HistoricalOperationCatalog.TryGetById("union-east-pressure", out var profile), "expected early profile");
+        var plan = new OperationalPlan();
+        plan.Phases.Add(new Phase { TargetObjectiveId = 3, DeadlineMonth = 12, DeadlineYear = 1861 });
+
+        var output = PhaseTruthLedger.Evaluate(new PhaseTruthInput
+        {
+            Plan = plan,
+            OperationProfile = profile,
+            ObjectiveAvailable = false,
+            TargetPositionResolves = true,
+            CurrentMonth = 7,
+            CurrentYear = 1861
+        });
+
+        AssertEqual(PhaseTruthVerdict.ObjectiveUnavailable, output.Verdict);
+        AssertEqual(PhaseTruthAction.Abort, output.RecommendedAction);
+        AssertEqual("objective-unavailable-abort", output.RuleId);
+    }
+
+    private static void HistoricalOperationDynamicActionMutatesPhasePosture()
+    {
+        var plan = new OperationalPlan
+        {
+            OperationPosture = OperationPosture.ProbeAndDevelop,
+            CurrentPhaseIndex = 0
+        };
+        plan.Phases.Add(new Phase
+        {
+            TargetObjectiveId = 3,
+            OperationPosture = OperationPosture.ProbeAndDevelop,
+            AllowCoordinatedAttack = false,
+            AllowReinforcementPackage = false,
+            AllowProbeOnly = true
+        });
+
+        bool keepPlan = CicReviewRouter.RouteAction(
+            plan,
+            new PhaseTruthOutput
+            {
+                Verdict = PhaseTruthVerdict.Valid,
+                RecommendedAction = PhaseTruthAction.Exploit,
+                RuleId = "friendly-victory-exploit"
+            },
+            7,
+            1864);
+
+        AssertEqual(true, keepPlan);
+        AssertEqual(OperationPosture.ExploitBreakthrough, plan.OperationPosture);
+        AssertEqual(OperationPosture.ExploitBreakthrough, plan.CurrentPhase.OperationPosture);
+        AssertEqual(true, plan.CurrentPhase.AllowCoordinatedAttack);
+        AssertEqual(true, plan.CurrentPhase.AllowReinforcementPackage);
+        AssertEqual(false, plan.CurrentPhase.AllowProbeOnly);
     }
 
     private static void RecruitmentIntentPrefersSupportedVolunteers()
