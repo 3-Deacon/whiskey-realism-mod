@@ -833,6 +833,9 @@ namespace WhiskeyRealism.Strategic
                 var posture = DirectorMemories[alliance]?.LastPosture;
                 if (posture != null)
                     StrategicResilienceDirector.ApplyTo(input.Options, posture);
+                input.PackageOptions = CoordinatedOperationOptions.FromDirector(
+                    Math.Max(1f, input.CurrentEnemyStrength),
+                    posture);
 
                 var output = OperationalProbeLedger.Build(input);
                 OperationalProbes[alliance] = output;

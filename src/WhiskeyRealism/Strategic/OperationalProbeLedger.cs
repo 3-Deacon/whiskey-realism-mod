@@ -44,6 +44,7 @@ namespace WhiskeyRealism.Strategic
         public float CurrentEnemyStrength = -1f;
         public float CurrentFriendlyStrength = -1f;
         public OperationalProbeOptions Options = new OperationalProbeOptions();
+        public CoordinatedOperationOptions PackageOptions;
         public ContactEvidence ContactEvidence = ContactEvidence.EnemyPresent;
     }
 
@@ -57,6 +58,7 @@ namespace WhiskeyRealism.Strategic
         public string TargetAreaKey;
         public string SourceSectorKey;
         public bool RequiresMassCommitment;
+        public CoordinatedOperationOutput Package;
         public OperationalProbeState State;
 
         public string Signature()
@@ -67,7 +69,8 @@ namespace WhiskeyRealism.Strategic
                 "|" + (TargetAreaKey ?? "-") +
                 "|" + (SourceSectorKey ?? "-") +
                 "|" + (Reason ?? "-") +
-                "|" + (RequiresMassCommitment ? "mass" : "limited");
+                "|" + (RequiresMassCommitment ? "mass" : "limited") +
+                "|" + (Package?.Signature() ?? "-");
         }
     }
 
@@ -86,7 +89,7 @@ namespace WhiskeyRealism.Strategic
                 return NoOp(output, "missing-plan-target");
 
             if (input.Previous != null)
-                return EvaluateExistingProbe(input, options, output);
+                return FinishWithPackage(input, EvaluateExistingProbe(input, options, output));
 
             if (input.FormationDirectives == null || input.FormationDirectives.Assignments == null)
                 return NoOp(output, "missing-formation-ledger");
@@ -118,7 +121,94 @@ namespace WhiskeyRealism.Strategic
                 LastObservedEnemyStrength = Math.Max(0f, CurrentEnemy(input, selected)),
                 LastObservedFriendlyStrength = Math.Max(0f, CurrentFriendly(input, selected))
             };
+            return FinishWithPackage(input, output);
+        }
+
+        private static OperationalProbeOutput FinishWithPackage(OperationalProbeInput input, OperationalProbeOutput output)
+        {
+            if (output == null) return null;
+            if (output.Decision == OperationalProbeDecision.Probe ||
+                output.Decision == OperationalProbeDecision.Escalate)
+            {
+                output.Package = output.Package ?? BuildPackage(
+                    input,
+                    output,
+                    output.Decision == OperationalProbeDecision.Escalate
+                        ? CoordinatedOperationIntent.Attack
+                        : CoordinatedOperationIntent.Probe);
+            }
             return output;
+        }
+
+        private static CoordinatedOperationOutput BuildPackage(
+            OperationalProbeInput input,
+            OperationalProbeOutput probe,
+            CoordinatedOperationIntent intent)
+        {
+            var lead = input.FormationDirectives?.GetAssignment(probe.SelectedUnitKey);
+            float enemy = Math.Max(0f, CurrentEnemy(input, lead));
+            var packageInput = new CoordinatedOperationInput
+            {
+                AllianceId = input.AllianceId,
+                IsPlayerCic = false,
+                Intent = intent,
+                TargetName = input.PlanTargetAreaKey,
+                TargetAreaKey = input.PlanTargetAreaKey,
+                TargetSectorKey = probe.SourceSectorKey,
+                TargetX = lead?.X ?? 0f,
+                TargetZ = lead?.Z ?? 0f,
+                TargetEnemyStrength = enemy,
+                PreferredLeadStableUnitId = StableIdFor(input.FormationDirectives, probe.SelectedUnitKey),
+                Options = input.PackageOptions ?? CoordinatedOperationOptions.StableDefaults(enemy)
+            };
+
+            if (input.FormationDirectives?.Assignments != null)
+            {
+                foreach (var assignment in input.FormationDirectives.Assignments)
+                    packageInput.Candidates.Add(CandidateFromAssignment(assignment));
+            }
+
+            return CoordinatedOperationPackageLedger.Build(packageInput);
+        }
+
+        private static int StableIdFor(FormationDirectiveLedger ledger, string unitKey)
+        {
+            return ledger?.GetAssignment(unitKey)?.StableUnitId ?? 0;
+        }
+
+        private static CoordinatedOperationCandidate CandidateFromAssignment(FormationDirectiveAssignment assignment)
+        {
+            return new CoordinatedOperationCandidate
+            {
+                StableUnitId = assignment.StableUnitId,
+                DisplayUnitKey = assignment.UnitKey,
+                AllianceId = assignment.AllianceId,
+                Level = assignment.Level,
+                Directive = assignment.Directive,
+                AreaKey = assignment.AreaKey,
+                SectorKey = assignment.SectorKey,
+                X = assignment.X,
+                Z = assignment.Z,
+                CombatAvailability = assignment.CombatAvailability,
+                ExchangePressure = assignment.ExchangePressure,
+                LocalFriendlySupport = assignment.LocalFriendlySupport,
+                LocalEnemyStrength = assignment.LocalEnemyStrength,
+                Readiness = assignment.Readiness,
+                Morale = assignment.Morale,
+                Ammo = assignment.Ammo,
+                Supply = assignment.Supply,
+                Fatigue = assignment.Fatigue,
+                OffensiveAllowed = assignment.OffensiveAllowed ||
+                    assignment.Directive == FormationDirective.Probe ||
+                    assignment.Directive == FormationDirective.Counterstroke,
+                DefensiveAllowed = assignment.DefensiveAllowed,
+                TransferDonorAllowed = assignment.TransferDonorAllowed,
+                DirectMovementAllowed = assignment.DirectMovementAllowed,
+                InheritsFromParent = assignment.InheritsFromParent,
+                CriticalSector = false,
+                FrontPosture = FrontPosture.Counterstroke,
+                CommitMode = CoordinatedCommitMode.DirectMovement
+            };
         }
 
         private static OperationalProbeOutput EvaluateExistingProbe(
@@ -172,6 +262,21 @@ namespace WhiskeyRealism.Strategic
                 return output;
             }
 
+            if (age >= options.MinimumProbeDays &&
+                input.ContactEvidence != ContactEvidence.NoContact &&
+                input.ContactEvidence != ContactEvidence.OvermatchedContact)
+            {
+                var package = BuildPackage(input, output, CoordinatedOperationIntent.Attack);
+                if (package.Decision == CoordinatedOperationDecision.CoordinateAttack)
+                {
+                    output.Decision = OperationalProbeDecision.Escalate;
+                    output.Reason = "favorable-package-contact";
+                    output.RequiresMassCommitment = true;
+                    output.Package = package;
+                    return output;
+                }
+            }
+
             output.Decision = OperationalProbeDecision.Probe;
             output.Reason = "continue-probe";
             return output;
@@ -210,13 +315,13 @@ namespace WhiskeyRealism.Strategic
         private static float CurrentEnemy(OperationalProbeInput input, FormationDirectiveAssignment selected)
         {
             if (input.CurrentEnemyStrength >= 0f) return input.CurrentEnemyStrength;
-            return selected.LocalEnemyStrength;
+            return selected?.LocalEnemyStrength ?? 0f;
         }
 
         private static float CurrentFriendly(OperationalProbeInput input, FormationDirectiveAssignment selected)
         {
             if (input.CurrentFriendlyStrength >= 0f) return input.CurrentFriendlyStrength;
-            return selected.CombatAvailability;
+            return selected?.CombatAvailability ?? 0f;
         }
 
         private static string BuildProbeId(int allianceId, string targetAreaKey, string unitKey)

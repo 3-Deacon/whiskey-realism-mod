@@ -171,6 +171,8 @@ static class Program
             ("operational probe escalates after favorable contact", OperationalProbeEscalatesAfterFavorableContact),
             ("operational probe refuses critical hold donor", OperationalProbeRefusesCriticalHoldDonor),
             ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
+            ("operational probe escalates with support package", OperationalProbeEscalatesWithSupportPackage),
+            ("operational probe support overlay blocks donor", OperationalProbeSupportOverlayBlocksDonor),
             ("operational probe stays continuing on no contact even after minimum days", OperationalProbeStaysContinuingOnNoContactAfterMinimumDays),
             ("operational probe state has single source on coordinator", OperationalProbeStateHasSingleSourceOnCoordinator),
             ("coordinated ops attack selects local support", CoordinatedOpsAttackSelectsLocalSupport),
@@ -3168,6 +3170,79 @@ static class Program
         AssertEqual(FormationDirective.Probe, assignment.Directive);
         AssertEqual("limited-contact-probe", assignment.Reason);
         AssertEqual(false, assignment.TransferDonorAllowed);
+    }
+
+    private static void OperationalProbeEscalatesWithSupportPackage()
+    {
+        var input = BuildProbeInput();
+        input.DaySerial = 104;
+        input.Previous = new OperationalProbeState
+        {
+            ProbeId = "1:VirginiaCapitalCorridor:probe-corps",
+            UnitKey = "probe-corps",
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            SourceSectorKey = "VirginiaCapitalCorridor",
+            StartedDaySerial = 100,
+            LastObservedEnemyStrength = 7000f,
+            LastObservedFriendlyStrength = 7000f
+        };
+        input.CurrentEnemyStrength = 10000f;
+        input.CurrentFriendlyStrength = 9000f;
+        input.PackageOptions = CoordinatedOperationOptions.StableDefaults(10000f);
+
+        var probe = ProbeSnapshot("probe-corps", 1, 15, 9000f, 4000f, FormationLevel.Division, FrontPosture.Counterstroke, "VirginiaCapitalCorridor");
+        probe.StableUnitId = 111;
+        probe.X = 10f;
+        probe.Z = 10f;
+        probe.Morale = 1f;
+        probe.Readiness = 1f;
+        probe.RifleAmmo = 1f;
+        probe.ArtilleryAmmo = 1f;
+        probe.Supply = 1f;
+        var support = Snapshot("support-corps", 1, 15, 7000f, 2000f, FormationLevel.Division, FrontPosture.Counterstroke);
+        support.StableUnitId = 222;
+        support.AreaKey = "VirginiaCapitalCorridor";
+        support.SectorKey = "VirginiaCapitalCorridor";
+        support.X = 12f;
+        support.Z = 10f;
+        support.Morale = 1f;
+        support.Readiness = 1f;
+        support.RifleAmmo = 1f;
+        support.ArtilleryAmmo = 1f;
+        support.Supply = 1f;
+        input.FormationDirectives = FormationDirectiveLedger.Build(new[] { probe, support }, EraStage.Operational1862, "VirginiaCapitalCorridor");
+
+        var output = OperationalProbeLedger.Build(input);
+
+        AssertEqual(OperationalProbeDecision.Escalate, output.Decision);
+        AssertTrue(output.Package != null, "package output should be set");
+        AssertEqual(CoordinatedOperationDecision.CoordinateAttack, output.Package.Decision);
+    }
+
+    private static void OperationalProbeSupportOverlayBlocksDonor()
+    {
+        var input = BuildProbeInput();
+        var output = OperationalProbeLedger.Build(input);
+        output.Package = new CoordinatedOperationOutput
+        {
+            Decision = CoordinatedOperationDecision.Reinforce,
+            LeadDisplayUnitKey = "probe-corps",
+            Reason = "reinforce-ratio-passed"
+        };
+        output.Package.SupportDisplayUnitKeys.Add("support-corps");
+
+        var probe = ProbeSnapshot("probe-corps", 1, 15, 9000f, 4000f, FormationLevel.Division, FrontPosture.Counterstroke, "VirginiaCapitalCorridor");
+        probe.StableUnitId = 111;
+        var support = Snapshot("support-corps", 1, 15, 7000f, 2000f, FormationLevel.Division, FrontPosture.Counterstroke);
+        support.StableUnitId = 222;
+        input.FormationDirectives = FormationDirectiveLedger.Build(new[] { probe, support }, EraStage.Operational1862, "VirginiaCapitalCorridor");
+
+        bool changed = input.FormationDirectives.ApplyOperationalProbe(output);
+        var assignment = input.FormationDirectives.GetAssignment("support-corps");
+
+        AssertEqual(true, changed);
+        AssertEqual(false, assignment.TransferDonorAllowed);
+        AssertEqual("probe-support:reinforce-ratio-passed", assignment.Reason);
     }
 
     private static void OperationalProbeStaysContinuingOnNoContactAfterMinimumDays()

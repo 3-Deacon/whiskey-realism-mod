@@ -93,18 +93,17 @@ namespace WhiskeyRealism.Strategic
                 var offensive = AccessTools.Field(factionType, "unitsinoffensiveoperations")?.GetValue(faction) as IList;
                 if (ownUnits == null || offensive == null) return;
 
-                var unit = FindUnit(ownUnits, output.SelectedUnitKey);
-                if (unit == null) return;
-
                 if (output.Decision == OperationalProbeDecision.Pause ||
                     output.Decision == OperationalProbeDecision.Withdraw)
                 {
-                    if (offensive.Contains(unit))
+                    var pausedUnit = FindUnit(ownUnits, output.SelectedUnitKey);
+                    if (pausedUnit == null) return;
+                    if (offensive.Contains(pausedUnit))
                     {
-                        offensive.Remove(unit);
+                        offensive.Remove(pausedUnit);
                         Plugin.Log.LogInfo(
                             $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
-                            $"unit={SafeName(unit)} reason={output.Reason}");
+                            $"unit={SafeName(pausedUnit)} reason={output.Reason}");
                     }
                     return;
                 }
@@ -113,6 +112,31 @@ namespace WhiskeyRealism.Strategic
                     output.Decision != OperationalProbeDecision.Escalate)
                     return;
                 if (!target.HasValue) return;
+
+                if (output.Package != null &&
+                    output.Package.Decision != CoordinatedOperationDecision.None &&
+                    output.Package.Decision != CoordinatedOperationDecision.Delay &&
+                    output.Package.Decision != CoordinatedOperationDecision.Recover)
+                {
+                    CoordinatedOperationRuntime.CommitPackage(
+                        allianceId,
+                        aifactionIndex,
+                        output.Package,
+                        target.Value,
+                        string.IsNullOrEmpty(output.TargetAreaKey) ? "Objective" : output.TargetAreaKey,
+                        output.Decision == OperationalProbeDecision.Escalate
+                            ? WlStrategicIntent.Offensive
+                            : WlStrategicIntent.Probe,
+                        "OperationalProbe");
+                    Plugin.Log.LogInfo(
+                        $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
+                        $"target={output.Package.TargetName ?? output.TargetAreaKey} ratio={output.Package.Ratio:0.00} " +
+                        $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
+                    return;
+                }
+
+                var unit = FindUnit(ownUnits, output.SelectedUnitKey);
+                if (unit == null) return;
                 if (!OffensiveAvailabilityWrapper.IsAvailable(aifactionIndex, unit, target.Value))
                 {
                     OnceLog.Info("operational-probe:gate-blocked:" + allianceId,

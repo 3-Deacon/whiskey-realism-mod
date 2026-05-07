@@ -170,6 +170,22 @@ namespace WhiskeyRealism.Strategic
                     return false;
             }
 
+            if (probe.Package != null)
+            {
+                foreach (var supportKey in probe.Package.SupportDisplayUnitKeys)
+                {
+                    var support = GetAssignment(supportKey);
+                    if (support == null) continue;
+                    support.Directive = probe.Package.Decision == CoordinatedOperationDecision.Reinforce
+                        ? FormationDirective.Reinforce
+                        : FormationDirective.Counterstroke;
+                    support.Reason = "probe-support:" + (probe.Package.Reason ?? probe.Reason ?? "package");
+                    support.OffensiveAllowed = probe.Package.Decision == CoordinatedOperationDecision.CoordinateAttack;
+                    support.DefensiveAllowed = true;
+                    support.TransferDonorAllowed = false;
+                }
+            }
+
             RecomputePressure();
             return true;
         }
