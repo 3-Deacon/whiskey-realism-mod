@@ -60,6 +60,8 @@ static class Program
             ("tactical macro debug override skips", TacticalMacroDebugOverrideSkips),
             ("tactical macro inferior no relief retreats", TacticalMacroInferiorNoReliefRetreats),
             ("tactical group decisive sector attacks without charge", TacticalGroupDecisiveSectorAttacksWithoutCharge),
+            ("tactical group weak point under defend probes", TacticalGroupWeakPointUnderDefendProbes),
+            ("tactical group explicit probe bypasses low confidence skip", TacticalGroupExplicitProbeBypassesLowConfidenceSkip),
             ("tactical group low confidence keeps vanilla", TacticalGroupLowConfidenceKeepsVanilla),
             ("tactical group wl player subordinate skips", TacticalGroupWlPlayerSubordinateSkips),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
@@ -825,6 +827,34 @@ static class Program
 
         AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
         AssertEqual(3, decision.GroupStance, "attack stance, not charge");
+    }
+
+    private static void TacticalGroupWeakPointUnderDefendProbes()
+    {
+        var sector = new TacticalSectorAssessment(4, TacticalSectorSource.ObjectiveChain, 5000f, 2000f, 0.9f, strongPoint: false, flankRisk: false, TacticalSectorMission.AttackWeakPoint);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 2,
+            macroAi: 2,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
+        AssertEqual(1, decision.GroupStance, "defensive weak point should probe/screen, not hold");
+    }
+
+    private static void TacticalGroupExplicitProbeBypassesLowConfidenceSkip()
+    {
+        var sector = new TacticalSectorAssessment(4, TacticalSectorSource.AngleSlice, 5000f, 0f, 0.45f, strongPoint: false, flankRisk: false, TacticalSectorMission.Probe);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 2,
+            macroAi: 2,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
+        AssertEqual(1, decision.GroupStance, "probe stance");
     }
 
     private static void TacticalGroupLowConfidenceKeepsVanilla()

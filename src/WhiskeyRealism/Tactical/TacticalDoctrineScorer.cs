@@ -41,8 +41,6 @@ namespace WhiskeyRealism.Tactical
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "wl-control");
             if (!input.OrderFrictionAllowsChange)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "order-friction");
-            if (input.Sector.Confidence < 0.55f)
-                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "low-confidence");
             if (input.MacroAi < 0)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "dynamic-macro");
 
@@ -50,14 +48,18 @@ namespace WhiskeyRealism.Tactical
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 2, "refuse");
             if (input.Sector.StrongPoint)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 2, "strongpoint");
+            if (input.Sector.Mission == TacticalSectorMission.Probe && input.Sector.Confidence >= 0.35f)
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 1, "probe");
+            if (input.Sector.Confidence < 0.55f)
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "low-confidence");
             if (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint &&
                 (input.MacroAi == 0 || input.MacroAi == 1))
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 3, "attack-weak-point");
+            if (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint)
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 1, "probe-weak-point");
             if (input.Sector.Mission == TacticalSectorMission.Fix ||
                 input.Sector.Mission == TacticalSectorMission.EconomyOfForce)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 1, "fix");
-            if (input.Sector.Mission == TacticalSectorMission.Probe)
-                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 1, "probe");
 
             return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 2, "hold");
         }
