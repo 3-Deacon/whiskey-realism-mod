@@ -54,7 +54,11 @@ namespace WhiskeyRealism.Strategic
         {
             try
             {
-                if (output == null || output.Decision == CoordinatedOperationDecision.None) return;
+                if (output == null ||
+                    output.Decision == CoordinatedOperationDecision.None ||
+                    output.Decision == CoordinatedOperationDecision.Delay ||
+                    output.Decision == CoordinatedOperationDecision.Recover)
+                    return;
                 var faction = AICampaignReflect.GetFaction(aifactionIndex);
                 if (faction == null) return;
                 var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
