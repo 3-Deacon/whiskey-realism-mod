@@ -136,6 +136,22 @@ Codex supports layered `AGENTS.md` files. It loads this root file first, then an
 
 Repeatable workflows should become repo skills under `.agents/skills/` instead of more root `AGENTS.md` text.
 
+### Superpowers workflow
+
+Codex uses native skill discovery. Do not paste legacy Superpowers bootstrap blocks into `AGENTS.md`; keep this file as repo policy and use skills for repeatable workflows. Superpowers is installed as a Codex plugin, and Codex can load skills from the plugin, `$HOME/.agents/skills`, and repo-local `.agents/skills`.
+
+Use the relevant Superpowers or repo skill before acting when the task matches its description, or when the user explicitly invokes `$skill-name`. Treat the order below as mandatory, not a menu:
+
+1. Review-only / critique work: use `whiskey-spec-adversarial-review` and/or `whiskey-vanilla-anchor-review`; lead with findings and cite shipped-code/decompile anchors. Do not create a worktree unless edits will be made.
+2. New feature or behavior design: use `brainstorming` before implementation; commit durable slice specs under `docs/superpowers/specs/`.
+3. After design/spec approval and before writing or executing an implementation plan: use `using-git-worktrees`. Detect whether the session is already in an isolated worktree, prefer any native worktree mechanism if available, otherwise use the git worktree fallback; if sandboxing blocks worktree creation, state that and continue only with the user's current-workspace preference.
+4. Approved multi-step work: use `writing-plans`; save plans under `docs/superpowers/plans/` with exact file paths, patch surfaces, verification commands, smoke expectations, and rollback/defer boundaries.
+5. Before implementation code: use `test-driven-development` for testable strategic/tactical logic. For Harmony/runtime-only changes, add the smallest meaningful harness coverage when feasible and always follow the DLL build/deploy/hash verification gates above.
+6. Plan execution: only after the `using-git-worktrees` gate, use `subagent-driven-development` when the active Codex session exposes multi-agent support and the user has requested or permitted subagents. Use `executing-plans` when subagents are unavailable or the user wants inline execution.
+7. Independent investigations: use `dispatching-parallel-agents` only for 2+ genuinely independent domains; keep write scopes disjoint and do not bypass the worktree gate for implementation work.
+8. Bugs or unexpected behavior at any point: use `systematic-debugging` before proposing fixes, then return to the appropriate ordered step above.
+9. Completion: use `verification-before-completion`; for DLL-affecting changes also use `whiskey-dll-deploy-smoke`, and for shipped release closeout use `whiskey-release-closeout`.
+
 ### References
 
 - `refs/` holds symlinks into the Steam install. **Do not check binary DLLs into git.**
