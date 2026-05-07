@@ -1,6 +1,6 @@
 # Strategic Project Doctrine Implementation Plan
 
-Status: active plan for `docs/superpowers/specs/2026-05-06-strategic-project-doctrine-design.md`.
+Status: archived after implementation, build/deploy/hash verification, and fresh selection runtime smoke on 2026-05-06. Living state is in `docs/patch-catalog.md`, `docs/handoff.md`, and `MEMORY.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -24,7 +24,7 @@ Read these before coding:
 - `src/WhiskeyRealism/Strategic/AGENTS.md`
 - `src/WhiskeyRealism/Patches/AGENTS.md`
 - `tests/WhiskeyRealism.Tests/AGENTS.md`
-- `docs/superpowers/specs/2026-05-06-strategic-project-doctrine-design.md`
+- `docs/superpowers/specs/archive/2026-05-06-strategic-project-doctrine-design.md`
 - `src/WhiskeyRealism/Patches/ProjectSelectionPatch.cs`
 - `src/WhiskeyRealism/Strategic/ProjectSelectionScorer.cs`
 - `src/WhiskeyRealism/Strategic/Fiscal/FiscalPolicyScorer.cs`
@@ -99,7 +99,7 @@ Do not modify:
 
 **Files:**
 
-- Read: `docs/superpowers/specs/2026-05-06-strategic-project-doctrine-design.md`
+- Read: `docs/superpowers/specs/archive/2026-05-06-strategic-project-doctrine-design.md`
 - Read: `src/WhiskeyRealism/Patches/ProjectSelectionPatch.cs`
 - Read: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`
 
@@ -1814,7 +1814,7 @@ If ordinals `#36-#38` are already used by parallel work, use the next open ordin
 Add a short active-workstream note:
 
 ```markdown
-- **Strategic project doctrine plan active.** Spec: `docs/superpowers/specs/2026-05-06-strategic-project-doctrine-design.md`; plan: `docs/superpowers/plans/2026-05-06-strategic-project-doctrine.md`. This slice owns project selection scoring and observer telemetry only. It does not patch `IsAppointable`, `AppointProject`, `CheckProjectUnlocks`, `UseSubsidyForPurpose`, or weapon purchase orders.
+- **Strategic project doctrine archived.** Spec: `docs/superpowers/specs/archive/2026-05-06-strategic-project-doctrine-design.md`; plan: `docs/superpowers/plans/archive/2026-05-06-strategic-project-doctrine.md`. This slice owns project selection scoring and observer telemetry only. It does not patch `IsAppointable`, `AppointProject`, `CheckProjectUnlocks`, `UseSubsidyForPurpose`, or weapon purchase orders.
 ```
 
 - [ ] **Step 3: Update repo memory**

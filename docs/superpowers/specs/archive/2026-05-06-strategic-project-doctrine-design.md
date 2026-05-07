@@ -1,7 +1,7 @@
 # Strategic Project Doctrine AI Design
 
 Date: 2026-05-06
-Status: active design spec, ready for adversarial review before implementation planning
+Status: archived design spec. Implemented on 2026-05-06; living state is in `docs/patch-catalog.md`, `docs/handoff.md`, and `MEMORY.md`.
 Scope: Slice A strategic/economy enrichment for Grand Tactician Projects. This spec expands project selection from static era weights into historically influenced, win-seeking Civil/Military project doctrine for both Union and CSA AI. It also records vanilla project bugs and bug candidates found during the decompile pass.
 
 ## Adversarial Review Corrections
