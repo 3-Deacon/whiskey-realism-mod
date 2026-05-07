@@ -12,6 +12,28 @@ namespace WhiskeyRealism.Strategic
 {
     internal static class CoordinatedOperationRuntime
     {
+        private static readonly Dictionary<int, string> _packageLockByUnitId =
+            new Dictionary<int, string>();
+
+        internal static void MarkPackageLocked(int stableUnitId, string packageSignature)
+        {
+            if (stableUnitId == 0 || string.IsNullOrEmpty(packageSignature)) return;
+            _packageLockByUnitId[stableUnitId] = packageSignature;
+        }
+
+        internal static bool IsPackageLocked(Regiment unit)
+        {
+            if (unit == null) return false;
+            int id = ((UnityEngine.Object)unit).GetInstanceID();
+            return _packageLockByUnitId.ContainsKey(id) && unit.regimentpaths > 0;
+        }
+
+        internal static void ClearPackageLock(Regiment unit)
+        {
+            if (unit == null) return;
+            _packageLockByUnitId.Remove(((UnityEngine.Object)unit).GetInstanceID());
+        }
+
         internal static CoordinatedCommitMode CommitModeFromBridge(WlStrategicOrderDecision decision)
         {
             if (decision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
@@ -177,6 +199,7 @@ namespace WhiskeyRealism.Strategic
 
             if (decision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
             {
+                MarkPackageLocked(stableUnitId, packageSignature);
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=wl-current-order type={decision.WlOrderType} package={packageSignature}");
                 return true;
             }
@@ -189,6 +212,7 @@ namespace WhiskeyRealism.Strategic
             {
                 if (!offensive.Contains(unit))
                     offensive.Add(unit);
+                MarkPackageLocked(stableUnitId, packageSignature);
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=direct-move package={packageSignature}");
                 return true;
             }
