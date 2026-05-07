@@ -176,6 +176,17 @@ namespace WhiskeyRealism.Strategic
             if (output.TargetEnemyStrength <= 0f && !options.AllowEmptyTargetPackage)
                 return Finish(output, CoordinatedOperationDecision.SingleLead, "empty-target-single-lead");
 
+            if (Ratio(output.PackageEffectiveStrength, output.TargetEnemyStrength) >= options.RequiredAttackRatio)
+            {
+                foreach (var c in eligible)
+                {
+                    if (c.StableUnitId == lead.StableUnitId) continue;
+                    string reason;
+                    Suppress(output, c, EligibleSupport(c, lead, input, options, out reason) ? "lead-overmatch" : reason);
+                }
+                return Finish(output, CoordinatedOperationDecision.SingleLead, "lead-overmatch");
+            }
+
             var supports = new List<CoordinatedOperationCandidate>();
             foreach (var c in eligible)
             {
@@ -238,12 +249,16 @@ namespace WhiskeyRealism.Strategic
             if (c == null) { reason = "null-candidate"; return false; }
             if (c.AllianceId != input.AllianceId) { reason = "wrong-alliance"; return false; }
             if (c.InheritsFromParent) { reason = "inherits-parent"; return false; }
-            if (!c.DirectMovementAllowed) { reason = "direct-movement-blocked"; return false; }
-            if (!c.OffensiveAllowed) { reason = "offensive-blocked"; return false; }
+            if (c.CommitMode == CoordinatedCommitMode.BlockedWlPlayerChain) { reason = "blocked-commit-mode"; return false; }
+            if (c.CommitMode == CoordinatedCommitMode.DirectMovement && !c.DirectMovementAllowed) { reason = "direct-movement-blocked"; return false; }
+            if (input.Intent == CoordinatedOperationIntent.Reinforce)
+            {
+                if (!c.DefensiveAllowed) { reason = "defensive-blocked"; return false; }
+            }
+            else if (!c.OffensiveAllowed) { reason = "offensive-blocked"; return false; }
             if (c.InOffensiveOperation) { reason = "in-offensive-operation"; return false; }
             if (c.InDefensiveOperation) { reason = "in-defensive-operation"; return false; }
             if (c.ConstructingSupplyDepot) { reason = "constructing-supply-depot"; return false; }
-            if (c.CommitMode == CoordinatedCommitMode.BlockedWlPlayerChain) { reason = "blocked-commit-mode"; return false; }
             if (c.Directive == FormationDirective.Guard || c.Directive == FormationDirective.Hold ||
                 c.Directive == FormationDirective.Recover || c.Directive == FormationDirective.Concede)
             { reason = "directive-blocked"; return false; }
@@ -252,12 +267,17 @@ namespace WhiskeyRealism.Strategic
             if (c.Morale < options.MinimumMorale) { reason = "low-morale"; return false; }
             if (c.Ammo < options.MinimumAmmo) { reason = "low-ammo"; return false; }
             if (c.Supply < options.MinimumSupply) { reason = "low-supply"; return false; }
+            int bucket = DistanceBucket(c, input);
+            if (bucket > 1 && !options.AllowRemoteTier) { reason = "remote-tier-blocked"; return false; }
+            if (bucket > 2) { reason = "outside-range"; return false; }
             return true;
         }
 
         private static bool EligibleSupport(CoordinatedOperationCandidate c, CoordinatedOperationCandidate lead, CoordinatedOperationInput input, CoordinatedOperationOptions options, out string reason)
         {
             if (!EligibleLead(c, input, options, out reason)) return false;
+            if (input.Intent == CoordinatedOperationIntent.Reinforce && c.StableUnitId != lead.StableUnitId && !c.TransferDonorAllowed)
+            { reason = "transfer-donor-blocked"; return false; }
             int bucket = DistanceBucket(c, input);
             if (bucket > 1 && !options.AllowRemoteTier) { reason = "remote-tier-blocked"; return false; }
             if (bucket > 2) { reason = "outside-range"; return false; }

@@ -175,6 +175,10 @@ static class Program
             ("operational probe state has single source on coordinator", OperationalProbeStateHasSingleSourceOnCoordinator),
             ("coordinated ops attack selects local support", CoordinatedOpsAttackSelectsLocalSupport),
             ("coordinated ops blocked wl support does not fake attack", CoordinatedOpsBlockedWlSupportDoesNotFakeAttack),
+            ("coordinated ops lead selection rejects remote oversized candidate", CoordinatedOpsLeadSelectionRejectsRemoteOversizedCandidate),
+            ("coordinated ops lead overmatch stays single lead", CoordinatedOpsLeadOvermatchStaysSingleLead),
+            ("coordinated ops reinforce uses defensive eligibility", CoordinatedOpsReinforceUsesDefensiveEligibility),
+            ("coordinated ops wl current order does not require direct movement", CoordinatedOpsWlCurrentOrderDoesNotRequireDirectMovement),
             ("coordinated ops empty target is single lead", CoordinatedOpsEmptyTargetIsSingleLead),
             ("coordinated ops high risk tightens donor caps", CoordinatedOpsHighRiskTightensDonorCaps),
             ("coordinated ops player cic returns none", CoordinatedOpsPlayerCicReturnsNone),
@@ -3294,6 +3298,72 @@ static class Program
         AssertEqual(CoordinatedOperationDecision.SingleLead, output.Decision);
         AssertEqual(1, output.Suppressed.Count);
         AssertEqual("blocked-commit-mode", output.Suppressed[0].Reason);
+    }
+
+    private static void CoordinatedOpsLeadSelectionRejectsRemoteOversizedCandidate()
+    {
+        var output = CoordinatedOperationPackageLedger.Build(OpInput(
+            OpCandidate(30, "remote", 500f, 0f, 20000f, CoordinatedCommitMode.DirectMovement, "Remote", "Remote"),
+            OpCandidate(10, "local", 0f, 0f, 9000f)));
+
+        AssertEqual(10, output.LeadStableUnitId);
+        var remote = output.Suppressed.Find(s => s.StableUnitId == 30);
+        AssertTrue(remote != null, "remote candidate should be suppressed");
+        AssertTrue(remote.Reason == "remote-tier-blocked" || remote.Reason == "outside-range",
+            "remote candidate should be blocked by range semantics");
+    }
+
+    private static void CoordinatedOpsLeadOvermatchStaysSingleLead()
+    {
+        var output = CoordinatedOperationPackageLedger.Build(OpInput(
+            OpCandidate(10, "lead", 0f, 0f, 14000f),
+            OpCandidate(20, "support", 5f, 0f, 4000f)));
+
+        AssertEqual(CoordinatedOperationDecision.SingleLead, output.Decision);
+        AssertEqual(0, output.SupportStableUnitIds.Count);
+        var support = output.Suppressed.Find(s => s.StableUnitId == 20);
+        AssertTrue(support != null, "support should be suppressed");
+        AssertTrue(support.Reason == "overmatch" || support.Reason == "lead-overmatch",
+            "support should be blocked by lead overmatch");
+    }
+
+    private static void CoordinatedOpsReinforceUsesDefensiveEligibility()
+    {
+        var lead = OpCandidate(10, "lead", 0f, 0f, 6000f);
+        var support = OpCandidate(20, "support", 5f, 0f, 5000f);
+        lead.OffensiveAllowed = false;
+        support.OffensiveAllowed = false;
+        support.TransferDonorAllowed = true;
+        var input = OpInput(lead, support);
+        input.Intent = CoordinatedOperationIntent.Reinforce;
+        input.TargetEnemyStrength = 12000f;
+
+        var output = CoordinatedOperationPackageLedger.Build(input);
+
+        AssertEqual(CoordinatedOperationDecision.Reinforce, output.Decision);
+        AssertEqual(10, output.LeadStableUnitId);
+        AssertEqual(1, output.SupportStableUnitIds.Count);
+        AssertEqual(20, output.SupportStableUnitIds[0]);
+        AssertTrue(output.Ratio >= input.Options.RequiredReinforceRatio, "reinforce ratio should pass");
+        AssertTrue(output.Ratio < input.Options.RequiredAttackRatio, "attack ratio should not pass");
+    }
+
+    private static void CoordinatedOpsWlCurrentOrderDoesNotRequireDirectMovement()
+    {
+        var support = OpCandidate(20, "wl-support", 5f, 0f, 5000f, CoordinatedCommitMode.WlCurrentOrder);
+        support.DirectMovementAllowed = false;
+        var blocked = OpCandidate(30, "blocked", 6f, 0f, 6000f, CoordinatedCommitMode.BlockedWlPlayerChain);
+        var output = CoordinatedOperationPackageLedger.Build(OpInput(
+            OpCandidate(10, "lead", 0f, 0f, 9000f),
+            support,
+            blocked));
+
+        AssertEqual(CoordinatedOperationDecision.CoordinateAttack, output.Decision);
+        AssertEqual(1, output.SupportStableUnitIds.Count);
+        AssertEqual(20, output.SupportStableUnitIds[0]);
+        var blockedSuppression = output.Suppressed.Find(s => s.StableUnitId == 30);
+        AssertTrue(blockedSuppression != null, "blocked W&L player-chain candidate should be suppressed");
+        AssertEqual("blocked-commit-mode", blockedSuppression.Reason);
     }
 
     private static void CoordinatedOpsEmptyTargetIsSingleLead()
