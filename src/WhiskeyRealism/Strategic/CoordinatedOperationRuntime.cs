@@ -25,6 +25,8 @@ namespace WhiskeyRealism.Strategic
             internal Regiment Unit;
             internal int StableUnitId;
             internal bool WasInOffensive;
+            internal bool HadDefensiveMovingOrder;
+            internal int RegimentPathsBefore;
         }
 
         private static readonly Dictionary<int, string> _packageLockByUnitId =
@@ -337,13 +339,17 @@ namespace WhiskeyRealism.Strategic
             if (AICampaign.MoveUnitTo(unit, target, true))
             {
                 bool wasInOffensive = offensive.Contains(unit);
+                bool hadDefensiveMovingOrder = AICampaign.DefensiveMovingOrder.OrderRunning(unit);
+                int regimentPathsBefore = unit.regimentpaths;
                 if (!offensive.Contains(unit))
                     offensive.Add(unit);
                 directRecords?.Add(new DirectCommitRecord
                 {
                     Unit = unit,
                     StableUnitId = plan.StableUnitId,
-                    WasInOffensive = wasInOffensive
+                    WasInOffensive = wasInOffensive,
+                    HadDefensiveMovingOrder = hadDefensiveMovingOrder,
+                    RegimentPathsBefore = regimentPathsBefore
                 });
                 MarkPackageLocked(plan.StableUnitId, packageSignature);
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=direct-move package={packageSignature}");
@@ -361,6 +367,10 @@ namespace WhiskeyRealism.Strategic
             {
                 var record = records[i];
                 ClearPackageLock(record.Unit);
+                if (!record.HadDefensiveMovingOrder)
+                    AICampaign.DefensiveMovingOrder.RemoveOrder(record.Unit);
+                if (record.RegimentPathsBefore <= 0 && record.Unit != null && record.Unit.regimentpaths > 0)
+                    record.Unit.StopRegiment(skipfinalrotation: true, manualstop: true);
                 if (!record.WasInOffensive)
                     offensive.Remove(record.Unit);
                 LogInfo($"[CoordinatedOps] unit={SafeName(record.Unit)} action=direct-rollback package={packageSignature}");
