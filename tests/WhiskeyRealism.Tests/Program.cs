@@ -173,6 +173,13 @@ static class Program
             ("operational probe overlays formation directive", OperationalProbeOverlaysFormationDirective),
             ("operational probe stays continuing on no contact even after minimum days", OperationalProbeStaysContinuingOnNoContactAfterMinimumDays),
             ("operational probe state has single source on coordinator", OperationalProbeStateHasSingleSourceOnCoordinator),
+            ("coordinated ops attack selects local support", CoordinatedOpsAttackSelectsLocalSupport),
+            ("coordinated ops blocked wl support does not fake attack", CoordinatedOpsBlockedWlSupportDoesNotFakeAttack),
+            ("coordinated ops empty target is single lead", CoordinatedOpsEmptyTargetIsSingleLead),
+            ("coordinated ops high risk tightens donor caps", CoordinatedOpsHighRiskTightensDonorCaps),
+            ("coordinated ops player cic returns none", CoordinatedOpsPlayerCicReturnsNone),
+            ("coordinated ops refuses live operation list candidates", CoordinatedOpsRefusesLiveOperationListCandidates),
+            ("coordinated ops deterministic tie by stable id", CoordinatedOpsDeterministicTieByStableId),
             ("recompute pressure resets counters before counting", RecomputePressureResetsCountersBeforeCounting),
             ("operational tempo chapter one delays escalation", OperationalTempoChapterOneDelaysEscalation),
             ("operational tempo late union sustains pressure", OperationalTempoLateUnionSustainsPressure),
@@ -3208,6 +3215,148 @@ static class Program
         });
         AssertTrue(second.State != null, "continuing probe publishes state");
         AssertEqual(first.State.ProbeId, second.State.ProbeId);
+    }
+
+    private static CoordinatedOperationCandidate OpCandidate(
+        int id,
+        string key,
+        float x,
+        float z,
+        float strength,
+        CoordinatedCommitMode commit = CoordinatedCommitMode.DirectMovement,
+        string sector = "VirginiaCapitalCorridor",
+        string area = "VirginiaCapitalCorridor")
+    {
+        return new CoordinatedOperationCandidate
+        {
+            StableUnitId = id,
+            DisplayUnitKey = key,
+            AllianceId = 1,
+            Level = FormationLevel.Corps,
+            Directive = FormationDirective.Counterstroke,
+            AreaKey = area,
+            SectorKey = sector,
+            X = x,
+            Z = z,
+            CombatAvailability = strength,
+            ExchangePressure = strength,
+            Readiness = 0.8f,
+            Morale = 0.8f,
+            Ammo = 0.8f,
+            Supply = 0.8f,
+            OffensiveAllowed = true,
+            DefensiveAllowed = true,
+            DirectMovementAllowed = true,
+            CommitMode = commit,
+            FrontPosture = FrontPosture.Counterstroke
+        };
+    }
+
+    private static CoordinatedOperationInput OpInput(params CoordinatedOperationCandidate[] candidates)
+    {
+        return new CoordinatedOperationInput
+        {
+            AllianceId = 1,
+            IsPlayerCic = false,
+            Intent = CoordinatedOperationIntent.Attack,
+            TargetName = "Manassas",
+            TargetAreaKey = "VirginiaCapitalCorridor",
+            TargetSectorKey = "VirginiaCapitalCorridor",
+            TargetX = 0f,
+            TargetZ = 0f,
+            TargetEnemyStrength = 10000f,
+            Options = CoordinatedOperationOptions.StableDefaults(10000f),
+            Candidates = new List<CoordinatedOperationCandidate>(candidates)
+        };
+    }
+
+    private static void CoordinatedOpsAttackSelectsLocalSupport()
+    {
+        var output = CoordinatedOperationPackageLedger.Build(OpInput(
+            OpCandidate(10, "lead", 0f, 0f, 8000f),
+            OpCandidate(20, "support", 5f, 0f, 6000f),
+            OpCandidate(30, "remote", 500f, 0f, 8000f, CoordinatedCommitMode.DirectMovement, "RemoteSector", "RemoteArea")));
+
+        AssertEqual(CoordinatedOperationDecision.CoordinateAttack, output.Decision);
+        AssertEqual(10, output.LeadStableUnitId);
+        AssertEqual(1, output.SupportStableUnitIds.Count);
+        AssertEqual(20, output.SupportStableUnitIds[0]);
+        AssertTrue(output.Ratio >= 1.25f, "attack ratio should pass");
+    }
+
+    private static void CoordinatedOpsBlockedWlSupportDoesNotFakeAttack()
+    {
+        var output = CoordinatedOperationPackageLedger.Build(OpInput(
+            OpCandidate(10, "lead", 0f, 0f, 9000f),
+            OpCandidate(20, "blocked", 5f, 0f, 6000f, CoordinatedCommitMode.BlockedWlPlayerChain)));
+
+        AssertTrue(output.Decision != CoordinatedOperationDecision.CoordinateAttack, "blocked support must not count");
+        AssertEqual(CoordinatedOperationDecision.SingleLead, output.Decision);
+        AssertEqual(1, output.Suppressed.Count);
+        AssertEqual("blocked-commit-mode", output.Suppressed[0].Reason);
+    }
+
+    private static void CoordinatedOpsEmptyTargetIsSingleLead()
+    {
+        var input = OpInput(
+            OpCandidate(10, "lead", 0f, 0f, 9000f),
+            OpCandidate(20, "support", 5f, 0f, 9000f));
+        input.Intent = CoordinatedOperationIntent.Probe;
+        input.TargetEnemyStrength = 0f;
+
+        var output = CoordinatedOperationPackageLedger.Build(input);
+
+        AssertEqual(CoordinatedOperationDecision.SingleLead, output.Decision);
+        AssertEqual(0, output.SupportStableUnitIds.Count);
+    }
+
+    private static void CoordinatedOpsHighRiskTightensDonorCaps()
+    {
+        var options = CoordinatedOperationOptions.FromDirector(10000f, new DirectorPosture
+        {
+            Pace = CampaignPace.Overheated,
+            Risk = CollapseRisk.Critical
+        });
+        var input = OpInput(
+            OpCandidate(10, "lead", 0f, 0f, 9000f),
+            OpCandidate(20, "support-a", 5f, 0f, 4000f),
+            OpCandidate(30, "support-b", 6f, 0f, 4000f));
+        input.Options = options;
+
+        var output = CoordinatedOperationPackageLedger.Build(input);
+
+        AssertTrue(output.SupportStableUnitIds.Count <= 1, "high risk caps support units to one");
+    }
+
+    private static void CoordinatedOpsPlayerCicReturnsNone()
+    {
+        var input = OpInput(OpCandidate(10, "lead", 0f, 0f, 20000f));
+        input.IsPlayerCic = true;
+
+        var output = CoordinatedOperationPackageLedger.Build(input);
+
+        AssertEqual(CoordinatedOperationDecision.None, output.Decision);
+        AssertEqual("player-cic", output.Reason);
+    }
+
+    private static void CoordinatedOpsRefusesLiveOperationListCandidates()
+    {
+        var inOps = OpCandidate(10, "in-ops", 0f, 0f, 20000f);
+        inOps.InOffensiveOperation = true;
+
+        var output = CoordinatedOperationPackageLedger.Build(OpInput(inOps));
+
+        AssertEqual(CoordinatedOperationDecision.None, output.Decision);
+        AssertEqual("no-eligible-lead", output.Reason);
+    }
+
+    private static void CoordinatedOpsDeterministicTieByStableId()
+    {
+        var output = CoordinatedOperationPackageLedger.Build(OpInput(
+            OpCandidate(30, "higher", 0f, 0f, 9000f),
+            OpCandidate(10, "lower", 0f, 0f, 9000f)));
+
+        AssertEqual(10, output.LeadStableUnitId);
     }
 
     private static void RecomputePressureResetsCountersBeforeCounting()
