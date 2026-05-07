@@ -152,6 +152,20 @@ namespace WhiskeyRealism.Strategic
             return decision;
         }
 
+        internal static WlStrategicOrderDecision ClassifyOnly(WlStrategicOrderRequest request)
+        {
+            if (request == null)
+            {
+                return new WlStrategicOrderDecision(
+                    WlStrategicOrderResult.DirectMovementAllowed,
+                    wlOrderType: -1,
+                    mayDirectMove: true,
+                    mayMutateOperationList: true,
+                    reason: "null-request");
+            }
+            return Classify(request.Intent, BuildFacts(request));
+        }
+
         internal static WlStrategicOrderDecision Classify(
             WlStrategicIntent intent,
             WlStrategicRoleFacts facts,

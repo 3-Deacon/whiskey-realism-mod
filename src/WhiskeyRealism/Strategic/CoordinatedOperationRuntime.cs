@@ -21,6 +21,50 @@ namespace WhiskeyRealism.Strategic
             return CoordinatedCommitMode.BlockedWlPlayerChain;
         }
 
+        internal static CoordinatedOperationCandidate CandidateFromAssignment(
+            FormationDirectiveAssignment assignment,
+            bool inOffensive,
+            bool inDefensive,
+            bool constructingSupplyDepot,
+            CoordinatedCommitMode commitMode)
+        {
+            if (assignment == null) return null;
+            return new CoordinatedOperationCandidate
+            {
+                StableUnitId = assignment.StableUnitId,
+                DisplayUnitKey = assignment.UnitKey,
+                AllianceId = assignment.AllianceId,
+                Level = assignment.Level,
+                Directive = assignment.Directive,
+                AreaKey = assignment.AreaKey,
+                SectorKey = assignment.SectorKey,
+                X = assignment.X,
+                Z = assignment.Z,
+                CombatAvailability = assignment.CombatAvailability,
+                ExchangePressure = assignment.ExchangePressure,
+                LocalFriendlySupport = assignment.LocalFriendlySupport,
+                LocalEnemyStrength = assignment.LocalEnemyStrength,
+                Readiness = assignment.Readiness,
+                Morale = assignment.Morale,
+                Ammo = assignment.Ammo,
+                Supply = assignment.Supply,
+                Fatigue = assignment.Fatigue,
+                OffensiveAllowed = assignment.OffensiveAllowed ||
+                    assignment.Directive == FormationDirective.Probe ||
+                    assignment.Directive == FormationDirective.Counterstroke,
+                DefensiveAllowed = assignment.DefensiveAllowed,
+                TransferDonorAllowed = assignment.TransferDonorAllowed,
+                DirectMovementAllowed = assignment.DirectMovementAllowed,
+                InheritsFromParent = assignment.InheritsFromParent,
+                CriticalSector = false,
+                FrontPosture = FrontPosture.Counterstroke,
+                InOffensiveOperation = inOffensive,
+                InDefensiveOperation = inDefensive,
+                ConstructingSupplyDepot = constructingSupplyDepot,
+                CommitMode = commitMode
+            };
+        }
+
         internal static string ResolveTargetName(int objectiveId, string fallbackAreaKey, CampaignMapLedger map, Vector3 target)
         {
             string objectiveName = ResolveObjectiveName(objectiveId);

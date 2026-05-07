@@ -165,7 +165,12 @@ namespace WhiskeyRealism.Strategic
             if (input.FormationDirectives?.Assignments != null)
             {
                 foreach (var assignment in input.FormationDirectives.Assignments)
-                    packageInput.Candidates.Add(CandidateFromAssignment(assignment));
+                    packageInput.Candidates.Add(CoordinatedOperationRuntime.CandidateFromAssignment(
+                        assignment,
+                        inOffensive: false,
+                        inDefensive: false,
+                        constructingSupplyDepot: false,
+                        commitMode: CoordinatedCommitMode.DirectMovement));
             }
 
             return CoordinatedOperationPackageLedger.Build(packageInput);
@@ -174,41 +179,6 @@ namespace WhiskeyRealism.Strategic
         private static int StableIdFor(FormationDirectiveLedger ledger, string unitKey)
         {
             return ledger?.GetAssignment(unitKey)?.StableUnitId ?? 0;
-        }
-
-        private static CoordinatedOperationCandidate CandidateFromAssignment(FormationDirectiveAssignment assignment)
-        {
-            return new CoordinatedOperationCandidate
-            {
-                StableUnitId = assignment.StableUnitId,
-                DisplayUnitKey = assignment.UnitKey,
-                AllianceId = assignment.AllianceId,
-                Level = assignment.Level,
-                Directive = assignment.Directive,
-                AreaKey = assignment.AreaKey,
-                SectorKey = assignment.SectorKey,
-                X = assignment.X,
-                Z = assignment.Z,
-                CombatAvailability = assignment.CombatAvailability,
-                ExchangePressure = assignment.ExchangePressure,
-                LocalFriendlySupport = assignment.LocalFriendlySupport,
-                LocalEnemyStrength = assignment.LocalEnemyStrength,
-                Readiness = assignment.Readiness,
-                Morale = assignment.Morale,
-                Ammo = assignment.Ammo,
-                Supply = assignment.Supply,
-                Fatigue = assignment.Fatigue,
-                OffensiveAllowed = assignment.OffensiveAllowed ||
-                    assignment.Directive == FormationDirective.Probe ||
-                    assignment.Directive == FormationDirective.Counterstroke,
-                DefensiveAllowed = assignment.DefensiveAllowed,
-                TransferDonorAllowed = assignment.TransferDonorAllowed,
-                DirectMovementAllowed = assignment.DirectMovementAllowed,
-                InheritsFromParent = assignment.InheritsFromParent,
-                CriticalSector = false,
-                FrontPosture = FrontPosture.Counterstroke,
-                CommitMode = CoordinatedCommitMode.DirectMovement
-            };
         }
 
         private static OperationalProbeOutput EvaluateExistingProbe(

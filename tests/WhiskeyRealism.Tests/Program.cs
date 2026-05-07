@@ -184,6 +184,7 @@ static class Program
             ("coordinated ops reinforce uses defensive eligibility", CoordinatedOpsReinforceUsesDefensiveEligibility),
             ("coordinated ops reinforce blocks non donor support", CoordinatedOpsReinforceBlocksNonDonorSupport),
             ("coordinated ops wl current order does not require direct movement", CoordinatedOpsWlCurrentOrderDoesNotRequireDirectMovement),
+            ("coordinated ops bridge decision maps blocked commit mode", CoordinatedOpsBridgeDecisionMapsBlockedCommitMode),
             ("coordinated ops empty target is single lead", CoordinatedOpsEmptyTargetIsSingleLead),
             ("coordinated ops high risk tightens donor caps", CoordinatedOpsHighRiskTightensDonorCaps),
             ("coordinated ops player cic returns none", CoordinatedOpsPlayerCicReturnsNone),
@@ -3578,6 +3579,32 @@ static class Program
         var blockedSuppression = output.Suppressed.Find(s => s.StableUnitId == 30);
         AssertTrue(blockedSuppression != null, "blocked W&L player-chain candidate should be suppressed");
         AssertEqual("blocked-commit-mode", blockedSuppression.Reason);
+    }
+
+    private static void CoordinatedOpsBridgeDecisionMapsBlockedCommitMode()
+    {
+        var blocked = new WlStrategicOrderDecision(
+            WlStrategicOrderResult.WlCurrentOrderIneligible,
+            16,
+            mayDirectMove: false,
+            mayMutateOperationList: false,
+            reason: "chain");
+        var issued = new WlStrategicOrderDecision(
+            WlStrategicOrderResult.IssuedWlCurrentOrder,
+            16,
+            mayDirectMove: false,
+            mayMutateOperationList: false,
+            reason: "issued");
+        var direct = new WlStrategicOrderDecision(
+            WlStrategicOrderResult.DirectMovementAllowed,
+            16,
+            mayDirectMove: true,
+            mayMutateOperationList: true,
+            reason: "direct");
+
+        AssertEqual(CoordinatedCommitMode.BlockedWlPlayerChain, CoordinatedOperationRuntime.CommitModeFromBridge(blocked));
+        AssertEqual(CoordinatedCommitMode.WlCurrentOrder, CoordinatedOperationRuntime.CommitModeFromBridge(issued));
+        AssertEqual(CoordinatedCommitMode.DirectMovement, CoordinatedOperationRuntime.CommitModeFromBridge(direct));
     }
 
     private static void CoordinatedOpsEmptyTargetIsSingleLead()
