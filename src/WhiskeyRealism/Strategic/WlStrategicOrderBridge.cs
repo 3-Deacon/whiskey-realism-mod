@@ -8,6 +8,7 @@ namespace WhiskeyRealism.Strategic
     {
         Redeploy,
         Probe,
+        Reinforce,
         Offensive,
         OffensiveContinuation,
         EngageEnemy,
@@ -196,6 +197,7 @@ namespace WhiskeyRealism.Strategic
             {
                 case WlStrategicIntent.Redeploy:
                 case WlStrategicIntent.Probe:
+                case WlStrategicIntent.Reinforce:
                     return 5;
                 case WlStrategicIntent.Offensive:
                     return 16;

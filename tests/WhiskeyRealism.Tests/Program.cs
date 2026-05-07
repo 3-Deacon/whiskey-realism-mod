@@ -61,6 +61,8 @@ static class Program
             ("wl bridge player cic skips movement", WlBridgePlayerCicSkipsMovement),
             ("wl bridge moved by player skips movement", WlBridgeMovedByPlayerSkipsMovement),
             ("wl bridge eligible under commander issues current order", WlBridgeEligibleUnderCommanderIssuesCurrentOrder),
+            ("wl bridge reinforce maps to redeploy order", WlBridgeReinforceMapsToRedeployOrder),
+            ("wl bridge reinforce eligible under commander issues current order", WlBridgeReinforceEligibleUnderCommanderIssuesCurrentOrder),
             ("wl bridge ineligible under commander blocks direct fallback", WlBridgeIneligibleUnderCommanderBlocksDirectFallback),
             ("wl bridge failed vanilla call blocks direct fallback", WlBridgeFailedVanillaCallBlocksDirectFallback),
             ("wl bridge part of player unit not under commander stays direct for c0c", WlBridgePartOfPlayerUnitNotUnderCommanderStaysDirectForC0c),
@@ -1115,6 +1117,35 @@ static class Program
         AssertEqual(6, decision.WlOrderType);
         AssertEqual(false, decision.MayDirectMove);
         AssertEqual(false, decision.MayMutateOperationList);
+    }
+
+    private static void WlBridgeReinforceMapsToRedeployOrder()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.Reinforce,
+            new WlStrategicRoleFacts(wlActive: false, isPlayerAlliance: true));
+
+        AssertEqual(WlStrategicOrderResult.NotWl, decision.Result);
+        AssertEqual(5, decision.WlOrderType);
+        AssertEqual(true, decision.MayDirectMove);
+    }
+
+    private static void WlBridgeReinforceEligibleUnderCommanderIssuesCurrentOrder()
+    {
+        var facts = new WlStrategicRoleFacts
+        {
+            WlActive = true,
+            IsPlayerAlliance = true,
+            IsUnderCommander = true,
+            CurrentCommandIsCampaignGroup = true,
+            CurrentCommandParentIsUnderTargetUnit = true
+        };
+
+        var decision = WlStrategicOrderBridge.Classify(WlStrategicIntent.Reinforce, facts);
+
+        AssertEqual(WlStrategicOrderResult.IssuedWlCurrentOrder, decision.Result);
+        AssertEqual(5, decision.WlOrderType);
+        AssertEqual(false, decision.MayDirectMove);
     }
 
     private static void WlBridgeIneligibleUnderCommanderBlocksDirectFallback()
