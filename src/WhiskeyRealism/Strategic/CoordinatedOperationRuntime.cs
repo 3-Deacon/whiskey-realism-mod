@@ -336,11 +336,11 @@ namespace WhiskeyRealism.Strategic
                 return true;
             }
 
+            bool wasInOffensive = offensive.Contains(unit);
+            bool hadDefensiveMovingOrder = AICampaign.DefensiveMovingOrder.OrderRunning(unit);
+            int regimentPathsBefore = unit.regimentpaths;
             if (AICampaign.MoveUnitTo(unit, target, true))
             {
-                bool wasInOffensive = offensive.Contains(unit);
-                bool hadDefensiveMovingOrder = AICampaign.DefensiveMovingOrder.OrderRunning(unit);
-                int regimentPathsBefore = unit.regimentpaths;
                 if (!offensive.Contains(unit))
                     offensive.Add(unit);
                 directRecords?.Add(new DirectCommitRecord
