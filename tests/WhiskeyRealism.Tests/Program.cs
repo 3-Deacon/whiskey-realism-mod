@@ -178,6 +178,7 @@ static class Program
             ("coordinated ops lead selection rejects remote oversized candidate", CoordinatedOpsLeadSelectionRejectsRemoteOversizedCandidate),
             ("coordinated ops lead overmatch stays single lead", CoordinatedOpsLeadOvermatchStaysSingleLead),
             ("coordinated ops reinforce uses defensive eligibility", CoordinatedOpsReinforceUsesDefensiveEligibility),
+            ("coordinated ops reinforce blocks non donor support", CoordinatedOpsReinforceBlocksNonDonorSupport),
             ("coordinated ops wl current order does not require direct movement", CoordinatedOpsWlCurrentOrderDoesNotRequireDirectMovement),
             ("coordinated ops empty target is single lead", CoordinatedOpsEmptyTargetIsSingleLead),
             ("coordinated ops high risk tightens donor caps", CoordinatedOpsHighRiskTightensDonorCaps),
@@ -3346,6 +3347,29 @@ static class Program
         AssertEqual(20, output.SupportStableUnitIds[0]);
         AssertTrue(output.Ratio >= input.Options.RequiredReinforceRatio, "reinforce ratio should pass");
         AssertTrue(output.Ratio < input.Options.RequiredAttackRatio, "attack ratio should not pass");
+    }
+
+    private static void CoordinatedOpsReinforceBlocksNonDonorSupport()
+    {
+        var lead = OpCandidate(10, "lead", 0f, 0f, 6000f);
+        var support = OpCandidate(20, "support", 5f, 0f, 5000f);
+        lead.OffensiveAllowed = false;
+        support.OffensiveAllowed = false;
+        support.DefensiveAllowed = true;
+        support.TransferDonorAllowed = false;
+        var input = OpInput(lead, support);
+        input.Intent = CoordinatedOperationIntent.Reinforce;
+        input.TargetEnemyStrength = 12000f;
+
+        var output = CoordinatedOperationPackageLedger.Build(input);
+
+        AssertTrue(output.Decision != CoordinatedOperationDecision.Reinforce,
+            "non donor support must not create reinforce package");
+        AssertEqual(CoordinatedOperationDecision.SingleLead, output.Decision);
+        AssertEqual(0, output.SupportStableUnitIds.Count);
+        var blocked = output.Suppressed.Find(s => s.StableUnitId == 20);
+        AssertTrue(blocked != null, "non donor support should be suppressed");
+        AssertEqual("transfer-donor-blocked", blocked.Reason);
     }
 
     private static void CoordinatedOpsWlCurrentOrderDoesNotRequireDirectMovement()
