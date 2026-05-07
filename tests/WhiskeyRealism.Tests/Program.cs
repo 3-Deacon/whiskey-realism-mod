@@ -38,6 +38,7 @@ static class Program
             ("tactical telemetry summary handles null", TacticalTelemetrySummaryHandlesNull),
             ("tactical telemetry maps player-order prefix", TacticalTelemetryMapsPlayerOrderPrefix),
             ("tactical telemetry maps command prefix", TacticalTelemetryMapsCommandPrefix),
+            ("tactical telemetry maps odds prefix", TacticalTelemetryMapsOddsPrefix),
             ("tactical telemetry signature changes on material fields", TacticalTelemetrySignatureChangesOnMaterialFields),
             ("tactical telemetry signature changes on command signature", TacticalTelemetrySignatureChangesOnCommandSignature),
             ("tactical telemetry throttle suppresses repeated signature", TacticalTelemetryThrottleSuppressesRepeatedSignature),
@@ -48,6 +49,18 @@ static class Program
             ("tactical order high initiative reduces delay pressure without instant delivery", TacticalOrderHighInitiativeReducesDelayPressureWithoutInstant),
             ("tactical command army and corps intent does not retask regiments directly", TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly),
             ("tactical command division mission maps to brigade actions", TacticalCommandDivisionMissionMapsToBrigadeActions),
+            ("tactical contact no sighting is none", TacticalContactNoSightingIsNone),
+            ("tactical contact stale sighting ages down", TacticalContactStaleSightingAgesDown),
+            ("tactical odds no contact avoids assault", TacticalOddsNoContactAvoidsAssault),
+            ("tactical odds global superiority selects one decisive sector", TacticalOddsGlobalSuperioritySelectsOneDecisiveSector),
+            ("tactical odds inferior no relief preserves force", TacticalOddsInferiorNoReliefPreservesForce),
+            ("tactical odds inferior with relief delays", TacticalOddsInferiorWithReliefDelays),
+            ("tactical macro dynamic is not attack", TacticalMacroDynamicIsNotAttack),
+            ("tactical macro debug override skips", TacticalMacroDebugOverrideSkips),
+            ("tactical macro inferior no relief retreats", TacticalMacroInferiorNoReliefRetreats),
+            ("tactical group decisive sector attacks without charge", TacticalGroupDecisiveSectorAttacksWithoutCharge),
+            ("tactical group low confidence keeps vanilla", TacticalGroupLowConfidenceKeepsVanilla),
+            ("tactical group wl player subordinate skips", TacticalGroupWlPlayerSubordinateSkips),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
             ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
             ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
@@ -547,6 +560,17 @@ static class Program
         AssertContains(summary, "commandSig=src=Division,tgt=Brigade,scope=SubcommandAction", "command signature");
     }
 
+    private static void TacticalTelemetryMapsOddsPrefix()
+    {
+        var context = TacticalBattleContext.Empty();
+        context.OddsSummary = "posture=probe";
+
+        string summary = TacticalTelemetry.Summary(TacticalObservedEvent.Odds, context);
+
+        AssertTrue(summary.StartsWith("[TacticalOdds]"), "odds prefix");
+        AssertContains(summary, "odds=posture=probe", "odds summary");
+    }
+
     private static void TacticalTelemetrySignatureChangesOnMaterialFields()
     {
         var baseline = new TacticalBattleContext
@@ -605,6 +629,208 @@ static class Program
         AssertContains(delta, "groups=2->2", "group delta");
         AssertContains(delta, "charging=0->1", "charging delta");
         AssertContains(delta, "reserves=1->2", "reserve delta");
+    }
+
+    private static void TacticalContactNoSightingIsNone()
+    {
+        var contact = TacticalContactLedger.Classify(new TacticalContactInput(
+            visibleEnemyStrength: 0f,
+            recentEnemyStrength: 0f,
+            inferredEnemyStrength: 0f,
+            secondsSinceLastConfirmed: 9999f,
+            receivedFire: false,
+            inFog: true));
+
+        AssertEqual(TacticalContactState.None, contact.State, "state");
+        AssertTrue(contact.Confidence < 0.2f, "confidence should be low without contact");
+    }
+
+    private static void TacticalContactStaleSightingAgesDown()
+    {
+        var recent = TacticalContactLedger.Classify(new TacticalContactInput(
+            visibleEnemyStrength: 1000f,
+            recentEnemyStrength: 1000f,
+            inferredEnemyStrength: 0f,
+            secondsSinceLastConfirmed: 5f,
+            receivedFire: false,
+            inFog: false));
+        var stale = TacticalContactLedger.Classify(new TacticalContactInput(
+            visibleEnemyStrength: 0f,
+            recentEnemyStrength: 1000f,
+            inferredEnemyStrength: 0f,
+            secondsSinceLastConfirmed: 900f,
+            receivedFire: false,
+            inFog: true));
+
+        AssertEqual(TacticalContactState.Confirmed, recent.State, "recent state");
+        AssertTrue(stale.State == TacticalContactState.Inferred || stale.State == TacticalContactState.None, "stale state");
+        AssertTrue(stale.Confidence < recent.Confidence, "stale confidence should decay");
+    }
+
+    private static void TacticalOddsNoContactAvoidsAssault()
+    {
+        var output = TacticalOddsDoctrine.Evaluate(new TacticalOddsInput(
+            ownStrength: 12000f,
+            enemyStrengthConfirmed: 0f,
+            enemyStrengthRecent: 0f,
+            enemyStrengthInferred: 0f,
+            reinforcementStrength24h: 0f,
+            terrainAdvantage: 0f,
+            contact: new TacticalContactAssessment(TacticalContactState.None, 0f, 0f, "none"),
+            sectors: Array.Empty<TacticalSectorAssessment>()));
+
+        AssertEqual(TacticalInferiorForcePosture.ProbeOrHold, output.InferiorForcePosture, "posture");
+        AssertTrue(!output.AllowAssault, "no contact should not permit assault");
+    }
+
+    private static void TacticalOddsGlobalSuperioritySelectsOneDecisiveSector()
+    {
+        var sectors = new[]
+        {
+            new TacticalSectorAssessment(0, TacticalSectorSource.AngleSlice, 3000f, 2500f, 0.7f, false, false, TacticalSectorMission.Hold),
+            new TacticalSectorAssessment(1, TacticalSectorSource.AngleSlice, 5000f, 1800f, 0.9f, false, false, TacticalSectorMission.Probe),
+            new TacticalSectorAssessment(2, TacticalSectorSource.AngleSlice, 4000f, 3200f, 0.8f, false, false, TacticalSectorMission.Hold)
+        };
+
+        var output = TacticalOddsDoctrine.Evaluate(new TacticalOddsInput(
+            ownStrength: 12000f,
+            enemyStrengthConfirmed: 7500f,
+            enemyStrengthRecent: 7500f,
+            enemyStrengthInferred: 7500f,
+            reinforcementStrength24h: 0f,
+            terrainAdvantage: 0f,
+            contact: new TacticalContactAssessment(TacticalContactState.Confirmed, 0.9f, 7500f, "visible"),
+            sectors: sectors));
+
+        AssertEqual(1, output.DecisiveSectorId, "decisive sector");
+        AssertTrue(output.EconomyOfForceSectorIds.Length >= 1, "other sectors should remain economy/fix candidates");
+    }
+
+    private static void TacticalOddsInferiorNoReliefPreservesForce()
+    {
+        var output = TacticalOddsDoctrine.Evaluate(new TacticalOddsInput(
+            ownStrength: 4000f,
+            enemyStrengthConfirmed: 12000f,
+            enemyStrengthRecent: 12000f,
+            enemyStrengthInferred: 12000f,
+            reinforcementStrength24h: 0f,
+            terrainAdvantage: 0f,
+            contact: new TacticalContactAssessment(TacticalContactState.Confirmed, 0.9f, 12000f, "visible"),
+            sectors: Array.Empty<TacticalSectorAssessment>()));
+
+        AssertEqual(TacticalInferiorForcePosture.PreserveOrRetreat, output.InferiorForcePosture, "posture");
+    }
+
+    private static void TacticalOddsInferiorWithReliefDelays()
+    {
+        var output = TacticalOddsDoctrine.Evaluate(new TacticalOddsInput(
+            ownStrength: 4000f,
+            enemyStrengthConfirmed: 12000f,
+            enemyStrengthRecent: 12000f,
+            enemyStrengthInferred: 12000f,
+            reinforcementStrength24h: 5000f,
+            terrainAdvantage: 0.8f,
+            contact: new TacticalContactAssessment(TacticalContactState.Confirmed, 0.9f, 12000f, "visible"),
+            sectors: Array.Empty<TacticalSectorAssessment>()));
+
+        AssertEqual(TacticalInferiorForcePosture.DelayOnStrongGround, output.InferiorForcePosture, "posture");
+    }
+
+    private static TacticalOddsAssessment Odds(
+        float current,
+        int decisive = -1,
+        TacticalInferiorForcePosture posture = TacticalInferiorForcePosture.None,
+        float confidence = 0.9f,
+        bool assault = false)
+    {
+        return new TacticalOddsAssessment(
+            current,
+            current,
+            decisive,
+            Array.Empty<int>(),
+            posture,
+            confidence,
+            assault);
+    }
+
+    private static void TacticalMacroDynamicIsNotAttack()
+    {
+        var decision = TacticalDoctrineScorer.DecideMacro(new TacticalMacroDecisionInput(
+            vanillaMacro: -1,
+            debugOverrideActive: false,
+            saveRestoreMacroActive: false,
+            vanillaRetreatActive: false,
+            commanderAggression01: 0.5f,
+            odds: Odds(1.2f, confidence: 0.1f)));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
+        AssertTrue(decision.MacroAi == -1 || decision.MacroAi == 2, "no-contact dynamic should stay dynamic/defend");
+    }
+
+    private static void TacticalMacroDebugOverrideSkips()
+    {
+        var decision = TacticalDoctrineScorer.DecideMacro(new TacticalMacroDecisionInput(
+            vanillaMacro: 1,
+            debugOverrideActive: true,
+            saveRestoreMacroActive: false,
+            vanillaRetreatActive: false,
+            commanderAggression01: 1f,
+            odds: Odds(3f, decisive: 1, confidence: 1f, assault: true)));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Skip, decision.Kind, "debug override must skip");
+    }
+
+    private static void TacticalMacroInferiorNoReliefRetreats()
+    {
+        var decision = TacticalDoctrineScorer.DecideMacro(new TacticalMacroDecisionInput(
+            vanillaMacro: 2,
+            debugOverrideActive: false,
+            saveRestoreMacroActive: false,
+            vanillaRetreatActive: false,
+            commanderAggression01: 0.5f,
+            odds: Odds(0.33f, posture: TacticalInferiorForcePosture.PreserveOrRetreat, confidence: 0.9f)));
+
+        AssertEqual(3, decision.MacroAi, "macro retreat pressure");
+    }
+
+    private static void TacticalGroupDecisiveSectorAttacksWithoutCharge()
+    {
+        var sector = new TacticalSectorAssessment(4, TacticalSectorSource.ObjectiveChain, 5000f, 2000f, 0.9f, strongPoint: false, flankRisk: false, TacticalSectorMission.AttackWeakPoint);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 2,
+            macroAi: 1,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
+        AssertEqual(3, decision.GroupStance, "attack stance, not charge");
+    }
+
+    private static void TacticalGroupLowConfidenceKeepsVanilla()
+    {
+        var sector = new TacticalSectorAssessment(4, TacticalSectorSource.AngleSlice, 5000f, 2000f, 0.2f, strongPoint: false, flankRisk: false, TacticalSectorMission.AttackWeakPoint);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 2,
+            macroAi: 1,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Skip, decision.Kind, "low confidence");
+    }
+
+    private static void TacticalGroupWlPlayerSubordinateSkips()
+    {
+        var sector = new TacticalSectorAssessment(4, TacticalSectorSource.ObjectiveChain, 5000f, 2000f, 0.9f, strongPoint: false, flankRisk: false, TacticalSectorMission.AttackWeakPoint);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 2,
+            macroAi: 1,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: false));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Skip, decision.Kind, "wl ownership");
     }
 
     private static void TacticalOrderOutsideBugleRangeIsDelayed()

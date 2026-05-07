@@ -120,6 +120,7 @@ namespace WhiskeyRealism.Patches
         internal static void CheckGlobalAIStrategyPostfix(AIBattle __instance)
         {
             Observe(__instance, TacticalObservedEvent.Macro, null, null);
+            Observe(__instance, TacticalObservedEvent.Odds, null, null);
         }
 
         [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
@@ -870,7 +871,142 @@ namespace WhiskeyRealism.Patches
             if (groupScoped) MergeGroupCounts(group, context);
             else CountUnits(unitsUsed, context);
 
+            var odds = BuildOddsDoctrine(battle, bunits, unitsUsed, side);
+            context.CurrentGlobalOdds = odds.CurrentGlobalOdds;
+            context.ProjectedGlobalOdds = odds.ProjectedGlobalOdds;
+            context.DecisiveSectorId = odds.DecisiveSectorId;
+            context.OddsSignature = "cur=" + BucketForObserver(odds.CurrentGlobalOdds)
+                + ",proj=" + BucketForObserver(odds.ProjectedGlobalOdds)
+                + ",decisive=" + odds.DecisiveSectorId
+                + ",posture=" + odds.InferiorForcePosture;
+            context.OddsSummary = "posture=" + odds.InferiorForcePosture
+                + ",confidence=" + FormatHours(odds.Confidence)
+                + ",assault=" + (odds.AllowAssault ? "1" : "0");
+
             return context;
+        }
+
+        private static TacticalOddsAssessment BuildOddsDoctrine(
+            AIBattle battle,
+            BattleUnits bunits,
+            IList unitsUsed,
+            int side)
+        {
+            float own = Math.Max(1f, SafeSideInfoFloat(bunits, side, "totalactiveforce"));
+            float confirmedEnemy = EstimateVisibleEnemyStrength(unitsUsed);
+            float inferredEnemy = EstimateInferredEnemyStrength(unitsUsed);
+            float enemy = Math.Max(confirmedEnemy, inferredEnemy);
+            if (enemy <= 0f)
+            {
+                float forceBalance = SafeForceBalance(bunits, side);
+                if (forceBalance > 0.01f && forceBalance < 0.99f)
+                    enemy = own * Math.Max(0.1f, (1f - forceBalance) / Math.Max(0.1f, forceBalance));
+            }
+
+            var contact = TacticalContactLedger.Classify(new TacticalContactInput(
+                confirmedEnemy,
+                confirmedEnemy,
+                inferredEnemy,
+                confirmedEnemy > 0f ? 0f : 9999f,
+                AnyReceivedFire(unitsUsed),
+                confirmedEnemy <= 0f));
+
+            return TacticalOddsDoctrine.Evaluate(new TacticalOddsInput(
+                own,
+                confirmedEnemy,
+                confirmedEnemy,
+                Math.Max(enemy, inferredEnemy),
+                SafeReinforcements(bunits, side),
+                0f,
+                contact,
+                BuildSectorAssessments(battle, unitsUsed)));
+        }
+
+        private static TacticalSectorAssessment[] BuildSectorAssessments(AIBattle battle, IList units)
+        {
+            if (units == null) return Array.Empty<TacticalSectorAssessment>();
+
+            var sectors = new List<TacticalSectorAssessment>();
+            int sectorId = 0;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var group = units[i] as Regiment;
+                if (group == null || group.unittyp <= 13) continue;
+
+                float own = Math.Max(group.groupowninrange, group.groupstrengthaigroup);
+                float enemy = Math.Max(1f, group.groupenemiesinrange);
+                float confidence = group.unitrange != null && group.unitrange.closestenemyunitfarreg != null ? 0.8f : 0.45f;
+                bool flankRisk = group.flanksthreated > 0f || group.outflanked > 0;
+                bool strongPoint = group.covervalue > 0.5f || group.fortinrange;
+                sectors.Add(new TacticalSectorAssessment(
+                    sectorId++,
+                    TacticalSectorSource.AngleSlice,
+                    own,
+                    enemy,
+                    confidence,
+                    strongPoint,
+                    flankRisk,
+                    TacticalSectorMission.Hold));
+            }
+
+            return sectors.ToArray();
+        }
+
+        private static float EstimateVisibleEnemyStrength(IList units)
+        {
+            if (units == null) return 0f;
+
+            float total = 0f;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var unit = units[i] as Regiment;
+                if (unit == null || unit.unitrange == null) continue;
+                if (unit.unitrange.closestenemyunitfarreg != null)
+                    total += Math.Max(0, unit.unitrange.closestenemyunitfarreg.strength);
+                else if (unit.unitrange.closestenemyunit != null)
+                    total += 100f;
+            }
+
+            return total;
+        }
+
+        private static float EstimateInferredEnemyStrength(IList units)
+        {
+            if (units == null) return 0f;
+
+            float total = 0f;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var unit = units[i] as Regiment;
+                if (unit == null || unit.unitrange == null || unit.unitrange.enemystrengthwithinangle == null) continue;
+                for (int j = 0; j < unit.unitrange.enemystrengthwithinangle.Length; j++)
+                    total += Math.Max(0f, unit.unitrange.enemystrengthwithinangle[j]);
+            }
+
+            return total;
+        }
+
+        private static bool AnyReceivedFire(IList units)
+        {
+            if (units == null) return false;
+
+            for (int i = 0; i < units.Count; i++)
+            {
+                var unit = units[i] as Regiment;
+                if (unit == null) continue;
+                try
+                {
+                    var field = AccessTools.Field(unit.GetType(), "receivedfire");
+                    var received = field != null ? field.GetValue(unit) as IList : null;
+                    if (received != null && received.Count > 0) return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            return false;
         }
 
         private static TacticalObserverSnapshot SnapshotBattle(AIBattle battle)
@@ -1172,6 +1308,30 @@ namespace WhiskeyRealism.Patches
             {
                 return 0f;
             }
+        }
+
+        private static float SafeSideInfoFloat(BattleUnits bunits, int side, string fieldName)
+        {
+            try
+            {
+                if (bunits == null || bunits.sideinformation == null) return 0f;
+                if (side < 0 || side >= bunits.sideinformation.Length) return 0f;
+                var info = bunits.sideinformation[side];
+                var field = AccessTools.Field(info.GetType(), fieldName);
+                if (field == null) return 0f;
+                object value = field.GetValue(info);
+                return value == null ? 0f : Convert.ToSingle(value);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static string BucketForObserver(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return "0.0";
+            return (Math.Round(value * 2f) / 2f).ToString("0.0");
         }
 
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)

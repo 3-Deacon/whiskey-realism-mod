@@ -48,9 +48,14 @@ namespace WhiskeyRealism.Tactical
                    " sectorSource=" + SectorSourceName(context.SectorSource) +
                    " forceBalance=" + FormatFloat(context.ForceBalance) +
                    " reinf24h=" + FormatFloat(context.ReinforcementsWithin24Hours) +
+                   " currentOdds=" + FormatFloat(context.CurrentGlobalOdds) +
+                   " projectedOdds=" + FormatFloat(context.ProjectedGlobalOdds) +
+                   " decisive=" + context.DecisiveSectorId +
                    " sectorSig=" + Safe(context.SectorSignature) +
                    " orderSig=" + Safe(context.OrderSignature) +
-                   " commandSig=" + Safe(context.CommandSignature);
+                   " commandSig=" + Safe(context.CommandSignature) +
+                   " oddsSig=" + Safe(context.OddsSignature) +
+                   " odds=" + Safe(context.OddsSummary);
         }
 
         public static string Delta(TacticalObserverSnapshot before, TacticalObserverSnapshot after)
@@ -89,7 +94,11 @@ namespace WhiskeyRealism.Tactical
                    "|" + Bucket(context.ReinforcementsWithin24Hours) +
                    "|" + Safe(context.SectorSignature) +
                    "|" + Safe(context.OrderSignature) +
-                   "|" + Safe(context.CommandSignature);
+                   "|" + Safe(context.CommandSignature) +
+                   "|" + Bucket(context.CurrentGlobalOdds) +
+                   "|" + Bucket(context.ProjectedGlobalOdds) +
+                   "|" + context.DecisiveSectorId +
+                   "|" + Safe(context.OddsSignature);
         }
 
         public static bool ShouldEmit(
@@ -133,6 +142,7 @@ namespace WhiskeyRealism.Tactical
                 case TacticalObservedEvent.Fallback: return "[TacticalFallback]";
                 case TacticalObservedEvent.PlayerOrder: return "[TacticalPlayerOrder]";
                 case TacticalObservedEvent.Command: return "[TacticalCommand]";
+                case TacticalObservedEvent.Odds: return "[TacticalOdds]";
                 default: return "[Tactical]";
             }
         }

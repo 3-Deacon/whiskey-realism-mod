@@ -21,7 +21,8 @@ namespace WhiskeyRealism.Tactical
         Artillery = 7,
         Fallback = 8,
         PlayerOrder = 9,
-        Command = 10
+        Command = 10,
+        Odds = 11
     }
 
     public sealed class TacticalBattleContext
@@ -42,8 +43,13 @@ namespace WhiskeyRealism.Tactical
         public string SectorSignature { get; set; }
         public string OrderSignature { get; set; }
         public string CommandSignature { get; set; }
+        public string OddsSignature { get; set; }
+        public string OddsSummary { get; set; }
         public float ForceBalance { get; set; }
         public float ReinforcementsWithin24Hours { get; set; }
+        public int DecisiveSectorId { get; set; }
+        public float CurrentGlobalOdds { get; set; }
+        public float ProjectedGlobalOdds { get; set; }
 
         public static TacticalBattleContext Empty()
         {
@@ -55,7 +61,10 @@ namespace WhiskeyRealism.Tactical
                 SectorSource = TacticalSectorSource.None,
                 SectorSignature = "",
                 OrderSignature = "",
-                CommandSignature = ""
+                CommandSignature = "",
+                OddsSignature = "",
+                OddsSummary = "",
+                DecisiveSectorId = -1
             };
         }
     }

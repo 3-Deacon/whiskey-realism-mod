@@ -127,6 +127,11 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommanderProfile.cs" Link="TacticalCommanderProfile.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommandLedger.cs" Link="TacticalCommandLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalBattlefieldBugDiagnostics.cs" Link="TacticalBattlefieldBugDiagnostics.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalContactLedger.cs" Link="TacticalContactLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalSectorLedger.cs" Link="TacticalSectorLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalOddsDoctrine.cs" Link="TacticalOddsDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalBattlePlan.cs" Link="TacticalBattlePlan.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalDoctrineScorer.cs" Link="TacticalDoctrineScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPosture.cs" Link="DirectorPosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />

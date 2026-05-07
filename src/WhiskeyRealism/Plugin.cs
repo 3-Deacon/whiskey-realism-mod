@@ -31,6 +31,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalBugTelemetry;
         internal ConfigEntry<bool> EnableTacticalFallbackRetreatNullGuard;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
+        internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
+        internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
@@ -138,6 +140,16 @@ namespace WhiskeyRealism
                 "Enable W&L Tactical Charge Guard",
                 false,
                 "Default OFF for Slice B1. When enabled, blocks new ungated W&L AI feud/charge movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
+            EnableTacticalMacroStanceScorer = Config.Bind(
+                "Tactical",
+                "Enable Tactical Macro Stance Scorer",
+                false,
+                "Default OFF for Slice B4. Uses B3 odds doctrine to bias battle-level macroai after vanilla dynamic macro logic runs.");
+            EnableTacticalGroupSectorStance = Config.Bind(
+                "Tactical",
+                "Enable Tactical Group Sector Stance",
+                false,
+                "Default OFF for Slice B5. Uses B3 sector doctrine to bias group ai_stance without issuing movement, reserve, artillery, fallback, or charge orders.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
