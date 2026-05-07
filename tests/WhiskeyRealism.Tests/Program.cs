@@ -3190,7 +3190,7 @@ static class Program
         };
         input.CurrentEnemyStrength = 10000f;
         input.CurrentFriendlyStrength = 9000f;
-        input.ContactEvidence = ContactEvidence.SkirmishObserved;
+        input.ContactEvidence = ContactEvidence.FavorableContact;
         input.PackageOptions = CoordinatedOperationOptions.StableDefaults(10000f);
 
         var probe = ProbeSnapshot("probe-corps", 1, 15, 9000f, 4000f, FormationLevel.Division, FrontPosture.Counterstroke, "VirginiaCapitalCorridor");
@@ -3238,7 +3238,7 @@ static class Program
         };
         input.CurrentEnemyStrength = 10000f;
         input.CurrentFriendlyStrength = 9000f;
-        input.ContactEvidence = ContactEvidence.EnemyPresent;
+        input.ContactEvidence = ContactEvidence.SkirmishObserved;
         input.PackageOptions = CoordinatedOperationOptions.StableDefaults(10000f);
 
         var probe = ProbeSnapshot("probe-corps", 1, 15, 9000f, 4000f, FormationLevel.Division, FrontPosture.Counterstroke, "VirginiaCapitalCorridor");

@@ -311,9 +311,7 @@ namespace WhiskeyRealism.Strategic
 
         private static bool IsFavorablePackageContact(ContactEvidence evidence)
         {
-            return evidence == ContactEvidence.SkirmishObserved ||
-                evidence == ContactEvidence.BattleObserved ||
-                evidence == ContactEvidence.FavorableContact;
+            return evidence == ContactEvidence.FavorableContact;
         }
 
         private static bool EligibleProbeFormation(

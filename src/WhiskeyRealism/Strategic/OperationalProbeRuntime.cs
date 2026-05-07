@@ -134,8 +134,15 @@ namespace WhiskeyRealism.Strategic
                             $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
                             $"target={output.Package.TargetName ?? output.TargetAreaKey} ratio={output.Package.Ratio:0.00} " +
                             $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
-                        return;
                     }
+                    else
+                    {
+                        Plugin.Log.LogWarning(
+                            $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
+                            $"action=package-no-commit target={output.Package.TargetName ?? output.TargetAreaKey} " +
+                            $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
+                    }
+                    return;
                 }
 
                 var unit = FindUnit(ownUnits, output.SelectedUnitKey);
