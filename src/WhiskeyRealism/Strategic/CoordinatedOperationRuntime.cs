@@ -110,15 +110,24 @@ namespace WhiskeyRealism.Strategic
                 var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
                 if (ownUnits == null || offensive == null) return false;
 
-                bool committed = CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.LeadStableUnitId, target, targetName, objectiveId, intent, sourceSystem, output.Signature());
+                int expected = 1 + output.SupportStableUnitIds.Count;
+                int committedCount = 0;
+                if (CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.LeadStableUnitId, target, targetName, objectiveId, intent, sourceSystem, output.Signature()))
+                    committedCount++;
                 for (int i = 0; i < output.SupportStableUnitIds.Count; i++)
                 {
                     var supportIntent = output.Decision == CoordinatedOperationDecision.Reinforce
                         ? WlStrategicIntent.Reinforce
                         : intent;
-                    committed |= CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.SupportStableUnitIds[i], target, targetName, objectiveId, supportIntent, sourceSystem, output.Signature());
+                    if (CommitUnit(allianceId, aifactionIndex, ownUnits, offensive, output.SupportStableUnitIds[i], target, targetName, objectiveId, supportIntent, sourceSystem, output.Signature()))
+                        committedCount++;
                 }
-                return committed;
+                if (committedCount > 0 && committedCount < expected)
+                {
+                    LogInfo(
+                        $"[CoordinatedOps] alliance={allianceId} action=package-partial committed={committedCount}/{expected} package={output.Signature()}");
+                }
+                return committedCount == expected;
             }
             catch (Exception ex)
             {
@@ -141,7 +150,11 @@ namespace WhiskeyRealism.Strategic
             string packageSignature)
         {
             var unit = FindUnitById(ownUnits, stableUnitId);
-            if (unit == null) return false;
+            if (unit == null)
+            {
+                LogInfo($"[CoordinatedOps] alliance={allianceId} unitId={stableUnitId} action=skip reason=unit-unresolved package={packageSignature}");
+                return false;
+            }
             if (!IsAvailable(aifactionIndex, unit, target))
             {
                 LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=skip reason=availability package={packageSignature}");

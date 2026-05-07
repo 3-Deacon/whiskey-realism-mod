@@ -14,9 +14,10 @@ namespace WhiskeyRealism.Patches
     // Patch #38 - coordinated offensive operation steering.
     // Vanilla CheckOffensiveMovements(int, Regiment, float) at decompile line 14166
     // builds and commits offensive operation packages by iterating
-    // aifaction[i].ownunits. We cache the Whiskey package decision per
-    // faction/lead/signature, filter ownunits only for the active vanilla call,
-    // then restore the list exactly in Postfix/Finalizer.
+    // aifaction[i].ownunits. When Whiskey selects a coordinated package, this
+    // Prefix commits it through CoordinatedOperationRuntime, then empties ownunits
+    // only for that vanilla call so vanilla cannot broaden or silently retarget it.
+    // Postfix/Finalizer restore the list exactly.
     [HarmonyPatch(typeof(AICampaign), "CheckOffensiveMovements")]
     internal static class CoordinatedOffensiveOperationsPatch
     {
@@ -30,13 +31,13 @@ namespace WhiskeyRealism.Patches
         private sealed class PackageFilterDecision
         {
             internal bool PackageSelected;
-            internal readonly HashSet<int> AllowedUnitIds = new HashSet<int>();
+            internal CoordinatedOperationOutput Output;
+            internal Vector3 Target;
+            internal string TargetName;
             internal string PackageSignature;
         }
 
         private static readonly Dictionary<int, Snapshot> _snapshots = new Dictionary<int, Snapshot>();
-        private static readonly Dictionary<string, PackageFilterDecision> _allowedBySignature =
-            new Dictionary<string, PackageFilterDecision>();
         private static readonly Dictionary<Type, FieldInfo> _ownUnitsFields =
             new Dictionary<Type, FieldInfo>();
         private static readonly Dictionary<Type, FieldInfo> _offensiveFields =
@@ -52,6 +53,8 @@ namespace WhiskeyRealism.Patches
             OnceLog.Info("coordinated-ops:offensive:wired",
                 "CoordinatedOffensiveOperationsPatch wired (#38)");
 
+            IList ownUnits = null;
+            bool blockVanilla = false;
             try
             {
                 if (unit == null || timediff <= 0f) return;
@@ -63,19 +66,14 @@ namespace WhiskeyRealism.Patches
                 var faction = AICampaignReflect.GetFaction(_aifaction);
                 if (faction == null) return;
 
-                var ownUnits = GetOwnUnits(faction);
+                ownUnits = GetOwnUnits(faction);
                 if (ownUnits == null || ownUnits.Count == 0) return;
 
                 string signature = BuildSignature(allianceId, _aifaction, unit, faction);
-                if (!_allowedBySignature.TryGetValue(signature, out var decision))
-                {
-                    decision = BuildAllowedSet(allianceId, _aifaction, ownUnits, unit, faction);
-                    if (_allowedBySignature.Count > 128)
-                        _allowedBySignature.Clear();
-                    _allowedBySignature[signature] = decision;
-                }
+                var decision = BuildAllowedSet(allianceId, _aifaction, ownUnits, unit, faction);
 
                 if (!decision.PackageSelected) return;
+                blockVanilla = true;
 
                 var snapshot = new Snapshot
                 {
@@ -86,18 +84,50 @@ namespace WhiskeyRealism.Patches
                     snapshot.OwnUnits.Add(ownUnits[i]);
                 _snapshots[_aifaction] = snapshot;
 
-                for (int i = ownUnits.Count - 1; i >= 0; i--)
+                bool committed = CoordinatedOperationRuntime.CommitPackage(
+                    allianceId,
+                    _aifaction,
+                    decision.Output,
+                    decision.Target,
+                    decision.TargetName,
+                    -1,
+                    WlStrategicIntent.Offensive,
+                    "VanillaOffensive");
+
+                if (committed)
                 {
-                    var obj = ownUnits[i] as UnityEngine.Object;
-                    if (obj == null) continue;
-                    if (!decision.AllowedUnitIds.Contains(obj.GetInstanceID()))
-                        ownUnits.RemoveAt(i);
+                    SetBool(faction, "recruitingzonesupdated", false);
+                    Plugin.Log.LogInfo(
+                        $"[CoordinatedOps] alliance={allianceId} intent=VanillaOffensive decision={decision.Output.Decision} " +
+                        $"target={decision.TargetName} ratio={decision.Output.Ratio:0.00} " +
+                        $"lead={decision.Output.LeadDisplayUnitKey} support={decision.Output.SupportStableUnitIds.Count} reason={decision.Output.Reason}");
                 }
+                else
+                {
+                    Plugin.Log.LogWarning(
+                        $"[CoordinatedOps] alliance={allianceId} intent=VanillaOffensive decision={decision.Output.Decision} " +
+                        $"action=package-no-commit target={decision.TargetName} " +
+                        $"lead={decision.Output.LeadDisplayUnitKey} support={decision.Output.SupportStableUnitIds.Count} reason={decision.Output.Reason} package={decision.PackageSignature}");
+                }
+
+                ownUnits.Clear();
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("coordinated-ops:offensive:prefix",
                     "[CoordinatedOps] offensive Prefix failed: " + ex.Message);
+                if (blockVanilla && ownUnits != null)
+                {
+                    try
+                    {
+                        ownUnits.Clear();
+                        OnceLog.Warning("coordinated-ops:offensive:block-after-prefix-error",
+                            "[CoordinatedOps] blocked vanilla offensive after selected package Prefix failure");
+                    }
+                    catch
+                    {
+                    }
+                }
             }
         }
 
@@ -191,6 +221,15 @@ namespace WhiskeyRealism.Patches
             var offensive = GetList(faction, "unitsinoffensiveoperations", _offensiveFields);
             var defensive = GetList(faction, "unitsindefensiveoperations", _defensiveFields);
             var depots = GetList(faction, "unitsconstructingsupplydepots", _depotFields);
+            var leadAssignment = ledger.GetAssignment(UnitKey(lead));
+            var vanillaTarget = ResolveVanillaOffensiveTarget(aifactionIndex, lead);
+            if (!vanillaTarget.HasValue)
+                return decision;
+            string targetName = CoordinatedOperationRuntime.ResolveTargetName(
+                -1,
+                leadAssignment?.AreaKey,
+                coordinator.CampaignMap,
+                vanillaTarget.Value);
 
             for (int i = 0; i < ledger.Assignments.Count; i++)
             {
@@ -203,8 +242,8 @@ namespace WhiskeyRealism.Patches
                     AllianceId = allianceId,
                     AifactionIndex = aifactionIndex,
                     Unit = unit,
-                    TargetPosition = lead.transform.position,
-                    TargetName = "Objective",
+                    TargetPosition = vanillaTarget.Value,
+                    TargetName = targetName,
                     ObjectiveId = -1,
                     Intent = WlStrategicIntent.Offensive,
                     Width = 20f,
@@ -220,18 +259,17 @@ namespace WhiskeyRealism.Patches
                     CoordinatedOperationRuntime.CommitModeFromBridge(bridgeDecision)));
             }
 
-            var leadAssignment = ledger.GetAssignment(UnitKey(lead));
             float targetStrength = Math.Max(1f, leadAssignment?.LocalEnemyStrength ?? lead.groupstrengthactive);
             var input = new CoordinatedOperationInput
             {
                 AllianceId = allianceId,
                 IsPlayerCic = false,
                 Intent = CoordinatedOperationIntent.Attack,
-                TargetName = "Objective",
+                TargetName = targetName,
                 TargetAreaKey = leadAssignment?.AreaKey,
                 TargetSectorKey = leadAssignment?.SectorKey,
-                TargetX = lead.transform.position.x,
-                TargetZ = lead.transform.position.z,
+                TargetX = vanillaTarget.Value.x,
+                TargetZ = vanillaTarget.Value.z,
                 TargetEnemyStrength = targetStrength,
                 PreferredLeadStableUnitId = StableId(lead),
                 Options = CoordinatedOperationOptions.StableDefaults(targetStrength),
@@ -245,32 +283,11 @@ namespace WhiskeyRealism.Patches
                 return decision;
 
             decision.PackageSelected = true;
+            decision.Output = output;
+            decision.Target = vanillaTarget.Value;
+            decision.TargetName = targetName;
             decision.PackageSignature = output.Signature();
-            AddIfResolved(decision.AllowedUnitIds, ownUnits, output.LeadStableUnitId);
-            for (int i = 0; i < output.SupportStableUnitIds.Count; i++)
-                AddIfResolved(decision.AllowedUnitIds, ownUnits, output.SupportStableUnitIds[i]);
-
-            if (decision.AllowedUnitIds.Count == 0)
-            {
-                Plugin.Log.LogWarning(
-                    $"[CoordinatedOps] alliance={allianceId} intent=VanillaOffensive decision={output.Decision} " +
-                    $"action=package-no-apply target={output.TargetName ?? input.TargetAreaKey ?? "Objective"} " +
-                    $"lead={output.LeadDisplayUnitKey} support={output.SupportStableUnitIds.Count} reason=allowed-units-unresolved package={decision.PackageSignature}");
-                return decision;
-            }
-
-            Plugin.Log.LogInfo(
-                $"[CoordinatedOps] alliance={allianceId} intent=VanillaOffensive decision={output.Decision} " +
-                $"target={output.TargetName ?? input.TargetAreaKey ?? "Objective"} ratio={output.Ratio:0.00} " +
-                $"lead={output.LeadDisplayUnitKey} support={output.SupportStableUnitIds.Count} reason={output.Reason}");
             return decision;
-        }
-
-        private static void AddIfResolved(HashSet<int> allowed, IList ownUnits, int stableUnitId)
-        {
-            var unit = CoordinatedOperationRuntime.FindUnitById(ownUnits, stableUnitId);
-            if (unit != null)
-                allowed.Add(StableId(unit));
         }
 
         private static IList GetOwnUnits(object faction)
@@ -335,6 +352,67 @@ namespace WhiskeyRealism.Patches
             return string.Join(",", parts);
         }
 
+        private static Vector3? ResolveVanillaOffensiveTarget(int aifactionIndex, Regiment lead)
+        {
+            try
+            {
+                if (lead == null) return null;
+                var aiArea = ResolveAIArea(lead.GetPosition());
+                if (aiArea == null) return null;
+
+                float enemyStrength = ReadIndexedFloat(aiArea, "enemycampaignunitsstrengthclose", aifactionIndex) *
+                    ReadIndexedFloat(aiArea, "avgenemytroopmoraleinzone", aifactionIndex) *
+                    GamePrefs.aiimportanceenemyunits;
+                object targetArea = enemyStrength == 0f
+                    ? ReadIndexedObject(aiArea, "mostvaluealbeaiareaclosedistanceonly", aifactionIndex)
+                    : ReadIndexedObject(aiArea, "mostvalueableaiareaclose", aifactionIndex);
+                if (targetArea == null) return null;
+
+                var method = AccessTools.Method(
+                    typeof(AICampaign),
+                    "GetClosestObjectivePosOfArea",
+                    new[] { typeof(Vector3), AccessTools.TypeByName("AIArea"), typeof(int), typeof(bool) });
+                if (method == null) return null;
+
+                var result = method.Invoke(null, new object[] { lead.GetPosition(), targetArea, aifactionIndex, true });
+                if (!(result is Vector3 target) || target == default(Vector3)) return null;
+                return target;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("coordinated-ops:offensive:target",
+                    "[CoordinatedOps] vanilla target resolve failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static object ResolveAIArea(Vector3 position)
+        {
+            var aiareas = AccessTools.Field(typeof(AICampaign), "aiareas")?.GetValue(null);
+            if (aiareas == null) return null;
+            var getColorOnPos = AccessTools.Method(aiareas.GetType(), "GetColorOnPos", new[] { typeof(Vector3), typeof(float) });
+            var color = getColorOnPos?.Invoke(aiareas, new object[] { position, -1f });
+            if (color == null) return null;
+            var getAIArea = AccessTools.Method(AccessTools.TypeByName("AIArea"), "GetAIArea", new[] { typeof(Color) });
+            return getAIArea?.Invoke(null, new[] { color });
+        }
+
+        private static float ReadIndexedFloat(object target, string fieldName, int index)
+        {
+            var value = AccessTools.Field(target.GetType(), fieldName)?.GetValue(target);
+            if (value is Array arr && index >= 0 && index < arr.Length)
+                return Convert.ToSingle(arr.GetValue(index));
+            return 0f;
+        }
+
+        private static object ReadIndexedObject(object target, string fieldName, int index)
+        {
+            var value = AccessTools.Field(target.GetType(), fieldName)?.GetValue(target);
+            if (value is Array arr && index >= 0 && index < arr.Length)
+                return arr.GetValue(index);
+            return null;
+        }
+
         private static string WlChainSignature()
         {
             try
@@ -382,6 +460,17 @@ namespace WhiskeyRealism.Patches
             {
             }
             return -1;
+        }
+
+        private static void SetBool(object target, string field, bool value)
+        {
+            try
+            {
+                AccessTools.Field(target.GetType(), field)?.SetValue(target, value);
+            }
+            catch
+            {
+            }
         }
     }
 }
