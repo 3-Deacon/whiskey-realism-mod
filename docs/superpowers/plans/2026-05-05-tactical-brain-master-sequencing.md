@@ -1,6 +1,6 @@
 # Tactical Brain Master Sequencing Implementation Plan
 
-Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard is implemented and hash-deployed locally, with fresh runtime denial smoke still pending.
+Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard is implemented and hash-deployed locally. Fresh B1 runtime denial smoke was explicitly deferred by user direction on 2026-05-07. B2 command/order-friction now has a standalone execution plan at `docs/superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -29,7 +29,7 @@ Read these before creating any B-slice plan:
 Implementation boundary:
 
 - Do not implement the whole tactical brain from this master plan.
-- Do not start B2 or later behavior patches until B1 runtime smoke is classified. B0 is closed; B1 is built/deployed but still needs a fresh W&L subordinate battle after restart.
+- Do not start B2 or later behavior patches until B1 runtime smoke is classified or explicitly deferred by the user. B0 is closed; B1 is built/deployed; B1 smoke was user-deferred on 2026-05-07, so B2 planning may proceed. Keep B1 smoke as a deferred default-on gate.
 - Do not merge the weapons/ammunition adjunct into this master tactical-brain track. The adjunct needs its own observer-first plan after core B0 proves battle telemetry shape.
 - Keep tactical state runtime-only unless a later battle-resume spec is written. Do not write tactical state to `whiskeyrealism.json`.
 - Existing dirty work in unrelated campaign systems must not be reverted while executing any B-slice.
@@ -361,7 +361,7 @@ No repeated warnings/errors.
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-05-05-tactical-b2-command-order-friction.md`
+- Created: `docs/superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md`
 - Future create: `src/WhiskeyRealism/Tactical/TacticalCommandLedger.cs`
 - Future create: `src/WhiskeyRealism/Tactical/TacticalOrderFriction.cs`
 
