@@ -35,7 +35,10 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalBugTelemetry;
         internal ConfigEntry<bool> EnableTacticalFallbackRetreatNullGuard;
         internal ConfigEntry<bool> EnableTacticalPathfinderDiscipline;
+        internal ConfigEntry<bool> EnableTacticalHqLinkGuard;
+        internal ConfigEntry<bool> EnableTacticalReserveOrderDelayGuard;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
+        internal ConfigEntry<bool> EnableWlOperationNullGuard;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
@@ -169,11 +172,26 @@ namespace WhiskeyRealism
                 "Enable Tactical Pathfinder Discipline",
                 false,
                 "Default OFF. Corrects BUG-TAC-010 by accepting close complete tactical path endpoints, removing failed non-target path fragments, and rejecting non-complete NavMesh paths before they poison movement retries.");
+            EnableTacticalHqLinkGuard = Config.Bind(
+                "Tactical",
+                "Enable Tactical HQ Link Guard",
+                false,
+                "Default OFF. Corrects cross-command group/HQ auto-links created by Regiment.MoveNonAIUnits while preserving same-command and same-hierarchy links.");
+            EnableTacticalReserveOrderDelayGuard = Config.Bind(
+                "Tactical",
+                "Enable Tactical Reserve Order Delay Guard",
+                false,
+                "Default OFF. Converts vanilla reserve support moves that were issued by direct RegimentSetPath into normal delayed SetWaypoint orders after removing the immediate path.");
             EnableWlTacticalChargeGuard = Config.Bind(
                 "Tactical",
                 "Enable W&L Tactical Charge Guard",
                 false,
                 "Default OFF for Slice B1/BUG-TAC-005. When enabled, blocks ungated W&L AI feud/charge/objective-chain movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
+            EnableWlOperationNullGuard = Config.Bind(
+                "W&L",
+                "Enable Operation Null Guard",
+                true,
+                "Default ON. Suppresses the vanilla Operation.UpdateOperation null-before-transform cleanup crash and finishes the missing operation instead.");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",

@@ -134,6 +134,9 @@ static class Program
             ("tactical diagnostics classify pathfinder add path outcome", TacticalDiagnosticsClassifyPathfinderAddPathOutcome),
             ("tactical diagnostics suppress only tactical null fallback exceptions", TacticalDiagnosticsSuppressOnlyTacticalNullFallbackExceptions),
             ("tactical diagnostics handle empty null and sanitized values", TacticalDiagnosticsHandleEmptyNullAndSanitizedValues),
+            ("tactical hq link guard clears cross command auto link", TacticalHqLinkGuardClearsCrossCommandAutoLink),
+            ("tactical hq link guard preserves valid command links", TacticalHqLinkGuardPreservesValidCommandLinks),
+            ("wl operation null guard finishes missing operation", WlOperationNullGuardFinishesMissingOperation),
             ("tactical wl guard allows non wl action", TacticalWlGuardAllowsNonWlAction),
             ("tactical wl guard allows when config disabled", TacticalWlGuardAllowsWhenConfigDisabled),
             ("tactical wl guard denies player subordinate charge initiation", TacticalWlGuardDeniesPlayerSubordinateChargeInitiation),
@@ -1514,6 +1517,74 @@ static class Program
         AssertTrue(failedFarEndpoint.ShouldRemoveAddedPath, "failed far endpoint path should be removed");
         AssertEqual(0, failedFarEndpoint.OverrideResult, "far endpoint override result");
         AssertEqual("failed-endpoint-mismatch", failedFarEndpoint.Reason, "far endpoint reason");
+    }
+
+    private static void TacticalHqLinkGuardClearsCrossCommandAutoLink()
+    {
+        bool clear = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
+            modEnabled: true,
+            newlyLinked: true,
+            sourceIsGroupUnit: true,
+            targetExists: true,
+            sameHierarchy: false,
+            sameNonRootParent: false,
+            sameAiGroup: false);
+
+        AssertTrue(clear, "cross-command group auto-link should be cleared");
+    }
+
+    private static void TacticalHqLinkGuardPreservesValidCommandLinks()
+    {
+        bool hierarchy = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
+            modEnabled: true,
+            newlyLinked: true,
+            sourceIsGroupUnit: true,
+            targetExists: true,
+            sameHierarchy: true,
+            sameNonRootParent: false,
+            sameAiGroup: false);
+        bool sibling = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
+            modEnabled: true,
+            newlyLinked: true,
+            sourceIsGroupUnit: true,
+            targetExists: true,
+            sameHierarchy: false,
+            sameNonRootParent: true,
+            sameAiGroup: false);
+        bool existingManualLink = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
+            modEnabled: true,
+            newlyLinked: false,
+            sourceIsGroupUnit: true,
+            targetExists: true,
+            sameHierarchy: false,
+            sameNonRootParent: false,
+            sameAiGroup: false);
+
+        AssertTrue(!hierarchy, "hierarchy link should be preserved");
+        AssertTrue(!sibling, "same non-root parent link should be preserved");
+        AssertTrue(!existingManualLink, "existing link should not be treated as a new auto-link");
+    }
+
+    private static void WlOperationNullGuardFinishesMissingOperation()
+    {
+        AssertTrue(
+            WlOperationNullGuard.ShouldFinishMissingOperation(
+                modEnabled: true,
+                operationExists: true,
+                usedTopGroupExists: false),
+            "missing operation unit should be finished before vanilla transform read");
+        AssertTrue(
+            !WlOperationNullGuard.ShouldFinishMissingOperation(
+                modEnabled: true,
+                operationExists: true,
+                usedTopGroupExists: true),
+            "valid operation unit should stay on vanilla path");
+        AssertTrue(
+            !WlOperationNullGuard.ShouldFinishMissingOperation(
+                modEnabled: false,
+                operationExists: true,
+                usedTopGroupExists: false),
+            "disabled mod should not patch operation cleanup");
     }
 
     private static void TacticalDiagnosticsSuppressOnlyTacticalNullFallbackExceptions()
