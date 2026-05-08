@@ -431,7 +431,11 @@ static class Program
             ("tactical b6b hold with flank morale risk requests relief", TacticalB6bHoldWithFlankMoraleRiskRequestsRelief),
             ("tactical b6b path risk fix mission maintains line", TacticalB6bPathRiskFixMissionMaintainsLine),
             ("tactical b6b denied attack maintains line", TacticalB6bDeniedAttackMaintainsLine),
-            ("tactical b6b denied fix mission screens without path risk", TacticalB6bDeniedFixMissionScreensWithoutPathRisk)
+            ("tactical b6b denied fix mission screens without path risk", TacticalB6bDeniedFixMissionScreensWithoutPathRisk),
+            ("tactical b6b attack fix mission screens even when charge ready", TacticalB6bAttackFixMissionScreensWhenChargeReady),
+            ("tactical b6b attack economy mission screens even when charge ready", TacticalB6bAttackEconomyMissionScreensWhenChargeReady),
+            ("tactical b6b attack hold mission maintains line when charge ready", TacticalB6bAttackHoldMissionMaintainsLineWhenChargeReady),
+            ("tactical b6b attack weak point mission permits charge when ready", TacticalB6bAttackWeakPointMissionPermitsChargeWhenReady)
         };
 
         foreach (var test in tests)
@@ -1916,6 +1920,53 @@ static class Program
             pathRiskActive: false));
 
         AssertEqual(LocalReaction.Screen, d.Reaction, "reaction");
+    }
+
+    private static void TacticalB6bAttackFixMissionScreensWhenChargeReady()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            sectorMission: TacticalSectorMission.Fix,
+            chargeCooldownReady: true,
+            pathRiskActive: false));
+
+        AssertEqual(LocalReaction.Screen, d.Reaction, "reaction");
+        AssertTrue(d.Reaction != LocalReaction.PermitCharge, "fix mission must not permit charge");
+    }
+
+    private static void TacticalB6bAttackEconomyMissionScreensWhenChargeReady()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            sectorMission: TacticalSectorMission.EconomyOfForce,
+            chargeCooldownReady: true,
+            pathRiskActive: false));
+
+        AssertEqual(LocalReaction.Screen, d.Reaction, "reaction");
+        AssertTrue(d.Reaction != LocalReaction.PermitCharge, "economy mission must not permit charge");
+    }
+
+    private static void TacticalB6bAttackHoldMissionMaintainsLineWhenChargeReady()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            sectorMission: TacticalSectorMission.Hold,
+            chargeCooldownReady: true,
+            pathRiskActive: false));
+
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
+        AssertTrue(d.Reaction != LocalReaction.PermitCharge, "hold mission must not permit charge");
+    }
+
+    private static void TacticalB6bAttackWeakPointMissionPermitsChargeWhenReady()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            sectorMission: TacticalSectorMission.AttackWeakPoint,
+            chargeCooldownReady: true,
+            pathRiskActive: false));
+
+        AssertEqual(LocalReaction.PermitCharge, d.Reaction, "reaction");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()

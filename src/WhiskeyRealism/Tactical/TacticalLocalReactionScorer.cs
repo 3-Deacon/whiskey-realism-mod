@@ -169,6 +169,13 @@ namespace WhiskeyRealism.Tactical
             if (input.PathRiskActive)
                 return Decision(LocalReaction.MaintainLine, false, input, "path-risk");
 
+            if (input.SectorMission == TacticalSectorMission.Fix ||
+                input.SectorMission == TacticalSectorMission.EconomyOfForce)
+                return Decision(LocalReaction.Screen, false, input, "screen-after-denied-charge");
+
+            if (input.SectorMission != TacticalSectorMission.AttackWeakPoint)
+                return Decision(LocalReaction.MaintainLine, false, input, "non-attack-sector");
+
             if (input.TargetVisible &&
                 !input.TargetStrongPoint &&
                 input.ChargeCooldownReady &&
@@ -177,10 +184,6 @@ namespace WhiskeyRealism.Tactical
             {
                 return Decision(LocalReaction.PermitCharge, false, input, "charge-permitted");
             }
-
-            if (input.SectorMission == TacticalSectorMission.Fix ||
-                input.SectorMission == TacticalSectorMission.EconomyOfForce)
-                return Decision(LocalReaction.Screen, false, input, "screen-after-denied-charge");
 
             if (input.TargetStrongPoint)
                 return Decision(LocalReaction.MaintainLine, false, input, "strongpoint");
