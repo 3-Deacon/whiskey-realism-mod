@@ -48,6 +48,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalReserveListMutation;
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
+        public static ConfigEntry<bool> EnableTacticalBattleOrchestrator;
         public const int TacticalMoraleSnapshotLedgerCapacity = 4;
         public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
@@ -241,6 +242,13 @@ namespace WhiskeyRealism
                 "Enable Tactical Withdrawal Doctrine",
                 false,
                 "Default-off. When true, B8 may call BattleUnits.SetWithdrawal for individual units classified as WithdrawalCandidate or CollapseCandidate by TacticalWithdrawalDoctrine. Read the patch source before enabling.");
+            EnableTacticalBattleOrchestrator = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Tactical Battle Orchestrator",
+                true,
+                "Master switch for the multi-echelon tactical battle orchestrator. " +
+                "Default on per orchestrator umbrella spec. Disable to revert to vanilla " +
+                "+ existing default-off Slice B scorer paths.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
