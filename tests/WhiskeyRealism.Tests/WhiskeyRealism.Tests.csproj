@@ -124,6 +124,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalTelemetry.cs" Link="TacticalTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalGateHelpers.cs" Link="TacticalGateHelpers.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalScoreCache.cs" Link="TacticalScoreCache.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalUnitType.cs" Link="TacticalUnitType.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalSupportScreen.cs" Link="TacticalSupportScreen.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalDestinationDiscipline.cs" Link="TacticalDestinationDiscipline.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalWlActionGuard.cs" Link="TacticalWlActionGuard.cs" />

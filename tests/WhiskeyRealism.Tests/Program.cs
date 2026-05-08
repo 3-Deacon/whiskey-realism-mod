@@ -92,7 +92,9 @@ static class Program
             ("tactical morale pressure fallback candidate", TacticalMoralePressureFallbackCandidate),
             ("tactical morale pressure withdrawal candidate flank no cover", TacticalMoralePressureWithdrawalCandidateFlankNoCover),
             ("tactical morale pressure collapse candidate", TacticalMoralePressureCollapseCandidate),
-            ("tactical morale pressure unknown on uninitialized", TacticalMoralePressureUnknownOnUninitialized),
+            ("tactical morale pressure stable on uninitialized defer to caller", TacticalMoralePressureStableOnUninitializedDeferToCaller),
+            ("tactical support screen quiet when no enemy and no screen", TacticalSupportScreenQuietWhenNoEnemyAndNoScreen),
+            ("tactical unit type constants match vanilla unittyp", TacticalUnitTypeConstantsMatchVanillaUnittyp),
             ("tactical help request no request when safe", TacticalHelpRequestNoRequestWhenSafe),
             ("tactical help request reserve screen on flank", TacticalHelpRequestReserveScreenOnFlank),
             ("tactical help request line relief on high pressure", TacticalHelpRequestLineReliefOnHighPressure),
@@ -2502,7 +2504,7 @@ static class Program
             TacticalMoralePressure.Score(input), "morale below threshold -> collapse");
     }
 
-    private static void TacticalMoralePressureUnknownOnUninitialized()
+    private static void TacticalMoralePressureStableOnUninitializedDeferToCaller()
     {
         var input = new TacticalMoralePressure.Input
         {
@@ -2514,6 +2516,36 @@ static class Program
         };
         AssertEqual(TacticalMoralePressure.Result.Stable,
             TacticalMoralePressure.Score(input), "uninitialized -> stable (caller separates)");
+    }
+
+    private static void TacticalSupportScreenQuietWhenNoEnemyAndNoScreen()
+    {
+        // Documents the design intent: "no enemy near = nothing to support against = treat as Screened."
+        // B7 wiring plans must treat Result.Screened as "OK to fire" only when an enemy IS in range.
+        var input = new TacticalSupportScreen.Input
+        {
+            ProtectedUnitMorale = 0.7f,
+            MoraleFallbackThreshold = 0.4f,
+            BattleStartMorale = 0.8f,
+            EnemyDistance = 9999f,
+            DangerRadius = 200f,
+            ScreenUnitCount = 0,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalSupportScreen.Result.Screened,
+            TacticalSupportScreen.Score(input), "no enemy + no screen falls through to Screened");
+    }
+
+    private static void TacticalUnitTypeConstantsMatchVanillaUnittyp()
+    {
+        AssertEqual(0, TacticalUnitType.Infantry, "infantry = 0");
+        AssertEqual(1, TacticalUnitType.Cavalry, "cavalry = 1");
+        AssertEqual(2, TacticalUnitType.Artillery, "artillery = 2");
+        AssertEqual(3, TacticalUnitType.Skirmisher, "skirmisher = 3");
+        AssertEqual(4, TacticalUnitType.Officer, "officer = 4");
+        AssertEqual(5, TacticalUnitType.Excluded, "excluded = 5");
+        AssertEqual(13, TacticalUnitType.MaxCombat, "max combat = 13");
     }
 
     private static void TacticalHelpRequestNoRequestWhenSafe()
