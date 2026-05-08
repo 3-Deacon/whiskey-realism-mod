@@ -62,8 +62,8 @@ namespace WhiskeyRealism.Tactical
             SectorId = sectorId;
             Mission = mission;
             Position = position;
-            OwnStrength = Math.Max(0f, ownStrength);
-            EnemyStrength = Math.Max(0f, enemyStrength);
+            OwnStrength = Sanitize(ownStrength);
+            EnemyStrength = Sanitize(enemyStrength);
             Confidence = Clamp01(confidence);
             StrongPoint = strongPoint;
             FlankRisk = flankRisk;
@@ -79,6 +79,12 @@ namespace WhiskeyRealism.Tactical
         public bool StrongPoint { get; }
         public bool FlankRisk { get; }
         public float OwnerSubordinateShare01 { get; }
+
+        private static float Sanitize(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
+            return Math.Max(0f, value);
+        }
 
         private static float Clamp01(float v)
         {
