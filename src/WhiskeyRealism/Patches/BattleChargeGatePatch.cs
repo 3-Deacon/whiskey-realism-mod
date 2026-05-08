@@ -145,8 +145,7 @@ namespace WhiskeyRealism.Patches
         private static bool IsExplicitChargeDenial(TacticalLocalReactionDecision reaction)
         {
             return reaction.Reason != "no-decision" &&
-                reaction.Reaction != LocalReaction.MaintainLine &&
-                reaction.Reaction != LocalReaction.PermitCharge;
+                reaction.Reaction == LocalReaction.DenyCharge;
         }
 
         private static BattleUnits BattleUnits(AIBattle battle)
