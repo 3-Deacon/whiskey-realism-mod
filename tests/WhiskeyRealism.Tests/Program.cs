@@ -535,7 +535,10 @@ static class Program
             ("echelon orchestrator parent child link is bidirectional", EchelonOrchestratorParentChildLinkBidirectional),
             ("tactical commander roster falls back to faction defaults for unknown", TacticalCommanderRosterFallsBackToFactionDefaultsForUnknown),
             ("tactical commander roster partitions by side", TacticalCommanderRosterPartitionsBySide),
-            ("tactical commander roster rank tier bias increases caution for corps", TacticalCommanderRosterRankTierBiasIncreasesCautionForCorps)
+            ("tactical commander roster rank tier bias increases caution for corps", TacticalCommanderRosterRankTierBiasIncreasesCautionForCorps),
+            ("tactical battle orchestrator owns alliance and roster", TacticalBattleOrchestratorOwnsAllianceAndRoster),
+            ("tactical battle orchestrator empty children in O0", TacticalBattleOrchestratorEmptyChildrenInO0),
+            ("tactical battle orchestrator empty tick is no-op", TacticalBattleOrchestratorEmptyTickIsNoOp)
         };
 
         foreach (var test in tests)
@@ -10337,5 +10340,33 @@ static class Program
         var factionDefault = FactionProfiles.For(0);
         AssertTrue(entry.PersonalityVector.Caution > factionDefault.Caution,
             "corps bias should increase Caution above faction default");
+    }
+
+    // ---- TacticalBattleOrchestrator tests ----
+
+    private static void TacticalBattleOrchestratorOwnsAllianceAndRoster()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new[]
+        {
+            new SyntheticCommanderInput("Lee", EchelonKind.Army, 1)
+        });
+        var orch = new TacticalBattleOrchestrator(allianceId: 1, roster);
+        AssertEqual(1, orch.AllianceId, "alliance id");
+        AssertTrue(ReferenceEquals(roster, orch.Roster), "roster is same reference");
+    }
+
+    private static void TacticalBattleOrchestratorEmptyChildrenInO0()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new SyntheticCommanderInput[0]);
+        var orch = new TacticalBattleOrchestrator(allianceId: 0, roster);
+        AssertEqual(0, orch.Echelons.Count, "echelons count is zero in O0");
+    }
+
+    private static void TacticalBattleOrchestratorEmptyTickIsNoOp()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new SyntheticCommanderInput[0]);
+        var orch = new TacticalBattleOrchestrator(allianceId: 0, roster);
+        orch.Tick();
+        AssertEqual(1, orch.TickCount, "tick count after one Tick");
     }
 }
