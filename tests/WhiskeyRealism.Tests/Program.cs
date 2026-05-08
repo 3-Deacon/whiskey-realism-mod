@@ -93,6 +93,12 @@ static class Program
             ("tactical morale pressure withdrawal candidate flank no cover", TacticalMoralePressureWithdrawalCandidateFlankNoCover),
             ("tactical morale pressure collapse candidate", TacticalMoralePressureCollapseCandidate),
             ("tactical morale pressure unknown on uninitialized", TacticalMoralePressureUnknownOnUninitialized),
+            ("tactical help request no request when safe", TacticalHelpRequestNoRequestWhenSafe),
+            ("tactical help request reserve screen on flank", TacticalHelpRequestReserveScreenOnFlank),
+            ("tactical help request line relief on high pressure", TacticalHelpRequestLineReliefOnHighPressure),
+            ("tactical help request artillery support", TacticalHelpRequestArtillerySupport),
+            ("tactical help request main effort shift", TacticalHelpRequestMainEffortShift),
+            ("tactical sector ledger stores help request", TacticalSectorLedgerStoresHelpRequest),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
             ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
             ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
@@ -2493,6 +2499,77 @@ static class Program
         };
         AssertEqual(TacticalMoralePressure.Result.Stable,
             TacticalMoralePressure.Score(input), "uninitialized -> stable (caller separates)");
+    }
+
+    private static void TacticalHelpRequestNoRequestWhenSafe()
+    {
+        var input = new TacticalHelpRequest.Input
+        {
+            SectorPressureRatio = 0.4f,
+            OutflankedTierMax = 0,
+            ArtilleryCounterBatteryNeeded = false,
+            MainEffortStalled = false,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalHelpRequest.Decision.NoRequest,
+            TacticalHelpRequest.Score(input), "no request when safe");
+    }
+
+    private static void TacticalHelpRequestReserveScreenOnFlank()
+    {
+        var input = new TacticalHelpRequest.Input
+        {
+            SectorPressureRatio = 0.5f,
+            OutflankedTierMax = 3,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalHelpRequest.Decision.RequestReserveScreen,
+            TacticalHelpRequest.Score(input), "reserve screen on outflanked tier 3");
+    }
+
+    private static void TacticalHelpRequestLineReliefOnHighPressure()
+    {
+        var input = new TacticalHelpRequest.Input
+        {
+            SectorPressureRatio = 1.4f,
+            OutflankedTierMax = 0,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalHelpRequest.Decision.RequestLineRelief,
+            TacticalHelpRequest.Score(input), "line relief on high pressure");
+    }
+
+    private static void TacticalHelpRequestArtillerySupport()
+    {
+        var input = new TacticalHelpRequest.Input
+        {
+            SectorPressureRatio = 0.6f,
+            OutflankedTierMax = 0,
+            ArtilleryCounterBatteryNeeded = true,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalHelpRequest.Decision.RequestArtillerySupport,
+            TacticalHelpRequest.Score(input), "artillery support");
+    }
+
+    private static void TacticalHelpRequestMainEffortShift()
+    {
+        var input = new TacticalHelpRequest.Input
+        {
+            SectorPressureRatio = 0.8f,
+            MainEffortStalled = true,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalHelpRequest.Decision.RequestMainEffortShift,
+            TacticalHelpRequest.Score(input), "main effort shift");
+    }
+
+    private static void TacticalSectorLedgerStoresHelpRequest()
+    {
+        int sectorId = 5;
+        TacticalSectorLedger.SetHelpRequest(sectorId, TacticalHelpRequest.Decision.RequestLineRelief);
+        AssertEqual(TacticalHelpRequest.Decision.RequestLineRelief,
+            TacticalSectorLedger.GetHelpRequest(sectorId), "sector ledger stores help request");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()

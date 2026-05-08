@@ -135,5 +135,18 @@ namespace WhiskeyRealism.Tactical
 
             return new TacticalSectorLedgerResult(resolved, decisive, economy.ToArray());
         }
+
+        private static readonly System.Collections.Generic.Dictionary<int, TacticalHelpRequest.Decision> helpRequests
+            = new System.Collections.Generic.Dictionary<int, TacticalHelpRequest.Decision>();
+
+        public static void SetHelpRequest(int sectorId, TacticalHelpRequest.Decision decision)
+        {
+            helpRequests[sectorId] = decision;
+        }
+
+        public static TacticalHelpRequest.Decision GetHelpRequest(int sectorId)
+        {
+            return helpRequests.TryGetValue(sectorId, out var d) ? d : TacticalHelpRequest.Decision.NoRequest;
+        }
     }
 }
