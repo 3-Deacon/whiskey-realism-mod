@@ -13,7 +13,7 @@ B6 owns the Scourge-derived idea that stance is commander intent, not just a num
 - command-friction extensions over B2 expressed as B6 self-constraints, not as new Prefix gates on vanilla order surfaces;
 - local subordinate reaction doctrine for groups (the B5 stance surface) and per-unit charge initiation (the B1 `MicroAICheckForCharges` surface);
 - delayed reserve-release and line-relief intent funneled through a per-side reserve policy aggregator;
-- charge permission as an explicit surface decision: PermitCharge means leave vanilla `ai_stanceordered == 4` alone; DenyCharge means demote stance 4 with telemetry and/or veto `MicroAICheckForCharges` movement initiation through B1's existing gate.
+- charge permission as an explicit surface decision: `PermitCharge` means leave vanilla `ai_stanceordered == 4` alone. The shipped B6b pure scorer does not emit `DenyCharge`; B6c must treat any non-`PermitCharge` local reaction as charge denial when `Enable Tactical Charge Denial` is enabled.
 
 The implementation split is:
 
@@ -103,7 +103,7 @@ When no strategic plan exists (player-CIC alliance, or pre-plan startup), B6 der
 | Division play tables assign multi-spot patterns such as high-ground defense, combined-arms defense, and refused flanks. | `objectivechain[i].linegroup_centerunit`, `linegroup_leftunits`, `linegroup_rightunits`, plus `flankpositionobj[0/1]` give a per-side L/center/R axis with anchored-flank evidence. | Apply. `TacticalPlaybookLedger` consumes those fields to assign one decisive sector, refused flank, fix sectors, and hold sectors before B5/B6 stance pressure runs. |
 | Courier logic lets higher commanders transmit orders to subordinates that lack orders, then subordinates execute with AI judgment. | `Regiment.AddOrderCourierline(...)` (125009), `AddToOrderQueue(...)` (124917), `ProcessOrders()` (125173), `BattleUnits.SetWaypoint(Regiment, ..., useorderdelay)` (91232). B2 already reads delivery state. | Apply as B6 self-constraint. B6 does not Prefix-gate these methods; instead B6's own scoring respects stale-order evidence and refuses to emit reactions that would require a fresh retask. Direct courier synthesis is out of scope for B6. |
 | Local infantry AI handles skirmishers, line maintenance, flanking, charge permission, morale fallback, and skirmisher fallback. | GT has scattered local surfaces: stance adjustment (4221), charge check (4905), fallback/retreat (5118/4817), reserve support (6062), and path/order APIs. | Apply selectively: stance adjustment (B5 surface), charge permit/deny (B1/#41 surface), reserve-list bias (named B6c task), local fallback intent (B8 reads). |
-| Morale and danger can trigger fallback/retreat from the local unit layer. | `AIBattle.CheckLineFallbacks(...)` (5118) writes fallback paths/modes; `MicroAICheckForRetreats(...)` (4817) controls retreat movement. | Apply now as `LocalFallbackPressure` intent only. Execution belongs to the B8 runtime plan. |
+| Morale and danger can trigger fallback/retreat from the local unit layer. | `AIBattle.CheckLineFallbacks(...)` (5118) writes fallback paths/modes; `MicroAICheckForRetreats(...)` (4817) controls retreat movement. | Deferred to B8. B6b defines the `LocalFallbackPressure` enum value but does not emit it; B8 must either extend the pure scorer or derive fallback pressure from B6/B3/B2 inputs before executing withdrawal behavior. |
 | Reserve behavior can support threatened or weak points. | `CheckUseOfReserves(...)` (6062) paths support units; `LinkReservesToLineGroup()` (6642) and `AssignReserves()` (7017) mutate `objectivechain[i].reservegroups`. | Apply as `TacticalReserveIntent` and a `TacticalReservePolicyLedger` aggregator. Reserve-list mutation requires a named B6c task that quotes the exact vanilla mutation shape, snapshots state, and defines rollback. |
 | Per-unit volley/fire-hold reactions. | No vanilla writeable surface (see Evidence Boundary). | **Drop.** Not implemented in B6. |
 
@@ -218,10 +218,10 @@ Reaction outputs:
 - `ProbeRange`: advance only to useful fire/scouting range.
 - `RefuseFlank`: defensive pressure for flank-risk sector (vanilla stance 2 with refused-flank playbook context).
 - `LimitedCounterstroke`: local attack only when enemy is weak/exposed and sector confidence is high.
-- `DenyCharge`: block charge initiation despite aggressive macro/stance (see Charge Permission Surfaces).
+- `DenyCharge`: retained as a model value for future extension, but not emitted by shipped B6b. B6c denial is based on the absence of `PermitCharge`.
 - `PermitCharge`: allow vanilla charge initiation when conditions hold (see Charge Permission Surfaces).
 - `LineReliefRequest`: mark battered frontline for reserve/relief consideration.
-- `LocalFallbackPressure`: local survival fallback pressure as intent only — does not call any vanilla movement or fallback method; B8 reads it.
+- `LocalFallbackPressure`: retained as a model value for B8, but not emitted by shipped B6b. B8 owns any future derivation and execution.
 
 Inputs:
 
@@ -242,7 +242,7 @@ Hard constraints:
 - `Hold` and `Defend` cannot produce `PermitCharge` unless `LimitedCounterstroke` conditions all hold AND the target is broken/exposed.
 - `PermitCharge` requires: confirmed contact (B3 contact age ≤ recent threshold), B3 confidence ≥ 0.55, target visible (`closestenemyunitfarreg != null`), target not a strongpoint (target's group not on cover/fort), target close (within charge range), W&L ownership safe, vanilla charge cooldown not active (`Regiment.lastaichargetime + GamePrefs.timetorenewaichargecheck` window respects current battle time). The replaced phrase "no order-friction denial" was incorrect — vanilla charge initiation does not flow through the courier order queue; the cooldown gate is the actual vanilla constraint (decompile 4917).
 - `LineReliefRequest` does not mutate reserve lists by itself. Aggregation is the reserve policy ledger's job.
-- `LocalFallbackPressure` does not call vanilla fallback or retreat APIs.
+- B6b does not call vanilla fallback or retreat APIs and does not currently emit `LocalFallbackPressure`.
 
 ## Reserve And Line Relief In B6
 
@@ -279,8 +279,8 @@ B5's existing Postfix (`Patches/BattleGroupStancePatch.cs`) currently silently d
 B6 charge surface contract:
 
 - **PermitCharge (default)**: B5 Postfix detects `group.ai_stanceordered == 4` post-vanilla and treats it as `Skip` with reason `vanilla-charge-preserved` whenever the per-group local reaction is `PermitCharge` or absent. B1/#41 then runs vanilla's per-unit `SetMovementMode(3)` initiation for that group.
-- **DenyCharge**: B5 Postfix detects `group.ai_stanceordered == 4` post-vanilla and the per-group reaction is `DenyCharge`. It writes stance 3 (Defend) explicitly through `bunits.ChangeStance(...)` and emits `[TacticalChargeDeny] reason=...`. Independently, B1/#41 `BattleChargeGatePatch` is extended to read the same per-group reaction state and deny the per-unit `SetMovementMode(3)` even if a stance 4 slipped through (defense in depth). The W&L ownership branch of #41 remains unchanged; the new branch is a second deny condition under `Enable Tactical Charge Denial`.
-- **No-Op (intent ≠ AllOutAttack/Attack and no DenyCharge fired)**: B5 Postfix preserves the vanilla decision regardless of intent. The doctrine layer does not silently demote vanilla charges that were not explicitly denied.
+- **No `PermitCharge`**: B5 Postfix detects `group.ai_stanceordered == 4` post-vanilla and the per-group reaction is not `PermitCharge`. It writes stance 3 (Defend) explicitly through `bunits.ChangeStance(...)` and emits `[TacticalChargeDeny] reason=...` when `Enable Tactical Charge Denial` is enabled. Independently, B1/#41 `BattleChargeGatePatch` is extended to read the same per-group reaction state and deny the per-unit `SetMovementMode(3)` when the reaction is not `PermitCharge` (defense in depth). The W&L ownership branch of #41 remains unchanged; the new branch is a second deny condition under `Enable Tactical Charge Denial`.
+- **No-Op (`PermitCharge` or charge-denial config off)**: B5 Postfix preserves the vanilla decision. The doctrine layer does not silently demote vanilla charges when charge denial is disabled.
 
 This contract is the resolution to the spec's prior ambiguity and to the pre-existing silent demotion in `Patches/BattleGroupStancePatch.cs:74-79`.
 
@@ -290,7 +290,7 @@ B6 runtime behavior is default-off behind explicit per-reaction configs:
 
 - `Enable Tactical Commander Intent Doctrine = false` — gates the playbook ledger and intent emission.
 - `Enable Tactical Local Reaction Doctrine = false` — gates the local reaction scorer outputs feeding stance pressure.
-- `Enable Tactical Charge Denial = false` — gates B5 stance-4 demotion and B1/#41 per-unit charge veto on DenyCharge.
+- `Enable Tactical Charge Denial = false` — gates B5 stance-4 demotion and B1/#41 per-unit charge veto based on non-`PermitCharge` reactions.
 - `Enable Tactical Reserve Intent Telemetry = false` — gates `[TacticalReserveIntent]` emission (read-only).
 - `Enable Tactical Reserve List Mutation = false` — gates the named B6c reserve-list bias task.
 
@@ -331,7 +331,7 @@ Pure tests must cover:
 - `Attack` with one decisive sector keeps adjacent sectors as fix/hold.
 - `Defend` on high ground allows `LimitedCounterstroke` only against weak/exposed enemy.
 - `Hold` keeps units near current role and rejects unnecessary retask; emits no `PermitCharge`.
-- `HoldToLast` blocks voluntary fallback intent and emits no `LocalFallbackPressure`; B8 inputs unchanged.
+- `HoldToLast` blocks voluntary fallback intent. Shipped B6b emits no `LocalFallbackPressure`; B8 must add or derive that input before execution.
 - `RefuseRight` and `RefuseLeft` assign one flank to refuse using the simulated `linegroup_rightunits` / `linegroup_leftunits` axis while center holds or fixes.
 - `CombinedArmsDefense` holds line and preserves artillery/reserve pressure without assault.
 - stale delayed order downgrades reaction to `MaintainLine`/`Screen` and emits `request-new-intent`.
@@ -342,8 +342,8 @@ Pure tests must cover:
 - W&L player-subordinate ownership denies behavior application.
 - `BUG-TAC-010` path-risk evidence blocks runtime movement application.
 - **Vanilla stance-4 preservation under PermitCharge**: simulated `ai_stanceordered == 4` post-vanilla with PermitCharge produces Skip with reason `vanilla-charge-preserved` and no overwrite.
-- **Vanilla stance-4 demotion under DenyCharge**: simulated `ai_stanceordered == 4` with DenyCharge produces explicit Apply stance 3 with `[TacticalChargeDeny]` telemetry, independent of B1/#41.
-- **B1/#41 DenyCharge defense in depth**: simulated `ai_stance == 4` reaching `MicroAICheckForCharges` with DenyCharge under `Enable Tactical Charge Denial` denies `SetMovementMode(3)`.
+- **Vanilla stance-4 demotion when not `PermitCharge`**: simulated `ai_stanceordered == 4` with a non-`PermitCharge` B6b reaction produces explicit Apply stance 3 with `[TacticalChargeDeny]` telemetry, independent of B1/#41.
+- **B1/#41 charge-denial defense in depth**: simulated `ai_stance == 4` reaching `MicroAICheckForCharges` with a non-`PermitCharge` reaction under `Enable Tactical Charge Denial` denies `SetMovementMode(3)`.
 - **Strategic→tactical translation**: each `OperationPosture` value yields the documented intent band given baseline B3/B4 evidence; missing plan falls back to B4-only mapping.
 - **Playbook ownership share**: a sector with > 50% `dlcw_isundercommander` units cannot be selected as `MainEffortSectorId`.
 - **Naming disambiguation**: `ProbeIntent` battle-wide and `TacticalSectorMission.Probe` per-sector compose without collision (intent `ProbeIntent` + sector mission `AttackWeakPoint` is rejected; intent `Defend` + sector mission `Probe` is allowed).
@@ -371,7 +371,7 @@ Each plan must state:
 The B6c plan must specifically:
 
 - describe the B5 stance-4 preservation/demotion contract changes to `Patches/BattleGroupStancePatch.cs`;
-- describe the B1/#41 extension to consume DenyCharge under `Enable Tactical Charge Denial`;
+- describe the B1/#41 extension to consume non-`PermitCharge` reactions under `Enable Tactical Charge Denial`;
 - describe the named reserve-list mutation task with snapshot/restore;
 - not bundle artillery (B7) or staged withdrawal (B8) execution.
 
@@ -409,7 +409,7 @@ If B6 causes all-sector attack, player-subordinate retasking, repeated logs, mac
 - #46 objective-chain denial still needs restart smoke on the current DLL.
 - `BUG-TAC-010` path-shape behavior remains unresolved and blocks any B6 movement-heavy implementation.
 - Runtime reserve behavior remains mostly unexercised; B6 begins with reserve intent telemetry rather than reserve-list mutation.
-- The B5 stance-4 silent demotion fix in `Patches/BattleGroupStancePatch.cs` is described here as part of the B6c contract but not yet implemented; B6c must land it before any DenyCharge runtime experiment.
+- The B5 stance-4 silent demotion fix in `Patches/BattleGroupStancePatch.cs` is described here as part of the B6c contract but not yet implemented; B6c must land it before any charge-denial runtime experiment.
 
 ## Success Criteria
 
@@ -418,5 +418,5 @@ B6 succeeds when Whiskey has a tested commander-intent and playbook layer that e
 The first successful B6 implementation needs to make B5 stance decisions meaningful, bounded, observable, and connected to:
 
 - the strategic `OperationPosture` translation;
-- the existing B1/#41 charge surface (PermitCharge as default, DenyCharge with telemetry and defense-in-depth);
+- the existing B1/#41 charge surface (`PermitCharge` as the only positive permission; non-`PermitCharge` reactions with telemetry and defense-in-depth);
 - the B7 artillery and B8 withdrawal runtime tracks (intent only, no execution coupling).

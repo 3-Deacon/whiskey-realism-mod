@@ -1,6 +1,6 @@
 # Tactical Brain Master Sequencing Implementation Plan
 
-Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard, B2 command/order-friction telemetry, B3 odds telemetry, B4/B5 default-off stance behavior, #43 fallback/retreat NRE containment, #35 `[TacticalDecisionMatrix]` logging, and #46 objective-chain W&L guard are implemented and hash-deployed. Restart smoke is pending for `[TacticalDecisionMatrix]` and `[TacticalObjectiveGuard]`. B4/B5 remain default-off because they write vanilla `macroai` / `ai_stance` and need focused runtime smoke before any default-on change. B6 is now scoped by `docs/superpowers/specs/2026-05-07-tactical-b6-commander-intent-local-reaction-design.md` as commander intent, playbooks, command-friction constraints, local subordinate reaction doctrine, and reserve/line-relief intent; B6a/B6b/B6c plans now exist as bounded execution tracks.
+Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard, B2 command/order-friction telemetry, B3 odds telemetry, B4/B5 default-off stance behavior, #43 fallback/retreat NRE containment, #35 `[TacticalDecisionMatrix]` logging, and #46 objective-chain W&L guard are implemented and hash-deployed. Restart smoke is pending for `[TacticalDecisionMatrix]` and `[TacticalObjectiveGuard]`. B4/B5 remain default-off because they write vanilla `macroai` / `ai_stance` and need focused runtime smoke before any default-on change. B6 is scoped by `docs/superpowers/specs/2026-05-07-tactical-b6-commander-intent-local-reaction-design.md` as commander intent, playbooks, command-friction constraints, local subordinate reaction doctrine, and reserve/line-relief intent. B6a and B6b pure logic are implemented and console/build verified; B6c runtime application is the next bounded execution track.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -95,7 +95,7 @@ Core model files:
 - Create: `src/WhiskeyRealism/Tactical/TacticalCommanderIntent.cs`
 - Create: `src/WhiskeyRealism/Tactical/TacticalPlaybookLedger.cs`
 - Create: `src/WhiskeyRealism/Tactical/TacticalLocalReactionScorer.cs`
-- Create: `src/WhiskeyRealism/Tactical/TacticalReserveIntent.cs`
+- Create: `src/WhiskeyRealism/Tactical/TacticalReservePolicyLedger.cs`
 - Create: `src/WhiskeyRealism/Tactical/TacticalRetreatDoctrine.cs`
 - Create: `src/WhiskeyRealism/Tactical/TacticalTelemetry.cs`
 - Create only if B0 proves the need: `src/WhiskeyRealism/Tactical/TacticalRuntime.cs`
@@ -106,7 +106,7 @@ Patch files by slice:
 - B1: `src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs`, `src/WhiskeyRealism/Patches/BattleFeudActionGatePatch.cs`
 - B4: `src/WhiskeyRealism/Patches/BattleMacroStrategyPatch.cs`
 - B5: `src/WhiskeyRealism/Patches/BattleGroupStancePatch.cs`
-- B6a/B6b: no new behavior patch required; extend tactical observer/telemetry and pure tactical scorers.
+- B6a/B6b: no new behavior patch required; B6a extends observer/telemetry and B6b adds pure tactical scorers.
 - B6c: patch file depends on the approved B6c plan; reserve behavior candidates include `BattleReserveDoctrinePatch.cs`, while stance pressure must reuse the B5 `ChangeStance` boundary instead of adding broad movement.
 - B7: `src/WhiskeyRealism/Patches/BattleBombardmentPatch.cs`
 - B8: `src/WhiskeyRealism/Patches/BattleFallbackDoctrinePatch.cs`
@@ -631,11 +631,11 @@ Patch `AdjustGroupAIStance()` with a Postfix that only changes stance when:
 - Create: B6 pure tactical files listed in the file ownership map.
 - Create only if B6c owns reserve mutation: `src/WhiskeyRealism/Patches/BattleReserveDoctrinePatch.cs`
 
-- [ ] **Step 1: Start B6 plans now and gate only runtime writes**
+- [x] **Step 1: Start B6 plans now and gate only runtime writes**
 
 B6a, B6b, and B6c planning starts now. B6a/B6b pure scoring can be implemented before default-on stance behavior. B6c runtime writes require the owning plan to record B5 smoke proving sector missions are stable and not causing all-sector attacks.
 
-- [ ] **Step 2: Read the focused B6 spec and prior plan chain**
+- [x] **Step 2: Read the focused B6 spec and prior plan chain**
 
 Read:
 
@@ -645,7 +645,7 @@ Read:
 - B3-B5 odds/macro/sector plan;
 - tactical bug-remediation plan for #46 and `BUG-TAC-010`.
 
-- [ ] **Step 3: Re-read local reaction and reserve methods**
+- [x] **Step 3: Re-read local reaction and reserve methods**
 
 Read:
 
@@ -658,7 +658,7 @@ Read:
 - `AIBattle.AssignReserves()`;
 - `FindExchangeUnitForUnit(...)` near line 5088.
 
-- [ ] **Step 4: Define B6 behavior limit**
+- [x] **Step 4: Define B6 behavior limit**
 
 B6 owns commander-intent bands, multi-sector playbook choice, command-friction constraints, local subordinate reaction scoring, reserve-release intent, line-relief pressure, artillery-support intent, and withdrawal pressure. It must not make B4/B5 default-on, issue broad `SetWaypoint` movement, write charge stance 4, exercise player-subordinate W&L objective-chain behavior before #46 smoke, or directly mutate `objectivechain.reservegroups` unless the B6c plan quotes the exact vanilla mutation pattern and defines snapshot/rollback.
 
@@ -671,13 +671,13 @@ B6 owns commander-intent bands, multi-sector playbook choice, command-friction c
 - Create: `src/WhiskeyRealism/Tactical/TacticalCommanderIntent.cs`
 - Create: `src/WhiskeyRealism/Tactical/TacticalPlaybookLedger.cs`
 - Create: `src/WhiskeyRealism/Tactical/TacticalLocalReactionScorer.cs`
-- Create: `src/WhiskeyRealism/Tactical/TacticalReserveIntent.cs`
+- Create: `src/WhiskeyRealism/Tactical/TacticalReservePolicyLedger.cs`
 - Create B6c patch files only if the approved B6c runtime plan requires them.
 - Modify: `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`
 - Modify: `tests/WhiskeyRealism.Tests/Program.cs`
 - Modify after deploy/smoke: `docs/patch-catalog.md`, `docs/handoff.md`, `MEMORY.md`
 
-- [ ] **Step 1: Add pure tests**
+- [x] **Step 1: Add pure tests**
 
 Tests must cover:
 
@@ -692,9 +692,9 @@ Tests must cover:
 - reserve is not stacked onto an already committed target;
 - local flank exposure prefers flank guard over exploitation.
 
-- [ ] **Step 2: Implement B6a/B6b before B6c**
+- [x] **Step 2: Implement B6a/B6b before B6c**
 
-Start with pure commander-intent, playbook, local-reaction, and reserve-intent scorers plus observer comparison, then wire B6c runtime tasks behind explicit config. Runtime writes belong only in B6c, must default off, and must reuse existing B5 stance boundaries or verified vanilla reserve APIs. Direct list mutation is allowed only after runtime proof and only with snapshot/restore or vanilla API parity.
+Pure commander-intent, playbook, local-reaction, and reserve-intent scorers plus B6a observer comparison are implemented. B6b's local-reaction scorer consumes `TacticalLocalReactionPolicy`: Conservative blocks `PermitCharge` and `LimitedCounterstroke`; Standard/Aggressive preserve the positive cases. B6b does not emit `DenyCharge` or `LocalFallbackPressure`; downstream B6c must treat `PermitCharge` as the only positive charge permission and B8 must add/own any fallback-pressure derivation before executing withdrawal behavior. Runtime writes belong only in B6c, must default off, and must reuse existing B5 stance boundaries or verified vanilla reserve APIs. Direct list mutation is allowed only after runtime proof and only with snapshot/restore or vanilla API parity.
 
 ## Task 15: B7 Artillery And Strongpoint Doctrine Plan
 

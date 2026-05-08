@@ -4,7 +4,7 @@
 
 **Goal:** Add staged withdrawal doctrine so a battle can stabilize, screen, bulk-withdraw, hold a rear guard, and only trigger full retreat after collapse evidence rather than snapping from pressure to global retreat.
 
-**Architecture:** B8 is a default-off withdrawal runtime slice. It consumes B6 intent, B6b local fallback pressure, B3 sector state, vanilla morale/routing evidence, and B2 order-friction evidence. It owns fallback/withdrawal/retreat surfaces and does not alter artillery, reserve lists, or attack stance scoring.
+**Architecture:** B8 is a default-off withdrawal runtime slice. It consumes B6 intent, B3 sector state, vanilla morale/routing evidence, and B2 order-friction evidence. B6b defines a `LocalFallbackPressure` model value but the shipped scorer does not emit it; B8 must either derive fallback pressure here or extend the pure scorer before executing withdrawal behavior. B8 owns fallback/withdrawal/retreat surfaces and does not alter artillery, reserve lists, or attack stance scoring.
 
 **Tech Stack:** BepInEx 5.4.x, HarmonyX, C# netstandard2.1, console harness, vanilla decompile anchors, DLL deploy/hash verification.
 
@@ -56,13 +56,13 @@ Add `Enable Tactical Withdrawal Doctrine` with C# default `false`.
 Add:
 
 - `TacticalWithdrawalStage`: `Stabilize`, `Screen`, `BulkWithdraw`, `RearGuard`, `RearGuardWithdraw`, `FullRetreat`.
-- `TacticalWithdrawalInput`: intent, playbook, local fallback pressure count, battered-line count, routed-neighbor pressure, morale average, ammo average, casualty ratio, flank risk, reserve coverage flag, enemy contact age, order-friction state, W&L ownership-safe flag, path-risk flag, vanilla macro value, full-retreat timer active flag.
+- `TacticalWithdrawalInput`: intent, playbook, B8-derived local fallback pressure count, battered-line count, routed-neighbor pressure, morale average, ammo average, casualty ratio, flank risk, reserve coverage flag, enemy contact age, order-friction state, W&L ownership-safe flag, path-risk flag, vanilla macro value, full-retreat timer active flag.
 - `TacticalWithdrawalDecision`: stage, target unit keys, rear-guard unit keys, allows fallback write bool, allows withdrawal write bool, allows full-retreat timer bool, confidence, reason.
 
 Rules:
 
 - `Stabilize` is selected when morale and line integrity are recoverable.
-- `Screen` is selected when local fallback pressure exists but main body remains coherent.
+- `Screen` is selected when B8-derived local fallback pressure exists but main body remains coherent.
 - `BulkWithdraw` requires sustained pressure, battered line evidence, and a safe covered path or reserve screen.
 - `RearGuard` holds a selected screen while main body begins withdrawal.
 - `RearGuardWithdraw` releases the screen after main-body withdrawal state is observed.
@@ -75,7 +75,7 @@ Rules:
 
 `BattleFallbackDoctrinePatch` should use Postfix patches first:
 
-- observe `AIBattle.CheckLineFallbacks(...)` for local fallback pressure and B8 stage telemetry;
+- observe `AIBattle.CheckLineFallbacks(...)` for local fallback pressure evidence and B8 stage telemetry;
 - observe `AIBattle.MicroAICheckForRetreats(...)` for retreat-state transitions;
 - apply selected withdrawal through `BattleUnits.SetWithdrawal(enddate, unitlist, alliance, fromposition, removemonument:false)` only when `Enable Tactical Withdrawal Doctrine` is true and the decision allows withdrawal;
 - call `TimePanel.SetRetreatTimer(alliance)` only for `FullRetreat` and only when vanilla has not already started the timer;

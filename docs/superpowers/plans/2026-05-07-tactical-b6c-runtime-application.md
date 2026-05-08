@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Apply B6a/B6b doctrine to vanilla battle state through three precise surfaces: (1) fix the existing silent vanilla-stance-4 demotion in `BattleGroupStancePatch` and add the explicit DenyCharge demotion path with `[TacticalChargeDeny]` telemetry; (2) extend `BattleChargeGatePatch` (#41) so DenyCharge becomes defense-in-depth at the per-unit charge initiation surface; (3) add a named, default-off, snapshot-protected reserve-list bias patch that consumes B6b's `TacticalReserveIntent`. Wire `[TacticalLocalReaction]` and `[TacticalReserveIntent]` telemetry. Five new per-reaction config flags. No new movement, no SetWaypoint, no AddToOrderQueue Prefix, no artillery, no fallback, no retreat.
+**Goal:** Apply B6a/B6b doctrine to vanilla battle state through three precise surfaces: (1) fix the existing silent vanilla-stance-4 demotion in `BattleGroupStancePatch` and add the explicit charge-denial demotion path with `[TacticalChargeDeny]` telemetry when the B6b reaction is not `PermitCharge`; (2) extend `BattleChargeGatePatch` (#41) so non-`PermitCharge` becomes defense-in-depth at the per-unit charge initiation surface; (3) add a named, default-off, snapshot-protected reserve-list bias patch that consumes B6b's `TacticalReserveIntent`. Wire `[TacticalLocalReaction]` and `[TacticalReserveIntent]` telemetry. Four new per-reaction config flags. No new movement, no SetWaypoint, no AddToOrderQueue Prefix, no artillery, no fallback, no retreat.
 
 **Architecture:** B6c is the only B6 slice that writes vanilla battle state. It uses a small in-memory per-tick cache (`TacticalReactionContext`) so the modified `BattleGroupStancePatch` and the extended `BattleChargeGatePatch` see the same B6b decision keyed by `Regiment.GetInstanceID()`. The reserve patch is its own file. Each runtime branch sits behind its own config flag for granular rollback.
 
@@ -19,11 +19,11 @@
 **Modify:**
 - `src/WhiskeyRealism/Plugin.cs` - bind four new ConfigEntry flags (`EnableTacticalCommanderIntentDoctrine` already lives from B6a — do **not** add a duplicate).
 - `src/WhiskeyRealism/Patches/BattleCommanderIntentObserverPatch.cs` (created in B6a) - extend to also compute `TacticalLocalReactionScorer` decisions for each `unitsused[i]` group, populate `TacticalReactionContext`, aggregate for the side via `TacticalReservePolicyLedger`, and emit `[TacticalLocalReaction]` + `[TacticalReserveIntent]` telemetry. The existing `[TacticalIntent]` and `[TacticalPlaybook]` emissions stay.
-- `src/WhiskeyRealism/Patches/BattleGroupStancePatch.cs` - implement the stance-4 contract. Preserve vanilla `ai_stanceordered == 4` when `PermitCharge` (or no DenyCharge); demote to 3 with `[TacticalChargeDeny]` telemetry under `Enable Tactical Charge Denial`.
-- `src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs` - add a second deny condition (DenyCharge from `TacticalReactionContext`) under `Enable Tactical Charge Denial`. The existing W&L ownership branch is unchanged.
+- `src/WhiskeyRealism/Patches/BattleGroupStancePatch.cs` - implement the stance-4 contract. Preserve vanilla `ai_stanceordered == 4` only when the B6b reaction is `PermitCharge` or charge denial is disabled; demote to 3 with `[TacticalChargeDeny]` telemetry under `Enable Tactical Charge Denial` for non-`PermitCharge` reactions.
+- `src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs` - add a second deny condition (non-`PermitCharge` from `TacticalReactionContext`) under `Enable Tactical Charge Denial`. The existing W&L ownership branch is unchanged.
 - `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` - add Compile Include for `TacticalReactionContext.cs`.
 - `tests/WhiskeyRealism.Tests/Program.cs` - tests for the cache and the reserve snapshot-restore helper.
-- `docs/patch-catalog.md` - update #45 (B5 stance contract change), update #41 (charge gate DenyCharge branch), add new ordinal for `BattleReserveDoctrinePatch`.
+- `docs/patch-catalog.md` - update #45 (B5 stance contract change), update #41 (charge gate non-`PermitCharge` branch), add new ordinal for `BattleReserveDoctrinePatch`.
 - `docs/handoff.md` - "What just shipped" update plus current DLL hash plus smoke evidence.
 
 ---
@@ -76,7 +76,7 @@ Test bodies:
         private static void TacticalB6cReactionContextReturnsLastDecisionPerGroup()
         {
             var ctx = new TacticalReactionContext();
-            var deny = new TacticalLocalReactionDecision(LocalReaction.DenyCharge, false, 0.7f, "deny");
+            var deny = new TacticalLocalReactionDecision(LocalReaction.MaintainLine, false, 0.7f, "deny");
             var permit = new TacticalLocalReactionDecision(LocalReaction.PermitCharge, false, 0.7f, "permit");
 
             ctx.SetReaction(groupInstanceId: 42, deny);
@@ -84,13 +84,13 @@ Test bodies:
             ctx.SetReaction(groupInstanceId: 99, deny);
 
             Assert(ctx.GetReaction(42).Reaction == LocalReaction.PermitCharge, "Latest decision must win");
-            Assert(ctx.GetReaction(99).Reaction == LocalReaction.DenyCharge, "Other key must persist");
+            Assert(ctx.GetReaction(99).Reaction == LocalReaction.MaintainLine, "Other key must persist");
         }
 
         private static void TacticalB6cReactionContextClearDiscards()
         {
             var ctx = new TacticalReactionContext();
-            ctx.SetReaction(1, new TacticalLocalReactionDecision(LocalReaction.DenyCharge, false, 0.7f, "deny"));
+            ctx.SetReaction(1, new TacticalLocalReactionDecision(LocalReaction.MaintainLine, false, 0.7f, "deny"));
             ctx.Clear();
             Assert(ctx.GetReaction(1).Reaction == LocalReaction.MaintainLine, "Clear must reset to default MaintainLine");
         }
@@ -216,7 +216,7 @@ In the tactical config-bind block (after `EnableTacticalCommanderIntentDoctrine 
                 "Tactical",
                 "Enable Tactical Charge Denial",
                 false,
-                "Default OFF for Slice B6c. When the local reaction is DenyCharge, BattleGroupStancePatch demotes vanilla stance 4 to 3 with [TacticalChargeDeny] telemetry, and BattleChargeGatePatch denies SetMovementMode(3) at the per-unit charge initiation surface as defense in depth.");
+                "Default OFF for Slice B6c. When the local reaction is not PermitCharge, BattleGroupStancePatch demotes vanilla stance 4 to 3 with [TacticalChargeDeny] telemetry, and BattleChargeGatePatch denies SetMovementMode(3) at the per-unit charge initiation surface as defense in depth.");
 
             EnableTacticalReserveIntentTelemetry = Config.Bind(
                 "Tactical",
@@ -508,7 +508,7 @@ Open `src/WhiskeyRealism/Patches/BattleGroupStancePatch.cs`. Locate the existing
                 }
 
                 var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
-                if (reaction.Reaction == LocalReaction.DenyCharge)
+                if (reaction.Reaction != LocalReaction.PermitCharge)
                 {
                     DemoteCharge(bunits, group, side, reaction.Reason);
                     return;
@@ -592,7 +592,7 @@ Expected: BUILD SUCCEEDED.
 ```bash
 git add src/WhiskeyRealism/Patches/BattleGroupStancePatch.cs
 git commit -m "$(cat <<'EOF'
-fix(tactical): B5 preserves vanilla stance 4 unless DenyCharge active
+fix(tactical): B5 preserves vanilla stance 4 unless charge denial applies
 
 Pre-existing silent demotion: when vanilla AdjustGroupAIStance wrote
 stance 4 (charge) and B5's scorer returned Apply 1/2/3, B5 silently
@@ -600,8 +600,8 @@ overwrote the vanilla charge.
 
 B6c contract: vanilla stance 4 is preserved by default. Demotion to
 stance 3 happens only when Enable Tactical Charge Denial is true and
-the group's reaction in TacticalReactionContext is DenyCharge, with
-explicit [TacticalChargeDeny] surface=stance telemetry.
+the group's reaction in TacticalReactionContext is not PermitCharge,
+with explicit [TacticalChargeDeny] surface=stance telemetry.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -610,14 +610,14 @@ EOF
 
 ---
 
-## Task 5: Extend `BattleChargeGatePatch` (#41) for DenyCharge defense in depth
+## Task 5: Extend `BattleChargeGatePatch` (#41) for charge-denial defense in depth
 
 **Files:**
 - Modify: `src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs`
 
 - [ ] **Step 1: Add the second deny condition**
 
-Open `src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs`. Locate the inner per-unit charge initiation block (the `if (!unit.permanentlydetached && chargeStance && ...)` block where `TacticalWlActionGuard.Decide(...)` runs). Replace the deny branch's `LogDenied(unit, aigroup, decision.Reason);` call with the extended version that also consumes B6c DenyCharge:
+Open `src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs`. Locate the inner per-unit charge initiation block (the `if (!unit.permanentlydetached && chargeStance && ...)` block where `TacticalWlActionGuard.Decide(...)` runs). Replace the deny branch's `LogDenied(unit, aigroup, decision.Reason);` call with the extended version that also consumes B6c non-`PermitCharge` reaction state:
 
 ```csharp
                         // Existing W&L ownership branch:
@@ -634,7 +634,7 @@ Open `src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs`. Locate the inner per
                         if (decision.Allow && Plugin.Instance.EnableTacticalChargeDenial.Value)
                         {
                             var reaction = TacticalReactionContext.Shared.GetReaction(aigroup.GetInstanceID());
-                            if (reaction.Reaction == LocalReaction.DenyCharge)
+                            if (reaction.Reaction != LocalReaction.PermitCharge)
                             {
                                 b6cDeny = true;
                                 b6cDenyReason = reaction.Reason;
@@ -661,7 +661,7 @@ Add the new `LogDeniedB6c` helper near the existing `LogDenied`:
 ```csharp
         private static void LogDeniedB6c(Regiment unit, Regiment group, string reason)
         {
-            OnceLog.Info("tactical-charge-guard:b6c", "BattleChargeGatePatch B6c DenyCharge wired");
+            OnceLog.Info("tactical-charge-guard:b6c", "BattleChargeGatePatch B6c charge denial wired");
             OnceLog.Info("tactical-charge-guard:b6c-deny:" + SafeName(unit), "[TacticalChargeDeny] surface=movement reason=" + reason +
                 " unit=" + SafeName(unit) +
                 " group=" + SafeName(group));
@@ -683,11 +683,11 @@ Expected: BUILD SUCCEEDED.
 ```bash
 git add src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs
 git commit -m "$(cat <<'EOF'
-feat(tactical): #41 charge gate consumes B6c DenyCharge defense in depth
+feat(tactical): #41 charge gate consumes B6c charge-denial state
 
 Second deny condition under Enable Tactical Charge Denial: if the
-group's TacticalReactionContext reaction is DenyCharge, the per-unit
-SetMovementMode(3) is denied even if W&L ownership allows it.
+group's TacticalReactionContext reaction is not PermitCharge, the
+per-unit SetMovementMode(3) is denied even if W&L ownership allows it.
 
 The existing W&L ownership branch is unchanged.
 
@@ -990,13 +990,13 @@ Expected: every test passes including the three B6c reaction-context tests.
 
 Find the existing #45 `BattleGroupStancePatch` row. Append a sentence to the description (do not replace the existing text):
 
-> v0.3.x B6c contract: vanilla `ai_stanceordered == 4` is preserved by default and is demoted to stance 3 with `[TacticalChargeDeny] surface=stance` only when `Enable Tactical Charge Denial` is true and the group's `TacticalReactionContext` reaction is `DenyCharge`. The pre-existing silent-demotion path is removed.
+> v0.3.x B6c contract: vanilla `ai_stanceordered == 4` is preserved by default and is demoted to stance 3 with `[TacticalChargeDeny] surface=stance` only when `Enable Tactical Charge Denial` is true and the group's `TacticalReactionContext` reaction is not `PermitCharge`. The pre-existing silent-demotion path is removed.
 
 - [ ] **Step 2: Update #41 row (B1 charge gate)**
 
 Find the existing #41 `BattleChargeGatePatch` row. Append a sentence:
 
-> v0.3.x B6c extension: a second deny condition consumes `TacticalReactionContext` reaction state under `Enable Tactical Charge Denial`. When that flag is true and the group's reaction is `DenyCharge`, per-unit `SetMovementMode(3)` is denied as defense-in-depth and `[TacticalChargeDeny] surface=movement` is logged. The existing W&L ownership branch is unchanged.
+> v0.3.x B6c extension: a second deny condition consumes `TacticalReactionContext` reaction state under `Enable Tactical Charge Denial`. When that flag is true and the group's reaction is not `PermitCharge`, per-unit `SetMovementMode(3)` is denied as defense-in-depth and `[TacticalChargeDeny] surface=movement` is logged. The existing W&L ownership branch is unchanged.
 
 - [ ] **Step 3: Update #47 row (B6a observer)**
 
@@ -1017,7 +1017,7 @@ Pick the next free ordinal (likely `48`). Insert in numeric order; replace `<sha
 Append a "What just shipped" bullet (replace `<sha>` with the hash from Task 7):
 
 ```markdown
-- **B6c tactical runtime application:** added `Tactical/TacticalReactionContext.cs` shared cache and `Patches/BattleReserveDoctrinePatch.cs` (#48). Extended `Patches/BattleCommanderIntentObserverPatch.cs` (#47) to populate the cache and emit `[TacticalLocalReaction]` + `[TacticalReserveIntent]` telemetry. Fixed pre-existing silent stance-4 demotion in `Patches/BattleGroupStancePatch.cs` (#45): vanilla charge stances are preserved by default and demoted only under `Enable Tactical Charge Denial` + `TacticalReactionContext` `DenyCharge`, with `[TacticalChargeDeny] surface=stance` telemetry. Extended `Patches/BattleChargeGatePatch.cs` (#41) with the same DenyCharge state as defense-in-depth at the per-unit charge initiation surface (`[TacticalChargeDeny] surface=movement`). Four new default-off configs: Local Reaction Doctrine, Charge Denial, Reserve Intent Telemetry, Reserve List Mutation. Build/deploy/hash verified in DLL `<sha>`; in-game smoke pending.
+- **B6c tactical runtime application:** added `Tactical/TacticalReactionContext.cs` shared cache and `Patches/BattleReserveDoctrinePatch.cs` (#48). Extended `Patches/BattleCommanderIntentObserverPatch.cs` (#47) to populate the cache and emit `[TacticalLocalReaction]` + `[TacticalReserveIntent]` telemetry. Fixed pre-existing silent stance-4 demotion in `Patches/BattleGroupStancePatch.cs` (#45): vanilla charge stances are preserved by default and demoted only under `Enable Tactical Charge Denial` + non-`PermitCharge` `TacticalReactionContext` state, with `[TacticalChargeDeny] surface=stance` telemetry. Extended `Patches/BattleChargeGatePatch.cs` (#41) with the same charge-denial state as defense-in-depth at the per-unit charge initiation surface (`[TacticalChargeDeny] surface=movement`). Four new default-off configs: Local Reaction Doctrine, Charge Denial, Reserve Intent Telemetry, Reserve List Mutation. Build/deploy/hash verified in DLL `<sha>`; in-game smoke pending.
 ```
 
 - [ ] **Step 6: Commit docs**
@@ -1161,8 +1161,8 @@ Pure types (`TacticalReactionContext`, `TacticalLocalReactionScorer`, `TacticalR
 | `[TacticalPlaybook]` | Always with B6a doctrine flag on |
 | `[TacticalLocalReaction]` | With B6c local reaction flag on |
 | `[TacticalReserveIntent]` | With B6c reserve telemetry flag on |
-| `[TacticalChargeDeny] surface=stance` | When B6c charge denial flag on AND vanilla wrote stance 4 AND B6 reaction is DenyCharge |
+| `[TacticalChargeDeny] surface=stance` | When B6c charge denial flag on AND vanilla wrote stance 4 AND B6 reaction is not `PermitCharge` |
 | `[TacticalChargeDeny] surface=movement` | Same conditions, secondary defense-in-depth at per-unit charge initiation |
-| `[TacticalGroupDecision] action=skip ... reason=vanilla-charge-preserved` | Vanilla wrote stance 4 AND B6 reaction is not DenyCharge AND charge denial flag on |
+| `[TacticalGroupDecision] action=skip ... reason=vanilla-charge-preserved` | Vanilla wrote stance 4 AND B6 reaction is `PermitCharge` or charge denial flag is off |
 | `[TacticalReserveMutation]` | With B6c reserve mutation flag on AND intent is RelieveBatteredLine/ExploitWeakPoint |
 | `[once:tactical-reserve-doctrine:failed]` | Postcondition violation triggered snapshot restore — investigate |

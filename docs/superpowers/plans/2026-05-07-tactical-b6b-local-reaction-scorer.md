@@ -6,6 +6,8 @@
 
 **Status:** Complete for B6c consumption. Final review wired `TacticalLocalReactionInput.PlaybookPolicy` into the scorer: Conservative blocks `PermitCharge` and `LimitedCounterstroke`; Standard/Aggressive preserve the existing positive cases. Console harness and plugin build passed; B6b has no deploy or in-game smoke requirement.
 
+**Implementation delta:** The task snippets below are historical execution scaffolding. The shipped B6b scorer is stricter after review: it does not emit `DenyCharge` or `LocalFallbackPressure`; it treats `PermitCharge` as the only positive charge permission; only `AttackWeakPoint` can permit charge; `Fix`/`EconomyOfForce` screen when path risk is absent; other support missions maintain line. B6c must consume the absence of `PermitCharge` as charge denial, and B8 must not assume B6b already emits fallback pressure.
+
 **Architecture:** Two new pure types under `src/WhiskeyRealism/Tactical/`. `TacticalLocalReactionScorer` consumes intent + playbook + per-unit evidence (morale, ammo, casualties, target visibility, vanilla charge cooldown readiness, W&L ownership, B2 order friction) and produces one `TacticalLocalReactionDecision` per group. `TacticalReservePolicyLedger` aggregates reaction decisions plus reserve-availability evidence and produces one `TacticalReserveIntent` per side. Both ship covered by the console harness.
 
 **Tech Stack:** C# netstandard2.1 (plugin) and net8.0 (test harness), no Harmony usage in this slice. Vanilla anchor cross-checks against `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
