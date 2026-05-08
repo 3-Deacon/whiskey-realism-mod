@@ -81,6 +81,15 @@ static class Program
             ("tactical support screen unsupported no screen", TacticalSupportScreenUnsupportedNoScreen),
             ("tactical support screen unknown on uninitialized", TacticalSupportScreenUnknownOnUninitialized),
             ("tactical support screen W&L gate blocks", TacticalSupportScreenWlGateBlocks),
+            ("tactical artillery doctrine preserves fire when screened and ammo ok", TacticalArtilleryDoctrinePreservesFireWhenScreenedAndAmmoOk),
+            ("tactical artillery doctrine counterbattery when enemy art visible", TacticalArtilleryDoctrineCounterBatteryWhenEnemyArtVisible),
+            ("tactical artillery doctrine cancel bombard when unsupported", TacticalArtilleryDoctrineCancelBombardWhenUnsupported),
+            ("tactical artillery doctrine defensive fallback when shaken and unsupported", TacticalArtilleryDoctrineDefensiveFallbackWhenShakenAndUnsupported),
+            ("tactical artillery doctrine cancel bombard on low ammo", TacticalArtilleryDoctrineCancelBombardOnLowAmmo),
+            ("tactical artillery doctrine W&L gate blocks", TacticalArtilleryDoctrineWlGateBlocks),
+            ("tactical artillery input adapter reads scalar fields", TacticalArtilleryInputAdapterReadsScalarFields),
+            ("tactical artillery input adapter rejects non-artillery", TacticalArtilleryInputAdapterRejectsNonArtillery),
+            ("tactical artillery input adapter rejects routed", TacticalArtilleryInputAdapterRejectsRouted),
             ("tactical destination discipline clear", TacticalDestinationDisciplineClearDestination),
             ("tactical destination discipline gun crowded on gun", TacticalDestinationDisciplineGunCrowdedOnGun),
             ("tactical destination discipline line crowded on line", TacticalDestinationDisciplineLineCrowdedOnLine),
@@ -93,6 +102,14 @@ static class Program
             ("tactical morale pressure withdrawal candidate flank no cover", TacticalMoralePressureWithdrawalCandidateFlankNoCover),
             ("tactical morale pressure collapse candidate", TacticalMoralePressureCollapseCandidate),
             ("tactical morale pressure stable on uninitialized defer to caller", TacticalMoralePressureStableOnUninitializedDeferToCaller),
+            ("tactical withdrawal input adapter to morale pressure input", TacticalWithdrawalInputAdapterToMoralePressureInput),
+            ("tactical withdrawal doctrine hold line when stable", TacticalWithdrawalDoctrineHoldLineWhenStable),
+            ("tactical withdrawal doctrine stabilize under pressure", TacticalWithdrawalDoctrineStabilizeUnderPressure),
+            ("tactical withdrawal doctrine screen for fallback candidate", TacticalWithdrawalDoctrineScreenForFallbackCandidate),
+            ("tactical withdrawal doctrine rear guard for withdrawal candidate", TacticalWithdrawalDoctrineRearGuardForWithdrawalCandidate),
+            ("tactical withdrawal doctrine full retreat on collapse", TacticalWithdrawalDoctrineFullRetreatOnCollapse),
+            ("tactical withdrawal doctrine rear pressure bumps ladder", TacticalWithdrawalDoctrineRearPressureBumpsLadder),
+            ("tactical withdrawal doctrine W&L gate blocks", TacticalWithdrawalDoctrineWlGateBlocks),
             ("tactical support screen quiet when no enemy and no screen", TacticalSupportScreenQuietWhenNoEnemyAndNoScreen),
             ("tactical unit type constants match vanilla unittyp", TacticalUnitTypeConstantsMatchVanillaUnittyp),
             ("tactical help request no request when safe", TacticalHelpRequestNoRequestWhenSafe),
@@ -484,6 +501,7 @@ static class Program
             ("tactical quadrant threat computes arcs", TacticalQuadrantThreatScorerComputesArcs),
             ("tactical quadrant threat detects rear pressure", TacticalQuadrantThreatScorerDetectsRearPressure),
             ("tactical quadrant threat null slices degrades gracefully", TacticalQuadrantThreatScorerNullSlicesDegradesGracefully),
+            ("tactical withdrawal input adapter to quadrant input", TacticalWithdrawalInputAdapterToQuadrantInput),
             ("tactical charge viability refuse on cooldown", TacticalChargeViabilityRefuseOnCooldown),
             ("tactical charge viability refuse on morale high", TacticalChargeViabilityRefuseOnMoraleHigh),
             ("tactical charge viability allow at threshold", TacticalChargeViabilityAllowAtThreshold),
@@ -2321,6 +2339,156 @@ static class Program
         AssertEqual(TacticalSupportScreen.Result.Unknown, TacticalSupportScreen.Score(input), "W&L gate blocks");
     }
 
+    private static void TacticalArtilleryDoctrinePreservesFireWhenScreenedAndAmmoOk()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.6f,
+            CanisterAmmo = 0.3f,
+            ClosestEnemyDistance = 600f,
+            UnitFireRange = 800f,
+            EnemyArtilleryVisible = false,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.PreserveFire,
+            TacticalArtilleryDoctrine.Score(input), "screened + ammo ok -> preserve fire");
+    }
+
+    private static void TacticalArtilleryDoctrineCounterBatteryWhenEnemyArtVisible()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.6f,
+            ClosestEnemyDistance = 700f,
+            UnitFireRange = 800f,
+            EnemyArtilleryVisible = true,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.CounterBattery,
+            TacticalArtilleryDoctrine.Score(input), "enemy art visible -> CB");
+    }
+
+    private static void TacticalArtilleryDoctrineCancelBombardWhenUnsupported()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Unsupported,
+            AmmoTotalRatio = 0.5f,
+            ClosestEnemyDistance = 80f,
+            UnitFireRange = 800f,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.CancelBombard,
+            TacticalArtilleryDoctrine.Score(input), "unsupported -> cancel bombard");
+    }
+
+    private static void TacticalArtilleryDoctrineDefensiveFallbackWhenShakenAndUnsupported()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Shaken,
+            AmmoTotalRatio = 0.5f,
+            ClosestEnemyDistance = 90f,
+            UnitFireRange = 800f,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.DefensiveFallback,
+            TacticalArtilleryDoctrine.Score(input), "shaken close enemy -> defensive fallback");
+    }
+
+    private static void TacticalArtilleryDoctrineCancelBombardOnLowAmmo()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.05f,
+            ClosestEnemyDistance = 600f,
+            UnitFireRange = 800f,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.CancelBombard,
+            TacticalArtilleryDoctrine.Score(input), "low ammo -> cancel bombard");
+    }
+
+    private static void TacticalArtilleryDoctrineWlGateBlocks()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.6f,
+            ClosestEnemyDistance = 600f,
+            UnitFireRange = 800f,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = 5,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.PreserveFire,
+            TacticalArtilleryDoctrine.Score(input), "W&L gate -> safe default PreserveFire");
+    }
+
+    private static void TacticalArtilleryInputAdapterReadsScalarFields()
+    {
+        var snapshot = new TacticalArtilleryInputAdapter.Snapshot
+        {
+            UnitTyp = TacticalUnitType.Artillery,
+            Guns = 4,
+            IsRouted = false,
+            MarkedForRout = false,
+            AmmoTotalRatio = 0.55f,
+            CanisterAmmo = 0.30f,
+            Morale = 0.75f,
+            BattleStartMorale = 0.85f,
+            BattleStartMoraleInitialized = true,
+            DangerRadius = 100f,
+            ClosestEnemyDistance = 80f,
+            InfCavScreenCount = 2,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+            FallbackThreshold = 0.40f,
+            CombatBehaviorOrdered = 8,
+            VolleyDwellRemaining = 0f,
+        };
+        var input = TacticalArtilleryInputAdapter.ToSupportScreenInput(snapshot);
+        AssertEqual(0.75f, input.ProtectedUnitMorale, "morale carried");
+        AssertEqual(0.40f, input.MoraleFallbackThreshold, "threshold carried");
+        AssertEqual(0.85f, input.BattleStartMorale, "battle start carried");
+        AssertEqual(80f, input.EnemyDistance, "enemy distance carried");
+        AssertEqual(100f, input.DangerRadius, "danger radius carried");
+        AssertEqual(2, input.ScreenUnitCount, "inf/cav screen count carried");
+        AssertEqual(-1, input.AiFeudStance, "feud stance carried");
+    }
+
+    private static void TacticalArtilleryInputAdapterRejectsNonArtillery()
+    {
+        var snapshot = new TacticalArtilleryInputAdapter.Snapshot
+        {
+            UnitTyp = TacticalUnitType.Infantry,
+            Guns = 0,
+            AiFeudStance = -1,
+        };
+        AssertFalse(TacticalArtilleryInputAdapter.IsEligible(snapshot), "non-artillery rejected");
+    }
+
+    private static void TacticalArtilleryInputAdapterRejectsRouted()
+    {
+        var snapshot = new TacticalArtilleryInputAdapter.Snapshot
+        {
+            UnitTyp = TacticalUnitType.Artillery,
+            Guns = 4,
+            IsRouted = true,
+            AiFeudStance = -1,
+        };
+        AssertFalse(TacticalArtilleryInputAdapter.IsEligible(snapshot), "routed rejected");
+    }
+
     private static void TacticalDestinationDisciplineClearDestination()
     {
         var input = new TacticalDestinationDiscipline.Input
@@ -2516,6 +2684,92 @@ static class Program
         };
         AssertEqual(TacticalMoralePressure.Result.Stable,
             TacticalMoralePressure.Score(input), "uninitialized -> stable (caller separates)");
+    }
+
+    private static void TacticalWithdrawalDoctrineHoldLineWhenStable()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.Stable,
+            RearPressureFlag = false,
+            Fatigue = TacticalFatigueState.Result.Fresh,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.HoldLine,
+            TacticalWithdrawalDoctrine.Score(input), "stable -> hold line");
+    }
+
+    private static void TacticalWithdrawalDoctrineStabilizeUnderPressure()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.UnderPressure,
+            Fatigue = TacticalFatigueState.Result.Tiring,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.Stabilize,
+            TacticalWithdrawalDoctrine.Score(input), "under pressure -> stabilize");
+    }
+
+    private static void TacticalWithdrawalDoctrineScreenForFallbackCandidate()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.FallbackCandidate,
+            Fatigue = TacticalFatigueState.Result.Tiring,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.Screen,
+            TacticalWithdrawalDoctrine.Score(input), "fallback candidate -> screen");
+    }
+
+    private static void TacticalWithdrawalDoctrineRearGuardForWithdrawalCandidate()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.WithdrawalCandidate,
+            Fatigue = TacticalFatigueState.Result.Spent,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.RearGuard,
+            TacticalWithdrawalDoctrine.Score(input), "withdrawal candidate -> rear guard");
+    }
+
+    private static void TacticalWithdrawalDoctrineFullRetreatOnCollapse()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.CollapseCandidate,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.FullRetreat,
+            TacticalWithdrawalDoctrine.Score(input), "collapse -> full retreat");
+    }
+
+    private static void TacticalWithdrawalDoctrineRearPressureBumpsLadder()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.UnderPressure,
+            RearPressureFlag = true,
+            Fatigue = TacticalFatigueState.Result.Spent,
+            AiFeudStance = -1,
+        };
+        // Rear-pressure + Spent fatigue bumps UnderPressure to Screen (mid-ladder).
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.Screen,
+            TacticalWithdrawalDoctrine.Score(input), "rear pressure + spent fatigue bumps to screen");
+    }
+
+    private static void TacticalWithdrawalDoctrineWlGateBlocks()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.CollapseCandidate,
+            AiFeudStance = 5,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.HoldLine,
+            TacticalWithdrawalDoctrine.Score(input), "W&L gate -> safe default HoldLine");
     }
 
     private static void TacticalSupportScreenQuietWhenNoEnemyAndNoScreen()
@@ -9458,6 +9712,30 @@ static class Program
         AssertFalse(ledger.TryGetLatest(key, out _, out _), "prune removes entry");
     }
 
+    private static void TacticalWithdrawalInputAdapterToMoralePressureInput()
+    {
+        var snapshot = new TacticalWithdrawalInputAdapter.Snapshot
+        {
+            Morale = 0.55f,
+            BattleStartMorale = 0.85f,
+            BattleStartMoraleInitialized = true,
+            FallbackThreshold = 0.40f,
+            Outflanked = 2,
+            FriendlyRoutedNear = 1f,
+            EnemyRoutedNear = 0f,
+            ReceivedFireFromClosestFar = true,
+            CoverValue = 0.2f,
+            CoverObject = 0,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+        };
+        var input = TacticalWithdrawalInputAdapter.ToMoralePressureInput(snapshot);
+        AssertEqual(0.55f, input.CurrentMorale, "morale carried");
+        AssertEqual(2, input.Outflanked, "outflanked carried");
+        AssertEqual(true, input.ReceivedFireFromClosestFar, "fire flag carried");
+        AssertEqual(true, input.BattleStartMoraleInitialized, "init flag carried");
+    }
+
     private static void TacticalQuadrantThreatScorerComputesArcs()
     {
         var slices = new float[36];
@@ -9501,6 +9779,21 @@ static class Program
         var output = TacticalQuadrantThreatScorer.Score(input);
         AssertEqual(0f, output.FrontStrength, "null slices -> zero");
         AssertFalse(output.RearPressureFlag, "no flag");
+    }
+
+    private static void TacticalWithdrawalInputAdapterToQuadrantInput()
+    {
+        var slices = new float[36];
+        var snapshot = new TacticalWithdrawalInputAdapter.Snapshot
+        {
+            EnemyStrengthWithinAngle = slices,
+            SliceWidthDegrees = 10f,
+            UnitFacingDegrees = 90f,
+        };
+        var input = TacticalWithdrawalInputAdapter.ToQuadrantInput(snapshot);
+        AssertEqual(slices.Length, input.Slices.Length, "slices carried");
+        AssertEqual(10f, input.SliceWidthDegrees, "slice width carried");
+        AssertEqual(90f, input.UnitFacingDegrees, "facing carried");
     }
 
     private static void TacticalChargeViabilityRefuseOnCooldown()

@@ -4,6 +4,7 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical;
 
 namespace WhiskeyRealism
 {
@@ -37,6 +38,10 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
+        public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
+        public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
+        public const int TacticalMoraleSnapshotLedgerCapacity = 4;
+        public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
@@ -178,6 +183,16 @@ namespace WhiskeyRealism
                 "Enable Tactical Commander Intent Doctrine",
                 false,
                 "Default OFF for Slice B6a. Computes tactical commander intent and playbook from B3-B5 evidence and the active OperationPosture, and emits read-only [TacticalIntent] and [TacticalPlaybook] telemetry. Does not change any vanilla battle state.");
+            EnableTacticalArtilleryDoctrine = Config.Bind(
+                "Tactical Doctrine",
+                "Enable Tactical Artillery Doctrine",
+                false,
+                "Default-off. When true, B7 may rewrite vanilla artillery combatbehaviorordered to favor counter-battery, preserve-fire, or cancel-bombard decisions based on doctrine. Read the patch source before enabling.");
+            EnableTacticalWithdrawalDoctrine = Config.Bind(
+                "Tactical Doctrine",
+                "Enable Tactical Withdrawal Doctrine",
+                false,
+                "Default-off. When true, B8 may call BattleUnits.SetWithdrawal for individual units classified as WithdrawalCandidate or CollapseCandidate by TacticalWithdrawalDoctrine. Read the patch source before enabling.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
@@ -327,6 +342,8 @@ namespace WhiskeyRealism
             // Strategic-brain bootstrap before patches register so patches
             // never see a null Instance on their first invocation.
             StrategicCoordinator.Bootstrap();
+
+            MoraleSnapshotLedger = new TacticalMoraleSnapshotLedger(capacity: TacticalMoraleSnapshotLedgerCapacity);
 
             // PatchAll(assembly) reflects all [HarmonyPatch] attributed classes
             // (including nested types like AICampaignSaveLoadPatch.SavePatch /
