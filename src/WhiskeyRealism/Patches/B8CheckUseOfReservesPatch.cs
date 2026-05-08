@@ -16,11 +16,14 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
     public static class B8CheckUseOfReservesPatch
     {
+        private static FieldInfo _bunitsField;
         private static FieldInfo _isPlayerAiOrFeudField;
+        private static MethodInfo _performAiActionDlcWlMethod;
 
         [HarmonyPostfix]
         public static void Postfix(AIBattle __instance, Regiment aigroup)
         {
+            if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
             if (aigroup == null) return;
 
             try
@@ -28,15 +31,22 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Info("b8-check-reserves", "B8 CheckUseOfReserves Postfix wired.");
 
                 var allUnits = aigroup.allattachedunits;
-                if (allUnits == null) return;
 
                 int? isPlayerAiOrFeud = IsPlayerAiOrFeud(__instance);
                 if (!isPlayerAiOrFeud.HasValue) return;
+                if (!HasPerformAiActionDlcWl()) return;
+
+                if (allUnits == null)
+                {
+                    EmitHelpRequest(aigroup, TacticalWithdrawalDoctrine.Decision.HoldLine);
+                    return;
+                }
 
                 bool writesEnabled = Plugin.EnableTacticalWithdrawalDoctrine != null
                     && Plugin.EnableTacticalWithdrawalDoctrine.Value;
 
                 List<Regiment> withdrawalList = null;
+                TacticalWithdrawalDoctrine.Decision strongestDecision = TacticalWithdrawalDoctrine.Decision.HoldLine;
 
                 for (int i = 0; i < allUnits.Length; i++)
                 {
@@ -47,6 +57,7 @@ namespace WhiskeyRealism.Patches
                     if (unit.permanentlydetached) continue;
                     if (!TacticalGateHelpers.PassesWlOwnership(aigroup.ai_feudstance, isPlayerAiOrFeud.Value))
                         continue;
+                    if (!PerformAiActionDlcWl(unit, aigroup)) continue;
 
                     var snapshot = BuildSnapshot(unit, aigroup, isPlayerAiOrFeud.Value);
                     var moraleInput = TacticalWithdrawalInputAdapter.ToMoralePressureInput(snapshot);
@@ -67,9 +78,11 @@ namespace WhiskeyRealism.Patches
                     };
                     var decision = TacticalWithdrawalDoctrine.Score(doctrineInput);
 
-                    EmitHelpRequest(aigroup, decision);
+                    if (DecisionRank(decision) > DecisionRank(strongestDecision))
+                        strongestDecision = decision;
 
                     if (writesEnabled
+                        && PassesWithdrawalWriteEnvelope(unit)
                         && (decision == TacticalWithdrawalDoctrine.Decision.RearGuard
                             || decision == TacticalWithdrawalDoctrine.Decision.FullRetreat))
                     {
@@ -78,9 +91,11 @@ namespace WhiskeyRealism.Patches
                     }
                 }
 
+                EmitHelpRequest(aigroup, strongestDecision);
+
                 if (withdrawalList != null && withdrawalList.Count > 0)
                 {
-                    float endDate = GameVars.currenttimefromstart + 600f;
+                    if (!TryGetWithdrawalEndDate(__instance, out float endDate)) return;
                     Vector3 fromPosition = new Vector3();
                     BattleUnits.SetWithdrawal(endDate, withdrawalList, aigroup.alliance, fromPosition, false);
                     OnceLog.Info("b8-set-withdrawal", "B8 SetWithdrawal applied count=" + withdrawalList.Count);
@@ -172,6 +187,90 @@ namespace WhiskeyRealism.Patches
             TacticalSectorLedger.SetHelpRequest(sectorId, request);
         }
 
+        private static int DecisionRank(TacticalWithdrawalDoctrine.Decision decision)
+        {
+            switch (decision)
+            {
+                case TacticalWithdrawalDoctrine.Decision.FullRetreat:
+                    return 3;
+                case TacticalWithdrawalDoctrine.Decision.RearGuard:
+                    return 2;
+                case TacticalWithdrawalDoctrine.Decision.Screen:
+                    return 1;
+                default:
+                    return 0;
+            }
+        }
+
+        private static bool PassesWithdrawalWriteEnvelope(Regiment unit)
+        {
+            if (unit == null) return false;
+            if (unit.isrouted || unit.markedforrout) return false;
+            if (unit.permanentlydetached) return false;
+            if (unit.regimentpaths > 0) return false;
+            return true;
+        }
+
+        private static bool TryGetWithdrawalEndDate(AIBattle battle, out float endDate)
+        {
+            endDate = 0f;
+
+            BattleUnits bunits = GetBattleUnits(battle);
+            if (bunits == null) return false;
+
+            try
+            {
+                if (bunits.uniStormSystem == null)
+                {
+                    OnceLog.Warning("b8-check-reserves-missing-unistorm", "[B8] Missing BattleUnits.uniStormSystem; skipping withdrawal writes.");
+                    return false;
+                }
+
+                endDate = new Tools.Date(
+                    bunits.uniStormSystem.dayCounter,
+                    bunits.uniStormSystem.monthCounter,
+                    bunits.year).yearfraction;
+                if (endDate <= 0f)
+                {
+                    OnceLog.Warning("b8-check-reserves-invalid-withdrawal-date", "[B8] Invalid campaign withdrawal date; skipping withdrawal writes.");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (System.Exception ex)
+            {
+                OnceLog.Warning("b8-check-reserves-withdrawal-date-error", "[B8] Failed computing campaign withdrawal date: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static BattleUnits GetBattleUnits(AIBattle battle)
+        {
+            try
+            {
+                if (battle == null) return null;
+
+                if (_bunitsField == null)
+                    _bunitsField = AccessTools.Field(typeof(AIBattle), "bunits");
+                if (_bunitsField == null)
+                {
+                    OnceLog.Warning("b8-check-reserves-missing-bunits", "[B8] Missing AIBattle.bunits; skipping withdrawal writes.");
+                    return null;
+                }
+
+                BattleUnits bunits = _bunitsField.GetValue(battle) as BattleUnits;
+                if (bunits == null)
+                    OnceLog.Warning("b8-check-reserves-null-bunits", "[B8] AIBattle.bunits was null; skipping withdrawal writes.");
+                return bunits;
+            }
+            catch (System.Exception ex)
+            {
+                OnceLog.Warning("b8-check-reserves-bunits-error", "[B8] Failed reading AIBattle.bunits: " + ex.Message);
+                return null;
+            }
+        }
+
         private static int? IsPlayerAiOrFeud(AIBattle battle)
         {
             try
@@ -196,6 +295,38 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("b8-check-reserves-isplayeraiorfeud-error", "[B8] Failed reading AIBattle.isplayeraiorfeud: " + ex.Message);
                 return null;
+            }
+        }
+
+        private static bool HasPerformAiActionDlcWl()
+        {
+            if (_performAiActionDlcWlMethod == null)
+            {
+                _performAiActionDlcWlMethod = AccessTools.Method(
+                    typeof(AIBattle),
+                    "PerformAIActionDLCWL",
+                    new[] { typeof(Regiment), typeof(Regiment) });
+            }
+            if (_performAiActionDlcWlMethod != null) return true;
+
+            OnceLog.Warning("b8-check-reserves-missing-perform-ai-action-dlcwl", "[B8] Missing AIBattle.PerformAIActionDLCWL(Regiment, Regiment); skipping withdrawal doctrine.");
+            return false;
+        }
+
+        private static bool PerformAiActionDlcWl(Regiment unit, Regiment aigroup)
+        {
+            try
+            {
+                object value = _performAiActionDlcWlMethod.Invoke(null, new object[] { unit, aigroup });
+                if (value is bool result) return result;
+
+                OnceLog.Warning("b8-check-reserves-invalid-perform-ai-action-dlcwl", "[B8] AIBattle.PerformAIActionDLCWL did not return bool; skipping unit.");
+                return false;
+            }
+            catch (System.Exception ex)
+            {
+                OnceLog.Warning("b8-check-reserves-perform-ai-action-dlcwl-error", "[B8] Failed invoking AIBattle.PerformAIActionDLCWL: " + ex.Message);
+                return false;
             }
         }
     }
