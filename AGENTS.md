@@ -13,6 +13,7 @@
 > - **Deploy:** `cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"` (game must be closed — Windows holds an exclusive lock on loaded DLLs)
 > - **Test:** `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` (console harness; pure strategic logic only)
 > - **Required for every DLL-affecting change:** build, deploy, then verify the deployed DLL matches `dist/WhiskeyRealism.dll` by timestamp/size and `sha256sum`. Do not report an implementation as ready from build output alone.
+> - **Agent instructions file:** `AGENTS.md` is the source. `CLAUDE.md` at the repo root is a symlink to it so Claude Code and Codex pick up the same content. Edit `AGENTS.md`; never write into `CLAUDE.md` directly.
 > - **Source-of-truth order:** shipped code > [`docs/patch-catalog.md`](docs/patch-catalog.md) > per-patch design doc > umbrella spec > archived plan
 > - **Master handoff:** [`docs/handoff.md`](docs/handoff.md) — read first at session start
 > - **Repository memory:** [`MEMORY.md`](MEMORY.md) — short durable state/index; read after `AGENTS.md` when resuming or updating project context
@@ -25,7 +26,7 @@
 
 ## What this project is
 
-A BepInEx plugin for Grand Tactician: The Civil War (1861-1865) that layers surgical Harmony patches on top of vanilla. Initial focus: **Slice A — strategic-brain overhaul** for the Whiskey & Lemons DLC career mode. Replaces the vanilla random-objective campaign AI with an era × faction × officer-personality scoring system that gives both Confederate and Union AI campaigns historical character without scripting them deterministically.
+A BepInEx plugin for Grand Tactician: The Civil War (1861-1865) that layers surgical Harmony patches on top of vanilla. **Slice A** (strategic-brain overhaul: era × faction × officer-personality scoring replacing the vanilla random-objective picker) shipped at v0.2.2. **Slice B** (tactical brain: contact/sector/odds doctrine, macro/group stance scorers, charge/feud guards, commander intent + playbook) is the active workstream — see `docs/handoff.md` for the current shipped state and DLL hash.
 
 Six locked design choices (Slice A umbrella spec, archived after ship: [`docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md`](docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md)):
 1. Slice A — strategic brain (campaign layer first; tactical layer is a later slice)
@@ -101,7 +102,7 @@ whiskey-realism-mod/
 │   ├── Plugin.cs                   ← BepInEx entry, ConfigEntry definitions
 │   ├── Strategic/                  ← strategic-brain core types: coordinator, CIC + theater commanders, era/personality/succession, per-cadence ledgers (front, army-area, formation-directive, fiscal, construction, defense intent), and supporting catalogs/runtimes. See files in directory; `docs/patch-catalog.md` is the canonical patch ordinal map.
 │   ├── Patches/                    ← Harmony patches; one concern per file
-│   │   └── Harmony patches #1-#25+ (see docs/patch-catalog.md for the canonical ordinal map; coordinator-driven runtimes are listed there too without ordinals)
+│   │   └── See docs/patch-catalog.md for the canonical numbered ordinal map; coordinator-driven runtimes are listed there too without ordinals.
 │   └── Util/                       ← shared infrastructure
 │       └── OnceLog / reflection helpers
 ├── docs/
@@ -155,6 +156,7 @@ Use the relevant Superpowers or repo skill before acting when the task matches i
 ### References
 
 - `refs/` holds symlinks into the Steam install. **Do not check binary DLLs into git.**
+- `refs/` is gitignored, so `git worktree add` does **not** carry the symlinks into a new worktree. After creating a worktree, re-link from the main repo: `cd <worktree> && ln -s ../../refs refs`. Without this, `./build.sh` and `dotnet run --project tests/...` fail with `Assembly-CSharp` / `UnityEngine` / `Newtonsoft.Json` resolve errors.
 - The HarmonyX runtime is pulled from the BepInEx NuGet feed (so the build works without BepInEx installed in the game). At runtime, BepInEx-provided HarmonyX is what executes patches.
 - The decompiled source for `Assembly-CSharp.dll` lives at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (regenerate with the steps in `docs/findings.md` if `/tmp` was wiped). It's the primary source of truth for method signatures.
 
