@@ -65,6 +65,14 @@ static class Program
             ("tactical group explicit probe bypasses low confidence skip", TacticalGroupExplicitProbeBypassesLowConfidenceSkip),
             ("tactical group low confidence keeps vanilla", TacticalGroupLowConfidenceKeepsVanilla),
             ("tactical group wl player subordinate skips", TacticalGroupWlPlayerSubordinateSkips),
+            ("tactical b6b reserve aggregator emits relieve battered line when reserve safe", TacticalB6bReserveAggregatorEmitsRelieveBatteredLineWhenReserveSafe),
+            ("tactical b6b reserve no reserve yields none", TacticalB6bReserveNoReserveYieldsNone),
+            ("tactical b6b reserve flank risk with last reserve guards", TacticalB6bReserveFlankRiskWithLastReserveGuards),
+            ("tactical b6b reserve flank risk with multiple reserves picks flank guard", TacticalB6bReserveFlankRiskWithMultipleReservesPicksFlankGuard),
+            ("tactical b6b reserve single relief request prepares relief", TacticalB6bReserveSingleReliefRequestPreparesRelief),
+            ("tactical b6b reserve exploit weak point picks exploit", TacticalB6bReserveExploitWeakPointPicksExploit),
+            ("tactical b6b reserve wl ownership unsafe holds reserve", TacticalB6bReserveWlOwnershipUnsafeHoldsReserve),
+            ("tactical b6b reserve stale order prepares without mutation", TacticalB6bReserveStaleOrderPreparesWithoutMutation),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
             ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
             ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
@@ -1967,6 +1975,139 @@ static class Program
             pathRiskActive: false));
 
         AssertEqual(LocalReaction.PermitCharge, d.Reaction, "reaction");
+    }
+
+    private static TacticalReserveAvailability ReserveAvailability(
+        int reserveCount = 1,
+        bool hasFlankRisk = false,
+        bool lastReserveIsFlankGuard = false,
+        bool wlOwnershipSafe = true,
+        bool stalenessActive = false)
+    {
+        return new TacticalReserveAvailability(
+            reserveCount,
+            hasFlankRisk,
+            lastReserveIsFlankGuard,
+            wlOwnershipSafe,
+            stalenessActive);
+    }
+
+    private static TacticalReserveIntentInput ReserveInput(
+        TacticalReservePolicy playbookPolicy = TacticalReservePolicy.HoldReserve,
+        TacticalLocalReactionDecision[] reactions = null,
+        TacticalReserveAvailability? availability = null)
+    {
+        return new TacticalReserveIntentInput(
+            playbookPolicy,
+            reactions,
+            availability ?? ReserveAvailability());
+    }
+
+    private static TacticalLocalReactionDecision ReactionDecision(
+        LocalReaction reaction = LocalReaction.MaintainLine,
+        bool reliefRequested = false)
+    {
+        return new TacticalLocalReactionDecision(reaction, reliefRequested, 0.75f, "test");
+    }
+
+    private static void TacticalB6bReserveAggregatorEmitsRelieveBatteredLineWhenReserveSafe()
+    {
+        var d = TacticalReservePolicyLedger.Decide(ReserveInput(
+            playbookPolicy: TacticalReservePolicy.RelieveBatteredLine,
+            reactions: new[]
+            {
+                ReactionDecision(reliefRequested: true),
+                ReactionDecision(LocalReaction.LineReliefRequest),
+            },
+            availability: ReserveAvailability(reserveCount: 2)));
+
+        AssertEqual(TacticalReserveIntent.RelieveBatteredLine, d.Intent, "intent");
+        AssertTrue(d.AllowsRuntimeMutation, "safe battered line relief should allow mutation");
+        AssertEqual("battered-line", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bReserveNoReserveYieldsNone()
+    {
+        var d = TacticalReservePolicyLedger.Decide(ReserveInput(
+            playbookPolicy: TacticalReservePolicy.RelieveBatteredLine,
+            reactions: new[] { ReactionDecision(reliefRequested: true) },
+            availability: ReserveAvailability(reserveCount: 0)));
+
+        AssertEqual(TacticalReserveIntent.None, d.Intent, "intent");
+        AssertTrue(!d.AllowsRuntimeMutation, "no reserve must not mutate");
+        AssertEqual("no-reserve", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bReserveFlankRiskWithLastReserveGuards()
+    {
+        var d = TacticalReservePolicyLedger.Decide(ReserveInput(
+            playbookPolicy: TacticalReservePolicy.FlankGuard,
+            availability: ReserveAvailability(reserveCount: 1, hasFlankRisk: true, lastReserveIsFlankGuard: true)));
+
+        AssertEqual(TacticalReserveIntent.FlankGuard, d.Intent, "intent");
+        AssertTrue(!d.AllowsRuntimeMutation, "last reserve flank guard should not mutate");
+        AssertEqual("last-reserve-is-flank-guard", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bReserveFlankRiskWithMultipleReservesPicksFlankGuard()
+    {
+        var d = TacticalReservePolicyLedger.Decide(ReserveInput(
+            playbookPolicy: TacticalReservePolicy.FlankGuard,
+            availability: ReserveAvailability(reserveCount: 2, hasFlankRisk: true)));
+
+        AssertEqual(TacticalReserveIntent.FlankGuard, d.Intent, "intent");
+        AssertTrue(d.AllowsRuntimeMutation, "multiple reserves can assign flank guard");
+        AssertEqual("flank-guard", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bReserveSingleReliefRequestPreparesRelief()
+    {
+        var d = TacticalReservePolicyLedger.Decide(ReserveInput(
+            reactions: new[] { ReactionDecision(reliefRequested: true) },
+            availability: ReserveAvailability(reserveCount: 1)));
+
+        AssertEqual(TacticalReserveIntent.PrepareRelief, d.Intent, "intent");
+        AssertTrue(!d.AllowsRuntimeMutation, "single relief request should prepare only");
+        AssertEqual("prepare-relief", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bReserveExploitWeakPointPicksExploit()
+    {
+        var d = TacticalReservePolicyLedger.Decide(ReserveInput(
+            playbookPolicy: TacticalReservePolicy.ExploitWeakPoint,
+            reactions: Array.Empty<TacticalLocalReactionDecision>(),
+            availability: ReserveAvailability(reserveCount: 1)));
+
+        AssertEqual(TacticalReserveIntent.ExploitWeakPoint, d.Intent, "intent");
+        AssertTrue(d.AllowsRuntimeMutation, "exploit weak point should allow mutation");
+        AssertEqual("exploit-weak-point", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bReserveWlOwnershipUnsafeHoldsReserve()
+    {
+        var d = TacticalReservePolicyLedger.Decide(ReserveInput(
+            playbookPolicy: TacticalReservePolicy.ExploitWeakPoint,
+            availability: ReserveAvailability(reserveCount: 2, wlOwnershipSafe: false)));
+
+        AssertEqual(TacticalReserveIntent.HoldReserve, d.Intent, "intent");
+        AssertTrue(!d.AllowsRuntimeMutation, "unsafe W&L ownership must not mutate");
+        AssertEqual("wl-ownership-blocked", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bReserveStaleOrderPreparesWithoutMutation()
+    {
+        var d = TacticalReservePolicyLedger.Decide(ReserveInput(
+            playbookPolicy: TacticalReservePolicy.RelieveBatteredLine,
+            reactions: new[]
+            {
+                ReactionDecision(reliefRequested: true),
+                ReactionDecision(reliefRequested: true),
+            },
+            availability: ReserveAvailability(reserveCount: 2, stalenessActive: true)));
+
+        AssertEqual(TacticalReserveIntent.PrepareRelief, d.Intent, "intent");
+        AssertTrue(!d.AllowsRuntimeMutation, "stale order should prepare without mutation");
+        AssertEqual("stale-order", d.Reason, "reason");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
