@@ -71,7 +71,6 @@ Then add the test method body (place near the other tactical helpers in the file
                 vanillaMacro: 1,
                 commanderInitiative01: 0.5f,
                 oddsConfidence: 0.7f,
-                allowAssault: true,
                 weakPointConfirmed: false);
 
             var decision = TacticalCommanderIntentResolver.Resolve(input);
@@ -117,7 +116,6 @@ namespace WhiskeyRealism.Tactical
             int vanillaMacro,
             float commanderInitiative01,
             float oddsConfidence,
-            bool allowAssault,
             bool weakPointConfirmed)
         {
             OperationPosture = operationPosture;
@@ -125,7 +123,6 @@ namespace WhiskeyRealism.Tactical
             VanillaMacro = vanillaMacro;
             CommanderInitiative01 = Clamp01(commanderInitiative01);
             OddsConfidence = Clamp01(oddsConfidence);
-            AllowAssault = allowAssault;
             WeakPointConfirmed = weakPointConfirmed;
         }
 
@@ -134,7 +131,6 @@ namespace WhiskeyRealism.Tactical
         public int VanillaMacro { get; }
         public float CommanderInitiative01 { get; }
         public float OddsConfidence { get; }
-        public bool AllowAssault { get; }
         public bool WeakPointConfirmed { get; }
 
         private static float Clamp01(float v)
@@ -262,7 +258,7 @@ In the dispatch tuple list, add after the existing B6a entry:
             var input = new TacticalIntentInput(
                 WhiskeyRealism.Strategic.OperationPosture.ConcentratedAttack,
                 hasPlan: true, vanillaMacro: 1, commanderInitiative01: 0.5f,
-                oddsConfidence: 0.7f, allowAssault: true, weakPointConfirmed: false);
+                oddsConfidence: 0.7f, weakPointConfirmed: false);
             var d = TacticalCommanderIntentResolver.Resolve(input);
             Assert(d.Intent == CommanderIntent.Attack, "Expected Attack, got " + d.Intent);
             Assert(d.AllowsCharge, "Attack should allow charge");
@@ -273,7 +269,7 @@ In the dispatch tuple list, add after the existing B6a entry:
             var input = new TacticalIntentInput(
                 WhiskeyRealism.Strategic.OperationPosture.ConcentratedAttack,
                 hasPlan: true, vanillaMacro: 0, commanderInitiative01: 0.7f,
-                oddsConfidence: 0.8f, allowAssault: true, weakPointConfirmed: true);
+                oddsConfidence: 0.8f, weakPointConfirmed: true);
             var d = TacticalCommanderIntentResolver.Resolve(input);
             Assert(d.Intent == CommanderIntent.AllOutAttack, "Expected AllOutAttack, got " + d.Intent);
         }
@@ -283,7 +279,7 @@ In the dispatch tuple list, add after the existing B6a entry:
             var input = new TacticalIntentInput(
                 WhiskeyRealism.Strategic.OperationPosture.ExploitBreakthrough,
                 hasPlan: true, vanillaMacro: 0, commanderInitiative01: 0.7f,
-                oddsConfidence: 0.4f, allowAssault: true, weakPointConfirmed: true);
+                oddsConfidence: 0.4f, weakPointConfirmed: true);
             var d = TacticalCommanderIntentResolver.Resolve(input);
             Assert(d.Intent == CommanderIntent.Attack, "Expected Attack on low confidence, got " + d.Intent);
         }
@@ -293,7 +289,7 @@ In the dispatch tuple list, add after the existing B6a entry:
             var input = new TacticalIntentInput(
                 WhiskeyRealism.Strategic.OperationPosture.Counterstroke,
                 hasPlan: true, vanillaMacro: 2, commanderInitiative01: 0.5f,
-                oddsConfidence: 0.6f, allowAssault: false, weakPointConfirmed: false);
+                oddsConfidence: 0.6f, weakPointConfirmed: false);
             var d = TacticalCommanderIntentResolver.Resolve(input);
             Assert(d.Intent == CommanderIntent.Defend, "Expected Defend, got " + d.Intent);
             Assert(d.AllowsCharge, "Counterstroke must keep charge available for LimitedCounterstroke");
@@ -304,7 +300,7 @@ In the dispatch tuple list, add after the existing B6a entry:
             var input = new TacticalIntentInput(
                 WhiskeyRealism.Strategic.OperationPosture.ScreenAndDelay,
                 hasPlan: true, vanillaMacro: 2, commanderInitiative01: 0.5f,
-                oddsConfidence: 0.5f, allowAssault: false, weakPointConfirmed: false);
+                oddsConfidence: 0.5f, weakPointConfirmed: false);
             var d = TacticalCommanderIntentResolver.Resolve(input);
             Assert(d.Intent == CommanderIntent.Defend, "Expected Defend, got " + d.Intent);
             Assert(!d.AllowsCharge, "ScreenAndDelay must not allow charge");
@@ -315,7 +311,7 @@ In the dispatch tuple list, add after the existing B6a entry:
             var input = new TacticalIntentInput(
                 WhiskeyRealism.Strategic.OperationPosture.ReinforceAndHold,
                 hasPlan: true, vanillaMacro: 2, commanderInitiative01: 0.5f,
-                oddsConfidence: 0.5f, allowAssault: false, weakPointConfirmed: false);
+                oddsConfidence: 0.5f, weakPointConfirmed: false);
             var d = TacticalCommanderIntentResolver.Resolve(input);
             Assert(d.Intent == CommanderIntent.Hold, "Expected Hold, got " + d.Intent);
         }
@@ -325,7 +321,7 @@ In the dispatch tuple list, add after the existing B6a entry:
             var input = new TacticalIntentInput(
                 WhiskeyRealism.Strategic.OperationPosture.Recover,
                 hasPlan: true, vanillaMacro: 2, commanderInitiative01: 0.5f,
-                oddsConfidence: 0.5f, allowAssault: false, weakPointConfirmed: false);
+                oddsConfidence: 0.5f, weakPointConfirmed: false);
             var d = TacticalCommanderIntentResolver.Resolve(input);
             Assert(d.Intent == CommanderIntent.HoldToLast, "Expected HoldToLast, got " + d.Intent);
         }
@@ -335,7 +331,7 @@ In the dispatch tuple list, add after the existing B6a entry:
             var input = new TacticalIntentInput(
                 WhiskeyRealism.Strategic.OperationPosture.Inherit,
                 hasPlan: false, vanillaMacro: 2, commanderInitiative01: 0.5f,
-                oddsConfidence: 0.5f, allowAssault: false, weakPointConfirmed: false);
+                oddsConfidence: 0.5f, weakPointConfirmed: false);
             var d = TacticalCommanderIntentResolver.Resolve(input);
             Assert(d.Intent == CommanderIntent.Defend, "Expected Defend from macro 2, got " + d.Intent);
         }
@@ -345,7 +341,7 @@ In the dispatch tuple list, add after the existing B6a entry:
             var input = new TacticalIntentInput(
                 WhiskeyRealism.Strategic.OperationPosture.Inherit,
                 hasPlan: false, vanillaMacro: 3, commanderInitiative01: 0.5f,
-                oddsConfidence: 0.0f, allowAssault: false, weakPointConfirmed: false);
+                oddsConfidence: 0.0f, weakPointConfirmed: false);
             var d = TacticalCommanderIntentResolver.Resolve(input);
             Assert(d.Intent == CommanderIntent.HoldToLast, "Expected HoldToLast from macro 3, got " + d.Intent);
         }
@@ -1085,7 +1081,6 @@ namespace WhiskeyRealism.Patches
                 vanillaMacro: macro,
                 commanderInitiative01: 0.5f,
                 oddsConfidence: 0.5f,
-                allowAssault: macro == 0 || macro == 1,
                 weakPointConfirmed: false);
         }
 

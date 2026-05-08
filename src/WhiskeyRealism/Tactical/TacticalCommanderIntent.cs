@@ -7,7 +7,7 @@ namespace WhiskeyRealism.Tactical
     {
         AllOutAttack = 0,
         Attack = 1,
-        ProbeIntent = 2,
+        ProbeIntent = 2,    // disambiguates from TacticalSectorMission.Probe in the same namespace
         Defend = 3,
         Hold = 4,
         HoldToLast = 5
@@ -21,7 +21,6 @@ namespace WhiskeyRealism.Tactical
             int vanillaMacro,
             float commanderInitiative01,
             float oddsConfidence,
-            bool allowAssault,
             bool weakPointConfirmed)
         {
             OperationPosture = operationPosture;
@@ -29,7 +28,6 @@ namespace WhiskeyRealism.Tactical
             VanillaMacro = vanillaMacro;
             CommanderInitiative01 = Clamp01(commanderInitiative01);
             OddsConfidence = Clamp01(oddsConfidence);
-            AllowAssault = allowAssault;
             WeakPointConfirmed = weakPointConfirmed;
         }
 
@@ -38,11 +36,11 @@ namespace WhiskeyRealism.Tactical
         public int VanillaMacro { get; }
         public float CommanderInitiative01 { get; }
         public float OddsConfidence { get; }
-        public bool AllowAssault { get; }
         public bool WeakPointConfirmed { get; }
 
         private static float Clamp01(float v)
         {
+            // 0.5 mid-band default for confidence/initiative inputs: a NaN must not flip an attacker to no-confidence behavior. Sibling Sanitize/Clamp01 helpers in odds/sector ledgers clamp to 0 because they represent strength, not bounded probabilities.
             if (float.IsNaN(v) || float.IsInfinity(v)) return 0.5f;
             if (v < 0f) return 0f;
             if (v > 1f) return 1f;

@@ -1453,7 +1453,6 @@ static class Program
             vanillaMacro: 1,
             commanderInitiative01: 0.5f,
             oddsConfidence: 0.7f,
-            allowAssault: true,
             weakPointConfirmed: false);
 
         var decision = TacticalCommanderIntentResolver.Resolve(input);
