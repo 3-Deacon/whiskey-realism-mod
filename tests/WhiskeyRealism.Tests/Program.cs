@@ -478,7 +478,10 @@ static class Program
             ("tactical morale snapshot ledger ring buffer drops oldest", TacticalMoraleSnapshotLedgerRingBufferDropsOldest),
             ("tactical morale snapshot ledger name fallback resolves across InstanceID roll", TacticalMoraleSnapshotLedgerNameFallbackResolvesAcrossInstanceIdRoll),
             ("tactical morale snapshot ledger skips when last update unchanged", TacticalMoraleSnapshotLedgerSkipsWhenLastUpdateUnchanged),
-            ("tactical morale snapshot ledger prune", TacticalMoraleSnapshotLedgerPrune)
+            ("tactical morale snapshot ledger prune", TacticalMoraleSnapshotLedgerPrune),
+            ("tactical quadrant threat computes arcs", TacticalQuadrantThreatScorerComputesArcs),
+            ("tactical quadrant threat detects rear pressure", TacticalQuadrantThreatScorerDetectsRearPressure),
+            ("tactical quadrant threat null slices degrades gracefully", TacticalQuadrantThreatScorerNullSlicesDegradesGracefully)
         };
 
         foreach (var test in tests)
@@ -9409,5 +9412,50 @@ static class Program
         ledger.RecordSample(key, morale: 0.9f, timeFromStart: 10f);
         ledger.PruneRouted(key);
         AssertFalse(ledger.TryGetLatest(key, out _, out _), "prune removes entry");
+    }
+
+    private static void TacticalQuadrantThreatScorerComputesArcs()
+    {
+        var slices = new float[36];
+        for (int i = 0; i < 9; i++) slices[i] = 10f;
+        for (int i = 27; i < 36; i++) slices[i] = 10f;
+        var input = new TacticalQuadrantThreatScorer.Input
+        {
+            Slices = slices,
+            SliceWidthDegrees = 10f,
+            UnitFacingDegrees = 0f,
+        };
+        var output = TacticalQuadrantThreatScorer.Score(input);
+        AssertTrue(output.FrontStrength > output.RearStrength, "front > rear when enemy is front");
+        AssertEqual(TacticalQuadrantThreatScorer.Direction.Front, output.DominantDirection, "dominant = front");
+        AssertFalse(output.RearPressureFlag, "no rear pressure");
+    }
+
+    private static void TacticalQuadrantThreatScorerDetectsRearPressure()
+    {
+        var slices = new float[36];
+        for (int i = 12; i < 24; i++) slices[i] = 50f;
+        var input = new TacticalQuadrantThreatScorer.Input
+        {
+            Slices = slices,
+            SliceWidthDegrees = 10f,
+            UnitFacingDegrees = 0f,
+        };
+        var output = TacticalQuadrantThreatScorer.Score(input);
+        AssertTrue(output.RearPressureFlag, "rear pressure when rear > front + max(L,R)");
+        AssertEqual(TacticalQuadrantThreatScorer.Direction.Rear, output.DominantDirection, "dominant = rear");
+    }
+
+    private static void TacticalQuadrantThreatScorerNullSlicesDegradesGracefully()
+    {
+        var input = new TacticalQuadrantThreatScorer.Input
+        {
+            Slices = null,
+            SliceWidthDegrees = 10f,
+            UnitFacingDegrees = 0f,
+        };
+        var output = TacticalQuadrantThreatScorer.Score(input);
+        AssertEqual(0f, output.FrontStrength, "null slices -> zero");
+        AssertFalse(output.RearPressureFlag, "no flag");
     }
 }
