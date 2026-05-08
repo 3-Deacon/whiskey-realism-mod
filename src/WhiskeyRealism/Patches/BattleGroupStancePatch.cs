@@ -69,13 +69,7 @@ namespace WhiskeyRealism.Patches
                 }
 
                 var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
-                if (reaction.Reason == "no-decision")
-                {
-                    LogChargePreserved(side, group, "vanilla-charge-preserved");
-                    return;
-                }
-
-                if (reaction.Reaction != LocalReaction.PermitCharge)
+                if (IsExplicitChargeDenial(reaction))
                 {
                     DemoteCharge(bunits, group, side, reaction);
                     return;
@@ -106,6 +100,13 @@ namespace WhiskeyRealism.Patches
             group.ai_stanceordered = decision.GroupStance;
             group.lastaistancechangetime = GameVars.currenttimefromstart;
             LogDecision(side, group, sector, decision);
+        }
+
+        private static bool IsExplicitChargeDenial(TacticalLocalReactionDecision reaction)
+        {
+            return reaction.Reason != "no-decision" &&
+                reaction.Reaction != LocalReaction.MaintainLine &&
+                reaction.Reaction != LocalReaction.PermitCharge;
         }
 
         private static void DemoteCharge(

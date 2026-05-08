@@ -136,11 +136,17 @@ namespace WhiskeyRealism.Patches
                 return false;
 
             TacticalLocalReactionDecision reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
-            if (reaction.Reason == "no-decision") return false;
-            if (reaction.Reaction == LocalReaction.PermitCharge) return false;
+            if (!IsExplicitChargeDenial(reaction)) return false;
 
             LogDeniedB6c(unit, group, reaction);
             return true;
+        }
+
+        private static bool IsExplicitChargeDenial(TacticalLocalReactionDecision reaction)
+        {
+            return reaction.Reason != "no-decision" &&
+                reaction.Reaction != LocalReaction.MaintainLine &&
+                reaction.Reaction != LocalReaction.PermitCharge;
         }
 
         private static BattleUnits BattleUnits(AIBattle battle)

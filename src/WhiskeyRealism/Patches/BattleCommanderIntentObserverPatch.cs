@@ -298,10 +298,18 @@ namespace WhiskeyRealism.Patches
                     object entry = chain[i];
                     if (TryReserveGroups(entry, out IList reserves))
                     {
-                        reserveCount += reserves.Count;
                         for (int j = 0; j < reserves.Count; j++)
                         {
-                            if (!ReserveWlOwnershipSafe(reserves[j] as Regiment))
+                            var reserve = reserves[j] as Regiment;
+                            if (reserve == null)
+                            {
+                                wlOwnershipSafe = false;
+                                OnceLog.Warning("tactical-b6c-reserve-list:invalid-entry", "Reserve availability saw a null/non-Regiment reservegroups entry; blocking reserve mutation.");
+                                continue;
+                            }
+
+                            reserveCount++;
+                            if (!ReserveWlOwnershipSafe(reserve))
                                 wlOwnershipSafe = false;
                         }
                     }
