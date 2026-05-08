@@ -103,6 +103,13 @@ static class Program
             ("tactical morale pressure collapse candidate", TacticalMoralePressureCollapseCandidate),
             ("tactical morale pressure stable on uninitialized defer to caller", TacticalMoralePressureStableOnUninitializedDeferToCaller),
             ("tactical withdrawal input adapter to morale pressure input", TacticalWithdrawalInputAdapterToMoralePressureInput),
+            ("tactical withdrawal doctrine hold line when stable", TacticalWithdrawalDoctrineHoldLineWhenStable),
+            ("tactical withdrawal doctrine stabilize under pressure", TacticalWithdrawalDoctrineStabilizeUnderPressure),
+            ("tactical withdrawal doctrine screen for fallback candidate", TacticalWithdrawalDoctrineScreenForFallbackCandidate),
+            ("tactical withdrawal doctrine rear guard for withdrawal candidate", TacticalWithdrawalDoctrineRearGuardForWithdrawalCandidate),
+            ("tactical withdrawal doctrine full retreat on collapse", TacticalWithdrawalDoctrineFullRetreatOnCollapse),
+            ("tactical withdrawal doctrine rear pressure bumps ladder", TacticalWithdrawalDoctrineRearPressureBumpsLadder),
+            ("tactical withdrawal doctrine W&L gate blocks", TacticalWithdrawalDoctrineWlGateBlocks),
             ("tactical support screen quiet when no enemy and no screen", TacticalSupportScreenQuietWhenNoEnemyAndNoScreen),
             ("tactical unit type constants match vanilla unittyp", TacticalUnitTypeConstantsMatchVanillaUnittyp),
             ("tactical help request no request when safe", TacticalHelpRequestNoRequestWhenSafe),
@@ -2677,6 +2684,92 @@ static class Program
         };
         AssertEqual(TacticalMoralePressure.Result.Stable,
             TacticalMoralePressure.Score(input), "uninitialized -> stable (caller separates)");
+    }
+
+    private static void TacticalWithdrawalDoctrineHoldLineWhenStable()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.Stable,
+            RearPressureFlag = false,
+            Fatigue = TacticalFatigueState.Result.Fresh,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.HoldLine,
+            TacticalWithdrawalDoctrine.Score(input), "stable -> hold line");
+    }
+
+    private static void TacticalWithdrawalDoctrineStabilizeUnderPressure()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.UnderPressure,
+            Fatigue = TacticalFatigueState.Result.Tiring,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.Stabilize,
+            TacticalWithdrawalDoctrine.Score(input), "under pressure -> stabilize");
+    }
+
+    private static void TacticalWithdrawalDoctrineScreenForFallbackCandidate()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.FallbackCandidate,
+            Fatigue = TacticalFatigueState.Result.Tiring,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.Screen,
+            TacticalWithdrawalDoctrine.Score(input), "fallback candidate -> screen");
+    }
+
+    private static void TacticalWithdrawalDoctrineRearGuardForWithdrawalCandidate()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.WithdrawalCandidate,
+            Fatigue = TacticalFatigueState.Result.Spent,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.RearGuard,
+            TacticalWithdrawalDoctrine.Score(input), "withdrawal candidate -> rear guard");
+    }
+
+    private static void TacticalWithdrawalDoctrineFullRetreatOnCollapse()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.CollapseCandidate,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.FullRetreat,
+            TacticalWithdrawalDoctrine.Score(input), "collapse -> full retreat");
+    }
+
+    private static void TacticalWithdrawalDoctrineRearPressureBumpsLadder()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.UnderPressure,
+            RearPressureFlag = true,
+            Fatigue = TacticalFatigueState.Result.Spent,
+            AiFeudStance = -1,
+        };
+        // Rear-pressure + Spent fatigue bumps UnderPressure to Screen (mid-ladder).
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.Screen,
+            TacticalWithdrawalDoctrine.Score(input), "rear pressure + spent fatigue bumps to screen");
+    }
+
+    private static void TacticalWithdrawalDoctrineWlGateBlocks()
+    {
+        var input = new TacticalWithdrawalDoctrine.Input
+        {
+            MoralePressure = TacticalMoralePressure.Result.CollapseCandidate,
+            AiFeudStance = 5,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalWithdrawalDoctrine.Decision.HoldLine,
+            TacticalWithdrawalDoctrine.Score(input), "W&L gate -> safe default HoldLine");
     }
 
     private static void TacticalSupportScreenQuietWhenNoEnemyAndNoScreen()
