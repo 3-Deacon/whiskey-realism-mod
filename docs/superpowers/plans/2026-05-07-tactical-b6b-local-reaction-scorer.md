@@ -107,8 +107,8 @@ Add the test body:
         {
             var input = ReactionInput(CommanderIntent.ProbeIntent);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction != LocalReaction.PermitCharge, "ProbeIntent must never PermitCharge, got " + d.Reaction);
-            Assert(d.Reaction != LocalReaction.LimitedCounterstroke, "ProbeIntent must not produce LimitedCounterstroke, got " + d.Reaction);
+            AssertTrue(d.Reaction != LocalReaction.PermitCharge, "ProbeIntent must never PermitCharge, got " + d.Reaction);
+            AssertTrue(d.Reaction != LocalReaction.LimitedCounterstroke, "ProbeIntent must not produce LimitedCounterstroke, got " + d.Reaction);
         }
 ```
 
@@ -165,7 +165,7 @@ namespace WhiskeyRealism.Tactical
             Intent = intent;
             PlaybookPolicy = playbookPolicy;
             SectorMission = sectorMission;
-            SectorOdds = Math.Max(0f, sectorOdds);
+            SectorOdds = Sanitize(sectorOdds);
             SectorConfidence = Clamp01(sectorConfidence);
             TargetVisible = targetVisible;
             TargetBroken = targetBroken;
@@ -196,6 +196,12 @@ namespace WhiskeyRealism.Tactical
         public bool ChargeCooldownReady { get; }
         public bool StalenessActive { get; }
         public bool PathRiskActive { get; }
+
+        private static float Sanitize(float v)
+        {
+            if (float.IsNaN(v) || float.IsInfinity(v)) return 0f;
+            return Math.Max(0f, v);
+        }
 
         private static float Clamp01(float v)
         {
@@ -368,75 +374,75 @@ EOF
         {
             var input = ReactionInput(CommanderIntent.HoldToLast, morale: 0.3f, casualtyRatio: 0.5f);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction != LocalReaction.LocalFallbackPressure, "HoldToLast must not emit LocalFallbackPressure, got " + d.Reaction);
-            Assert(d.Reaction == LocalReaction.MaintainLine, "Expected MaintainLine under HoldToLast");
+            AssertTrue(d.Reaction != LocalReaction.LocalFallbackPressure, "HoldToLast must not emit LocalFallbackPressure, got " + d.Reaction);
+            AssertTrue(d.Reaction == LocalReaction.MaintainLine, "Expected MaintainLine under HoldToLast");
         }
 
         private static void TacticalB6bDefendPermitsLimitedCounterstroke()
         {
             var input = ReactionInput(CommanderIntent.Defend, oddsConfidence: 0.7f, targetBroken: true, targetStrongPoint: false);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction == LocalReaction.LimitedCounterstroke, "Expected LimitedCounterstroke, got " + d.Reaction);
+            AssertTrue(d.Reaction == LocalReaction.LimitedCounterstroke, "Expected LimitedCounterstroke, got " + d.Reaction);
         }
 
         private static void TacticalB6bDefendStrongpointDeniesCounterstroke()
         {
             var input = ReactionInput(CommanderIntent.Defend, oddsConfidence: 0.7f, targetStrongPoint: true);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction != LocalReaction.LimitedCounterstroke, "Strongpoint target must deny counterstroke, got " + d.Reaction);
+            AssertTrue(d.Reaction != LocalReaction.LimitedCounterstroke, "Strongpoint target must deny counterstroke, got " + d.Reaction);
         }
 
         private static void TacticalB6bAttackPermitsChargeAgainstFreshTarget()
         {
             var input = ReactionInput(CommanderIntent.Attack, oddsConfidence: 0.7f, chargeCooldownReady: true, targetStrongPoint: false);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction == LocalReaction.PermitCharge, "Expected PermitCharge, got " + d.Reaction);
+            AssertTrue(d.Reaction == LocalReaction.PermitCharge, "Expected PermitCharge, got " + d.Reaction);
         }
 
         private static void TacticalB6bAttackCooldownActiveDeniesCharge()
         {
             var input = ReactionInput(CommanderIntent.Attack, oddsConfidence: 0.7f, chargeCooldownReady: false);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction != LocalReaction.PermitCharge, "Cooldown active must deny PermitCharge, got " + d.Reaction);
+            AssertTrue(d.Reaction != LocalReaction.PermitCharge, "Cooldown active must deny PermitCharge, got " + d.Reaction);
         }
 
         private static void TacticalB6bAttackStrongpointDeniesCharge()
         {
             var input = ReactionInput(CommanderIntent.Attack, oddsConfidence: 0.7f, targetStrongPoint: true);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction != LocalReaction.PermitCharge, "Strongpoint target must deny PermitCharge, got " + d.Reaction);
+            AssertTrue(d.Reaction != LocalReaction.PermitCharge, "Strongpoint target must deny PermitCharge, got " + d.Reaction);
         }
 
         private static void TacticalB6bStaleOrderDowngradesToMaintainLine()
         {
             var input = ReactionInput(CommanderIntent.Attack, stalenessActive: true);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction == LocalReaction.MaintainLine, "Stale order must downgrade to MaintainLine, got " + d.Reaction);
-            Assert(d.Reason == "request-new-intent", "Expected request-new-intent reason, got " + d.Reason);
+            AssertTrue(d.Reaction == LocalReaction.MaintainLine, "Stale order must downgrade to MaintainLine, got " + d.Reaction);
+            AssertTrue(d.Reason == "request-new-intent", "Expected request-new-intent reason, got " + d.Reason);
         }
 
         private static void TacticalB6bWlOwnershipUnsafeForcesMaintain()
         {
             var input = ReactionInput(CommanderIntent.Attack, wlOwnershipSafe: false);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction == LocalReaction.MaintainLine, "WL ownership unsafe must force MaintainLine, got " + d.Reaction);
-            Assert(d.Reason == "wl-ownership-blocked", "Expected wl-ownership-blocked reason, got " + d.Reason);
+            AssertTrue(d.Reaction == LocalReaction.MaintainLine, "WL ownership unsafe must force MaintainLine, got " + d.Reaction);
+            AssertTrue(d.Reason == "wl-ownership-blocked", "Expected wl-ownership-blocked reason, got " + d.Reason);
         }
 
         private static void TacticalB6bPathRiskBlocksRuntime()
         {
             var input = ReactionInput(CommanderIntent.Attack, oddsConfidence: 0.7f, chargeCooldownReady: true, pathRiskActive: true);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction != LocalReaction.PermitCharge, "Path risk must block PermitCharge, got " + d.Reaction);
-            Assert(d.Reaction != LocalReaction.LimitedCounterstroke, "Path risk must block LimitedCounterstroke, got " + d.Reaction);
+            AssertTrue(d.Reaction != LocalReaction.PermitCharge, "Path risk must block PermitCharge, got " + d.Reaction);
+            AssertTrue(d.Reaction != LocalReaction.LimitedCounterstroke, "Path risk must block LimitedCounterstroke, got " + d.Reaction);
         }
 
         private static void TacticalB6bBatteredFrontlineEmitsLineReliefRequest()
         {
             var input = ReactionInput(CommanderIntent.Hold, morale: 0.25f, casualtyRatio: 0.5f);
             var d = TacticalLocalReactionScorer.Score(input);
-            Assert(d.Reaction == LocalReaction.LineReliefRequest, "Expected LineReliefRequest, got " + d.Reaction);
-            Assert(d.ReliefRequested, "ReliefRequested flag must be true");
+            AssertTrue(d.Reaction == LocalReaction.LineReliefRequest, "Expected LineReliefRequest, got " + d.Reaction);
+            AssertTrue(d.ReliefRequested, "ReliefRequested flag must be true");
         }
 ```
 
@@ -507,8 +513,8 @@ Add the test body:
 
             var decision = TacticalReservePolicyLedger.Decide(input);
 
-            Assert(decision.Intent == TacticalReserveIntent.RelieveBatteredLine, "Expected RelieveBatteredLine, got " + decision.Intent);
-            Assert(decision.AllowsRuntimeMutation, "AllowsRuntimeMutation must be true with safe reserve and ownership");
+            AssertTrue(decision.Intent == TacticalReserveIntent.RelieveBatteredLine, "Expected RelieveBatteredLine, got " + decision.Intent);
+            AssertTrue(decision.AllowsRuntimeMutation, "AllowsRuntimeMutation must be true with safe reserve and ownership");
         }
 ```
 
@@ -708,8 +714,8 @@ EOF
             var avail = new TacticalReserveAvailability(0, false, false, true, false);
             var input = new TacticalReserveIntentInput(TacticalReservePolicy.HoldReserve, new[] { Battered(), Battered() }, avail);
             var d = TacticalReservePolicyLedger.Decide(input);
-            Assert(d.Intent == TacticalReserveIntent.None, "Expected None, got " + d.Intent);
-            Assert(!d.AllowsRuntimeMutation, "No-reserve must not mutate");
+            AssertTrue(d.Intent == TacticalReserveIntent.None, "Expected None, got " + d.Intent);
+            AssertTrue(!d.AllowsRuntimeMutation, "No-reserve must not mutate");
         }
 
         private static void TacticalB6bReserveLastReserveGuardsFlank()
@@ -717,8 +723,8 @@ EOF
             var avail = new TacticalReserveAvailability(1, true, true, true, false);
             var input = new TacticalReserveIntentInput(TacticalReservePolicy.PrepareRelief, new[] { Battered(), Battered() }, avail);
             var d = TacticalReservePolicyLedger.Decide(input);
-            Assert(d.Intent == TacticalReserveIntent.FlankGuard, "Expected FlankGuard, got " + d.Intent);
-            Assert(!d.AllowsRuntimeMutation, "Last-reserve flank guard must not mutate");
+            AssertTrue(d.Intent == TacticalReserveIntent.FlankGuard, "Expected FlankGuard, got " + d.Intent);
+            AssertTrue(!d.AllowsRuntimeMutation, "Last-reserve flank guard must not mutate");
         }
 
         private static void TacticalB6bReserveMultipleFlankGuard()
@@ -726,8 +732,8 @@ EOF
             var avail = new TacticalReserveAvailability(3, true, false, true, false);
             var input = new TacticalReserveIntentInput(TacticalReservePolicy.PrepareRelief, new[] { OkLine() }, avail);
             var d = TacticalReservePolicyLedger.Decide(input);
-            Assert(d.Intent == TacticalReserveIntent.FlankGuard, "Expected FlankGuard, got " + d.Intent);
-            Assert(d.AllowsRuntimeMutation, "Multi-reserve flank guard may mutate");
+            AssertTrue(d.Intent == TacticalReserveIntent.FlankGuard, "Expected FlankGuard, got " + d.Intent);
+            AssertTrue(d.AllowsRuntimeMutation, "Multi-reserve flank guard may mutate");
         }
 
         private static void TacticalB6bReserveSingleReliefPrepares()
@@ -735,8 +741,8 @@ EOF
             var avail = new TacticalReserveAvailability(2, false, false, true, false);
             var input = new TacticalReserveIntentInput(TacticalReservePolicy.HoldReserve, new[] { Battered(), OkLine(), OkLine() }, avail);
             var d = TacticalReservePolicyLedger.Decide(input);
-            Assert(d.Intent == TacticalReserveIntent.PrepareRelief, "Expected PrepareRelief, got " + d.Intent);
-            Assert(!d.AllowsRuntimeMutation, "Single relief must not mutate yet");
+            AssertTrue(d.Intent == TacticalReserveIntent.PrepareRelief, "Expected PrepareRelief, got " + d.Intent);
+            AssertTrue(!d.AllowsRuntimeMutation, "Single relief must not mutate yet");
         }
 
         private static void TacticalB6bReserveExploitWeakPoint()
@@ -744,8 +750,8 @@ EOF
             var avail = new TacticalReserveAvailability(2, false, false, true, false);
             var input = new TacticalReserveIntentInput(TacticalReservePolicy.ExploitWeakPoint, new[] { OkLine(), OkLine() }, avail);
             var d = TacticalReservePolicyLedger.Decide(input);
-            Assert(d.Intent == TacticalReserveIntent.ExploitWeakPoint, "Expected ExploitWeakPoint, got " + d.Intent);
-            Assert(d.AllowsRuntimeMutation, "ExploitWeakPoint allows mutation when conditions met");
+            AssertTrue(d.Intent == TacticalReserveIntent.ExploitWeakPoint, "Expected ExploitWeakPoint, got " + d.Intent);
+            AssertTrue(d.AllowsRuntimeMutation, "ExploitWeakPoint allows mutation when conditions met");
         }
 
         private static void TacticalB6bReserveWlUnsafeHolds()
@@ -753,8 +759,8 @@ EOF
             var avail = new TacticalReserveAvailability(2, false, false, false, false);
             var input = new TacticalReserveIntentInput(TacticalReservePolicy.PrepareRelief, new[] { Battered(), Battered() }, avail);
             var d = TacticalReservePolicyLedger.Decide(input);
-            Assert(d.Intent == TacticalReserveIntent.HoldReserve, "WL unsafe must HoldReserve, got " + d.Intent);
-            Assert(!d.AllowsRuntimeMutation, "WL unsafe must not mutate");
+            AssertTrue(d.Intent == TacticalReserveIntent.HoldReserve, "WL unsafe must HoldReserve, got " + d.Intent);
+            AssertTrue(!d.AllowsRuntimeMutation, "WL unsafe must not mutate");
         }
 
         private static void TacticalB6bReserveStaleOrderNoMutation()
@@ -762,8 +768,8 @@ EOF
             var avail = new TacticalReserveAvailability(2, false, false, true, true);
             var input = new TacticalReserveIntentInput(TacticalReservePolicy.PrepareRelief, new[] { Battered(), Battered() }, avail);
             var d = TacticalReservePolicyLedger.Decide(input);
-            Assert(d.Intent == TacticalReserveIntent.PrepareRelief, "Stale order must PrepareRelief, got " + d.Intent);
-            Assert(!d.AllowsRuntimeMutation, "Stale order must not mutate");
+            AssertTrue(d.Intent == TacticalReserveIntent.PrepareRelief, "Stale order must PrepareRelief, got " + d.Intent);
+            AssertTrue(!d.AllowsRuntimeMutation, "Stale order must not mutate");
         }
 ```
 
