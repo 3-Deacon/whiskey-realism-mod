@@ -8,6 +8,8 @@
 
 **Tech Stack:** BepInEx 5.4.x, HarmonyX, C# netstandard2.1, console harness, vanilla decompile anchors, DLL deploy/hash verification.
 
+**Status:** Superseded as an execution artifact by [`2026-05-08-tactical-b7-b8-wiring-implementation.md`](2026-05-08-tactical-b7-b8-wiring-implementation.md). The shipped B8 wiring lives in patches #49-#52 and current deployed DLL `328c74a43f356df4ecb52f38a0df1ec89267eae714fd207af406529b1adffef0`; focused smoke confirmed `[once:b8-check-line-fallbacks]`, `[once:b8-morale-snapshot-sampler]`, `[once:b8-check-reserves]`, and `[once:b8-set-withdrawal]`. `[once:b8-microai-check-retreats]` has not fired yet.
+
 ---
 
 ## Evidence Review
