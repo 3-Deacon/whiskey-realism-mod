@@ -105,6 +105,7 @@ namespace WhiskeyRealism.Tactical
             for (int i = 0; i < sectors.Length; i++)
             {
                 if (sectors[i].EnemyStrength <= 0f) continue;
+                if (!CanDriveDecisiveSector(sectors[i])) continue;
                 float score = sectors[i].Odds * sectors[i].Confidence;
                 if (sectors[i].StrongPoint) score *= 0.65f;
                 if (sectors[i].FlankRisk) score *= 0.55f;
@@ -122,7 +123,7 @@ namespace WhiskeyRealism.Tactical
                 TacticalSectorMission mission;
                 if (sectors[i].FlankRisk) mission = TacticalSectorMission.Refuse;
                 else if (sectors[i].StrongPoint) mission = TacticalSectorMission.Hold;
-                else if (sectors[i].SectorId == decisive && sectors[i].Odds >= 1.35f) mission = TacticalSectorMission.AttackWeakPoint;
+                else if (sectors[i].SectorId == decisive && sectors[i].Odds >= 1.35f && CanDriveDecisiveSector(sectors[i])) mission = TacticalSectorMission.AttackWeakPoint;
                 else if (sectors[i].Confidence < 0.45f) mission = TacticalSectorMission.Probe;
                 else if (decisive >= 0) mission = TacticalSectorMission.Fix;
                 else mission = TacticalSectorMission.Hold;
@@ -134,6 +135,15 @@ namespace WhiskeyRealism.Tactical
             }
 
             return new TacticalSectorLedgerResult(resolved, decisive, economy.ToArray());
+        }
+
+        private static bool CanDriveDecisiveSector(TacticalSectorAssessment sector)
+        {
+            if (sector.EnemyStrength <= 0f) return false;
+            if (sector.Source != TacticalSectorSource.AngleSlice) return true;
+
+            float minimum = Math.Max(500f, sector.OwnStrength * 0.05f);
+            return sector.EnemyStrength >= minimum;
         }
 
         private static readonly System.Collections.Generic.Dictionary<int, TacticalHelpRequest.Decision> helpRequests
