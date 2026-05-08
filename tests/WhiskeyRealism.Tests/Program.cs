@@ -545,7 +545,12 @@ static class Program
             ("tactical battle coordinator activates on battle start with synthetic inputs", TacticalBattleCoordinatorActivatesOnBattleStartWithSyntheticInputs),
             ("tactical battle coordinator suppresses player cic side", TacticalBattleCoordinatorSuppressesPlayerCicSide),
             ("tactical battle coordinator on battle end for test clears state", TacticalBattleCoordinatorOnBattleEndForTestClearsState),
-            ("tactical battle coordinator double start is no-op", TacticalBattleCoordinatorDoubleStartIsNoOp)
+            ("tactical battle coordinator double start is no-op", TacticalBattleCoordinatorDoubleStartIsNoOp),
+            ("tactical battle lifecycle detector returns none when no units across ticks", TacticalBattleLifecycleDetectorReturnsNoneWhenNoUnitsAcrossTicks),
+            ("tactical battle lifecycle detector returns battle start on first units tick", TacticalBattleLifecycleDetectorReturnsBattleStartOnFirstUnitsTick),
+            ("tactical battle lifecycle detector requires two consecutive zero ticks for battle end", TacticalBattleLifecycleDetectorRequiresTwoConsecutiveZeroTicksForBattleEnd),
+            ("tactical battle lifecycle detector ignores transient zero tick between units ticks", TacticalBattleLifecycleDetectorIgnoresTransientZeroTickBetweenUnitsTicks),
+            ("tactical battle lifecycle detector does not fire double start on subsequent units ticks", TacticalBattleLifecycleDetectorDoesNotFireDoubleStartOnSubsequentUnitsTicks)
         };
 
         foreach (var test in tests)
@@ -10464,5 +10469,59 @@ static class Program
         TacticalBattleCoordinator.OnBattleStartForTest(1, new SyntheticCommanderInput[0]);
         AssertTrue(ReferenceEquals(originalSide1, TacticalBattleCoordinator.GetSideOrchestrator(1)),
             "side1 reference should be unchanged on double start");
+    }
+
+    // ---- TacticalBattleLifecycleDetector tests ----
+
+    private static void TacticalBattleLifecycleDetectorReturnsNoneWhenNoUnitsAcrossTicks()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "first zero tick should be None");
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "second zero tick should be None");
+    }
+
+    private static void TacticalBattleLifecycleDetectorReturnsBattleStartOnFirstUnitsTick()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        detector.Observe(0);
+        var ev = detector.Observe(5);
+        AssertEqual(BattleLifecycleEvent.BattleStart, ev, "first units tick after zero should fire BattleStart");
+    }
+
+    private static void TacticalBattleLifecycleDetectorRequiresTwoConsecutiveZeroTicksForBattleEnd()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        // arm the detector: start a battle
+        detector.Observe(0);
+        detector.Observe(3); // BattleStart
+        // first zero tick: not enough for BattleEnd
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "first zero after units should be None");
+        // second consecutive zero tick: now fires BattleEnd
+        AssertEqual(BattleLifecycleEvent.BattleEnd, detector.Observe(0), "second consecutive zero should fire BattleEnd");
+    }
+
+    private static void TacticalBattleLifecycleDetectorIgnoresTransientZeroTickBetweenUnitsTicks()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        // arm: start battle
+        detector.Observe(0);
+        AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(3), "initial BattleStart");
+        // transient zero: counter increments to 1
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "transient zero should be None");
+        // back to units: counter resets to 0
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(2), "return to units after transient zero is None");
+        // zero again: counter at 1 — not enough
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "first zero (counter=1) after reset is None");
+        // second consecutive zero: counter at 2 — BattleEnd
+        AssertEqual(BattleLifecycleEvent.BattleEnd, detector.Observe(0), "second consecutive zero fires BattleEnd");
+    }
+
+    private static void TacticalBattleLifecycleDetectorDoesNotFireDoubleStartOnSubsequentUnitsTicks()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        detector.Observe(0);
+        AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(3), "first units tick fires BattleStart");
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(5), "subsequent units tick should be None");
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(2), "third units tick should also be None");
     }
 }

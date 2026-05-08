@@ -166,5 +166,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalCommanderRoster.cs" Link="Orchestrator\TacticalCommanderRoster.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattleOrchestrator.cs" Link="Orchestrator\TacticalBattleOrchestrator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattleCoordinator.cs" Link="Orchestrator\TacticalBattleCoordinator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattleLifecycleDetector.cs" Link="Orchestrator\TacticalBattleLifecycleDetector.cs" />
   </ItemGroup>
 </Project>
