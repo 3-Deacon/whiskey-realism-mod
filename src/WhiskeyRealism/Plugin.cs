@@ -39,6 +39,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
+        public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
         public const int TacticalMoraleSnapshotLedgerCapacity = 4;
         public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
@@ -187,6 +188,11 @@ namespace WhiskeyRealism
                 "Enable Tactical Artillery Doctrine",
                 false,
                 "Default-off. When true, B7 may rewrite vanilla artillery combatbehaviorordered to favor counter-battery, preserve-fire, or cancel-bombard decisions based on doctrine. Read the patch source before enabling.");
+            EnableTacticalWithdrawalDoctrine = Config.Bind(
+                "Tactical Doctrine",
+                "Enable Tactical Withdrawal Doctrine",
+                false,
+                "Default-off. When true, B8 may call BattleUnits.SetWithdrawal for individual units classified as WithdrawalCandidate or CollapseCandidate by TacticalWithdrawalDoctrine. Read the patch source before enabling.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
