@@ -23,6 +23,7 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _orderedStanceField;
 
         [HarmonyPostfix]
+        [HarmonyPriority(Priority.Last)]
         internal static void Postfix(AIBattle __instance)
         {
             if (!Enabled() || __instance == null) return;
@@ -61,13 +62,19 @@ namespace WhiskeyRealism.Patches
             int vanillaOrdered = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
             if (vanillaOrdered == 4)
             {
-                if (!Plugin.Instance.EnableTacticalChargeDenial.Value)
+                if (!Plugin.Instance.EnableTacticalChargeDenial.Value || !LocalReactionProducerEnabled())
                 {
                     LogChargePreserved(side, group, "vanilla-charge-preserved");
                     return;
                 }
 
                 var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
+                if (reaction.Reason == "no-decision")
+                {
+                    LogChargePreserved(side, group, "vanilla-charge-preserved");
+                    return;
+                }
+
                 if (reaction.Reaction != LocalReaction.PermitCharge)
                 {
                     DemoteCharge(bunits, group, side, reaction);
@@ -131,7 +138,7 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "b6c-charge-preserved", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalChargePreserved] side=" + side +
+            Plugin.Log.LogInfo("[TacticalChargePreserved] surface=stance side=" + side +
                 " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
                 " reason=" + reason);
         }
@@ -216,6 +223,14 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null &&
                 Plugin.Instance.Enabled.Value &&
                 Plugin.Instance.EnableTacticalGroupSectorStance.Value;
+        }
+
+        private static bool LocalReactionProducerEnabled()
+        {
+            return Plugin.Instance != null &&
+                Plugin.Instance.EnableTacticalObserver.Value &&
+                Plugin.Instance.EnableTacticalCommanderIntentDoctrine.Value &&
+                Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value;
         }
 
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)
