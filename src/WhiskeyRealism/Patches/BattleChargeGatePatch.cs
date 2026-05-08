@@ -71,8 +71,10 @@ namespace WhiskeyRealism.Patches
                         if (decision.Allow)
                         {
                             tookOwnership = true;
-                            unit.SetMovementMode(3);
                             aigroup.lastfeudactiontime = CurrentBattleHour(bunits);
+                            if (TryB6cDeny(unit, aigroup)) continue;
+
+                            unit.SetMovementMode(3);
                         }
                         else
                         {
@@ -116,7 +118,34 @@ namespace WhiskeyRealism.Patches
         {
             return Plugin.Instance != null &&
                 Plugin.Instance.Enabled.Value &&
-                Plugin.Instance.EnableWlTacticalChargeGuard.Value;
+                (Plugin.Instance.EnableWlTacticalChargeGuard.Value ||
+                    Plugin.Instance.EnableTacticalChargeDenial.Value);
+        }
+
+        private static bool LocalReactionProducerEnabled()
+        {
+            return Plugin.Instance != null &&
+                Plugin.Instance.EnableTacticalObserver.Value &&
+                Plugin.Instance.EnableTacticalCommanderIntentDoctrine.Value &&
+                Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value;
+        }
+
+        private static bool TryB6cDeny(Regiment unit, Regiment group)
+        {
+            if (!Plugin.Instance.EnableTacticalChargeDenial.Value || !LocalReactionProducerEnabled())
+                return false;
+
+            TacticalLocalReactionDecision reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
+            if (!IsExplicitChargeDenial(reaction)) return false;
+
+            LogDeniedB6c(unit, group, reaction);
+            return true;
+        }
+
+        private static bool IsExplicitChargeDenial(TacticalLocalReactionDecision reaction)
+        {
+            return reaction.Reason != "no-decision" &&
+                reaction.Reaction == LocalReaction.DenyCharge;
         }
 
         private static BattleUnits BattleUnits(AIBattle battle)
@@ -164,6 +193,15 @@ namespace WhiskeyRealism.Patches
                 " group=" + SafeName(group));
         }
 
+        private static void LogDeniedB6c(Regiment unit, Regiment group, TacticalLocalReactionDecision reaction)
+        {
+            OnceLog.Info("tactical-charge-deny:movement:" + SafeName(unit), "[TacticalChargeDeny] surface=movement action=deny" +
+                " unit=" + SafeName(unit) + "#" + SafeInstanceId(unit) +
+                " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
+                " reaction=" + reaction.Reaction +
+                " reason=" + reaction.Reason);
+        }
+
         private static void LogMissingRequiredAnchor(string anchor)
         {
             if (_missingRequiredAnchorLogged) return;
@@ -176,6 +214,18 @@ namespace WhiskeyRealism.Patches
             if (unit == null) return "<null>";
             try { return ((UnityEngine.Component)unit).gameObject.name; }
             catch { return unit.GetHashCode().ToString(); }
+        }
+
+        private static int SafeInstanceId(UnityEngine.Object obj)
+        {
+            try
+            {
+                return obj != null ? obj.GetInstanceID() : 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
     }
 }

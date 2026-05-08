@@ -10,11 +10,11 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // B6a telemetry-only observer. Runs as Postfix on AIBattle.AdjustGroupAIStance
+    // B6a/B6c telemetry observer. Runs as Postfix on AIBattle.AdjustGroupAIStance
     // (decompile 4221), reads vanilla side/macro/objective-chain context, feeds
     // TacticalCommanderIntentResolver and TacticalPlaybookLedger, and emits
-    // bounded [TacticalIntent] and [TacticalPlaybook] log lines. Never writes
-    // vanilla battle state.
+    // bounded [TacticalIntent], [TacticalPlaybook], [TacticalLocalReaction],
+    // and [TacticalReserveIntent] log lines. Never writes vanilla battle state.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
     internal static class BattleCommanderIntentObserverPatch
     {
@@ -25,28 +25,34 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _chainCenterField;
         private static FieldInfo _flankAnchoredField;
         private static FieldInfo _reserveGroupsField;
+        private static FieldInfo _unitsUsedField;
 
         [HarmonyPostfix]
         [HarmonyPriority(Priority.LowerThanNormal)]
         internal static void Postfix(AIBattle __instance)
         {
-            if (!Enabled() || __instance == null) return;
+            RefreshRuntimeState(__instance, emitTelemetry: true);
+        }
 
+        internal static bool RefreshRuntimeState(AIBattle battle, bool emitTelemetry)
+        {
+            if (!Enabled() || battle == null) return false;
             try
             {
-                Apply(__instance);
+                return Apply(battle, emitTelemetry);
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("tactical-b6a-observer:failed", "BattleCommanderIntentObserverPatch failed: " + ex.Message);
+                return false;
             }
         }
 
-        private static void Apply(AIBattle battle)
+        private static bool Apply(AIBattle battle, bool emitTelemetry)
         {
             int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
-            if (side < 0) return;
+            if (side < 0) return false;
 
             var intentInput = BuildIntentInput(macro);
             var intent = TacticalCommanderIntentResolver.Resolve(intentInput);
@@ -62,8 +68,50 @@ namespace WhiskeyRealism.Patches
                 stalenessPressure: 0f);
             var playbook = TacticalPlaybookLedger.Decide(playbookInput);
 
-            EmitIntent(side, macro, intentInput, intent);
-            EmitPlaybook(side, playbook);
+            if (emitTelemetry)
+            {
+                EmitIntent(side, macro, intentInput, intent);
+                EmitPlaybook(side, playbook);
+            }
+
+            TacticalReactionContext.Shared.Clear();
+
+            if (!Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value)
+                return true;
+
+            IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
+            var reactions = new List<TacticalLocalReactionDecision>();
+            if (units != null)
+            {
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var group = units[i] as Regiment;
+                    if (group == null || group.unittyp <= 13) continue;
+
+                    TacticalLocalReactionInput reactionInput = BuildReactionInput(group, intent, playbook);
+                    TacticalLocalReactionDecision reaction = TacticalLocalReactionScorer.Score(reactionInput);
+                    TacticalReactionContext.Shared.SetReaction(SafeInstanceId(group), reaction);
+                    reactions.Add(reaction);
+                    if (emitTelemetry)
+                        EmitReaction(side, group, reaction);
+                }
+            }
+
+            bool reserveTelemetryEnabled = Plugin.Instance.EnableTacticalReserveIntentTelemetry.Value;
+            if (reserveTelemetryEnabled || Plugin.Instance.EnableTacticalReserveListMutation.Value)
+            {
+                var availability = BuildReserveAvailability(battle);
+                var reserveInput = new TacticalReserveIntentInput(
+                    playbook.ReservePolicy,
+                    reactions.ToArray(),
+                    availability);
+                TacticalReserveIntentDecision reserveIntent = TacticalReservePolicyLedger.Decide(reserveInput);
+                TacticalReactionContext.Shared.SetReserveIntent(side, reserveIntent);
+                if (emitTelemetry && reserveTelemetryEnabled)
+                    EmitReserveIntent(side, reserveIntent);
+            }
+
+            return true;
         }
 
         private static TacticalIntentInput BuildIntentInput(int macro)
@@ -139,13 +187,46 @@ namespace WhiskeyRealism.Patches
         {
             IList chain = ObjectiveChain(battle);
             if (chain == null) return false;
+
+            bool hasValidReserve = false;
             for (int i = 0; i < chain.Count; i++)
             {
-                if (_reserveGroupsField == null) _reserveGroupsField = AccessTools.Field(chain[i].GetType(), "reservegroups");
-                if (_reserveGroupsField == null) continue;
-                if (_reserveGroupsField.GetValue(chain[i]) is IList reserves && reserves.Count > 0) return true;
+                if (!TryReserveGroups(chain[i], out IList reserves))
+                    return false;
+
+                if (!ReserveListAvailableForPlaybook(reserves, ref hasValidReserve))
+                    return false;
             }
-            return false;
+
+            return hasValidReserve;
+        }
+
+        private static bool ReserveListAvailableForPlaybook(IList reserves, ref bool hasValidReserve)
+        {
+            try
+            {
+                for (int i = 0; i < reserves.Count; i++)
+                {
+                    var reserve = reserves[i] as Regiment;
+                    if (reserve == null)
+                    {
+                        OnceLog.Warning("tactical-b6c-reserve-list:invalid-entry", "Reserve availability saw a null/non-Regiment reservegroups entry; blocking reserve mutation.");
+                        return false;
+                    }
+
+                    if (!ReserveWlOwnershipSafe(reserve))
+                        return false;
+
+                    hasValidReserve = true;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-b6c-reserve-list:failed", "Reserve availability list inspection failed; blocking reserve mutation: " + ex.Message);
+                return false;
+            }
         }
 
         private static bool AnchoredFlank(AIBattle battle, int index)
@@ -171,6 +252,178 @@ namespace WhiskeyRealism.Patches
                 if (u.dlcw_isundercommander) sub++;
             }
             return total > 0 ? (float)sub / total : 0f;
+        }
+
+        private static TacticalLocalReactionInput BuildReactionInput(
+            Regiment group,
+            TacticalIntentDecision intent,
+            TacticalPlaybookDecision playbook)
+        {
+            float own = Math.Max(0f, group.groupowninrange);
+            float enemy = Math.Max(0f, group.groupenemiesinrange);
+            float odds = enemy <= 0f ? 0f : own / Math.Max(1f, enemy);
+            bool flank = group.flanksthreated > 0f || group.outflanked > 0;
+
+            Regiment target = group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+            bool targetVisible = target != null;
+            bool targetBroken = target != null && (target.morale < 0.45f || target.markedforrout);
+            bool targetStrongPoint = target != null && (target.covervalue > 0.5f || target.fortinrange != null);
+
+            float morale = Mathf.Clamp01(group.morale);
+            float ammo = Mathf.Clamp01(group.groupammo);
+            float casualties = Mathf.Clamp01(group.grouplosses / Math.Max(1f, group.groupstrength + group.grouplosses));
+            bool chargeReady = group.lastaichargetime + GamePrefs.timetorenewaichargecheck <= GameVars.currenttimefromstart;
+            bool staleness = group.regimentpaths > 0 && group.pathinterrupted;
+
+            return new TacticalLocalReactionInput(
+                intent.Intent,
+                playbook.LocalReactionPolicy,
+                TacticalSectorMission.Hold,
+                odds,
+                playbook.Confidence,
+                targetVisible,
+                targetBroken,
+                targetStrongPoint,
+                morale,
+                ammo,
+                casualties,
+                flank,
+                WlOwnershipSafe(group),
+                chargeReady,
+                staleness,
+                pathRiskActive: false);
+        }
+
+        private static bool WlOwnershipSafe(Regiment group)
+        {
+            return WlOwnershipSafe(group, failClosed: false);
+        }
+
+        private static bool ReserveWlOwnershipSafe(Regiment group)
+        {
+            return WlOwnershipSafe(group, failClosed: true);
+        }
+
+        private static bool WlOwnershipSafe(Regiment group, bool failClosed)
+        {
+            try
+            {
+                if (!DLC_WL.dlc_scenarioactive) return true;
+                if (group == null) return true;
+                if (group.dlcw_isundercommander) return false;
+                if (group.allattachedunits == null) return true;
+
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit != null && unit.dlcw_isundercommander)
+                        return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (failClosed)
+                    OnceLog.Warning("tactical-b6c-reserve-wl-ownership:failed", "Reserve W&L ownership inspection failed; blocking reserve mutation: " + ex.Message);
+                return !failClosed;
+            }
+        }
+
+        private static TacticalReserveAvailability BuildReserveAvailability(AIBattle battle)
+        {
+            int reserveCount = 0;
+            bool flankRisk = false;
+            bool wlOwnershipSafe = true;
+            IList chain = ObjectiveChain(battle);
+
+            if (chain != null)
+            {
+                for (int i = 0; i < chain.Count; i++)
+                {
+                    object entry = chain[i];
+                    if (TryReserveGroups(entry, out IList reserves))
+                    {
+                        for (int j = 0; j < reserves.Count; j++)
+                        {
+                            var reserve = reserves[j] as Regiment;
+                            if (reserve == null)
+                            {
+                                wlOwnershipSafe = false;
+                                OnceLog.Warning("tactical-b6c-reserve-list:invalid-entry", "Reserve availability saw a null/non-Regiment reservegroups entry; blocking reserve mutation.");
+                                continue;
+                            }
+
+                            reserveCount++;
+                            if (!ReserveWlOwnershipSafe(reserve))
+                                wlOwnershipSafe = false;
+                        }
+                    }
+                    else
+                    {
+                        wlOwnershipSafe = false;
+                    }
+
+                    if (_flankAnchoredField == null && entry != null)
+                        _flankAnchoredField = AccessTools.Field(entry.GetType(), "anchoredflank");
+                    if (_flankAnchoredField == null) continue;
+
+                    try
+                    {
+                        if (_flankAnchoredField.GetValue(entry) is bool[] anchored)
+                        {
+                            if (anchored.Length > 0 && !anchored[0]) flankRisk = true;
+                            if (anchored.Length > 1 && !anchored[1]) flankRisk = true;
+                        }
+                    }
+                    catch
+                    {
+                        // Missing flank data should not disable reserve telemetry.
+                    }
+                }
+            }
+
+            return new TacticalReserveAvailability(
+                reserveCount,
+                flankRisk,
+                lastReserveIsFlankGuard: flankRisk && reserveCount <= 1,
+                wlOwnershipSafe: wlOwnershipSafe,
+                stalenessActive: false);
+        }
+
+        private static bool TryReserveGroups(object entry, out IList reserves)
+        {
+            reserves = null;
+            try
+            {
+                if (entry == null)
+                {
+                    OnceLog.Warning("tactical-b6c-reserve-list:null-entry", "Reserve availability saw a null objective chain entry; blocking reserve mutation.");
+                    return false;
+                }
+
+                if (_reserveGroupsField == null)
+                    _reserveGroupsField = AccessTools.Field(entry.GetType(), "reservegroups");
+                if (_reserveGroupsField == null)
+                {
+                    OnceLog.Warning("tactical-b6c-reserve-list:missing-field", "Reserve availability could not find objectivechain.reservegroups; blocking reserve mutation.");
+                    return false;
+                }
+
+                reserves = _reserveGroupsField.GetValue(entry) as IList;
+                if (reserves == null)
+                {
+                    OnceLog.Warning("tactical-b6c-reserve-list:not-list", "Reserve availability could not read objectivechain.reservegroups as a list; blocking reserve mutation.");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-b6c-reserve-list:failed", "Reserve availability list inspection failed; blocking reserve mutation: " + ex.Message);
+                return false;
+            }
         }
 
         private static void EmitIntent(int side, int macro, TacticalIntentInput input, TacticalIntentDecision intent)
@@ -205,6 +458,34 @@ namespace WhiskeyRealism.Patches
                 " reason=" + decision.Reason);
         }
 
+        private static void EmitReaction(int side, Regiment group, TacticalLocalReactionDecision decision)
+        {
+            int id = SafeInstanceId(group);
+            string signature = side + "|" + id + "|" + decision.Reaction + "|" + decision.ReliefRequested + "|" + decision.Reason;
+            if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "b6c-reaction", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            Plugin.Log.LogInfo("[TacticalLocalReaction] side=" + side +
+                " group=" + SafeName(group) + "#" + id +
+                " reaction=" + decision.Reaction +
+                " reliefRequested=" + (decision.ReliefRequested ? 1 : 0) +
+                " reason=" + decision.Reason +
+                " confidence=" + decision.Confidence.ToString("0.00"));
+        }
+
+        private static void EmitReserveIntent(int side, TacticalReserveIntentDecision decision)
+        {
+            string signature = side + "|" + decision.Intent + "|" + decision.AllowsRuntimeMutation + "|" + decision.Reason;
+            if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "b6c-reserve-intent", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            Plugin.Log.LogInfo("[TacticalReserveIntent] side=" + side +
+                " intent=" + decision.Intent +
+                " allowsMutation=" + (decision.AllowsRuntimeMutation ? 1 : 0) +
+                " reason=" + decision.Reason +
+                " confidence=" + decision.Confidence.ToString("0.00"));
+        }
+
         private static string Join(int[] values)
         {
             if (values == null || values.Length == 0) return "-";
@@ -215,6 +496,20 @@ namespace WhiskeyRealism.Patches
         {
             if (_objectiveChainField == null) _objectiveChainField = AccessTools.Field(typeof(AIBattle), "objective" + "chain");
             return _objectiveChainField?.GetValue(battle) as IList;
+        }
+
+        private static IList SafeList(object instance, ref FieldInfo cache, string name)
+        {
+            try
+            {
+                if (instance == null) return null;
+                if (cache == null) cache = AccessTools.Field(instance.GetType(), name);
+                return cache != null ? cache.GetValue(instance) as IList : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static Regiment SafeRegimentField(object instance, ref FieldInfo cache, string name)
@@ -243,6 +538,32 @@ namespace WhiskeyRealism.Patches
             catch
             {
                 return fallback;
+            }
+        }
+
+        private static int SafeInstanceId(UnityEngine.Object obj)
+        {
+            try
+            {
+                return obj != null ? obj.GetInstanceID() : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static string SafeName(Regiment group)
+        {
+            try
+            {
+                if (group == null) return "group";
+                string name = group.name;
+                return string.IsNullOrEmpty(name) ? "group" : name.Replace(' ', '_');
+            }
+            catch
+            {
+                return "group";
             }
         }
 

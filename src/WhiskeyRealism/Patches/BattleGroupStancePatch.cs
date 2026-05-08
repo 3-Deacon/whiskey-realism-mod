@@ -23,6 +23,7 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _orderedStanceField;
 
         [HarmonyPostfix]
+        [HarmonyPriority(Priority.Last)]
         internal static void Postfix(AIBattle __instance)
         {
             if (!Enabled() || __instance == null) return;
@@ -58,16 +59,36 @@ namespace WhiskeyRealism.Patches
             if (!WlAllowsControl(group)) return;
             if (!OrderFrictionAllowsChange(group)) return;
 
+            int vanillaOrdered = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
+            if (vanillaOrdered == 4)
+            {
+                if (!Plugin.Instance.EnableTacticalChargeDenial.Value || !LocalReactionProducerEnabled())
+                {
+                    LogChargePreserved(side, group, "vanilla-charge-preserved");
+                    return;
+                }
+
+                var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
+                if (IsExplicitChargeDenial(reaction))
+                {
+                    DemoteCharge(bunits, group, side, reaction);
+                    return;
+                }
+
+                LogChargePreserved(side, group, "vanilla-charge-preserved");
+                return;
+            }
+
             var sector = BuildGroupSector(group, index);
             var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
-                SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered),
+                vanillaOrdered,
                 macro,
                 sector,
                 true,
                 true));
 
             if (decision.Kind != TacticalDoctrineDecisionKind.Apply) return;
-            if (decision.GroupStance == group.ai_stanceordered) return;
+            if (decision.GroupStance == vanillaOrdered) return;
             if (decision.GroupStance == 4) return;
             if (decision.GroupStance < 0 || decision.GroupStance > 3) return;
 
@@ -79,6 +100,47 @@ namespace WhiskeyRealism.Patches
             group.ai_stanceordered = decision.GroupStance;
             group.lastaistancechangetime = GameVars.currenttimefromstart;
             LogDecision(side, group, sector, decision);
+        }
+
+        private static bool IsExplicitChargeDenial(TacticalLocalReactionDecision reaction)
+        {
+            return reaction.Reason != "no-decision" &&
+                reaction.Reaction == LocalReaction.DenyCharge;
+        }
+
+        private static void DemoteCharge(
+            BattleUnits bunits,
+            Regiment group,
+            int side,
+            TacticalLocalReactionDecision reaction)
+        {
+            var gameObject = UnityObject(group);
+            if (gameObject == null || !gameObject.activeInHierarchy) return;
+
+            bunits.ChangeStance(gameObject, 3, immediate: false, overwriteaigroups: false);
+            group.ai_stance = 3;
+            group.ai_stanceordered = 3;
+            group.lastaistancechangetime = GameVars.currenttimefromstart;
+
+            string signature = side + "|" + SafeInstanceId(group) + "|" + reaction.Reaction + "|" + reaction.Reason;
+            if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "b6c-charge-deny-stance", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            Plugin.Log.LogInfo("[TacticalChargeDeny] surface=stance side=" + side +
+                " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
+                " reaction=" + reaction.Reaction +
+                " reason=" + reaction.Reason);
+        }
+
+        private static void LogChargePreserved(int side, Regiment group, string reason)
+        {
+            string signature = side + "|" + SafeInstanceId(group) + "|" + reason;
+            if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "b6c-charge-preserved", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            Plugin.Log.LogInfo("[TacticalChargePreserved] surface=stance side=" + side +
+                " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
+                " reason=" + reason);
         }
 
         private static TacticalSectorAssessment BuildGroupSector(Regiment group, int index)
@@ -173,6 +235,14 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.EnableTacticalGroupSectorStance.Value;
         }
 
+        private static bool LocalReactionProducerEnabled()
+        {
+            return Plugin.Instance != null &&
+                Plugin.Instance.EnableTacticalObserver.Value &&
+                Plugin.Instance.EnableTacticalCommanderIntentDoctrine.Value &&
+                Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value;
+        }
+
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)
         {
             try
@@ -225,6 +295,18 @@ namespace WhiskeyRealism.Patches
             catch
             {
                 return null;
+            }
+        }
+
+        private static string SafeName(Regiment group)
+        {
+            try
+            {
+                return group != null ? ((Component)group).gameObject.name : "<null>";
+            }
+            catch
+            {
+                return "<err>";
             }
         }
 
