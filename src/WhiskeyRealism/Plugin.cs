@@ -37,6 +37,10 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
+        internal ConfigEntry<bool> EnableTacticalLocalReactionDoctrine;
+        internal ConfigEntry<bool> EnableTacticalChargeDenial;
+        internal ConfigEntry<bool> EnableTacticalReserveIntentTelemetry;
+        internal ConfigEntry<bool> EnableTacticalReserveListMutation;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
@@ -178,6 +182,26 @@ namespace WhiskeyRealism
                 "Enable Tactical Commander Intent Doctrine",
                 false,
                 "Default OFF for Slice B6a. Computes tactical commander intent and playbook from B3-B5 evidence and the active OperationPosture, and emits read-only [TacticalIntent] and [TacticalPlaybook] telemetry. Does not change any vanilla battle state.");
+            EnableTacticalLocalReactionDoctrine = Config.Bind(
+                "Tactical",
+                "Enable Tactical Local Reaction Doctrine",
+                false,
+                "Default OFF for Slice B6c. Computes per-group local reactions from B6a intent + playbook + B3 evidence and emits read-only [TacticalLocalReaction] telemetry. Enables stance-4 preservation/demotion contract in BattleGroupStancePatch.");
+            EnableTacticalChargeDenial = Config.Bind(
+                "Tactical",
+                "Enable Tactical Charge Denial",
+                false,
+                "Default OFF for Slice B6c. When local reaction is not PermitCharge, BattleGroupStancePatch demotes vanilla stance 4 to 3 with [TacticalChargeDeny] telemetry, and BattleChargeGatePatch denies SetMovementMode(3) at the per-unit charge initiation surface as defense in depth.");
+            EnableTacticalReserveIntentTelemetry = Config.Bind(
+                "Tactical",
+                "Enable Tactical Reserve Intent Telemetry",
+                false,
+                "Default OFF for Slice B6c. Emits read-only [TacticalReserveIntent] lines aggregating LineReliefRequest signals + reserve availability per side. Does not mutate reserve lists.");
+            EnableTacticalReserveListMutation = Config.Bind(
+                "Tactical",
+                "Enable Tactical Reserve List Mutation",
+                false,
+                "Default OFF for Slice B6c. Allows BattleReserveDoctrinePatch to bias objectivechain[i].reservegroups membership under snapshot/restore protection when reserve intent allows mutation. W&L ownership and stale-order gates apply.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
