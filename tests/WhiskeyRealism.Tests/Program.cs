@@ -486,7 +486,11 @@ static class Program
             ("tactical charge viability refuse on morale high", TacticalChargeViabilityRefuseOnMoraleHigh),
             ("tactical charge viability allow at threshold", TacticalChargeViabilityAllowAtThreshold),
             ("tactical charge viability encourage on flanked target", TacticalChargeViabilityEncourageOnFlankedTarget),
-            ("tactical charge viability artillery target ignores morale gate", TacticalChargeViabilityArtilleryTargetIgnoresMoraleGate)
+            ("tactical charge viability artillery target ignores morale gate", TacticalChargeViabilityArtilleryTargetIgnoresMoraleGate),
+            ("tactical refuse flank intent no refuse when balanced", TacticalRefuseFlankIntentNoRefuseWhenBalanced),
+            ("tactical refuse flank intent refuse left when left threatened", TacticalRefuseFlankIntentRefuseLeftWhenLeftThreatened),
+            ("tactical refuse flank intent refuse right when right threatened", TacticalRefuseFlankIntentRefuseRightWhenRightThreatened),
+            ("tactical refuse flank intent no refuse on offensive posture", TacticalRefuseFlankIntentNoRefuseOnOffensivePosture)
         };
 
         foreach (var test in tests)
@@ -9560,5 +9564,57 @@ static class Program
         };
         AssertEqual(TacticalChargeViability.Result.Allow,
             TacticalChargeViability.Score(input), "artillery target bypasses morale gate");
+    }
+
+    private static void TacticalRefuseFlankIntentNoRefuseWhenBalanced()
+    {
+        var input = new TacticalRefuseFlankIntent.Input
+        {
+            LeftFlankStrength = 50f,
+            RightFlankStrength = 50f,
+            SectorPosture = TacticalRefuseFlankIntent.Posture.Defensive,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalRefuseFlankIntent.Decision.NoRefuse,
+            TacticalRefuseFlankIntent.Score(input), "no refuse when balanced");
+    }
+
+    private static void TacticalRefuseFlankIntentRefuseLeftWhenLeftThreatened()
+    {
+        var input = new TacticalRefuseFlankIntent.Input
+        {
+            LeftFlankStrength = 200f,
+            RightFlankStrength = 50f,
+            SectorPosture = TacticalRefuseFlankIntent.Posture.Defensive,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalRefuseFlankIntent.Decision.RefuseLeft,
+            TacticalRefuseFlankIntent.Score(input), "refuse left under left pressure");
+    }
+
+    private static void TacticalRefuseFlankIntentRefuseRightWhenRightThreatened()
+    {
+        var input = new TacticalRefuseFlankIntent.Input
+        {
+            LeftFlankStrength = 50f,
+            RightFlankStrength = 200f,
+            SectorPosture = TacticalRefuseFlankIntent.Posture.Defensive,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalRefuseFlankIntent.Decision.RefuseRight,
+            TacticalRefuseFlankIntent.Score(input), "refuse right under right pressure");
+    }
+
+    private static void TacticalRefuseFlankIntentNoRefuseOnOffensivePosture()
+    {
+        var input = new TacticalRefuseFlankIntent.Input
+        {
+            LeftFlankStrength = 200f,
+            RightFlankStrength = 50f,
+            SectorPosture = TacticalRefuseFlankIntent.Posture.Offensive,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalRefuseFlankIntent.Decision.NoRefuse,
+            TacticalRefuseFlankIntent.Score(input), "offensive posture suppresses refuse");
     }
 }
