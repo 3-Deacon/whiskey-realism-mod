@@ -61,6 +61,7 @@ static class Program
             ("tactical macro inferior no relief retreats", TacticalMacroInferiorNoReliefRetreats),
             ("tactical group decisive sector attacks without charge", TacticalGroupDecisiveSectorAttacksWithoutCharge),
             ("tactical group weak point under defend probes", TacticalGroupWeakPointUnderDefendProbes),
+            ("tactical group retreat macro keeps vanilla", TacticalGroupRetreatMacroKeepsVanilla),
             ("tactical group explicit probe bypasses low confidence skip", TacticalGroupExplicitProbeBypassesLowConfidenceSkip),
             ("tactical group low confidence keeps vanilla", TacticalGroupLowConfidenceKeepsVanilla),
             ("tactical group wl player subordinate skips", TacticalGroupWlPlayerSubordinateSkips),
@@ -841,6 +842,20 @@ static class Program
 
         AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
         AssertEqual(1, decision.GroupStance, "defensive weak point should probe/screen, not hold");
+    }
+
+    private static void TacticalGroupRetreatMacroKeepsVanilla()
+    {
+        var sector = new TacticalSectorAssessment(4, TacticalSectorSource.ObjectiveChain, 5000f, 500f, 1.0f, strongPoint: false, flankRisk: false, TacticalSectorMission.AttackWeakPoint);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 1,
+            macroAi: 3,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Skip, decision.Kind, "kind");
+        AssertEqual(1, decision.GroupStance, "retreat stance stays vanilla-owned");
     }
 
     private static void TacticalGroupExplicitProbeBypassesLowConfidenceSkip()

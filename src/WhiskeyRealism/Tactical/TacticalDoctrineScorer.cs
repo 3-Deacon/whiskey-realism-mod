@@ -43,6 +43,8 @@ namespace WhiskeyRealism.Tactical
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "order-friction");
             if (input.MacroAi < 0)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "dynamic-macro");
+            if (input.MacroAi == 3)
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "vanilla-retreat");
 
             if (input.Sector.FlankRisk || input.Sector.Mission == TacticalSectorMission.Refuse)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 2, "refuse");
