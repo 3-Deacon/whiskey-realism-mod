@@ -7,6 +7,8 @@ Vanilla verification: see [`2026-05-05-tactical-brain-vanilla-verification.md`](
 
 Focused adjunct: see [`2026-05-05-tactical-weapons-ammunition-design.md`](2026-05-05-tactical-weapons-ammunition-design.md) for infantry weapons, artillery ammunition, projectile behavior, smoke, fire discipline, and autoresolve parity. That adjunct is observer-first and should not be merged into the W&L charge-safety slice.
 
+Focused B6 spec: see [`2026-05-07-tactical-b6-commander-intent-local-reaction-design.md`](2026-05-07-tactical-b6-commander-intent-local-reaction-design.md) for the Scourge-informed commander-intent, tactical playbook, command-friction extension, local subordinate reaction doctrine, reserve/line-relief intent, artillery-support intent, and withdrawal pressure. The immediate tactical doctrine program is implemented through B6a/B6b/B6c plus B7 artillery and B8 withdrawal runtime plans.
+
 Runtime smoke delta: focused W&L battle smoke on 2026-05-07 confirmed the B2 command/order telemetry surface and repeated `BUG-TAC-005` objective-chain player-subordinate exposure through `[TacticalObjectiveMove]`; user field observation escalated that gap to #46 `BattleObjectiveChainWlGuardPatch`. #35 now also has removable `[TacticalDecisionMatrix]` logging. `[TacticalPathShape] reason=backward-first-segment` has proof-backed `BUG-TAC-010`. B3-B5 odds/macro/sector doctrine is implemented and hash-deployed, but B4/B5 stay default-off because they write vanilla battle state (`macroai` and `ai_stance`). Any courier, current-order, reserve behavior patch, path-shape correction, or default-on tactical stance behavior still needs the additional proof called out in the tactical bug-remediation and B3-B5 plans.
 
 ## Source Findings
@@ -46,7 +48,7 @@ Implementation boundaries from review:
 - This document is the Slice B umbrella spec. Do not create a second tactical-brain umbrella spec unless this one is replaced outright.
 - Each behavior slice needs its own implementation plan under `docs/superpowers/plans/`; this spec is too large and too risky to implement as one patch plan.
 - `B1 W&L Feud And Charge Guard` is a narrow control-safety slice. It is not the full doctrine charge gate.
-- Full doctrine charge gating depends on later sector, odds, reserve, strong-point, and artillery context.
+- Full doctrine charge gating depends on sector, odds, reserve, strong-point, and artillery context.
 - Runtime behavior patches must be preceded by `B0 Tactical Observer` logs because the sector projection and W&L symptom still need live confirmation.
 - Focused 2026-05-07 runtime logs proved that B2 command/order telemetry is readable in battle (`[TacticalCommand]` and `[TacticalOrder]`) and that objective-chain groups can include player-subordinate attachments. That is enough to update planning priorities, but not enough to patch movement behavior without path/position deltas.
 
@@ -714,7 +716,7 @@ Risk rubric (column "Risk" below):
 | 4 | `B3 Tactical Odds Doctrine` | current/projected odds, local-superiority scorer, inferior-force preservation scorer | medium | `B0` |
 | 5 | `B4 Macro Stance Scorer` | bias/clamp `macroai` transitions with `macroai = -1 dynamic` handling and short-circuit-respect (see Macro Stance Scoring safeguards) | medium | `B0`, `B3` |
 | 6 | `B5 Group Sector Stance` | map vanilla objective-chain center/flank/reserve/artillery/screening groups into sector missions and steer group `ai_stance` | high | `B0`, `B2`, `B3` |
-| 7 | `B6 Reserve Relief And Flank Doctrine` | reserve relief, flank guard/refuse behavior, anti-stacking discipline | high | `B2`, `B3`, `B5` |
+| 7 | `B6 Commander Intent And Local Reaction Doctrine` | stance-as-intent, multi-sector playbooks, command-friction constraints, local subordinate reactions, reserve/line-relief intent | high | `B1`, `B2`, `B3`, `B4`, `B5`, #46 smoke or explicit objective-chain quarantine |
 | 8 | `B7 Artillery And Strongpoint Doctrine` | bombard strongpoints, avoid direct fortification attacks, attack weak points after suppression | high | `B3`, `B5` |
 | 9 | `B8 Withdrawal Doctrine` | staged withdrawal, rear guard, full retreat thresholds, anti-retreat-loop hysteresis | high | `B2`, `B3`, `B5`, `B6` |
 | 10 | `B9 Tuning And Telemetry Soak` | runtime threshold tuning, smoke matrix, bounded log review, battleprefs validation | medium | all prior |
@@ -724,8 +726,9 @@ Plan ordering rules (derived from the dependency column, restated for emphasis):
 - `B0` must ship before any behavior patch.
 - `B1` can ship immediately after `B0` because it is a control-safety guard, not full doctrine.
 - `B2` is upstream of every plan that reads or steers order state (`B5`, `B6`, `B8`); ship it before any of them.
+- `B6` must follow the focused B6 spec and split into B6a/B6b/B6c plus the B7/B8 runtime tracks; pure intent/playbook planning starts now, and runtime writes are enabled only after the owning plan records B4/B5 smoke and #46 objective-chain proof or quarantine.
 - Full charge, reserve, artillery, and withdrawal doctrine depends on the full `B3`-through-`B7` context, not just `B3` and `B5`. Do not back-fit doctrine into earlier slices to ship sooner.
-- `B8` must not ship before `B3`, `B5`, and `B6` because retreat without sector/reserve context risks game-ruining over-withdrawal.
+- `B8` planning starts with B6, but its runtime writes require `B3`, `B5`, and `B6` context because retreat without sector/reserve context risks game-ruining over-withdrawal.
 
 Each slice should have pure scorer tests before Harmony patch wiring.
 
@@ -741,7 +744,8 @@ Telemetry must be bounded and useful:
 - sector summary only when signature changes;
 - retreat decision line only when posture escalates or de-escalates;
 - charge denial/permission summary sampled or OnceLog-gated;
-- reserve relief line only when a reserve assignment changes.
+- intent/playbook/reaction summaries only when the decision signature changes;
+- reserve relief line only when reserve intent or a verified reserve assignment changes.
 
 Example log shape:
 
