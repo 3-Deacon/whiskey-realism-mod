@@ -102,8 +102,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (chosen < 0 || chosen >= GameVars.commander.Count) return -1;
                 return GameVars.commander[chosen].alliance;
             }
-            catch
+            catch (System.Exception e)
             {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] ResolvePlayerCicAllianceId failed (W&L suppression gate disabled until next battle): " + e.GetType().Name + " " + e.Message);
                 return -1;
             }
         }
