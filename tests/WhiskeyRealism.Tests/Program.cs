@@ -131,6 +131,7 @@ static class Program
             ("tactical diagnostics detect objective chain movement mutation proof", TacticalDiagnosticsDetectObjectiveChainMovementMutationProof),
             ("tactical diagnostics detect reserve direct path delay bypass", TacticalDiagnosticsDetectReserveDirectPathDelayBypass),
             ("tactical diagnostics detect pathfinder backtrack shape", TacticalDiagnosticsDetectPathfinderBacktrackShape),
+            ("tactical diagnostics classify pathfinder add path outcome", TacticalDiagnosticsClassifyPathfinderAddPathOutcome),
             ("tactical diagnostics suppress only tactical null fallback exceptions", TacticalDiagnosticsSuppressOnlyTacticalNullFallbackExceptions),
             ("tactical diagnostics handle empty null and sanitized values", TacticalDiagnosticsHandleEmptyNullAndSanitizedValues),
             ("tactical wl guard allows non wl action", TacticalWlGuardAllowsNonWlAction),
@@ -1474,6 +1475,45 @@ static class Program
         AssertEqual("excessive-path-ratio", longRoute.Reason, "ratio reason");
         AssertTrue(!aiPath.IsRisk, "AI path shapes should not count as player right-click proof");
         AssertEqual("non-ui-path", aiPath.Reason, "ai reason");
+    }
+
+    private static void TacticalDiagnosticsClassifyPathfinderAddPathOutcome()
+    {
+        var nearEndpoint = TacticalBattlefieldBugDiagnostics.ClassifyAddPathOutcome(
+            vanillaResult: 0,
+            pathCountBefore: 0,
+            pathCountAfter: 1,
+            cornerCount: 8,
+            navStatus: "PathComplete",
+            finalDistanceToTarget: 1.25f,
+            endpointTolerance: 5f);
+        var nonComplete = TacticalBattlefieldBugDiagnostics.ClassifyAddPathOutcome(
+            vanillaResult: 1,
+            pathCountBefore: 0,
+            pathCountAfter: 1,
+            cornerCount: 8,
+            navStatus: "PathPartial",
+            finalDistanceToTarget: 1.25f,
+            endpointTolerance: 5f);
+        var failedFarEndpoint = TacticalBattlefieldBugDiagnostics.ClassifyAddPathOutcome(
+            vanillaResult: 0,
+            pathCountBefore: 0,
+            pathCountAfter: 1,
+            cornerCount: 8,
+            navStatus: "PathComplete",
+            finalDistanceToTarget: 75f,
+            endpointTolerance: 5f);
+
+        AssertTrue(nearEndpoint.ShouldOverrideResult, "near endpoint mismatch should override vanilla failure");
+        AssertEqual(1, nearEndpoint.OverrideResult, "near endpoint override result");
+        AssertTrue(!nearEndpoint.ShouldRemoveAddedPath, "near endpoint path should be kept");
+        AssertEqual("endpoint-within-tolerance", nearEndpoint.Reason, "near endpoint reason");
+        AssertTrue(nonComplete.ShouldRemoveAddedPath, "non-complete path should be removed");
+        AssertEqual(0, nonComplete.OverrideResult, "non-complete override result");
+        AssertEqual("navmesh-noncomplete", nonComplete.Reason, "non-complete reason");
+        AssertTrue(failedFarEndpoint.ShouldRemoveAddedPath, "failed far endpoint path should be removed");
+        AssertEqual(0, failedFarEndpoint.OverrideResult, "far endpoint override result");
+        AssertEqual("failed-endpoint-mismatch", failedFarEndpoint.Reason, "far endpoint reason");
     }
 
     private static void TacticalDiagnosticsSuppressOnlyTacticalNullFallbackExceptions()

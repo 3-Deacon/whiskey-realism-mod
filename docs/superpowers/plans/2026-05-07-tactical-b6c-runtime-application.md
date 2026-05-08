@@ -337,7 +337,7 @@ Open `src/WhiskeyRealism/Patches/BattleCommanderIntentObserverPatch.cs`. Locate 
             bool wlSafe = WlOwnershipSafe(group);
             bool chargeReady = group.lastaichargetime + GamePrefs.timetorenewaichargecheck <= GameVars.currenttimefromstart;
             bool staleness = group.regimentpaths > 0 && group.pathinterrupted;
-            bool pathRisk = false; // BUG-TAC-010 hookup is wired in a follow-up task; default false here.
+            bool pathRisk = false; // #53 handles BUG-TAC-010 separately; B6c must quarantine movement until enabled smoke is clean.
 
             return new TacticalLocalReactionInput(
                 intent: intent.Intent,

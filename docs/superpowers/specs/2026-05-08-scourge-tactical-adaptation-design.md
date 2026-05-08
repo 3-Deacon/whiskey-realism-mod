@@ -129,7 +129,7 @@ Confirmed GT inputs:
 - `Regiment.GetLastTransmittedPathPos(ignoreorderdelay:true)` (127552);
 - `Regiment.width`, `depth`, `firerange`, `lastsetwaypointposition` (111096), `lastsetwaypointrotation` (111098), `lastsetwaypointpositionsafetyzone` (111100);
 - `Regiment.regimentpaths` (111068) and `pathinterrupted` for in-motion gating; skirmisher skip when `unittyp == 3` and `regimentpaths > 0`;
-- `BUG-TAC-010` path-risk boundary from active tactical plans.
+- #53 `BUG-TAC-010` pathfinder discipline boundary from active tactical plans; movement writers must treat it as unsmoked until `[TacticalPathfinderDiscipline]` focused smoke is clean.
 
 Tiered crowding thresholds (mirroring Scourge):
 

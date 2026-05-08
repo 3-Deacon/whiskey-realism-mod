@@ -115,7 +115,7 @@ B6a/B6b can start immediately as pure doctrine and ledger work. B6c runtime writ
 
 - B4/B5 focused runtime smoke on the **current deployed DLL** (`docs/handoff.md` "Current shipped version" hash) confirms bounded `[TacticalMacroDecision]` and `[TacticalGroupDecision]` lines, no repeated exceptions, no Harmony failures, no missing anchors, no macro flip-flop, no all-sector attack from global superiority, no charge stance 4 writes by Whiskey, no movement/reserve/artillery/fallback side effects, and no player-subordinate retasking. Counts cited from prior DLLs do not satisfy this gate.
 - #46 W&L objective-chain guard denial smoke either proves `[TacticalObjectiveGuard] denied objective-chain advance ... reason=player-subordinate-attached` on the current DLL or the plan states that B6 will not exercise objective-chain behavior until that proof exists.
-- `BUG-TAC-010` path-shape behavior remains out of B6c unless the implementation plan first resolves or quarantines path-shape correction. B6c must not build broad movement behavior on top of a known path-backtrack defect.
+- `BUG-TAC-010` path-shape behavior is implemented by #53 behind `Enable Tactical Pathfinder Discipline`, but B6c movement-heavy work still requires current-DLL enabled smoke or an explicit quarantine. B6c must not build broad movement behavior on top of an unsmoked path-correction valve.
 
 ## Non-Goals
 
@@ -340,7 +340,7 @@ Pure tests must cover:
 - per-side reserve aggregator emits `RelieveBatteredLine` only when reserve is safe and not the last flank guard.
 - low ammo/fatigue/casualties raise relief/fallback intent and lower charge permission.
 - W&L player-subordinate ownership denies behavior application.
-- `BUG-TAC-010` path-risk evidence blocks runtime movement application.
+- #53 implements the `BUG-TAC-010` path-risk fix behind a default-off valve; broad runtime movement application stays blocked until enabled smoke proves the correction stable or the implementation quarantines that movement surface.
 - **Vanilla stance-4 preservation under PermitCharge**: simulated `ai_stanceordered == 4` post-vanilla with PermitCharge produces Skip with reason `vanilla-charge-preserved` and no overwrite.
 - **Vanilla stance-4 demotion when not `PermitCharge`**: simulated `ai_stanceordered == 4` with a non-`PermitCharge` B6b reaction produces explicit Apply stance 3 with `[TacticalChargeDeny]` telemetry, independent of B1/#41.
 - **B1/#41 charge-denial defense in depth**: simulated `ai_stance == 4` reaching `MicroAICheckForCharges` with a non-`PermitCharge` reaction under `Enable Tactical Charge Denial` denies `SetMovementMode(3)`.
@@ -407,7 +407,7 @@ If B6 causes all-sector attack, player-subordinate retasking, repeated logs, mac
 - Scourge concept evidence does not prove that Grand Tactician can safely execute identical local reactions.
 - B4/B5 behavior smoke on the **current deployed DLL** is the actual precondition; smoke counts on prior DLLs do not satisfy it.
 - #46 objective-chain denial still needs restart smoke on the current DLL.
-- `BUG-TAC-010` path-shape behavior remains unresolved and blocks any B6 movement-heavy implementation.
+- `BUG-TAC-010` path-shape behavior has a default-off #53 fix; B6 movement-heavy implementation remains blocked until enabled smoke proves the path-correction valve stable or the plan quarantines that surface.
 - Runtime reserve behavior remains mostly unexercised; B6 begins with reserve intent telemetry rather than reserve-list mutation.
 - The B5 stance-4 silent demotion fix in `Patches/BattleGroupStancePatch.cs` is described here as part of the B6c contract but not yet implemented; B6c must land it before any charge-denial runtime experiment.
 
