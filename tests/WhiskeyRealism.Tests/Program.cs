@@ -532,7 +532,10 @@ static class Program
             ("tactical fatigue state clamps above", TacticalFatigueStateClampsAbove),
             ("echelon orchestrator empty tick is no-op", EchelonOrchestratorEmptyTickIsNoOp),
             ("echelon orchestrator propagate intent dispatches to children", EchelonOrchestratorPropagateIntentDispatchesToChildren),
-            ("echelon orchestrator parent child link is bidirectional", EchelonOrchestratorParentChildLinkBidirectional)
+            ("echelon orchestrator parent child link is bidirectional", EchelonOrchestratorParentChildLinkBidirectional),
+            ("tactical commander roster falls back to faction defaults for unknown", TacticalCommanderRosterFallsBackToFactionDefaultsForUnknown),
+            ("tactical commander roster partitions by side", TacticalCommanderRosterPartitionsBySide),
+            ("tactical commander roster rank tier bias increases caution for corps", TacticalCommanderRosterRankTierBiasIncreasesCautionForCorps)
         };
 
         foreach (var test in tests)
@@ -10283,5 +10286,56 @@ static class Program
         public int PropagateCount { get; private set; }
         public override void Tick() { TickCount++; base.Tick(); }
         public override void PropagateIntent() { PropagateCount++; base.PropagateIntent(); }
+    }
+
+    // ---- TacticalCommanderRoster tests ----
+
+    private static void TacticalCommanderRosterFallsBackToFactionDefaultsForUnknown()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new[]
+        {
+            new SyntheticCommanderInput("Some Brigadier", EchelonKind.Brigade, 0)
+        });
+
+        var entry = roster.GetByName("Some Brigadier");
+        AssertTrue(entry != null, "entry should be present");
+        AssertFalse(entry.MatchedHistoricalRegistry, "synthetic entry should not be matched historical");
+
+        // Brigade bias: Aggression += 0.05; other fields unchanged from faction default
+        var factionDefault = FactionProfiles.For(0);
+        float expectedAgg = PersonalityVector.Clamp(factionDefault.Aggression + 0.05f);
+        AssertNear(expectedAgg, entry.PersonalityVector.Aggression, 0.001f, "brigade bias applied to aggression");
+        AssertNear(factionDefault.Caution, entry.PersonalityVector.Caution, 0.001f, "caution unchanged for brigade");
+        AssertNear(factionDefault.Audacity, entry.PersonalityVector.Audacity, 0.001f, "audacity unchanged for brigade");
+        AssertNear(factionDefault.CasualtyTolerance, entry.PersonalityVector.CasualtyTolerance, 0.001f, "casualty tolerance unchanged for brigade");
+        AssertNear(factionDefault.PoliticalResponsiveness, entry.PersonalityVector.PoliticalResponsiveness, 0.001f, "political responsiveness unchanged for brigade");
+    }
+
+    private static void TacticalCommanderRosterPartitionsBySide()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new[]
+        {
+            new SyntheticCommanderInput("A", EchelonKind.Army, 0),
+            new SyntheticCommanderInput("B", EchelonKind.Army, 1)
+        });
+
+        AssertEqual(2, roster.Count, "total roster count");
+        AssertEqual(1, roster.GetSide(0).Count, "side 0 count");
+        AssertEqual(1, roster.GetSide(1).Count, "side 1 count");
+    }
+
+    private static void TacticalCommanderRosterRankTierBiasIncreasesCautionForCorps()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new[]
+        {
+            new SyntheticCommanderInput("X", EchelonKind.Corps, 0)
+        });
+
+        var entry = roster.GetByName("X");
+        AssertTrue(entry != null, "corps entry should be present");
+
+        var factionDefault = FactionProfiles.For(0);
+        AssertTrue(entry.PersonalityVector.Caution > factionDefault.Caution,
+            "corps bias should increase Caution above faction default");
     }
 }
