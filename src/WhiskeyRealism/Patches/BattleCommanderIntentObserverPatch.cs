@@ -10,11 +10,11 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // B6a telemetry-only observer. Runs as Postfix on AIBattle.AdjustGroupAIStance
+    // B6a/B6c telemetry observer. Runs as Postfix on AIBattle.AdjustGroupAIStance
     // (decompile 4221), reads vanilla side/macro/objective-chain context, feeds
     // TacticalCommanderIntentResolver and TacticalPlaybookLedger, and emits
-    // bounded [TacticalIntent] and [TacticalPlaybook] log lines. Never writes
-    // vanilla battle state.
+    // bounded [TacticalIntent], [TacticalPlaybook], [TacticalLocalReaction],
+    // and [TacticalReserveIntent] log lines. Never writes vanilla battle state.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
     internal static class BattleCommanderIntentObserverPatch
     {
@@ -25,6 +25,7 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _chainCenterField;
         private static FieldInfo _flankAnchoredField;
         private static FieldInfo _reserveGroupsField;
+        private static FieldInfo _unitsUsedField;
 
         [HarmonyPostfix]
         [HarmonyPriority(Priority.LowerThanNormal)]
@@ -64,6 +65,39 @@ namespace WhiskeyRealism.Patches
 
             EmitIntent(side, macro, intentInput, intent);
             EmitPlaybook(side, playbook);
+
+            if (!Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value)
+                return;
+
+            TacticalReactionContext.Shared.Clear();
+
+            IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
+            if (units == null || units.Count == 0) return;
+
+            var reactions = new List<TacticalLocalReactionDecision>();
+            for (int i = 0; i < units.Count; i++)
+            {
+                var group = units[i] as Regiment;
+                if (group == null || group.unittyp <= 13) continue;
+
+                TacticalLocalReactionInput reactionInput = BuildReactionInput(group, intent, playbook);
+                TacticalLocalReactionDecision reaction = TacticalLocalReactionScorer.Score(reactionInput);
+                TacticalReactionContext.Shared.SetReaction(SafeInstanceId(group), reaction);
+                reactions.Add(reaction);
+                EmitReaction(side, group, reaction);
+            }
+
+            if (Plugin.Instance.EnableTacticalReserveIntentTelemetry.Value)
+            {
+                var availability = BuildReserveAvailability(battle);
+                var reserveInput = new TacticalReserveIntentInput(
+                    playbook.ReservePolicy,
+                    reactions.ToArray(),
+                    availability);
+                TacticalReserveIntentDecision reserveIntent = TacticalReservePolicyLedger.Decide(reserveInput);
+                TacticalReactionContext.Shared.SetReserveIntent(side, reserveIntent);
+                EmitReserveIntent(side, reserveIntent);
+            }
         }
 
         private static TacticalIntentInput BuildIntentInput(int macro)
@@ -173,6 +207,111 @@ namespace WhiskeyRealism.Patches
             return total > 0 ? (float)sub / total : 0f;
         }
 
+        private static TacticalLocalReactionInput BuildReactionInput(
+            Regiment group,
+            TacticalIntentDecision intent,
+            TacticalPlaybookDecision playbook)
+        {
+            float own = Math.Max(0f, group.groupowninrange);
+            float enemy = Math.Max(0f, group.groupenemiesinrange);
+            float odds = enemy <= 0f ? 0f : own / Math.Max(1f, enemy);
+            bool flank = group.flanksthreated > 0f || group.outflanked > 0;
+
+            Regiment target = group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+            bool targetVisible = target != null;
+            bool targetBroken = target != null && (target.morale < 0.45f || target.markedforrout);
+            bool targetStrongPoint = target != null && (target.covervalue > 0.5f || target.fortinrange != null);
+
+            float morale = Mathf.Clamp01(group.morale);
+            float ammo = Mathf.Clamp01(group.groupammo);
+            float casualties = Mathf.Clamp01(group.grouplosses / Math.Max(1f, group.groupstrength + group.grouplosses));
+            bool chargeReady = group.lastaichargetime + GamePrefs.timetorenewaichargecheck <= GameVars.currenttimefromstart;
+            bool staleness = group.regimentpaths > 0 && group.pathinterrupted;
+
+            return new TacticalLocalReactionInput(
+                intent.Intent,
+                playbook.LocalReactionPolicy,
+                TacticalSectorMission.Hold,
+                odds,
+                playbook.Confidence,
+                targetVisible,
+                targetBroken,
+                targetStrongPoint,
+                morale,
+                ammo,
+                casualties,
+                flank,
+                WlOwnershipSafe(group),
+                chargeReady,
+                staleness,
+                pathRiskActive: false);
+        }
+
+        private static bool WlOwnershipSafe(Regiment group)
+        {
+            try
+            {
+                if (!DLC_WL.dlc_scenarioactive) return true;
+                if (group == null) return true;
+                if (group.dlcw_isundercommander) return false;
+                if (group.allattachedunits == null) return true;
+
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit != null && unit.dlcw_isundercommander)
+                        return false;
+                }
+
+                return true;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static TacticalReserveAvailability BuildReserveAvailability(AIBattle battle)
+        {
+            int reserveCount = 0;
+            bool flankRisk = false;
+            IList chain = ObjectiveChain(battle);
+
+            if (chain != null)
+            {
+                for (int i = 0; i < chain.Count; i++)
+                {
+                    object entry = chain[i];
+                    IList reserves = SafeList(entry, ref _reserveGroupsField, "reservegroups");
+                    if (reserves != null) reserveCount += reserves.Count;
+
+                    if (_flankAnchoredField == null && entry != null)
+                        _flankAnchoredField = AccessTools.Field(entry.GetType(), "anchoredflank");
+                    if (_flankAnchoredField == null) continue;
+
+                    try
+                    {
+                        if (_flankAnchoredField.GetValue(entry) is bool[] anchored)
+                        {
+                            if (anchored.Length > 0 && !anchored[0]) flankRisk = true;
+                            if (anchored.Length > 1 && !anchored[1]) flankRisk = true;
+                        }
+                    }
+                    catch
+                    {
+                        // Missing flank data should not disable reserve telemetry.
+                    }
+                }
+            }
+
+            return new TacticalReserveAvailability(
+                reserveCount,
+                flankRisk,
+                lastReserveIsFlankGuard: flankRisk && reserveCount <= 1,
+                wlOwnershipSafe: true,
+                stalenessActive: false);
+        }
+
         private static void EmitIntent(int side, int macro, TacticalIntentInput input, TacticalIntentDecision intent)
         {
             string signature = side + "|" + macro + "|" + intent.Intent + "|" + intent.Reason;
@@ -205,6 +344,34 @@ namespace WhiskeyRealism.Patches
                 " reason=" + decision.Reason);
         }
 
+        private static void EmitReaction(int side, Regiment group, TacticalLocalReactionDecision decision)
+        {
+            int id = SafeInstanceId(group);
+            string signature = side + "|" + id + "|" + decision.Reaction + "|" + decision.ReliefRequested + "|" + decision.Reason;
+            if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "b6c-reaction", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            Plugin.Log.LogInfo("[TacticalLocalReaction] side=" + side +
+                " group=" + SafeName(group) + "#" + id +
+                " reaction=" + decision.Reaction +
+                " reliefRequested=" + (decision.ReliefRequested ? 1 : 0) +
+                " reason=" + decision.Reason +
+                " confidence=" + decision.Confidence.ToString("0.00"));
+        }
+
+        private static void EmitReserveIntent(int side, TacticalReserveIntentDecision decision)
+        {
+            string signature = side + "|" + decision.Intent + "|" + decision.AllowsRuntimeMutation + "|" + decision.Reason;
+            if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "b6c-reserve-intent", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            Plugin.Log.LogInfo("[TacticalReserveIntent] side=" + side +
+                " intent=" + decision.Intent +
+                " allowsMutation=" + (decision.AllowsRuntimeMutation ? 1 : 0) +
+                " reason=" + decision.Reason +
+                " confidence=" + decision.Confidence.ToString("0.00"));
+        }
+
         private static string Join(int[] values)
         {
             if (values == null || values.Length == 0) return "-";
@@ -215,6 +382,20 @@ namespace WhiskeyRealism.Patches
         {
             if (_objectiveChainField == null) _objectiveChainField = AccessTools.Field(typeof(AIBattle), "objective" + "chain");
             return _objectiveChainField?.GetValue(battle) as IList;
+        }
+
+        private static IList SafeList(object instance, ref FieldInfo cache, string name)
+        {
+            try
+            {
+                if (instance == null) return null;
+                if (cache == null) cache = AccessTools.Field(instance.GetType(), name);
+                return cache != null ? cache.GetValue(instance) as IList : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static Regiment SafeRegimentField(object instance, ref FieldInfo cache, string name)
@@ -243,6 +424,32 @@ namespace WhiskeyRealism.Patches
             catch
             {
                 return fallback;
+            }
+        }
+
+        private static int SafeInstanceId(UnityEngine.Object obj)
+        {
+            try
+            {
+                return obj != null ? obj.GetInstanceID() : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static string SafeName(Regiment group)
+        {
+            try
+            {
+                if (group == null) return "group";
+                string name = group.name;
+                return string.IsNullOrEmpty(name) ? "group" : name.Replace(' ', '_');
+            }
+            catch
+            {
+                return "group";
             }
         }
 
