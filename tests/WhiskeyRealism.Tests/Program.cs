@@ -102,6 +102,7 @@ static class Program
             ("tactical morale pressure withdrawal candidate flank no cover", TacticalMoralePressureWithdrawalCandidateFlankNoCover),
             ("tactical morale pressure collapse candidate", TacticalMoralePressureCollapseCandidate),
             ("tactical morale pressure stable on uninitialized defer to caller", TacticalMoralePressureStableOnUninitializedDeferToCaller),
+            ("tactical withdrawal input adapter to morale pressure input", TacticalWithdrawalInputAdapterToMoralePressureInput),
             ("tactical support screen quiet when no enemy and no screen", TacticalSupportScreenQuietWhenNoEnemyAndNoScreen),
             ("tactical unit type constants match vanilla unittyp", TacticalUnitTypeConstantsMatchVanillaUnittyp),
             ("tactical help request no request when safe", TacticalHelpRequestNoRequestWhenSafe),
@@ -493,6 +494,7 @@ static class Program
             ("tactical quadrant threat computes arcs", TacticalQuadrantThreatScorerComputesArcs),
             ("tactical quadrant threat detects rear pressure", TacticalQuadrantThreatScorerDetectsRearPressure),
             ("tactical quadrant threat null slices degrades gracefully", TacticalQuadrantThreatScorerNullSlicesDegradesGracefully),
+            ("tactical withdrawal input adapter to quadrant input", TacticalWithdrawalInputAdapterToQuadrantInput),
             ("tactical charge viability refuse on cooldown", TacticalChargeViabilityRefuseOnCooldown),
             ("tactical charge viability refuse on morale high", TacticalChargeViabilityRefuseOnMoraleHigh),
             ("tactical charge viability allow at threshold", TacticalChargeViabilityAllowAtThreshold),
@@ -9617,6 +9619,30 @@ static class Program
         AssertFalse(ledger.TryGetLatest(key, out _, out _), "prune removes entry");
     }
 
+    private static void TacticalWithdrawalInputAdapterToMoralePressureInput()
+    {
+        var snapshot = new TacticalWithdrawalInputAdapter.Snapshot
+        {
+            Morale = 0.55f,
+            BattleStartMorale = 0.85f,
+            BattleStartMoraleInitialized = true,
+            FallbackThreshold = 0.40f,
+            Outflanked = 2,
+            FriendlyRoutedNear = 1f,
+            EnemyRoutedNear = 0f,
+            ReceivedFireFromClosestFar = true,
+            CoverValue = 0.2f,
+            CoverObject = 0,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+        };
+        var input = TacticalWithdrawalInputAdapter.ToMoralePressureInput(snapshot);
+        AssertEqual(0.55f, input.CurrentMorale, "morale carried");
+        AssertEqual(2, input.Outflanked, "outflanked carried");
+        AssertEqual(true, input.ReceivedFireFromClosestFar, "fire flag carried");
+        AssertEqual(true, input.BattleStartMoraleInitialized, "init flag carried");
+    }
+
     private static void TacticalQuadrantThreatScorerComputesArcs()
     {
         var slices = new float[36];
@@ -9660,6 +9686,21 @@ static class Program
         var output = TacticalQuadrantThreatScorer.Score(input);
         AssertEqual(0f, output.FrontStrength, "null slices -> zero");
         AssertFalse(output.RearPressureFlag, "no flag");
+    }
+
+    private static void TacticalWithdrawalInputAdapterToQuadrantInput()
+    {
+        var slices = new float[36];
+        var snapshot = new TacticalWithdrawalInputAdapter.Snapshot
+        {
+            EnemyStrengthWithinAngle = slices,
+            SliceWidthDegrees = 10f,
+            UnitFacingDegrees = 90f,
+        };
+        var input = TacticalWithdrawalInputAdapter.ToQuadrantInput(snapshot);
+        AssertEqual(slices.Length, input.Slices.Length, "slices carried");
+        AssertEqual(10f, input.SliceWidthDegrees, "slice width carried");
+        AssertEqual(90f, input.UnitFacingDegrees, "facing carried");
     }
 
     private static void TacticalChargeViabilityRefuseOnCooldown()
