@@ -8,7 +8,7 @@
 
 **Tech Stack:** BepInEx 5.4.x, HarmonyX, C# netstandard2.1, console harness, vanilla decompile anchors, DLL deploy/hash verification.
 
-**Status:** Superseded as an execution artifact by [`2026-05-08-tactical-b7-b8-wiring-implementation.md`](2026-05-08-tactical-b7-b8-wiring-implementation.md). The shipped B7 wiring lives in patch #48 and current deployed DLL `328c74a43f356df4ecb52f38a0df1ec89267eae714fd207af406529b1adffef0`; focused smoke confirmed `[once:b7-check-ai-bombardment]` and `[once:b7-counterbattery]`. Conditional `[once:b7-cancel-bombard]` has not fired yet.
+**Status:** Superseded as an execution artifact by [`2026-05-08-tactical-b7-b8-wiring-implementation.md`](2026-05-08-tactical-b7-b8-wiring-implementation.md). The shipped B7 wiring lives in patch #48 and was first verified in DLL `328c74a43f356df4ecb52f38a0df1ec89267eae714fd207af406529b1adffef0`; the currently deployed #53 DLL is `b07bbd39eaaf664d81d5930b42d5dc268b64c43dc98244a17015c49e329ce88a` and still includes #48. Focused smoke confirmed `[once:b7-check-ai-bombardment]` and `[once:b7-counterbattery]`. Conditional `[once:b7-cancel-bombard]` has not fired yet.
 
 ---
 

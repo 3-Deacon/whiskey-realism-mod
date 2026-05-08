@@ -34,6 +34,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<int> TacticalDecisionMatrixMaxRows;
         internal ConfigEntry<bool> EnableTacticalBugTelemetry;
         internal ConfigEntry<bool> EnableTacticalFallbackRetreatNullGuard;
+        internal ConfigEntry<bool> EnableTacticalPathfinderDiscipline;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
@@ -163,6 +164,11 @@ namespace WhiskeyRealism
                 "Enable Tactical Fallback Retreat Null Guard",
                 false,
                 "Default OFF. Suppresses NullReferenceException from two vanilla tactical fallback/retreat methods during focused bug-smoke runs; all non-null exceptions still propagate.");
+            EnableTacticalPathfinderDiscipline = Config.Bind(
+                "Tactical",
+                "Enable Tactical Pathfinder Discipline",
+                false,
+                "Default OFF. Corrects BUG-TAC-010 by accepting close complete tactical path endpoints, removing failed non-target path fragments, and rejecting non-complete NavMesh paths before they poison movement retries.");
             EnableWlTacticalChargeGuard = Config.Bind(
                 "Tactical",
                 "Enable W&L Tactical Charge Guard",
