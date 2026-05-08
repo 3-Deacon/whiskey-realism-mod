@@ -2,6 +2,11 @@ namespace WhiskeyRealism.Tactical
 {
     public static class TacticalDoctrineScorer
     {
+        public static bool AllowsLocalGroupStanceWriter(int unitType)
+        {
+            return unitType == TacticalUnitType.BattleGroupBrigade;
+        }
+
         public static TacticalMacroDecision DecideMacro(TacticalMacroDecisionInput input)
         {
             if (input.DebugOverrideActive)
@@ -57,6 +62,11 @@ namespace WhiskeyRealism.Tactical
             if (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint &&
                 (input.MacroAi == 0 || input.MacroAi == 1))
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 3, "attack-weak-point");
+            if (input.MacroAi == 2 &&
+                (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint ||
+                 input.Sector.Mission == TacticalSectorMission.Fix ||
+                 input.Sector.Mission == TacticalSectorMission.EconomyOfForce))
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 2, "defend-hold");
             if (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 1, "probe-weak-point");
             if (input.Sector.Mission == TacticalSectorMission.Fix ||
