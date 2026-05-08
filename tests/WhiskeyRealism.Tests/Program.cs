@@ -408,7 +408,15 @@ static class Program
             ("tactical b6a recover maps to hold to last", TacticalB6aRecoverMapsToHoldToLast),
             ("tactical b6a no plan falls back to macro", TacticalB6aNoPlanFallsBackToMacro),
             ("tactical b6a macro retreat falls to hold to last", TacticalB6aMacroRetreatFallsToHoldToLast),
-            ("tactical b6a probe intent yields probe and fix", TacticalB6aProbeIntentYieldsProbeAndFix)
+            ("tactical b6a probe intent yields probe and fix", TacticalB6aProbeIntentYieldsProbeAndFix),
+            ("tactical b6a defend with right flank risk yields refuse right", TacticalB6aDefendRightFlankYieldsRefuseRight),
+            ("tactical b6a defend with left flank risk yields refuse left", TacticalB6aDefendLeftFlankYieldsRefuseLeft),
+            ("tactical b6a defend with anchored flank does not refuse", TacticalB6aDefendAnchoredFlankDoesNotRefuse),
+            ("tactical b6a attack with decisive sector yields weak point pressure", TacticalB6aAttackDecisiveYieldsWeakPointPressure),
+            ("tactical b6a attack without decisive sector falls back to probe and fix", TacticalB6aAttackNoDecisiveFallsBack),
+            ("tactical b6a main effort rejected when subordinate share over half", TacticalB6aMainEffortRejectedOnPlayerOwnership),
+            ("tactical b6a hold to last yields high ground defense", TacticalB6aHoldToLastYieldsHighGroundDefense),
+            ("tactical b6a empty sectors yields no-sectors decision", TacticalB6aEmptySectorsYieldsEmpty)
         };
 
         foreach (var test in tests)
@@ -1582,6 +1590,115 @@ static class Program
 
         AssertTrue(decision.Playbook == TacticalPlaybook.ProbeAndFix, "Expected ProbeAndFix, got " + decision.Playbook);
         AssertTrue(decision.RefusedFlank == TacticalRefusedFlank.None, "Probe with no flank risk must not refuse");
+    }
+
+    private static TacticalPlaybookSectorView Sector(int id, TacticalSectorPosition pos, float own, float enemy, float conf, bool flankRisk = false, bool strongPoint = false, float share = 0f, TacticalSectorMission mission = TacticalSectorMission.Hold)
+    {
+        return new TacticalPlaybookSectorView(id, mission, pos, own, enemy, conf, strongPoint, flankRisk, share);
+    }
+
+    private static void TacticalB6aDefendRightFlankYieldsRefuseRight()
+    {
+        var sectors = new[]
+        {
+            Sector(0, TacticalSectorPosition.Left,   1000, 800, 0.7f),
+            Sector(1, TacticalSectorPosition.Center, 1500, 1200, 0.7f),
+            Sector(2, TacticalSectorPosition.Right,  900,  1500, 0.7f, flankRisk: true),
+        };
+        var input = new TacticalPlaybookInput(CommanderIntent.Defend, 1, sectors, true, false, false, 0f);
+        var d = TacticalPlaybookLedger.Decide(input);
+        AssertTrue(d.Playbook == TacticalPlaybook.RefuseRight, "Expected RefuseRight, got " + d.Playbook);
+        AssertTrue(d.RefusedFlank == TacticalRefusedFlank.Right, "Refused flank mismatch");
+    }
+
+    private static void TacticalB6aDefendLeftFlankYieldsRefuseLeft()
+    {
+        var sectors = new[]
+        {
+            Sector(0, TacticalSectorPosition.Left,   900,  1500, 0.7f, flankRisk: true),
+            Sector(1, TacticalSectorPosition.Center, 1500, 1200, 0.7f),
+            Sector(2, TacticalSectorPosition.Right,  1000, 800,  0.7f),
+        };
+        var input = new TacticalPlaybookInput(CommanderIntent.Defend, 1, sectors, true, false, false, 0f);
+        var d = TacticalPlaybookLedger.Decide(input);
+        AssertTrue(d.Playbook == TacticalPlaybook.RefuseLeft, "Expected RefuseLeft, got " + d.Playbook);
+    }
+
+    private static void TacticalB6aDefendAnchoredFlankDoesNotRefuse()
+    {
+        var sectors = new[]
+        {
+            Sector(0, TacticalSectorPosition.Left,   1000, 800, 0.7f),
+            Sector(1, TacticalSectorPosition.Center, 1500, 1200, 0.7f),
+            Sector(2, TacticalSectorPosition.Right,  900,  1500, 0.7f, flankRisk: true),
+        };
+        var input = new TacticalPlaybookInput(CommanderIntent.Defend, 1, sectors, true, false, true, 0f);
+        var d = TacticalPlaybookLedger.Decide(input);
+        AssertTrue(d.RefusedFlank == TacticalRefusedFlank.None, "Anchored right flank must not be refused");
+        AssertTrue(d.Playbook == TacticalPlaybook.CombinedArmsDefense, "Expected CombinedArmsDefense, got " + d.Playbook);
+    }
+
+    private static void TacticalB6aAttackDecisiveYieldsWeakPointPressure()
+    {
+        var sectors = new[]
+        {
+            Sector(0, TacticalSectorPosition.Left,   1000, 800, 0.7f),
+            Sector(1, TacticalSectorPosition.Center, 1500, 800, 0.8f, mission: TacticalSectorMission.AttackWeakPoint),
+            Sector(2, TacticalSectorPosition.Right,  1000, 800, 0.7f),
+        };
+        var input = new TacticalPlaybookInput(CommanderIntent.Attack, 1, sectors, true, false, false, 0f);
+        var d = TacticalPlaybookLedger.Decide(input);
+        AssertTrue(d.Playbook == TacticalPlaybook.WeakPointPressure, "Expected WeakPointPressure, got " + d.Playbook);
+        AssertTrue(d.MainEffortSectorId == 1, "Main effort must be sector 1");
+    }
+
+    private static void TacticalB6aAttackNoDecisiveFallsBack()
+    {
+        var sectors = new[]
+        {
+            Sector(0, TacticalSectorPosition.Left,   1000, 800, 0.4f),
+            Sector(1, TacticalSectorPosition.Center, 1500, 1200, 0.4f),
+            Sector(2, TacticalSectorPosition.Right,  1000, 800, 0.4f),
+        };
+        var input = new TacticalPlaybookInput(CommanderIntent.Attack, -1, sectors, true, false, false, 0f);
+        var d = TacticalPlaybookLedger.Decide(input);
+        AssertTrue(d.Playbook == TacticalPlaybook.ProbeAndFix, "Expected ProbeAndFix fallback, got " + d.Playbook);
+    }
+
+    private static void TacticalB6aMainEffortRejectedOnPlayerOwnership()
+    {
+        var sectors = new[]
+        {
+            Sector(0, TacticalSectorPosition.Left,   1000, 800, 0.7f),
+            Sector(1, TacticalSectorPosition.Center, 1500, 800, 0.8f, share: 0.6f, mission: TacticalSectorMission.AttackWeakPoint),
+            Sector(2, TacticalSectorPosition.Right,  1000, 800, 0.7f),
+        };
+        var input = new TacticalPlaybookInput(CommanderIntent.Attack, 1, sectors, true, false, false, 0f);
+        var d = TacticalPlaybookLedger.Decide(input);
+        AssertTrue(d.MainEffortSectorId == -1, "Main effort must be rejected when subordinate share > 0.5");
+        AssertTrue(d.Playbook == TacticalPlaybook.ProbeAndFix, "Expected ProbeAndFix fallback when main effort denied");
+    }
+
+    private static void TacticalB6aHoldToLastYieldsHighGroundDefense()
+    {
+        var sectors = new[]
+        {
+            Sector(0, TacticalSectorPosition.Left,   1000, 800, 0.7f),
+            Sector(1, TacticalSectorPosition.Center, 1500, 1200, 0.7f),
+            Sector(2, TacticalSectorPosition.Right,  1000, 800, 0.7f),
+        };
+        var input = new TacticalPlaybookInput(CommanderIntent.HoldToLast, -1, sectors, false, false, false, 0f);
+        var d = TacticalPlaybookLedger.Decide(input);
+        AssertTrue(d.Playbook == TacticalPlaybook.HighGroundDefense, "Expected HighGroundDefense, got " + d.Playbook);
+        AssertTrue(d.ReservePolicy == TacticalReservePolicy.HoldReserve, "HoldToLast must keep reserve");
+    }
+
+    private static void TacticalB6aEmptySectorsYieldsEmpty()
+    {
+        var input = new TacticalPlaybookInput(CommanderIntent.Attack, -1, System.Array.Empty<TacticalPlaybookSectorView>(), false, false, false, 0f);
+        var d = TacticalPlaybookLedger.Decide(input);
+        AssertTrue(d.Reason == "no-sectors", "Expected no-sectors reason, got " + d.Reason);
+        AssertTrue(d.Confidence == 0f, "Empty decision must have zero confidence");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
