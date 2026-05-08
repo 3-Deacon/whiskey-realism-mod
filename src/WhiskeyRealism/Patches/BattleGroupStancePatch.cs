@@ -49,7 +49,7 @@ namespace WhiskeyRealism.Patches
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i] as Regiment;
-                if (group == null || group.unittyp <= 13) continue;
+                if (group == null || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)) continue;
                 ApplyGroup(bunits, side, macro, group, i);
             }
         }

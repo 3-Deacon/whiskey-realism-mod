@@ -66,7 +66,9 @@ static class Program
             ("tactical macro debug override skips", TacticalMacroDebugOverrideSkips),
             ("tactical macro inferior no relief retreats", TacticalMacroInferiorNoReliefRetreats),
             ("tactical group decisive sector attacks without charge", TacticalGroupDecisiveSectorAttacksWithoutCharge),
-            ("tactical group weak point under defend probes", TacticalGroupWeakPointUnderDefendProbes),
+            ("tactical group weak point under defend holds", TacticalGroupWeakPointUnderDefendHolds),
+            ("tactical group fix under defend holds", TacticalGroupFixUnderDefendHolds),
+            ("tactical group local stance writer only controls brigades", TacticalGroupLocalStanceWriterOnlyControlsBrigades),
             ("tactical group retreat macro keeps vanilla", TacticalGroupRetreatMacroKeepsVanilla),
             ("tactical group explicit probe bypasses low confidence skip", TacticalGroupExplicitProbeBypassesLowConfidenceSkip),
             ("tactical group low confidence keeps vanilla", TacticalGroupLowConfidenceKeepsVanilla),
@@ -985,7 +987,7 @@ static class Program
         AssertEqual(3, decision.GroupStance, "attack stance, not charge");
     }
 
-    private static void TacticalGroupWeakPointUnderDefendProbes()
+    private static void TacticalGroupWeakPointUnderDefendHolds()
     {
         var sector = new TacticalSectorAssessment(4, TacticalSectorSource.ObjectiveChain, 5000f, 2000f, 0.9f, strongPoint: false, flankRisk: false, TacticalSectorMission.AttackWeakPoint);
         var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
@@ -996,7 +998,30 @@ static class Program
             wlAllowsControl: true));
 
         AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
-        AssertEqual(1, decision.GroupStance, "defensive weak point should probe/screen, not hold");
+        AssertEqual(2, decision.GroupStance, "defensive weak point should hold");
+        AssertEqual("defend-hold", decision.Reason, "reason");
+    }
+
+    private static void TacticalGroupFixUnderDefendHolds()
+    {
+        var sector = new TacticalSectorAssessment(4, TacticalSectorSource.ObjectiveChain, 5000f, 2000f, 0.9f, strongPoint: false, flankRisk: false, TacticalSectorMission.Fix);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 2,
+            macroAi: 2,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
+        AssertEqual(2, decision.GroupStance, "defensive fix should hold");
+        AssertEqual("defend-hold", decision.Reason, "reason");
+    }
+
+    private static void TacticalGroupLocalStanceWriterOnlyControlsBrigades()
+    {
+        AssertEqual(true, TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(TacticalUnitType.BattleGroupBrigade), "brigade");
+        AssertFalse(TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(TacticalUnitType.BattleGroupDivision), "division");
+        AssertFalse(TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(TacticalUnitType.BattleGroupArmy), "army");
     }
 
     private static void TacticalGroupRetreatMacroKeepsVanilla()
@@ -3006,6 +3031,9 @@ static class Program
         AssertEqual(4, TacticalUnitType.Officer, "officer = 4");
         AssertEqual(5, TacticalUnitType.Excluded, "excluded = 5");
         AssertEqual(13, TacticalUnitType.MaxCombat, "max combat = 13");
+        AssertEqual(14, TacticalUnitType.BattleGroupBrigade, "battle group brigade = 14");
+        AssertEqual(15, TacticalUnitType.BattleGroupDivision, "battle group division = 15");
+        AssertEqual(16, TacticalUnitType.BattleGroupArmy, "battle group army = 16");
     }
 
     private static void TacticalHelpRequestNoRequestWhenSafe()

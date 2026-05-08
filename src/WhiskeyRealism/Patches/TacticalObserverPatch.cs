@@ -1227,12 +1227,14 @@ namespace WhiskeyRealism.Patches
                 CountAttachedUnderCommander(group) > 0);
             bool orderFrictionAllows = MatrixOrderFrictionAllowsChange(group);
             int vanillaStance = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
-            var stanceDecision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
-                vanillaStance,
-                context.MacroAi,
-                sector,
-                orderFrictionAllows,
-                wlGuard.Allow));
+            var stanceDecision = TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)
+                ? TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+                    vanillaStance,
+                    context.MacroAi,
+                    sector,
+                    orderFrictionAllows,
+                    wlGuard.Allow))
+                : new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, vanillaStance, "command-scope");
 
             Plugin.Log.LogInfo("[TacticalDecisionMatrix] event=" + eventType +
                 " row=group index=" + index +
