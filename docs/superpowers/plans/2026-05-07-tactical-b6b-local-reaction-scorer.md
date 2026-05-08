@@ -1,8 +1,10 @@
 # Tactical B6b Local Reaction Scorer Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **Goal:** Add pure C# subordinate-reaction scoring on top of B6a intent/playbook outputs, plus a per-side reserve-policy aggregator that turns regiment-level `LineReliefRequest` signals into a single `RelieveBatteredLine` decision per side per cycle. No vanilla writes, no patches in this slice — runtime application is B6c's job.
+
+**Status:** Complete for B6c consumption. Final review wired `TacticalLocalReactionInput.PlaybookPolicy` into the scorer: Conservative blocks `PermitCharge` and `LimitedCounterstroke`; Standard/Aggressive preserve the existing positive cases. Console harness and plugin build passed; B6b has no deploy or in-game smoke requirement.
 
 **Architecture:** Two new pure types under `src/WhiskeyRealism/Tactical/`. `TacticalLocalReactionScorer` consumes intent + playbook + per-unit evidence (morale, ammo, casualties, target visibility, vanilla charge cooldown readiness, W&L ownership, B2 order friction) and produces one `TacticalLocalReactionDecision` per group. `TacticalReservePolicyLedger` aggregates reaction decisions plus reserve-availability evidence and produces one `TacticalReserveIntent` per side. Both ship covered by the console harness.
 
@@ -49,7 +51,7 @@ If any line drifts materially, update this plan inline before implementing.
 - Create: `src/WhiskeyRealism/Tactical/TacticalLocalReactionScorer.cs`
 - Modify: `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`, `tests/WhiskeyRealism.Tests/Program.cs`
 
-- [ ] **Step 1: Add Compile Include**
+- [x] **Step 1: Add Compile Include**
 
 In `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`:
 
@@ -57,7 +59,7 @@ In `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`:
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalLocalReactionScorer.cs" Link="TacticalLocalReactionScorer.cs" />
 ```
 
-- [ ] **Step 2: Write the failing test (ProbeIntent always denies charge)**
+- [x] **Step 2: Write the failing test (ProbeIntent always denies charge)**
 
 Add the dispatch entry:
 
@@ -112,7 +114,7 @@ Add the test body:
         }
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 ```bash
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
@@ -120,7 +122,7 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: build error citing missing `TacticalLocalReactionScorer`, `TacticalLocalReactionInput`, `LocalReaction`.
 
-- [ ] **Step 4: Implement `TacticalLocalReactionScorer.cs`**
+- [x] **Step 4: Implement `TacticalLocalReactionScorer.cs`**
 
 Create `src/WhiskeyRealism/Tactical/TacticalLocalReactionScorer.cs`:
 
@@ -321,7 +323,7 @@ namespace WhiskeyRealism.Tactical
 }
 ```
 
-- [ ] **Step 5: Run tests, verify pass**
+- [x] **Step 5: Run tests, verify pass**
 
 ```bash
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
@@ -329,7 +331,7 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/WhiskeyRealism/Tactical/TacticalLocalReactionScorer.cs tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj tests/WhiskeyRealism.Tests/Program.cs
@@ -352,7 +354,7 @@ EOF
 **Files:**
 - Modify: `tests/WhiskeyRealism.Tests/Program.cs`
 
-- [ ] **Step 1: Add ten dispatch entries**
+- [x] **Step 1: Add ten dispatch entries**
 
 ```csharp
             ("tactical b6b hold to last blocks fallback pressure", TacticalB6bHoldToLastBlocksFallbackPressure),
@@ -367,7 +369,7 @@ EOF
             ("tactical b6b battered frontline emits line relief request under hold", TacticalB6bBatteredFrontlineEmitsLineReliefRequest),
 ```
 
-- [ ] **Step 2: Add the test bodies**
+- [x] **Step 2: Add the test bodies**
 
 ```csharp
         private static void TacticalB6bHoldToLastBlocksFallbackPressure()
@@ -446,7 +448,7 @@ EOF
         }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
@@ -454,7 +456,7 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: 10 new B6b tests PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/WhiskeyRealism.Tests/Program.cs
@@ -474,7 +476,7 @@ EOF
 - Create: `src/WhiskeyRealism/Tactical/TacticalReservePolicyLedger.cs`
 - Modify: `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`, `tests/WhiskeyRealism.Tests/Program.cs`
 
-- [ ] **Step 1: Add Compile Include**
+- [x] **Step 1: Add Compile Include**
 
 In `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`:
 
@@ -482,7 +484,7 @@ In `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`:
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalReservePolicyLedger.cs" Link="TacticalReservePolicyLedger.cs" />
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Add the dispatch entry:
 
@@ -518,7 +520,7 @@ Add the test body:
         }
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 ```bash
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
@@ -526,7 +528,7 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: missing `TacticalReservePolicyLedger`, etc.
 
-- [ ] **Step 4: Implement `TacticalReservePolicyLedger.cs`**
+- [x] **Step 4: Implement `TacticalReservePolicyLedger.cs`**
 
 Create `src/WhiskeyRealism/Tactical/TacticalReservePolicyLedger.cs`:
 
@@ -660,7 +662,7 @@ namespace WhiskeyRealism.Tactical
 }
 ```
 
-- [ ] **Step 5: Run, verify pass**
+- [x] **Step 5: Run, verify pass**
 
 ```bash
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
@@ -668,7 +670,7 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/WhiskeyRealism/Tactical/TacticalReservePolicyLedger.cs tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj tests/WhiskeyRealism.Tests/Program.cs
@@ -691,7 +693,7 @@ EOF
 **Files:**
 - Modify: `tests/WhiskeyRealism.Tests/Program.cs`
 
-- [ ] **Step 1: Add seven dispatch entries**
+- [x] **Step 1: Add seven dispatch entries**
 
 ```csharp
             ("tactical b6b reserve no reserve yields none", TacticalB6bReserveNoReserveYieldsNone),
@@ -703,7 +705,7 @@ EOF
             ("tactical b6b reserve stale order prepares without mutation", TacticalB6bReserveStaleOrderNoMutation),
 ```
 
-- [ ] **Step 2: Add the test bodies**
+- [x] **Step 2: Add the test bodies**
 
 ```csharp
         private static TacticalLocalReactionDecision Battered() => new TacticalLocalReactionDecision(LocalReaction.LineReliefRequest, true, 0.7f, "battered");
@@ -773,7 +775,7 @@ EOF
         }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
@@ -781,7 +783,7 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: 7 new B6b reserve tests PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/WhiskeyRealism.Tests/Program.cs
@@ -799,7 +801,7 @@ EOF
 
 **Files:** none modified.
 
-- [ ] **Step 1: Run the full harness**
+- [x] **Step 1: Run the full harness**
 
 ```bash
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
@@ -807,7 +809,7 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: every prior B-tactical test still passes plus all B6a + B6b tests pass.
 
-- [ ] **Step 2: Build the plugin to confirm netstandard2.1 still compiles**
+- [x] **Step 2: Build the plugin to confirm netstandard2.1 still compiles**
 
 ```bash
 ./build.sh
@@ -815,7 +817,7 @@ Expected: every prior B-tactical test still passes plus all B6a + B6b tests pass
 
 Expected: BUILD SUCCEEDED with 0 warnings, 0 errors. (Plugin compiles even though no patches are added in B6b — the Tactical types are referenced only by the B6a observer Postfix and the future B6c patches.)
 
-- [ ] **Step 3: Sanity check no patch was modified**
+- [x] **Step 3: Sanity check no patch was modified**
 
 ```bash
 git status
@@ -824,7 +826,7 @@ git diff --stat src/WhiskeyRealism/Patches/
 
 Expected: empty diff under `Patches/` (B6b is pure logic). If anything appears there, revert it — that work belongs to B6c.
 
-- [ ] **Step 4: Final commit if needed**
+- [x] **Step 4: Final commit if needed**
 
 ```bash
 git add docs/handoff.md

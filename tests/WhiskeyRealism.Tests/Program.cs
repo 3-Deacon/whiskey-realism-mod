@@ -443,7 +443,11 @@ static class Program
             ("tactical b6b attack fix mission screens even when charge ready", TacticalB6bAttackFixMissionScreensWhenChargeReady),
             ("tactical b6b attack economy mission screens even when charge ready", TacticalB6bAttackEconomyMissionScreensWhenChargeReady),
             ("tactical b6b attack hold mission maintains line when charge ready", TacticalB6bAttackHoldMissionMaintainsLineWhenChargeReady),
-            ("tactical b6b attack weak point mission permits charge when ready", TacticalB6bAttackWeakPointMissionPermitsChargeWhenReady)
+            ("tactical b6b attack weak point mission permits charge when ready", TacticalB6bAttackWeakPointMissionPermitsChargeWhenReady),
+            ("tactical b6b conservative policy blocks weak point charge", TacticalB6bConservativePolicyBlocksWeakPointCharge),
+            ("tactical b6b aggressive policy permits weak point charge", TacticalB6bAggressivePolicyPermitsWeakPointCharge),
+            ("tactical b6b conservative policy blocks defend counterstroke", TacticalB6bConservativePolicyBlocksDefendCounterstroke),
+            ("tactical b6b standard policy permits defend counterstroke", TacticalB6bStandardPolicyPermitsDefendCounterstroke)
         };
 
         foreach (var test in tests)
@@ -1975,6 +1979,58 @@ static class Program
             pathRiskActive: false));
 
         AssertEqual(LocalReaction.PermitCharge, d.Reaction, "reaction");
+    }
+
+    private static void TacticalB6bConservativePolicyBlocksWeakPointCharge()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            playbookPolicy: TacticalLocalReactionPolicy.Conservative,
+            sectorMission: TacticalSectorMission.AttackWeakPoint,
+            chargeCooldownReady: true,
+            pathRiskActive: false));
+
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
+        AssertContains(d.Reason, "conservative", "reason");
+    }
+
+    private static void TacticalB6bAggressivePolicyPermitsWeakPointCharge()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            playbookPolicy: TacticalLocalReactionPolicy.Aggressive,
+            sectorMission: TacticalSectorMission.AttackWeakPoint,
+            chargeCooldownReady: true,
+            pathRiskActive: false));
+
+        AssertEqual(LocalReaction.PermitCharge, d.Reaction, "reaction");
+    }
+
+    private static void TacticalB6bConservativePolicyBlocksDefendCounterstroke()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Defend,
+            playbookPolicy: TacticalLocalReactionPolicy.Conservative,
+            sectorOdds: 1.25f,
+            sectorConfidence: 0.65f,
+            targetVisible: true,
+            targetStrongPoint: false));
+
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
+        AssertContains(d.Reason, "conservative", "reason");
+    }
+
+    private static void TacticalB6bStandardPolicyPermitsDefendCounterstroke()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Defend,
+            playbookPolicy: TacticalLocalReactionPolicy.Standard,
+            sectorOdds: 1.25f,
+            sectorConfidence: 0.65f,
+            targetVisible: true,
+            targetStrongPoint: false));
+
+        AssertEqual(LocalReaction.LimitedCounterstroke, d.Reaction, "reaction");
     }
 
     private static TacticalReserveAvailability ReserveAvailability(

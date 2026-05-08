@@ -158,6 +158,9 @@ namespace WhiskeyRealism.Tactical
                 input.SectorConfidence >= 0.55f &&
                 !input.PathRiskActive)
             {
+                if (input.PlaybookPolicy == TacticalLocalReactionPolicy.Conservative)
+                    return ReliefOrMaintain(input, "conservative-counterstroke-blocked");
+
                 return Decision(LocalReaction.LimitedCounterstroke, false, input, "limited-counterstroke");
             }
 
@@ -182,6 +185,9 @@ namespace WhiskeyRealism.Tactical
                 input.WlOwnershipSafe &&
                 input.SectorConfidence >= 0.55f)
             {
+                if (input.PlaybookPolicy == TacticalLocalReactionPolicy.Conservative)
+                    return Decision(LocalReaction.MaintainLine, false, input, "conservative-charge-blocked");
+
                 return Decision(LocalReaction.PermitCharge, false, input, "charge-permitted");
             }
 
