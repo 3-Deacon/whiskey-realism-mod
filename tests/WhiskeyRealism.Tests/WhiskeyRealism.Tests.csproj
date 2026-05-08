@@ -140,6 +140,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalPlaybookLedger.cs" Link="TacticalPlaybookLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalLocalReactionScorer.cs" Link="TacticalLocalReactionScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalReservePolicyLedger.cs" Link="TacticalReservePolicyLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalMoraleSnapshotLedger.cs" Link="TacticalMoraleSnapshotLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPosture.cs" Link="DirectorPosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />

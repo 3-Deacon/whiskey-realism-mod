@@ -461,7 +461,12 @@ static class Program
             ("tactical b6b conservative policy blocks weak point charge", TacticalB6bConservativePolicyBlocksWeakPointCharge),
             ("tactical b6b aggressive policy permits weak point charge", TacticalB6bAggressivePolicyPermitsWeakPointCharge),
             ("tactical b6b conservative policy blocks defend counterstroke", TacticalB6bConservativePolicyBlocksDefendCounterstroke),
-            ("tactical b6b standard policy permits defend counterstroke", TacticalB6bStandardPolicyPermitsDefendCounterstroke)
+            ("tactical b6b standard policy permits defend counterstroke", TacticalB6bStandardPolicyPermitsDefendCounterstroke),
+            ("tactical morale snapshot ledger stores and reads", TacticalMoraleSnapshotLedgerStoresAndReads),
+            ("tactical morale snapshot ledger ring buffer drops oldest", TacticalMoraleSnapshotLedgerRingBufferDropsOldest),
+            ("tactical morale snapshot ledger name fallback resolves across InstanceID roll", TacticalMoraleSnapshotLedgerNameFallbackResolvesAcrossInstanceIdRoll),
+            ("tactical morale snapshot ledger skips when last update unchanged", TacticalMoraleSnapshotLedgerSkipsWhenLastUpdateUnchanged),
+            ("tactical morale snapshot ledger prune", TacticalMoraleSnapshotLedgerPrune)
         };
 
         foreach (var test in tests)
@@ -9168,5 +9173,61 @@ static class Program
             personality: new PersonalityVector());
         AssertTrue(posture.GuardBudgetFractionModifier <= 0f,
             "Union late-war pressure can slightly lower guard for source-sector concentration");
+    }
+
+    private static void TacticalMoraleSnapshotLedgerStoresAndReads()
+    {
+        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
+        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
+        ledger.RecordSample(key, morale: 0.85f, timeFromStart: 10f);
+        ledger.RecordSample(key, morale: 0.80f, timeFromStart: 20f);
+        AssertTrue(ledger.TryGetLatest(key, out float morale, out float time), "has latest");
+        AssertEqual(0.80f, morale, "latest morale");
+        AssertEqual(20f, time, "latest time");
+    }
+
+    private static void TacticalMoraleSnapshotLedgerRingBufferDropsOldest()
+    {
+        var ledger = new TacticalMoraleSnapshotLedger(capacity: 2);
+        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
+        ledger.RecordSample(key, morale: 0.9f, timeFromStart: 10f);
+        ledger.RecordSample(key, morale: 0.8f, timeFromStart: 20f);
+        ledger.RecordSample(key, morale: 0.7f, timeFromStart: 30f);
+        AssertEqual(2, ledger.SampleCount(key), "buffer capped at 2");
+        AssertTrue(ledger.TryGetOldestRetained(key, out float oldestMorale, out float oldestTime),
+            "has oldest retained");
+        AssertEqual(0.8f, oldestMorale, "10f sample dropped");
+        AssertEqual(20f, oldestTime, "oldest retained time");
+    }
+
+    private static void TacticalMoraleSnapshotLedgerNameFallbackResolvesAcrossInstanceIdRoll()
+    {
+        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
+        var oldKey = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
+        ledger.RecordSample(oldKey, morale: 0.9f, timeFromStart: 10f);
+        var newKey = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 200, unitName: "1stVA");
+        AssertTrue(ledger.TryGetLatest(newKey, out float morale, out _),
+            "name fallback resolves after InstanceID roll");
+        AssertEqual(0.9f, morale, "fallback returns prior sample");
+    }
+
+    private static void TacticalMoraleSnapshotLedgerSkipsWhenLastUpdateUnchanged()
+    {
+        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
+        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
+        bool firstWrote = ledger.RecordSampleIfNew(key, morale: 0.9f, timeFromStart: 10f, vanillaLastMoraleUpdate: 5f);
+        bool secondWrote = ledger.RecordSampleIfNew(key, morale: 0.85f, timeFromStart: 11f, vanillaLastMoraleUpdate: 5f);
+        AssertTrue(firstWrote, "first sample writes");
+        AssertFalse(secondWrote, "skipped when vanilla timestamp unchanged");
+        AssertEqual(1, ledger.SampleCount(key), "single sample");
+    }
+
+    private static void TacticalMoraleSnapshotLedgerPrune()
+    {
+        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
+        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 100, unitName: "1stVA");
+        ledger.RecordSample(key, morale: 0.9f, timeFromStart: 10f);
+        ledger.PruneRouted(key);
+        AssertFalse(ledger.TryGetLatest(key, out _, out _), "prune removes entry");
     }
 }
