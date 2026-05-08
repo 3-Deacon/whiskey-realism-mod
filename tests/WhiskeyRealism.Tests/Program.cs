@@ -416,7 +416,18 @@ static class Program
             ("tactical b6a attack without decisive sector falls back to probe and fix", TacticalB6aAttackNoDecisiveFallsBack),
             ("tactical b6a main effort rejected when subordinate share over half", TacticalB6aMainEffortRejectedOnPlayerOwnership),
             ("tactical b6a hold to last yields high ground defense", TacticalB6aHoldToLastYieldsHighGroundDefense),
-            ("tactical b6a empty sectors yields no-sectors decision", TacticalB6aEmptySectorsYieldsEmpty)
+            ("tactical b6a empty sectors yields no-sectors decision", TacticalB6aEmptySectorsYieldsEmpty),
+            ("tactical b6b probe intent denies charge", TacticalB6bProbeIntentDeniesCharge),
+            ("tactical b6b hold to last blocks fallback pressure", TacticalB6bHoldToLastBlocksFallbackPressure),
+            ("tactical b6b defend with weak exposed target permits limited counterstroke", TacticalB6bDefendWeakExposedTargetPermitsCounterstroke),
+            ("tactical b6b defend against strongpoint denies counterstroke", TacticalB6bDefendStrongpointDeniesCounterstroke),
+            ("tactical b6b attack permits charge against fresh target", TacticalB6bAttackPermitsChargeFreshTarget),
+            ("tactical b6b attack with cooldown active denies charge", TacticalB6bAttackCooldownActiveDeniesCharge),
+            ("tactical b6b attack with strongpoint target denies charge", TacticalB6bAttackStrongpointTargetDeniesCharge),
+            ("tactical b6b stale order downgrades to maintain line", TacticalB6bStaleOrderDowngradesToMaintainLine),
+            ("tactical b6b wl ownership unsafe forces maintain line", TacticalB6bWlOwnershipUnsafeForcesMaintainLine),
+            ("tactical b6b path risk blocks runtime application", TacticalB6bPathRiskBlocksRuntimeApplication),
+            ("tactical b6b battered frontline emits line relief request under hold", TacticalB6bBatteredFrontlineEmitsLineReliefRequest)
         };
 
         foreach (var test in tests)
@@ -1699,6 +1710,157 @@ static class Program
         var d = TacticalPlaybookLedger.Decide(input);
         AssertTrue(d.Reason == "no-sectors", "Expected no-sectors reason, got " + d.Reason);
         AssertTrue(d.Confidence == 0f, "Empty decision must have zero confidence");
+    }
+
+    private static TacticalLocalReactionInput ReactionInput(
+        CommanderIntent intent = CommanderIntent.Defend,
+        TacticalLocalReactionPolicy playbookPolicy = TacticalLocalReactionPolicy.Standard,
+        TacticalSectorMission sectorMission = TacticalSectorMission.Hold,
+        float sectorOdds = 1.0f,
+        float sectorConfidence = 0.7f,
+        bool targetVisible = true,
+        bool targetBroken = false,
+        bool targetStrongPoint = false,
+        float morale01 = 0.7f,
+        float ammoRatio01 = 0.7f,
+        float casualtyRatio01 = 0.1f,
+        bool flankRisk = false,
+        bool wlOwnershipSafe = true,
+        bool chargeCooldownReady = true,
+        bool stalenessActive = false,
+        bool pathRiskActive = false)
+    {
+        return new TacticalLocalReactionInput(
+            intent,
+            playbookPolicy,
+            sectorMission,
+            sectorOdds,
+            sectorConfidence,
+            targetVisible,
+            targetBroken,
+            targetStrongPoint,
+            morale01,
+            ammoRatio01,
+            casualtyRatio01,
+            flankRisk,
+            wlOwnershipSafe,
+            chargeCooldownReady,
+            stalenessActive,
+            pathRiskActive);
+    }
+
+    private static void TacticalB6bProbeIntentDeniesCharge()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.ProbeIntent,
+            sectorConfidence: 0.35f));
+
+        AssertEqual(LocalReaction.ProbeRange, d.Reaction, "reaction");
+        AssertTrue(d.Reaction != LocalReaction.PermitCharge, "probe intent must not permit charge");
+        AssertTrue(d.Reaction != LocalReaction.LimitedCounterstroke, "probe intent must not counterstroke");
+    }
+
+    private static void TacticalB6bHoldToLastBlocksFallbackPressure()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.HoldToLast,
+            casualtyRatio01: 0.65f,
+            morale01: 0.2f,
+            ammoRatio01: 0.05f));
+
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
+        AssertTrue(!d.ReliefRequested, "hold to last must not request relief");
+    }
+
+    private static void TacticalB6bDefendWeakExposedTargetPermitsCounterstroke()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Defend,
+            sectorOdds: 1.25f,
+            sectorConfidence: 0.65f,
+            targetVisible: true,
+            targetStrongPoint: false));
+
+        AssertEqual(LocalReaction.LimitedCounterstroke, d.Reaction, "reaction");
+        AssertTrue(!d.ReliefRequested, "fresh counterstroke should not request relief");
+    }
+
+    private static void TacticalB6bDefendStrongpointDeniesCounterstroke()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Defend,
+            sectorOdds: 1.4f,
+            targetStrongPoint: true));
+
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
+    }
+
+    private static void TacticalB6bAttackPermitsChargeFreshTarget()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            sectorMission: TacticalSectorMission.AttackWeakPoint,
+            sectorConfidence: 0.75f));
+
+        AssertEqual(LocalReaction.PermitCharge, d.Reaction, "reaction");
+    }
+
+    private static void TacticalB6bAttackCooldownActiveDeniesCharge()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            chargeCooldownReady: false));
+
+        AssertEqual(LocalReaction.DenyCharge, d.Reaction, "reaction");
+    }
+
+    private static void TacticalB6bAttackStrongpointTargetDeniesCharge()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.AllOutAttack,
+            targetStrongPoint: true));
+
+        AssertEqual(LocalReaction.DenyCharge, d.Reaction, "reaction");
+    }
+
+    private static void TacticalB6bStaleOrderDowngradesToMaintainLine()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            stalenessActive: true));
+
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
+        AssertEqual("request-new-intent", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bWlOwnershipUnsafeForcesMaintainLine()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            wlOwnershipSafe: false));
+
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
+        AssertEqual("wl-ownership-blocked", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bPathRiskBlocksRuntimeApplication()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            pathRiskActive: true));
+
+        AssertEqual(LocalReaction.DenyCharge, d.Reaction, "reaction");
+        AssertEqual("path-risk", d.Reason, "reason");
+    }
+
+    private static void TacticalB6bBatteredFrontlineEmitsLineReliefRequest()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Hold,
+            casualtyRatio01: 0.42f));
+
+        AssertEqual(LocalReaction.LineReliefRequest, d.Reaction, "reaction");
+        AssertTrue(d.ReliefRequested, "battered hold line should request relief");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
