@@ -407,7 +407,8 @@ static class Program
             ("tactical b6a reinforce and hold maps to hold", TacticalB6aReinforceAndHoldMapsToHold),
             ("tactical b6a recover maps to hold to last", TacticalB6aRecoverMapsToHoldToLast),
             ("tactical b6a no plan falls back to macro", TacticalB6aNoPlanFallsBackToMacro),
-            ("tactical b6a macro retreat falls to hold to last", TacticalB6aMacroRetreatFallsToHoldToLast)
+            ("tactical b6a macro retreat falls to hold to last", TacticalB6aMacroRetreatFallsToHoldToLast),
+            ("tactical b6a probe intent yields probe and fix", TacticalB6aProbeIntentYieldsProbeAndFix)
         };
 
         foreach (var test in tests)
@@ -1561,6 +1562,26 @@ static class Program
             oddsConfidence: 0.0f, weakPointConfirmed: false);
         var d = TacticalCommanderIntentResolver.Resolve(input);
         AssertTrue(d.Intent == CommanderIntent.HoldToLast, "Expected HoldToLast from macro 3, got " + d.Intent);
+    }
+
+    private static void TacticalB6aProbeIntentYieldsProbeAndFix()
+    {
+        var sectorL = new TacticalPlaybookSectorView(0, TacticalSectorMission.Hold, TacticalSectorPosition.Left,  ownStrength: 1000f, enemyStrength: 800f, confidence: 0.4f, strongPoint: false, flankRisk: false, ownerSubordinateShare01: 0f);
+        var sectorC = new TacticalPlaybookSectorView(1, TacticalSectorMission.Hold, TacticalSectorPosition.Center, ownStrength: 1500f, enemyStrength: 1200f, confidence: 0.4f, strongPoint: false, flankRisk: false, ownerSubordinateShare01: 0f);
+        var sectorR = new TacticalPlaybookSectorView(2, TacticalSectorMission.Hold, TacticalSectorPosition.Right, ownStrength: 1000f, enemyStrength: 800f, confidence: 0.4f, strongPoint: false, flankRisk: false, ownerSubordinateShare01: 0f);
+
+        var input = new TacticalPlaybookInput(
+            CommanderIntent.ProbeIntent,
+            decisiveSectorId: -1,
+            sectors: new[] { sectorL, sectorC, sectorR },
+            hasReserveAvailable: true,
+            anchoredFlankLeft: false, anchoredFlankRight: false,
+            stalenessPressure: 0f);
+
+        var decision = TacticalPlaybookLedger.Decide(input);
+
+        AssertTrue(decision.Playbook == TacticalPlaybook.ProbeAndFix, "Expected ProbeAndFix, got " + decision.Playbook);
+        AssertTrue(decision.RefusedFlank == TacticalRefusedFlank.None, "Probe with no flank risk must not refuse");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
