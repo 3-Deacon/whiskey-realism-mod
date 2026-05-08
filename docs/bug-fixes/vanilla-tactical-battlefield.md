@@ -9,11 +9,23 @@ Narrow battlefield-layer bug queue for order delivery, W&L current-order handlin
 | `BUG-TAC-003` | Observed benign battle-call only | W&L current orders | `CheckCurrentOrderUpdate(... calledfromcampaign:true)` bypasses duplicate suppression and replaces `DLC_WL.givenorder`. Focused smoke emitted one `[TacticalCurrentOrder]` line with `calledFromCampaign=False` and `duplicateRisk=False`. | Need campaign-call proof before any duplicate guard. Do not patch the battle-call path that already has vanilla duplicate suppression. |
 | `BUG-TAC-004` | Not observed | Delayed order path drift | `BattleUnits.SetWaypoint(...)` skips `AddToOrderQueue` when order type is active but still writes path intent. Focused smoke emitted no `[TacticalWaypointDrift]` lines. | Widen/prove the caller-specific path mutation before any behavior guard; do not patch generic `SetWaypoint` globally. |
 | `BUG-TAC-005` | Guard implemented; denial smoke pending restart | Objective-chain exposure | `UpdateMovingTargets()` checks only center group `dlcw_isundercommander`, not attached player-subordinate units. Focused smoke emitted repeated `[TacticalObjectiveMove]` lines with `center=1st_Brigade`, `chains=4`, `attachedUnderCommanderCount=1`, and `risk=True`; user observed the attached player flank exposed near the second objective. | #46 `BattleObjectiveChainWlGuardPatch` remains included in the current post-#53 deployed DLL behind `Enable W&L Tactical Charge Guard`. It filters protected objective-chain entries during vanilla `UpdateMovingTargets` and restores them after the call. Restart smoke should show `[TacticalObjectiveGuard] denied objective-chain advance ... reason=player-subordinate-attached`. |
-| `BUG-TAC-006` | Not observed | Reserve support | `CheckUseOfReserves()` uses direct `RegimentSetPath(...)`, bypassing order delay. Focused smoke emitted no `[TacticalReserveMove]` lines, although generic reserve observer coverage fired in earlier B0 smoke. | Widen reserve direct-path telemetry before doctrine/fix planning. Behavior change belongs to later reserve doctrine unless runtime proves pathological instant shifts. |
+| `BUG-TAC-006` | Observed; guard shipped default-off | Reserve support | `AIBattle.CheckUseOfReserves()` selects a reserve then calls `regiment2.RegimentSetPath(...)` directly at decompile line 6170, bypassing `BattleUnits.SetWaypoint(... useorderdelay:true)`. Live log on 2026-05-08 emitted `[TacticalReserveMove] group=2nd_Division ... risk=True reason=reserve-direct-path-bypasses-delay`. | #56 `TacticalReserveOrderDelayGuardPatch` is deployed behind `Enable Tactical Reserve Order Delay Guard`. It snapshots attached units, removes the immediate path created by vanilla, and reissues the same target through delayed `BattleUnits.SetWaypoint`. Enabled runtime proof pending. |
 | `BUG-TAC-007` | Needs repro | W&L incident order delay | Incident 40 branch reads incident 38 timers in `AddOrderCourierline(...)`. | Verify incidents can be independently active before any transpiler request. |
 | `BUG-TAC-008` | Backlog | Reserve candidate bias | `Random.Range(0, list.Count - 1)` likely excludes last reserve candidate. | Observe candidate counts/selected index first; do not mirror full reserve method for this alone. |
 | `BUG-TAC-009` | Backlog | Relief doctrine gap | `CheckReliefOfObjectve(...)` is empty and `CheckReliefOfObjectveDueToLowMorale(...)` discards a boolean. | Later tactical doctrine; not a hotfix. |
 | `BUG-TAC-010` | Implemented; enabled smoke pending | Pathfinder backtrack / excessive route shape | RMB field click reaches `BattleUI.CheckPathSetting()` -> `BattleUnits.SetWaypoint(...)` -> `Regiment.RegimentSetPath(...)`. Vanilla `AddPath(...)` retains non-empty non-target paths, rejects partial/invalid `NavMeshPath.status` only for iterations `<15`, then `RegimentSetPath` can retry from `Vector3.MoveTowards(lastCorner, target, -0.5f)`, i.e. away from the clicked target. Anchors: `AddPath` 130259, `NavMesh.CalculatePath` 130473, partial/invalid handling 130511-130519, retry loop 131167-131188. Live log includes `[TacticalPathShape] ... reason=backward-first-segment` for `7th_South_Carolina_Infantry`. | #53 `TacticalPathfinderDisciplinePatch` is included in deployed DLL `8462b4b99bdbcfc93bfde407efea06130afa1786def330ba9e74678799d48317` behind `Enable Tactical Pathfinder Discipline`. It accepts complete endpoints within 5m, removes failed non-target fragments before the retry loop can reuse them, and rejects non-complete NavMesh paths accepted after retry exhaustion. Runtime enabled smoke should show bounded `[TacticalPathfinderDiscipline]` markers and fewer/no risky `[TacticalPathShape]` rows. |
+| `BUG-TAC-011` | Guard shipped default-on | W&L operation cleanup | `DLC_WL.CommanderRelations.Operation.UpdateOperation()` reads `usedtopgroup.transform.position` before its null cleanup branch. Anchor: decompile lines 41142-41149. A missing operation unit can throw before `FinishOperation()` runs. | #54 `WlOperationNullGuardPatch` finalizes only that null-before-transform fault, invokes vanilla private `FinishOperation()`, sets the method result to complete, and suppresses the exception. Config `Enable Operation Null Guard` defaults true. |
+| `BUG-TAC-012` | Guard shipped default-off | HQ/group follow links | `Regiment.MoveNonAIUnits()` auto-links idle group units (`unittyp > 13`) to `unitrange.closestownunit[0]` without checking command hierarchy. Anchor: decompile lines 129026-129049. Direct `UpdateUnitLink()` then moves the linked group toward that unit. | #55 `TacticalHqAutoLinkGuardPatch` snapshots newly-created auto links and clears cross-command group/HQ links while preserving same-hierarchy, same non-root parent, and same AI-group links. Config `Enable Tactical HQ Link Guard` defaults false until focused smoke proves no unintended command-link loss. |
+
+## Runtime Evidence - 2026-05-08 HQ/Reserve Follow Investigation
+
+Live `LogOutput.log` mtime `2026-05-08 15:31:59 -0500`, size `37,858,853` bytes, proved the current tactical build was active and captured a reserve delay bypass after the prior smoke had missed it:
+
+- `[TacticalReserveMove] group=2nd_Division#-26790 pathBefore=1 pathAfter=2 queueBefore=3 queueAfter=3 risk=True reason=reserve-direct-path-bypasses-delay`
+- `[TacticalPathfinderDiscipline] reason=navmesh-noncomplete ... navStatus=PathPartial`
+- `[TacticalPathfinderDiscipline] reason=endpoint-within-tolerance ... navStatus=PathComplete`
+
+No operation-null exception was present in the searched log window; `BUG-TAC-011` is fixed from decompile proof because the null branch is unreachable after the transform read.
 
 ## Runtime Evidence - 2026-05-07 Focused Battle Smoke
 
@@ -28,7 +40,7 @@ Observed marker counts:
 - `[TacticalCourierQueue]`: 5
 - `[TacticalObjectiveMove]`: 11
 - `[TacticalWaypointDrift]`: 0
-- `[TacticalReserveMove]`: 0
+- `[TacticalReserveMove]`: 0 during this smoke; later 2026-05-08 log produced a `risk=True` reserve-delay bypass marker.
 - `[Patch:TacticalFallbackRetreatNullGuard]`: 0
 - `[TacticalChargeGuard]`: 0
 - `[TacticalFeudGuard]`: 0
@@ -52,6 +64,9 @@ Classification:
 - `[TacticalObjectiveGuard]`
 - `[TacticalDecisionMatrix]`
 - `[TacticalReserveMove]`
+- `[TacticalReserveOrderDelayGuard]`
+- `[TacticalHqLinkGuard]`
+- `[Patch:WLOperationNullGuard]`
 - `[Patch:TacticalFallbackRetreatNullGuard]`
 - `[once:b7-check-ai-bombardment]`
 - `[once:b7-cancel-bombard]`

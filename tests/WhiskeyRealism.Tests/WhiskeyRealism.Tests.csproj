@@ -98,6 +98,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FiscalConstructionScorer.cs" Link="FiscalConstructionScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\EconomyAllianceDataGuard.cs" Link="EconomyAllianceDataGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CommanderAssignmentGuard.cs" Link="CommanderAssignmentGuard.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlOperationNullGuard.cs" Link="WlOperationNullGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignFilterMapInitializationGuard.cs" Link="CampaignFilterMapInitializationGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StateHandoverGuard.cs" Link="StateHandoverGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FleetPatrolResetGuard.cs" Link="FleetPatrolResetGuard.cs" />
@@ -135,6 +136,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommanderProfile.cs" Link="TacticalCommanderProfile.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommandLedger.cs" Link="TacticalCommandLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalBattlefieldBugDiagnostics.cs" Link="TacticalBattlefieldBugDiagnostics.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalHqLinkGuard.cs" Link="TacticalHqLinkGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalContactLedger.cs" Link="TacticalContactLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalSectorLedger.cs" Link="TacticalSectorLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalOddsDoctrine.cs" Link="TacticalOddsDoctrine.cs" />
