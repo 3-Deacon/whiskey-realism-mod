@@ -427,7 +427,11 @@ static class Program
             ("tactical b6b stale order downgrades to maintain line", TacticalB6bStaleOrderDowngradesToMaintainLine),
             ("tactical b6b wl ownership unsafe forces maintain line", TacticalB6bWlOwnershipUnsafeForcesMaintainLine),
             ("tactical b6b path risk blocks runtime application", TacticalB6bPathRiskBlocksRuntimeApplication),
-            ("tactical b6b battered frontline emits line relief request under hold", TacticalB6bBatteredFrontlineEmitsLineReliefRequest)
+            ("tactical b6b battered frontline emits line relief request under hold", TacticalB6bBatteredFrontlineEmitsLineReliefRequest),
+            ("tactical b6b hold with flank morale risk requests relief", TacticalB6bHoldWithFlankMoraleRiskRequestsRelief),
+            ("tactical b6b path risk fix mission maintains line", TacticalB6bPathRiskFixMissionMaintainsLine),
+            ("tactical b6b denied attack maintains line", TacticalB6bDeniedAttackMaintainsLine),
+            ("tactical b6b denied fix mission screens without path risk", TacticalB6bDeniedFixMissionScreensWithoutPathRisk)
         };
 
         foreach (var test in tests)
@@ -1811,7 +1815,7 @@ static class Program
             intent: CommanderIntent.Attack,
             chargeCooldownReady: false));
 
-        AssertEqual(LocalReaction.DenyCharge, d.Reaction, "reaction");
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
     }
 
     private static void TacticalB6bAttackStrongpointTargetDeniesCharge()
@@ -1820,7 +1824,7 @@ static class Program
             intent: CommanderIntent.AllOutAttack,
             targetStrongPoint: true));
 
-        AssertEqual(LocalReaction.DenyCharge, d.Reaction, "reaction");
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
     }
 
     private static void TacticalB6bStaleOrderDowngradesToMaintainLine()
@@ -1849,7 +1853,7 @@ static class Program
             intent: CommanderIntent.Attack,
             pathRiskActive: true));
 
-        AssertEqual(LocalReaction.DenyCharge, d.Reaction, "reaction");
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
         AssertEqual("path-risk", d.Reason, "reason");
     }
 
@@ -1861,6 +1865,57 @@ static class Program
 
         AssertEqual(LocalReaction.LineReliefRequest, d.Reaction, "reaction");
         AssertTrue(d.ReliefRequested, "battered hold line should request relief");
+    }
+
+    private static void TacticalB6bHoldWithFlankMoraleRiskRequestsRelief()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Hold,
+            flankRisk: true,
+            morale01: 0.55f,
+            casualtyRatio01: 0.1f,
+            ammoRatio01: 0.7f));
+
+        AssertEqual(LocalReaction.LineReliefRequest, d.Reaction, "reaction");
+        AssertTrue(d.ReliefRequested, "flank risk with low morale should request relief under hold");
+    }
+
+    private static void TacticalB6bPathRiskFixMissionMaintainsLine()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            sectorMission: TacticalSectorMission.Fix,
+            pathRiskActive: true));
+
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
+        AssertTrue(d.Reaction != LocalReaction.Screen, "path risk must not screen");
+        AssertTrue(d.Reaction != LocalReaction.PermitCharge, "path risk must not permit charge");
+    }
+
+    private static void TacticalB6bDeniedAttackMaintainsLine()
+    {
+        var cooldown = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            chargeCooldownReady: false));
+        var strongpoint = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            targetStrongPoint: true));
+
+        AssertEqual(LocalReaction.MaintainLine, cooldown.Reaction, "cooldown reaction");
+        AssertEqual(LocalReaction.MaintainLine, strongpoint.Reaction, "strongpoint reaction");
+        AssertTrue(cooldown.Reaction != LocalReaction.DenyCharge, "cooldown should not emit terminal deny");
+        AssertTrue(strongpoint.Reaction != LocalReaction.DenyCharge, "strongpoint should not emit terminal deny");
+    }
+
+    private static void TacticalB6bDeniedFixMissionScreensWithoutPathRisk()
+    {
+        var d = TacticalLocalReactionScorer.Score(ReactionInput(
+            intent: CommanderIntent.Attack,
+            sectorMission: TacticalSectorMission.Fix,
+            chargeCooldownReady: false,
+            pathRiskActive: false));
+
+        AssertEqual(LocalReaction.Screen, d.Reaction, "reaction");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()

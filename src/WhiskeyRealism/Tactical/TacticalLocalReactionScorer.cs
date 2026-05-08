@@ -121,8 +121,6 @@ namespace WhiskeyRealism.Tactical
                 return Decision(LocalReaction.MaintainLine, false, input, "wl-ownership-blocked");
             if (input.StalenessActive)
                 return Decision(LocalReaction.MaintainLine, false, input, "request-new-intent");
-            if (input.FlankRisk)
-                return Decision(LocalReaction.RefuseFlank, false, input, "flank-risk");
 
             switch (input.Intent)
             {
@@ -131,13 +129,21 @@ namespace WhiskeyRealism.Tactical
                 case CommanderIntent.Hold:
                     return ReliefOrMaintain(input, "hold");
                 case CommanderIntent.Defend:
+                    if (input.FlankRisk)
+                        return ReliefTriggered(input)
+                            ? Decision(LocalReaction.LineReliefRequest, true, input, "line-relief")
+                            : Decision(LocalReaction.RefuseFlank, false, input, "flank-risk");
                     return Defend(input);
                 case CommanderIntent.ProbeIntent:
+                    if (input.FlankRisk)
+                        return Decision(LocalReaction.RefuseFlank, false, input, "flank-risk");
                     return input.SectorConfidence < 0.55f
                         ? Decision(LocalReaction.ProbeRange, false, input, "probe-low-confidence")
                         : Decision(LocalReaction.Screen, false, input, "probe-screen");
                 case CommanderIntent.Attack:
                 case CommanderIntent.AllOutAttack:
+                    if (input.FlankRisk)
+                        return Decision(LocalReaction.RefuseFlank, false, input, "flank-risk");
                     return Attack(input);
                 default:
                     return Decision(LocalReaction.MaintainLine, false, input, "default-maintain");
@@ -160,12 +166,14 @@ namespace WhiskeyRealism.Tactical
 
         private static TacticalLocalReactionDecision Attack(TacticalLocalReactionInput input)
         {
+            if (input.PathRiskActive)
+                return Decision(LocalReaction.MaintainLine, false, input, "path-risk");
+
             if (input.TargetVisible &&
                 !input.TargetStrongPoint &&
                 input.ChargeCooldownReady &&
                 input.WlOwnershipSafe &&
-                input.SectorConfidence >= 0.55f &&
-                !input.PathRiskActive)
+                input.SectorConfidence >= 0.55f)
             {
                 return Decision(LocalReaction.PermitCharge, false, input, "charge-permitted");
             }
@@ -174,14 +182,12 @@ namespace WhiskeyRealism.Tactical
                 input.SectorMission == TacticalSectorMission.EconomyOfForce)
                 return Decision(LocalReaction.Screen, false, input, "screen-after-denied-charge");
 
-            if (input.PathRiskActive)
-                return Decision(LocalReaction.DenyCharge, false, input, "path-risk");
             if (input.TargetStrongPoint)
-                return Decision(LocalReaction.DenyCharge, false, input, "strongpoint");
+                return Decision(LocalReaction.MaintainLine, false, input, "strongpoint");
             if (!input.ChargeCooldownReady)
-                return Decision(LocalReaction.DenyCharge, false, input, "cooldown-active");
+                return Decision(LocalReaction.MaintainLine, false, input, "cooldown-active");
 
-            return Decision(LocalReaction.DenyCharge, false, input, "charge-denied");
+            return Decision(LocalReaction.MaintainLine, false, input, "charge-denied");
         }
 
         private static TacticalLocalReactionDecision ReliefOrMaintain(TacticalLocalReactionInput input, string maintainReason)
