@@ -1,6 +1,6 @@
 # Tactical Brain Master Sequencing Implementation Plan
 
-Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard, B2 command/order-friction telemetry, B3 odds telemetry, B4/B5 default-off stance behavior, #43 fallback/retreat NRE containment, #35 `[TacticalDecisionMatrix]` logging, and #46 objective-chain W&L guard are implemented and hash-deployed. Restart smoke is pending for `[TacticalDecisionMatrix]` and `[TacticalObjectiveGuard]`. B4/B5 remain default-off because they write vanilla `macroai` / `ai_stance` and need focused runtime smoke before any default-on change. B6 is now scoped by `docs/superpowers/specs/2026-05-07-tactical-b6-commander-intent-local-reaction-design.md` as commander intent, playbooks, command-friction constraints, local subordinate reaction doctrine, and reserve/line-relief intent; it must be split into B6a/B6b/B6c plans.
+Status: active execution. User explicitly reopened Slice B on 2026-05-06. B0 tactical observer runtime smoke closed on 2026-05-07; B1 charge/feud guard, B2 command/order-friction telemetry, B3 odds telemetry, B4/B5 default-off stance behavior, #43 fallback/retreat NRE containment, #35 `[TacticalDecisionMatrix]` logging, and #46 objective-chain W&L guard are implemented and hash-deployed. Restart smoke is pending for `[TacticalDecisionMatrix]` and `[TacticalObjectiveGuard]`. B4/B5 remain default-off because they write vanilla `macroai` / `ai_stance` and need focused runtime smoke before any default-on change. B6 is now scoped by `docs/superpowers/specs/2026-05-07-tactical-b6-commander-intent-local-reaction-design.md` as commander intent, playbooks, command-friction constraints, local subordinate reaction doctrine, and reserve/line-relief intent; B6a/B6b/B6c plans now exist as bounded execution tracks.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -30,7 +30,7 @@ Read these before creating any B-slice plan:
 Implementation boundary:
 
 - Do not implement the whole tactical brain from this master plan.
-- Do not start B2 or later behavior patches until B1 runtime smoke is classified or explicitly deferred by the user. B0 is closed; B1 is built/deployed; B1 smoke was user-deferred on 2026-05-07, so B2 planning may proceed. Keep B1 smoke as a deferred default-on gate.
+- Do not start B2 or later behavior patches until B1 runtime smoke is classified or explicitly held by the user. B0 is closed; B1 is built/deployed; B1 smoke was user-held on 2026-05-07, so B2 planning may proceed. Keep B1 smoke as a required default-on gate.
 - Do not merge the weapons/ammunition adjunct into this master tactical-brain track. The adjunct needs its own observer-first plan after core B0 proves battle telemetry shape.
 - Keep tactical state runtime-only unless a later battle-resume spec is written. Do not write tactical state to `whiskeyrealism.json`.
 - Existing dirty work in unrelated campaign systems must not be reverted while executing any B-slice.
@@ -373,7 +373,7 @@ No repeated warnings/errors.
 
 - [x] **Step 1: Require B0/B1 evidence**
 
-B2 starts only after B0 shipped and B1 either shipped or was explicitly deferred by the user. The plan must cite B0 `[TacticalOrder]` output showing transmitted-path and order-delay fields are readable in runtime.
+B2 starts only after B0 shipped and B1 either shipped or was explicitly held by the user. The plan must cite B0 `[TacticalOrder]` output showing transmitted-path and order-delay fields are readable in runtime.
 
 - [x] **Step 2: Re-read order-delay anchors**
 
@@ -572,7 +572,7 @@ Smoke meeting engagement and outnumbered defensive battle. Pass requires no inst
 
 - [ ] **Step 1: Require B2/B3/B4 evidence**
 
-B5 starts only after B2 order state and B3 sector/odds telemetry are stable, and B4 macro scorer is either shipped or explicitly deferred.
+B5 starts only after B2 order state and B3 sector/odds telemetry are stable, and B4 macro scorer is either shipped or explicitly held.
 
 - [ ] **Step 2: Re-read group stance method**
 
@@ -625,9 +625,9 @@ Patch `AdjustGroupAIStance()` with a Postfix that only changes stance when:
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-05-07-tactical-b6a-commander-intent-playbook.md`
-- Create: `docs/superpowers/plans/2026-05-07-tactical-b6b-local-reaction-scorer.md`
-- Create: `docs/superpowers/plans/2026-05-07-tactical-b6c-runtime-application.md`
+- Created: `docs/superpowers/plans/2026-05-07-tactical-b6a-commander-intent-playbook.md`
+- Created: `docs/superpowers/plans/2026-05-07-tactical-b6b-local-reaction-scorer.md`
+- Created: `docs/superpowers/plans/2026-05-07-tactical-b6c-runtime-application.md`
 - Create: B6 pure tactical files listed in the file ownership map.
 - Create only if B6c owns reserve mutation: `src/WhiskeyRealism/Patches/BattleReserveDoctrinePatch.cs`
 
@@ -700,7 +700,7 @@ Start with pure commander-intent, playbook, local-reaction, and reserve-intent s
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-05-05-tactical-b7-artillery-strongpoint.md`
+- Created: `docs/superpowers/plans/2026-05-07-tactical-b7-artillery-strongpoint-runtime.md`
 - Create: `src/WhiskeyRealism/Patches/BattleBombardmentPatch.cs`
 
 - [ ] **Step 1: Require B3/B5 evidence**
@@ -751,7 +751,7 @@ Patch `CheckAIBombardment(...)` only. Preserve vanilla counterbattery and fallba
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-05-05-tactical-b8-withdrawal-doctrine.md`
+- Created: `docs/superpowers/plans/2026-05-07-tactical-b8-staged-withdrawal-runtime.md`
 - Create: `src/WhiskeyRealism/Tactical/TacticalRetreatDoctrine.cs`
 - Create: `src/WhiskeyRealism/Patches/BattleFallbackDoctrinePatch.cs`
 
