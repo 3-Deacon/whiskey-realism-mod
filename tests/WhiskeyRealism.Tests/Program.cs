@@ -73,6 +73,9 @@ static class Program
             ("tactical b6b reserve exploit weak point picks exploit", TacticalB6bReserveExploitWeakPointPicksExploit),
             ("tactical b6b reserve wl ownership unsafe holds reserve", TacticalB6bReserveWlOwnershipUnsafeHoldsReserve),
             ("tactical b6b reserve stale order prepares without mutation", TacticalB6bReserveStaleOrderPreparesWithoutMutation),
+            ("tactical gate helpers W&L ownership", TacticalGateHelpersWlOwnership),
+            ("tactical gate helpers alliance bounds", TacticalGateHelpersAllianceBounds),
+            ("tactical score cache roundtrip", TacticalScoreCacheRoundtrip),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
             ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
             ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
@@ -2164,6 +2167,33 @@ static class Program
         AssertEqual(TacticalReserveIntent.PrepareRelief, d.Intent, "intent");
         AssertTrue(!d.AllowsRuntimeMutation, "stale order should prepare without mutation");
         AssertEqual("stale-order", d.Reason, "reason");
+    }
+
+    private static void TacticalGateHelpersWlOwnership()
+    {
+        AssertTrue(TacticalGateHelpers.PassesWlOwnership(aiFeudStance: -1, isPlayerAiOrFeud: 0), "feud=-1 passes");
+        AssertTrue(TacticalGateHelpers.PassesWlOwnership(aiFeudStance: 5, isPlayerAiOrFeud: 2), "playerai=2 passes");
+        AssertTrue(!TacticalGateHelpers.PassesWlOwnership(aiFeudStance: 5, isPlayerAiOrFeud: 0), "neither passes");
+    }
+
+    private static void TacticalGateHelpersAllianceBounds()
+    {
+        AssertTrue(TacticalGateHelpers.IsValidAllianceIndex(0, factionLength: 2), "0 in range");
+        AssertTrue(TacticalGateHelpers.IsValidAllianceIndex(1, factionLength: 2), "1 in range");
+        AssertTrue(!TacticalGateHelpers.IsValidAllianceIndex(2, factionLength: 2), "2 (Europe) out of bounds");
+        AssertTrue(!TacticalGateHelpers.IsValidAllianceIndex(-1, factionLength: 2), "negative out of bounds");
+    }
+
+    private static void TacticalScoreCacheRoundtrip()
+    {
+        var cache = new TacticalScoreCache<int>();
+        var key = new TacticalScoreCache<int>.Key(unitId: 42, signature: "sig-A");
+        AssertTrue(!cache.TryGet(key, out _), "miss before write");
+        cache.Set(key, 7);
+        AssertTrue(cache.TryGet(key, out int value), "hit after write");
+        AssertEqual(7, value, "round-tripped value");
+        var staleKey = new TacticalScoreCache<int>.Key(unitId: 42, signature: "sig-B");
+        AssertTrue(!cache.TryGet(staleKey, out _), "different signature misses");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
