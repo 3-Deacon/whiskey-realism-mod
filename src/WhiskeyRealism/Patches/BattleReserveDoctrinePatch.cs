@@ -29,6 +29,9 @@ namespace WhiskeyRealism.Patches
             int side = SafeIntField(__instance, ref _sideOfAiField, "sideofai", -1);
             if (side < 0) return;
 
+            if (!BattleCommanderIntentObserverPatch.RefreshRuntimeState(__instance, emitTelemetry: false))
+                return;
+
             TacticalReserveIntentDecision intent = TacticalReactionContext.Shared.GetReserveIntent(side);
             if (!intent.AllowsRuntimeMutation || intent.Intent == TacticalReserveIntent.None) return;
 

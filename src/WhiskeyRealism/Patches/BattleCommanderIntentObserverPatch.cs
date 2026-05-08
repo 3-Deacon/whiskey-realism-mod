@@ -31,23 +31,28 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.LowerThanNormal)]
         internal static void Postfix(AIBattle __instance)
         {
-            if (!Enabled() || __instance == null) return;
+            RefreshRuntimeState(__instance, emitTelemetry: true);
+        }
 
+        internal static bool RefreshRuntimeState(AIBattle battle, bool emitTelemetry)
+        {
+            if (!Enabled() || battle == null) return false;
             try
             {
-                Apply(__instance);
+                return Apply(battle, emitTelemetry);
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("tactical-b6a-observer:failed", "BattleCommanderIntentObserverPatch failed: " + ex.Message);
+                return false;
             }
         }
 
-        private static void Apply(AIBattle battle)
+        private static bool Apply(AIBattle battle, bool emitTelemetry)
         {
             int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
-            if (side < 0) return;
+            if (side < 0) return false;
 
             var intentInput = BuildIntentInput(macro);
             var intent = TacticalCommanderIntentResolver.Resolve(intentInput);
@@ -63,13 +68,16 @@ namespace WhiskeyRealism.Patches
                 stalenessPressure: 0f);
             var playbook = TacticalPlaybookLedger.Decide(playbookInput);
 
-            EmitIntent(side, macro, intentInput, intent);
-            EmitPlaybook(side, playbook);
-
-            if (!Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value)
-                return;
+            if (emitTelemetry)
+            {
+                EmitIntent(side, macro, intentInput, intent);
+                EmitPlaybook(side, playbook);
+            }
 
             TacticalReactionContext.Shared.Clear();
+
+            if (!Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value)
+                return true;
 
             IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
             var reactions = new List<TacticalLocalReactionDecision>();
@@ -84,11 +92,13 @@ namespace WhiskeyRealism.Patches
                     TacticalLocalReactionDecision reaction = TacticalLocalReactionScorer.Score(reactionInput);
                     TacticalReactionContext.Shared.SetReaction(SafeInstanceId(group), reaction);
                     reactions.Add(reaction);
-                    EmitReaction(side, group, reaction);
+                    if (emitTelemetry)
+                        EmitReaction(side, group, reaction);
                 }
             }
 
-            if (Plugin.Instance.EnableTacticalReserveIntentTelemetry.Value)
+            bool reserveTelemetryEnabled = Plugin.Instance.EnableTacticalReserveIntentTelemetry.Value;
+            if (reserveTelemetryEnabled || Plugin.Instance.EnableTacticalReserveListMutation.Value)
             {
                 var availability = BuildReserveAvailability(battle);
                 var reserveInput = new TacticalReserveIntentInput(
@@ -97,8 +107,11 @@ namespace WhiskeyRealism.Patches
                     availability);
                 TacticalReserveIntentDecision reserveIntent = TacticalReservePolicyLedger.Decide(reserveInput);
                 TacticalReactionContext.Shared.SetReserveIntent(side, reserveIntent);
-                EmitReserveIntent(side, reserveIntent);
+                if (emitTelemetry && reserveTelemetryEnabled)
+                    EmitReserveIntent(side, reserveIntent);
             }
+
+            return true;
         }
 
         private static TacticalIntentInput BuildIntentInput(int macro)
