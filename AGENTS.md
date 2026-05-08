@@ -20,13 +20,13 @@
 > - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
 > - **Parallel sessions are normal.** Another agent may be working concurrently — run `git log --oneline -10` and `git status` before committing to detect parallel work.
 
-> **Current state:** see `docs/handoff.md` for the deployed DLL hash, post-release deltas, and active workstream. AGENTS.md intentionally does not duplicate that volatile state — it churns every commit and went stale repeatedly when carried inline here.
+> **Current state:** see `docs/handoff.md` for the deployed DLL hash, post-release deltas, and active workstream. AGENTS.md intentionally does not duplicate volatile state — it churns every commit and went stale repeatedly when carried inline here.
 
 ---
 
 ## What this project is
 
-A BepInEx plugin for Grand Tactician: The Civil War (1861-1865) that layers surgical Harmony patches on top of vanilla. **Slice A** (strategic-brain overhaul: era × faction × officer-personality scoring replacing the vanilla random-objective picker) shipped at v0.2.2. **Slice B** (tactical brain: contact/sector/odds doctrine, macro/group stance scorers, charge/feud guards, commander intent + playbook) is the active workstream — see `docs/handoff.md` for the current shipped state and DLL hash.
+A BepInEx plugin for Grand Tactician: The Civil War (1861-1865) that layers surgical Harmony patches on top of vanilla. **Slice A** (strategic-brain overhaul: era × faction × officer-personality scoring replacing the vanilla random-objective picker) shipped at v0.2.2. Tactical AI work follows the same shipped-code/decompile-first rule; see `docs/handoff.md` for the current shipped state, deployed DLL hash, and active workstream.
 
 Six locked design choices (Slice A umbrella spec, archived after ship: [`docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md`](docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md)):
 1. Slice A — strategic brain (campaign layer first; tactical layer is a later slice)
@@ -147,7 +147,7 @@ Use the relevant Superpowers or repo skill before acting when the task matches i
 2. New feature or behavior design: use `brainstorming` before implementation; commit durable slice specs under `docs/superpowers/specs/`.
 3. After design/spec approval and before writing or executing an implementation plan: use `using-git-worktrees`. Detect whether the session is already in an isolated worktree, prefer any native worktree mechanism if available, otherwise use the git worktree fallback; if sandboxing blocks worktree creation, state that and continue only with the user's current-workspace preference.
 4. Approved multi-step work: use `writing-plans`; save plans under `docs/superpowers/plans/` with exact file paths, patch surfaces, verification commands, smoke expectations, and rollback/defer boundaries.
-5. Before implementation code: use `test-driven-development` for testable strategic/tactical logic. For Harmony/runtime-only changes, add the smallest meaningful harness coverage when feasible and always follow the DLL build/deploy/hash verification gates above.
+5. Before implementation code: use `test-driven-development` for testable strategic/tactical logic. For Harmony/runtime-only changes, add harness coverage appropriate to the risk and changed behavior when feasible and always follow the DLL build/deploy/hash verification gates above.
 6. Plan execution: only after the `using-git-worktrees` gate, use `subagent-driven-development` when the active Codex session exposes multi-agent support and the user has requested or permitted subagents. Use `executing-plans` when subagents are unavailable or the user wants inline execution.
 7. Independent investigations: use `dispatching-parallel-agents` only for 2+ genuinely independent domains; keep write scopes disjoint and do not bypass the worktree gate for implementation work.
 8. Bugs or unexpected behavior at any point: use `systematic-debugging` before proposing fixes, then return to the appropriate ordered step above.
@@ -213,7 +213,7 @@ When GTCW patches: re-decompile `Assembly-CSharp.dll`, diff our patch sites, reb
 - Don't add Prefix-blocking or Transpiler patches without consulting the user — they're brittle to game updates and easy to get wrong.
 - Don't write Harmony patches that mutate strategic mod state. State writes happen ONLY on daily strategic review and event-trigger handlers. Patches READ; they don't WRITE. (Targeted candidate-list filtering via Prefix-snapshot/Postfix-restore is permitted as the spec'd Slice 2 enforcement surface — see #25 — but the snapshot/restore must be try/finally-safe.)
 - Don't size per-alliance state arrays to 2 without bound-checking. `AICampaign.aifaction` includes alliance 2 (Europe) — `AICampaignReflect.GetAllianceId(_aifaction)` can return 2, so any `someArray[allianceId]` access where `someArray.Length == 2` must guard with `if (allianceId < 0 || allianceId >= someArray.Length) return;` (or short-circuit alliance > 1 entirely if Europe shouldn't get the treatment).
-- Don't expand workstream scope without an aligned spec/plan. Use `docs/handoff.md` for the current active workstream; AGENTS.md must not duplicate volatile slice status. Narrow confirmed vanilla bug fixes may be tracked under `docs/bug-fixes/`, but do not treat broad doctrine or feature work as a bug fix.
+- Don't expand workstream scope without an aligned spec/plan. Use `docs/handoff.md` for the current active workstream; AGENTS.md must not duplicate volatile slice status. Confirmed vanilla bug fixes may be tracked under `docs/bug-fixes/`, but do not treat broad doctrine or feature work as a bug fix.
 
 ---
 

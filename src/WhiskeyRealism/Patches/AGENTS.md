@@ -7,7 +7,7 @@ These rules apply to Harmony patches under `src/WhiskeyRealism/Patches/`.
 - Re-read the current vanilla method body in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 - Confirm the exact owner type, method name, overload shape, and side effects.
 - Check `docs/patch-catalog.md` for existing patch ownership before adding another patch on the same surface.
-- Prefer Postfix. Use Prefix only for narrow gates, snapshot/filter/restore, or cases where vanilla exposes no safe Postfix surface.
+- Prefer Postfix. Use Prefix only for explicit gates, snapshot/filter/restore, or cases where vanilla exposes no safe Postfix surface.
 - Do not use Transpilers without explicit user approval.
 
 ## Patch Rules

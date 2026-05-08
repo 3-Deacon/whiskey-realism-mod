@@ -9,7 +9,7 @@ These rules apply to non-patch logic under `src/WhiskeyRealism/Strategic/` and f
 - Put reflection-heavy extraction in runtime adapter classes, not pure logic.
 - State writes belong in coordinator cadence/event handlers, not Harmony patches.
 - Prefer deterministic inputs/outputs that can be covered by the console test harness.
-- Use small DTOs for telemetry signatures so logs can be bounded and compared.
+- Use focused DTOs for telemetry signatures so logs can be bounded and compared.
 
 ## Cadence Rules
 
