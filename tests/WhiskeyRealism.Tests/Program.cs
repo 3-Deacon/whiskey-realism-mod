@@ -73,6 +73,9 @@ static class Program
             ("tactical b6b reserve exploit weak point picks exploit", TacticalB6bReserveExploitWeakPointPicksExploit),
             ("tactical b6b reserve wl ownership unsafe holds reserve", TacticalB6bReserveWlOwnershipUnsafeHoldsReserve),
             ("tactical b6b reserve stale order prepares without mutation", TacticalB6bReserveStaleOrderPreparesWithoutMutation),
+            ("tactical b6c reaction context returns last decision per group", TacticalB6cReactionContextReturnsLastDecisionPerGroup),
+            ("tactical b6c reaction context clear discards all entries", TacticalB6cReactionContextClearDiscardsAllEntries),
+            ("tactical b6c reaction context missing key returns default maintain", TacticalB6cReactionContextMissingKeyReturnsDefaultMaintain),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
             ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
             ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
@@ -2164,6 +2167,51 @@ static class Program
         AssertEqual(TacticalReserveIntent.PrepareRelief, d.Intent, "intent");
         AssertTrue(!d.AllowsRuntimeMutation, "stale order should prepare without mutation");
         AssertEqual("stale-order", d.Reason, "reason");
+    }
+
+    private static void TacticalB6cReactionContextReturnsLastDecisionPerGroup()
+    {
+        var context = new TacticalReactionContext();
+        var first = new TacticalLocalReactionDecision(LocalReaction.Screen, false, 0.5f, "first");
+        var latest = new TacticalLocalReactionDecision(LocalReaction.PermitCharge, false, 0.8f, "latest");
+        var other = new TacticalLocalReactionDecision(LocalReaction.LineReliefRequest, true, 0.7f, "other");
+
+        context.SetReaction(12, first);
+        context.SetReaction(99, other);
+        context.SetReaction(12, latest);
+
+        var d = context.GetReaction(12);
+        var otherD = context.GetReaction(99);
+        AssertEqual(LocalReaction.PermitCharge, d.Reaction, "latest reaction");
+        AssertEqual("latest", d.Reason, "latest reason");
+        AssertEqual(LocalReaction.LineReliefRequest, otherD.Reaction, "other reaction");
+        AssertTrue(otherD.ReliefRequested, "other group should persist");
+    }
+
+    private static void TacticalB6cReactionContextClearDiscardsAllEntries()
+    {
+        var context = new TacticalReactionContext();
+        context.SetReaction(12, new TacticalLocalReactionDecision(LocalReaction.Screen, false, 0.5f, "stored"));
+        context.SetReserveIntent(1, new TacticalReserveIntentDecision(TacticalReserveIntent.ExploitWeakPoint, true, 0.7f, "stored"));
+
+        context.Clear();
+
+        var reaction = context.GetReaction(12);
+        var reserveIntent = context.GetReserveIntent(1);
+        AssertEqual(LocalReaction.MaintainLine, reaction.Reaction, "reaction");
+        AssertEqual("no-decision", reaction.Reason, "reaction reason");
+        AssertEqual(TacticalReserveIntent.None, reserveIntent.Intent, "reserve intent");
+        AssertEqual("no-decision", reserveIntent.Reason, "reserve reason");
+    }
+
+    private static void TacticalB6cReactionContextMissingKeyReturnsDefaultMaintain()
+    {
+        var context = new TacticalReactionContext();
+
+        var d = context.GetReaction(44);
+
+        AssertEqual(LocalReaction.MaintainLine, d.Reaction, "reaction");
+        AssertEqual("no-decision", d.Reason, "reason");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
