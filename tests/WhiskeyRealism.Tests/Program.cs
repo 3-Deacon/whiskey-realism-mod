@@ -81,6 +81,12 @@ static class Program
             ("tactical support screen unsupported no screen", TacticalSupportScreenUnsupportedNoScreen),
             ("tactical support screen unknown on uninitialized", TacticalSupportScreenUnknownOnUninitialized),
             ("tactical support screen W&L gate blocks", TacticalSupportScreenWlGateBlocks),
+            ("tactical artillery doctrine preserves fire when screened and ammo ok", TacticalArtilleryDoctrinePreservesFireWhenScreenedAndAmmoOk),
+            ("tactical artillery doctrine counterbattery when enemy art visible", TacticalArtilleryDoctrineCounterBatteryWhenEnemyArtVisible),
+            ("tactical artillery doctrine cancel bombard when unsupported", TacticalArtilleryDoctrineCancelBombardWhenUnsupported),
+            ("tactical artillery doctrine defensive fallback when shaken and unsupported", TacticalArtilleryDoctrineDefensiveFallbackWhenShakenAndUnsupported),
+            ("tactical artillery doctrine cancel bombard on low ammo", TacticalArtilleryDoctrineCancelBombardOnLowAmmo),
+            ("tactical artillery doctrine W&L gate blocks", TacticalArtilleryDoctrineWlGateBlocks),
             ("tactical artillery input adapter reads scalar fields", TacticalArtilleryInputAdapterReadsScalarFields),
             ("tactical artillery input adapter rejects non-artillery", TacticalArtilleryInputAdapterRejectsNonArtillery),
             ("tactical artillery input adapter rejects routed", TacticalArtilleryInputAdapterRejectsRouted),
@@ -2322,6 +2328,101 @@ static class Program
             IsPlayerAiOrFeud = 0,
         };
         AssertEqual(TacticalSupportScreen.Result.Unknown, TacticalSupportScreen.Score(input), "W&L gate blocks");
+    }
+
+    private static void TacticalArtilleryDoctrinePreservesFireWhenScreenedAndAmmoOk()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.6f,
+            CanisterAmmo = 0.3f,
+            ClosestEnemyDistance = 600f,
+            UnitFireRange = 800f,
+            EnemyArtilleryVisible = false,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.PreserveFire,
+            TacticalArtilleryDoctrine.Score(input), "screened + ammo ok -> preserve fire");
+    }
+
+    private static void TacticalArtilleryDoctrineCounterBatteryWhenEnemyArtVisible()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.6f,
+            ClosestEnemyDistance = 700f,
+            UnitFireRange = 800f,
+            EnemyArtilleryVisible = true,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.CounterBattery,
+            TacticalArtilleryDoctrine.Score(input), "enemy art visible -> CB");
+    }
+
+    private static void TacticalArtilleryDoctrineCancelBombardWhenUnsupported()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Unsupported,
+            AmmoTotalRatio = 0.5f,
+            ClosestEnemyDistance = 80f,
+            UnitFireRange = 800f,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.CancelBombard,
+            TacticalArtilleryDoctrine.Score(input), "unsupported -> cancel bombard");
+    }
+
+    private static void TacticalArtilleryDoctrineDefensiveFallbackWhenShakenAndUnsupported()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Shaken,
+            AmmoTotalRatio = 0.5f,
+            ClosestEnemyDistance = 90f,
+            UnitFireRange = 800f,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.DefensiveFallback,
+            TacticalArtilleryDoctrine.Score(input), "shaken close enemy -> defensive fallback");
+    }
+
+    private static void TacticalArtilleryDoctrineCancelBombardOnLowAmmo()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.05f,
+            ClosestEnemyDistance = 600f,
+            UnitFireRange = 800f,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.CancelBombard,
+            TacticalArtilleryDoctrine.Score(input), "low ammo -> cancel bombard");
+    }
+
+    private static void TacticalArtilleryDoctrineWlGateBlocks()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.6f,
+            ClosestEnemyDistance = 600f,
+            UnitFireRange = 800f,
+            CombatBehaviorOrdered = 8,
+            AiFeudStance = 5,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalArtilleryDoctrine.Decision.PreserveFire,
+            TacticalArtilleryDoctrine.Score(input), "W&L gate -> safe default PreserveFire");
     }
 
     private static void TacticalArtilleryInputAdapterReadsScalarFields()
