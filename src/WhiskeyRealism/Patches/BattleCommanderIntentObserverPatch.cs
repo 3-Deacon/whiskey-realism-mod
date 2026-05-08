@@ -250,6 +250,16 @@ namespace WhiskeyRealism.Patches
 
         private static bool WlOwnershipSafe(Regiment group)
         {
+            return WlOwnershipSafe(group, failClosed: false);
+        }
+
+        private static bool ReserveWlOwnershipSafe(Regiment group)
+        {
+            return WlOwnershipSafe(group, failClosed: true);
+        }
+
+        private static bool WlOwnershipSafe(Regiment group, bool failClosed)
+        {
             try
             {
                 if (!DLC_WL.dlc_scenarioactive) return true;
@@ -266,9 +276,11 @@ namespace WhiskeyRealism.Patches
 
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
-                return true;
+                if (failClosed)
+                    OnceLog.Warning("tactical-b6c-reserve-wl-ownership:failed", "Reserve W&L ownership inspection failed; blocking reserve mutation: " + ex.Message);
+                return !failClosed;
             }
         }
 
@@ -276,6 +288,7 @@ namespace WhiskeyRealism.Patches
         {
             int reserveCount = 0;
             bool flankRisk = false;
+            bool wlOwnershipSafe = true;
             IList chain = ObjectiveChain(battle);
 
             if (chain != null)
@@ -283,8 +296,19 @@ namespace WhiskeyRealism.Patches
                 for (int i = 0; i < chain.Count; i++)
                 {
                     object entry = chain[i];
-                    IList reserves = SafeList(entry, ref _reserveGroupsField, "reservegroups");
-                    if (reserves != null) reserveCount += reserves.Count;
+                    if (TryReserveGroups(entry, out IList reserves))
+                    {
+                        reserveCount += reserves.Count;
+                        for (int j = 0; j < reserves.Count; j++)
+                        {
+                            if (!ReserveWlOwnershipSafe(reserves[j] as Regiment))
+                                wlOwnershipSafe = false;
+                        }
+                    }
+                    else
+                    {
+                        wlOwnershipSafe = false;
+                    }
 
                     if (_flankAnchoredField == null && entry != null)
                         _flankAnchoredField = AccessTools.Field(entry.GetType(), "anchoredflank");
@@ -309,8 +333,43 @@ namespace WhiskeyRealism.Patches
                 reserveCount,
                 flankRisk,
                 lastReserveIsFlankGuard: flankRisk && reserveCount <= 1,
-                wlOwnershipSafe: true,
+                wlOwnershipSafe: wlOwnershipSafe,
                 stalenessActive: false);
+        }
+
+        private static bool TryReserveGroups(object entry, out IList reserves)
+        {
+            reserves = null;
+            try
+            {
+                if (entry == null)
+                {
+                    OnceLog.Warning("tactical-b6c-reserve-list:null-entry", "Reserve availability saw a null objective chain entry; blocking reserve mutation.");
+                    return false;
+                }
+
+                if (_reserveGroupsField == null)
+                    _reserveGroupsField = AccessTools.Field(entry.GetType(), "reservegroups");
+                if (_reserveGroupsField == null)
+                {
+                    OnceLog.Warning("tactical-b6c-reserve-list:missing-field", "Reserve availability could not find objectivechain.reservegroups; blocking reserve mutation.");
+                    return false;
+                }
+
+                reserves = _reserveGroupsField.GetValue(entry) as IList;
+                if (reserves == null)
+                {
+                    OnceLog.Warning("tactical-b6c-reserve-list:not-list", "Reserve availability could not read objectivechain.reservegroups as a list; blocking reserve mutation.");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-b6c-reserve-list:failed", "Reserve availability list inspection failed; blocking reserve mutation: " + ex.Message);
+                return false;
+            }
         }
 
         private static void EmitIntent(int side, int macro, TacticalIntentInput input, TacticalIntentDecision intent)
