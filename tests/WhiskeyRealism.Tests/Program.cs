@@ -2173,27 +2173,27 @@ static class Program
     {
         AssertTrue(TacticalGateHelpers.PassesWlOwnership(aiFeudStance: -1, isPlayerAiOrFeud: 0), "feud=-1 passes");
         AssertTrue(TacticalGateHelpers.PassesWlOwnership(aiFeudStance: 5, isPlayerAiOrFeud: 2), "playerai=2 passes");
-        AssertTrue(!TacticalGateHelpers.PassesWlOwnership(aiFeudStance: 5, isPlayerAiOrFeud: 0), "neither passes");
+        AssertFalse(TacticalGateHelpers.PassesWlOwnership(aiFeudStance: 5, isPlayerAiOrFeud: 0), "neither passes");
     }
 
     private static void TacticalGateHelpersAllianceBounds()
     {
         AssertTrue(TacticalGateHelpers.IsValidAllianceIndex(0, factionLength: 2), "0 in range");
         AssertTrue(TacticalGateHelpers.IsValidAllianceIndex(1, factionLength: 2), "1 in range");
-        AssertTrue(!TacticalGateHelpers.IsValidAllianceIndex(2, factionLength: 2), "2 (Europe) out of bounds");
-        AssertTrue(!TacticalGateHelpers.IsValidAllianceIndex(-1, factionLength: 2), "negative out of bounds");
+        AssertFalse(TacticalGateHelpers.IsValidAllianceIndex(2, factionLength: 2), "2 (Europe) out of bounds");
+        AssertFalse(TacticalGateHelpers.IsValidAllianceIndex(-1, factionLength: 2), "negative out of bounds");
     }
 
     private static void TacticalScoreCacheRoundtrip()
     {
         var cache = new TacticalScoreCache<int>();
         var key = new TacticalScoreCache<int>.Key(unitId: 42, signature: "sig-A");
-        AssertTrue(!cache.TryGet(key, out _), "miss before write");
+        AssertFalse(cache.TryGet(key, out _), "miss before write");
         cache.Set(key, 7);
         AssertTrue(cache.TryGet(key, out int value), "hit after write");
         AssertEqual(7, value, "round-tripped value");
         var staleKey = new TacticalScoreCache<int>.Key(unitId: 42, signature: "sig-B");
-        AssertTrue(!cache.TryGet(staleKey, out _), "different signature misses");
+        AssertFalse(cache.TryGet(staleKey, out _), "different signature misses");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
@@ -7149,6 +7149,11 @@ static class Program
     private static void AssertTrue(bool condition, string message)
     {
         if (!condition) throw new Exception(message);
+    }
+
+    private static void AssertFalse(bool condition, string message)
+    {
+        if (condition) throw new Exception(message);
     }
 
     private static void AssertFinite(float value, string label)
