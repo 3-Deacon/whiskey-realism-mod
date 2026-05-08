@@ -481,7 +481,12 @@ static class Program
             ("tactical morale snapshot ledger prune", TacticalMoraleSnapshotLedgerPrune),
             ("tactical quadrant threat computes arcs", TacticalQuadrantThreatScorerComputesArcs),
             ("tactical quadrant threat detects rear pressure", TacticalQuadrantThreatScorerDetectsRearPressure),
-            ("tactical quadrant threat null slices degrades gracefully", TacticalQuadrantThreatScorerNullSlicesDegradesGracefully)
+            ("tactical quadrant threat null slices degrades gracefully", TacticalQuadrantThreatScorerNullSlicesDegradesGracefully),
+            ("tactical charge viability refuse on cooldown", TacticalChargeViabilityRefuseOnCooldown),
+            ("tactical charge viability refuse on morale high", TacticalChargeViabilityRefuseOnMoraleHigh),
+            ("tactical charge viability allow at threshold", TacticalChargeViabilityAllowAtThreshold),
+            ("tactical charge viability encourage on flanked target", TacticalChargeViabilityEncourageOnFlankedTarget),
+            ("tactical charge viability artillery target ignores morale gate", TacticalChargeViabilityArtilleryTargetIgnoresMoraleGate)
         };
 
         foreach (var test in tests)
@@ -9457,5 +9462,103 @@ static class Program
         var output = TacticalQuadrantThreatScorer.Score(input);
         AssertEqual(0f, output.FrontStrength, "null slices -> zero");
         AssertFalse(output.RearPressureFlag, "no flag");
+    }
+
+    private static void TacticalChargeViabilityRefuseOnCooldown()
+    {
+        var input = new TacticalChargeViability.Input
+        {
+            ChargeScore = 5f,
+            ScoreThreshold = 1f,
+            TargetMorale = 0.4f,
+            TargetMoraleThreshold = 0.7f,
+            TargetUnitTyp = 0,
+            DistanceToTarget = 50f,
+            MaxChargeRadius = 200f,
+            TimeSinceLastCharge = 1f,
+            ChargeCooldown = 5f,
+            VolleyDwellRemaining = 0f,
+            TargetOutflanked = 0,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalChargeViability.Result.Refuse,
+            TacticalChargeViability.Score(input), "cooldown refuses");
+    }
+
+    private static void TacticalChargeViabilityRefuseOnMoraleHigh()
+    {
+        var input = new TacticalChargeViability.Input
+        {
+            ChargeScore = 5f,
+            ScoreThreshold = 1f,
+            TargetMorale = 0.9f,
+            TargetMoraleThreshold = 0.7f,
+            TargetUnitTyp = 0,
+            DistanceToTarget = 50f,
+            MaxChargeRadius = 200f,
+            TimeSinceLastCharge = 99f,
+            ChargeCooldown = 5f,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalChargeViability.Result.Refuse,
+            TacticalChargeViability.Score(input), "high target morale refuses");
+    }
+
+    private static void TacticalChargeViabilityAllowAtThreshold()
+    {
+        var input = new TacticalChargeViability.Input
+        {
+            ChargeScore = 1.1f,
+            ScoreThreshold = 1f,
+            TargetMorale = 0.5f,
+            TargetMoraleThreshold = 0.7f,
+            TargetUnitTyp = 0,
+            DistanceToTarget = 50f,
+            MaxChargeRadius = 200f,
+            TimeSinceLastCharge = 99f,
+            ChargeCooldown = 5f,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalChargeViability.Result.Allow,
+            TacticalChargeViability.Score(input), "score just above threshold -> allow");
+    }
+
+    private static void TacticalChargeViabilityEncourageOnFlankedTarget()
+    {
+        var input = new TacticalChargeViability.Input
+        {
+            ChargeScore = 2f,
+            ScoreThreshold = 1f,
+            TargetMorale = 0.5f,
+            TargetMoraleThreshold = 0.7f,
+            TargetUnitTyp = 0,
+            TargetOutflanked = 4,
+            DistanceToTarget = 50f,
+            MaxChargeRadius = 200f,
+            TimeSinceLastCharge = 99f,
+            ChargeCooldown = 5f,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalChargeViability.Result.Encourage,
+            TacticalChargeViability.Score(input), "flanked target + high score -> encourage");
+    }
+
+    private static void TacticalChargeViabilityArtilleryTargetIgnoresMoraleGate()
+    {
+        var input = new TacticalChargeViability.Input
+        {
+            ChargeScore = 1.1f,
+            ScoreThreshold = 1f,
+            TargetMorale = 0.95f,
+            TargetMoraleThreshold = 0.7f,
+            TargetUnitTyp = 2,
+            DistanceToTarget = 50f,
+            MaxChargeRadius = 200f,
+            TimeSinceLastCharge = 99f,
+            ChargeCooldown = 5f,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalChargeViability.Result.Allow,
+            TacticalChargeViability.Score(input), "artillery target bypasses morale gate");
     }
 }
