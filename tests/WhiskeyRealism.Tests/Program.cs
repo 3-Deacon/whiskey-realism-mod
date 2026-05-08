@@ -81,6 +81,12 @@ static class Program
             ("tactical support screen unsupported no screen", TacticalSupportScreenUnsupportedNoScreen),
             ("tactical support screen unknown on uninitialized", TacticalSupportScreenUnknownOnUninitialized),
             ("tactical support screen W&L gate blocks", TacticalSupportScreenWlGateBlocks),
+            ("tactical destination discipline clear", TacticalDestinationDisciplineClearDestination),
+            ("tactical destination discipline gun crowded on gun", TacticalDestinationDisciplineGunCrowdedOnGun),
+            ("tactical destination discipline line crowded on line", TacticalDestinationDisciplineLineCrowdedOnLine),
+            ("tactical destination discipline enemy on destination", TacticalDestinationDisciplineEnemyOnDestination),
+            ("tactical destination discipline path risk unknown", TacticalDestinationDisciplinePathRiskUnknown),
+            ("tactical destination discipline skirmisher in motion skips check", TacticalDestinationDisciplineSkirmisherInMotionSkipsCheck),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
             ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
             ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
@@ -2279,6 +2285,106 @@ static class Program
             IsPlayerAiOrFeud = 0,
         };
         AssertEqual(TacticalSupportScreen.Result.Unknown, TacticalSupportScreen.Score(input), "W&L gate blocks");
+    }
+
+    private static void TacticalDestinationDisciplineClearDestination()
+    {
+        var input = new TacticalDestinationDiscipline.Input
+        {
+            MoverUnitTyp = 0,
+            NearestSameTypePeerDistance = 9999f,
+            NearestOtherCombatPeerDistance = 9999f,
+            EnemyOnDestinationDistance = 9999f,
+            MoverFireRange = 200f,
+            MoverWidth = 50f,
+            VanillaInterruptThreshold = 100f,
+        };
+        AssertEqual(TacticalDestinationDiscipline.Result.ClearDestination,
+            TacticalDestinationDiscipline.Score(input), "clear");
+    }
+
+    private static void TacticalDestinationDisciplineGunCrowdedOnGun()
+    {
+        var input = new TacticalDestinationDiscipline.Input
+        {
+            MoverUnitTyp = 2,
+            PeerUnitTyp = 2,
+            NearestSameTypePeerDistance = 4f,
+            NearestOtherCombatPeerDistance = 9999f,
+            EnemyOnDestinationDistance = 9999f,
+            MoverFireRange = 1500f,
+            MoverWidth = 30f,
+            VanillaInterruptThreshold = 100f,
+        };
+        AssertEqual(TacticalDestinationDiscipline.Result.CrowdedSameType,
+            TacticalDestinationDiscipline.Score(input), "gun on gun within 5m");
+    }
+
+    private static void TacticalDestinationDisciplineLineCrowdedOnLine()
+    {
+        var input = new TacticalDestinationDiscipline.Input
+        {
+            MoverUnitTyp = 0,
+            PeerUnitTyp = 0,
+            NearestSameTypePeerDistance = 70f,
+            NearestOtherCombatPeerDistance = 9999f,
+            EnemyOnDestinationDistance = 9999f,
+            MoverFireRange = 200f,
+            MoverWidth = 50f,
+            VanillaInterruptThreshold = 100f,
+        };
+        AssertEqual(TacticalDestinationDiscipline.Result.CrowdedSameType,
+            TacticalDestinationDiscipline.Score(input), "line on line within firerange-scaled tier");
+    }
+
+    private static void TacticalDestinationDisciplineEnemyOnDestination()
+    {
+        var input = new TacticalDestinationDiscipline.Input
+        {
+            MoverUnitTyp = 0,
+            NearestSameTypePeerDistance = 9999f,
+            NearestOtherCombatPeerDistance = 9999f,
+            EnemyOnDestinationDistance = 50f,
+            MoverFireRange = 200f,
+            MoverWidth = 50f,
+            VanillaInterruptThreshold = 100f,
+        };
+        AssertEqual(TacticalDestinationDiscipline.Result.EnemyOnDestination,
+            TacticalDestinationDiscipline.Score(input), "enemy on destination");
+    }
+
+    private static void TacticalDestinationDisciplinePathRiskUnknown()
+    {
+        var input = new TacticalDestinationDiscipline.Input
+        {
+            MoverUnitTyp = 0,
+            NearestSameTypePeerDistance = 9999f,
+            NearestOtherCombatPeerDistance = 9999f,
+            EnemyOnDestinationDistance = 9999f,
+            MoverFireRange = -1f,
+            MoverWidth = 50f,
+            VanillaInterruptThreshold = 100f,
+        };
+        AssertEqual(TacticalDestinationDiscipline.Result.PathRiskUnknown,
+            TacticalDestinationDiscipline.Score(input), "unknown on bad firerange");
+    }
+
+    private static void TacticalDestinationDisciplineSkirmisherInMotionSkipsCheck()
+    {
+        var input = new TacticalDestinationDiscipline.Input
+        {
+            MoverUnitTyp = 0,
+            PeerUnitTyp = 3,
+            PeerHasActivePath = true,
+            NearestSameTypePeerDistance = 9999f,
+            NearestOtherCombatPeerDistance = 30f,
+            EnemyOnDestinationDistance = 9999f,
+            MoverFireRange = 200f,
+            MoverWidth = 50f,
+            VanillaInterruptThreshold = 100f,
+        };
+        AssertEqual(TacticalDestinationDiscipline.Result.ClearDestination,
+            TacticalDestinationDiscipline.Score(input), "skirmisher in motion exempt");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
