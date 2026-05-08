@@ -397,7 +397,8 @@ static class Program
             ("director too quiet healthy fiscal favors logistics", DirectorTooQuietFavorsLogistics),
             ("director too fast collapse damps expansion", DirectorTooFastCollapseDampsExpansion),
             ("director raises capital defense budget under too fast collapse", DirectorRaisesCapitalDefenseBudgetUnderTooFastCollapse),
-            ("director lowers union guard budget under late war pressure", DirectorLowersUnionGuardUnderLateWarPressure)
+            ("director lowers union guard budget under late war pressure", DirectorLowersUnionGuardUnderLateWarPressure),
+            ("tactical b6a probe posture maps to probe intent", TacticalB6aProbePostureMapsToProbeIntent)
         };
 
         foreach (var test in tests)
@@ -1442,6 +1443,23 @@ static class Program
 
         AssertTrue(decision.Allow, "AI-chain objective movement should remain vanilla");
         AssertEqual("ai-chain", decision.Reason, "reason");
+    }
+
+    private static void TacticalB6aProbePostureMapsToProbeIntent()
+    {
+        var input = new TacticalIntentInput(
+            operationPosture: WhiskeyRealism.Strategic.OperationPosture.ProbeAndDevelop,
+            hasPlan: true,
+            vanillaMacro: 1,
+            commanderInitiative01: 0.5f,
+            oddsConfidence: 0.7f,
+            allowAssault: true,
+            weakPointConfirmed: false);
+
+        var decision = TacticalCommanderIntentResolver.Resolve(input);
+
+        AssertTrue(decision.Intent == CommanderIntent.ProbeIntent, "Expected ProbeIntent, got " + decision.Intent);
+        AssertTrue(!decision.AllowsCharge, "ProbeIntent must not allow charge");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
