@@ -76,6 +76,11 @@ static class Program
             ("tactical gate helpers W&L ownership", TacticalGateHelpersWlOwnership),
             ("tactical gate helpers alliance bounds", TacticalGateHelpersAllianceBounds),
             ("tactical score cache roundtrip", TacticalScoreCacheRoundtrip),
+            ("tactical support screen supported and steady", TacticalSupportScreenSupportedAndSteady),
+            ("tactical support screen shaken with screen", TacticalSupportScreenShakenWithScreen),
+            ("tactical support screen unsupported no screen", TacticalSupportScreenUnsupportedNoScreen),
+            ("tactical support screen unknown on uninitialized", TacticalSupportScreenUnknownOnUninitialized),
+            ("tactical support screen W&L gate blocks", TacticalSupportScreenWlGateBlocks),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
             ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
             ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
@@ -2194,6 +2199,86 @@ static class Program
         AssertEqual(7, value, "round-tripped value");
         var staleKey = new TacticalScoreCache<int>.Key(unitId: 42, signature: "sig-B");
         AssertFalse(cache.TryGet(staleKey, out _), "different signature misses");
+    }
+
+    private static void TacticalSupportScreenSupportedAndSteady()
+    {
+        var input = new TacticalSupportScreen.Input
+        {
+            ProtectedUnitMorale = 0.7f,
+            MoraleFallbackThreshold = 0.4f,
+            BattleStartMorale = 0.8f,
+            EnemyDistance = 100f,
+            DangerRadius = 200f,
+            ScreenUnitCount = 1,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalSupportScreen.Result.Screened, TacticalSupportScreen.Score(input), "screened steady");
+    }
+
+    private static void TacticalSupportScreenShakenWithScreen()
+    {
+        var input = new TacticalSupportScreen.Input
+        {
+            ProtectedUnitMorale = 0.30f,
+            MoraleFallbackThreshold = 0.40f,
+            BattleStartMorale = 0.80f,
+            EnemyDistance = 100f,
+            DangerRadius = 200f,
+            ScreenUnitCount = 1,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalSupportScreen.Result.Shaken, TacticalSupportScreen.Score(input), "shaken with screen");
+    }
+
+    private static void TacticalSupportScreenUnsupportedNoScreen()
+    {
+        var input = new TacticalSupportScreen.Input
+        {
+            ProtectedUnitMorale = 0.7f,
+            MoraleFallbackThreshold = 0.4f,
+            BattleStartMorale = 0.8f,
+            EnemyDistance = 100f,
+            DangerRadius = 200f,
+            ScreenUnitCount = 0,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalSupportScreen.Result.Unsupported, TacticalSupportScreen.Score(input), "unsupported");
+    }
+
+    private static void TacticalSupportScreenUnknownOnUninitialized()
+    {
+        var input = new TacticalSupportScreen.Input
+        {
+            ProtectedUnitMorale = 0.7f,
+            MoraleFallbackThreshold = 0.4f,
+            BattleStartMorale = -1f,
+            EnemyDistance = 100f,
+            DangerRadius = 200f,
+            ScreenUnitCount = 1,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalSupportScreen.Result.Unknown, TacticalSupportScreen.Score(input), "uninitialized");
+    }
+
+    private static void TacticalSupportScreenWlGateBlocks()
+    {
+        var input = new TacticalSupportScreen.Input
+        {
+            ProtectedUnitMorale = 0.7f,
+            MoraleFallbackThreshold = 0.4f,
+            BattleStartMorale = 0.8f,
+            EnemyDistance = 100f,
+            DangerRadius = 200f,
+            ScreenUnitCount = 1,
+            AiFeudStance = 5,
+            IsPlayerAiOrFeud = 0,
+        };
+        AssertEqual(TacticalSupportScreen.Result.Unknown, TacticalSupportScreen.Score(input), "W&L gate blocks");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
