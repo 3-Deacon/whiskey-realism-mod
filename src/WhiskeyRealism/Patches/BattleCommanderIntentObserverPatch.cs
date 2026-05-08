@@ -174,13 +174,46 @@ namespace WhiskeyRealism.Patches
         {
             IList chain = ObjectiveChain(battle);
             if (chain == null) return false;
+
+            bool hasValidReserve = false;
             for (int i = 0; i < chain.Count; i++)
             {
-                if (_reserveGroupsField == null) _reserveGroupsField = AccessTools.Field(chain[i].GetType(), "reservegroups");
-                if (_reserveGroupsField == null) continue;
-                if (_reserveGroupsField.GetValue(chain[i]) is IList reserves && reserves.Count > 0) return true;
+                if (!TryReserveGroups(chain[i], out IList reserves))
+                    return false;
+
+                if (!ReserveListAvailableForPlaybook(reserves, ref hasValidReserve))
+                    return false;
             }
-            return false;
+
+            return hasValidReserve;
+        }
+
+        private static bool ReserveListAvailableForPlaybook(IList reserves, ref bool hasValidReserve)
+        {
+            try
+            {
+                for (int i = 0; i < reserves.Count; i++)
+                {
+                    var reserve = reserves[i] as Regiment;
+                    if (reserve == null)
+                    {
+                        OnceLog.Warning("tactical-b6c-reserve-list:invalid-entry", "Reserve availability saw a null/non-Regiment reservegroups entry; blocking reserve mutation.");
+                        return false;
+                    }
+
+                    if (!ReserveWlOwnershipSafe(reserve))
+                        return false;
+
+                    hasValidReserve = true;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-b6c-reserve-list:failed", "Reserve availability list inspection failed; blocking reserve mutation: " + ex.Message);
+                return false;
+            }
         }
 
         private static bool AnchoredFlank(AIBattle battle, int index)
