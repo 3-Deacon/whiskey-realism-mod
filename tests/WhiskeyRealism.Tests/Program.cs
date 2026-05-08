@@ -550,7 +550,8 @@ static class Program
             ("tactical battle lifecycle detector returns battle start on first units tick", TacticalBattleLifecycleDetectorReturnsBattleStartOnFirstUnitsTick),
             ("tactical battle lifecycle detector requires two consecutive zero ticks for battle end", TacticalBattleLifecycleDetectorRequiresTwoConsecutiveZeroTicksForBattleEnd),
             ("tactical battle lifecycle detector ignores transient zero tick between units ticks", TacticalBattleLifecycleDetectorIgnoresTransientZeroTickBetweenUnitsTicks),
-            ("tactical battle lifecycle detector does not fire double start on subsequent units ticks", TacticalBattleLifecycleDetectorDoesNotFireDoubleStartOnSubsequentUnitsTicks)
+            ("tactical battle lifecycle detector does not fire double start on subsequent units ticks", TacticalBattleLifecycleDetectorDoesNotFireDoubleStartOnSubsequentUnitsTicks),
+            ("tactical battle lifecycle detector restarts battle after end", TacticalBattleLifecycleDetectorRestartsBattleAfterEnd)
         };
 
         foreach (var test in tests)
@@ -10523,5 +10524,19 @@ static class Program
         AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(3), "first units tick fires BattleStart");
         AssertEqual(BattleLifecycleEvent.None, detector.Observe(5), "subsequent units tick should be None");
         AssertEqual(BattleLifecycleEvent.None, detector.Observe(2), "third units tick should also be None");
+    }
+
+    private static void TacticalBattleLifecycleDetectorRestartsBattleAfterEnd()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        // prime the detector
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "priming zero should be None");
+        // first battle begins
+        AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(3), "first BattleStart");
+        // teardown: two consecutive zero ticks end the first battle
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "first zero of teardown should be None");
+        AssertEqual(BattleLifecycleEvent.BattleEnd, detector.Observe(0), "second consecutive zero fires BattleEnd");
+        // second battle begins — verifies reset path: inBattle=false, consecutiveZeroTicks=0
+        AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(5), "second BattleStart after reset");
     }
 }

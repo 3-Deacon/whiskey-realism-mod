@@ -272,6 +272,9 @@ namespace WhiskeyRealism.Patches
                             TacticalBattleCoordinator.OnBattleEnd();
                             break;
                     }
+                    // First Tick is intentionally colocated with OnBattleStart to give the coordinator
+                    // a zero-latency cold start (observer-driven cadence; we don't want to wait for the
+                    // next CheckGlobalAIStrategy invocation to fire the first tick telemetry).
                     if (TacticalBattleCoordinator.IsActive)
                     {
                         TacticalBattleCoordinator.Tick();
