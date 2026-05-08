@@ -87,6 +87,12 @@ static class Program
             ("tactical destination discipline enemy on destination", TacticalDestinationDisciplineEnemyOnDestination),
             ("tactical destination discipline path risk unknown", TacticalDestinationDisciplinePathRiskUnknown),
             ("tactical destination discipline skirmisher in motion skips check", TacticalDestinationDisciplineSkirmisherInMotionSkipsCheck),
+            ("tactical morale pressure stable", TacticalMoralePressureStable),
+            ("tactical morale pressure under pressure from outflanked tier", TacticalMoralePressureUnderPressureFromOutflankedTier),
+            ("tactical morale pressure fallback candidate", TacticalMoralePressureFallbackCandidate),
+            ("tactical morale pressure withdrawal candidate flank no cover", TacticalMoralePressureWithdrawalCandidateFlankNoCover),
+            ("tactical morale pressure collapse candidate", TacticalMoralePressureCollapseCandidate),
+            ("tactical morale pressure unknown on uninitialized", TacticalMoralePressureUnknownOnUninitialized),
             ("tactical diagnostics detect campaign current order replacement risk", TacticalDiagnosticsDetectCampaignCurrentOrderReplacementRisk),
             ("tactical diagnostics detect delayed waypoint drift", TacticalDiagnosticsDetectDelayedWaypointDrift),
             ("tactical diagnostics detect secondary courier queue mismatch risk", TacticalDiagnosticsDetectSecondaryCourierQueueMismatchRisk),
@@ -2390,6 +2396,103 @@ static class Program
         };
         AssertEqual(TacticalDestinationDiscipline.Result.ClearDestination,
             TacticalDestinationDiscipline.Score(input), "skirmisher in motion exempt");
+    }
+
+    private static void TacticalMoralePressureStable()
+    {
+        var input = new TacticalMoralePressure.Input
+        {
+            CurrentMorale = 0.85f,
+            BattleStartMorale = 0.90f,
+            FallbackThreshold = 0.40f,
+            Outflanked = 0,
+            FriendlyRoutedNear = 0f,
+            EnemyRoutedNear = 0f,
+            ReceivedFireFromClosestFar = false,
+            CoverValue = 0.5f,
+            CoverObject = 0,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+            BattleStartMoraleInitialized = true,
+        };
+        AssertEqual(TacticalMoralePressure.Result.Stable, TacticalMoralePressure.Score(input), "stable");
+    }
+
+    private static void TacticalMoralePressureUnderPressureFromOutflankedTier()
+    {
+        var input = new TacticalMoralePressure.Input
+        {
+            CurrentMorale = 0.85f,
+            BattleStartMorale = 0.90f,
+            FallbackThreshold = 0.40f,
+            Outflanked = 1,
+            BattleStartMoraleInitialized = true,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalMoralePressure.Result.UnderPressure,
+            TacticalMoralePressure.Score(input), "outflanked tier 1 -> under pressure");
+    }
+
+    private static void TacticalMoralePressureFallbackCandidate()
+    {
+        var input = new TacticalMoralePressure.Input
+        {
+            CurrentMorale = 0.45f,
+            BattleStartMorale = 0.85f,
+            FallbackThreshold = 0.40f,
+            Outflanked = 0,
+            ReceivedFireFromClosestFar = true,
+            BattleStartMoraleInitialized = true,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalMoralePressure.Result.FallbackCandidate,
+            TacticalMoralePressure.Score(input), "fallback candidate");
+    }
+
+    private static void TacticalMoralePressureWithdrawalCandidateFlankNoCover()
+    {
+        var input = new TacticalMoralePressure.Input
+        {
+            CurrentMorale = 0.45f,
+            BattleStartMorale = 0.85f,
+            FallbackThreshold = 0.40f,
+            Outflanked = 4,
+            ReceivedFireFromClosestFar = true,
+            CoverValue = 0f,
+            CoverObject = 3,
+            BattleStartMoraleInitialized = true,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalMoralePressure.Result.WithdrawalCandidate,
+            TacticalMoralePressure.Score(input), "flank tier 4 + no cover -> withdrawal");
+    }
+
+    private static void TacticalMoralePressureCollapseCandidate()
+    {
+        var input = new TacticalMoralePressure.Input
+        {
+            CurrentMorale = 0.30f,
+            BattleStartMorale = 0.85f,
+            FallbackThreshold = 0.40f,
+            BattleStartMoraleInitialized = true,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalMoralePressure.Result.CollapseCandidate,
+            TacticalMoralePressure.Score(input), "morale below threshold -> collapse");
+    }
+
+    private static void TacticalMoralePressureUnknownOnUninitialized()
+    {
+        var input = new TacticalMoralePressure.Input
+        {
+            CurrentMorale = 0.45f,
+            BattleStartMorale = -1f,
+            BattleStartMoraleInitialized = false,
+            FallbackThreshold = 0.4f,
+            AiFeudStance = -1,
+        };
+        AssertEqual(TacticalMoralePressure.Result.Stable,
+            TacticalMoralePressure.Score(input), "uninitialized -> stable (caller separates)");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()
