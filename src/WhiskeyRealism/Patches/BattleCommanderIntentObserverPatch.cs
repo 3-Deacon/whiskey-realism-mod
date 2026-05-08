@@ -72,19 +72,20 @@ namespace WhiskeyRealism.Patches
             TacticalReactionContext.Shared.Clear();
 
             IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
-            if (units == null || units.Count == 0) return;
-
             var reactions = new List<TacticalLocalReactionDecision>();
-            for (int i = 0; i < units.Count; i++)
+            if (units != null)
             {
-                var group = units[i] as Regiment;
-                if (group == null || group.unittyp <= 13) continue;
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var group = units[i] as Regiment;
+                    if (group == null || group.unittyp <= 13) continue;
 
-                TacticalLocalReactionInput reactionInput = BuildReactionInput(group, intent, playbook);
-                TacticalLocalReactionDecision reaction = TacticalLocalReactionScorer.Score(reactionInput);
-                TacticalReactionContext.Shared.SetReaction(SafeInstanceId(group), reaction);
-                reactions.Add(reaction);
-                EmitReaction(side, group, reaction);
+                    TacticalLocalReactionInput reactionInput = BuildReactionInput(group, intent, playbook);
+                    TacticalLocalReactionDecision reaction = TacticalLocalReactionScorer.Score(reactionInput);
+                    TacticalReactionContext.Shared.SetReaction(SafeInstanceId(group), reaction);
+                    reactions.Add(reaction);
+                    EmitReaction(side, group, reaction);
+                }
             }
 
             if (Plugin.Instance.EnableTacticalReserveIntentTelemetry.Value)
