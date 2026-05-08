@@ -47,6 +47,10 @@ static class Program
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
             ("tactical order high initiative reduces delay pressure without instant delivery", TacticalOrderHighInitiativeReducesDelayPressureWithoutInstant),
+            ("tactical order settlement allows idle stance retask", TacticalOrderSettlementAllowsIdleStanceRetask),
+            ("tactical order settlement blocks queued stance retask", TacticalOrderSettlementBlocksQueuedStanceRetask),
+            ("tactical order settlement blocks delivered pending stance retask", TacticalOrderSettlementBlocksDeliveredPendingStanceRetask),
+            ("tactical order settlement blocks unknown order state", TacticalOrderSettlementBlocksUnknownOrderState),
             ("tactical command army and corps intent does not retask regiments directly", TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly),
             ("tactical command division mission maps to brigade actions", TacticalCommandDivisionMissionMapsToBrigadeActions),
             ("tactical contact no sighting is none", TacticalContactNoSightingIsNone),
@@ -56,6 +60,8 @@ static class Program
             ("tactical odds inferior no relief preserves force", TacticalOddsInferiorNoReliefPreservesForce),
             ("tactical odds inferior with relief delays", TacticalOddsInferiorWithReliefDelays),
             ("tactical sector no measured enemy is not weak point", TacticalSectorNoMeasuredEnemyIsNotWeakPoint),
+            ("tactical sector tiny angle contact is not weak point", TacticalSectorTinyAngleContactIsNotWeakPoint),
+            ("tactical sector substantial contact remains weak point", TacticalSectorSubstantialContactRemainsWeakPoint),
             ("tactical macro dynamic is not attack", TacticalMacroDynamicIsNotAttack),
             ("tactical macro debug override skips", TacticalMacroDebugOverrideSkips),
             ("tactical macro inferior no relief retreats", TacticalMacroInferiorNoReliefRetreats),
@@ -875,6 +881,32 @@ static class Program
         AssertEqual(0f, result.Sectors[0].Odds, "no measured enemy has no attack odds");
     }
 
+    private static void TacticalSectorTinyAngleContactIsNotWeakPoint()
+    {
+        var sectors = new[]
+        {
+            new TacticalSectorAssessment(4, TacticalSectorSource.AngleSlice, 15306f, 63f, 0.8f, false, false, TacticalSectorMission.Hold)
+        };
+
+        var result = TacticalSectorLedger.Evaluate(sectors);
+
+        AssertEqual(-1, result.DecisiveSectorId, "tiny angle contact should not become decisive");
+        AssertEqual(TacticalSectorMission.Hold, result.Sectors[0].Mission, "tiny contact should not become weak-point attack");
+    }
+
+    private static void TacticalSectorSubstantialContactRemainsWeakPoint()
+    {
+        var sectors = new[]
+        {
+            new TacticalSectorAssessment(4, TacticalSectorSource.AngleSlice, 5000f, 2000f, 0.8f, false, false, TacticalSectorMission.Hold)
+        };
+
+        var result = TacticalSectorLedger.Evaluate(sectors);
+
+        AssertEqual(4, result.DecisiveSectorId, "substantial contact can be decisive");
+        AssertEqual(TacticalSectorMission.AttackWeakPoint, result.Sectors[0].Mission, "real contact should still attack weak point");
+    }
+
     private static TacticalOddsAssessment Odds(
         float current,
         int decisive = -1,
@@ -1103,6 +1135,66 @@ static class Program
         AssertTrue(high.DelayPressure < low.DelayPressure, "high initiative should reduce delay pressure");
         AssertEqual(TacticalOrderFrictionState.Courier, high.State, "state");
         AssertTrue(!high.IsDelivered, "high initiative should not make courier order instant");
+    }
+
+    private static void TacticalOrderSettlementAllowsIdleStanceRetask()
+    {
+        var decision = TacticalOrderSettlementGate.Evaluate(new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 0,
+            OrderState = 0,
+            RegimentPaths = 0,
+            PathInterrupted = false,
+            MovementMode = 0
+        });
+
+        AssertTrue(decision.AllowChange, "idle group should allow stance retask");
+        AssertEqual("settled", decision.Reason, "reason");
+    }
+
+    private static void TacticalOrderSettlementBlocksQueuedStanceRetask()
+    {
+        var decision = TacticalOrderSettlementGate.Evaluate(new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 2,
+            OrderState = 0,
+            RegimentPaths = 0,
+            PathInterrupted = false,
+            MovementMode = 0
+        });
+
+        AssertFalse(decision.AllowChange, "queued vanilla orders must block stance retask");
+        AssertEqual("queued-order", decision.Reason, "reason");
+    }
+
+    private static void TacticalOrderSettlementBlocksDeliveredPendingStanceRetask()
+    {
+        var decision = TacticalOrderSettlementGate.Evaluate(new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 0,
+            OrderState = 2,
+            RegimentPaths = 0,
+            PathInterrupted = false,
+            MovementMode = 0
+        });
+
+        AssertFalse(decision.AllowChange, "delivered but unapplied orderstate must block stance retask");
+        AssertEqual("pending-orderstate", decision.Reason, "reason");
+    }
+
+    private static void TacticalOrderSettlementBlocksUnknownOrderState()
+    {
+        var decision = TacticalOrderSettlementGate.Evaluate(new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 0,
+            OrderState = -1,
+            RegimentPaths = 0,
+            PathInterrupted = false,
+            MovementMode = 0
+        });
+
+        AssertFalse(decision.AllowChange, "unknown vanilla order state must fail closed");
+        AssertEqual("unknown-orderstate", decision.Reason, "reason");
     }
 
     private static void TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly()

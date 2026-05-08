@@ -1303,10 +1303,14 @@ namespace WhiskeyRealism.Patches
 
         private static bool MatrixOrderFrictionAllowsChange(Regiment group)
         {
-            if (group == null) return false;
-            if (group.regimentpaths > 0 && group.pathinterrupted) return false;
-            if (group.regimentpaths > 0 && group.movementmode == 3) return false;
-            return true;
+            return TacticalOrderSettlementGate.Evaluate(new TacticalOrderSettlementGate.Input
+            {
+                OrderQueueCount = SafeOrderQueueCount(group),
+                OrderState = SafeOrderState(group),
+                RegimentPaths = group != null ? group.regimentpaths : 0,
+                PathInterrupted = group != null && group.pathinterrupted,
+                MovementMode = group != null ? group.movementmode : -1
+            }).AllowChange;
         }
 
         private static bool MatrixReceivedFire(Regiment group)

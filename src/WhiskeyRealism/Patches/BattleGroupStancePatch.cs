@@ -129,10 +129,20 @@ namespace WhiskeyRealism.Patches
 
         private static bool OrderFrictionAllowsChange(Regiment group)
         {
-            if (group == null) return false;
-            if (group.regimentpaths > 0 && group.pathinterrupted) return false;
-            if (group.regimentpaths > 0 && group.movementmode == 3) return false;
-            return true;
+            return TacticalOrderSettlementGate.Evaluate(new TacticalOrderSettlementGate.Input
+            {
+                OrderQueueCount = SafeOrderQueueCount(group),
+                OrderState = group != null ? group.orderstate : -1,
+                RegimentPaths = group != null ? group.regimentpaths : 0,
+                PathInterrupted = group != null && group.pathinterrupted,
+                MovementMode = group != null ? group.movementmode : -1
+            }).AllowChange;
+        }
+
+        private static int SafeOrderQueueCount(Regiment group)
+        {
+            try { return group != null && group.orderqueue != null ? group.orderqueue.Count : 0; }
+            catch { return 1; }
         }
 
         private static void LogDecision(
