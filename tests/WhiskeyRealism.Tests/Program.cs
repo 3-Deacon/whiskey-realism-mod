@@ -490,7 +490,10 @@ static class Program
             ("tactical refuse flank intent no refuse when balanced", TacticalRefuseFlankIntentNoRefuseWhenBalanced),
             ("tactical refuse flank intent refuse left when left threatened", TacticalRefuseFlankIntentRefuseLeftWhenLeftThreatened),
             ("tactical refuse flank intent refuse right when right threatened", TacticalRefuseFlankIntentRefuseRightWhenRightThreatened),
-            ("tactical refuse flank intent no refuse on offensive posture", TacticalRefuseFlankIntentNoRefuseOnOffensivePosture)
+            ("tactical refuse flank intent no refuse on offensive posture", TacticalRefuseFlankIntentNoRefuseOnOffensivePosture),
+            ("tactical fatigue state bands", TacticalFatigueStateBands),
+            ("tactical fatigue state clamps below", TacticalFatigueStateClampsBelow),
+            ("tactical fatigue state clamps above", TacticalFatigueStateClampsAbove)
         };
 
         foreach (var test in tests)
@@ -9616,5 +9619,27 @@ static class Program
         };
         AssertEqual(TacticalRefuseFlankIntent.Decision.NoRefuse,
             TacticalRefuseFlankIntent.Score(input), "offensive posture suppresses refuse");
+    }
+
+    private static void TacticalFatigueStateBands()
+    {
+        AssertEqual(TacticalFatigueState.Result.Fresh, TacticalFatigueState.Score(0.10f), "0.10 fresh");
+        AssertEqual(TacticalFatigueState.Result.Fresh, TacticalFatigueState.Score(0.24f), "boundary < 0.25");
+        AssertEqual(TacticalFatigueState.Result.Tiring, TacticalFatigueState.Score(0.25f), "0.25 tiring");
+        AssertEqual(TacticalFatigueState.Result.Tiring, TacticalFatigueState.Score(0.54f), "boundary < 0.55");
+        AssertEqual(TacticalFatigueState.Result.Spent, TacticalFatigueState.Score(0.55f), "0.55 spent");
+        AssertEqual(TacticalFatigueState.Result.Spent, TacticalFatigueState.Score(0.79f), "boundary < 0.80");
+        AssertEqual(TacticalFatigueState.Result.Exhausted, TacticalFatigueState.Score(0.80f), "0.80 exhausted");
+        AssertEqual(TacticalFatigueState.Result.Exhausted, TacticalFatigueState.Score(1.00f), "1.00 exhausted");
+    }
+
+    private static void TacticalFatigueStateClampsBelow()
+    {
+        AssertEqual(TacticalFatigueState.Result.Fresh, TacticalFatigueState.Score(-0.5f), "negative clamps fresh");
+    }
+
+    private static void TacticalFatigueStateClampsAbove()
+    {
+        AssertEqual(TacticalFatigueState.Result.Exhausted, TacticalFatigueState.Score(2.0f), "above 1 clamps exhausted");
     }
 }

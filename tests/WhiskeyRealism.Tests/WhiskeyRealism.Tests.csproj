@@ -146,6 +146,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalQuadrantThreatScorer.cs" Link="TacticalQuadrantThreatScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalChargeViability.cs" Link="TacticalChargeViability.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalRefuseFlankIntent.cs" Link="TacticalRefuseFlankIntent.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalFatigueState.cs" Link="TacticalFatigueState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPosture.cs" Link="DirectorPosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />
