@@ -4,6 +4,7 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical;
 
 namespace WhiskeyRealism
 {
@@ -38,6 +39,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
+        public const int TacticalMoraleSnapshotLedgerCapacity = 4;
+        public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
@@ -333,6 +336,8 @@ namespace WhiskeyRealism
             // Strategic-brain bootstrap before patches register so patches
             // never see a null Instance on their first invocation.
             StrategicCoordinator.Bootstrap();
+
+            MoraleSnapshotLedger = new TacticalMoraleSnapshotLedger(capacity: TacticalMoraleSnapshotLedgerCapacity);
 
             // PatchAll(assembly) reflects all [HarmonyPatch] attributed classes
             // (including nested types like AICampaignSaveLoadPatch.SavePatch /
