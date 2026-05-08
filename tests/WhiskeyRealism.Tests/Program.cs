@@ -81,6 +81,9 @@ static class Program
             ("tactical support screen unsupported no screen", TacticalSupportScreenUnsupportedNoScreen),
             ("tactical support screen unknown on uninitialized", TacticalSupportScreenUnknownOnUninitialized),
             ("tactical support screen W&L gate blocks", TacticalSupportScreenWlGateBlocks),
+            ("tactical artillery input adapter reads scalar fields", TacticalArtilleryInputAdapterReadsScalarFields),
+            ("tactical artillery input adapter rejects non-artillery", TacticalArtilleryInputAdapterRejectsNonArtillery),
+            ("tactical artillery input adapter rejects routed", TacticalArtilleryInputAdapterRejectsRouted),
             ("tactical destination discipline clear", TacticalDestinationDisciplineClearDestination),
             ("tactical destination discipline gun crowded on gun", TacticalDestinationDisciplineGunCrowdedOnGun),
             ("tactical destination discipline line crowded on line", TacticalDestinationDisciplineLineCrowdedOnLine),
@@ -2319,6 +2322,61 @@ static class Program
             IsPlayerAiOrFeud = 0,
         };
         AssertEqual(TacticalSupportScreen.Result.Unknown, TacticalSupportScreen.Score(input), "W&L gate blocks");
+    }
+
+    private static void TacticalArtilleryInputAdapterReadsScalarFields()
+    {
+        var snapshot = new TacticalArtilleryInputAdapter.Snapshot
+        {
+            UnitTyp = TacticalUnitType.Artillery,
+            Guns = 4,
+            IsRouted = false,
+            MarkedForRout = false,
+            AmmoTotalRatio = 0.55f,
+            CanisterAmmo = 0.30f,
+            Morale = 0.75f,
+            BattleStartMorale = 0.85f,
+            BattleStartMoraleInitialized = true,
+            DangerRadius = 100f,
+            ClosestEnemyDistance = 80f,
+            InfCavScreenCount = 2,
+            AiFeudStance = -1,
+            IsPlayerAiOrFeud = 0,
+            FallbackThreshold = 0.40f,
+            CombatBehaviorOrdered = 8,
+            VolleyDwellRemaining = 0f,
+        };
+        var input = TacticalArtilleryInputAdapter.ToSupportScreenInput(snapshot);
+        AssertEqual(0.75f, input.ProtectedUnitMorale, "morale carried");
+        AssertEqual(0.40f, input.MoraleFallbackThreshold, "threshold carried");
+        AssertEqual(0.85f, input.BattleStartMorale, "battle start carried");
+        AssertEqual(80f, input.EnemyDistance, "enemy distance carried");
+        AssertEqual(100f, input.DangerRadius, "danger radius carried");
+        AssertEqual(2, input.ScreenUnitCount, "inf/cav screen count carried");
+        AssertEqual(-1, input.AiFeudStance, "feud stance carried");
+    }
+
+    private static void TacticalArtilleryInputAdapterRejectsNonArtillery()
+    {
+        var snapshot = new TacticalArtilleryInputAdapter.Snapshot
+        {
+            UnitTyp = TacticalUnitType.Infantry,
+            Guns = 0,
+            AiFeudStance = -1,
+        };
+        AssertFalse(TacticalArtilleryInputAdapter.IsEligible(snapshot), "non-artillery rejected");
+    }
+
+    private static void TacticalArtilleryInputAdapterRejectsRouted()
+    {
+        var snapshot = new TacticalArtilleryInputAdapter.Snapshot
+        {
+            UnitTyp = TacticalUnitType.Artillery,
+            Guns = 4,
+            IsRouted = true,
+            AiFeudStance = -1,
+        };
+        AssertFalse(TacticalArtilleryInputAdapter.IsEligible(snapshot), "routed rejected");
     }
 
     private static void TacticalDestinationDisciplineClearDestination()
