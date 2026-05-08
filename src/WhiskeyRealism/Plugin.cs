@@ -36,6 +36,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
+        internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
@@ -172,6 +173,11 @@ namespace WhiskeyRealism
                 "Enable Tactical Group Sector Stance",
                 false,
                 "Default OFF for Slice B5. Uses B3 sector doctrine to bias group ai_stance without issuing movement, reserve, artillery, fallback, or charge orders.");
+            EnableTacticalCommanderIntentDoctrine = Config.Bind(
+                "Tactical",
+                "Enable Tactical Commander Intent Doctrine",
+                false,
+                "Default OFF for Slice B6a. Computes tactical commander intent and playbook from B3-B5 evidence and the active OperationPosture, and emits read-only [TacticalIntent] and [TacticalPlaybook] telemetry. Does not change any vanilla battle state.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
