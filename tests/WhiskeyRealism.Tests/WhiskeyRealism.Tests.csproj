@@ -162,5 +162,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignPaceLedger.cs" Link="CampaignPaceLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategicResilienceDirector.cs" Link="StrategicResilienceDirector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPublishClamp.cs" Link="DirectorPublishClamp.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\EchelonOrchestrator.cs" Link="Orchestrator\EchelonOrchestrator.cs" />
   </ItemGroup>
 </Project>

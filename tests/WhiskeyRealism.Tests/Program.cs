@@ -5,6 +5,7 @@ using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 static class Program
 {
@@ -528,7 +529,10 @@ static class Program
             ("tactical refuse flank intent no refuse on offensive posture", TacticalRefuseFlankIntentNoRefuseOnOffensivePosture),
             ("tactical fatigue state bands", TacticalFatigueStateBands),
             ("tactical fatigue state clamps below", TacticalFatigueStateClampsBelow),
-            ("tactical fatigue state clamps above", TacticalFatigueStateClampsAbove)
+            ("tactical fatigue state clamps above", TacticalFatigueStateClampsAbove),
+            ("echelon orchestrator empty tick is no-op", EchelonOrchestratorEmptyTickIsNoOp),
+            ("echelon orchestrator propagate intent dispatches to children", EchelonOrchestratorPropagateIntentDispatchesToChildren),
+            ("echelon orchestrator parent child link is bidirectional", EchelonOrchestratorParentChildLinkBidirectional)
         };
 
         foreach (var test in tests)
@@ -10245,5 +10249,39 @@ static class Program
     private static void TacticalFatigueStateClampsAbove()
     {
         AssertEqual(TacticalFatigueState.Result.Exhausted, TacticalFatigueState.Score(2.0f), "above 1 clamps exhausted");
+    }
+
+    private static void EchelonOrchestratorEmptyTickIsNoOp()
+    {
+        var stub = new StubEchelonOrchestrator(EchelonKind.Army, allianceId: 0);
+        stub.Tick();
+        AssertEqual(1, stub.TickCount, "tick count after one Tick");
+    }
+
+    private static void EchelonOrchestratorPropagateIntentDispatchesToChildren()
+    {
+        var parent = new StubEchelonOrchestrator(EchelonKind.Army, allianceId: 0);
+        var child = new StubEchelonOrchestrator(EchelonKind.Corps, allianceId: 0);
+        parent.AddChild(child);
+        parent.PropagateIntent();
+        AssertEqual(1, child.PropagateCount, "child propagate count");
+    }
+
+    private static void EchelonOrchestratorParentChildLinkBidirectional()
+    {
+        var parent = new StubEchelonOrchestrator(EchelonKind.Army, allianceId: 0);
+        var child = new StubEchelonOrchestrator(EchelonKind.Corps, allianceId: 0);
+        parent.AddChild(child);
+        AssertTrue(ReferenceEquals(parent, child.Parent), "child.Parent is parent");
+        AssertEqual(1, parent.Children.Count, "parent.Children.Count");
+    }
+
+    private sealed class StubEchelonOrchestrator : EchelonOrchestrator
+    {
+        public StubEchelonOrchestrator(EchelonKind kind, int allianceId) : base(kind, allianceId) { }
+        public int TickCount { get; private set; }
+        public int PropagateCount { get; private set; }
+        public override void Tick() { TickCount++; base.Tick(); }
+        public override void PropagateIntent() { PropagateCount++; base.PropagateIntent(); }
     }
 }
