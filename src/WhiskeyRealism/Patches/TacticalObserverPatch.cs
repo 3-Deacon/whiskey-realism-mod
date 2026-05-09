@@ -288,23 +288,25 @@ namespace WhiskeyRealism.Patches
         }
 
         /// <summary>
-        /// Counts Regiment instances across all sides where inbattle == true.
-        /// Uses BattleUnits.completeunitlist (public static List&lt;Regiment&gt;) — no reflection
-        /// needed. Returns 0 on any exception so a vanilla rename fails gracefully.
+        /// Returns a positive value when a battle scene is loaded, 0 otherwise. Used by
+        /// the lifecycle detector as the "battle is running" signal.
+        ///
+        /// Vanilla nullifies `BattleUnits.completeunitlist` on battle end (decompile line
+        /// 79219) and treats `completeunitlist == null` as "no battle" in many call sites
+        /// (lines 11306, 36228, 36316, 65947, 105437, 210259, 210294). The presence of a
+        /// non-empty list is therefore the canonical signal that a tactical battle scene
+        /// is currently loaded — irrespective of `Regiment.inbattle` (which tracks
+        /// campaign-side engagement state and does not necessarily flip true on
+        /// battle-instance Regiments). Returns 0 on any exception so a vanilla rename
+        /// fails gracefully.
         /// </summary>
         private static int CountUnitsInBattleAcrossSides()
         {
             try
             {
                 var all = BattleUnits.completeunitlist;
-                if (all == null) return 0;
-                int count = 0;
-                for (int i = 0; i < all.Count; i++)
-                {
-                    var r = all[i];
-                    if (r != null && r.inbattle) count++;
-                }
-                return count;
+                if (all == null || all.Count == 0) return 0;
+                return all.Count;
             }
             catch (Exception e)
             {
