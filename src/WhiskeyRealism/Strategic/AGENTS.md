@@ -1,6 +1,6 @@
-# Strategic And Tactical Logic Instructions
+# Strategic Logic Instructions
 
-These rules apply to non-patch logic under `src/WhiskeyRealism/Strategic/` and future pure tactical logic.
+These rules apply to non-patch logic under `src/WhiskeyRealism/Strategic/`. Identical rules apply to tactical-orchestrator code under `src/WhiskeyRealism/Tactical/` — a sibling [`src/WhiskeyRealism/Tactical/AGENTS.md`](../Tactical/AGENTS.md) mirrors this file so path-based `AGENTS.md` discovery picks it up regardless of which subtree a session opens in.
 
 ## Design Rules
 

@@ -26,7 +26,12 @@
 
 ## What this project is
 
-A BepInEx plugin for Grand Tactician: The Civil War (1861-1865) that layers surgical Harmony patches on top of vanilla. **Slice A** (strategic-brain overhaul: era × faction × officer-personality scoring replacing the vanilla random-objective picker) shipped at v0.2.2. Tactical AI work follows the same shipped-code/decompile-first rule; see `docs/handoff.md` for the current shipped state, deployed DLL hash, and active workstream.
+A BepInEx plugin for Grand Tactician: The Civil War (1861-1865) that layers surgical Harmony patches on top of vanilla. Two shipped workstreams on `main`:
+
+- **Strategic brain (Slice A, v0.2.2):** era × faction × officer-personality scoring replacing the vanilla random-objective picker. CIC + theater commanders, daily ledger cadence, JSON sidecar persistence.
+- **Tactical orchestrator (O0-O3 + #58):** per-battle echelon stack (`TacticalBattleCoordinator` + per-side `TacticalBattleOrchestrator` → `ArmyOrchestrator` → direct-child role allocation), army-intent inference with adversarial replan loop, #42 W&L feud-action gate consultation, #58 deployment observer telemetry. Behavior writers ship default-off behind explicit config flags. Tactical-orchestrator state has the same read-only-to-patches contract as strategic state.
+
+All tactical AI work follows the same shipped-code/decompile-first rule. See `docs/handoff.md` for the current shipped state, deployed DLL hash, and active workstream.
 
 Six locked design choices (Slice A umbrella spec, archived after ship: [`docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md`](docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md)):
 1. Slice A — strategic brain (campaign layer first; tactical layer is a later slice)
@@ -101,6 +106,7 @@ whiskey-realism-mod/
 │   ├── WhiskeyRealism.csproj
 │   ├── Plugin.cs                   ← BepInEx entry, ConfigEntry definitions
 │   ├── Strategic/                  ← strategic-brain core types: coordinator, CIC + theater commanders, era/personality/succession, per-cadence ledgers (front, army-area, formation-directive, fiscal, construction, defense intent), and supporting catalogs/runtimes. See files in directory; `docs/patch-catalog.md` is the canonical patch ordinal map.
+│   ├── Tactical/                   ← tactical-brain logic. `Orchestrator/` holds the per-battle echelon stack (`TacticalBattleCoordinator` + per-side `TacticalBattleOrchestrator`, `ArmyOrchestrator`, `DirectChildAllocator`/`Discovery`/`Gate`, `ArmyIntentInference`, `EnemyVisibleState`, etc.). Top-level files hold pure scorers/ledgers (`TacticalSectorLedger`, `TacticalOddsDoctrine`, `TacticalCommanderIntent`, `TacticalDeploymentTelemetry`, etc.). Same pure/runtime split as `Strategic/` — runtime adapters live alongside but are excluded from the test csproj.
 │   ├── Patches/                    ← Harmony patches; one concern per file
 │   │   └── See docs/patch-catalog.md for the canonical numbered ordinal map; coordinator-driven runtimes are listed there too without ordinals.
 │   └── Util/                       ← shared infrastructure
@@ -129,7 +135,8 @@ whiskey-realism-mod/
 Codex supports layered `AGENTS.md` files. It loads this root file first, then any more specific `AGENTS.md` files on the path to the current working directory. If a session starts at repo root, use this section as the index and read the relevant nested guidance before specialized work:
 
 - Patch work: [`src/WhiskeyRealism/Patches/AGENTS.md`](src/WhiskeyRealism/Patches/AGENTS.md)
-- Pure strategic/tactical logic: [`src/WhiskeyRealism/Strategic/AGENTS.md`](src/WhiskeyRealism/Strategic/AGENTS.md)
+- Pure strategic logic: [`src/WhiskeyRealism/Strategic/AGENTS.md`](src/WhiskeyRealism/Strategic/AGENTS.md)
+- Tactical orchestrator + tactical scorers/ledgers: [`src/WhiskeyRealism/Tactical/AGENTS.md`](src/WhiskeyRealism/Tactical/AGENTS.md)
 - Tests: [`tests/WhiskeyRealism.Tests/AGENTS.md`](tests/WhiskeyRealism.Tests/AGENTS.md)
 - Bug fixes: [`docs/bug-fixes/AGENTS.md`](docs/bug-fixes/AGENTS.md)
 - Specs/plans/reviews: [`docs/superpowers/AGENTS.md`](docs/superpowers/AGENTS.md)
@@ -171,7 +178,7 @@ Use the relevant Superpowers or repo skill before acting when the task matches i
 
 - Every Harmony patch class lives under `src/WhiskeyRealism/Patches/`. One concern per file.
 - Wrap reflection lookups in try/catch and log via `Plugin.Log.LogWarning(...)` on failure. **Never throw from a patch.** A single throw on every Postfix tick produces 40k log lines per session.
-- Strategic mod state is **read-only** to Harmony patches. Patches read CIC / TheaterCommander / ledger state and steer existing AI methods. State writes happen only on daily strategic review and event-trigger handlers.
+- Strategic AND tactical-orchestrator mod state is **read-only** to Harmony patches. Patches read CIC / TheaterCommander / ledger / orchestrator state (`ArmyOrchestrator.GetDirectChildRole`, `TacticalBattleCoordinator.GetSideOrchestrator`, etc.) and steer existing AI methods. State writes happen only on daily strategic review, event-trigger handlers, and the per-battle orchestrator tick cycle.
 - New tactical behavior patches that write vanilla battle state (`macroai`, `ai_stance`, movement, reserves, artillery, fallback, retreat, or charge state) must ship behind explicit default-off config until a focused in-game smoke proves bounded logs, stable Harmony anchors, no repeated exceptions, no player-subordinate retasking, and no unintended side effects. Read-only telemetry may be enabled separately.
 - Add a header comment explaining what the vanilla method does and what the patch changes.
 
