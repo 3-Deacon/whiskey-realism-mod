@@ -612,6 +612,8 @@ static class Program
             ("direct child allocator allocates refuse to flank with exposure", DirectChildAllocatorAllocatesRefuseToFlankWithExposure),
             ("direct child allocator deterministic on registration order tie", DirectChildAllocatorDeterministicOnRegistrationOrderTie),
             ("direct child allocator unknown when no plan main effort match", DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch),
+            ("direct child allocator assigns screen on screening sector with low strengths", DirectChildAllocatorAssignsScreenOnScreeningSectorWithLowStrengths),
+            ("direct child allocator handles mismatched per child intent length", DirectChildAllocatorHandlesMismatchedPerChildIntentLength),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -11450,6 +11452,38 @@ static class Program
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
         var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
         AssertEqual(DirectChildRole.Unknown, intents[0].Role);
+    }
+
+    private static void DirectChildAllocatorAssignsScreenOnScreeningSectorWithLowStrengths()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new[] { 4 }, 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Screening", true) };
+        var evidence = new[] { new DirectChildEvidence(1, 1, false, 4, 0, 0.3f) };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Screen, intents[0].Role);
+        AssertEqual(DirectChildAxis.Hold, intents[0].Axis);
+    }
+
+    private static void DirectChildAllocatorHandlesMismatchedPerChildIntentLength()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        // perChildEnemyIntent length 0 != snapshots length 1; allocator must rebuild internally.
+        var intents = DirectChildAllocator.AllocateWithChildIntent(
+            plan, personality, snapshots,
+            new[] { new DirectChildEvidence(1, 3, true, 0, 0, 0.7f) },
+            Array.Empty<TacticalIntentModel>());
+        // With Unknown enemy intent, Fallback rule (which needs Attack intent) cannot fire.
+        // Adverse-odds child with no other rule match should land Unknown.
+        AssertEqual(1, intents.Count);
+        AssertEqual(DirectChildRole.Unknown, intents[0].Role);
+        AssertEqual(InferredIntent.Unknown, intents[0].EnemyIntent.PrimaryIntent);
     }
 
     private static void EnemyVisibleStateRecordsSectorAndContactFields()

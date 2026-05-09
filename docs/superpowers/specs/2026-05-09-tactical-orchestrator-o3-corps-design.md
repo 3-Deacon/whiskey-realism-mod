@@ -141,7 +141,7 @@ Rules:
 2. Adjacent children (sector ± 1 from main) with `OwnStrengthBucket >= 1` and not on a refused flank receive `SupportMain`.
 3. Children whose sector is in `plan.FixingSectors` and have `ContactFlag = true` receive `Fix`.
 4. Children whose sector is in `plan.ScreeningSectors` or have low `OwnStrengthBucket` and low `EnemyStrengthBucket` receive `Screen`.
-5. The leftmost child whose `FlankExposureBucket` exceeds threshold receives `RefuseLeft`; rightmost equivalent receives `RefuseRight`. Threshold = `2` on a 0-3 bucket scale.
+5. Every child with `FlankExposureBucket >= 2` receives a Refuse role: `RefuseLeft` if the child's `PrimarySector` is less than the chosen Main effort's sector (or `plan.MainEffortSector` when no Main was picked), `RefuseRight` otherwise. This means each exposed flank position holds its sector individually rather than picking only the extremes. Threshold = `2` on a 0-3 bucket scale.
 6. Children with `OwnStrengthBucket >= 2`, `ContactFlag = false`, and not yet assigned receive `Reserve`.
 7. Children with adverse-odds evidence (`EnemyStrengthBucket > OwnStrengthBucket + 1`) and inferred enemy `Attack` intent in their frontage receive `Fallback`. Fallback is intent-only at O3; it does not trigger any retreat write.
 8. Anything still `Unknown` after the above stays `Unknown` and is treated by #42 as "no opinion → defer to W&L decision only".
