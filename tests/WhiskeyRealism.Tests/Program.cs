@@ -649,7 +649,13 @@ static class Program
             ("army tick cycle reset clears battle lifetime rate limit", ArmyTickCycleResetClearsBattleLifetimeRateLimit),
             ("army tick cycle updates observed intent without replan", ArmyTickCycleUpdatesObservedIntentWithoutReplan),
             ("army tick cycle enemy intent shift fires when confident enemy attacks", ArmyTickCycleEnemyIntentShiftFiresWhenConfidentEnemyAttacks),
-            ("army tick cycle no replan if orchestrator has no plan", ArmyTickCycleNoReplanIfOrchestratorHasNoPlan)
+            ("army tick cycle no replan if orchestrator has no plan", ArmyTickCycleNoReplanIfOrchestratorHasNoPlan),
+            ("direct child discovery probe handles empty unitsused", DirectChildDiscoveryProbeHandlesEmptyUnitsused),
+            ("direct child discovery probe filters below effective command min", DirectChildDiscoveryProbeFiltersBelowEffectiveCommandMin),
+            ("direct child discovery probe selects highest unittyp as army root", DirectChildDiscoveryProbeSelectsHighestUnittypAsArmyRoot),
+            ("direct child discovery probe handles negative command hierarchy shift", DirectChildDiscoveryProbeHandlesNegativeCommandHierarchyShift),
+            ("direct child discovery probe synthesizes when zero direct children", DirectChildDiscoveryProbeSynthesizesWhenZeroDirectChildren),
+            ("direct child discovery probe iterates each army root for multi army side", DirectChildDiscoveryProbeIteratesEachArmyRootForMultiArmySide),
         };
 
         foreach (var test in tests)
@@ -12231,5 +12237,81 @@ static class Program
             anyContactSpotted: true,
             anyContactBroken: false,
             enemyReinforcementStrength24h: 0f);
+    }
+
+    private static void DirectChildDiscoveryProbeHandlesEmptyUnitsused()
+    {
+        var snaps = DirectChildDiscovery.Probe(Array.Empty<DirectChildDiscovery.RegimentProbe>(), commandHierarchyShift: 0);
+        AssertEqual(0, snaps.Count);
+    }
+
+    private static void DirectChildDiscoveryProbeFiltersBelowEffectiveCommandMin()
+    {
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(instanceId: 100, unittyp: 13, name: "Skirmisher", active: true, parentInstanceId: 0, isDirectChild: false),
+            new DirectChildDiscovery.RegimentProbe(instanceId: 200, unittyp: 16, name: "Army A", active: true, parentInstanceId: 0, isDirectChild: false),
+            new DirectChildDiscovery.RegimentProbe(instanceId: 300, unittyp: 15, name: "Corps A", active: true, parentInstanceId: 200, isDirectChild: true),
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: 0);
+        AssertEqual(1, snaps.Count);
+        AssertEqual("child-300", snaps[0].ChildId);
+        AssertEqual("army-200", snaps[0].ParentArmyId);
+    }
+
+    private static void DirectChildDiscoveryProbeSelectsHighestUnittypAsArmyRoot()
+    {
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(100, 16, "Army", true, 0, false),
+            new DirectChildDiscovery.RegimentProbe(200, 15, "Corps Direct", true, 100, true),
+            new DirectChildDiscovery.RegimentProbe(300, 15, "Corps Independent", true, 999 /* not under army */, false),
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: 0);
+        AssertEqual(1, snaps.Count);
+        AssertEqual("child-200", snaps[0].ChildId);
+    }
+
+    private static void DirectChildDiscoveryProbeHandlesNegativeCommandHierarchyShift()
+    {
+        // shift = -1: army root unittyp == 15 (vanilla "division" label), child unittyp == 14
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(100, 15, "Early-war Army", true, 0, false),
+            new DirectChildDiscovery.RegimentProbe(200, 14, "Early-war Corps", true, 100, true),
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: -1);
+        AssertEqual(1, snaps.Count);
+        AssertEqual(14, snaps[0].RawUnitTyp);
+        AssertEqual(15, snaps[0].EffectiveCommandLevel); // 14 - (-1) = 15 = unshifted-Corps
+    }
+
+    private static void DirectChildDiscoveryProbeSynthesizesWhenZeroDirectChildren()
+    {
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(100, 16, "Lonely Army", true, 0, false),
+            // no children attached
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: 0);
+        AssertEqual(1, snaps.Count);
+        AssertEqual("synth-army-100", snaps[0].ChildId);
+        AssertEqual("army-100", snaps[0].ParentArmyId);
+        AssertEqual(16, snaps[0].RawUnitTyp);
+    }
+
+    private static void DirectChildDiscoveryProbeIteratesEachArmyRootForMultiArmySide()
+    {
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(100, 16, "ArmyA", true, 0, false),
+            new DirectChildDiscovery.RegimentProbe(200, 16, "ArmyB", true, 0, false),
+            new DirectChildDiscovery.RegimentProbe(300, 15, "Corps under A", true, 100, true),
+            new DirectChildDiscovery.RegimentProbe(400, 15, "Corps under B", true, 200, true),
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: 0);
+        AssertEqual(2, snaps.Count);
+        AssertEqual("army-100", snaps[0].ParentArmyId);
+        AssertEqual("army-200", snaps[1].ParentArmyId);
     }
 }
