@@ -44,6 +44,8 @@ static class Program
             ("tactical telemetry signature changes on command signature", TacticalTelemetrySignatureChangesOnCommandSignature),
             ("tactical telemetry throttle suppresses repeated signature", TacticalTelemetryThrottleSuppressesRepeatedSignature),
             ("tactical telemetry delta formats before after counts", TacticalTelemetryDeltaFormatsBeforeAfterCounts),
+            ("tactical deployment telemetry summarizes large moves", TacticalDeploymentTelemetrySummarizesLargeMoves),
+            ("tactical deployment telemetry tracks new and removed groups", TacticalDeploymentTelemetryTracksNewAndRemovedGroups),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -861,6 +863,54 @@ static class Program
         AssertContains(delta, "groups=2->2", "group delta");
         AssertContains(delta, "charging=0->1", "charging delta");
         AssertContains(delta, "reserves=1->2", "reserve delta");
+    }
+
+    private static void TacticalDeploymentTelemetrySummarizesLargeMoves()
+    {
+        var before = new TacticalDeploymentSnapshot("pre", 0, 0, 0, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("army", "Army", 0, 16, 100f, 100f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("division", "Division", 0, 15, 300f, 100f, 1, 1, 0, false, true)
+        });
+        var after = new TacticalDeploymentSnapshot("post", 0, 0, 0, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("army", "Army", 0, 16, 250f, 100f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("division", "Division", 0, 15, 310f, 100f, 1, 1, 0, false, true)
+        });
+
+        var summary = TacticalDeploymentTelemetry.Delta("DoPlacementAIUnitsWithinDeploymentzoneNew", before, after);
+
+        AssertEqual(2, summary.MatchedGroups, "matched groups");
+        AssertEqual(2, summary.MovedGroups, "moved groups");
+        AssertEqual(1, summary.LargeMoves, "large moves");
+        AssertNear(150f, summary.MaxMoveDistance, 0.01f, "max move");
+        AssertNear(80f, summary.AverageMoveDistance, 0.01f, "average move");
+        AssertContains(TacticalDeploymentTelemetry.FormatSummary(summary), "[TacticalDeployment]", "summary prefix");
+        AssertContains(TacticalDeploymentTelemetry.FormatSummary(summary), "largeMoves=1", "large move field");
+    }
+
+    private static void TacticalDeploymentTelemetryTracksNewAndRemovedGroups()
+    {
+        var before = new TacticalDeploymentSnapshot("pre", 1, 5, 2, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("kept", "Kept", 1, 14, 0f, 0f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("removed", "Removed", 1, 14, 10f, 0f, 1, 1, 0, false, true)
+        });
+        var after = new TacticalDeploymentSnapshot("post", 1, 5, 2, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("kept", "Kept", 1, 14, 0f, 0f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("new", "New", 1, 14, 40f, 0f, 1, 1, 0, false, true)
+        });
+
+        var summary = TacticalDeploymentTelemetry.Delta("SetActiveDeploymentPhase", before, after);
+        string signature = TacticalDeploymentTelemetry.Signature(summary);
+
+        AssertEqual(1, summary.NewGroups, "new groups");
+        AssertEqual(1, summary.RemovedGroups, "removed groups");
+        AssertContains(signature, "surface=SetActiveDeploymentPhase", "surface signature");
+        AssertContains(signature, "phase=eod", "phase signature");
+        AssertContains(signature, "new=1", "new signature");
+        AssertContains(signature, "removed=1", "removed signature");
     }
 
     private static void TacticalContactNoSightingIsNone()
