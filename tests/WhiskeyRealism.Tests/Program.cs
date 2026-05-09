@@ -628,6 +628,11 @@ static class Program
             ("army orchestrator replan with intent resets age and updates history", ArmyOrchestratorReplanWithIntentResetsAgeAndUpdatesHistory),
             ("army orchestrator replan without intent leaves intent unknown", ArmyOrchestratorReplanWithoutIntentLeavesIntentUnknown),
             ("army orchestrator failed replan preserves active state", ArmyOrchestratorFailedReplanPreservesActiveState),
+            ("army orchestrator register direct children stores snapshots", ArmyOrchestratorRegisterDirectChildrenStoresSnapshots),
+            ("army orchestrator observe evidence allocates roles", ArmyOrchestratorObserveEvidenceAllocatesRoles),
+            ("army orchestrator observe evidence is idempotent on equal signature", ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature),
+            ("army orchestrator emit army intent includes direct children", ArmyOrchestratorEmitArmyIntentIncludesDirectChildren),
+            ("army orchestrator get direct child role unknown when unregistered", ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered),
             ("army replan triggers phase deadline fires when age exceeds phase budget", ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget),
             ("army replan triggers main effort sector loss fires below threshold", ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold),
             ("army replan triggers force imbalance shift fires when odds cross hysteresis", ArmyReplanTriggersForceImbalanceShiftFiresWhenOddsCrossHysteresis),
@@ -11837,6 +11842,78 @@ static class Program
         AssertNear(45f, orch.PlanAgeSeconds, 1e-5f, "failed replan preserves age");
         AssertNear(1.4f, orch.HistoryGlobalOdds, 1e-5f, "failed replan preserves history odds");
         AssertEqual(InferredIntent.Unknown, orch.CurrentIntentModel.PrimaryIntent, "failed replan preserves previous intent");
+    }
+
+    private static void ArmyOrchestratorRegisterDirectChildrenStoresSnapshots()
+    {
+        var orch = NewArmyOrchestratorWithPlan();
+        orch.RegisterDirectChildren(new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
+        });
+        AssertEqual(2, orch.CurrentDirectChildIntents.Count);
+        AssertEqual("c0", orch.CurrentDirectChildIntents[0].ChildId);
+        AssertEqual(DirectChildRole.Unknown, orch.CurrentDirectChildIntents[0].Role); // no evidence yet
+    }
+
+    private static void ArmyOrchestratorObserveEvidenceAllocatesRoles()
+    {
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
+        });
+        orch.ObserveDirectChildEvidence(new[]
+        {
+            new DirectChildEvidence(1, 1, false, 0, 0, 0.3f),
+            new DirectChildEvidence(3, 1, true,  2, 0, 0.7f),
+        });
+        AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("c1"));
+    }
+
+    private static void ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature()
+    {
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        var firstRole = orch.GetDirectChildRole("c0");
+        var firstIntents = orch.CurrentDirectChildIntents;
+        // re-observe identical evidence — orchestrator should NOT recompute
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        AssertEqual(firstRole, orch.GetDirectChildRole("c0"));
+        AssertTrue(object.ReferenceEquals(firstIntents, orch.CurrentDirectChildIntents),
+            "signature-equal evidence must reuse the cached intent list (no allocation)");
+    }
+
+    private static void ArmyOrchestratorEmitArmyIntentIncludesDirectChildren()
+    {
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        var intent = orch.EmitArmyIntent();
+        AssertEqual(1, intent.DirectChildIntents.Count);
+        AssertEqual(DirectChildRole.Main, intent.DirectChildIntents[0].Role);
+    }
+
+    private static void ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered()
+    {
+        var orch = NewArmyOrchestratorWithPlan();
+        AssertEqual(DirectChildRole.Unknown, orch.GetDirectChildRole("never-registered"));
+    }
+
+    // Helper used by the five tests above. Note the 8-arg TacticalBattlePlan ctor (the
+    // last arg is jitterSeed) and 5-arg PersonalityVector ctor (the last arg is pol).
+    private static ArmyOrchestrator NewArmyOrchestratorWithPlan(int mainSector = 2)
+    {
+        var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
+        var catalog = new TacticalPlaybookCatalog();
+        var orch = new ArmyOrchestrator(allianceId: 0, catalog, personality);
+        orch.SetPlanForTesting(new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            mainSector, Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0f, 0));
+        return orch;
     }
 
     private static void ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget()

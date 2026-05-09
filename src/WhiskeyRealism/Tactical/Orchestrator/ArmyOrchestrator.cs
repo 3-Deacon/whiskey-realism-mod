@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -135,7 +137,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _plan.FixingSectors,
                 _plan.ScreeningSectors,
                 _plan.ReserveCommitTriggerOdds,
-                aggressionBias01: (_commanderPersonality.Aggression + 1f) * 0.5f);
+                aggressionBias01: (_commanderPersonality.Aggression + 1f) * 0.5f,
+                directChildIntents: _directChildIntents);
         }
 
         public ReplanTrigger CheckReplanTriggers(ReplanTriggerInput input) => ArmyReplanTriggers.Evaluate(input);
@@ -190,6 +193,113 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             return baseBias * m.Confidence01;
+        }
+
+        private DirectChildSnapshot[] _directChildSnapshots = Array.Empty<DirectChildSnapshot>();
+        private DirectChildEvidence[] _directChildEvidenceCache = Array.Empty<DirectChildEvidence>();
+        private IReadOnlyList<DirectChildIntent> _directChildIntents = Array.Empty<DirectChildIntent>();
+        private bool _hasObservedEvidence;
+
+        public IReadOnlyList<DirectChildIntent> CurrentDirectChildIntents => _directChildIntents;
+
+        public void RegisterDirectChildren(IReadOnlyList<DirectChildSnapshot> snapshots)
+        {
+            if (snapshots == null || snapshots.Count == 0)
+            {
+                _directChildSnapshots = Array.Empty<DirectChildSnapshot>();
+                _directChildEvidenceCache = Array.Empty<DirectChildEvidence>();
+                _directChildIntents = Array.Empty<DirectChildIntent>();
+                _hasObservedEvidence = false;
+                return;
+            }
+
+            _directChildSnapshots = new DirectChildSnapshot[snapshots.Count];
+            for (int i = 0; i < snapshots.Count; i++) _directChildSnapshots[i] = snapshots[i];
+            _directChildEvidenceCache = new DirectChildEvidence[snapshots.Count];
+            // Initial intent list mirrors snapshot count with Unknown roles so callers
+            // can iterate before any evidence has arrived.
+            var initial = new DirectChildIntent[snapshots.Count];
+            var unknownEnemy = new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>());
+            for (int i = 0; i < snapshots.Count; i++)
+            {
+                var s = snapshots[i];
+                initial[i] = new DirectChildIntent(
+                    s.ChildId, s.RawUnitTyp, s.EffectiveCommandLevel, s.DisplayName,
+                    primarySector: 0, role: DirectChildRole.Unknown,
+                    axis: DirectChildAxis.None, axisSector: 0,
+                    supportPriority01: 0f, aggressionBias01: (_commanderPersonality.Aggression + 1f) * 0.5f,
+                    enemyIntent: unknownEnemy);
+            }
+            _directChildIntents = initial;
+            _hasObservedEvidence = false;
+        }
+
+        public void ObserveDirectChildEvidence(IReadOnlyList<DirectChildEvidence> evidence)
+        {
+            if (!HasPlan) return;
+            if (evidence == null || evidence.Count != _directChildSnapshots.Length) return;
+
+            if (_hasObservedEvidence && SignatureEqual(evidence, _directChildEvidenceCache))
+            {
+                return;
+            }
+
+            for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
+            _hasObservedEvidence = true;
+
+            _directChildIntents = DirectChildAllocator.Allocate(
+                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache);
+        }
+
+        public void ObserveDirectChildEvidenceWithIntent(IReadOnlyList<DirectChildEvidence> evidence, IReadOnlyList<TacticalIntentModel> perChildEnemyIntent)
+        {
+            if (!HasPlan) return;
+            if (evidence == null || evidence.Count != _directChildSnapshots.Length) return;
+            // Force allocation regardless of signature when explicit per-child intent is supplied,
+            // since enemy intent (which is not part of DirectChildEvidence.SignatureEquals) can change.
+            for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
+            _hasObservedEvidence = true;
+            _directChildIntents = DirectChildAllocator.AllocateWithChildIntent(
+                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache, perChildEnemyIntent);
+        }
+
+        public DirectChildRole GetDirectChildRole(string childId)
+        {
+            if (string.IsNullOrEmpty(childId)) return DirectChildRole.Unknown;
+            for (int i = 0; i < _directChildIntents.Count; i++)
+            {
+                if (_directChildIntents[i].ChildId == childId) return _directChildIntents[i].Role;
+            }
+            return DirectChildRole.Unknown;
+        }
+
+        public DirectChildIntent? GetDirectChildIntent(string childId)
+        {
+            if (string.IsNullOrEmpty(childId)) return null;
+            for (int i = 0; i < _directChildIntents.Count; i++)
+            {
+                if (_directChildIntents[i].ChildId == childId) return _directChildIntents[i];
+            }
+            return null;
+        }
+
+        /// <summary>Test-only: directly install a plan without going through a playbook.</summary>
+        internal void SetPlanForTesting(TacticalBattlePlan plan)
+        {
+            _plan = plan;
+            HasPlan = true;
+            _planAgeSeconds = 0f;
+            _historyGlobalOdds = 1f;
+        }
+
+        private static bool SignatureEqual(IReadOnlyList<DirectChildEvidence> a, DirectChildEvidence[] b)
+        {
+            if (a.Count != b.Length) return false;
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (!a[i].SignatureEquals(b[i])) return false;
+            }
+            return true;
         }
     }
 }
