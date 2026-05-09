@@ -16,6 +16,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Between ArmyIntentInference reserve thresholds: not committed, not uncommitted.
         private const float UnknownReserveCommitFraction = 0.35f;
         private static FieldInfo _bunitsFieldCache;
+        private static readonly Dictionary<string, FieldInfo> _sideInfoFieldCache = new Dictionary<string, FieldInfo>();
 
         internal readonly struct Bundle
         {
@@ -331,7 +332,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (side < 0 || side >= bunits.sideinformation.Length) return false;
                 var info = bunits.sideinformation[side];
                 if (info == null) return false;
-                var field = AccessTools.Field(info.GetType(), fieldName);
+                var field = ResolveSideInfoField(info.GetType(), fieldName);
                 if (field == null) return false;
                 object raw = field.GetValue(info);
                 if (raw == null) return false;
@@ -343,6 +344,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 value = 0f;
                 return false;
             }
+        }
+
+        private static FieldInfo ResolveSideInfoField(Type infoType, string fieldName)
+        {
+            if (infoType == null) return null;
+
+            string key = infoType.FullName + ":" + fieldName;
+            if (_sideInfoFieldCache.ContainsKey(key))
+                return _sideInfoFieldCache[key];
+
+            var field = infoType.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            _sideInfoFieldCache[key] = field;
+            return field;
         }
 
         private static float SafeReserveCommitFraction(BattleUnits bunits, int side)
