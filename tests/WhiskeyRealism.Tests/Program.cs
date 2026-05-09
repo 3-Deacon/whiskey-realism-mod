@@ -604,6 +604,14 @@ static class Program
             ("direct child evidence buckets are non negative", DirectChildEvidenceBucketsAreNonNegative),
             ("direct child evidence equals same buckets", DirectChildEvidenceEqualsSameBuckets),
             ("direct child snapshot stores raw and effective unittyp", DirectChildSnapshotStoresRawAndEffectiveUnittyp),
+            ("direct child allocator assigns main on main effort sector with strength", DirectChildAllocatorAssignsMainOnMainEffortSectorWithStrength),
+            ("direct child allocator assigns support main to adjacent strong child", DirectChildAllocatorAssignsSupportMainToAdjacentStrongChild),
+            ("direct child allocator assigns fix on fixing sector with contact", DirectChildAllocatorAssignsFixOnFixingSectorWithContact),
+            ("direct child allocator assigns reserve to uncommitted strong child", DirectChildAllocatorAssignsReserveToUncommittedStrongChild),
+            ("direct child allocator assigns fallback on adverse odds and attack", DirectChildAllocatorAssignsFallbackOnAdverseOddsAndAttack),
+            ("direct child allocator allocates refuse to flank with exposure", DirectChildAllocatorAllocatesRefuseToFlankWithExposure),
+            ("direct child allocator deterministic on registration order tie", DirectChildAllocatorDeterministicOnRegistrationOrderTie),
+            ("direct child allocator unknown when no plan main effort match", DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -11289,6 +11297,159 @@ static class Program
         AssertEqual("child-99", snap.ChildId);
         AssertEqual("army-1", snap.ParentArmyId);
         AssertTrue(snap.Active, "active flag preserved");
+    }
+
+    private static void DirectChildAllocatorAssignsMainOnMainEffortSectorWithStrength()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 2, fixingSectors: new[] { 0 }, screeningSectors: new[] { 4 },
+            reserveCommitTriggerOdds: 1.2f, ageSeconds: 0f, jitterSeed: 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First Corps", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second Corps", true),
+            new DirectChildSnapshot("c2", "a", 15, 0, "Third Corps", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(1, 1, false, 0, 0, 0.5f),
+            new DirectChildEvidence(3, 1, true,  2, 0, 0.7f),
+            new DirectChildEvidence(1, 1, false, 4, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(3, intents.Count);
+        AssertEqual(DirectChildRole.Main, intents[1].Role, "main on sector 2");
+        AssertEqual(2, intents[1].PrimarySector);
+        AssertEqual(DirectChildAxis.SectorAxis, intents[1].Axis);
+        AssertEqual(2, intents[1].AxisSector);
+    }
+
+    private static void DirectChildAllocatorAssignsSupportMainToAdjacentStrongChild()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new[] { 0 }, new int[0], 1.2f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
+            new DirectChildSnapshot("c2", "a", 15, 0, "Third", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 1, false, 1, 0, 0.5f),
+            new DirectChildEvidence(3, 1, true,  2, 0, 0.7f),
+            new DirectChildEvidence(2, 1, false, 3, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.SupportMain, intents[0].Role);
+        AssertEqual(DirectChildRole.Main, intents[1].Role);
+        AssertEqual(DirectChildRole.SupportMain, intents[2].Role);
+    }
+
+    private static void DirectChildAllocatorAssignsFixOnFixingSectorWithContact()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new[] { 0 }, new[] { 4 }, 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pinning", true) };
+        var evidence = new[] { new DirectChildEvidence(2, 2, true, 0, 0, 0.6f) };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Fix, intents[0].Role);
+    }
+
+    private static void DirectChildAllocatorAssignsReserveToUncommittedStrongChild()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "Main", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Reserve", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(3, 2, true, 2, 0, 0.7f),
+            new DirectChildEvidence(3, 0, false, 5, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Main, intents[0].Role);
+        AssertEqual(DirectChildRole.Reserve, intents[1].Role);
+    }
+
+    private static void DirectChildAllocatorAssignsFallbackOnAdverseOddsAndAttack()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
+        var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 0, 0.8f, 0f, Array.Empty<EvidenceTag>());
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.AllocateWithChildIntent(
+            plan, personality, snapshots,
+            new[] { new DirectChildEvidence(1, 3, true, 0, 0, 0.7f) },
+            new[] { enemyAttack });
+        AssertEqual(DirectChildRole.Fallback, intents[0].Role);
+    }
+
+    private static void DirectChildAllocatorAllocatesRefuseToFlankWithExposure()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "Left", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Right", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 2, false, 0, 3, 0.5f),
+            new DirectChildEvidence(2, 2, false, 4, 3, 0.5f),
+        };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.RefuseLeft, intents[0].Role);
+        AssertEqual(DirectChildRole.RefuseRight, intents[1].Role);
+    }
+
+    private static void DirectChildAllocatorDeterministicOnRegistrationOrderTie()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("z-late", "a", 15, 0, "Z", true),
+            new DirectChildSnapshot("a-early", "a", 15, 0, "A", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 1, true, 2, 0, 0.5f),
+            new DirectChildEvidence(2, 1, true, 2, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Main, intents[0].Role, "first registered wins ties");
+        AssertTrue(intents[1].Role != DirectChildRole.Main, "second registered did not also become Main");
+    }
+
+    private static void DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            99, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Lonely", true) };
+        var evidence = new[] { new DirectChildEvidence(1, 1, false, 0, 0, 0.3f) };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Unknown, intents[0].Role);
     }
 
     private static void EnemyVisibleStateRecordsSectorAndContactFields()
