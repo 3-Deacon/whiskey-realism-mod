@@ -39,7 +39,7 @@ Read these before implementation:
 - `docs/superpowers/AGENTS.md`
 - `docs/superpowers/specs/2026-05-05-tactical-brain-design.md`
 - `docs/superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md`
-- `docs/superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md`
+- `docs/superpowers/plans/archive/2026-05-05-tactical-brain-master-sequencing.md`
 - `src/WhiskeyRealism/Patches/AGENTS.md`
 - `tests/WhiskeyRealism.Tests/AGENTS.md`
 

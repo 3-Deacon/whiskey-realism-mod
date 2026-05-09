@@ -12,7 +12,7 @@
 
 **Current status (2026-05-08):** Implemented, merged to local `main`, built, deployed, and hash-verified as DLL SHA-256 `328c74a43f356df4ecb52f38a0df1ec89267eae714fd207af406529b1adffef0` (633856 bytes) with console harness **502 PASS / 0 FAIL**. That B7+B8 artifact is now superseded in the local deployed plugin by #53 pathfinder discipline DLL SHA-256 `b07bbd39eaaf664d81d5930b42d5dc268b64c43dc98244a17015c49e329ce88a` (637952 bytes), which still includes #48-#52. C# defaults keep both writer valves false; the live BepInEx config currently has `Enable Tactical Artillery Doctrine = true` and `Enable Tactical Withdrawal Doctrine = true` for focused smoke. Confirmed markers: `[once:b7-check-ai-bombardment]`, `[once:b7-counterbattery]`, `[once:b8-check-line-fallbacks]`, `[once:b8-morale-snapshot-sampler]`, `[once:b8-check-reserves]`, and `[once:b8-set-withdrawal] B8 SetWithdrawal applied count=1`. Still pending observation: `[once:b8-microai-check-retreats]` and conditional `[once:b7-cancel-bombard]`. No B7/B8 repeated exceptions, Harmony failures, missing-anchor warnings, or writer error markers were found in the tailed log.
 
-**Source-of-truth references:** [`docs/superpowers/specs/2026-05-08-scourge-tactical-adaptation-design.md`](../specs/2026-05-08-scourge-tactical-adaptation-design.md) (the doctrine spec). Older [`2026-05-07-tactical-b7-artillery-strongpoint-runtime.md`](2026-05-07-tactical-b7-artillery-strongpoint-runtime.md) and [`2026-05-07-tactical-b8-staged-withdrawal-runtime.md`](2026-05-07-tactical-b8-staged-withdrawal-runtime.md) are kept as **design context only** — this plan supersedes them as the execution artifact and reuses the shipped Slice B scorers in place of invented ones.
+**Source-of-truth references:** [`docs/superpowers/specs/archive/2026-05-08-scourge-tactical-adaptation-design.md`](../specs/2026-05-08-scourge-tactical-adaptation-design.md) (the doctrine spec). Older [`2026-05-07-tactical-b7-artillery-strongpoint-runtime.md`](2026-05-07-tactical-b7-artillery-strongpoint-runtime.md) and [`2026-05-07-tactical-b8-staged-withdrawal-runtime.md`](2026-05-07-tactical-b8-staged-withdrawal-runtime.md) are kept as **design context only** — this plan supersedes them as the execution artifact and reuses the shipped Slice B scorers in place of invented ones.
 
 ---
 
@@ -1615,7 +1615,7 @@ Three scorers are deliberately **not** consumed by this plan: `TacticalDestinati
 
 ## Execution Handoff
 
-**Plan complete and saved to `docs/superpowers/plans/2026-05-08-tactical-b7-b8-wiring-implementation.md`.**
+**Plan complete and saved to `docs/superpowers/plans/archive/2026-05-08-tactical-b7-b8-wiring-implementation.md`.**
 
 Two execution options:
 

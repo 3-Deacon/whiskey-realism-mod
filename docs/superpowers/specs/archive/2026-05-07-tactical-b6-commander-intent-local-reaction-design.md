@@ -352,11 +352,11 @@ Pure tests must cover:
 
 B6 implementation plans should be written now as separate plan files:
 
-- `docs/superpowers/plans/2026-05-07-tactical-b6a-commander-intent-playbook.md`
-- `docs/superpowers/plans/2026-05-07-tactical-b6b-local-reaction-scorer.md`
-- `docs/superpowers/plans/2026-05-07-tactical-b6c-runtime-application.md`
-- `docs/superpowers/plans/2026-05-07-tactical-b7-artillery-strongpoint-runtime.md`
-- `docs/superpowers/plans/2026-05-07-tactical-b8-staged-withdrawal-runtime.md`
+- `docs/superpowers/plans/archive/2026-05-07-tactical-b6a-commander-intent-playbook.md`
+- `docs/superpowers/plans/archive/2026-05-07-tactical-b6b-local-reaction-scorer.md`
+- `docs/superpowers/plans/archive/2026-05-07-tactical-b6c-runtime-application.md`
+- `docs/superpowers/plans/archive/2026-05-07-tactical-b7-artillery-strongpoint-runtime.md`
+- `docs/superpowers/plans/archive/2026-05-07-tactical-b8-staged-withdrawal-runtime.md`
 
 Each plan must state:
 

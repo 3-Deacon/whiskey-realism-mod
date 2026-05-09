@@ -1099,7 +1099,7 @@ git commit -m "docs: close tactical b2 command order plan"
 
 ## Execution Options
 
-Plan complete and saved to `docs/superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md`.
+Plan complete and saved to `docs/superpowers/plans/archive/2026-05-07-tactical-b2-command-order-friction.md`.
 
 1. **Subagent-Driven (recommended)** - dispatch a fresh worker per task, review between tasks, fast iteration.
 2. **Inline Execution** - execute tasks in this session using `superpowers:executing-plans`, batching with checkpoints.

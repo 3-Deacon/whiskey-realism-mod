@@ -44,7 +44,7 @@ Modify:
 - `docs/patch-catalog.md`
 - `docs/handoff.md`
 - `MEMORY.md`
-- `docs/superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md`
+- `docs/superpowers/plans/archive/2026-05-05-tactical-brain-master-sequencing.md`
 
 ## Config
 
