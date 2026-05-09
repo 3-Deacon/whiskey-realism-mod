@@ -587,6 +587,8 @@ static class Program
             ("tactical intent model records all fields", TacticalIntentModelRecordsAllFields),
             ("tactical intent model clamps confidence and age", TacticalIntentModelClampsConfidenceAndAge),
             ("tactical intent model unknown primary intent sentinel", TacticalIntentModelUnknownPrimaryIntentSentinel),
+            ("enemy visible state records sector and contact fields", EnemyVisibleStateRecordsSectorAndContactFields),
+            ("enemy visible state clamps and coerces null sectors", EnemyVisibleStateClampsAndCoercesNullSectors),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -11123,6 +11125,44 @@ static class Program
         AssertEqual(InferredIntent.Unknown, unknown.PrimaryIntent, "unknown primary intent");
         AssertEqual(-1, unknown.InferredMainEffort, "unknown main effort sentinel");
         AssertNear(0f, unknown.Confidence01, 1e-5f, "unknown confidence");
+    }
+
+    private static void EnemyVisibleStateRecordsSectorAndContactFields()
+    {
+        var sectors = new[]
+        {
+            new EnemyVisibleSector(sectorId: 0, ownStrength: 5000f, enemyStrength: 7500f, recentFire: true),
+            new EnemyVisibleSector(sectorId: 1, ownStrength: 3000f, enemyStrength: 1500f, recentFire: false)
+        };
+        var state = new EnemyVisibleState(
+            sectors,
+            enemyReserveCommitFraction: 0.4f,
+            anyContactSpotted: true,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 2000f);
+
+        AssertEqual(2, state.Sectors.Length, "sector count");
+        AssertEqual(0, state.Sectors[0].SectorId, "sector 0 id");
+        AssertNear(7500f, state.Sectors[0].EnemyStrength, 1e-5f, "sector 0 enemy strength");
+        AssertTrue(state.Sectors[0].RecentFire, "sector 0 recent fire");
+        AssertNear(0.4f, state.EnemyReserveCommitFraction, 1e-5f, "enemy reserve commit fraction");
+        AssertTrue(state.AnyContactSpotted, "any contact spotted");
+        AssertFalse(state.AnyContactBroken, "any contact broken");
+        AssertNear(2000f, state.EnemyReinforcementStrength24h, 1e-5f, "enemy reinforcement strength 24h");
+    }
+
+    private static void EnemyVisibleStateClampsAndCoercesNullSectors()
+    {
+        var state = new EnemyVisibleState(
+            sectors: null,
+            enemyReserveCommitFraction: 1.5f,
+            anyContactSpotted: false,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: float.NaN);
+
+        AssertEqual(0, state.Sectors.Length, "null sectors become empty");
+        AssertNear(1.0f, state.EnemyReserveCommitFraction, 1e-5f, "reserve fraction clamps to 1");
+        AssertNear(0f, state.EnemyReinforcementStrength24h, 1e-5f, "NaN reinforcement strength becomes 0");
     }
 
     private static void ArmyOrchestratorNewHasNoPlanUntilPicked()
