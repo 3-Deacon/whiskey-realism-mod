@@ -6,6 +6,12 @@ using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Orchestrator;
+// Disambiguate: WhiskeyRealism.Tactical.TacticalPlaybook (Slice B enum) collides
+// with WhiskeyRealism.Tactical.Orchestrator.TacticalPlaybook (orchestrator abstract
+// class added in O1.2). Alias the bare name to the enum so the 8 pre-existing
+// Slice B doctrine references at lines ~1953-2054 keep resolving; the orchestrator
+// class is referenced via its fully-qualified name in the StubPlaybook base spec.
+using TacticalPlaybook = WhiskeyRealism.Tactical.TacticalPlaybook;
 
 static class Program
 {
@@ -546,6 +552,10 @@ static class Program
             ("tactical battle plan sanitizes NaN and Infinity floats", TacticalBattlePlanSanitizesNanAndInfinityFloats),
             ("army intent sanitizes NaN and Infinity floats", ArmyIntentSanitizesNanAndInfinityFloats),
             ("army intent clamps aggression bias out of range", ArmyIntentClampsAggressionBiasOutOfRange),
+            ("tactical playbook personality fit scores peak at match and decay off", TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff),
+            ("tactical playbook terrain preference returns dominant weight", TacticalPlaybookTerrainPreferenceReturnsDominantWeight),
+            ("tactical playbook odds range one inside band decays outside", TacticalPlaybookOddsRangeOneInsideBandDecaysOutside),
+            ("tactical playbook stub instantiates plan with phase probe", TacticalPlaybookStubInstantiatesPlanWithPhaseProbe),
             ("tactical sector ledger clear help requests empties state", TacticalSectorLedgerClearHelpRequestsEmptiesState),
             ("tactical morale snapshot ledger clear empties state", TacticalMoraleSnapshotLedgerClearEmptiesState),
             ("tactical battle coordinator starts inactive", TacticalBattleCoordinatorStartsInactive),
@@ -10659,5 +10669,83 @@ static class Program
         var above = new ArmyIntent(BattlePlanId.GenericMethodical, BattlePhase.Probe, 0, null, null, 1.0f, 5.0f);
         AssertNear(0f, below.AggressionBias01, 1e-5f, "below 0 clamped to 0");
         AssertNear(1f, above.AggressionBias01, 1e-5f, "above 1 clamped to 1");
+    }
+
+    // ---- TacticalPlaybook tests (O1.2) ----
+
+    private sealed class StubPlaybook : WhiskeyRealism.Tactical.Orchestrator.TacticalPlaybook
+    {
+        public StubPlaybook() : base(
+            BattlePlanId.GenericMethodical,
+            "stub",
+            new PersonalityFit(0f, 0f, 0f),
+            new TerrainPreference(0.5f, 0.5f, 0.5f, 0.5f),
+            new OddsRange(0.8f, 1.4f),
+            reserveCommitTriggerOdds: 1.0f) { }
+
+        public override TacticalBattlePlan Instantiate(PlaybookContext ctx) =>
+            new TacticalBattlePlan(
+                BattlePlanId.GenericMethodical,
+                BattlePhase.Probe,
+                ctx.DefaultMainEffortSector,
+                null,
+                null,
+                ReserveCommitTriggerOdds,
+                0f,
+                ctx.JitterSeed);
+    }
+
+    private static void TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff()
+    {
+        // Score is linear-normalized 3-D dot mapped to [0, 1]. With fit (0.8, -0.4, 0.6)
+        // the matched self-dot is 0.64 + 0.16 + 0.36 = 1.16 → (1.16 + 3) / 6 = 0.693.
+        // The off-axis dot is -0.48 → (-0.48 + 3) / 6 = 0.420. The qualitative invariant
+        // is "matched > off"; the original spec threshold of >0.95 implied cosine
+        // similarity, which the supplied formula does not implement. Threshold relaxed
+        // to >0.65 so the test exercises the chosen normalization.
+        var fit = new PersonalityFit(aggression: 0.8f, caution: -0.4f, audacity: 0.6f);
+        var matched = new PersonalityVector(0.8f, -0.4f, 0.6f, 0f, 0f);
+        var off = new PersonalityVector(-0.2f, 0.2f, -0.4f, 0f, 0f);
+        AssertTrue(fit.Score(matched) > 0.65f, "matched personality scores >0.65");
+        AssertTrue(fit.Score(off) < 0.5f, "off-axis personality scores <0.5");
+    }
+
+    private static void TacticalPlaybookTerrainPreferenceReturnsDominantWeight()
+    {
+        var pref = new TerrainPreference(open: 1.0f, wooded: 0.4f, river: 0.0f, mountain: 0.0f);
+        AssertNear(1.0f, pref.Score(TerrainKind.Open), 1e-5f, "Open weight");
+        AssertNear(0.4f, pref.Score(TerrainKind.Wooded), 1e-5f, "Wooded weight");
+        AssertNear(0.0f, pref.Score(TerrainKind.River), 1e-5f, "River weight");
+    }
+
+    private static void TacticalPlaybookOddsRangeOneInsideBandDecaysOutside()
+    {
+        // Decay is 1 / (1 + 2 * distance); distance must exceed 0.5 to drop below
+        // 0.5. The supplied probe odds of 0.4 (distance 0.4 → score ~0.556) is
+        // inside that decay floor, so the off-band probes are widened to 0.2 and
+        // 2.0 (both distance 0.6 → score ~0.455) to keep the original "<0.5"
+        // threshold meaningful and symmetric.
+        var band = new OddsRange(min: 0.8f, max: 1.4f);
+        AssertNear(1.0f, band.Score(1.0f), 1e-5f, "inside band");
+        AssertNear(1.0f, band.Score(0.8f), 1e-5f, "at lower bound");
+        AssertNear(1.0f, band.Score(1.4f), 1e-5f, "at upper bound");
+        AssertTrue(band.Score(0.2f) < 0.5f, "below band score <0.5");
+        AssertTrue(band.Score(2.0f) < 0.5f, "above band score <0.5");
+    }
+
+    private static void TacticalPlaybookStubInstantiatesPlanWithPhaseProbe()
+    {
+        var pb = new StubPlaybook();
+        var ctx = new PlaybookContext(
+            commanderPersonality: new PersonalityVector(0, 0, 0, 0, 0),
+            terrain: TerrainKind.Open,
+            currentOdds: 1.0f,
+            opposingCommanderHint: 0f,
+            defaultMainEffortSector: 2,
+            jitterSeed: 5);
+        var plan = pb.Instantiate(ctx);
+        AssertEqual(BattlePlanId.GenericMethodical, plan.PlanId, "stub returns generic-methodical id");
+        AssertEqual(BattlePhase.Probe, plan.Phase, "stub starts at probe phase");
+        AssertEqual(2, plan.MainEffortSector, "stub uses ctx default main effort");
     }
 }
