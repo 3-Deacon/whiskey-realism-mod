@@ -354,7 +354,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // list is idempotent in effect but resets allocator caches; avoid the churn.
                 if (side.Army.CurrentDirectChildIntents.Count > 0) return;
 
-                var snapshots = DirectChildDiscovery.Snapshot(battle);
+                var snapshots = DirectChildDiscovery.Snapshot(side.AllianceId);
                 if (snapshots.Count == 0)
                 {
                     if (!_directChildDeferLogged.Contains(side.AllianceId))
@@ -479,13 +479,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         // Parse the trailing integer instanceId from "child-{id}" or "synth-army-{id}".
+        // Unity GameObject InstanceIDs are routinely negative, so we strip the known
+        // prefix (not the last dash) to keep the leading sign intact.
         // Returns 0 on parse failure (which never matches a real GameObject InstanceID).
+        private const string ChildIdPrefix = "child-";
+        private const string SynthArmyIdPrefix = "synth-army-";
         private static int ParseInstanceIdFromChildId(string childId)
         {
             if (string.IsNullOrEmpty(childId)) return 0;
-            int dash = childId.LastIndexOf('-');
-            if (dash < 0 || dash >= childId.Length - 1) return 0;
-            return int.TryParse(childId.Substring(dash + 1), out int id) ? id : 0;
+            string suffix;
+            if (childId.StartsWith(SynthArmyIdPrefix, StringComparison.Ordinal))
+                suffix = childId.Substring(SynthArmyIdPrefix.Length);
+            else if (childId.StartsWith(ChildIdPrefix, StringComparison.Ordinal))
+                suffix = childId.Substring(ChildIdPrefix.Length);
+            else
+                return 0;
+            return int.TryParse(suffix, out int id) ? id : 0;
         }
 
         // Walk BattleUnits.completeunitlist with the same filter ArmyEvidenceBuilder uses
