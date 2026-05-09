@@ -175,5 +175,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericCautiousPlaybook.cs" Link="Orchestrator\Playbooks\GenericCautiousPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericMethodicalPlaybook.cs" Link="Orchestrator\Playbooks\GenericMethodicalPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericDesperatePlaybook.cs" Link="Orchestrator\Playbooks\GenericDesperatePlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\LeeEnvelopmentPlaybook.cs" Link="Orchestrator\Playbooks\LeeEnvelopmentPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\JacksonValleyShufflePlaybook.cs" Link="Orchestrator\Playbooks\JacksonValleyShufflePlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\McClellanPreparedDefensePlaybook.cs" Link="Orchestrator\Playbooks\McClellanPreparedDefensePlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\ShermanManeuverFixPlaybook.cs" Link="Orchestrator\Playbooks\ShermanManeuverFixPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GrantContinuousAttritionPlaybook.cs" Link="Orchestrator\Playbooks\GrantContinuousAttritionPlaybook.cs" />
   </ItemGroup>
 </Project>
