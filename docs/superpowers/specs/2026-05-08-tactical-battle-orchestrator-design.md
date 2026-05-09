@@ -534,3 +534,19 @@ One-line markers, gated by an observer config; replace much of the current `[Tac
 ## Open issues (none deferred)
 
 All five brainstorm-stage open questions are locked in §"Locked decisions". Future per-phase plans may surface new open issues; those are tracked there, not here.
+
+## Known follow-ups (post-O1 smoke, 2026-05-08)
+
+These are tuning concerns observed during O1 in-game smoke. They do not block O2-O5 but should be addressed before any release that depends on plan-selection quality.
+
+1. **`HistoricalFigureRegistry` coverage too sparse.** O1 smoke battle paired David Hunter (Union) vs P.G.T. Beauregard (CSA) — both notable Civil War commanders, neither in the registry. Both fell back to `FactionProfiles.For(allianceId)` defaults plus rank-tier biases. The 25-officer registry from Slice A covers iconic commanders but misses many corps/army-tier commanders the player will encounter in W&L scenarios. Expand registry with at least: Beauregard, Hunter, Pope, Rosecrans, Thomas, Sheridan, Hancock, Reynolds, Sedgwick, A. P. Hill, D. H. Hill, Polk, Hardee, Cleburne, Ewell, Stuart. ~20 entries; mechanical work.
+
+2. **`PersonalityFit` formula doesn't differentiate sharply when commander vector is mid-magnitude.** O1 smoke had Beauregard (CSA, unmatched, faction-default vector) selecting `ShermanManeuverFix` despite Sherman being a Union playbook. Hunter (Union) selected `GenericCautious` despite his historical aggression. Root cause: `(dot + 3) / 6` normalization in `PersonalityFit.Score` collapses faction-default vectors (mid-magnitude in all axes) into similar score bands, so terrain + odds tiebreakers dominate selection. Two candidate fixes:
+   - Adopt true cosine similarity (`dot / (||fit|| × ||commander||)`) — naturally penalizes magnitude mismatches.
+   - Add a faction-fit term to playbook score: each playbook tagged Union/Confederate/either; mismatched faction multiplies the personality score by ~0.5.
+
+   Either fix will require updating tests in Tasks 4-6 of the archived O1 plan since current expected selections rely on the existing formula. Best done as a single targeted slice rather than mixed into O2/O3.
+
+3. **`AggressionBias01` -> `CurrentMacroAi` may be too binary at Probe phase.** Current logic in `ArmyOrchestrator.CurrentMacroAi` returns `-1` (dynamic) at Probe phase when `Aggression <= 0.3`, otherwise `1` (attack). O1 smoke had both sides emit `[once:orch-macro-write:…->-1]` because both COs' faction-default Aggression was at or below the threshold. That's a sensible no-op outcome but the cliff at 0.3 is arbitrary. Consider a smoother mapping or letting the playbook's aggression bias drive the macro decision rather than the commander's raw vector. Address as part of the personality formula slice (#2) or as a small follow-up after O5 ships.
+
+4. **No replan loop wired in O1 runtime.** `ArmyOrchestrator.CheckReplanTriggers` is implemented and unit-tested, but no runtime caller feeds it inputs each tick. O2 (intent inference + adversarial loop) is the natural home for `ArmyTickCycle.MaybeReplan` — see the O2 sketch. Without it, plans never advance phase or re-pick during a battle.
