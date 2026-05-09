@@ -180,5 +180,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\McClellanPreparedDefensePlaybook.cs" Link="Orchestrator\Playbooks\McClellanPreparedDefensePlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\ShermanManeuverFixPlaybook.cs" Link="Orchestrator\Playbooks\ShermanManeuverFixPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GrantContinuousAttritionPlaybook.cs" Link="Orchestrator\Playbooks\GrantContinuousAttritionPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\LongstreetDefensiveOverslopePlaybook.cs" Link="Orchestrator\Playbooks\LongstreetDefensiveOverslopePlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\HookerFlankDeparturePlaybook.cs" Link="Orchestrator\Playbooks\HookerFlankDeparturePlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\HoodFrontalAssaultPlaybook.cs" Link="Orchestrator\Playbooks\HoodFrontalAssaultPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\BurnsideForcedAssaultPlaybook.cs" Link="Orchestrator\Playbooks\BurnsideForcedAssaultPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\BraggIndecisiveCommitPlaybook.cs" Link="Orchestrator\Playbooks\BraggIndecisiveCommitPlaybook.cs" />
   </ItemGroup>
 </Project>
