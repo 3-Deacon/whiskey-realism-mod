@@ -614,7 +614,15 @@ static class Program
             ("army replan triggers reserve exhaustion fires at 85 percent committed", ArmyReplanTriggersReserveExhaustionFiresAt85PercentCommitted),
             ("army replan triggers reinforcement arrival fires on nonzero delta", ArmyReplanTriggersReinforcementArrivalFiresOnNonzeroDelta),
             ("army replan triggers enemy intent shift fires when confidence weighted exceeds floor", ArmyReplanTriggersEnemyIntentShiftFiresWhenConfidenceWeightedExceedsFloor),
-            ("army replan triggers none when all conditions normal", ArmyReplanTriggersNoneWhenAllConditionsNormal)
+            ("army replan triggers none when all conditions normal", ArmyReplanTriggersNoneWhenAllConditionsNormal),
+            ("army tick cycle no trigger when all conditions normal", ArmyTickCycleNoTriggerWhenAllConditionsNormal),
+            ("army tick cycle phase deadline fires", ArmyTickCyclePhaseDeadlineFires),
+            ("army tick cycle rate limits replan within min replan seconds", ArmyTickCycleRateLimitsReplanWithinMinReplanSeconds),
+            ("army tick cycle rate limit is per alliance clock", ArmyTickCycleRateLimitIsPerAllianceClock),
+            ("army tick cycle reset clears battle lifetime rate limit", ArmyTickCycleResetClearsBattleLifetimeRateLimit),
+            ("army tick cycle updates observed intent without replan", ArmyTickCycleUpdatesObservedIntentWithoutReplan),
+            ("army tick cycle enemy intent shift fires when confident enemy attacks", ArmyTickCycleEnemyIntentShiftFiresWhenConfidentEnemyAttacks),
+            ("army tick cycle no replan if orchestrator has no plan", ArmyTickCycleNoReplanIfOrchestratorHasNoPlan)
         };
 
         foreach (var test in tests)
@@ -11508,5 +11516,217 @@ static class Program
     {
         var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, 0f, 0f);
         AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(input), "no trigger fires when conditions normal");
+    }
+
+    private static void ArmyTickCycleNoTriggerWhenAllConditionsNormal()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.None, trigger, "normal conditions do not replan");
+        AssertNear(5f, orch.PlanAgeSeconds, 1e-5f, "tick advances plan age");
+    }
+
+    private static void ArmyTickCyclePhaseDeadlineFires()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+        orch.AdvancePlanAge(190f);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.PhaseDeadline, trigger, "age beyond budget replans on phase deadline");
+        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "replan resets plan age");
+    }
+
+    private static void ArmyTickCycleRateLimitsReplanWithinMinReplanSeconds()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+        orch.AdvancePlanAge(200f);
+
+        var first = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+        orch.AdvancePlanAge(200f);
+        var second = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.PhaseDeadline, first, "first over-budget tick replans");
+        AssertEqual(ReplanTrigger.None, second, "second over-budget tick is rate-limited");
+    }
+
+    private static void ArmyTickCycleRateLimitIsPerAllianceClock()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var union = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var csa = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        union.PickInitialPlan(ownEvidence);
+        csa.PickInitialPlan(ownEvidence);
+        union.AdvancePlanAge(200f);
+        csa.AdvancePlanAge(200f);
+
+        var unionFirst = ArmyTickCycle.MaybeReplan(union, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+        var csaFirst = ArmyTickCycle.MaybeReplan(csa, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+        union.AdvancePlanAge(200f);
+        var unionSecond = ArmyTickCycle.MaybeReplan(union, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+
+        AssertEqual(ReplanTrigger.PhaseDeadline, unionFirst, "union first over-budget tick replans");
+        AssertEqual(ReplanTrigger.PhaseDeadline, csaFirst, "csa first over-budget tick replans");
+        AssertEqual(ReplanTrigger.None, unionSecond, "csa tick does not advance union rate-limit clock");
+    }
+
+    private static void ArmyTickCycleResetClearsBattleLifetimeRateLimit()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var firstBattle = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        firstBattle.PickInitialPlan(ownEvidence);
+        firstBattle.AdvancePlanAge(200f);
+        var first = ArmyTickCycle.MaybeReplan(firstBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+
+        ArmyTickCycle.Reset();
+
+        var secondBattle = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        secondBattle.PickInitialPlan(ownEvidence);
+        secondBattle.AdvancePlanAge(200f);
+        var second = ArmyTickCycle.MaybeReplan(secondBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+
+        AssertEqual(ReplanTrigger.PhaseDeadline, first, "first battle over-budget tick replans");
+        AssertEqual(ReplanTrigger.PhaseDeadline, second, "reset clears rate-limit state for next battle");
+    }
+
+    private static void ArmyTickCycleUpdatesObservedIntentWithoutReplan()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.None, trigger, "normal tick does not replan");
+        AssertEqual(InferredIntent.Probe, orch.CurrentIntentModel.PrimaryIntent, "normal tick still stores observed intent");
+    }
+
+    private static void ArmyTickCycleEnemyIntentShiftFiresWhenConfidentEnemyAttacks()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+        orch.AdvancePlanAge(70f);
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0, 5000f, 9000f, true),
+                new EnemyVisibleSector(1, 5000f, 1500f, false),
+                new EnemyVisibleSector(2, 5000f, 1500f, false)
+            },
+            enemyReserveCommitFraction: 0.8f,
+            anyContactSpotted: true,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            enemy,
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.EnemyIntentShift, trigger, "confident enemy attack signal replans");
+    }
+
+    private static void ArmyTickCycleNoReplanIfOrchestratorHasNoPlan()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            new ArmyEvidence(1.0f, TerrainKind.Open, 0),
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.None, trigger, "no active plan cannot replan");
+    }
+
+    private static EnemyVisibleState NormalEnemyVisibleState()
+    {
+        return new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 5000f, 5000f, false) },
+            enemyReserveCommitFraction: 0.5f,
+            anyContactSpotted: true,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
     }
 }

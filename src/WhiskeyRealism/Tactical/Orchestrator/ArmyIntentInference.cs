@@ -21,6 +21,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             float totalEnemy = 0f;
             float maxEnemyStrength = 0f;
+            float ownStrengthAtMaxEnemy = 0f;
             int sectorWithMaxEnemy = -1;
             int recentFireSectorCount = 0;
 
@@ -31,6 +32,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (sector.EnemyStrength > maxEnemyStrength || sectorWithMaxEnemy < 0)
                 {
                     maxEnemyStrength = sector.EnemyStrength;
+                    ownStrengthAtMaxEnemy = sector.OwnStrength;
                     sectorWithMaxEnemy = sector.SectorId;
                 }
 
@@ -77,13 +79,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 intent = InferredIntent.Defend;
             }
-            else if (concentration > 0.55f && enemy.EnemyReserveCommitFraction >= 0.4f)
+            else if (concentration > 0.55f &&
+                     enemy.EnemyReserveCommitFraction >= 0.4f &&
+                     (enemy.Sectors.Length > 1 || maxEnemyStrength > ownStrengthAtMaxEnemy * 1.2f || recentFireSectorCount > 0))
             {
                 intent = InferredIntent.Attack;
             }
             else if (concentration > 0.55f && enemy.EnemyReserveCommitFraction < 0.3f)
             {
                 intent = InferredIntent.Refuse;
+            }
+            else if (enemy.Sectors.Length == 1 && recentFireSectorCount == 0 && maxEnemyStrength <= ownStrengthAtMaxEnemy * 1.2f)
+            {
+                intent = InferredIntent.Probe;
             }
             else if (concentration < 0.45f && enemy.EnemyReserveCommitFraction < 0.3f)
             {

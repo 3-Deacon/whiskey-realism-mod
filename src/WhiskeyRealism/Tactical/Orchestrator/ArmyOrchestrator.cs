@@ -140,6 +140,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public ReplanTrigger CheckReplanTriggers(ReplanTriggerInput input) => ArmyReplanTriggers.Evaluate(input);
 
+        public void ObserveIntent(TacticalIntentModel enemyIntent)
+        {
+            _currentIntentModel = enemyIntent;
+        }
+
         public void Replan(ArmyEvidence evidence)
         {
             Replan(evidence, UnknownIntentModel());
