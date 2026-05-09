@@ -121,6 +121,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try { TacticalSectorLedger.ClearHelpRequests(); } catch { }
             try { Plugin.MoraleSnapshotLedger?.Clear(); } catch { }
+            try { WhiskeyRealism.Patches.TacticalRegimentDiagnosticsPatch.Reset(); } catch { }
         }
 
         private static void ClearForFailure()

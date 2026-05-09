@@ -49,6 +49,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
         public static ConfigEntry<bool> EnableTacticalBattleOrchestrator;
+        public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
+        public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public const int TacticalMoraleSnapshotLedgerCapacity = 4;
         public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
@@ -249,6 +251,21 @@ namespace WhiskeyRealism
                 "Master switch for the multi-echelon tactical battle orchestrator. " +
                 "Default on per orchestrator umbrella spec. Disable to revert to vanilla " +
                 "+ existing default-off Slice B scorer paths.");
+            EnableTacticalRegimentDiagnostics = Config.Bind(
+                "Tactical Diagnostics",
+                "Enable Tactical Regiment Diagnostics",
+                false,
+                "Default-off. Per-regiment delta logger for diagnosing stuck-retreat / stuck-charge " +
+                "/ unit-state bugs. Even when enabled, only logs units whose name contains a substring " +
+                "from Tactical Regiment Diagnostic Names (default empty = no logging). Hard-capped at " +
+                "2000 lines per battle, min 0.5s between samples per unit, deltas only.");
+            TacticalRegimentDiagnosticNames = Config.Bind(
+                "Tactical Diagnostics",
+                "Tactical Regiment Diagnostic Names",
+                "",
+                "Comma-separated case-insensitive substrings to match against Regiment names for " +
+                "Enable Tactical Regiment Diagnostics. Empty = no units watched. Examples: " +
+                "Hampton,8th_Tennessee,2nd_South_Carolina");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
