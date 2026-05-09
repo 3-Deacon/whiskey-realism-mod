@@ -74,7 +74,14 @@ namespace WhiskeyRealism.Patches
                 EmitPlaybook(side, playbook);
             }
 
-            TacticalReactionContext.Shared.Clear();
+            // O1.13: when the army orchestrator is on (default), it owns reactions.
+            // The legacy scorer still computes and emits telemetry for comparison,
+            // but skips the TacticalReactionContext.Shared writes so the orchestrator
+            // pipeline isn't fighting it. Removed entirely at O7 cleanup.
+            bool legacyWritesAllowed = !OrchestratorArmyOn();
+
+            if (legacyWritesAllowed)
+                TacticalReactionContext.Shared.Clear();
 
             if (!Plugin.Instance.EnableTacticalLocalReactionDoctrine.Value)
                 return true;
@@ -90,7 +97,8 @@ namespace WhiskeyRealism.Patches
 
                     TacticalLocalReactionInput reactionInput = BuildReactionInput(group, intent, playbook);
                     TacticalLocalReactionDecision reaction = TacticalLocalReactionScorer.Score(reactionInput);
-                    TacticalReactionContext.Shared.SetReaction(SafeInstanceId(group), reaction);
+                    if (legacyWritesAllowed)
+                        TacticalReactionContext.Shared.SetReaction(SafeInstanceId(group), reaction);
                     reactions.Add(reaction);
                     if (emitTelemetry)
                         EmitReaction(side, group, reaction);
@@ -106,7 +114,8 @@ namespace WhiskeyRealism.Patches
                     reactions.ToArray(),
                     availability);
                 TacticalReserveIntentDecision reserveIntent = TacticalReservePolicyLedger.Decide(reserveInput);
-                TacticalReactionContext.Shared.SetReserveIntent(side, reserveIntent);
+                if (legacyWritesAllowed)
+                    TacticalReactionContext.Shared.SetReserveIntent(side, reserveIntent);
                 if (emitTelemetry && reserveTelemetryEnabled)
                     EmitReserveIntent(side, reserveIntent);
             }
@@ -573,6 +582,12 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.Enabled.Value &&
                 Plugin.Instance.EnableTacticalObserver.Value &&
                 Plugin.Instance.EnableTacticalCommanderIntentDoctrine.Value;
+        }
+
+        private static bool OrchestratorArmyOn()
+        {
+            return Plugin.EnableTacticalOrchestratorArmy != null
+                && Plugin.EnableTacticalOrchestratorArmy.Value;
         }
     }
 }
