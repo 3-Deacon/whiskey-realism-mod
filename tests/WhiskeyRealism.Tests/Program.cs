@@ -668,6 +668,7 @@ static class Program
             ("direct child gate screen allows in sector denies out of sector", DirectChildGateScreenAllowsInSectorDeniesOutOfSector),
             ("direct child gate fallback allows away from enemy denies toward enemy", DirectChildGateFallbackAllowsAwayDeniesToward),
             ("direct child gate refuse left allows in sector denies out", DirectChildGateRefuseLeftAllowsInSectorDeniesOut),
+            ("direct child gate negative target sector coerces to primary", DirectChildGateNegativeTargetSectorCoercesToPrimary),
         };
 
         foreach (var test in tests)
@@ -12526,5 +12527,37 @@ static class Program
         var dDeny = TacticalDirectChildGate.Decide(inputDeny);
         AssertTrue(!dDeny.Allow, "RefuseLeft denies out of flank sector");
         AssertContains(dDeny.Reason, "refuse-out-of-sector", "reason");
+    }
+
+    private static void DirectChildGateNegativeTargetSectorCoercesToPrimary()
+    {
+        // The Input ctor's intendedTargetSector < 0 sentinel must coerce to primarySector
+        // so callers that can't resolve the target sector (e.g. ResolveTargetSector returning -1)
+        // get an in-sector decision for Screen/Refuse roles by default.
+        var input = new TacticalDirectChildGate.Input(
+            gateEnabled: true, sideIsAi: true,
+            role: DirectChildRole.Screen, axisSector: 0, primarySector: 3,
+            groupBearingFromOriginRadians: 0f,
+            intendedTargetBearingFromOriginRadians: 0f,
+            intendedTargetDistanceFromGroup: 100f,
+            nearestEnemyBearingFromGroupRadians: 0f,
+            feudMaxDistance: 2000f,
+            intendedTargetSector: -1);
+        AssertEqual(3, input.IntendedTargetSector);
+        var d = TacticalDirectChildGate.Decide(input);
+        AssertTrue(d.Allow, "Screen with -1 target sector coerces to primary and allows in-sector");
+
+        var refuseInput = new TacticalDirectChildGate.Input(
+            gateEnabled: true, sideIsAi: true,
+            role: DirectChildRole.RefuseLeft, axisSector: 0, primarySector: 5,
+            groupBearingFromOriginRadians: 0f,
+            intendedTargetBearingFromOriginRadians: 0f,
+            intendedTargetDistanceFromGroup: 100f,
+            nearestEnemyBearingFromGroupRadians: 0f,
+            feudMaxDistance: 2000f,
+            intendedTargetSector: -1);
+        AssertEqual(5, refuseInput.IntendedTargetSector);
+        var dRefuse = TacticalDirectChildGate.Decide(refuseInput);
+        AssertTrue(dRefuse.Allow, "RefuseLeft with -1 target sector coerces to primary and allows in-flank-sector");
     }
 }

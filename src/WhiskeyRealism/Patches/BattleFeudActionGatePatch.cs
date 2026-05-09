@@ -323,10 +323,11 @@ namespace WhiskeyRealism.Patches
         private static int ResolveTargetSector(Vector3 targetPos)
         {
             // TODO: O3.x — wire to TacticalSectorLedger when a position-→sector resolver lands.
-            // For now, return 0 so Screen/Refuse role decisions degrade to "always in-sector when
-            // we can't tell" (denial precision tightens after smoke calibration). Acceptable
-            // because Main/SupportMain/Fix/Reserve/Fallback decisions don't read this field.
-            return 0;
+            // Return -1 so TacticalDirectChildGate.Input ctor coerces it to primarySector,
+            // making Screen/Refuse role decisions degrade to "always in-sector when we can't
+            // tell" (denial precision tightens after smoke calibration). Acceptable because
+            // Main/SupportMain/Fix/Reserve/Fallback decisions don't read this field.
+            return -1;
         }
 
         private static void LogDeniedOrch(Regiment group, DirectChildGateDecision decision)
