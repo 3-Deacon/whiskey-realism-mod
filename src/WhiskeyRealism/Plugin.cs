@@ -53,6 +53,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<int> TacticalOrchestratorMinReplanSeconds;
         public static ConfigEntry<bool> TacticalOrchestratorVerboseLogging;
         public static ConfigEntry<bool> EnableTacticalOrchestratorIntentInference;
+        public static ConfigEntry<bool> EnableTacticalOrchestratorDirectChildGate;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
@@ -286,6 +287,16 @@ namespace WhiskeyRealism
                 "state, fed into ArmyOrchestrator's replan trigger evaluator and " +
                 "playbook selection bias. Disable to keep O1 initial-pick-only behavior " +
                 "(plans never advance phase or replan during a battle).");
+            EnableTacticalOrchestratorDirectChildGate = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Tactical Orchestrator Direct-Child Gate",
+                false,
+                "Default OFF. O3: when true, BattleFeudActionGatePatch (#42) consults " +
+                "ArmyOrchestrator.GetDirectChildRole(group) between the W&L decision and " +
+                "SetWaypoint, denying off-axis Main/SupportMain, wide Fix, out-of-sector " +
+                "Screen/Refuse, toward-enemy Fallback, and any Reserve movement on AI- " +
+                "controlled sides. Disable to keep #42's existing W&L-only behavior. " +
+                "Telemetry runs regardless of this flag; only deny actions are gated.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",
