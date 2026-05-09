@@ -539,6 +539,8 @@ static class Program
             ("tactical battle orchestrator owns alliance and roster", TacticalBattleOrchestratorOwnsAllianceAndRoster),
             ("tactical battle orchestrator empty children in O0", TacticalBattleOrchestratorEmptyChildrenInO0),
             ("tactical battle orchestrator empty tick is no-op", TacticalBattleOrchestratorEmptyTickIsNoOp),
+            ("tactical battle orchestrator attach army exposes army and adds to echelons", TacticalBattleOrchestratorAttachArmyExposesArmyAndAddsToEchelons),
+            ("tactical battle orchestrator attach army idempotent", TacticalBattleOrchestratorAttachArmyIdempotent),
             ("tactical battle plan records id phase main effort and age", TacticalBattlePlanRecordsIdPhaseMainEffortAndAge),
             ("tactical battle plan with phase advances and resets age", TacticalBattlePlanWithPhaseAdvancesAndResetsAge),
             ("tactical battle plan with age changes age only", TacticalBattlePlanWithAgeChangesAgeOnly),
@@ -10424,6 +10426,27 @@ static class Program
         var orch = new TacticalBattleOrchestrator(allianceId: 0, roster);
         orch.Tick();
         AssertEqual(1, orch.TickCount, "tick count after one Tick");
+    }
+
+    private static void TacticalBattleOrchestratorAttachArmyExposesArmyAndAddsToEchelons()
+    {
+        var roster = new TacticalCommanderRoster();
+        var side = new TacticalBattleOrchestrator(allianceId: 0, roster);
+        var army = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), default);
+        side.AttachArmy(army);
+        AssertTrue(side.Army == army, "Army property exposes attached army");
+        AssertEqual(1, side.Echelons.Count, "Army added to Echelons exactly once");
+    }
+
+    private static void TacticalBattleOrchestratorAttachArmyIdempotent()
+    {
+        var roster = new TacticalCommanderRoster();
+        var side = new TacticalBattleOrchestrator(allianceId: 0, roster);
+        var army = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), default);
+        side.AttachArmy(army);
+        side.AttachArmy(army);
+        side.AttachArmy(null);
+        AssertEqual(1, side.Echelons.Count, "duplicate or null AttachArmy does not grow Echelons");
     }
 
     // ---- TacticalSectorLedger.ClearHelpRequests tests ----

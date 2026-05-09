@@ -4,8 +4,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
     /// Per-side root container instantiated by the coordinator for each active battle alliance.
-    /// In O0 the Echelons list is always empty — Army/Corps/etc. concretes ship in O1+.
-    /// Tick cascades to child echelons (none in O0) after incrementing its own TickCount.
+    /// O0 shipped with empty Echelons; O1 attaches a single ArmyOrchestrator via AttachArmy.
+    /// Future phases attach Corps / Division / Brigade echelons as children of Army.
     /// </summary>
     public sealed class TacticalBattleOrchestrator
     {
@@ -20,22 +20,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public TacticalCommanderRoster Roster { get; }
         public List<EchelonOrchestrator> Echelons { get; }
         public int TickCount { get; private set; }
+        public ArmyOrchestrator Army { get; private set; }
+
+        /// <summary>
+        /// Attach the per-side ArmyOrchestrator. No-op if <paramref name="army"/> is null.
+        /// Idempotent: re-attaching the same instance does not duplicate it in <see cref="Echelons"/>.
+        /// </summary>
+        public void AttachArmy(ArmyOrchestrator army)
+        {
+            if (army == null) return;
+            Army = army;
+            if (!Echelons.Contains(army)) Echelons.Add(army);
+        }
 
         public void Tick()
         {
             TickCount++;
-            for (int i = 0; i < Echelons.Count; i++)
-            {
-                Echelons[i]?.Tick();
-            }
+            for (int i = 0; i < Echelons.Count; i++) Echelons[i]?.Tick();
         }
 
         public void PropagateIntent()
         {
-            for (int i = 0; i < Echelons.Count; i++)
-            {
-                Echelons[i]?.PropagateIntent();
-            }
+            for (int i = 0; i < Echelons.Count; i++) Echelons[i]?.PropagateIntent();
         }
     }
 }
