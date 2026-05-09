@@ -26,13 +26,13 @@ All line anchors refer to `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 | Claim | Status | Vanilla anchor |
 |---|---|---|
 | Campaign battle export can write zero start X/Z when `useunitcoordinates` is false. | Confirmed | `ImportExportUnitData.CreateBattleDataFile`, lines 67710-67718. |
-| Campaign battle establishment uses `useunitcoordinates: false`. | Confirmed | `BattleUnits.EstablishCampaignBattle`, line 80900. |
+| Campaign battle establishment uses `useunitcoordinates: false`. | Confirmed | `BattleUnits.EstablishCampaignBattle` call site, line 80900. |
 | Battle start frame 30 calls `AllocateUnitsAndObjectivesToAI()` and then `DoPlacementAIUnitsWithinDeploymentzoneNew(...)` for both alliances unless excluded by operation type. | Confirmed | `BattleController.Update`, lines 23988-23995. |
 | Native AI deployment owner is `BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew(int foralliance)`. | Confirmed | method starts line 85524. |
 | `DoPlacementAIUnitsWithinDeploymentzoneNew` skips the human player's alliance unless `GameVars.ai_vs_ai` is true, and skips unengaged tutorial battles. | Confirmed | lines 85588-85591. |
 | Initial deployment is distinguished by `battlepasseddays <= 0`; later-day deployment can follow different branches. | Confirmed | lines 85643-85647 and later checks at 85754-85765. |
 | Deployment target selection uses objectives, objective ownership, frontline-zone checks, battle type, morale, attached-unit count, guessed enemy position, and similar-position deconfliction before calling `SetGroupFormation`. | Confirmed | lines 85604-85860. |
-| EOD deployment cycle opens deployment after resupply, reinforcement arrival check, and routed withdrawal. | Confirmed | `BattleUnits.CheckTimeIssues`, lines 86440-86470. |
+| EOD deployment cycle opens deployment after resupply, reinforcement arrival check, and routed withdrawal. | Confirmed | `BattleUnits.CheckTimeIssues` `eodcycle == 4` branch, lines 86440-86470. |
 | Closing deployment phase while `BU.eodcycle > 0` reruns `DoPlacementAIUnitsWithinDeploymentzoneNew(...)` for the opposite alliance and player alliance. | Confirmed | `BattleUI.SetActiveDeploymentPhase`, lines 164875-164879. |
 | `DoUnitPositioning()` handles explicit start positions and entry-point placement before deployment-zone updates. | Confirmed | `BattleUnits.DoUnitPositioning`, lines 87720-87805. |
 | `MoveAllUnitsIntoDeploymentZone()` individually calls `CheckIfPositionIsOutsideDeploymentZone(...)` on active units. | Confirmed | lines 87253-87274. |
@@ -64,6 +64,10 @@ All line anchors refer to `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 
 ## Architecture
 
+### Patch Ordinal
+
+This observer is a numbered Harmony patch. Reserve patch catalog ordinal **#58** for `TacticalDeploymentObserverPatch`. The next behavior patch ordinal becomes **#59**.
+
 ### `TacticalDeploymentTelemetry`
 
 Pure tactical helper under `src/WhiskeyRealism/Tactical/`.
@@ -74,6 +78,8 @@ Responsibilities:
 - compare before/after snapshots;
 - compute matched groups, moved groups, large moves, new groups, removed groups, max move distance, and average move distance;
 - produce stable summary and signature strings for tests and runtime logs.
+
+Snapshot matching must use `Regiment.GetInstanceID()` only. `BattleUnits.DoUnitPositioning()` reorders `BattleUnits.grp` by hierarchy level before placement, so array index is not stable and must not be part of the match key.
 
 This is testable in the console harness and has no BepInEx, Harmony, or Unity dependency beyond plain values supplied by the patch adapter.
 
@@ -88,6 +94,17 @@ Required patch surfaces:
 - `BattleUI.SetActiveDeploymentPhase(bool active = true, bool showsupplybydefault = true, bool calledfromsave = false)` Prefix/Postfix.
 
 The patch snapshots `BattleUnits.grp` before and after each surface, then sends pure snapshots to `TacticalDeploymentTelemetry`. It logs summaries and capped top-move rows. It catches exceptions and emits one-time warnings through `OnceLog`; it must never throw from a hot deployment path.
+
+The patch must read `BattleUnits.grp`, `BattleUnits.eodcycle`, and `BattleUnits.battlepasseddays` through cached `AccessTools.Field` lookups. Missing fields degrade to one bounded warning and an empty/no-op snapshot, not a plugin-load failure.
+
+The patch must capture phase inputs in Prefix and carry them into the summary. `BattleUI.SetActiveDeploymentPhase(active:false)` sets `BU.eodcycle = 0` before Postfix, so deriving phase from the Postfix snapshot mis-tags EOD close as initial.
+
+Nested calls must be explicit. `BattleUI.SetActiveDeploymentPhase(active:false)` can call `DoPlacementAIUnitsWithinDeploymentzoneNew` twice before its own Postfix. The observer should suppress the outer `SetActiveDeploymentPhase:close` movement delta when the Prefix saw `eodcycle > 0`, and rely on the two inner `DoPlacementAIUnitsWithinDeploymentzoneNew` deltas for actual movement rows. It should still emit `[TacticalDeploymentPhase] action=close` so phase transitions remain visible.
+
+Early-return surfaces must be distinguishable from successful no-move placement:
+
+- `DoPlacementAIUnitsWithinDeploymentzoneNew` must emit `phase=skipped` when the vanilla guard would return early: `(GameVars.playeralliance == foralliance && !GameVars.ai_vs_ai) || (GameVars.tutorialactive && !Tutorial.engaged)`.
+- `SetActiveDeploymentPhase` must skip all logs when `BattleUI.IsCampaign` is true, matching the vanilla early return.
 
 ### Config
 
@@ -106,12 +123,12 @@ Expected markers:
 
 ```text
 [once:tactical-deployment-observer]
-[TacticalDeployment]
+[TacDeployObs]
 [TacticalDeploymentPhase]
-[TacticalDeploymentMove]
+[TacDeployObsMove]
 ```
 
-`[TacticalDeployment]` fields:
+`[TacDeployObs]` fields:
 
 - `surface`
 - `phase`
@@ -128,7 +145,23 @@ Expected markers:
 - `maxMove`
 - `avgMove`
 
-`[TacticalDeploymentMove]` fields:
+Legal `phase` values:
+
+- `initial-positioning`: `DoUnitPositioning()`.
+- `initial`: battle day 0 non-skipped deployment.
+- `eod`: EOD/later-day deployment, derived from Prefix `eodcycle > 0` or `battlepasseddays > 0`.
+- `skipped`: observer saw a vanilla early-return condition and did not treat zero movement as a successful placement decision.
+
+`[TacticalDeploymentPhase]` fields:
+
+- `action`: `open` or `close`.
+- `calledFromSave`: vanilla `calledfromsave` argument.
+- `eod`: Prefix `BU.eodcycle`.
+- `days`: Prefix `BU.battlepasseddays`.
+- `groups`: observed group count.
+- `outerDeltaSuppressed`: `true` when close wraps inner EOD `DoPlacementAIUnitsWithinDeploymentzoneNew` deltas.
+
+`[TacDeployObsMove]` fields:
 
 - `surface`
 - `phase`
@@ -146,6 +179,8 @@ Expected markers:
 
 Large-move detail rows must be capped. Initial cap: 8 rows per observed surface call.
 
+Default-on telemetry can produce meaningful log mass on long multi-day battles. Focused smoke should scan the markers, then disable `Enable Tactical Deployment Observer` if a long play session no longer needs deployment evidence.
+
 ## Safety Rules
 
 - Prefixes must return `void`; they must not return `false`.
@@ -153,6 +188,8 @@ Large-move detail rows must be capped. Initial cap: 8 rows per observed surface 
 - No writes to `BattleUnits.grp`, `BattleUnits.completeunitlist`, `frontline2`, `Regiment` position/order/path/formation fields, or tactical orchestrator state.
 - Reflection reads must be guarded and one-time warned on failure.
 - Group snapshots must tolerate null groups, null `regref`, inactive objects, routed groups, and missing `BattleUI.BU`.
+- Snapshot keys must not depend on `BattleUnits.grp` array index.
+- `BattleUI.SetActiveDeploymentPhase` observers must no-op when `IsCampaign` is true.
 - No Transpilers.
 
 ## Testing
@@ -163,6 +200,10 @@ Console harness tests must cover:
 - new/removed group accounting;
 - summary formatting;
 - stable signature fields for phase/surface/new/removed/large-move deltas.
+- stable matching across `BattleUnits.grp` reorder, modeled as same group keys in different order;
+- skipped-phase formatting for vanilla early-return conditions.
+
+The test project uses explicit `<Compile Include>` entries. Any new file under `src/WhiskeyRealism/Tactical/` that the harness consumes must be added to `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`.
 
 DLL verification must include:
 
@@ -173,16 +214,16 @@ stat -c '%y %s %n' dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/ste
 sha256sum dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/WhiskeyRealism.dll"
 ```
 
-Runtime smoke requires restarting GTCW, starting a battle, and checking `BepInEx/LogOutput.log` for the markers above. EOD proof requires advancing through an end-of-day deployment phase and closing deployment.
+Runtime smoke requires restarting GTCW, starting a battle, and checking `BepInEx/LogOutput.log` for the markers above. EOD proof requires advancing through an end-of-day deployment phase and closing deployment. In W&L subordinate battles, `CheckTimeIssues` can immediately close deployment when no `Grp.IsApplicableForDeployment(...)` entries exist; a clean run may show open/close phase rows without movement rows. That should be read as scenario gating, not automatically as observer failure.
 
 ## Acceptance Criteria
 
 - Harness passes with the new pure telemetry tests.
 - `./build.sh` passes with 0 errors.
 - Deployed DLL hash matches `dist/WhiskeyRealism.dll`.
-- Runtime battle start produces at least one `[TacticalDeployment]` or one bounded missing-anchor warning.
-- EOD deployment close produces `[TacticalDeploymentPhase] action=close` and a deployment delta when the vanilla EOD branch fires.
-- No repeated observer exception spam.
+- Runtime battle start produces both `surface=DoUnitPositioning` and `surface=DoPlacementAIUnitsWithinDeploymentzoneNew` `[TacDeployObs]` rows.
+- EOD deployment close produces `[TacticalDeploymentPhase] action=close`; when the vanilla EOD placement branch is not W&L-skipped, it also produces inner `surface=DoPlacementAIUnitsWithinDeploymentzoneNew phase=eod` rows.
+- Zero `tactical-deployment-observer:*` warnings during the smoke run. A missing-anchor warning is a failed smoke, not a pass.
 - No behavior-changing patch is committed as part of this observer slice.
 
 ## Follow-Up Design Boundary
