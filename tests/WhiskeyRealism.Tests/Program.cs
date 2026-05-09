@@ -584,6 +584,9 @@ static class Program
             ("historical playbook selection hood low odds high aggression selects frontal assault", HistoricalPlaybookSelectionHoodLowOddsHighAggressionSelectsFrontalAssault),
             ("historical playbook selection burnside low caution low audacity selects forced assault", HistoricalPlaybookSelectionBurnsideLowCautionLowAudacitySelectsForcedAssault),
             ("historical playbook selection bragg mid odds low audacity selects indecisive commit", HistoricalPlaybookSelectionBraggMidOddsLowAudacitySelectsIndecisiveCommit),
+            ("tactical intent model records all fields", TacticalIntentModelRecordsAllFields),
+            ("tactical intent model clamps confidence and age", TacticalIntentModelClampsConfidenceAndAge),
+            ("tactical intent model unknown primary intent sentinel", TacticalIntentModelUnknownPrimaryIntentSentinel),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -11054,6 +11057,73 @@ static class Program
     }
 
     // ---- Army orchestrator tests (O1.7) ----
+
+    private static void TacticalIntentModelRecordsAllFields()
+    {
+        var evidence = new[] { EvidenceTag.SectorConcentration, EvidenceTag.ReserveUncommitted };
+        var model = new TacticalIntentModel(
+            primaryIntent: InferredIntent.Attack,
+            inferredMainEffort: 3,
+            confidence01: 0.62f,
+            ageSeconds: 12.5f,
+            supportingEvidence: evidence);
+
+        AssertEqual(InferredIntent.Attack, model.PrimaryIntent, "primary intent");
+        AssertEqual(3, model.InferredMainEffort, "inferred main effort");
+        AssertNear(0.62f, model.Confidence01, 1e-5f, "confidence");
+        AssertNear(12.5f, model.AgeSeconds, 1e-5f, "age");
+        AssertEqual(2, model.SupportingEvidence.Length, "supporting evidence length");
+        AssertEqual(EvidenceTag.SectorConcentration, model.SupportingEvidence[0], "evidence 0");
+        AssertEqual(EvidenceTag.ReserveUncommitted, model.SupportingEvidence[1], "evidence 1");
+
+        evidence[0] = EvidenceTag.Unknown;
+        AssertEqual(EvidenceTag.SectorConcentration, model.SupportingEvidence[0], "evidence snapshot owns copy");
+    }
+
+    private static void TacticalIntentModelClampsConfidenceAndAge()
+    {
+        var clampedHigh = new TacticalIntentModel(
+            InferredIntent.Defend,
+            inferredMainEffort: 0,
+            confidence01: 1.5f,
+            ageSeconds: -3f,
+            supportingEvidence: null);
+
+        AssertNear(1.0f, clampedHigh.Confidence01, 1e-5f, "high confidence clamps to 1");
+        AssertNear(0f, clampedHigh.AgeSeconds, 1e-5f, "negative age clamps to 0");
+        AssertEqual(0, clampedHigh.SupportingEvidence.Length, "null evidence becomes empty");
+
+        var clampedLow = new TacticalIntentModel(
+            InferredIntent.Defend,
+            inferredMainEffort: 0,
+            confidence01: -0.2f,
+            ageSeconds: float.NaN,
+            supportingEvidence: null);
+
+        AssertNear(0f, clampedLow.Confidence01, 1e-5f, "low confidence clamps to 0");
+        AssertNear(0f, clampedLow.AgeSeconds, 1e-5f, "NaN age becomes 0");
+
+        var confidenceNaN = new TacticalIntentModel(InferredIntent.Defend, 0, float.NaN, 0f, null);
+        var confidencePositiveInfinity = new TacticalIntentModel(InferredIntent.Defend, 0, float.PositiveInfinity, 0f, null);
+        var confidenceNegativeInfinity = new TacticalIntentModel(InferredIntent.Defend, 0, float.NegativeInfinity, 0f, null);
+        var agePositiveInfinity = new TacticalIntentModel(InferredIntent.Defend, 0, 0.5f, float.PositiveInfinity, null);
+        var ageNegativeInfinity = new TacticalIntentModel(InferredIntent.Defend, 0, 0.5f, float.NegativeInfinity, null);
+
+        AssertNear(0f, confidenceNaN.Confidence01, 1e-5f, "NaN confidence becomes 0");
+        AssertNear(0f, confidencePositiveInfinity.Confidence01, 1e-5f, "positive infinity confidence becomes 0");
+        AssertNear(0f, confidenceNegativeInfinity.Confidence01, 1e-5f, "negative infinity confidence becomes 0");
+        AssertNear(0f, agePositiveInfinity.AgeSeconds, 1e-5f, "positive infinity age becomes 0");
+        AssertNear(0f, ageNegativeInfinity.AgeSeconds, 1e-5f, "negative infinity age becomes 0");
+    }
+
+    private static void TacticalIntentModelUnknownPrimaryIntentSentinel()
+    {
+        var unknown = new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null);
+
+        AssertEqual(InferredIntent.Unknown, unknown.PrimaryIntent, "unknown primary intent");
+        AssertEqual(-1, unknown.InferredMainEffort, "unknown main effort sentinel");
+        AssertNear(0f, unknown.Confidence01, 1e-5f, "unknown confidence");
+    }
 
     private static void ArmyOrchestratorNewHasNoPlanUntilPicked()
     {
