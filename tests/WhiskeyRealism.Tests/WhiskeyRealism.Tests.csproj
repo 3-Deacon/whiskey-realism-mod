@@ -187,5 +187,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\HoodFrontalAssaultPlaybook.cs" Link="Orchestrator\Playbooks\HoodFrontalAssaultPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\BurnsideForcedAssaultPlaybook.cs" Link="Orchestrator\Playbooks\BurnsideForcedAssaultPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\BraggIndecisiveCommitPlaybook.cs" Link="Orchestrator\Playbooks\BraggIndecisiveCommitPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\BuiltInPlaybooks.cs" Link="Orchestrator\BuiltInPlaybooks.cs" />
   </ItemGroup>
 </Project>
