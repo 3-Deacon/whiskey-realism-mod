@@ -254,18 +254,19 @@ namespace WhiskeyRealism
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",
-                false,
-                "Default-off. Per-regiment delta logger for diagnosing stuck-retreat / stuck-charge " +
-                "/ unit-state bugs. Even when enabled, only logs units whose name contains a substring " +
-                "from Tactical Regiment Diagnostic Names (default empty = no logging). Hard-capped at " +
-                "2000 lines per battle, min 0.5s between samples per unit, deltas only.");
+                true,
+                "Default-on. Per-regiment delta logger for diagnosing stuck-retreat / stuck-charge " +
+                "/ unit-state bugs that the matrix observer (#35) cannot see. Pure observation; " +
+                "no behavior writes. Bounded by Tactical Regiment Diagnostic Names watch list, " +
+                "per-unit min 0.5s sample interval, and a hard cap of 2000 lines per battle.");
             TacticalRegimentDiagnosticNames = Config.Bind(
                 "Tactical Diagnostics",
                 "Tactical Regiment Diagnostic Names",
-                "",
-                "Comma-separated case-insensitive substrings to match against Regiment names for " +
-                "Enable Tactical Regiment Diagnostics. Empty = no units watched. Examples: " +
-                "Hampton,8th_Tennessee,2nd_South_Carolina");
+                "Hampton,Tennessee",
+                "Comma-separated case-insensitive substrings matched against Regiment names. " +
+                "Default seeds Hampton's Legion + any Tennessee-named regiment (the reported " +
+                "stuck-retreat units). Add more as needed: 'Hampton,Tennessee,2nd_South_Carolina'. " +
+                "Empty string disables logging (feature stays enabled but watches nothing).");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
