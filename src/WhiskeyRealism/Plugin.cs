@@ -54,6 +54,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> TacticalOrchestratorVerboseLogging;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
+        public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public const int TacticalMoraleSnapshotLedgerCapacity = 4;
         public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
@@ -292,6 +293,11 @@ namespace WhiskeyRealism
                 "Default seeds Hampton's Legion + any Tennessee-named regiment (the reported " +
                 "stuck-retreat units). Add more as needed: 'Hampton,Tennessee,2nd_South_Carolina'. " +
                 "Empty string disables logging (feature stays enabled but watches nothing).");
+            EnableTacticalDeploymentObserver = Config.Bind(
+                "Tactical Diagnostics",
+                "Enable Tactical Deployment Observer",
+                true,
+                "Default-on. Read-only deployment/redeployment observer for battle-start and end-of-day placement. Logs [TacDeployObs], [TacDeployObsMove], and [TacticalDeploymentPhase] rows; does not change unit positions or orders.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
