@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using UnityEngine;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -401,14 +402,41 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 var bundle = ArmyEvidenceBuilder.Build(battle, side.AllianceId);
                 int childCount = side.Army.CurrentDirectChildIntents.Count;
+
+                // Build instanceId → sector-index map matching ArmyEvidenceBuilder's iteration
+                // (BattleUnits.completeunitlist filtered by IsUsableOwnGroup). The post-filter
+                // index IS the SectorId in bundle.EnemyVisible.Sectors, so a real per-child
+                // primary sector lets BuildForFrontage actually find a matching sector and
+                // lets the allocator's adjacency / flank rules engage.
+                var instanceToSector = BuildInstanceToSectorIndexMap(battle, side.AllianceId);
+
                 var primarySectors = new int[childCount];
+                int minSector = int.MaxValue;
+                int maxSector = int.MinValue;
+                for (int i = 0; i < childCount; i++)
+                {
+                    var existing = side.Army.CurrentDirectChildIntents[i];
+                    int instanceId = ParseInstanceIdFromChildId(existing.ChildId);
+                    int sector;
+                    if (instanceId != 0 && instanceToSector.TryGetValue(instanceId, out int mapped))
+                        sector = mapped;
+                    else
+                        sector = existing.PrimarySector >= 0 ? existing.PrimarySector : 0;
+                    primarySectors[i] = sector;
+                    if (sector < minSector) minSector = sector;
+                    if (sector > maxSector) maxSector = sector;
+                }
+
+                // Flank exposure: leftmost (lowest sector index) and rightmost (highest) children
+                // are wing positions. Bucket >= FlankExposureRefuseThreshold (=2) triggers
+                // RefuseLeft/RefuseRight in the allocator. Single-child armies have min==max so
+                // both checks land on the same child and it stays bucket=2 either way.
                 var flankBuckets = new int[childCount];
                 var perChildIntent = new TacticalIntentModel[childCount];
                 for (int i = 0; i < childCount; i++)
                 {
-                    var existing = side.Army.CurrentDirectChildIntents[i];
-                    primarySectors[i] = existing.PrimarySector >= 0 ? existing.PrimarySector : 0;
-                    flankBuckets[i] = 0;
+                    bool isWing = childCount > 1 && (primarySectors[i] == minSector || primarySectors[i] == maxSector);
+                    flankBuckets[i] = isWing ? 2 : 0;
                     perChildIntent[i] = ArmyIntentInference.BuildForFrontage(primarySectors[i], bundle.EnemyVisible, ownStrengthBucket: 1);
                 }
 
@@ -448,6 +476,48 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 WarnTickCycleOnce(side, e);
             }
+        }
+
+        // Parse the trailing integer instanceId from "child-{id}" or "synth-army-{id}".
+        // Returns 0 on parse failure (which never matches a real GameObject InstanceID).
+        private static int ParseInstanceIdFromChildId(string childId)
+        {
+            if (string.IsNullOrEmpty(childId)) return 0;
+            int dash = childId.LastIndexOf('-');
+            if (dash < 0 || dash >= childId.Length - 1) return 0;
+            return int.TryParse(childId.Substring(dash + 1), out int id) ? id : 0;
+        }
+
+        // Walk BattleUnits.completeunitlist with the same filter ArmyEvidenceBuilder uses
+        // (alliance match + unittyp > 13 + not routed) and record each command-level group's
+        // GameObject InstanceID → post-filter index. The post-filter index equals the SectorId
+        // assigned by ArmyEvidenceBuilder, so per-child primary-sector lookups stay aligned.
+        private static System.Collections.Generic.Dictionary<int, int> BuildInstanceToSectorIndexMap(AIBattle battle, int allianceId)
+        {
+            var map = new System.Collections.Generic.Dictionary<int, int>();
+            try
+            {
+                var units = BattleUnits.completeunitlist as System.Collections.IList;
+                if (units == null) return map;
+                int sectorIndex = 0;
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var group = units[i] as Regiment;
+                    if (group == null) continue;
+                    if (group.alliance != allianceId) continue;
+                    if (group.unittyp <= TacticalUnitType.MaxCombat) continue;
+                    if (group.isrouted || group.markedforrout) continue;
+                    var go = ((Component)group).gameObject;
+                    if (go == null) continue;
+                    map[go.GetInstanceID()] = sectorIndex;
+                    sectorIndex++;
+                }
+            }
+            catch
+            {
+                // Empty map → primary sectors fall back to existing.PrimarySector per child.
+            }
+            return map;
         }
 
         private static ArmyEvidence BuildArmyEvidenceForSide(int allianceId, AIBattle battle)
