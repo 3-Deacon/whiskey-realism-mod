@@ -22,8 +22,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static partial class TacticalBattleCoordinator
     {
+        private const float MaxTickDeltaSeconds = 5f;
+
         // Cached AIBattle.bunits FieldInfo — avoids reflection cost on every battle bootstrap.
         private static FieldInfo _bunitsFieldCache;
+        private static float _lastTickTimeSeconds;
+        private static int _battleSequence;
+        private static readonly HashSet<string> _tickWarningKeys = new HashSet<string>();
 
         public static void OnBattleStart(AIBattle battle)
         {
@@ -36,6 +41,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var commanders = DiscoverCommandersFromVanilla(battle);
                 var roster = TacticalCommanderRoster.BuildFromSynthetic(commanders);
                 BuildAndActivate(playerCicAllianceId, roster);
+                _battleSequence++;
 
                 if (Plugin.EnableTacticalOrchestratorArmy != null && Plugin.EnableTacticalOrchestratorArmy.Value)
                 {
@@ -74,6 +80,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 ClearLedgersBetweenBattles();
+                ResetRuntimeTickState();
                 side0 = null;
                 side1 = null;
                 active = false;
@@ -87,7 +94,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        public static void Tick()
+        public static void Tick(AIBattle battle)
         {
             if (!active) return;
             try
@@ -95,6 +102,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 OnceLog.Info("orch-coordinator", "[TacticalOrchestrator] coordinator first tick");
                 side0?.Tick();
                 side1?.Tick();
+
+                if (Plugin.EnableTacticalOrchestratorIntentInference != null
+                    && Plugin.EnableTacticalOrchestratorIntentInference.Value)
+                {
+                    float deltaSeconds = ComputeTickDeltaSeconds();
+                    DriveTickCycle(side0, battle, deltaSeconds);
+                    DriveTickCycle(side1, battle, deltaSeconds);
+                }
             }
             catch (Exception e)
             {
@@ -104,6 +119,88 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         // ---- Private runtime helpers ----
+
+        private static float ComputeTickDeltaSeconds()
+        {
+            try
+            {
+                float now = UnityEngine.Time.realtimeSinceStartup;
+                float delta = _lastTickTimeSeconds <= 0f ? 1f : Math.Max(0f, now - _lastTickTimeSeconds);
+                _lastTickTimeSeconds = now;
+                return SanitizeDelta(delta);
+            }
+            catch
+            {
+                return 1f;
+            }
+        }
+
+        private static float SanitizeDelta(float deltaSeconds)
+        {
+            if (deltaSeconds <= 0f || float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds)) return 0f;
+            return Math.Min(deltaSeconds, MaxTickDeltaSeconds);
+        }
+
+        private static void DriveTickCycle(TacticalBattleOrchestrator side, AIBattle battle, float deltaSeconds)
+        {
+            try
+            {
+                if (side == null || side.Army == null || !side.Army.HasPlan) return;
+
+                var bundle = ArmyEvidenceBuilder.Build(battle, side.AllianceId);
+                int minReplanSeconds = (Plugin.TacticalOrchestratorMinReplanSeconds != null)
+                    ? Plugin.TacticalOrchestratorMinReplanSeconds.Value
+                    : 60;
+
+                var trigger = ArmyTickCycle.MaybeReplan(
+                    side.Army,
+                    deltaSeconds: deltaSeconds,
+                    ownEvidence: bundle.OwnEvidence,
+                    enemyVisible: bundle.EnemyVisible,
+                    ownMainEffortStrength: bundle.OwnMainEffortStrength,
+                    ownArmyMorale: bundle.OwnArmyMorale,
+                    ownReservesCommittedFraction: bundle.OwnReservesCommittedFraction,
+                    reinforcementsArrivingDelta: bundle.ReinforcementsArrivingDelta,
+                    minReplanSeconds: minReplanSeconds);
+
+                var intent = side.Army.CurrentIntentModel;
+                if (intent.PrimaryIntent != InferredIntent.Unknown)
+                {
+                    OnceLog.Info("orch-intent:" + _battleSequence + ":" + side.AllianceId + ":" + intent.PrimaryIntent + ":" + intent.InferredMainEffort,
+                        "[TacticalIntent] side=" + side.AllianceId
+                        + " seesEnemy=" + intent.PrimaryIntent
+                        + " mainEffort=" + intent.InferredMainEffort
+                        + " confidence=" + intent.Confidence01.ToString("0.00"));
+                }
+
+                if (trigger != ReplanTrigger.None)
+                {
+                    OnceLog.Info("orch-replan:" + _battleSequence + ":" + side.AllianceId + ":" + trigger + ":" + side.Army.CurrentPlan.PlanId,
+                        "[TacticalReplan] side=" + side.AllianceId
+                        + " trigger=" + trigger
+                        + " newPlan=" + side.Army.CurrentPlan.PlanId
+                        + " phase=" + side.Army.CurrentPlan.Phase);
+                }
+            }
+            catch (Exception e)
+            {
+                WarnTickCycleOnce(side, e);
+            }
+        }
+
+        private static void WarnTickCycleOnce(TacticalBattleOrchestrator side, Exception e)
+        {
+            try
+            {
+                string sideKey = side == null ? "null" : side.AllianceId.ToString();
+                string key = sideKey + ":" + e.GetType().Name;
+                if (_tickWarningKeys.Contains(key)) return;
+                _tickWarningKeys.Add(key);
+                Plugin.Log.LogWarning("[TacticalOrchestrator] Army tick skipped side="
+                    + sideKey + ": " + e.GetType().Name + " " + e.Message);
+            }
+            catch { }
+        }
 
         private static int ResolvePlayerCicAllianceId()
         {
@@ -279,8 +376,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try { WhiskeyRealism.Patches.TacticalRegimentDiagnosticsPatch.Reset(); } catch { }
         }
 
+        private static void ResetRuntimeTickState()
+        {
+            try { ArmyTickCycle.Reset(); } catch { }
+            _lastTickTimeSeconds = 0f;
+            _tickWarningKeys.Clear();
+        }
+
         private static void ClearForFailure()
         {
+            ResetRuntimeTickState();
             side0 = null;
             side1 = null;
             active = false;

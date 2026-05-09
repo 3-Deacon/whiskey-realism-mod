@@ -277,7 +277,7 @@ namespace WhiskeyRealism.Patches
                     // next CheckGlobalAIStrategy invocation to fire the first tick telemetry).
                     if (TacticalBattleCoordinator.IsActive)
                     {
-                        TacticalBattleCoordinator.Tick();
+                        TacticalBattleCoordinator.Tick(__instance);
                     }
                 }
             }
