@@ -589,6 +589,13 @@ static class Program
             ("tactical intent model unknown primary intent sentinel", TacticalIntentModelUnknownPrimaryIntentSentinel),
             ("enemy visible state records sector and contact fields", EnemyVisibleStateRecordsSectorAndContactFields),
             ("enemy visible state clamps and coerces null sectors", EnemyVisibleStateClampsAndCoercesNullSectors),
+            ("army intent inference unknown when no visible sectors", ArmyIntentInferenceUnknownWhenNoVisibleSectors),
+            ("army intent inference concentration in one sector implies attack", ArmyIntentInferenceConcentrationInOneSectorImpliesAttack),
+            ("army intent inference single sector strong contact stays finite", ArmyIntentInferenceSingleSectorStrongContactStaysFinite),
+            ("army intent inference unconcentrated reserves uncommitted implies probe", ArmyIntentInferenceUnconcentratedReservesUncommittedImpliesProbe),
+            ("army intent inference contact broken implies withdraw", ArmyIntentInferenceContactBrokenImpliesWithdraw),
+            ("army intent inference receiving fire implies defend", ArmyIntentInferenceReceivingFireImpliesDefend),
+            ("army intent inference confidence floor below threshold", ArmyIntentInferenceConfidenceFloorBelowThreshold),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -11163,6 +11170,137 @@ static class Program
         AssertEqual(0, state.Sectors.Length, "null sectors become empty");
         AssertNear(1.0f, state.EnemyReserveCommitFraction, 1e-5f, "reserve fraction clamps to 1");
         AssertNear(0f, state.EnemyReinforcementStrength24h, 1e-5f, "NaN reinforcement strength becomes 0");
+    }
+
+    private static void ArmyIntentInferenceUnknownWhenNoVisibleSectors()
+    {
+        var ownEvidence = new ArmyEvidence(currentOdds: 1.0f, terrain: TerrainKind.Open, defaultMainEffortSector: 0);
+        var enemy = new EnemyVisibleState(System.Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Unknown, model.PrimaryIntent, "no sectors infers Unknown");
+        AssertNear(0f, model.Confidence01, 1e-5f, "no sectors confidence");
+        AssertEqual(0, model.SupportingEvidence.Length, "no sectors has no evidence");
+    }
+
+    private static void ArmyIntentInferenceConcentrationInOneSectorImpliesAttack()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0, 5000f, 8500f, false),
+                new EnemyVisibleSector(1, 5000f, 1200f, false),
+                new EnemyVisibleSector(2, 5000f, 1300f, false)
+            },
+            0.7f,
+            true,
+            false,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Attack, model.PrimaryIntent, "concentration + committed reserve infers Attack");
+        AssertEqual(0, model.InferredMainEffort, "sector 0 is max enemy strength");
+        AssertTrue(model.Confidence01 >= 0.5f, "attack confidence >= 0.5");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.SectorConcentration) >= 0, "attack evidence includes concentration");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReserveCommitted) >= 0, "attack evidence includes reserve committed");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ContactSpotted) >= 0, "attack evidence includes contact spotted");
+    }
+
+    private static void ArmyIntentInferenceSingleSectorStrongContactStaysFinite()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 5000f, 7000f, false) },
+            0.7f,
+            true,
+            false,
+            1500f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Attack, model.PrimaryIntent, "single sector strong contact infers Attack");
+        AssertEqual(0, model.InferredMainEffort, "single sector is main effort");
+        AssertTrue(model.Confidence01 >= ArmyIntentInference.ConfidenceFloor, "single sector confidence reaches floor");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReserveCommitted) >= 0, "single sector evidence includes reserve committed");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ContactSpotted) >= 0, "single sector evidence includes contact spotted");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReinforcementsArriving) >= 0, "single sector evidence includes reinforcements");
+    }
+
+    private static void ArmyIntentInferenceUnconcentratedReservesUncommittedImpliesProbe()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0, 5000f, 2000f, false),
+                new EnemyVisibleSector(1, 5000f, 2200f, false),
+                new EnemyVisibleSector(2, 5000f, 2100f, false)
+            },
+            0.1f,
+            true,
+            false,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Probe, model.PrimaryIntent, "unconcentrated + uncommitted reserve infers Probe");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReserveUncommitted) >= 0, "probe evidence includes reserve uncommitted");
+    }
+
+    private static void ArmyIntentInferenceContactBrokenImpliesWithdraw()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 5000f, 1000f, false) },
+            0f,
+            false,
+            true,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Withdraw, model.PrimaryIntent, "broken contact with low visible enemy infers Withdraw");
+        AssertTrue(model.Confidence01 >= ArmyIntentInference.ConfidenceFloor, "hard withdraw signal reaches confidence floor");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ContactBroken) >= 0, "withdraw evidence includes contact broken");
+    }
+
+    private static void ArmyIntentInferenceReceivingFireImpliesDefend()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0, 4000f, 6000f, true),
+                new EnemyVisibleSector(1, 4000f, 6500f, true)
+            },
+            0.6f,
+            true,
+            false,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Defend, model.PrimaryIntent, "recent fire in multiple sectors with committed reserve infers Defend");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReceivingFire) >= 0, "defend evidence includes receiving fire");
+    }
+
+    private static void ArmyIntentInferenceConfidenceFloorBelowThreshold()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 5000f, 100f, false) },
+            0f,
+            false,
+            false,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertTrue(model.Confidence01 < 0.3f, "low signal confidence remains below floor");
+        AssertEqual(InferredIntent.Unknown, model.PrimaryIntent, "below confidence floor infers Unknown");
     }
 
     private static void ArmyOrchestratorNewHasNoPlanUntilPicked()
