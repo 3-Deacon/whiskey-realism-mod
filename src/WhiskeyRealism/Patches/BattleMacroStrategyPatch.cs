@@ -45,6 +45,10 @@ namespace WhiskeyRealism.Patches
             var units = SafeList(battle, ref _unitsUsedField, "unitsused");
             if (side < 0 || bunits == null) return;
 
+            int allianceId = ResolveAllianceId(bunits, side);
+            if (TryApplyOrchestrator(battle, vanillaMacro, allianceId)) return;
+
+            // Fallback: existing scorer path preserved verbatim for regression triage.
             var odds = BuildRuntimeOdds(bunits, side, units);
             var decision = TacticalDoctrineScorer.DecideMacro(new TacticalMacroDecisionInput(
                 vanillaMacro,
@@ -61,6 +65,41 @@ namespace WhiskeyRealism.Patches
 
             _macroAiField.SetValue(battle, decision.MacroAi);
             LogDecision(side, vanillaMacro, decision, odds);
+        }
+
+        private static bool TryApplyOrchestrator(AIBattle battle, int vanillaMacro, int allianceId)
+        {
+            if (Plugin.EnableTacticalOrchestratorArmy == null || !Plugin.EnableTacticalOrchestratorArmy.Value) return false;
+            if (allianceId < 0 || allianceId >= 2) return false;
+
+            var sideOrch = WhiskeyRealism.Tactical.Orchestrator.TacticalBattleCoordinator.GetSideOrchestrator(allianceId);
+            if (sideOrch?.Army == null || !sideOrch.Army.HasPlan) return false;
+
+            int macro = sideOrch.Army.CurrentMacroAi;
+            // CurrentMacroAi -1 means "let vanilla decide" — return true so we DON'T fall through to the scorer.
+            // (The orchestrator has spoken; its choice is "no opinion this tick.")
+            if (macro < -1 || macro > 3) return true;
+            if (macro == vanillaMacro) return true;        // already aligned; no write needed
+            if (_macroAiField == null) return true;
+
+            _macroAiField.SetValue(battle, macro);
+            OnceLog.Info("orch-macro-write:" + allianceId + ":" + vanillaMacro + "->" + macro,
+                "[TacticalMacroDecision] side=" + allianceId
+                + " old=" + TacticalTelemetry.MacroName(vanillaMacro)
+                + " orchestrator=" + TacticalTelemetry.MacroName(macro)
+                + " plan=" + sideOrch.Army.CurrentPlan.PlanId
+                + " phase=" + sideOrch.Army.CurrentPlan.Phase);
+            return true;
+        }
+
+        private static int ResolveAllianceId(BattleUnits bunits, int side)
+        {
+            try
+            {
+                if (bunits == null || bunits.alliance == null || side < 0 || side >= bunits.alliance.Length) return -1;
+                return bunits.alliance[side];
+            }
+            catch { return -1; }
         }
 
         private static TacticalOddsAssessment BuildRuntimeOdds(BattleUnits bunits, int side, IList units)
