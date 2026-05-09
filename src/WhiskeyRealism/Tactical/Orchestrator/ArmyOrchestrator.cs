@@ -105,5 +105,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _plan.ReserveCommitTriggerOdds,
                 aggressionBias01: (_commanderPersonality.Aggression + 1f) * 0.5f);
         }
+
+        public ReplanTrigger CheckReplanTriggers(ReplanTriggerInput input) => ArmyReplanTriggers.Evaluate(input);
+
+        public void Replan(ArmyEvidence evidence)
+        {
+            PickInitialPlan(evidence);  // re-runs selection; new plan replaces old
+        }
     }
 }

@@ -586,7 +586,15 @@ static class Program
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
             ("army orchestrator current macroai defend on consolidate with cautious personality", ArmyOrchestratorCurrentMacroAiDefendOnConsolidateWithCautiousPersonality),
-            ("army orchestrator emit army intent matches current plan", ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan)
+            ("army orchestrator emit army intent matches current plan", ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan),
+            ("army replan triggers phase deadline fires when age exceeds phase budget", ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget),
+            ("army replan triggers main effort sector loss fires below threshold", ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold),
+            ("army replan triggers force imbalance shift fires when odds cross hysteresis", ArmyReplanTriggersForceImbalanceShiftFiresWhenOddsCrossHysteresis),
+            ("army replan triggers casualty threshold fires when morale below floor", ArmyReplanTriggersCasualtyThresholdFiresWhenMoraleBelowFloor),
+            ("army replan triggers reserve exhaustion fires at 85 percent committed", ArmyReplanTriggersReserveExhaustionFiresAt85PercentCommitted),
+            ("army replan triggers reinforcement arrival fires on nonzero delta", ArmyReplanTriggersReinforcementArrivalFiresOnNonzeroDelta),
+            ("army replan triggers enemy intent shift fires when confidence weighted exceeds floor", ArmyReplanTriggersEnemyIntentShiftFiresWhenConfidenceWeightedExceedsFloor),
+            ("army replan triggers none when all conditions normal", ArmyReplanTriggersNoneWhenAllConditionsNormal)
         };
 
         foreach (var test in tests)
@@ -11069,5 +11077,67 @@ static class Program
         AssertEqual(BattlePhase.Probe, intent.Phase, "intent phase matches");
         AssertEqual(2, intent.MainEffortSector, "intent main effort matches plan");
         AssertTrue(intent.AggressionBias01 > 0.5f, "intent aggression bias positive for aggressive CO");
+    }
+
+    private static void ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget()
+    {
+        var input = new ReplanTriggerInput(
+            planAgeSeconds: 200f, currentPhase: BattlePhase.Probe,
+            mainEffortOwnStrength: 5000f, mainEffortHistoryOwnStrength: 5000f,
+            globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
+            armyMoraleCurrent: 1.0f, armyMoraleFloor: 0.4f,
+            reservesCommittedFraction: 0.5f, reinforcementsArrivingDelta: 0f,
+            enemyMainEffortShiftConfidenceWeighted: 0f);
+        AssertEqual(ReplanTrigger.PhaseDeadline, ArmyReplanTriggers.Evaluate(input), "age >= 180 fires PhaseDeadline");
+    }
+
+    private static void ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold()
+    {
+        var input = new ReplanTriggerInput(
+            planAgeSeconds: 30f, currentPhase: BattlePhase.MainEffort,
+            mainEffortOwnStrength: 1500f, mainEffortHistoryOwnStrength: 5000f,  // 30% of historic
+            globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
+            armyMoraleCurrent: 1.0f, armyMoraleFloor: 0.4f,
+            reservesCommittedFraction: 0.5f, reinforcementsArrivingDelta: 0f,
+            enemyMainEffortShiftConfidenceWeighted: 0f);
+        AssertEqual(ReplanTrigger.MainEffortSectorLoss, ArmyReplanTriggers.Evaluate(input), "main-effort below 50% fires MainEffortSectorLoss");
+    }
+
+    private static void ArmyReplanTriggersForceImbalanceShiftFiresWhenOddsCrossHysteresis()
+    {
+        var below = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 0.65f, 1.5f, 1f, 0.4f, 0.5f, 0f, 0f);
+        var above = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.5f, 1.0f, 1f, 0.4f, 0.5f, 0f, 0f);
+        AssertEqual(ReplanTrigger.ForceImbalanceShift, ArmyReplanTriggers.Evaluate(below), "odds cross 0.7 downward fires ForceImbalanceShift");
+        AssertEqual(ReplanTrigger.ForceImbalanceShift, ArmyReplanTriggers.Evaluate(above), "odds cross 1.4 upward fires ForceImbalanceShift");
+    }
+
+    private static void ArmyReplanTriggersCasualtyThresholdFiresWhenMoraleBelowFloor()
+    {
+        var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, armyMoraleCurrent: 0.3f, armyMoraleFloor: 0.4f, 0.5f, 0f, 0f);
+        AssertEqual(ReplanTrigger.CasualtyThreshold, ArmyReplanTriggers.Evaluate(input), "morale below floor fires CasualtyThreshold");
+    }
+
+    private static void ArmyReplanTriggersReserveExhaustionFiresAt85PercentCommitted()
+    {
+        var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, reservesCommittedFraction: 0.9f, 0f, 0f);
+        AssertEqual(ReplanTrigger.ReserveExhaustion, ArmyReplanTriggers.Evaluate(input), "reserves >=85% fires ReserveExhaustion");
+    }
+
+    private static void ArmyReplanTriggersReinforcementArrivalFiresOnNonzeroDelta()
+    {
+        var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, reinforcementsArrivingDelta: 2500f, 0f);
+        AssertEqual(ReplanTrigger.ReinforcementArrival, ArmyReplanTriggers.Evaluate(input), "reinforcements arrival fires ReinforcementArrival");
+    }
+
+    private static void ArmyReplanTriggersEnemyIntentShiftFiresWhenConfidenceWeightedExceedsFloor()
+    {
+        var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, 0f, enemyMainEffortShiftConfidenceWeighted: 0.55f);
+        AssertEqual(ReplanTrigger.EnemyIntentShift, ArmyReplanTriggers.Evaluate(input), "enemy shift >=0.5 fires EnemyIntentShift");
+    }
+
+    private static void ArmyReplanTriggersNoneWhenAllConditionsNormal()
+    {
+        var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, 0f, 0f);
+        AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(input), "no trigger fires when conditions normal");
     }
 }
