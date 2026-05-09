@@ -44,6 +44,10 @@ static class Program
             ("tactical telemetry signature changes on command signature", TacticalTelemetrySignatureChangesOnCommandSignature),
             ("tactical telemetry throttle suppresses repeated signature", TacticalTelemetryThrottleSuppressesRepeatedSignature),
             ("tactical telemetry delta formats before after counts", TacticalTelemetryDeltaFormatsBeforeAfterCounts),
+            ("tactical deployment telemetry summarizes large moves", TacticalDeploymentTelemetrySummarizesLargeMoves),
+            ("tactical deployment telemetry tracks new and removed groups", TacticalDeploymentTelemetryTracksNewAndRemovedGroups),
+            ("tactical deployment telemetry matches stable keys across reorder", TacticalDeploymentTelemetryMatchesStableKeysAcrossReorder),
+            ("tactical deployment telemetry formats skipped phase", TacticalDeploymentTelemetryFormatsSkippedPhase),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -835,6 +839,100 @@ static class Program
         AssertContains(delta, "groups=2->2", "group delta");
         AssertContains(delta, "charging=0->1", "charging delta");
         AssertContains(delta, "reserves=1->2", "reserve delta");
+    }
+
+    private static void TacticalDeploymentTelemetrySummarizesLargeMoves()
+    {
+        var before = new TacticalDeploymentSnapshot("pre", 0, 0, 0, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("army", "Army", 0, 16, 100f, 100f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("division", "Division", 0, 15, 300f, 100f, 1, 1, 0, false, true)
+        });
+        var after = new TacticalDeploymentSnapshot("post", 0, 0, 0, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("army", "Army", 0, 16, 250f, 100f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("division", "Division", 0, 15, 310f, 100f, 1, 1, 0, false, true)
+        });
+
+        var summary = TacticalDeploymentTelemetry.Delta("DoPlacementAIUnitsWithinDeploymentzoneNew", before, after);
+
+        AssertEqual(2, summary.MatchedGroups, "matched groups");
+        AssertEqual(2, summary.MovedGroups, "moved groups");
+        AssertEqual(1, summary.LargeMoves, "large moves");
+        AssertNear(150f, summary.MaxMoveDistance, 0.01f, "max move");
+        AssertNear(80f, summary.AverageMoveDistance, 0.01f, "average move");
+        AssertContains(TacticalDeploymentTelemetry.FormatSummary(summary), "[TacDeployObs]", "summary prefix");
+        AssertContains(TacticalDeploymentTelemetry.FormatSummary(summary), "largeMoves=1", "large move field");
+    }
+
+    private static void TacticalDeploymentTelemetryTracksNewAndRemovedGroups()
+    {
+        var before = new TacticalDeploymentSnapshot("pre", 1, 5, 2, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("kept", "Kept", 1, 14, 0f, 0f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("removed", "Removed", 1, 14, 10f, 0f, 1, 1, 0, false, true)
+        });
+        var after = new TacticalDeploymentSnapshot("post", 1, 5, 2, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("kept", "Kept", 1, 14, 0f, 0f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("new", "New", 1, 14, 40f, 0f, 1, 1, 0, false, true)
+        });
+
+        var summary = TacticalDeploymentTelemetry.Delta("SetActiveDeploymentPhase", before, after);
+        string signature = TacticalDeploymentTelemetry.Signature(summary);
+
+        AssertEqual(1, summary.NewGroups, "new groups");
+        AssertEqual(1, summary.RemovedGroups, "removed groups");
+        AssertContains(signature, "surface=SetActiveDeploymentPhase", "surface signature");
+        AssertContains(signature, "phase=eod", "phase signature");
+        AssertContains(signature, "new=1", "new signature");
+        AssertContains(signature, "removed=1", "removed signature");
+    }
+
+    private static void TacticalDeploymentTelemetryMatchesStableKeysAcrossReorder()
+    {
+        var before = new TacticalDeploymentSnapshot("pre", 0, 0, 0, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("101", "Army", 0, 16, 10f, 10f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("202", "Division", 0, 15, 20f, 20f, 1, 1, 0, false, true)
+        }, TacticalDeploymentTelemetry.PhaseInitialPositioning);
+
+        var after = new TacticalDeploymentSnapshot("post", 0, 0, 0, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("202", "Division", 0, 15, 20f, 20f, 1, 1, 0, false, true),
+            new TacticalDeploymentGroupSnapshot("101", "Army", 0, 16, 110f, 10f, 1, 1, 0, false, true)
+        }, TacticalDeploymentTelemetry.PhaseInitialPositioning);
+
+        var summary = TacticalDeploymentTelemetry.Delta("DoUnitPositioning", before, after);
+
+        AssertEqual(2, summary.MatchedGroups, "reorder matched groups");
+        AssertEqual(0, summary.NewGroups, "reorder new groups");
+        AssertEqual(0, summary.RemovedGroups, "reorder removed groups");
+        AssertEqual(1, summary.MovedGroups, "reorder moved groups");
+        AssertEqual(1, summary.LargeMoves, "reorder large moves");
+        AssertContains(TacticalDeploymentTelemetry.Signature(summary), "phase=initial-positioning", "initial positioning phase");
+    }
+
+    private static void TacticalDeploymentTelemetryFormatsSkippedPhase()
+    {
+        var before = new TacticalDeploymentSnapshot("pre", 1, 0, 0, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("303", "Skipped", 1, 14, 50f, 50f, 1, 1, 0, false, true)
+        }, TacticalDeploymentTelemetry.PhaseSkipped);
+
+        var after = new TacticalDeploymentSnapshot("post", 1, 0, 0, new[]
+        {
+            new TacticalDeploymentGroupSnapshot("303", "Skipped", 1, 14, 50f, 50f, 1, 1, 0, false, true)
+        }, TacticalDeploymentTelemetry.PhaseSkipped);
+
+        var summary = TacticalDeploymentTelemetry.Delta("DoPlacementAIUnitsWithinDeploymentzoneNew", before, after);
+        string formatted = TacticalDeploymentTelemetry.FormatSummary(summary);
+
+        AssertContains(formatted, "[TacDeployObs]", "summary marker");
+        AssertContains(formatted, "surface=DoPlacementAIUnitsWithinDeploymentzoneNew", "surface");
+        AssertContains(formatted, "phase=skipped", "skipped phase");
+        AssertContains(formatted, "matched=1", "matched count");
+        AssertContains(formatted, "moved=0", "skipped move count");
     }
 
     private static void TacticalContactNoSightingIsNone()
