@@ -550,6 +550,8 @@ static class Program
             ("tactical battle plan sanitizes NaN and Infinity floats", TacticalBattlePlanSanitizesNanAndInfinityFloats),
             ("army intent sanitizes NaN and Infinity floats", ArmyIntentSanitizesNanAndInfinityFloats),
             ("army intent clamps aggression bias out of range", ArmyIntentClampsAggressionBiasOutOfRange),
+            ("army intent carries direct child intents list", ArmyIntentCarriesDirectChildIntentsList),
+            ("army intent direct child intents defaults empty", ArmyIntentDirectChildIntentsDefaultsEmpty),
             ("tactical playbook personality fit scores peak at match and decay off", TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff),
             ("tactical playbook terrain preference returns dominant weight", TacticalPlaybookTerrainPreferenceReturnsDominantWeight),
             ("tactical playbook odds range one inside band decays outside", TacticalPlaybookOddsRangeOneInsideBandDecaysOutside),
@@ -10809,6 +10811,34 @@ static class Program
         var above = new ArmyIntent(BattlePlanId.GenericMethodical, BattlePhase.Probe, 0, null, null, 1.0f, 5.0f);
         AssertNear(0f, below.AggressionBias01, 1e-5f, "below 0 clamped to 0");
         AssertNear(1f, above.AggressionBias01, 1e-5f, "above 1 clamped to 1");
+    }
+
+    private static void ArmyIntentCarriesDirectChildIntentsList()
+    {
+        var children = new[]
+        {
+            new DirectChildIntent(
+                "c0", 15, 16, "First", 2, DirectChildRole.Main,
+                DirectChildAxis.SectorAxis, 2, 1.0f, 0.6f,
+                new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>())),
+        };
+        var intent = new ArmyIntent(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 2, fixingSectors: new[] { 0 }, screeningSectors: new[] { 4 },
+            reserveCommitTriggerOdds: 1.2f, aggressionBias01: 0.7f,
+            directChildIntents: children);
+        AssertEqual(1, intent.DirectChildIntents.Count);
+        AssertEqual("c0", intent.DirectChildIntents[0].ChildId);
+        AssertEqual(DirectChildRole.Main, intent.DirectChildIntents[0].Role);
+    }
+
+    private static void ArmyIntentDirectChildIntentsDefaultsEmpty()
+    {
+        // existing 7-arg ctor must continue to work and yield empty children list
+        var intent = new ArmyIntent(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0.5f);
+        AssertEqual(0, intent.DirectChildIntents.Count);
     }
 
     // ---- TacticalPlaybook tests (O1.2) ----
