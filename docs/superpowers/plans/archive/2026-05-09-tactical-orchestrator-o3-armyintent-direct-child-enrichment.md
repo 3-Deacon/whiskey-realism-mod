@@ -8,7 +8,7 @@
 
 **Tech Stack:** C# 8 / netstandard2.1, BepInEx 5.4.x x64, HarmonyX 2.10.2, Unity 2021.3.16f1 Mono. Pure tests in `tests/WhiskeyRealism.Tests/Program.cs` using the existing `AssertEqual<T>` / `AssertTrue` / `AssertContains` helpers.
 
-**Spec:** `docs/superpowers/specs/2026-05-09-tactical-orchestrator-o3-corps-design.md`
+**Spec:** `docs/superpowers/specs/archive/2026-05-09-tactical-orchestrator-o3-corps-design.md`
 
 **Worktree:** Plan executes in the existing `.worktrees/orch-o2-intent/` worktree (already linked to the main repo's `refs/`). The branch is `orch/o2-intent`. **Before merging, rebase or fast-forward into a fresh O3 branch (`orch/o3-direct-child`) and merge from there** — keep O2 history clean.
 
