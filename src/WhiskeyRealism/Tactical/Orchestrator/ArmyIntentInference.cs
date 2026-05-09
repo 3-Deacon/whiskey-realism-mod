@@ -105,6 +105,45 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return new TacticalIntentModel(intent, sectorWithMaxEnemy, confidence, 0f, evidence.ToArray());
         }
 
+        /// <summary>
+        /// Frontage-filtered overload used by O3 to compute per-direct-child enemy
+        /// intent. Filters EnemyVisibleState.Sectors to a single sector mask and
+        /// reuses the existing Build path. ownStrengthBucket is converted to a
+        /// rough OwnStrength so the existing strength heuristics still fire.
+        /// </summary>
+        public static TacticalIntentModel BuildForFrontage(int primarySector, EnemyVisibleState enemy, int ownStrengthBucket)
+        {
+            EnemyVisibleSector? matched = null;
+            for (int i = 0; i < enemy.Sectors.Length; i++)
+            {
+                if (enemy.Sectors[i].SectorId == primarySector)
+                {
+                    matched = enemy.Sectors[i];
+                    break;
+                }
+            }
+
+            if (!matched.HasValue)
+            {
+                return new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>());
+            }
+
+            var filtered = new EnemyVisibleState(
+                sectors: new[] { matched.Value },
+                enemyReserveCommitFraction: enemy.EnemyReserveCommitFraction,
+                anyContactSpotted: enemy.AnyContactSpotted,
+                anyContactBroken: enemy.AnyContactBroken,
+                enemyReinforcementStrength24h: enemy.EnemyReinforcementStrength24h);
+
+            float syntheticOwnStrength = Math.Max(matched.Value.OwnStrength, ownStrengthBucket * 1000f);
+            var ownEvidence = new ArmyEvidence(
+                currentOdds: matched.Value.EnemyStrength <= 0f ? 1f : syntheticOwnStrength / Math.Max(1f, matched.Value.EnemyStrength),
+                terrain: TerrainKind.Open,
+                defaultMainEffortSector: primarySector);
+
+            return Build(ownEvidence, filtered);
+        }
+
         private static float Clamp01(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;

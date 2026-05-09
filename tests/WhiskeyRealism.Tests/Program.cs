@@ -601,6 +601,8 @@ static class Program
             ("army intent inference contact broken implies withdraw", ArmyIntentInferenceContactBrokenImpliesWithdraw),
             ("army intent inference receiving fire implies defend", ArmyIntentInferenceReceivingFireImpliesDefend),
             ("army intent inference confidence floor below threshold", ArmyIntentInferenceConfidenceFloorBelowThreshold),
+            ("army intent inference for frontage filters by sector", ArmyIntentInferenceForFrontageFiltersBySector),
+            ("army intent inference for frontage empty mask returns unknown", ArmyIntentInferenceForFrontageEmptyMaskReturnsUnknown),
             ("direct child intent sanitizes nonfinite floats", DirectChildIntentSanitizesNonfiniteFloats),
             ("direct child intent clamps support and aggression bias", DirectChildIntentClampsSupportAndAggression),
             ("direct child evidence buckets are non negative", DirectChildEvidenceBucketsAreNonNegative),
@@ -11683,6 +11685,38 @@ static class Program
 
         AssertTrue(model.Confidence01 < 0.3f, "low signal confidence remains below floor");
         AssertEqual(InferredIntent.Unknown, model.PrimaryIntent, "below confidence floor infers Unknown");
+    }
+
+    private static void ArmyIntentInferenceForFrontageFiltersBySector()
+    {
+        var enemy = new EnemyVisibleState(
+            sectors: new[]
+            {
+                new EnemyVisibleSector(0, 1000f,  500f, false),
+                new EnemyVisibleSector(2, 2000f, 4000f, true),  // child sector — strong enemy + recent fire
+                new EnemyVisibleSector(4, 1000f,  500f, false),
+            },
+            enemyReserveCommitFraction: 0.5f,
+            anyContactSpotted: true,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
+
+        var intent = ArmyIntentInference.BuildForFrontage(primarySector: 2, enemy, ownStrengthBucket: 1);
+        AssertTrue(intent.PrimaryIntent != InferredIntent.Unknown,
+            "frontage-filtered single-sector enemy should yield non-Unknown when fire and reserve evidence present");
+        AssertEqual(2, intent.InferredMainEffort);
+    }
+
+    private static void ArmyIntentInferenceForFrontageEmptyMaskReturnsUnknown()
+    {
+        var enemy = new EnemyVisibleState(
+            sectors: new[] { new EnemyVisibleSector(0, 100f, 100f, false) },
+            enemyReserveCommitFraction: 0f,
+            anyContactSpotted: false,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
+        var intent = ArmyIntentInference.BuildForFrontage(primarySector: 99, enemy, ownStrengthBucket: 0);
+        AssertEqual(InferredIntent.Unknown, intent.PrimaryIntent);
     }
 
     private static void ArmyOrchestratorNewHasNoPlanUntilPicked()
