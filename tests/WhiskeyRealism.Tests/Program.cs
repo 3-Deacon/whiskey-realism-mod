@@ -599,6 +599,11 @@ static class Program
             ("army intent inference contact broken implies withdraw", ArmyIntentInferenceContactBrokenImpliesWithdraw),
             ("army intent inference receiving fire implies defend", ArmyIntentInferenceReceivingFireImpliesDefend),
             ("army intent inference confidence floor below threshold", ArmyIntentInferenceConfidenceFloorBelowThreshold),
+            ("direct child intent sanitizes nonfinite floats", DirectChildIntentSanitizesNonfiniteFloats),
+            ("direct child intent clamps support and aggression bias", DirectChildIntentClampsSupportAndAggression),
+            ("direct child evidence buckets are non negative", DirectChildEvidenceBucketsAreNonNegative),
+            ("direct child evidence equals same buckets", DirectChildEvidenceEqualsSameBuckets),
+            ("direct child snapshot stores raw and effective unittyp", DirectChildSnapshotStoresRawAndEffectiveUnittyp),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -11215,6 +11220,75 @@ static class Program
         AssertEqual(InferredIntent.Unknown, unknown.PrimaryIntent, "unknown primary intent");
         AssertEqual(-1, unknown.InferredMainEffort, "unknown main effort sentinel");
         AssertNear(0f, unknown.Confidence01, 1e-5f, "unknown confidence");
+    }
+
+    private static void DirectChildIntentSanitizesNonfiniteFloats()
+    {
+        var intent = new DirectChildIntent(
+            childId: "c1",
+            rawUnitTyp: 15,
+            effectiveCommandLevel: 16,
+            displayName: "1st Corps",
+            primarySector: 2,
+            role: DirectChildRole.Main,
+            axis: DirectChildAxis.SectorAxis,
+            axisSector: 2,
+            supportPriority01: float.NaN,
+            aggressionBias01: float.PositiveInfinity,
+            enemyIntent: new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
+        AssertEqual(0f, intent.SupportPriority01, "NaN sanitized to 0");
+        AssertEqual(0.5f, intent.AggressionBias01, "Inf sanitized to 0.5");
+    }
+
+    private static void DirectChildIntentClampsSupportAndAggression()
+    {
+        var intent = new DirectChildIntent(
+            "c1", 15, 16, "1st", 0, DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 0,
+            supportPriority01: 1.5f,
+            aggressionBias01: -0.2f,
+            enemyIntent: new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
+        AssertEqual(1f, intent.SupportPriority01);
+        AssertEqual(0f, intent.AggressionBias01);
+    }
+
+    private static void DirectChildEvidenceBucketsAreNonNegative()
+    {
+        var ev = new DirectChildEvidence(
+            ownStrengthBucket: -3,
+            enemyStrengthBucket: -1,
+            contactFlag: false,
+            primarySector: 0,
+            flankExposureBucket: -2,
+            confidence01: float.NaN);
+        AssertEqual(0, ev.OwnStrengthBucket);
+        AssertEqual(0, ev.EnemyStrengthBucket);
+        AssertEqual(0, ev.FlankExposureBucket);
+        AssertEqual(0f, ev.Confidence01);
+    }
+
+    private static void DirectChildEvidenceEqualsSameBuckets()
+    {
+        var a = new DirectChildEvidence(2, 1, true, 3, 1, 0.7f);
+        var b = new DirectChildEvidence(2, 1, true, 3, 1, 0.7f);
+        AssertTrue(a.SignatureEquals(b), "signature equals when buckets+flag+sector match");
+        var c = new DirectChildEvidence(2, 1, false, 3, 1, 0.7f); // contact flag flipped
+        AssertTrue(!a.SignatureEquals(c), "signature differs when contact flag changes");
+    }
+
+    private static void DirectChildSnapshotStoresRawAndEffectiveUnittyp()
+    {
+        var snap = new DirectChildSnapshot(
+            childId: "child-99",
+            parentArmyId: "army-1",
+            rawUnitTyp: 15,
+            commandHierarchyShift: -1,
+            displayName: "Jackson's Corps",
+            active: true);
+        AssertEqual(15, snap.RawUnitTyp);
+        AssertEqual(16, snap.EffectiveCommandLevel); // 15 - (-1) = 16 = unshifted Army
+        AssertEqual("child-99", snap.ChildId);
+        AssertEqual("army-1", snap.ParentArmyId);
+        AssertTrue(snap.Active, "active flag preserved");
     }
 
     private static void EnemyVisibleStateRecordsSectorAndContactFields()
