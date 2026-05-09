@@ -539,6 +539,10 @@ static class Program
             ("tactical battle orchestrator owns alliance and roster", TacticalBattleOrchestratorOwnsAllianceAndRoster),
             ("tactical battle orchestrator empty children in O0", TacticalBattleOrchestratorEmptyChildrenInO0),
             ("tactical battle orchestrator empty tick is no-op", TacticalBattleOrchestratorEmptyTickIsNoOp),
+            ("tactical battle plan records id phase main effort and age", TacticalBattlePlanRecordsIdPhaseMainEffortAndAge),
+            ("tactical battle plan with phase advances and resets age", TacticalBattlePlanWithPhaseAdvancesAndResetsAge),
+            ("tactical battle plan with age changes age only", TacticalBattlePlanWithAgeChangesAgeOnly),
+            ("army intent carries plan id phase and aggression bias", ArmyIntentCarriesPlanIdPhaseAndAggressionBias),
             ("tactical sector ledger clear help requests empties state", TacticalSectorLedgerClearHelpRequestsEmptiesState),
             ("tactical morale snapshot ledger clear empties state", TacticalMoraleSnapshotLedgerClearEmptiesState),
             ("tactical battle coordinator starts inactive", TacticalBattleCoordinatorStartsInactive),
@@ -10538,5 +10542,78 @@ static class Program
         AssertEqual(BattleLifecycleEvent.BattleEnd, detector.Observe(0), "second consecutive zero fires BattleEnd");
         // second battle begins — verifies reset path: inBattle=false, consecutiveZeroTicks=0
         AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(5), "second BattleStart after reset");
+    }
+
+    // ---- TacticalBattlePlan / ArmyIntent tests (O1.1) ----
+
+    private static void TacticalBattlePlanRecordsIdPhaseMainEffortAndAge()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment,
+            BattlePhase.Probe,
+            mainEffortSector: 3,
+            fixingSectors: new[] { 0, 1 },
+            screeningSectors: new[] { 4 },
+            reserveCommitTriggerOdds: 1.4f,
+            ageSeconds: 0f,
+            jitterSeed: 17);
+        AssertEqual(BattlePlanId.LeeEnvelopment, plan.PlanId, "plan id");
+        AssertEqual(BattlePhase.Probe, plan.Phase, "phase");
+        AssertEqual(3, plan.MainEffortSector, "main effort sector");
+        AssertEqual(2, plan.FixingSectors.Length, "fixing sectors length");
+        AssertEqual(0, plan.FixingSectors[0], "fixing sector 0");
+        AssertEqual(1, plan.FixingSectors[1], "fixing sector 1");
+        AssertEqual(1, plan.ScreeningSectors.Length, "screening sectors length");
+        AssertEqual(4, plan.ScreeningSectors[0], "screening sector 0");
+        AssertNear(1.4f, plan.ReserveCommitTriggerOdds, 1e-5f, "reserve trigger");
+        AssertNear(0f, plan.AgeSeconds, 1e-5f, "age");
+        AssertEqual(17, plan.JitterSeed, "jitter seed");
+    }
+
+    private static void TacticalBattlePlanWithPhaseAdvancesAndResetsAge()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.GenericMethodical,
+            BattlePhase.Probe,
+            mainEffortSector: 0,
+            fixingSectors: null,
+            screeningSectors: null,
+            reserveCommitTriggerOdds: 1.2f,
+            ageSeconds: 12.5f,
+            jitterSeed: 1).WithPhase(BattlePhase.MainEffort);
+        AssertEqual(BattlePhase.MainEffort, plan.Phase, "phase advanced");
+        AssertNear(0f, plan.AgeSeconds, 1e-5f, "age reset");
+    }
+
+    private static void TacticalBattlePlanWithAgeChangesAgeOnly()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.GenericMethodical,
+            BattlePhase.Probe,
+            mainEffortSector: 2,
+            fixingSectors: null,
+            screeningSectors: null,
+            reserveCommitTriggerOdds: 1.0f,
+            ageSeconds: 0f,
+            jitterSeed: 1).WithAge(45.5f);
+        AssertNear(45.5f, plan.AgeSeconds, 1e-5f, "age");
+        AssertEqual(BattlePhase.Probe, plan.Phase, "phase preserved");
+        AssertEqual(2, plan.MainEffortSector, "main effort preserved");
+    }
+
+    private static void ArmyIntentCarriesPlanIdPhaseAndAggressionBias()
+    {
+        var intent = new ArmyIntent(
+            BattlePlanId.ShermanManeuverFix,
+            BattlePhase.MainEffort,
+            mainEffortSector: 1,
+            fixingSectors: new[] { 2, 3 },
+            screeningSectors: System.Array.Empty<int>(),
+            reserveCommitTriggerOdds: 1.3f,
+            aggressionBias01: 0.65f);
+        AssertEqual(BattlePlanId.ShermanManeuverFix, intent.PlanId, "plan id");
+        AssertEqual(BattlePhase.MainEffort, intent.Phase, "phase");
+        AssertEqual(1, intent.MainEffortSector, "main effort sector");
+        AssertNear(0.65f, intent.AggressionBias01, 1e-5f, "aggression bias");
     }
 }
