@@ -34,18 +34,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private readonly TacticalPlaybookCatalog _catalog;
         private readonly PersonalityVector _commanderPersonality;
         private TacticalBattlePlan _plan;
+        private float _planAgeSeconds;
+        private float _historyGlobalOdds;
+        private TacticalIntentModel _currentIntentModel;
 
         public ArmyOrchestrator(int allianceId, TacticalPlaybookCatalog catalog, PersonalityVector commanderPersonality)
             : base(EchelonKind.Army, allianceId)
         {
             _catalog = catalog;
             _commanderPersonality = commanderPersonality;
+            _planAgeSeconds = 0f;
+            _historyGlobalOdds = 1f;
+            _currentIntentModel = UnknownIntentModel();
             HasPlan = false;
         }
 
         public bool HasPlan { get; private set; }
         public TacticalBattlePlan CurrentPlan => _plan;
         public PersonalityVector CommanderPersonality => _commanderPersonality;
+        public float PlanAgeSeconds => _planAgeSeconds;
+        public float HistoryGlobalOdds => _historyGlobalOdds;
+        public TacticalIntentModel CurrentIntentModel => _currentIntentModel;
 
         /// <summary>
         /// AIBattle.macroai derived from current plan + phase + commander aggression.
@@ -71,27 +80,50 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public void PickInitialPlan(ArmyEvidence evidence)
         {
+            if (TryPickPlan(evidence, opposingCommanderHint: 0f, out var nextPlan))
+            {
+                _plan = nextPlan;
+                HasPlan = true;
+            }
+            else
+            {
+                HasPlan = false;
+            }
+            _historyGlobalOdds = evidence.CurrentOdds;
+            _planAgeSeconds = 0f;
+        }
+
+        public void AdvancePlanAge(float deltaSeconds)
+        {
+            if (deltaSeconds <= 0f || float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds)) return;
+            _planAgeSeconds += deltaSeconds;
+        }
+
+        private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, out TacticalBattlePlan nextPlan)
+        {
             var ctx = new PlaybookContext(
                 _commanderPersonality,
                 evidence.Terrain,
                 evidence.CurrentOdds,
-                opposingCommanderHint: 0f,
+                opposingCommanderHint,
                 defaultMainEffortSector: evidence.DefaultMainEffortSector,
                 jitterSeed: AllianceId * 31 + 7);
             var pb = _catalog?.Select(ctx);
             if (pb == null)
             {
-                HasPlan = false;
-                return;
+                nextPlan = default;
+                return false;
             }
-            _plan = pb.Instantiate(ctx);
-            HasPlan = true;
+            nextPlan = pb.Instantiate(ctx);
+            return true;
         }
 
         public void AdvancePhase(BattlePhase next)
         {
             if (!HasPlan) return;
+            if (_plan.Phase == next) return;
             _plan = _plan.WithPhase(next);
+            _planAgeSeconds = 0f;
         }
 
         public ArmyIntent EmitArmyIntent()
@@ -110,7 +142,49 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public void Replan(ArmyEvidence evidence)
         {
-            PickInitialPlan(evidence);  // re-runs selection; new plan replaces old
+            Replan(evidence, UnknownIntentModel());
+        }
+
+        public void Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent)
+        {
+            if (!TryPickPlan(evidence, OpposingCommanderHintFromIntent(enemyIntent), out var nextPlan))
+            {
+                return;
+            }
+
+            _plan = nextPlan;
+            HasPlan = true;
+            _currentIntentModel = enemyIntent;
+            _historyGlobalOdds = evidence.CurrentOdds;
+            _planAgeSeconds = 0f;
+        }
+
+        private static TacticalIntentModel UnknownIntentModel() =>
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null);
+
+        private static float OpposingCommanderHintFromIntent(TacticalIntentModel m)
+        {
+            float baseBias;
+            switch (m.PrimaryIntent)
+            {
+                case InferredIntent.Defend:
+                case InferredIntent.Refuse:
+                case InferredIntent.Withdraw:
+                    baseBias = 0.6f;
+                    break;
+                case InferredIntent.Attack:
+                    baseBias = 0.2f;
+                    break;
+                case InferredIntent.Probe:
+                    baseBias = 0.4f;
+                    break;
+                case InferredIntent.Unknown:
+                default:
+                    baseBias = 0f;
+                    break;
+            }
+
+            return baseBias * m.Confidence01;
         }
     }
 }

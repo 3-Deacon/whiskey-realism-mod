@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -35,7 +36,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float personalityScore = pb.Fit.Score(ctx.CommanderPersonality);
                 float terrainScore = pb.TerrainFit.Score(ctx.Terrain);
                 float oddsScore = pb.PreferredOdds.Score(ctx.CurrentOdds);
-                float hintScore = ctx.OpposingCommanderHint;
+                float hintScore = HintAffinity(pb.Id, ctx.OpposingCommanderHint);
                 state = NextRand(state);
                 float jitter = (state & 0xFFFFu) / 65535f;
 
@@ -52,6 +53,47 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
             return best;
+        }
+
+        private static float HintAffinity(BattlePlanId id, float opposingCommanderHint)
+        {
+            if (opposingCommanderHint <= 0f) return 0f;
+            float target = ResponseTargetFor(id);
+            float hint = Clamp01(opposingCommanderHint);
+            return 1f - Math.Min(1f, Math.Abs(target - hint) * 2f);
+        }
+
+        private static float ResponseTargetFor(BattlePlanId id)
+        {
+            switch (id)
+            {
+                case BattlePlanId.McClellanPreparedDefense:
+                case BattlePlanId.LongstreetDefensiveOverslope:
+                case BattlePlanId.GenericCautious:
+                    return 0.2f;
+                case BattlePlanId.BraggIndecisiveCommit:
+                case BattlePlanId.GenericMethodical:
+                    return 0.4f;
+                case BattlePlanId.LeeEnvelopment:
+                case BattlePlanId.JacksonValleyShuffle:
+                case BattlePlanId.ShermanManeuverFix:
+                case BattlePlanId.GrantContinuousAttrition:
+                case BattlePlanId.HookerFlankDeparture:
+                case BattlePlanId.HoodFrontalAssault:
+                case BattlePlanId.BurnsideForcedAssault:
+                case BattlePlanId.GenericAggressive:
+                case BattlePlanId.GenericDesperate:
+                    return 0.6f;
+                default:
+                    return 0.4f;
+            }
+        }
+
+        private static float Clamp01(float value)
+        {
+            if (value < 0f) return 0f;
+            if (value > 1f) return 1f;
+            return value;
         }
 
         // xorshift32 — deterministic, fast, no allocations.

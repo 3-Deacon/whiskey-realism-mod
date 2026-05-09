@@ -555,6 +555,7 @@ static class Program
             ("tactical playbook catalog empty returns null", TacticalPlaybookCatalogEmptyReturnsNull),
             ("tactical playbook catalog highest scoring playbook wins", TacticalPlaybookCatalogHighestScoringPlaybookWins),
             ("tactical playbook catalog personality weight dominates terrain", TacticalPlaybookCatalogPersonalityWeightDominatesTerrain),
+            ("tactical playbook catalog opposing hint changes ranking", TacticalPlaybookCatalogOpposingHintChangesRanking),
             ("tactical playbook catalog jitter deterministic for same seed", TacticalPlaybookCatalogJitterDeterministicForSameSeed),
             ("tactical sector ledger clear help requests empties state", TacticalSectorLedgerClearHelpRequestsEmptiesState),
             ("tactical morale snapshot ledger clear empties state", TacticalMoraleSnapshotLedgerClearEmptiesState),
@@ -601,6 +602,11 @@ static class Program
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
             ("army orchestrator current macroai defend on consolidate with cautious personality", ArmyOrchestratorCurrentMacroAiDefendOnConsolidateWithCautiousPersonality),
             ("army orchestrator emit army intent matches current plan", ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan),
+            ("army orchestrator records history on initial plan", ArmyOrchestratorRecordsHistoryOnInitialPlan),
+            ("army orchestrator tick advances age without replanning", ArmyOrchestratorTickAdvancesAgeWithoutReplanning),
+            ("army orchestrator replan with intent resets age and updates history", ArmyOrchestratorReplanWithIntentResetsAgeAndUpdatesHistory),
+            ("army orchestrator replan without intent leaves intent unknown", ArmyOrchestratorReplanWithoutIntentLeavesIntentUnknown),
+            ("army orchestrator failed replan preserves active state", ArmyOrchestratorFailedReplanPreservesActiveState),
             ("army replan triggers phase deadline fires when age exceeds phase budget", ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget),
             ("army replan triggers main effort sector loss fires below threshold", ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold),
             ("army replan triggers force imbalance shift fires when odds cross hysteresis", ArmyReplanTriggersForceImbalanceShiftFiresWhenOddsCrossHysteresis),
@@ -10864,6 +10870,25 @@ static class Program
         AssertEqual(BattlePlanId.LeeEnvelopment, cat.Select(ctx).Id, "personality outweighs terrain when both are extreme");
     }
 
+    private static void TacticalPlaybookCatalogOpposingHintChangesRanking()
+    {
+        var cat = new TacticalPlaybookCatalog();
+        cat.Register(new FakePlaybook(BattlePlanId.GenericAggressive,
+            new PersonalityFit(0f, 0f, 0f),
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0.5f, 2f)));
+        cat.Register(new FakePlaybook(BattlePlanId.GenericCautious,
+            new PersonalityFit(0f, 0f, 0f),
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0.5f, 2f)));
+
+        var attackResponseHint = new PlaybookContext(default, TerrainKind.Open, 1f, opposingCommanderHint: 0.6f, 0, 1);
+        var defenseResponseHint = new PlaybookContext(default, TerrainKind.Open, 1f, opposingCommanderHint: 0.2f, 0, 1);
+
+        AssertEqual(BattlePlanId.GenericAggressive, cat.Select(attackResponseHint).Id, "high opposing hint favors attack-response playbook");
+        AssertEqual(BattlePlanId.GenericCautious, cat.Select(defenseResponseHint).Id, "low opposing hint favors defense-response playbook");
+    }
+
     private static void TacticalPlaybookCatalogJitterDeterministicForSameSeed()
     {
         var cat = new TacticalPlaybookCatalog();
@@ -11348,6 +11373,79 @@ static class Program
         AssertEqual(BattlePhase.Probe, intent.Phase, "intent phase matches");
         AssertEqual(2, intent.MainEffortSector, "intent main effort matches plan");
         AssertTrue(intent.AggressionBias01 > 0.5f, "intent aggression bias positive for aggressive CO");
+    }
+
+    private static void ArmyOrchestratorRecordsHistoryOnInitialPlan()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+
+        AssertNear(1.4f, orch.HistoryGlobalOdds, 1e-5f, "initial plan records global odds history");
+        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "initial plan resets plan age");
+    }
+
+    private static void ArmyOrchestratorTickAdvancesAgeWithoutReplanning()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+
+        orch.AdvancePlanAge(15f);
+        orch.AdvancePlanAge(20f);
+
+        AssertNear(35f, orch.PlanAgeSeconds, 1e-5f, "positive ticks accumulate plan age");
+    }
+
+    private static void ArmyOrchestratorReplanWithIntentResetsAgeAndUpdatesHistory()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+        orch.AdvancePlanAge(60f);
+        var enemyIntent = new TacticalIntentModel(InferredIntent.Defend, 1, 0.7f, 0f, null);
+
+        orch.Replan(new ArmyEvidence(0.8f, TerrainKind.Open, 1), enemyIntent);
+
+        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "replan resets plan age");
+        AssertNear(0.8f, orch.HistoryGlobalOdds, 1e-5f, "replan updates global odds history");
+        AssertEqual(InferredIntent.Defend, orch.CurrentIntentModel.PrimaryIntent, "current intent model stores last consumed intent");
+    }
+
+    private static void ArmyOrchestratorReplanWithoutIntentLeavesIntentUnknown()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+
+        orch.Replan(new ArmyEvidence(1.0f, TerrainKind.Wooded, 0));
+
+        AssertEqual(InferredIntent.Unknown, orch.CurrentIntentModel.PrimaryIntent, "legacy replan uses unknown intent");
+    }
+
+    private static void ArmyOrchestratorFailedReplanPreservesActiveState()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var catalog = SeedCatalog.AllHistoricalAndGeneric();
+        var orch = new ArmyOrchestrator(0, catalog, lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+        orch.AdvancePlanAge(45f);
+        var oldPlanId = orch.CurrentPlan.PlanId;
+
+        var field = typeof(TacticalPlaybookCatalog).GetField("_playbooks", BindingFlags.NonPublic | BindingFlags.Instance);
+        var list = (List<TacticalPlaybook>)field.GetValue(catalog);
+        list.Clear();
+
+        orch.Replan(
+            new ArmyEvidence(0.7f, TerrainKind.Open, 2),
+            new TacticalIntentModel(InferredIntent.Attack, 2, 0.9f, 0f, null));
+
+        AssertTrue(orch.HasPlan, "failed replan preserves active plan flag");
+        AssertEqual(oldPlanId, orch.CurrentPlan.PlanId, "failed replan preserves active plan");
+        AssertNear(45f, orch.PlanAgeSeconds, 1e-5f, "failed replan preserves age");
+        AssertNear(1.4f, orch.HistoryGlobalOdds, 1e-5f, "failed replan preserves history odds");
+        AssertEqual(InferredIntent.Unknown, orch.CurrentIntentModel.PrimaryIntent, "failed replan preserves previous intent");
     }
 
     private static void ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget()
