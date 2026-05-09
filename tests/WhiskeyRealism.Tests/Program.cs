@@ -550,6 +550,10 @@ static class Program
             ("tactical playbook terrain preference returns dominant weight", TacticalPlaybookTerrainPreferenceReturnsDominantWeight),
             ("tactical playbook odds range one inside band decays outside", TacticalPlaybookOddsRangeOneInsideBandDecaysOutside),
             ("tactical playbook stub instantiates plan with phase probe", TacticalPlaybookStubInstantiatesPlanWithPhaseProbe),
+            ("tactical playbook catalog empty returns null", TacticalPlaybookCatalogEmptyReturnsNull),
+            ("tactical playbook catalog highest scoring playbook wins", TacticalPlaybookCatalogHighestScoringPlaybookWins),
+            ("tactical playbook catalog personality weight dominates terrain", TacticalPlaybookCatalogPersonalityWeightDominatesTerrain),
+            ("tactical playbook catalog jitter deterministic for same seed", TacticalPlaybookCatalogJitterDeterministicForSameSeed),
             ("tactical sector ledger clear help requests empties state", TacticalSectorLedgerClearHelpRequestsEmptiesState),
             ("tactical morale snapshot ledger clear empties state", TacticalMoraleSnapshotLedgerClearEmptiesState),
             ("tactical battle coordinator starts inactive", TacticalBattleCoordinatorStartsInactive),
@@ -10741,5 +10745,72 @@ static class Program
         AssertEqual(BattlePlanId.GenericMethodical, plan.PlanId, "stub returns generic-methodical id");
         AssertEqual(BattlePhase.Probe, plan.Phase, "stub starts at probe phase");
         AssertEqual(2, plan.MainEffortSector, "stub uses ctx default main effort");
+    }
+
+    // ---- TacticalPlaybookCatalog tests (O1.3) ----
+
+    private sealed class FakePlaybook : TacticalPlaybook
+    {
+        public FakePlaybook(BattlePlanId id, PersonalityFit fit, TerrainPreference terrain, OddsRange odds)
+            : base(id, "fake-" + id, fit, terrain, odds, 1.0f) { }
+        public override TacticalBattlePlan Instantiate(PlaybookContext ctx) =>
+            new TacticalBattlePlan(Id, BattlePhase.Probe, ctx.DefaultMainEffortSector, null, null, ReserveCommitTriggerOdds, 0f, ctx.JitterSeed);
+    }
+
+    private static void TacticalPlaybookCatalogEmptyReturnsNull()
+    {
+        var cat = new TacticalPlaybookCatalog();
+        var ctx = new PlaybookContext(default, TerrainKind.Open, 1f, 0f, 0, 0);
+        AssertTrue(cat.Select(ctx) == null, "empty catalog selects null");
+        AssertEqual(0, cat.Count, "empty catalog count is 0");
+    }
+
+    private static void TacticalPlaybookCatalogHighestScoringPlaybookWins()
+    {
+        var cat = new TacticalPlaybookCatalog();
+        cat.Register(new FakePlaybook(BattlePlanId.GenericAggressive,
+            new PersonalityFit(1f, -1f, 1f),
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0.5f, 2f)));
+        cat.Register(new FakePlaybook(BattlePlanId.GenericCautious,
+            new PersonalityFit(-1f, 1f, -1f),
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0.5f, 2f)));
+
+        var aggressivePersonality = new PlaybookContext(new PersonalityVector(1f, -1f, 1f, 0, 0), TerrainKind.Open, 1f, 0f, 0, 1);
+        var cautiousPersonality = new PlaybookContext(new PersonalityVector(-1f, 1f, -1f, 0, 0), TerrainKind.Open, 1f, 0f, 0, 1);
+
+        AssertEqual(BattlePlanId.GenericAggressive, cat.Select(aggressivePersonality).Id, "aggressive personality picks aggressive playbook");
+        AssertEqual(BattlePlanId.GenericCautious,   cat.Select(cautiousPersonality).Id,   "cautious personality picks cautious playbook");
+    }
+
+    private static void TacticalPlaybookCatalogPersonalityWeightDominatesTerrain()
+    {
+        // Personality weight (0.5) should dominate terrain (0.2): a perfect-on-personality
+        // playbook beats a perfect-on-terrain playbook when personality is the only differentiator.
+        var cat = new TacticalPlaybookCatalog();
+        cat.Register(new FakePlaybook(BattlePlanId.LeeEnvelopment,
+            new PersonalityFit(1f, -1f, 1f),
+            new TerrainPreference(0f, 0f, 0f, 0f),
+            new OddsRange(0f, 0f)));
+        cat.Register(new FakePlaybook(BattlePlanId.GenericMethodical,
+            new PersonalityFit(0f, 0f, 0f),
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0f, 0f)));
+        var ctx = new PlaybookContext(new PersonalityVector(1f, -1f, 1f, 0, 0), TerrainKind.Open, 5f, 0f, 0, 1);
+        AssertEqual(BattlePlanId.LeeEnvelopment, cat.Select(ctx).Id, "personality outweighs terrain when both are extreme");
+    }
+
+    private static void TacticalPlaybookCatalogJitterDeterministicForSameSeed()
+    {
+        var cat = new TacticalPlaybookCatalog();
+        cat.Register(new FakePlaybook(BattlePlanId.GenericMethodical,
+            new PersonalityFit(0f, 0f, 0f),
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0.5f, 2f)));
+        var ctx = new PlaybookContext(default, TerrainKind.Open, 1f, 0f, 0, 42);
+        var first = cat.Select(ctx).Id;
+        var second = cat.Select(ctx).Id;
+        AssertEqual(first, second, "same seed yields same selection");
     }
 }
