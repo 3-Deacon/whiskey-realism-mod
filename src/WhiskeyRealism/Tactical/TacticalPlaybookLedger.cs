@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace WhiskeyRealism.Tactical
 {
-    public enum TacticalPlaybook
+    public enum TacticalPlaybookKind
     {
         HighGroundDefense = 0,
         CombinedArmsDefense = 1,
@@ -127,7 +127,7 @@ namespace WhiskeyRealism.Tactical
     public readonly struct TacticalPlaybookDecision
     {
         public TacticalPlaybookDecision(
-            TacticalPlaybook playbook,
+            TacticalPlaybookKind playbook,
             int mainEffortSectorId,
             TacticalRefusedFlank refusedFlank,
             int[] probeSectorIds,
@@ -150,7 +150,7 @@ namespace WhiskeyRealism.Tactical
             Reason = string.IsNullOrEmpty(reason) ? "unknown" : reason;
         }
 
-        public TacticalPlaybook Playbook { get; }
+        public TacticalPlaybookKind Playbook { get; }
         public int MainEffortSectorId { get; }
         public TacticalRefusedFlank RefusedFlank { get; }
         public int[] ProbeSectorIds { get; }
@@ -243,7 +243,7 @@ namespace WhiskeyRealism.Tactical
                 else hold.Add(s.SectorId);
             }
             return new TacticalPlaybookDecision(
-                TacticalPlaybook.ProbeAndFix,
+                TacticalPlaybookKind.ProbeAndFix,
                 mainEffortSectorId: -1,
                 refusedFlank: refused,
                 probeSectorIds: probe.ToArray(),
@@ -261,7 +261,7 @@ namespace WhiskeyRealism.Tactical
             for (int i = 0; i < input.Sectors.Length; i++)
                 hold.Add(input.Sectors[i].SectorId);
             return new TacticalPlaybookDecision(
-                TacticalPlaybook.HighGroundDefense,
+                TacticalPlaybookKind.HighGroundDefense,
                 mainEffortSectorId: -1,
                 refusedFlank: refused,
                 probeSectorIds: Array.Empty<int>(),
@@ -284,8 +284,8 @@ namespace WhiskeyRealism.Tactical
                 else hold.Add(s.SectorId);
             }
             return new TacticalPlaybookDecision(
-                refused == TacticalRefusedFlank.None ? TacticalPlaybook.CombinedArmsDefense
-                    : (refused == TacticalRefusedFlank.Right ? TacticalPlaybook.RefuseRight : TacticalPlaybook.RefuseLeft),
+                refused == TacticalRefusedFlank.None ? TacticalPlaybookKind.CombinedArmsDefense
+                    : (refused == TacticalRefusedFlank.Right ? TacticalPlaybookKind.RefuseRight : TacticalPlaybookKind.RefuseLeft),
                 mainEffortSectorId: mainEffort,
                 refusedFlank: refused,
                 probeSectorIds: Array.Empty<int>(),
@@ -313,7 +313,7 @@ namespace WhiskeyRealism.Tactical
                 else hold.Add(s.SectorId);
             }
             return new TacticalPlaybookDecision(
-                TacticalPlaybook.WeakPointPressure,
+                TacticalPlaybookKind.WeakPointPressure,
                 mainEffortSectorId: main,
                 refusedFlank: refused,
                 probeSectorIds: Array.Empty<int>(),
@@ -328,7 +328,7 @@ namespace WhiskeyRealism.Tactical
         private static TacticalPlaybookDecision Empty(CommanderIntent intent, string reason)
         {
             return new TacticalPlaybookDecision(
-                TacticalPlaybook.HighGroundDefense,
+                TacticalPlaybookKind.HighGroundDefense,
                 mainEffortSectorId: -1,
                 refusedFlank: TacticalRefusedFlank.None,
                 probeSectorIds: Array.Empty<int>(),

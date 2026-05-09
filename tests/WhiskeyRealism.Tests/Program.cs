@@ -6,12 +6,6 @@ using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Orchestrator;
-// Disambiguate: WhiskeyRealism.Tactical.TacticalPlaybook (Slice B enum) collides
-// with WhiskeyRealism.Tactical.Orchestrator.TacticalPlaybook (orchestrator abstract
-// class added in O1.2). Alias the bare name to the enum so the 8 pre-existing
-// Slice B doctrine references at lines ~1953-2054 keep resolving; the orchestrator
-// class is referenced via its fully-qualified name in the StubPlaybook base spec.
-using TacticalPlaybook = WhiskeyRealism.Tactical.TacticalPlaybook;
 
 static class Program
 {
@@ -1956,7 +1950,7 @@ static class Program
 
         var decision = TacticalPlaybookLedger.Decide(input);
 
-        AssertTrue(decision.Playbook == TacticalPlaybook.ProbeAndFix, "Expected ProbeAndFix, got " + decision.Playbook);
+        AssertTrue(decision.Playbook == TacticalPlaybookKind.ProbeAndFix, "Expected ProbeAndFix, got " + decision.Playbook);
         AssertTrue(decision.RefusedFlank == TacticalRefusedFlank.None, "Probe with no flank risk must not refuse");
     }
 
@@ -1975,7 +1969,7 @@ static class Program
         };
         var input = new TacticalPlaybookInput(CommanderIntent.Defend, 1, sectors, true, false, false, 0f);
         var d = TacticalPlaybookLedger.Decide(input);
-        AssertTrue(d.Playbook == TacticalPlaybook.RefuseRight, "Expected RefuseRight, got " + d.Playbook);
+        AssertTrue(d.Playbook == TacticalPlaybookKind.RefuseRight, "Expected RefuseRight, got " + d.Playbook);
         AssertTrue(d.RefusedFlank == TacticalRefusedFlank.Right, "Refused flank mismatch");
     }
 
@@ -1989,7 +1983,7 @@ static class Program
         };
         var input = new TacticalPlaybookInput(CommanderIntent.Defend, 1, sectors, true, false, false, 0f);
         var d = TacticalPlaybookLedger.Decide(input);
-        AssertTrue(d.Playbook == TacticalPlaybook.RefuseLeft, "Expected RefuseLeft, got " + d.Playbook);
+        AssertTrue(d.Playbook == TacticalPlaybookKind.RefuseLeft, "Expected RefuseLeft, got " + d.Playbook);
     }
 
     private static void TacticalB6aDefendAnchoredFlankDoesNotRefuse()
@@ -2003,7 +1997,7 @@ static class Program
         var input = new TacticalPlaybookInput(CommanderIntent.Defend, 1, sectors, true, false, true, 0f);
         var d = TacticalPlaybookLedger.Decide(input);
         AssertTrue(d.RefusedFlank == TacticalRefusedFlank.None, "Anchored right flank must not be refused");
-        AssertTrue(d.Playbook == TacticalPlaybook.CombinedArmsDefense, "Expected CombinedArmsDefense, got " + d.Playbook);
+        AssertTrue(d.Playbook == TacticalPlaybookKind.CombinedArmsDefense, "Expected CombinedArmsDefense, got " + d.Playbook);
     }
 
     private static void TacticalB6aAttackDecisiveYieldsWeakPointPressure()
@@ -2016,7 +2010,7 @@ static class Program
         };
         var input = new TacticalPlaybookInput(CommanderIntent.Attack, 1, sectors, true, false, false, 0f);
         var d = TacticalPlaybookLedger.Decide(input);
-        AssertTrue(d.Playbook == TacticalPlaybook.WeakPointPressure, "Expected WeakPointPressure, got " + d.Playbook);
+        AssertTrue(d.Playbook == TacticalPlaybookKind.WeakPointPressure, "Expected WeakPointPressure, got " + d.Playbook);
         AssertTrue(d.MainEffortSectorId == 1, "Main effort must be sector 1");
     }
 
@@ -2030,7 +2024,7 @@ static class Program
         };
         var input = new TacticalPlaybookInput(CommanderIntent.Attack, -1, sectors, true, false, false, 0f);
         var d = TacticalPlaybookLedger.Decide(input);
-        AssertTrue(d.Playbook == TacticalPlaybook.ProbeAndFix, "Expected ProbeAndFix fallback, got " + d.Playbook);
+        AssertTrue(d.Playbook == TacticalPlaybookKind.ProbeAndFix, "Expected ProbeAndFix fallback, got " + d.Playbook);
     }
 
     private static void TacticalB6aMainEffortRejectedOnPlayerOwnership()
@@ -2044,7 +2038,7 @@ static class Program
         var input = new TacticalPlaybookInput(CommanderIntent.Attack, 1, sectors, true, false, false, 0f);
         var d = TacticalPlaybookLedger.Decide(input);
         AssertTrue(d.MainEffortSectorId == -1, "Main effort must be rejected when subordinate share > 0.5");
-        AssertTrue(d.Playbook == TacticalPlaybook.ProbeAndFix, "Expected ProbeAndFix fallback when main effort denied");
+        AssertTrue(d.Playbook == TacticalPlaybookKind.ProbeAndFix, "Expected ProbeAndFix fallback when main effort denied");
     }
 
     private static void TacticalB6aHoldToLastYieldsHighGroundDefense()
@@ -2057,7 +2051,7 @@ static class Program
         };
         var input = new TacticalPlaybookInput(CommanderIntent.HoldToLast, -1, sectors, false, false, false, 0f);
         var d = TacticalPlaybookLedger.Decide(input);
-        AssertTrue(d.Playbook == TacticalPlaybook.HighGroundDefense, "Expected HighGroundDefense, got " + d.Playbook);
+        AssertTrue(d.Playbook == TacticalPlaybookKind.HighGroundDefense, "Expected HighGroundDefense, got " + d.Playbook);
         AssertTrue(d.ReservePolicy == TacticalReservePolicy.HoldReserve, "HoldToLast must keep reserve");
     }
 
@@ -10673,7 +10667,7 @@ static class Program
 
     // ---- TacticalPlaybook tests (O1.2) ----
 
-    private sealed class StubPlaybook : WhiskeyRealism.Tactical.Orchestrator.TacticalPlaybook
+    private sealed class StubPlaybook : TacticalPlaybook
     {
         public StubPlaybook() : base(
             BattlePlanId.GenericMethodical,
