@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the pure-scorer doctrine inputs specified in [`docs/superpowers/specs/2026-05-08-scourge-tactical-adaptation-design.md`](../specs/2026-05-08-scourge-tactical-adaptation-design.md) — nine read-only scorers plus a morale snapshot ledger plus tick-budget infrastructure — with full pure-harness test coverage. **No runtime writes.** Wiring these scorers into Harmony patches is the responsibility of separate B6c / B7 / B8 plans.
+**Goal:** Build the pure-scorer doctrine inputs specified in [`docs/superpowers/specs/archive/2026-05-08-scourge-tactical-adaptation-design.md`](../specs/2026-05-08-scourge-tactical-adaptation-design.md) — nine read-only scorers plus a morale snapshot ledger plus tick-budget infrastructure — with full pure-harness test coverage. **No runtime writes.** Wiring these scorers into Harmony patches is the responsibility of separate B6c / B7 / B8 plans.
 
 **Architecture:** All scorers live under `src/WhiskeyRealism/Tactical/`, follow the existing pure-input-struct → labelled-output-enum pattern (see `TacticalOddsDoctrine.cs`, `TacticalDoctrineScorer.cs`, `TacticalLocalReactionScorer.cs`), and emit telemetry via the existing `TacticalTelemetry` and `OnceLog` helpers. Reflection-failure paths produce `Unknown` results and degrade silently after the first log. The `TacticalMoraleSnapshotLedger` provides the prior-morale comparator GT vanilla does not expose; it is in-memory only (no JSON sidecar).
 
@@ -1768,7 +1768,7 @@ No drift detected.
 
 ## Execution Handoff
 
-**Plan complete and saved to `docs/superpowers/plans/2026-05-08-scourge-tactical-adaptation-implementation.md`.**
+**Plan complete and saved to `docs/superpowers/plans/archive/2026-05-08-scourge-tactical-adaptation-implementation.md`.**
 
 Two execution options:
 

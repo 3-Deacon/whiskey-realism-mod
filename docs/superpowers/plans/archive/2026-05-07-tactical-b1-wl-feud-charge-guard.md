@@ -783,7 +783,7 @@ Pass criteria:
 - Modify: `docs/patch-catalog.md`
 - Modify: `docs/handoff.md`
 - Modify: `MEMORY.md`
-- Optional modify: `docs/superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md`
+- Optional modify: `docs/superpowers/plans/archive/2026-05-05-tactical-brain-master-sequencing.md`
 
 - [ ] **Step 1: Patch catalog**
 
@@ -816,16 +816,16 @@ In `MEMORY.md`, replace the stale B0 pending bullet with:
 
 - [ ] **Step 4: Master sequencing plan**
 
-In `docs/superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md`, mark B0 as smoke-closed in prose and link this plan:
+In `docs/superpowers/plans/archive/2026-05-05-tactical-brain-master-sequencing.md`, mark B0 as smoke-closed in prose and link this plan:
 
 ```markdown
-B0 tactical observer smoke closed on 2026-05-07. B1 plan lives at `docs/superpowers/plans/2026-05-07-tactical-b1-wl-feud-charge-guard.md`.
+B0 tactical observer smoke closed on 2026-05-07. B1 plan lives at `docs/superpowers/plans/archive/2026-05-07-tactical-b1-wl-feud-charge-guard.md`.
 ```
 
 ## Task 9: Commit
 
 **Files:**
-- `docs/superpowers/plans/2026-05-07-tactical-b1-wl-feud-charge-guard.md`
+- `docs/superpowers/plans/archive/2026-05-07-tactical-b1-wl-feud-charge-guard.md`
 - B1 source/test files if implementation has been executed.
 - B1 closeout docs if implementation has been smoke-verified.
 
@@ -834,7 +834,7 @@ B0 tactical observer smoke closed on 2026-05-07. B1 plan lives at `docs/superpow
 If only this plan was added, run:
 
 ```bash
-git add docs/superpowers/plans/2026-05-07-tactical-b1-wl-feud-charge-guard.md
+git add docs/superpowers/plans/archive/2026-05-07-tactical-b1-wl-feud-charge-guard.md
 git commit -m "docs: plan tactical b1 wl feud charge guard"
 ```
 
@@ -845,7 +845,7 @@ Expected: one docs-only commit.
 After Tasks 1-8 are implemented and smoke-verified, run:
 
 ```bash
-git add src/WhiskeyRealism/Plugin.cs src/WhiskeyRealism/Tactical/TacticalWlActionGuard.cs src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs src/WhiskeyRealism/Patches/BattleFeudActionGatePatch.cs tests/WhiskeyRealism.Tests/Program.cs tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj docs/patch-catalog.md docs/handoff.md MEMORY.md docs/superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md
+git add src/WhiskeyRealism/Plugin.cs src/WhiskeyRealism/Tactical/TacticalWlActionGuard.cs src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs src/WhiskeyRealism/Patches/BattleFeudActionGatePatch.cs tests/WhiskeyRealism.Tests/Program.cs tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj docs/patch-catalog.md docs/handoff.md MEMORY.md docs/superpowers/plans/archive/2026-05-05-tactical-brain-master-sequencing.md
 git commit -m "feat: add tactical b1 wl feud charge guard"
 ```
 

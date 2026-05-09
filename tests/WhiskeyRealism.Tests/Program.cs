@@ -5,6 +5,7 @@ using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 static class Program
 {
@@ -528,7 +529,29 @@ static class Program
             ("tactical refuse flank intent no refuse on offensive posture", TacticalRefuseFlankIntentNoRefuseOnOffensivePosture),
             ("tactical fatigue state bands", TacticalFatigueStateBands),
             ("tactical fatigue state clamps below", TacticalFatigueStateClampsBelow),
-            ("tactical fatigue state clamps above", TacticalFatigueStateClampsAbove)
+            ("tactical fatigue state clamps above", TacticalFatigueStateClampsAbove),
+            ("echelon orchestrator empty tick is no-op", EchelonOrchestratorEmptyTickIsNoOp),
+            ("echelon orchestrator propagate intent dispatches to children", EchelonOrchestratorPropagateIntentDispatchesToChildren),
+            ("echelon orchestrator parent child link is bidirectional", EchelonOrchestratorParentChildLinkBidirectional),
+            ("tactical commander roster falls back to faction defaults for unknown", TacticalCommanderRosterFallsBackToFactionDefaultsForUnknown),
+            ("tactical commander roster partitions by side", TacticalCommanderRosterPartitionsBySide),
+            ("tactical commander roster rank tier bias increases caution for corps", TacticalCommanderRosterRankTierBiasIncreasesCautionForCorps),
+            ("tactical battle orchestrator owns alliance and roster", TacticalBattleOrchestratorOwnsAllianceAndRoster),
+            ("tactical battle orchestrator empty children in O0", TacticalBattleOrchestratorEmptyChildrenInO0),
+            ("tactical battle orchestrator empty tick is no-op", TacticalBattleOrchestratorEmptyTickIsNoOp),
+            ("tactical sector ledger clear help requests empties state", TacticalSectorLedgerClearHelpRequestsEmptiesState),
+            ("tactical morale snapshot ledger clear empties state", TacticalMoraleSnapshotLedgerClearEmptiesState),
+            ("tactical battle coordinator starts inactive", TacticalBattleCoordinatorStartsInactive),
+            ("tactical battle coordinator activates on battle start with synthetic inputs", TacticalBattleCoordinatorActivatesOnBattleStartWithSyntheticInputs),
+            ("tactical battle coordinator suppresses player cic side", TacticalBattleCoordinatorSuppressesPlayerCicSide),
+            ("tactical battle coordinator on battle end for test clears state", TacticalBattleCoordinatorOnBattleEndForTestClearsState),
+            ("tactical battle coordinator double start is no-op", TacticalBattleCoordinatorDoubleStartIsNoOp),
+            ("tactical battle lifecycle detector returns none when no units across ticks", TacticalBattleLifecycleDetectorReturnsNoneWhenNoUnitsAcrossTicks),
+            ("tactical battle lifecycle detector returns battle start on first units tick", TacticalBattleLifecycleDetectorReturnsBattleStartOnFirstUnitsTick),
+            ("tactical battle lifecycle detector requires two consecutive zero ticks for battle end", TacticalBattleLifecycleDetectorRequiresTwoConsecutiveZeroTicksForBattleEnd),
+            ("tactical battle lifecycle detector ignores transient zero tick between units ticks", TacticalBattleLifecycleDetectorIgnoresTransientZeroTickBetweenUnitsTicks),
+            ("tactical battle lifecycle detector does not fire double start on subsequent units ticks", TacticalBattleLifecycleDetectorDoesNotFireDoubleStartOnSubsequentUnitsTicks),
+            ("tactical battle lifecycle detector restarts battle after end", TacticalBattleLifecycleDetectorRestartsBattleAfterEnd)
         };
 
         foreach (var test in tests)
@@ -10245,5 +10268,275 @@ static class Program
     private static void TacticalFatigueStateClampsAbove()
     {
         AssertEqual(TacticalFatigueState.Result.Exhausted, TacticalFatigueState.Score(2.0f), "above 1 clamps exhausted");
+    }
+
+    private static void EchelonOrchestratorEmptyTickIsNoOp()
+    {
+        var stub = new StubEchelonOrchestrator(EchelonKind.Army, allianceId: 0);
+        stub.Tick();
+        AssertEqual(1, stub.TickCount, "tick count after one Tick");
+    }
+
+    private static void EchelonOrchestratorPropagateIntentDispatchesToChildren()
+    {
+        var parent = new StubEchelonOrchestrator(EchelonKind.Army, allianceId: 0);
+        var child = new StubEchelonOrchestrator(EchelonKind.Corps, allianceId: 0);
+        parent.AddChild(child);
+        parent.PropagateIntent();
+        AssertEqual(1, child.PropagateCount, "child propagate count");
+    }
+
+    private static void EchelonOrchestratorParentChildLinkBidirectional()
+    {
+        var parent = new StubEchelonOrchestrator(EchelonKind.Army, allianceId: 0);
+        var child = new StubEchelonOrchestrator(EchelonKind.Corps, allianceId: 0);
+        parent.AddChild(child);
+        AssertTrue(ReferenceEquals(parent, child.Parent), "child.Parent is parent");
+        AssertEqual(1, parent.Children.Count, "parent.Children.Count");
+    }
+
+    private sealed class StubEchelonOrchestrator : EchelonOrchestrator
+    {
+        public StubEchelonOrchestrator(EchelonKind kind, int allianceId) : base(kind, allianceId) { }
+        public int TickCount { get; private set; }
+        public int PropagateCount { get; private set; }
+        public override void Tick() { TickCount++; base.Tick(); }
+        public override void PropagateIntent() { PropagateCount++; base.PropagateIntent(); }
+    }
+
+    // ---- TacticalCommanderRoster tests ----
+
+    private static void TacticalCommanderRosterFallsBackToFactionDefaultsForUnknown()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new[]
+        {
+            new SyntheticCommanderInput("Some Brigadier", EchelonKind.Brigade, 0)
+        });
+
+        var entry = roster.GetByName("Some Brigadier");
+        AssertTrue(entry != null, "entry should be present");
+        AssertFalse(entry.MatchedHistoricalRegistry, "synthetic entry should not be matched historical");
+
+        // Brigade bias: Aggression += 0.05; other fields unchanged from faction default
+        var factionDefault = FactionProfiles.For(0);
+        float expectedAgg = PersonalityVector.Clamp(factionDefault.Aggression + 0.05f);
+        AssertNear(expectedAgg, entry.PersonalityVector.Aggression, 0.001f, "brigade bias applied to aggression");
+        AssertNear(factionDefault.Caution, entry.PersonalityVector.Caution, 0.001f, "caution unchanged for brigade");
+        AssertNear(factionDefault.Audacity, entry.PersonalityVector.Audacity, 0.001f, "audacity unchanged for brigade");
+        AssertNear(factionDefault.CasualtyTolerance, entry.PersonalityVector.CasualtyTolerance, 0.001f, "casualty tolerance unchanged for brigade");
+        AssertNear(factionDefault.PoliticalResponsiveness, entry.PersonalityVector.PoliticalResponsiveness, 0.001f, "political responsiveness unchanged for brigade");
+    }
+
+    private static void TacticalCommanderRosterPartitionsBySide()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new[]
+        {
+            new SyntheticCommanderInput("A", EchelonKind.Army, 0),
+            new SyntheticCommanderInput("B", EchelonKind.Army, 1)
+        });
+
+        AssertEqual(2, roster.Count, "total roster count");
+        AssertEqual(1, roster.GetSide(0).Count, "side 0 count");
+        AssertEqual(1, roster.GetSide(1).Count, "side 1 count");
+    }
+
+    private static void TacticalCommanderRosterRankTierBiasIncreasesCautionForCorps()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new[]
+        {
+            new SyntheticCommanderInput("X", EchelonKind.Corps, 0)
+        });
+
+        var entry = roster.GetByName("X");
+        AssertTrue(entry != null, "corps entry should be present");
+
+        var factionDefault = FactionProfiles.For(0);
+        AssertTrue(entry.PersonalityVector.Caution > factionDefault.Caution,
+            "corps bias should increase Caution above faction default");
+    }
+
+    // ---- TacticalBattleOrchestrator tests ----
+
+    private static void TacticalBattleOrchestratorOwnsAllianceAndRoster()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new[]
+        {
+            new SyntheticCommanderInput("Lee", EchelonKind.Army, 1)
+        });
+        var orch = new TacticalBattleOrchestrator(allianceId: 1, roster);
+        AssertEqual(1, orch.AllianceId, "alliance id");
+        AssertTrue(ReferenceEquals(roster, orch.Roster), "roster is same reference");
+    }
+
+    private static void TacticalBattleOrchestratorEmptyChildrenInO0()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new SyntheticCommanderInput[0]);
+        var orch = new TacticalBattleOrchestrator(allianceId: 0, roster);
+        AssertEqual(0, orch.Echelons.Count, "echelons count is zero in O0");
+    }
+
+    private static void TacticalBattleOrchestratorEmptyTickIsNoOp()
+    {
+        var roster = TacticalCommanderRoster.BuildFromSynthetic(new SyntheticCommanderInput[0]);
+        var orch = new TacticalBattleOrchestrator(allianceId: 0, roster);
+        orch.Tick();
+        AssertEqual(1, orch.TickCount, "tick count after one Tick");
+    }
+
+    // ---- TacticalSectorLedger.ClearHelpRequests tests ----
+
+    private static void TacticalSectorLedgerClearHelpRequestsEmptiesState()
+    {
+        TacticalSectorLedger.SetHelpRequest(1, TacticalHelpRequest.Decision.RequestLineRelief);
+        TacticalSectorLedger.SetHelpRequest(2, TacticalHelpRequest.Decision.RequestArtillerySupport);
+        TacticalSectorLedger.ClearHelpRequests();
+        AssertEqual(TacticalHelpRequest.Decision.NoRequest,
+            TacticalSectorLedger.GetHelpRequest(1), "sector 1 should be cleared");
+        AssertEqual(TacticalHelpRequest.Decision.NoRequest,
+            TacticalSectorLedger.GetHelpRequest(2), "sector 2 should be cleared");
+    }
+
+    // ---- TacticalMoraleSnapshotLedger.Clear tests ----
+
+    private static void TacticalMoraleSnapshotLedgerClearEmptiesState()
+    {
+        var ledger = new TacticalMoraleSnapshotLedger(capacity: 4);
+        var key = new TacticalMoraleSnapshotLedger.Key(unitInstanceId: 10, unitName: "IronBrigade");
+        ledger.RecordSample(key, morale: 0.8f, timeFromStart: 1f);
+        AssertEqual(1, ledger.SampleCount(key), "sample recorded before clear");
+        ledger.Clear();
+        AssertEqual(0, ledger.SampleCount(key), "sample count should be 0 after Clear");
+        float m, t;
+        AssertTrue(!ledger.TryGetLatest(key, out m, out t), "TryGetLatest should return false after Clear");
+    }
+
+    // ---- TacticalBattleCoordinator tests ----
+
+    private static void TacticalBattleCoordinatorStartsInactive()
+    {
+        TacticalBattleCoordinator.ResetForTest();
+        AssertTrue(!TacticalBattleCoordinator.IsActive, "coordinator should start inactive");
+        AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(0) == null, "side0 should be null before start");
+        AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(1) == null, "side1 should be null before start");
+    }
+
+    private static void TacticalBattleCoordinatorActivatesOnBattleStartWithSyntheticInputs()
+    {
+        TacticalBattleCoordinator.ResetForTest();
+        var inputs = new[]
+        {
+            new SyntheticCommanderInput("Lee", EchelonKind.Army, 1),
+            new SyntheticCommanderInput("McClellan", EchelonKind.Army, 0)
+        };
+        // playerCicAllianceId = -1 means no player CIC: both sides should be active
+        TacticalBattleCoordinator.OnBattleStartForTest(-1, inputs);
+        AssertTrue(TacticalBattleCoordinator.IsActive, "should be active after start");
+        AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(0) != null, "side0 should be non-null");
+        AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(1) != null, "side1 should be non-null");
+    }
+
+    private static void TacticalBattleCoordinatorSuppressesPlayerCicSide()
+    {
+        TacticalBattleCoordinator.ResetForTest();
+        var inputs = new[]
+        {
+            new SyntheticCommanderInput("Lee", EchelonKind.Army, 1),
+            new SyntheticCommanderInput("McClellan", EchelonKind.Army, 0)
+        };
+        // playerCicAllianceId = 0: side0 is player-controlled, should be suppressed
+        TacticalBattleCoordinator.OnBattleStartForTest(0, inputs);
+        AssertTrue(TacticalBattleCoordinator.IsActive, "should be active even with one side suppressed");
+        AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(0) == null, "side0 (player CIC) should be suppressed");
+        AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(1) != null, "side1 (AI) should be active");
+    }
+
+    private static void TacticalBattleCoordinatorOnBattleEndForTestClearsState()
+    {
+        TacticalBattleCoordinator.ResetForTest();
+        TacticalBattleCoordinator.OnBattleStartForTest(-1, new SyntheticCommanderInput[0]);
+        AssertTrue(TacticalBattleCoordinator.IsActive, "should be active after start");
+        TacticalBattleCoordinator.OnBattleEndForTest();
+        AssertTrue(!TacticalBattleCoordinator.IsActive, "should be inactive after end");
+        AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(0) == null, "side0 should be null after end");
+        AssertTrue(TacticalBattleCoordinator.GetSideOrchestrator(1) == null, "side1 should be null after end");
+    }
+
+    private static void TacticalBattleCoordinatorDoubleStartIsNoOp()
+    {
+        TacticalBattleCoordinator.ResetForTest();
+        TacticalBattleCoordinator.OnBattleStartForTest(-1, new SyntheticCommanderInput[0]);
+        var originalSide1 = TacticalBattleCoordinator.GetSideOrchestrator(1);
+        // Second start with different player side should be rejected (already active)
+        TacticalBattleCoordinator.OnBattleStartForTest(1, new SyntheticCommanderInput[0]);
+        AssertTrue(ReferenceEquals(originalSide1, TacticalBattleCoordinator.GetSideOrchestrator(1)),
+            "side1 reference should be unchanged on double start");
+    }
+
+    // ---- TacticalBattleLifecycleDetector tests ----
+
+    private static void TacticalBattleLifecycleDetectorReturnsNoneWhenNoUnitsAcrossTicks()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "first zero tick should be None");
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "second zero tick should be None");
+    }
+
+    private static void TacticalBattleLifecycleDetectorReturnsBattleStartOnFirstUnitsTick()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        detector.Observe(0);
+        var ev = detector.Observe(5);
+        AssertEqual(BattleLifecycleEvent.BattleStart, ev, "first units tick after zero should fire BattleStart");
+    }
+
+    private static void TacticalBattleLifecycleDetectorRequiresTwoConsecutiveZeroTicksForBattleEnd()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        // arm the detector: start a battle
+        detector.Observe(0);
+        detector.Observe(3); // BattleStart
+        // first zero tick: not enough for BattleEnd
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "first zero after units should be None");
+        // second consecutive zero tick: now fires BattleEnd
+        AssertEqual(BattleLifecycleEvent.BattleEnd, detector.Observe(0), "second consecutive zero should fire BattleEnd");
+    }
+
+    private static void TacticalBattleLifecycleDetectorIgnoresTransientZeroTickBetweenUnitsTicks()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        // arm: start battle
+        detector.Observe(0);
+        AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(3), "initial BattleStart");
+        // transient zero: counter increments to 1
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "transient zero should be None");
+        // back to units: counter resets to 0
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(2), "return to units after transient zero is None");
+        // zero again: counter at 1 — not enough
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "first zero (counter=1) after reset is None");
+        // second consecutive zero: counter at 2 — BattleEnd
+        AssertEqual(BattleLifecycleEvent.BattleEnd, detector.Observe(0), "second consecutive zero fires BattleEnd");
+    }
+
+    private static void TacticalBattleLifecycleDetectorDoesNotFireDoubleStartOnSubsequentUnitsTicks()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        detector.Observe(0);
+        AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(3), "first units tick fires BattleStart");
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(5), "subsequent units tick should be None");
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(2), "third units tick should also be None");
+    }
+
+    private static void TacticalBattleLifecycleDetectorRestartsBattleAfterEnd()
+    {
+        var detector = new TacticalBattleLifecycleDetector();
+        // prime the detector
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "priming zero should be None");
+        // first battle begins
+        AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(3), "first BattleStart");
+        // teardown: two consecutive zero ticks end the first battle
+        AssertEqual(BattleLifecycleEvent.None, detector.Observe(0), "first zero of teardown should be None");
+        AssertEqual(BattleLifecycleEvent.BattleEnd, detector.Observe(0), "second consecutive zero fires BattleEnd");
+        // second battle begins — verifies reset path: inBattle=false, consecutiveZeroTicks=0
+        AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(5), "second BattleStart after reset");
     }
 }

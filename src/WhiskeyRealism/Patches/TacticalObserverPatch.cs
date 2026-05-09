@@ -6,6 +6,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -19,6 +20,11 @@ namespace WhiskeyRealism.Patches
         private static int _chargeBeforeId;
         private static TacticalObserverSnapshot _chargeBefore = TacticalObserverSnapshot.Empty();
         private static TacticalObserverSnapshot _feudBefore = TacticalObserverSnapshot.Empty();
+
+        // Per-session lifecycle detector. Static so it preserves state across observer ticks.
+        // CheckGlobalAIStrategyPostfix fires once per AI side per tick (~2× per frame when both
+        // sides are AI-controlled); the two-tick hysteresis in the detector handles this safely.
+        private static readonly TacticalBattleLifecycleDetector _lifecycleDetector = new TacticalBattleLifecycleDetector();
 
         private static FieldInfo _macroAiField;
         private static FieldInfo _sideOfAiField;
@@ -246,6 +252,65 @@ namespace WhiskeyRealism.Patches
         {
             Observe(__instance, TacticalObservedEvent.Macro, null, null);
             Observe(__instance, TacticalObservedEvent.Odds, null, null);
+
+            // Orchestrator lifecycle: count units in battle, detect start/end transitions,
+            // then drive TacticalBattleCoordinator. Anchored here because
+            // CheckGlobalAIStrategy is the macro-strategy entry — fires once per AI side
+            // per tick, giving us a consistent per-tick observation cadence.
+            try
+            {
+                if (Plugin.EnableTacticalBattleOrchestrator.Value)
+                {
+                    int unitsInBattle = CountUnitsInBattleAcrossSides();
+                    var ev = _lifecycleDetector.Observe(unitsInBattle);
+                    switch (ev)
+                    {
+                        case BattleLifecycleEvent.BattleStart:
+                            TacticalBattleCoordinator.OnBattleStart();
+                            break;
+                        case BattleLifecycleEvent.BattleEnd:
+                            TacticalBattleCoordinator.OnBattleEnd();
+                            break;
+                    }
+                    // First Tick is intentionally colocated with OnBattleStart to give the coordinator
+                    // a zero-latency cold start (observer-driven cadence; we don't want to wait for the
+                    // next CheckGlobalAIStrategy invocation to fire the first tick telemetry).
+                    if (TacticalBattleCoordinator.IsActive)
+                    {
+                        TacticalBattleCoordinator.Tick();
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] observer wiring skipped: " + e.GetType().Name + " " + e.Message);
+            }
+        }
+
+        /// <summary>
+        /// Counts Regiment instances across all sides where inbattle == true.
+        /// Uses BattleUnits.completeunitlist (public static List&lt;Regiment&gt;) — no reflection
+        /// needed. Returns 0 on any exception so a vanilla rename fails gracefully.
+        /// </summary>
+        private static int CountUnitsInBattleAcrossSides()
+        {
+            try
+            {
+                var all = BattleUnits.completeunitlist;
+                if (all == null) return 0;
+                int count = 0;
+                for (int i = 0; i < all.Count; i++)
+                {
+                    var r = all[i];
+                    if (r != null && r.inbattle) count++;
+                }
+                return count;
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] CountUnitsInBattle: " + e.GetType().Name + " " + e.Message);
+                return 0;
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]

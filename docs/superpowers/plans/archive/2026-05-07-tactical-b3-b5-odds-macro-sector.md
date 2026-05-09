@@ -14,8 +14,8 @@
 
 ## Source Inputs
 
-- Spec: `docs/superpowers/specs/2026-05-07-tactical-b3-b5-odds-macro-sector-design.md`
-- Master sequence: `docs/superpowers/plans/2026-05-05-tactical-brain-master-sequencing.md`
+- Spec: `docs/superpowers/specs/archive/2026-05-07-tactical-b3-b5-odds-macro-sector-design.md`
+- Master sequence: `docs/superpowers/plans/archive/2026-05-05-tactical-brain-master-sequencing.md`
 - Current tactical files:
   - `src/WhiskeyRealism/Tactical/TacticalBattleContext.cs`
   - `src/WhiskeyRealism/Tactical/TacticalTelemetry.cs`

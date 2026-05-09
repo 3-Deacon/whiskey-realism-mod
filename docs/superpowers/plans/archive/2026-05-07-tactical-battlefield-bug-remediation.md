@@ -88,7 +88,7 @@ Non-negotiable boundaries:
 - Read: `AGENTS.md`
 - Read: `docs/handoff.md`
 - Read: `docs/patch-catalog.md`
-- Read: `docs/superpowers/plans/2026-05-07-tactical-b2-command-order-friction.md`
+- Read: `docs/superpowers/plans/archive/2026-05-07-tactical-b2-command-order-friction.md`
 
 - [ ] **Step 1: Confirm branch and dirty worktree**
 
@@ -768,7 +768,7 @@ In `docs/patch-catalog.md`, reserve the next ordinal `#43`:
 In `docs/handoff.md`, add a tactical bug-remediation note under the active workstream:
 
 ```markdown
-Tactical bug-remediation plan is active at `docs/superpowers/plans/2026-05-07-tactical-battlefield-bug-remediation.md`. Immediate optional smoke guard is #43 `TacticalFallbackRetreatNullGuardPatch`; because it is method-level NRE containment for two vanilla fallback/retreat loops, keep it default-off until focused logs prove the bounded-warning/no-stack-spam behavior is worth enabling. Other tactical findings are telemetry-first and remain unproven until focused logs show `[TacticalCurrentOrder]`, `[TacticalWaypointDrift]`, `[TacticalCourierQueue]`, `[TacticalObjectiveMove]` exposure lines with path/position follow-up, or `[TacticalReserveMove]` risk lines.
+Tactical bug-remediation plan is active at `docs/superpowers/plans/archive/2026-05-07-tactical-battlefield-bug-remediation.md`. Immediate optional smoke guard is #43 `TacticalFallbackRetreatNullGuardPatch`; because it is method-level NRE containment for two vanilla fallback/retreat loops, keep it default-off until focused logs prove the bounded-warning/no-stack-spam behavior is worth enabling. Other tactical findings are telemetry-first and remain unproven until focused logs show `[TacticalCurrentOrder]`, `[TacticalWaypointDrift]`, `[TacticalCourierQueue]`, `[TacticalObjectiveMove]` exposure lines with path/position follow-up, or `[TacticalReserveMove]` risk lines.
 ```
 
 ## Task 6: Deploy And Smoke Telemetry/Null Guard
@@ -917,7 +917,7 @@ Record:
 Use focused commit messages. Suggested split:
 
 ```bash
-git add docs/bug-fixes/README.md docs/bug-fixes/vanilla-tactical-battlefield.md docs/superpowers/plans/2026-05-07-tactical-battlefield-bug-remediation.md
+git add docs/bug-fixes/README.md docs/bug-fixes/vanilla-tactical-battlefield.md docs/superpowers/plans/archive/2026-05-07-tactical-battlefield-bug-remediation.md
 git commit -m "docs: plan tactical battlefield bug remediation"
 
 git add src/WhiskeyRealism/Tactical/TacticalBattlefieldBugDiagnostics.cs tests/WhiskeyRealism.Tests/Program.cs tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj

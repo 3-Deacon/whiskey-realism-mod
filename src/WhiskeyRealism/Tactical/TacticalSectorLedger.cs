@@ -158,5 +158,15 @@ namespace WhiskeyRealism.Tactical
         {
             return helpRequests.TryGetValue(sectorId, out var d) ? d : TacticalHelpRequest.Decision.NoRequest;
         }
+
+        /// <summary>
+        /// Clears all queued help requests. Called by TacticalBattleCoordinator on battle end
+        /// to prevent stale requests from carrying over to the next engagement.
+        /// Idempotent — safe to call on an already-empty table.
+        /// </summary>
+        public static void ClearHelpRequests()
+        {
+            helpRequests.Clear();
+        }
     }
 }

@@ -82,5 +82,16 @@ namespace WhiskeyRealism.Tactical
             byInstanceId.Remove(key.InstanceId);
             if (key.UnitName != null) byName.Remove(key.UnitName);
         }
+
+        /// <summary>
+        /// Clears all morale samples. Called by TacticalBattleCoordinator on battle end via
+        /// Plugin.MoraleSnapshotLedger so that stale samples from a previous engagement do
+        /// not pollute pressure calculations in the next battle. Idempotent.
+        /// </summary>
+        public void Clear()
+        {
+            byInstanceId.Clear();
+            byName.Clear();
+        }
     }
 }
