@@ -204,9 +204,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private DirectChildSnapshot[] _directChildSnapshots = Array.Empty<DirectChildSnapshot>();
         private DirectChildEvidence[] _directChildEvidenceCache = Array.Empty<DirectChildEvidence>();
         private IReadOnlyList<DirectChildIntent> _directChildIntents = Array.Empty<DirectChildIntent>();
+        private CommandTreeSnapshot _commandTree = CommandTreeSnapshot.Empty;
+        private IReadOnlyList<CommandNodeIntent> _commandNodeIntents = Array.Empty<CommandNodeIntent>();
         private bool _hasObservedEvidence;
 
         public IReadOnlyList<DirectChildIntent> CurrentDirectChildIntents => _directChildIntents;
+        internal CommandTreeSnapshot CurrentCommandTree => _commandTree;
+        internal IReadOnlyList<CommandNodeIntent> CurrentCommandNodeIntents => _commandNodeIntents;
 
         public void RegisterDirectChildren(IReadOnlyList<DirectChildSnapshot> snapshots)
         {
@@ -216,6 +220,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _directChildEvidenceCache = Array.Empty<DirectChildEvidence>();
                 _directChildIntents = Array.Empty<DirectChildIntent>();
                 _hasObservedEvidence = false;
+                _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
                 return;
             }
 
@@ -238,6 +243,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             _directChildIntents = initial;
             _hasObservedEvidence = false;
+            _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
+        }
+
+        internal void RegisterCommandTree(CommandTreeSnapshot tree)
+        {
+            _commandTree = tree ?? CommandTreeSnapshot.Empty;
+            _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
+        }
+
+        internal CommandIntentResolution ResolveCommandIntentForGroup(int regimentInstanceId)
+        {
+            return CommandIntentResolver.ResolveForInstance(regimentInstanceId, _commandNodeIntents, _directChildIntents);
         }
 
         public void ObserveDirectChildEvidence(IReadOnlyList<DirectChildEvidence> evidence)
@@ -255,6 +272,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             _directChildIntents = DirectChildAllocator.Allocate(
                 _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache);
+            _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
         }
 
         public void ObserveDirectChildEvidenceWithIntent(IReadOnlyList<DirectChildEvidence> evidence, IReadOnlyList<TacticalIntentModel> perChildEnemyIntent)
@@ -267,6 +285,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _hasObservedEvidence = true;
             _directChildIntents = DirectChildAllocator.AllocateWithChildIntent(
                 _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache, perChildEnemyIntent);
+            _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
         }
 
         public DirectChildRole GetDirectChildRole(string childId)

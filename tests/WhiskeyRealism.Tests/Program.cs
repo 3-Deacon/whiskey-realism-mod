@@ -620,6 +620,21 @@ static class Program
             ("direct child allocator unknown when no plan main effort match", DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch),
             ("direct child allocator assigns screen on screening sector with low strengths", DirectChildAllocatorAssignsScreenOnScreeningSectorWithLowStrengths),
             ("direct child allocator handles mismatched per child intent length", DirectChildAllocatorHandlesMismatchedPerChildIntentLength),
+            ("command node contracts sanitize ids and finite aggression", TestCommandNodeContractsSanitizeInputs),
+            ("command tree builder creates synthetic root when no command candidates exist", TestCommandTreeBuilderSyntheticRootWhenEmpty),
+            ("command tree builder preserves single root hierarchy depth", TestCommandTreeBuilderSingleRootHierarchyDepth),
+            ("command tree builder preserves negative instance id parent links", TestCommandTreeBuilderPreservesNegativeInstanceIdParentLinks),
+            ("command tree builder creates synthetic root for multiple top roots", TestCommandTreeBuilderSyntheticRootForMultipleTopRoots),
+            ("command tree builder filters inactive routed wrong side and combat groups", TestCommandTreeBuilderFiltersInvalidGroups),
+            ("command tree builder counts missing command parents", TestCommandTreeBuilderCountsMissingParents),
+            ("command tree builder honors command hierarchy shift", TestCommandTreeBuilderHonorsCommandHierarchyShift),
+            ("command tree distribution is deterministic", TestCommandTreeDistributionDeterministic),
+            ("command intent allocator maps direct child role onto command node", TestCommandIntentAllocatorMapsDirectChildRole),
+            ("command intent allocator inherits nearest ancestor role", TestCommandIntentAllocatorInheritsNearestAncestorRole),
+            ("command intent allocator assigns bounded reserve for root fallback", TestCommandIntentAllocatorRootFallbackReserve),
+            ("command intent resolver finds exact node by instance", TestCommandIntentResolverFindsExactNode),
+            ("command intent resolver preserves negative instance ids", TestCommandIntentResolverPreservesNegativeInstanceIds),
+            ("command intent resolver reports missing node without throwing", TestCommandIntentResolverMissingNode),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -636,6 +651,10 @@ static class Program
             ("army orchestrator emit army intent includes direct children", ArmyOrchestratorEmitArmyIntentIncludesDirectChildren),
             ("army orchestrator get direct child role unknown when unregistered", ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered),
             ("army orchestrator returns role for synth army child id", ArmyOrchestratorReturnsRoleForSynthArmyChildId),
+            ("army orchestrator registers command tree snapshot", TestArmyOrchestratorRegistersCommandTree),
+            ("army orchestrator preserves O3 direct child role after command tree allocation", TestArmyOrchestratorPreservesDirectChildRoleWithCommandTree),
+            ("army orchestrator resolves command node intent after direct child evidence", TestArmyOrchestratorResolvesCommandNodeIntent),
+            ("army orchestrator command resolver falls back to O3 direct child intent", TestArmyOrchestratorCommandResolverFallsBackToDirectChildIntent),
             ("army orchestrator replan invalidates direct child evidence cache", ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache),
             ("army replan triggers phase deadline fires when age exceeds phase budget", ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget),
             ("army replan triggers main effort sector loss fires below threshold", ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold),
@@ -11597,6 +11616,288 @@ static class Program
         AssertEqual(InferredIntent.Unknown, intents[0].EnemyIntent.PrimaryIntent);
     }
 
+    private static void TestCommandNodeContractsSanitizeInputs()
+    {
+        var node = new CommandNodeSnapshot(
+            nodeId: "  ",
+            parentNodeId: null,
+            instanceId: 42,
+            parentInstanceId: 0,
+            allianceId: 1,
+            rawUnitTyp: 15,
+            commandHierarchyShift: -1,
+            displayName: "  ",
+            active: true,
+            synthetic: false,
+            depth: -3);
+        AssertEqual("node-unknown", node.NodeId);
+        AssertEqual(string.Empty, node.ParentNodeId);
+        AssertEqual("node-unknown", node.DisplayName);
+        AssertEqual(0, node.Depth);
+        AssertEqual(16, node.EffectiveCommandLevel);
+
+        var intent = new CommandNodeIntent(
+            nodeId: "  ",
+            sourceNodeId: "  ",
+            role: DirectChildRole.Main,
+            axis: DirectChildAxis.SectorAxis,
+            primarySector: -2,
+            supportPriority: 120,
+            aggressionBias01: float.PositiveInfinity,
+            depth: -1);
+        AssertEqual("node-unknown", intent.NodeId);
+        AssertEqual("node-unknown", intent.SourceNodeId);
+        AssertEqual(0, intent.PrimarySector);
+        AssertEqual(100, intent.SupportPriority);
+        AssertEqual(0f, intent.AggressionBias01);
+        AssertEqual(0, intent.Depth);
+    }
+
+    private static void TestCommandTreeBuilderSyntheticRootWhenEmpty()
+    {
+        var tree = CommandTreeBuilder.Build(Array.Empty<CommandTreeBuilder.CommandProbe>(), allianceId: 1, commandHierarchyShift: 0);
+
+        AssertEqual("synth-root-1", tree.RootNodeId);
+        AssertEqual(1, tree.Nodes.Count);
+        AssertTrue(tree.Nodes[0].Synthetic, "empty command tree uses synthetic root");
+        AssertEqual(14, tree.Nodes[0].RawUnitTyp);
+        AssertEqual("14:1", tree.RawUnitTypDistribution);
+    }
+
+    private static void TestCommandTreeBuilderSingleRootHierarchyDepth()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "Army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 100, 1, 15, "Corps", true, false, false),
+            new CommandTreeBuilder.CommandProbe(300, 200, 1, 14, "Division", true, false, false),
+        }, 1, 0);
+
+        AssertEqual("node-100", tree.RootNodeId);
+        AssertEqual(3, tree.Nodes.Count);
+        AssertEqual("node-100", tree.Nodes[0].NodeId);
+        AssertEqual(0, tree.Nodes[0].Depth);
+        AssertEqual("node-200", tree.Nodes[1].NodeId);
+        AssertEqual("node-100", tree.Nodes[1].ParentNodeId);
+        AssertEqual(1, tree.Nodes[1].Depth);
+        AssertEqual("node-300", tree.Nodes[2].NodeId);
+        AssertEqual("node-200", tree.Nodes[2].ParentNodeId);
+        AssertEqual(2, tree.Nodes[2].Depth);
+        AssertEqual(2, tree.MaxDepth);
+    }
+
+    private static void TestCommandTreeBuilderPreservesNegativeInstanceIdParentLinks()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(-100, 0, 1, 17, "Army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(-200, -100, 1, 15, "Corps", true, false, false),
+            new CommandTreeBuilder.CommandProbe(-300, -200, 1, 14, "Division", true, false, false),
+        }, 1, 0);
+
+        AssertEqual("node--100", tree.RootNodeId);
+        AssertEqual(3, tree.Nodes.Count);
+        AssertEqual("node--200", tree.Nodes[1].NodeId);
+        AssertEqual("node--100", tree.Nodes[1].ParentNodeId);
+        AssertEqual("node--300", tree.Nodes[2].NodeId);
+        AssertEqual("node--200", tree.Nodes[2].ParentNodeId);
+        AssertEqual(0, tree.MissingParentCount);
+    }
+
+    private static void TestCommandTreeBuilderSyntheticRootForMultipleTopRoots()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "Army A", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 0, 1, 17, "Army B", true, false, false),
+            new CommandTreeBuilder.CommandProbe(300, 100, 1, 15, "Corps", true, false, false),
+        }, 1, 0);
+
+        AssertEqual("synth-root-1", tree.RootNodeId);
+        AssertEqual(4, tree.Nodes.Count);
+        AssertTrue(tree.Nodes[0].Synthetic, "multiple roots use synthetic side root");
+        AssertEqual("node-100", tree.Nodes[1].NodeId);
+        AssertEqual("synth-root-1", tree.Nodes[1].ParentNodeId);
+        AssertEqual("node-200", tree.Nodes[2].NodeId);
+        AssertEqual("synth-root-1", tree.Nodes[2].ParentNodeId);
+        AssertEqual(2, tree.MaxDepth);
+    }
+
+    private static void TestCommandTreeBuilderFiltersInvalidGroups()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "Army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 100, 1, 15, "Inactive", false, false, false),
+            new CommandTreeBuilder.CommandProbe(300, 100, 1, 15, "Routed", true, true, false),
+            new CommandTreeBuilder.CommandProbe(400, 100, 1, 15, "Marked", true, false, true),
+            new CommandTreeBuilder.CommandProbe(500, 100, 0, 15, "Wrong Side", true, false, false),
+            new CommandTreeBuilder.CommandProbe(600, 100, 1, 13, "Combat", true, false, false),
+        }, 1, 0);
+
+        AssertEqual(1, tree.Nodes.Count);
+        AssertEqual("node-100", tree.Nodes[0].NodeId);
+    }
+
+    private static void TestCommandTreeBuilderCountsMissingParents()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 999, 1, 15, "Detached Corps", true, false, false),
+        }, 1, 0);
+
+        AssertEqual(1, tree.MissingParentCount);
+        AssertEqual("node-100", tree.RootNodeId);
+        AssertEqual(string.Empty, tree.Nodes[0].ParentNodeId);
+    }
+
+    private static void TestCommandTreeBuilderHonorsCommandHierarchyShift()
+    {
+        var shifted = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 12, "Below", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 0, 1, 14, "Early Command", true, false, false),
+        }, 1, -1);
+
+        var clampedHigh = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(300, 0, 1, 17, "Below Clamp", true, false, false),
+            new CommandTreeBuilder.CommandProbe(400, 0, 1, 18, "Highest Command", true, false, false),
+        }, 1, 99);
+
+        AssertEqual(1, shifted.Nodes.Count);
+        AssertEqual("node-200", shifted.RootNodeId);
+        AssertEqual(15, shifted.Nodes[0].EffectiveCommandLevel);
+        AssertEqual(1, clampedHigh.Nodes.Count);
+        AssertEqual("node-400", clampedHigh.RootNodeId);
+    }
+
+    private static void TestCommandTreeDistributionDeterministic()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(300, 100, 1, 15, "C", true, false, false),
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "A", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 100, 1, 15, "B", true, false, false),
+            new CommandTreeBuilder.CommandProbe(400, 200, 1, 14, "D", true, false, false),
+        }, 1, 0);
+
+        AssertEqual("17:1,15:2,14:1", tree.RawUnitTypDistribution);
+        AssertEqual("node-100", tree.Nodes[0].NodeId);
+        AssertEqual("node-200", tree.Nodes[1].NodeId);
+        AssertEqual("node-300", tree.Nodes[2].NodeId);
+        AssertEqual("node-400", tree.Nodes[3].NodeId);
+    }
+
+    private static void TestCommandIntentAllocatorMapsDirectChildRole()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "Army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 100, 1, 15, "Corps", true, false, false),
+        }, 1, 0);
+        var intents = CommandTreeIntentAllocator.Allocate(tree, new[]
+        {
+            DirectIntent("child-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 0.75f, 0.6f),
+        });
+
+        AssertEqual(2, intents.Count);
+        AssertEqual(DirectChildRole.Main, intents[1].Role);
+        AssertEqual("node-200", intents[1].SourceNodeId);
+        AssertEqual(75, intents[1].SupportPriority);
+        AssertEqual(2, intents[1].PrimarySector);
+
+        var syntheticMapped = CommandTreeIntentAllocator.Allocate(tree, new[]
+        {
+            DirectIntent("synth-army-100", DirectChildRole.Fallback, DirectChildAxis.Withdraw, 1, 0.3f, 0.2f),
+        });
+        AssertEqual(DirectChildRole.Fallback, syntheticMapped[0].Role);
+        AssertEqual("node-100", syntheticMapped[0].SourceNodeId);
+    }
+
+    private static void TestCommandIntentAllocatorInheritsNearestAncestorRole()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "Army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 100, 1, 15, "Corps", true, false, false),
+            new CommandTreeBuilder.CommandProbe(300, 200, 1, 14, "Division", true, false, false),
+        }, 1, 0);
+        var intents = CommandTreeIntentAllocator.Allocate(tree, new[]
+        {
+            DirectIntent("child-200", DirectChildRole.Fix, DirectChildAxis.Hold, 4, 0.4f, 0.25f),
+        });
+
+        AssertEqual(DirectChildRole.Fix, intents[2].Role);
+        AssertEqual("node-200", intents[2].SourceNodeId);
+        AssertEqual(4, intents[2].PrimarySector);
+        AssertEqual(2, intents[2].Depth);
+    }
+
+    private static void TestCommandIntentAllocatorRootFallbackReserve()
+    {
+        var tree = CommandTreeBuilder.Build(Array.Empty<CommandTreeBuilder.CommandProbe>(), 1, 0);
+        var intents = CommandTreeIntentAllocator.Allocate(tree, Array.Empty<DirectChildIntent>());
+
+        AssertEqual(1, intents.Count);
+        AssertEqual("synth-root-1", intents[0].NodeId);
+        AssertEqual(DirectChildRole.Reserve, intents[0].Role);
+        AssertEqual(DirectChildAxis.Hold, intents[0].Axis);
+        AssertEqual(25, intents[0].SupportPriority);
+        AssertTrue(intents[0].AggressionBias01 >= 0f && intents[0].AggressionBias01 <= 1f, "fallback aggression bounded");
+    }
+
+    private static void TestCommandIntentResolverFindsExactNode()
+    {
+        var intents = new[]
+        {
+            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 0.6f, 1),
+        };
+
+        var resolution = CommandIntentResolver.ResolveForInstance(200, intents);
+
+        AssertTrue(resolution.Found, "exact node should resolve");
+        AssertEqual("exact-command-node", resolution.Reason);
+        AssertEqual(DirectChildRole.Main, resolution.Intent.Role);
+    }
+
+    private static void TestCommandIntentResolverPreservesNegativeInstanceIds()
+    {
+        var exact = CommandIntentResolver.ResolveForInstance(-200, new[]
+        {
+            new CommandNodeIntent("node--200", "node--200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 0.6f, 1),
+        });
+        var childFallback = CommandIntentResolver.ResolveForInstance(-300, Array.Empty<CommandNodeIntent>(), new[]
+        {
+            DirectIntent("child--300", DirectChildRole.Fix, DirectChildAxis.Hold, 4, 0.4f, 0.25f),
+        });
+        var synthFallback = CommandIntentResolver.ResolveForInstance(-400, Array.Empty<CommandNodeIntent>(), new[]
+        {
+            DirectIntent("synth-army--400", DirectChildRole.Fallback, DirectChildAxis.Withdraw, 5, 0.2f, 0.1f),
+        });
+
+        AssertTrue(exact.Found, "negative exact command node should resolve");
+        AssertEqual(DirectChildRole.Main, exact.Intent.Role);
+        AssertTrue(childFallback.Found, "negative child id should fall back");
+        AssertEqual(DirectChildRole.Fix, childFallback.Intent.Role);
+        AssertTrue(synthFallback.Found, "negative synth-army id should fall back");
+        AssertEqual(DirectChildRole.Fallback, synthFallback.Intent.Role);
+    }
+
+    private static void TestCommandIntentResolverMissingNode()
+    {
+        var missing = CommandIntentResolver.ResolveForInstance(999, new[]
+        {
+            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 0.6f, 1),
+        });
+        var invalid = CommandIntentResolver.ResolveForInstance(0, Array.Empty<CommandNodeIntent>());
+
+        AssertFalse(missing.Found, "missing node should not resolve");
+        AssertEqual("command-node-not-found", missing.Reason);
+        AssertFalse(invalid.Found, "invalid lookup should not resolve");
+        AssertEqual("no-command-intent", invalid.Reason);
+    }
+
     private static void EnemyVisibleStateRecordsSectorAndContactFields()
     {
         var sectors = new[]
@@ -11996,6 +12297,102 @@ static class Program
             "orchestrator must distinguish synth-army-{id} from child-{id} by exact match");
     }
 
+    private static void TestArmyOrchestratorRegistersCommandTree()
+    {
+        var army = NewArmyOrchestratorWithPlan();
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "Army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 100, 1, 15, "Corps", true, false, false),
+        }, 1, 0);
+
+        army.RegisterCommandTree(tree);
+
+        AssertEqual("node-100", army.CurrentCommandTree.RootNodeId);
+        AssertEqual(2, army.CurrentCommandTree.Nodes.Count);
+        AssertEqual(2, army.CurrentCommandNodeIntents.Count);
+    }
+
+    private static void TestArmyOrchestratorPreservesDirectChildRoleWithCommandTree()
+    {
+        var army = NewArmyOrchestratorWithPlan();
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "Army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 100, 1, 15, "Corps", true, false, false),
+        }, 1, 0);
+
+        army.RegisterDirectChildren(new[]
+        {
+            new DirectChildSnapshot("child-200", "army-100", 15, 0, "Corps", true),
+        });
+        army.RegisterCommandTree(tree);
+        army.ObserveDirectChildEvidenceWithIntent(new[]
+        {
+            new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
+        }, new[]
+        {
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()),
+        });
+
+        AssertEqual(DirectChildRole.Main, army.GetDirectChildRole("child-200"), "O3 direct child role should remain authoritative");
+        var resolution = army.ResolveCommandIntentForGroup(200);
+        AssertTrue(resolution.Found, "command resolver should find node-200");
+        AssertEqual(DirectChildRole.Main, resolution.Intent.Role, "command node should mirror direct child role");
+    }
+
+    private static void TestArmyOrchestratorResolvesCommandNodeIntent()
+    {
+        var army = NewArmyOrchestratorWithPlan();
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "Army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 100, 1, 15, "Corps", true, false, false),
+            new CommandTreeBuilder.CommandProbe(300, 200, 1, 14, "Division", true, false, false),
+        }, 1, 0);
+
+        army.RegisterDirectChildren(new[]
+        {
+            new DirectChildSnapshot("child-200", "army-100", 15, 0, "Corps", true),
+        });
+        army.RegisterCommandTree(tree);
+        army.ObserveDirectChildEvidence(new[]
+        {
+            new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
+        });
+
+        var parent = army.ResolveCommandIntentForGroup(200);
+        var child = army.ResolveCommandIntentForGroup(300);
+        AssertTrue(parent.Found, "parent command node resolves");
+        AssertTrue(child.Found, "deeper command node resolves");
+        AssertEqual(DirectChildRole.Main, parent.Intent.Role);
+        AssertEqual(DirectChildRole.Main, child.Intent.Role);
+        AssertEqual("node-200", child.Intent.SourceNodeId);
+    }
+
+    private static void TestArmyOrchestratorCommandResolverFallsBackToDirectChildIntent()
+    {
+        var army = NewArmyOrchestratorWithPlan();
+        army.RegisterDirectChildren(new[]
+        {
+            new DirectChildSnapshot("synth-army-200", "army-200", 15, 0, "Detached Corps", true),
+        });
+        army.ObserveDirectChildEvidenceWithIntent(new[]
+        {
+            new DirectChildEvidence(1, 3, true, 4, 0, 0.8f),
+        }, new[]
+        {
+            new TacticalIntentModel(InferredIntent.Attack, 4, 0.8f, 0.5f, Array.Empty<EvidenceTag>()),
+        });
+
+        var resolution = army.ResolveCommandIntentForGroup(200);
+
+        AssertTrue(resolution.Found, "missing command tree should fall back to O3 direct child intent");
+        AssertEqual("o3-direct-child-fallback", resolution.Reason);
+        AssertEqual(army.GetDirectChildRole("synth-army-200"), resolution.Intent.Role);
+        AssertEqual(4, resolution.Intent.PrimarySector);
+    }
+
     private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()
     {
         var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
@@ -12049,6 +12446,28 @@ static class Program
             BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
             mainSector, Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0f, 0));
         return orch;
+    }
+
+    private static DirectChildIntent DirectIntent(
+        string childId,
+        DirectChildRole role,
+        DirectChildAxis axis,
+        int primarySector,
+        float supportPriority01,
+        float aggressionBias01)
+    {
+        return new DirectChildIntent(
+            childId,
+            rawUnitTyp: 15,
+            effectiveCommandLevel: 15,
+            displayName: childId,
+            primarySector,
+            role,
+            axis,
+            axisSector: primarySector,
+            supportPriority01,
+            aggressionBias01,
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
     }
 
     private static void ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget()

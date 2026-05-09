@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Text;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Util;
@@ -31,6 +32,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static int _battleSequence;
         private static readonly HashSet<string> _tickWarningKeys = new HashSet<string>();
         private static readonly HashSet<int> _directChildDeferLogged = new HashSet<int>();
+        private static readonly Dictionary<string, string> _commandTreeTelemetrySignatures = new Dictionary<string, string>();
 
         public static void OnBattleStart(AIBattle battle)
         {
@@ -51,6 +53,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     AttachArmyIfActive(side1, battle);
                     AttachDirectChildrenIfReady(side0, battle);
                     AttachDirectChildrenIfReady(side1, battle);
+                    AttachCommandTreeIfReady(side0, battle);
+                    AttachCommandTreeIfReady(side1, battle);
                 }
 
                 int suppressed = (playerCicAllianceId == 0 || playerCicAllianceId == 1) ? 1 : 0;
@@ -86,6 +90,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ClearLedgersBetweenBattles();
                 ResetRuntimeTickState();
                 _directChildDeferLogged.Clear();
+                _commandTreeTelemetrySignatures.Clear();
                 side0 = null;
                 side1 = null;
                 active = false;
@@ -115,6 +120,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     DriveTickCycle(side0, battle, deltaSeconds);
                     DriveTickCycle(side1, battle, deltaSeconds);
 
+                    AttachCommandTreeIfReady(side0, battle);
+                    AttachCommandTreeIfReady(side1, battle);
                     DriveDirectChildCycle(side0, battle);
                     DriveDirectChildCycle(side1, battle);
                 }
@@ -387,6 +394,105 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int i = 0; i < snaps.Count; i++)
                 if (snaps[i].ChildId.StartsWith("synth-army-")) return true;
             return false;
+        }
+
+        private static void AttachCommandTreeIfReady(TacticalBattleOrchestrator side, AIBattle battle)
+        {
+            try
+            {
+                if (side == null || side.Army == null || !side.Army.HasPlan) return;
+
+                var tree = CommandTreeRuntime.Snapshot(side.AllianceId);
+                if (!tree.HasNodes) return;
+
+                var current = side.Army.CurrentCommandTree;
+                if (current.HasNodes && IsSyntheticOnlyCommandTree(tree) && !IsSyntheticOnlyCommandTree(current))
+                {
+                    return;
+                }
+
+                if (current.HasNodes
+                    && string.Equals(CommandTreeSignature(current), CommandTreeSignature(tree), StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                side.Army.RegisterCommandTree(tree);
+                LogCommandTreeTelemetry(side.AllianceId, tree);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] AttachCommandTreeIfReady skipped side="
+                    + (side == null ? "null" : side.AllianceId.ToString())
+                    + ": " + e.GetType().Name + " " + e.Message);
+            }
+        }
+
+        private static string CommandTreeSignature(CommandTreeSnapshot tree)
+        {
+            if (tree == null || !tree.HasNodes)
+            {
+                return string.Empty;
+            }
+
+            var signature = new StringBuilder();
+            signature.Append(tree.RootNodeId).Append(':')
+                .Append(tree.Nodes.Count).Append(':')
+                .Append(tree.MaxDepth).Append(':')
+                .Append(tree.RawUnitTypDistribution).Append(':')
+                .Append(tree.MissingParentCount);
+
+            for (int i = 0; i < tree.Nodes.Count; i++)
+            {
+                var node = tree.Nodes[i];
+                signature.Append('|')
+                    .Append(node.NodeId).Append('<')
+                    .Append(node.ParentNodeId).Append(':')
+                    .Append(node.RawUnitTyp).Append(':')
+                    .Append(node.Depth);
+            }
+
+            return signature.ToString();
+        }
+
+        private static bool IsSyntheticOnlyCommandTree(CommandTreeSnapshot tree)
+        {
+            try
+            {
+                return tree != null
+                    && tree.Nodes.Count == 1
+                    && tree.Nodes[0].Synthetic;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void LogCommandTreeTelemetry(int allianceId, CommandTreeSnapshot tree)
+        {
+            try
+            {
+                if (tree == null || !tree.HasNodes) return;
+                string key = _battleSequence + ":" + allianceId;
+                string signature = CommandTreeSignature(tree);
+
+                string existing;
+                if (_commandTreeTelemetrySignatures.TryGetValue(key, out existing)
+                    && string.Equals(existing, signature, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _commandTreeTelemetrySignatures[key] = signature;
+                Plugin.Log.LogInfo("[TacticalCommandTree] side=" + allianceId
+                    + " root=" + tree.RootNodeId
+                    + " nodes=" + tree.Nodes.Count
+                    + " maxDepth=" + tree.MaxDepth
+                    + " unittyps=" + tree.RawUnitTypDistribution
+                    + " missingParents=" + tree.MissingParentCount);
+            }
+            catch { }
         }
 
         private static void DriveDirectChildCycle(TacticalBattleOrchestrator side, AIBattle battle)

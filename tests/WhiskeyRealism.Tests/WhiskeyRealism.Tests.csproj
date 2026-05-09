@@ -174,6 +174,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyIntentInference.cs" Link="Orchestrator\ArmyIntentInference.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyIntent.cs" Link="Orchestrator\ArmyIntent.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildContracts.cs" Link="Orchestrator\DirectChildContracts.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\CommandNodeContracts.cs" Link="Orchestrator\CommandNodeContracts.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\CommandTreeBuilder.cs" Link="Orchestrator\CommandTreeBuilder.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\CommandTreeIntentAllocator.cs" Link="Orchestrator\CommandTreeIntentAllocator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\CommandIntentResolver.cs" Link="Orchestrator\CommandIntentResolver.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildAllocator.cs" Link="Orchestrator\DirectChildAllocator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildDiscovery.cs" Link="Orchestrator\DirectChildDiscovery.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildEvidenceBuilder.cs" Link="Orchestrator\DirectChildEvidenceBuilder.cs" />
