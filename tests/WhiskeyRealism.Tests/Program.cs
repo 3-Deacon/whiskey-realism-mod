@@ -552,6 +552,8 @@ static class Program
             ("tactical battle plan sanitizes NaN and Infinity floats", TacticalBattlePlanSanitizesNanAndInfinityFloats),
             ("army intent sanitizes NaN and Infinity floats", ArmyIntentSanitizesNanAndInfinityFloats),
             ("army intent clamps aggression bias out of range", ArmyIntentClampsAggressionBiasOutOfRange),
+            ("army intent carries direct child intents list", ArmyIntentCarriesDirectChildIntentsList),
+            ("army intent direct child intents defaults empty", ArmyIntentDirectChildIntentsDefaultsEmpty),
             ("tactical playbook personality fit scores peak at match and decay off", TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff),
             ("tactical playbook terrain preference returns dominant weight", TacticalPlaybookTerrainPreferenceReturnsDominantWeight),
             ("tactical playbook odds range one inside band decays outside", TacticalPlaybookOddsRangeOneInsideBandDecaysOutside),
@@ -559,6 +561,7 @@ static class Program
             ("tactical playbook catalog empty returns null", TacticalPlaybookCatalogEmptyReturnsNull),
             ("tactical playbook catalog highest scoring playbook wins", TacticalPlaybookCatalogHighestScoringPlaybookWins),
             ("tactical playbook catalog personality weight dominates terrain", TacticalPlaybookCatalogPersonalityWeightDominatesTerrain),
+            ("tactical playbook catalog opposing hint changes ranking", TacticalPlaybookCatalogOpposingHintChangesRanking),
             ("tactical playbook catalog jitter deterministic for same seed", TacticalPlaybookCatalogJitterDeterministicForSameSeed),
             ("tactical sector ledger clear help requests empties state", TacticalSectorLedgerClearHelpRequestsEmptiesState),
             ("tactical morale snapshot ledger clear empties state", TacticalMoraleSnapshotLedgerClearEmptiesState),
@@ -588,11 +591,52 @@ static class Program
             ("historical playbook selection hood low odds high aggression selects frontal assault", HistoricalPlaybookSelectionHoodLowOddsHighAggressionSelectsFrontalAssault),
             ("historical playbook selection burnside low caution low audacity selects forced assault", HistoricalPlaybookSelectionBurnsideLowCautionLowAudacitySelectsForcedAssault),
             ("historical playbook selection bragg mid odds low audacity selects indecisive commit", HistoricalPlaybookSelectionBraggMidOddsLowAudacitySelectsIndecisiveCommit),
+            ("tactical intent model records all fields", TacticalIntentModelRecordsAllFields),
+            ("tactical intent model clamps confidence and age", TacticalIntentModelClampsConfidenceAndAge),
+            ("tactical intent model unknown primary intent sentinel", TacticalIntentModelUnknownPrimaryIntentSentinel),
+            ("enemy visible state records sector and contact fields", EnemyVisibleStateRecordsSectorAndContactFields),
+            ("enemy visible state clamps and coerces null sectors", EnemyVisibleStateClampsAndCoercesNullSectors),
+            ("army intent inference unknown when no visible sectors", ArmyIntentInferenceUnknownWhenNoVisibleSectors),
+            ("army intent inference concentration in one sector implies attack", ArmyIntentInferenceConcentrationInOneSectorImpliesAttack),
+            ("army intent inference single sector strong contact stays finite", ArmyIntentInferenceSingleSectorStrongContactStaysFinite),
+            ("army intent inference unconcentrated reserves uncommitted implies probe", ArmyIntentInferenceUnconcentratedReservesUncommittedImpliesProbe),
+            ("army intent inference contact broken implies withdraw", ArmyIntentInferenceContactBrokenImpliesWithdraw),
+            ("army intent inference receiving fire implies defend", ArmyIntentInferenceReceivingFireImpliesDefend),
+            ("army intent inference confidence floor below threshold", ArmyIntentInferenceConfidenceFloorBelowThreshold),
+            ("army intent inference for frontage filters by sector", ArmyIntentInferenceForFrontageFiltersBySector),
+            ("army intent inference for frontage empty mask returns unknown", ArmyIntentInferenceForFrontageEmptyMaskReturnsUnknown),
+            ("direct child intent sanitizes nonfinite floats", DirectChildIntentSanitizesNonfiniteFloats),
+            ("direct child intent clamps support and aggression bias", DirectChildIntentClampsSupportAndAggression),
+            ("direct child evidence buckets are non negative", DirectChildEvidenceBucketsAreNonNegative),
+            ("direct child evidence equals same buckets", DirectChildEvidenceEqualsSameBuckets),
+            ("direct child snapshot stores raw and effective unittyp", DirectChildSnapshotStoresRawAndEffectiveUnittyp),
+            ("direct child allocator assigns main on main effort sector with strength", DirectChildAllocatorAssignsMainOnMainEffortSectorWithStrength),
+            ("direct child allocator assigns support main to adjacent strong child", DirectChildAllocatorAssignsSupportMainToAdjacentStrongChild),
+            ("direct child allocator assigns fix on fixing sector with contact", DirectChildAllocatorAssignsFixOnFixingSectorWithContact),
+            ("direct child allocator assigns reserve to uncommitted strong child", DirectChildAllocatorAssignsReserveToUncommittedStrongChild),
+            ("direct child allocator assigns fallback on adverse odds and attack", DirectChildAllocatorAssignsFallbackOnAdverseOddsAndAttack),
+            ("direct child allocator allocates refuse to flank with exposure", DirectChildAllocatorAllocatesRefuseToFlankWithExposure),
+            ("direct child allocator deterministic on registration order tie", DirectChildAllocatorDeterministicOnRegistrationOrderTie),
+            ("direct child allocator unknown when no plan main effort match", DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch),
+            ("direct child allocator assigns screen on screening sector with low strengths", DirectChildAllocatorAssignsScreenOnScreeningSectorWithLowStrengths),
+            ("direct child allocator handles mismatched per child intent length", DirectChildAllocatorHandlesMismatchedPerChildIntentLength),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
             ("army orchestrator current macroai defend on consolidate with cautious personality", ArmyOrchestratorCurrentMacroAiDefendOnConsolidateWithCautiousPersonality),
             ("army orchestrator emit army intent matches current plan", ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan),
+            ("army orchestrator records history on initial plan", ArmyOrchestratorRecordsHistoryOnInitialPlan),
+            ("army orchestrator tick advances age without replanning", ArmyOrchestratorTickAdvancesAgeWithoutReplanning),
+            ("army orchestrator replan with intent resets age and updates history", ArmyOrchestratorReplanWithIntentResetsAgeAndUpdatesHistory),
+            ("army orchestrator replan without intent leaves intent unknown", ArmyOrchestratorReplanWithoutIntentLeavesIntentUnknown),
+            ("army orchestrator failed replan preserves active state", ArmyOrchestratorFailedReplanPreservesActiveState),
+            ("army orchestrator register direct children stores snapshots", ArmyOrchestratorRegisterDirectChildrenStoresSnapshots),
+            ("army orchestrator observe evidence allocates roles", ArmyOrchestratorObserveEvidenceAllocatesRoles),
+            ("army orchestrator observe evidence is idempotent on equal signature", ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature),
+            ("army orchestrator emit army intent includes direct children", ArmyOrchestratorEmitArmyIntentIncludesDirectChildren),
+            ("army orchestrator get direct child role unknown when unregistered", ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered),
+            ("army orchestrator returns role for synth army child id", ArmyOrchestratorReturnsRoleForSynthArmyChildId),
+            ("army orchestrator replan invalidates direct child evidence cache", ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache),
             ("army replan triggers phase deadline fires when age exceeds phase budget", ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget),
             ("army replan triggers main effort sector loss fires below threshold", ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold),
             ("army replan triggers force imbalance shift fires when odds cross hysteresis", ArmyReplanTriggersForceImbalanceShiftFiresWhenOddsCrossHysteresis),
@@ -600,7 +644,38 @@ static class Program
             ("army replan triggers reserve exhaustion fires at 85 percent committed", ArmyReplanTriggersReserveExhaustionFiresAt85PercentCommitted),
             ("army replan triggers reinforcement arrival fires on nonzero delta", ArmyReplanTriggersReinforcementArrivalFiresOnNonzeroDelta),
             ("army replan triggers enemy intent shift fires when confidence weighted exceeds floor", ArmyReplanTriggersEnemyIntentShiftFiresWhenConfidenceWeightedExceedsFloor),
-            ("army replan triggers none when all conditions normal", ArmyReplanTriggersNoneWhenAllConditionsNormal)
+            ("army replan triggers none when all conditions normal", ArmyReplanTriggersNoneWhenAllConditionsNormal),
+            ("army tick cycle no trigger when all conditions normal", ArmyTickCycleNoTriggerWhenAllConditionsNormal),
+            ("army tick cycle phase deadline fires", ArmyTickCyclePhaseDeadlineFires),
+            ("army tick cycle rate limits replan within min replan seconds", ArmyTickCycleRateLimitsReplanWithinMinReplanSeconds),
+            ("army tick cycle rate limit is per alliance clock", ArmyTickCycleRateLimitIsPerAllianceClock),
+            ("army tick cycle reset clears battle lifetime rate limit", ArmyTickCycleResetClearsBattleLifetimeRateLimit),
+            ("army tick cycle updates observed intent without replan", ArmyTickCycleUpdatesObservedIntentWithoutReplan),
+            ("army tick cycle enemy intent shift fires when confident enemy attacks", ArmyTickCycleEnemyIntentShiftFiresWhenConfidentEnemyAttacks),
+            ("army tick cycle no replan if orchestrator has no plan", ArmyTickCycleNoReplanIfOrchestratorHasNoPlan),
+            ("direct child discovery probe handles empty unitsused", DirectChildDiscoveryProbeHandlesEmptyUnitsused),
+            ("direct child discovery probe filters below effective command min", DirectChildDiscoveryProbeFiltersBelowEffectiveCommandMin),
+            ("direct child discovery probe selects highest unittyp as army root", DirectChildDiscoveryProbeSelectsHighestUnittypAsArmyRoot),
+            ("direct child discovery probe handles negative command hierarchy shift", DirectChildDiscoveryProbeHandlesNegativeCommandHierarchyShift),
+            ("direct child discovery probe synthesizes when zero direct children", DirectChildDiscoveryProbeSynthesizesWhenZeroDirectChildren),
+            ("direct child discovery probe iterates each army root for multi army side", DirectChildDiscoveryProbeIteratesEachArmyRootForMultiArmySide),
+            ("direct child evidence builder buckets strength using 0.5 ratio", DirectChildEvidenceBuilderBucketsStrengthUsing05Ratio),
+            ("direct child evidence builder propagates contact flag", DirectChildEvidenceBuilderPropagatesContactFlag),
+            ("direct child evidence builder zero own when sector missing", DirectChildEvidenceBuilderZeroOwnWhenSectorMissing),
+            ("direct child gate disabled allows all", DirectChildGateDisabledAllowsAll),
+            ("direct child gate player side allows all", DirectChildGatePlayerSideAllowsAll),
+            ("direct child gate unknown role allows", DirectChildGateUnknownRoleAllows),
+            ("direct child gate reserve denies", DirectChildGateReserveDenies),
+            ("direct child gate main allows on axis denies off axis", DirectChildGateMainAllowsOnAxisDeniesOffAxis),
+            ("direct child gate fix allows short denies wide", DirectChildGateFixAllowsShortDeniesWide),
+            ("direct child gate screen allows in sector denies out of sector", DirectChildGateScreenAllowsInSectorDeniesOutOfSector),
+            ("direct child gate fallback allows away from enemy denies toward enemy", DirectChildGateFallbackAllowsAwayDeniesToward),
+            ("direct child gate refuse left allows in sector denies out", DirectChildGateRefuseLeftAllowsInSectorDeniesOut),
+            ("direct child gate negative target sector coerces to primary", DirectChildGateNegativeTargetSectorCoercesToPrimary),
+            ("parse instance id child positive", ParseInstanceIdChildPositive),
+            ("parse instance id child negative", ParseInstanceIdChildNegative),
+            ("parse instance id synth army positive", ParseInstanceIdSynthArmyPositive),
+            ("parse instance id synth army negative", ParseInstanceIdSynthArmyNegative),
         };
 
         foreach (var test in tests)
@@ -934,6 +1009,7 @@ static class Program
         AssertContains(formatted, "matched=1", "matched count");
         AssertContains(formatted, "moved=0", "skipped move count");
     }
+
 
     private static void TacticalContactNoSightingIsNone()
     {
@@ -10818,6 +10894,34 @@ static class Program
         AssertNear(1f, above.AggressionBias01, 1e-5f, "above 1 clamped to 1");
     }
 
+    private static void ArmyIntentCarriesDirectChildIntentsList()
+    {
+        var children = new[]
+        {
+            new DirectChildIntent(
+                "c0", 15, 16, "First", 2, DirectChildRole.Main,
+                DirectChildAxis.SectorAxis, 2, 1.0f, 0.6f,
+                new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>())),
+        };
+        var intent = new ArmyIntent(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 2, fixingSectors: new[] { 0 }, screeningSectors: new[] { 4 },
+            reserveCommitTriggerOdds: 1.2f, aggressionBias01: 0.7f,
+            directChildIntents: children);
+        AssertEqual(1, intent.DirectChildIntents.Count);
+        AssertEqual("c0", intent.DirectChildIntents[0].ChildId);
+        AssertEqual(DirectChildRole.Main, intent.DirectChildIntents[0].Role);
+    }
+
+    private static void ArmyIntentDirectChildIntentsDefaultsEmpty()
+    {
+        // existing 7-arg ctor must continue to work and yield empty children list
+        var intent = new ArmyIntent(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0.5f);
+        AssertEqual(0, intent.DirectChildIntents.Count);
+    }
+
     // ---- TacticalPlaybook tests (O1.2) ----
 
     private sealed class StubPlaybook : TacticalPlaybook
@@ -10948,6 +11052,25 @@ static class Program
             new OddsRange(0f, 0f)));
         var ctx = new PlaybookContext(new PersonalityVector(1f, -1f, 1f, 0, 0), TerrainKind.Open, 5f, 0f, 0, 1);
         AssertEqual(BattlePlanId.LeeEnvelopment, cat.Select(ctx).Id, "personality outweighs terrain when both are extreme");
+    }
+
+    private static void TacticalPlaybookCatalogOpposingHintChangesRanking()
+    {
+        var cat = new TacticalPlaybookCatalog();
+        cat.Register(new FakePlaybook(BattlePlanId.GenericAggressive,
+            new PersonalityFit(0f, 0f, 0f),
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0.5f, 2f)));
+        cat.Register(new FakePlaybook(BattlePlanId.GenericCautious,
+            new PersonalityFit(0f, 0f, 0f),
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0.5f, 2f)));
+
+        var attackResponseHint = new PlaybookContext(default, TerrainKind.Open, 1f, opposingCommanderHint: 0.6f, 0, 1);
+        var defenseResponseHint = new PlaybookContext(default, TerrainKind.Open, 1f, opposingCommanderHint: 0.2f, 0, 1);
+
+        AssertEqual(BattlePlanId.GenericAggressive, cat.Select(attackResponseHint).Id, "high opposing hint favors attack-response playbook");
+        AssertEqual(BattlePlanId.GenericCautious, cat.Select(defenseResponseHint).Id, "low opposing hint favors defense-response playbook");
     }
 
     private static void TacticalPlaybookCatalogJitterDeterministicForSameSeed()
@@ -11153,6 +11276,528 @@ static class Program
 
     // ---- Army orchestrator tests (O1.7) ----
 
+    private static void TacticalIntentModelRecordsAllFields()
+    {
+        var evidence = new[] { EvidenceTag.SectorConcentration, EvidenceTag.ReserveUncommitted };
+        var model = new TacticalIntentModel(
+            primaryIntent: InferredIntent.Attack,
+            inferredMainEffort: 3,
+            confidence01: 0.62f,
+            ageSeconds: 12.5f,
+            supportingEvidence: evidence);
+
+        AssertEqual(InferredIntent.Attack, model.PrimaryIntent, "primary intent");
+        AssertEqual(3, model.InferredMainEffort, "inferred main effort");
+        AssertNear(0.62f, model.Confidence01, 1e-5f, "confidence");
+        AssertNear(12.5f, model.AgeSeconds, 1e-5f, "age");
+        AssertEqual(2, model.SupportingEvidence.Length, "supporting evidence length");
+        AssertEqual(EvidenceTag.SectorConcentration, model.SupportingEvidence[0], "evidence 0");
+        AssertEqual(EvidenceTag.ReserveUncommitted, model.SupportingEvidence[1], "evidence 1");
+
+        evidence[0] = EvidenceTag.Unknown;
+        AssertEqual(EvidenceTag.SectorConcentration, model.SupportingEvidence[0], "evidence snapshot owns copy");
+    }
+
+    private static void TacticalIntentModelClampsConfidenceAndAge()
+    {
+        var clampedHigh = new TacticalIntentModel(
+            InferredIntent.Defend,
+            inferredMainEffort: 0,
+            confidence01: 1.5f,
+            ageSeconds: -3f,
+            supportingEvidence: null);
+
+        AssertNear(1.0f, clampedHigh.Confidence01, 1e-5f, "high confidence clamps to 1");
+        AssertNear(0f, clampedHigh.AgeSeconds, 1e-5f, "negative age clamps to 0");
+        AssertEqual(0, clampedHigh.SupportingEvidence.Length, "null evidence becomes empty");
+
+        var clampedLow = new TacticalIntentModel(
+            InferredIntent.Defend,
+            inferredMainEffort: 0,
+            confidence01: -0.2f,
+            ageSeconds: float.NaN,
+            supportingEvidence: null);
+
+        AssertNear(0f, clampedLow.Confidence01, 1e-5f, "low confidence clamps to 0");
+        AssertNear(0f, clampedLow.AgeSeconds, 1e-5f, "NaN age becomes 0");
+
+        var confidenceNaN = new TacticalIntentModel(InferredIntent.Defend, 0, float.NaN, 0f, null);
+        var confidencePositiveInfinity = new TacticalIntentModel(InferredIntent.Defend, 0, float.PositiveInfinity, 0f, null);
+        var confidenceNegativeInfinity = new TacticalIntentModel(InferredIntent.Defend, 0, float.NegativeInfinity, 0f, null);
+        var agePositiveInfinity = new TacticalIntentModel(InferredIntent.Defend, 0, 0.5f, float.PositiveInfinity, null);
+        var ageNegativeInfinity = new TacticalIntentModel(InferredIntent.Defend, 0, 0.5f, float.NegativeInfinity, null);
+
+        AssertNear(0f, confidenceNaN.Confidence01, 1e-5f, "NaN confidence becomes 0");
+        AssertNear(0f, confidencePositiveInfinity.Confidence01, 1e-5f, "positive infinity confidence becomes 0");
+        AssertNear(0f, confidenceNegativeInfinity.Confidence01, 1e-5f, "negative infinity confidence becomes 0");
+        AssertNear(0f, agePositiveInfinity.AgeSeconds, 1e-5f, "positive infinity age becomes 0");
+        AssertNear(0f, ageNegativeInfinity.AgeSeconds, 1e-5f, "negative infinity age becomes 0");
+    }
+
+    private static void TacticalIntentModelUnknownPrimaryIntentSentinel()
+    {
+        var unknown = new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null);
+
+        AssertEqual(InferredIntent.Unknown, unknown.PrimaryIntent, "unknown primary intent");
+        AssertEqual(-1, unknown.InferredMainEffort, "unknown main effort sentinel");
+        AssertNear(0f, unknown.Confidence01, 1e-5f, "unknown confidence");
+    }
+
+    private static void DirectChildIntentSanitizesNonfiniteFloats()
+    {
+        var intent = new DirectChildIntent(
+            childId: "c1",
+            rawUnitTyp: 15,
+            effectiveCommandLevel: 16,
+            displayName: "1st Corps",
+            primarySector: 2,
+            role: DirectChildRole.Main,
+            axis: DirectChildAxis.SectorAxis,
+            axisSector: 2,
+            supportPriority01: float.NaN,
+            aggressionBias01: float.PositiveInfinity,
+            enemyIntent: new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
+        AssertEqual(0f, intent.SupportPriority01, "NaN sanitized to 0");
+        AssertEqual(0.5f, intent.AggressionBias01, "Inf sanitized to 0.5");
+    }
+
+    private static void DirectChildIntentClampsSupportAndAggression()
+    {
+        var intent = new DirectChildIntent(
+            "c1", 15, 16, "1st", 0, DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 0,
+            supportPriority01: 1.5f,
+            aggressionBias01: -0.2f,
+            enemyIntent: new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
+        AssertEqual(1f, intent.SupportPriority01);
+        AssertEqual(0f, intent.AggressionBias01);
+    }
+
+    private static void DirectChildEvidenceBucketsAreNonNegative()
+    {
+        var ev = new DirectChildEvidence(
+            ownStrengthBucket: -3,
+            enemyStrengthBucket: -1,
+            contactFlag: false,
+            primarySector: 0,
+            flankExposureBucket: -2,
+            confidence01: float.NaN);
+        AssertEqual(0, ev.OwnStrengthBucket);
+        AssertEqual(0, ev.EnemyStrengthBucket);
+        AssertEqual(0, ev.FlankExposureBucket);
+        AssertEqual(0f, ev.Confidence01);
+    }
+
+    private static void DirectChildEvidenceEqualsSameBuckets()
+    {
+        var a = new DirectChildEvidence(2, 1, true, 3, 1, 0.7f);
+        var b = new DirectChildEvidence(2, 1, true, 3, 1, 0.7f);
+        AssertTrue(a.SignatureEquals(b), "signature equals when buckets+flag+sector match");
+        var c = new DirectChildEvidence(2, 1, false, 3, 1, 0.7f); // contact flag flipped
+        AssertTrue(!a.SignatureEquals(c), "signature differs when contact flag changes");
+    }
+
+    private static void DirectChildSnapshotStoresRawAndEffectiveUnittyp()
+    {
+        var snap = new DirectChildSnapshot(
+            childId: "child-99",
+            parentArmyId: "army-1",
+            rawUnitTyp: 15,
+            commandHierarchyShift: -1,
+            displayName: "Jackson's Corps",
+            active: true);
+        AssertEqual(15, snap.RawUnitTyp);
+        AssertEqual(16, snap.EffectiveCommandLevel); // 15 - (-1) = 16 = unshifted Army
+        AssertEqual("child-99", snap.ChildId);
+        AssertEqual("army-1", snap.ParentArmyId);
+        AssertTrue(snap.Active, "active flag preserved");
+    }
+
+    private static void DirectChildAllocatorAssignsMainOnMainEffortSectorWithStrength()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 2, fixingSectors: new[] { 0 }, screeningSectors: new[] { 4 },
+            reserveCommitTriggerOdds: 1.2f, ageSeconds: 0f, jitterSeed: 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First Corps", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second Corps", true),
+            new DirectChildSnapshot("c2", "a", 15, 0, "Third Corps", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(1, 1, false, 0, 0, 0.5f),
+            new DirectChildEvidence(3, 1, true,  2, 0, 0.7f),
+            new DirectChildEvidence(1, 1, false, 4, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(3, intents.Count);
+        AssertEqual(DirectChildRole.Main, intents[1].Role, "main on sector 2");
+        AssertEqual(2, intents[1].PrimarySector);
+        AssertEqual(DirectChildAxis.SectorAxis, intents[1].Axis);
+        AssertEqual(2, intents[1].AxisSector);
+    }
+
+    private static void DirectChildAllocatorAssignsSupportMainToAdjacentStrongChild()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new[] { 0 }, new int[0], 1.2f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
+            new DirectChildSnapshot("c2", "a", 15, 0, "Third", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 1, false, 1, 0, 0.5f),
+            new DirectChildEvidence(3, 1, true,  2, 0, 0.7f),
+            new DirectChildEvidence(2, 1, false, 3, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.SupportMain, intents[0].Role);
+        AssertEqual(DirectChildRole.Main, intents[1].Role);
+        AssertEqual(DirectChildRole.SupportMain, intents[2].Role);
+    }
+
+    private static void DirectChildAllocatorAssignsFixOnFixingSectorWithContact()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new[] { 0 }, new[] { 4 }, 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pinning", true) };
+        var evidence = new[] { new DirectChildEvidence(2, 2, true, 0, 0, 0.6f) };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Fix, intents[0].Role);
+    }
+
+    private static void DirectChildAllocatorAssignsReserveToUncommittedStrongChild()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "Main", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Reserve", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(3, 2, true, 2, 0, 0.7f),
+            new DirectChildEvidence(3, 0, false, 5, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Main, intents[0].Role);
+        AssertEqual(DirectChildRole.Reserve, intents[1].Role);
+    }
+
+    private static void DirectChildAllocatorAssignsFallbackOnAdverseOddsAndAttack()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
+        var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 0, 0.8f, 0f, Array.Empty<EvidenceTag>());
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.AllocateWithChildIntent(
+            plan, personality, snapshots,
+            new[] { new DirectChildEvidence(1, 3, true, 0, 0, 0.7f) },
+            new[] { enemyAttack });
+        AssertEqual(DirectChildRole.Fallback, intents[0].Role);
+    }
+
+    private static void DirectChildAllocatorAllocatesRefuseToFlankWithExposure()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "Left", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Right", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 2, false, 0, 3, 0.5f),
+            new DirectChildEvidence(2, 2, false, 4, 3, 0.5f),
+        };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.RefuseLeft, intents[0].Role);
+        AssertEqual(DirectChildRole.RefuseRight, intents[1].Role);
+    }
+
+    private static void DirectChildAllocatorDeterministicOnRegistrationOrderTie()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("z-late", "a", 15, 0, "Z", true),
+            new DirectChildSnapshot("a-early", "a", 15, 0, "A", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 1, true, 2, 0, 0.5f),
+            new DirectChildEvidence(2, 1, true, 2, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Main, intents[0].Role, "first registered wins ties");
+        AssertTrue(intents[1].Role != DirectChildRole.Main, "second registered did not also become Main");
+    }
+
+    private static void DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            99, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Lonely", true) };
+        var evidence = new[] { new DirectChildEvidence(1, 1, false, 0, 0, 0.3f) };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Unknown, intents[0].Role);
+    }
+
+    private static void DirectChildAllocatorAssignsScreenOnScreeningSectorWithLowStrengths()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new[] { 4 }, 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Screening", true) };
+        var evidence = new[] { new DirectChildEvidence(1, 1, false, 4, 0, 0.3f) };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Screen, intents[0].Role);
+        AssertEqual(DirectChildAxis.Hold, intents[0].Axis);
+    }
+
+    private static void DirectChildAllocatorHandlesMismatchedPerChildIntentLength()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        // perChildEnemyIntent length 0 != snapshots length 1; allocator must rebuild internally.
+        var intents = DirectChildAllocator.AllocateWithChildIntent(
+            plan, personality, snapshots,
+            new[] { new DirectChildEvidence(1, 3, true, 0, 0, 0.7f) },
+            Array.Empty<TacticalIntentModel>());
+        // With Unknown enemy intent, Fallback rule (which needs Attack intent) cannot fire.
+        // Adverse-odds child with no other rule match should land Unknown.
+        AssertEqual(1, intents.Count);
+        AssertEqual(DirectChildRole.Unknown, intents[0].Role);
+        AssertEqual(InferredIntent.Unknown, intents[0].EnemyIntent.PrimaryIntent);
+    }
+
+    private static void EnemyVisibleStateRecordsSectorAndContactFields()
+    {
+        var sectors = new[]
+        {
+            new EnemyVisibleSector(sectorId: 0, ownStrength: 5000f, enemyStrength: 7500f, recentFire: true),
+            new EnemyVisibleSector(sectorId: 1, ownStrength: 3000f, enemyStrength: 1500f, recentFire: false)
+        };
+        var state = new EnemyVisibleState(
+            sectors,
+            enemyReserveCommitFraction: 0.4f,
+            anyContactSpotted: true,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 2000f);
+
+        AssertEqual(2, state.Sectors.Length, "sector count");
+        AssertEqual(0, state.Sectors[0].SectorId, "sector 0 id");
+        AssertNear(7500f, state.Sectors[0].EnemyStrength, 1e-5f, "sector 0 enemy strength");
+        AssertTrue(state.Sectors[0].RecentFire, "sector 0 recent fire");
+        AssertNear(0.4f, state.EnemyReserveCommitFraction, 1e-5f, "enemy reserve commit fraction");
+        AssertTrue(state.AnyContactSpotted, "any contact spotted");
+        AssertFalse(state.AnyContactBroken, "any contact broken");
+        AssertNear(2000f, state.EnemyReinforcementStrength24h, 1e-5f, "enemy reinforcement strength 24h");
+    }
+
+    private static void EnemyVisibleStateClampsAndCoercesNullSectors()
+    {
+        var state = new EnemyVisibleState(
+            sectors: null,
+            enemyReserveCommitFraction: 1.5f,
+            anyContactSpotted: false,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: float.NaN);
+
+        AssertEqual(0, state.Sectors.Length, "null sectors become empty");
+        AssertNear(1.0f, state.EnemyReserveCommitFraction, 1e-5f, "reserve fraction clamps to 1");
+        AssertNear(0f, state.EnemyReinforcementStrength24h, 1e-5f, "NaN reinforcement strength becomes 0");
+    }
+
+    private static void ArmyIntentInferenceUnknownWhenNoVisibleSectors()
+    {
+        var ownEvidence = new ArmyEvidence(currentOdds: 1.0f, terrain: TerrainKind.Open, defaultMainEffortSector: 0);
+        var enemy = new EnemyVisibleState(System.Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Unknown, model.PrimaryIntent, "no sectors infers Unknown");
+        AssertNear(0f, model.Confidence01, 1e-5f, "no sectors confidence");
+        AssertEqual(0, model.SupportingEvidence.Length, "no sectors has no evidence");
+    }
+
+    private static void ArmyIntentInferenceConcentrationInOneSectorImpliesAttack()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0, 5000f, 8500f, false),
+                new EnemyVisibleSector(1, 5000f, 1200f, false),
+                new EnemyVisibleSector(2, 5000f, 1300f, false)
+            },
+            0.7f,
+            true,
+            false,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Attack, model.PrimaryIntent, "concentration + committed reserve infers Attack");
+        AssertEqual(0, model.InferredMainEffort, "sector 0 is max enemy strength");
+        AssertTrue(model.Confidence01 >= 0.5f, "attack confidence >= 0.5");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.SectorConcentration) >= 0, "attack evidence includes concentration");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReserveCommitted) >= 0, "attack evidence includes reserve committed");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ContactSpotted) >= 0, "attack evidence includes contact spotted");
+    }
+
+    private static void ArmyIntentInferenceSingleSectorStrongContactStaysFinite()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 5000f, 7000f, false) },
+            0.7f,
+            true,
+            false,
+            1500f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Attack, model.PrimaryIntent, "single sector strong contact infers Attack");
+        AssertEqual(0, model.InferredMainEffort, "single sector is main effort");
+        AssertTrue(model.Confidence01 >= ArmyIntentInference.ConfidenceFloor, "single sector confidence reaches floor");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReserveCommitted) >= 0, "single sector evidence includes reserve committed");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ContactSpotted) >= 0, "single sector evidence includes contact spotted");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReinforcementsArriving) >= 0, "single sector evidence includes reinforcements");
+    }
+
+    private static void ArmyIntentInferenceUnconcentratedReservesUncommittedImpliesProbe()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0, 5000f, 2000f, false),
+                new EnemyVisibleSector(1, 5000f, 2200f, false),
+                new EnemyVisibleSector(2, 5000f, 2100f, false)
+            },
+            0.1f,
+            true,
+            false,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Probe, model.PrimaryIntent, "unconcentrated + uncommitted reserve infers Probe");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReserveUncommitted) >= 0, "probe evidence includes reserve uncommitted");
+    }
+
+    private static void ArmyIntentInferenceContactBrokenImpliesWithdraw()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 5000f, 1000f, false) },
+            0f,
+            false,
+            true,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Withdraw, model.PrimaryIntent, "broken contact with low visible enemy infers Withdraw");
+        AssertTrue(model.Confidence01 >= ArmyIntentInference.ConfidenceFloor, "hard withdraw signal reaches confidence floor");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ContactBroken) >= 0, "withdraw evidence includes contact broken");
+    }
+
+    private static void ArmyIntentInferenceReceivingFireImpliesDefend()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0, 4000f, 6000f, true),
+                new EnemyVisibleSector(1, 4000f, 6500f, true)
+            },
+            0.6f,
+            true,
+            false,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertEqual(InferredIntent.Defend, model.PrimaryIntent, "recent fire in multiple sectors with committed reserve infers Defend");
+        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReceivingFire) >= 0, "defend evidence includes receiving fire");
+    }
+
+    private static void ArmyIntentInferenceConfidenceFloorBelowThreshold()
+    {
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 5000f, 100f, false) },
+            0f,
+            false,
+            false,
+            0f);
+
+        var model = ArmyIntentInference.Build(ownEvidence, enemy);
+
+        AssertTrue(model.Confidence01 < 0.3f, "low signal confidence remains below floor");
+        AssertEqual(InferredIntent.Unknown, model.PrimaryIntent, "below confidence floor infers Unknown");
+    }
+
+    private static void ArmyIntentInferenceForFrontageFiltersBySector()
+    {
+        var enemy = new EnemyVisibleState(
+            sectors: new[]
+            {
+                new EnemyVisibleSector(0, 1000f,  500f, false),
+                new EnemyVisibleSector(2, 2000f, 4000f, true),  // child sector — strong enemy + recent fire
+                new EnemyVisibleSector(4, 1000f,  500f, false),
+            },
+            enemyReserveCommitFraction: 0.5f,
+            anyContactSpotted: true,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
+
+        var intent = ArmyIntentInference.BuildForFrontage(primarySector: 2, enemy, ownStrengthBucket: 1);
+        AssertTrue(intent.PrimaryIntent != InferredIntent.Unknown,
+            "frontage-filtered single-sector enemy should yield non-Unknown when fire and reserve evidence present");
+        AssertEqual(2, intent.InferredMainEffort);
+    }
+
+    private static void ArmyIntentInferenceForFrontageEmptyMaskReturnsUnknown()
+    {
+        var enemy = new EnemyVisibleState(
+            sectors: new[] { new EnemyVisibleSector(0, 100f, 100f, false) },
+            enemyReserveCommitFraction: 0f,
+            anyContactSpotted: false,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
+        var intent = ArmyIntentInference.BuildForFrontage(primarySector: 99, enemy, ownStrengthBucket: 0);
+        AssertEqual(InferredIntent.Unknown, intent.PrimaryIntent);
+    }
+
     private static void ArmyOrchestratorNewHasNoPlanUntilPicked()
     {
         var orch = new ArmyOrchestrator(allianceId: 0, catalog: SeedCatalog.AllHistoricalAndGeneric(), commanderPersonality: default);
@@ -11198,6 +11843,212 @@ static class Program
         AssertEqual(BattlePhase.Probe, intent.Phase, "intent phase matches");
         AssertEqual(2, intent.MainEffortSector, "intent main effort matches plan");
         AssertTrue(intent.AggressionBias01 > 0.5f, "intent aggression bias positive for aggressive CO");
+    }
+
+    private static void ArmyOrchestratorRecordsHistoryOnInitialPlan()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+
+        AssertNear(1.4f, orch.HistoryGlobalOdds, 1e-5f, "initial plan records global odds history");
+        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "initial plan resets plan age");
+    }
+
+    private static void ArmyOrchestratorTickAdvancesAgeWithoutReplanning()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+
+        orch.AdvancePlanAge(15f);
+        orch.AdvancePlanAge(20f);
+
+        AssertNear(35f, orch.PlanAgeSeconds, 1e-5f, "positive ticks accumulate plan age");
+    }
+
+    private static void ArmyOrchestratorReplanWithIntentResetsAgeAndUpdatesHistory()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+        orch.AdvancePlanAge(60f);
+        var enemyIntent = new TacticalIntentModel(InferredIntent.Defend, 1, 0.7f, 0f, null);
+
+        orch.Replan(new ArmyEvidence(0.8f, TerrainKind.Open, 1), enemyIntent);
+
+        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "replan resets plan age");
+        AssertNear(0.8f, orch.HistoryGlobalOdds, 1e-5f, "replan updates global odds history");
+        AssertEqual(InferredIntent.Defend, orch.CurrentIntentModel.PrimaryIntent, "current intent model stores last consumed intent");
+    }
+
+    private static void ArmyOrchestratorReplanWithoutIntentLeavesIntentUnknown()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+
+        orch.Replan(new ArmyEvidence(1.0f, TerrainKind.Wooded, 0));
+
+        AssertEqual(InferredIntent.Unknown, orch.CurrentIntentModel.PrimaryIntent, "legacy replan uses unknown intent");
+    }
+
+    private static void ArmyOrchestratorFailedReplanPreservesActiveState()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var catalog = SeedCatalog.AllHistoricalAndGeneric();
+        var orch = new ArmyOrchestrator(0, catalog, lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
+        orch.AdvancePlanAge(45f);
+        var oldPlanId = orch.CurrentPlan.PlanId;
+
+        var field = typeof(TacticalPlaybookCatalog).GetField("_playbooks", BindingFlags.NonPublic | BindingFlags.Instance);
+        var list = (List<TacticalPlaybook>)field.GetValue(catalog);
+        list.Clear();
+
+        orch.Replan(
+            new ArmyEvidence(0.7f, TerrainKind.Open, 2),
+            new TacticalIntentModel(InferredIntent.Attack, 2, 0.9f, 0f, null));
+
+        AssertTrue(orch.HasPlan, "failed replan preserves active plan flag");
+        AssertEqual(oldPlanId, orch.CurrentPlan.PlanId, "failed replan preserves active plan");
+        AssertNear(45f, orch.PlanAgeSeconds, 1e-5f, "failed replan preserves age");
+        AssertNear(1.4f, orch.HistoryGlobalOdds, 1e-5f, "failed replan preserves history odds");
+        AssertEqual(InferredIntent.Unknown, orch.CurrentIntentModel.PrimaryIntent, "failed replan preserves previous intent");
+    }
+
+    private static void ArmyOrchestratorRegisterDirectChildrenStoresSnapshots()
+    {
+        var orch = NewArmyOrchestratorWithPlan();
+        orch.RegisterDirectChildren(new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
+        });
+        AssertEqual(2, orch.CurrentDirectChildIntents.Count);
+        AssertEqual("c0", orch.CurrentDirectChildIntents[0].ChildId);
+        AssertEqual(DirectChildRole.Unknown, orch.CurrentDirectChildIntents[0].Role); // no evidence yet
+    }
+
+    private static void ArmyOrchestratorObserveEvidenceAllocatesRoles()
+    {
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
+        });
+        orch.ObserveDirectChildEvidence(new[]
+        {
+            new DirectChildEvidence(1, 1, false, 0, 0, 0.3f),
+            new DirectChildEvidence(3, 1, true,  2, 0, 0.7f),
+        });
+        AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("c1"));
+    }
+
+    private static void ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature()
+    {
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        var firstRole = orch.GetDirectChildRole("c0");
+        var firstIntents = orch.CurrentDirectChildIntents;
+        // re-observe identical evidence — orchestrator should NOT recompute
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        AssertEqual(firstRole, orch.GetDirectChildRole("c0"));
+        AssertTrue(object.ReferenceEquals(firstIntents, orch.CurrentDirectChildIntents),
+            "signature-equal evidence must reuse the cached intent list (no allocation)");
+    }
+
+    private static void ArmyOrchestratorEmitArmyIntentIncludesDirectChildren()
+    {
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        var intent = orch.EmitArmyIntent();
+        AssertEqual(1, intent.DirectChildIntents.Count);
+        AssertEqual(DirectChildRole.Main, intent.DirectChildIntents[0].Role);
+    }
+
+    private static void ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered()
+    {
+        var orch = NewArmyOrchestratorWithPlan();
+        AssertEqual(DirectChildRole.Unknown, orch.GetDirectChildRole("never-registered"));
+    }
+
+    private static void ArmyOrchestratorReturnsRoleForSynthArmyChildId()
+    {
+        // When DirectChildDiscovery synthesizes an army-root snapshot (zero qualifying
+        // direct children), its ChildId is "synth-army-{instanceId}". The orchestrator
+        // must return the assigned role for that exact id so #42's fallback lookup engages.
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[]
+        {
+            new DirectChildSnapshot("synth-army-12345", "army-12345", 16, 0, "ArmyA", true),
+        });
+        orch.ObserveDirectChildEvidence(new[]
+        {
+            new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
+        });
+        AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("synth-army-12345"));
+        AssertEqual(DirectChildRole.Unknown, orch.GetDirectChildRole("child-12345"),
+            "orchestrator must distinguish synth-army-{id} from child-{id} by exact match");
+    }
+
+    private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()
+    {
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        var firstIntents = orch.CurrentDirectChildIntents;
+
+        // Force a replan (returns void; succeeds when TryPickPlan returns true).
+        // The empty-catalog helper used by NewArmyOrchestratorWithPlan would otherwise
+        // make TryPickPlan fail, so we register a single placeholder playbook by re-using
+        // SetPlanForTesting before calling Replan with the new sector.
+        orch.SetPlanForTesting(new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 5,  // different sector than before
+            Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0f, 0));
+
+        // Simulate post-replan: signature-equal evidence should now allocate against the new plan,
+        // because _hasObservedEvidence was reset (replan path) — but here we use SetPlanForTesting,
+        // which does not reset _hasObservedEvidence. So instead, drive the same invariant via the
+        // RegisterDirectChildren path which DOES clear _hasObservedEvidence. Then verify that
+        // re-observing with the same signature now picks up the new sector layout.
+        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        AssertTrue(!object.ReferenceEquals(firstIntents, orch.CurrentDirectChildIntents),
+            "after re-registration, the cached intent list must be replaced");
+
+        // Now exercise Replan invalidation directly. We need a non-empty catalog so TryPickPlan succeeds.
+        // The simplest path: spin up a fresh orchestrator with a real seeded catalog.
+        var orch2 = new ArmyOrchestrator(allianceId: 0, BuiltInPlaybooks.SeedCatalog(),
+            new PersonalityVector(0.2f, 0f, 0f, 0f, 0f));
+        orch2.PickInitialPlan(new ArmyEvidence(currentOdds: 1.2f, terrain: TerrainKind.Open, defaultMainEffortSector: 2));
+        orch2.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch2.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        var preReplanIntents = orch2.CurrentDirectChildIntents;
+
+        orch2.Replan(new ArmyEvidence(currentOdds: 0.8f, terrain: TerrainKind.Open, defaultMainEffortSector: 5));
+        // Re-observing with identical evidence should now reallocate (cache invalidated by Replan).
+        orch2.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        AssertTrue(!object.ReferenceEquals(preReplanIntents, orch2.CurrentDirectChildIntents),
+            "Replan must invalidate the cache so the next signature-equal observe reallocates");
+    }
+
+    // Helper used by the five tests above. Note the 8-arg TacticalBattlePlan ctor (the
+    // last arg is jitterSeed) and 5-arg PersonalityVector ctor (the last arg is pol).
+    private static ArmyOrchestrator NewArmyOrchestratorWithPlan(int mainSector = 2)
+    {
+        var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
+        var catalog = new TacticalPlaybookCatalog();
+        var orch = new ArmyOrchestrator(allianceId: 0, catalog, personality);
+        orch.SetPlanForTesting(new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            mainSector, Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0f, 0));
+        return orch;
     }
 
     private static void ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget()
@@ -11260,5 +12111,552 @@ static class Program
     {
         var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, 0f, 0f);
         AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(input), "no trigger fires when conditions normal");
+    }
+
+    private static void ArmyTickCycleNoTriggerWhenAllConditionsNormal()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.None, trigger, "normal conditions do not replan");
+        AssertNear(5f, orch.PlanAgeSeconds, 1e-5f, "tick advances plan age");
+    }
+
+    private static void ArmyTickCyclePhaseDeadlineFires()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+        orch.AdvancePlanAge(190f);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.PhaseDeadline, trigger, "age beyond budget replans on phase deadline");
+        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "replan resets plan age");
+    }
+
+    private static void ArmyTickCycleRateLimitsReplanWithinMinReplanSeconds()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+        orch.AdvancePlanAge(200f);
+
+        var first = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+        orch.AdvancePlanAge(200f);
+        var second = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.PhaseDeadline, first, "first over-budget tick replans");
+        AssertEqual(ReplanTrigger.None, second, "second over-budget tick is rate-limited");
+    }
+
+    private static void ArmyTickCycleRateLimitIsPerAllianceClock()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var union = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var csa = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        union.PickInitialPlan(ownEvidence);
+        csa.PickInitialPlan(ownEvidence);
+        union.AdvancePlanAge(200f);
+        csa.AdvancePlanAge(200f);
+
+        var unionFirst = ArmyTickCycle.MaybeReplan(union, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+        var csaFirst = ArmyTickCycle.MaybeReplan(csa, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+        union.AdvancePlanAge(200f);
+        var unionSecond = ArmyTickCycle.MaybeReplan(union, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+
+        AssertEqual(ReplanTrigger.PhaseDeadline, unionFirst, "union first over-budget tick replans");
+        AssertEqual(ReplanTrigger.PhaseDeadline, csaFirst, "csa first over-budget tick replans");
+        AssertEqual(ReplanTrigger.None, unionSecond, "csa tick does not advance union rate-limit clock");
+    }
+
+    private static void ArmyTickCycleResetClearsBattleLifetimeRateLimit()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var firstBattle = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        firstBattle.PickInitialPlan(ownEvidence);
+        firstBattle.AdvancePlanAge(200f);
+        var first = ArmyTickCycle.MaybeReplan(firstBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+
+        ArmyTickCycle.Reset();
+
+        var secondBattle = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        secondBattle.PickInitialPlan(ownEvidence);
+        secondBattle.AdvancePlanAge(200f);
+        var second = ArmyTickCycle.MaybeReplan(secondBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
+
+        AssertEqual(ReplanTrigger.PhaseDeadline, first, "first battle over-budget tick replans");
+        AssertEqual(ReplanTrigger.PhaseDeadline, second, "reset clears rate-limit state for next battle");
+    }
+
+    private static void ArmyTickCycleUpdatesObservedIntentWithoutReplan()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.None, trigger, "normal tick does not replan");
+        AssertEqual(InferredIntent.Probe, orch.CurrentIntentModel.PrimaryIntent, "normal tick still stores observed intent");
+    }
+
+    private static void ArmyTickCycleEnemyIntentShiftFiresWhenConfidentEnemyAttacks()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(ownEvidence);
+        orch.AdvancePlanAge(70f);
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0, 5000f, 9000f, true),
+                new EnemyVisibleSector(1, 5000f, 1500f, false),
+                new EnemyVisibleSector(2, 5000f, 1500f, false)
+            },
+            enemyReserveCommitFraction: 0.8f,
+            anyContactSpotted: true,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            ownEvidence,
+            enemy,
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.EnemyIntentShift, trigger, "confident enemy attack signal replans");
+    }
+
+    private static void ArmyTickCycleNoReplanIfOrchestratorHasNoPlan()
+    {
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+
+        var trigger = ArmyTickCycle.MaybeReplan(
+            orch,
+            deltaSeconds: 5f,
+            new ArmyEvidence(1.0f, TerrainKind.Open, 0),
+            NormalEnemyVisibleState(),
+            ownMainEffortStrength: 5000f,
+            ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(ReplanTrigger.None, trigger, "no active plan cannot replan");
+    }
+
+    private static EnemyVisibleState NormalEnemyVisibleState()
+    {
+        return new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 5000f, 5000f, false) },
+            enemyReserveCommitFraction: 0.5f,
+            anyContactSpotted: true,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
+    }
+
+    private static void DirectChildDiscoveryProbeHandlesEmptyUnitsused()
+    {
+        var snaps = DirectChildDiscovery.Probe(Array.Empty<DirectChildDiscovery.RegimentProbe>(), commandHierarchyShift: 0);
+        AssertEqual(0, snaps.Count);
+    }
+
+    private static void DirectChildDiscoveryProbeFiltersBelowEffectiveCommandMin()
+    {
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(instanceId: 100, unittyp: 13, name: "Skirmisher", active: true, parentInstanceId: 0, isDirectChild: false),
+            new DirectChildDiscovery.RegimentProbe(instanceId: 200, unittyp: 16, name: "Army A", active: true, parentInstanceId: 0, isDirectChild: false),
+            new DirectChildDiscovery.RegimentProbe(instanceId: 300, unittyp: 15, name: "Corps A", active: true, parentInstanceId: 200, isDirectChild: true),
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: 0);
+        AssertEqual(1, snaps.Count);
+        AssertEqual("child-300", snaps[0].ChildId);
+        AssertEqual("army-200", snaps[0].ParentArmyId);
+    }
+
+    private static void DirectChildDiscoveryProbeSelectsHighestUnittypAsArmyRoot()
+    {
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(100, 16, "Army", true, 0, false),
+            new DirectChildDiscovery.RegimentProbe(200, 15, "Corps Direct", true, 100, true),
+            new DirectChildDiscovery.RegimentProbe(300, 15, "Corps Independent", true, 999 /* not under army */, false),
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: 0);
+        AssertEqual(1, snaps.Count);
+        AssertEqual("child-200", snaps[0].ChildId);
+    }
+
+    private static void DirectChildDiscoveryProbeHandlesNegativeCommandHierarchyShift()
+    {
+        // shift = -1: army root unittyp == 15 (vanilla "division" label), child unittyp == 14
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(100, 15, "Early-war Army", true, 0, false),
+            new DirectChildDiscovery.RegimentProbe(200, 14, "Early-war Corps", true, 100, true),
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: -1);
+        AssertEqual(1, snaps.Count);
+        AssertEqual(14, snaps[0].RawUnitTyp);
+        AssertEqual(15, snaps[0].EffectiveCommandLevel); // 14 - (-1) = 15 = unshifted-Corps
+    }
+
+    private static void DirectChildDiscoveryProbeSynthesizesWhenZeroDirectChildren()
+    {
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(100, 16, "Lonely Army", true, 0, false),
+            // no children attached
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: 0);
+        AssertEqual(1, snaps.Count);
+        AssertEqual("synth-army-100", snaps[0].ChildId);
+        AssertEqual("army-100", snaps[0].ParentArmyId);
+        AssertEqual(16, snaps[0].RawUnitTyp);
+    }
+
+    private static void DirectChildDiscoveryProbeIteratesEachArmyRootForMultiArmySide()
+    {
+        var probes = new[]
+        {
+            new DirectChildDiscovery.RegimentProbe(100, 16, "ArmyA", true, 0, false),
+            new DirectChildDiscovery.RegimentProbe(200, 16, "ArmyB", true, 0, false),
+            new DirectChildDiscovery.RegimentProbe(300, 15, "Corps under A", true, 100, true),
+            new DirectChildDiscovery.RegimentProbe(400, 15, "Corps under B", true, 200, true),
+        };
+        var snaps = DirectChildDiscovery.Probe(probes, commandHierarchyShift: 0);
+        AssertEqual(2, snaps.Count);
+        AssertEqual("army-100", snaps[0].ParentArmyId);
+        AssertEqual("army-200", snaps[1].ParentArmyId);
+    }
+
+    private static void DirectChildEvidenceBuilderBucketsStrengthUsing05Ratio()
+    {
+        // NOTE: plan's verbatim test asserted OwnStrengthBucket=1 with comment "ratio 0.6 → bucket 1",
+        // but the verbatim bucket spec (and self-review checklist) state 1500 ≤ s < 3000 → 2.
+        // Spec/checklist take precedence over the test author's stale ratio-bucket comment;
+        // expectations adjusted to match the canonical strength-bucket scheme.
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0,  100f,  100f, false),
+                new EnemyVisibleSector(1, 1500f, 2500f, false), // own 1500 → bucket 2, enemy 2500 → bucket 2
+            },
+            enemyReserveCommitFraction: 0.4f,
+            anyContactSpotted: false,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
+
+        var evidence = DirectChildEvidenceBuilder.BuildAll(
+            snapshots: new[]
+            {
+                new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            },
+            primarySectorPerSnapshot: new[] { 1 },
+            flankExposureBucketPerSnapshot: new[] { 0 },
+            enemy);
+
+        AssertEqual(1, evidence.Count);
+        AssertEqual(1, evidence[0].PrimarySector);
+        AssertEqual(2, evidence[0].OwnStrengthBucket);
+        AssertEqual(2, evidence[0].EnemyStrengthBucket);
+    }
+
+    private static void DirectChildEvidenceBuilderPropagatesContactFlag()
+    {
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(2, 500f, 500f, recentFire: true) },
+            0.3f, true, false, 0f);
+        var evidence = DirectChildEvidenceBuilder.BuildAll(
+            new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) },
+            new[] { 2 },
+            new[] { 0 },
+            enemy);
+        AssertTrue(evidence[0].ContactFlag, "recent fire propagates as ContactFlag");
+    }
+
+    private static void DirectChildEvidenceBuilderZeroOwnWhenSectorMissing()
+    {
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 1000f, 0f, false) },
+            0f, false, false, 0f);
+        var evidence = DirectChildEvidenceBuilder.BuildAll(
+            new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) },
+            new[] { 99 /* sector not present in EnemyVisibleState */ },
+            new[] { 0 },
+            enemy);
+        AssertEqual(0, evidence[0].OwnStrengthBucket);
+        AssertEqual(0, evidence[0].EnemyStrengthBucket);
+        AssertTrue(!evidence[0].ContactFlag, "missing sector → no contact");
+    }
+
+    private static void DirectChildGateDisabledAllowsAll()
+    {
+        var input = new TacticalDirectChildGate.Input(
+            gateEnabled: false, sideIsAi: true,
+            role: DirectChildRole.Reserve, axisSector: 2, primarySector: 2,
+            intendedTargetBearingFromGroupRadians: (float)Math.PI,
+            intendedTargetDistanceFromGroup: 100f,
+            nearestEnemyBearingFromGroupRadians: (float)Math.PI,
+            feudMaxDistance: 2000f);
+        var d = TacticalDirectChildGate.Decide(input);
+        AssertTrue(d.Allow, "gate disabled allows");
+        AssertContains(d.Reason, "gate-disabled", "reason mentions gate-disabled");
+    }
+
+    private static void DirectChildGatePlayerSideAllowsAll()
+    {
+        var input = new TacticalDirectChildGate.Input(
+            true, false, DirectChildRole.Reserve, 2, 2,
+            (float)Math.PI, 100f, 0f, 2000f);
+        var d = TacticalDirectChildGate.Decide(input);
+        AssertTrue(d.Allow, "player side allows");
+        AssertContains(d.Reason, "player-side", "reason mentions player-side");
+    }
+
+    private static void DirectChildGateUnknownRoleAllows()
+    {
+        var input = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.Unknown, 2, 2,
+            (float)Math.PI, 100f, 0f, 2000f);
+        var d = TacticalDirectChildGate.Decide(input);
+        AssertTrue(d.Allow, "Unknown role yields no opinion");
+        AssertContains(d.Reason, "role-unknown", "reason mentions role-unknown");
+    }
+
+    private static void DirectChildGateReserveDenies()
+    {
+        var input = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.Reserve, 2, 2,
+            0f, 100f, 0f, 2000f);
+        var d = TacticalDirectChildGate.Decide(input);
+        AssertTrue(!d.Allow, "Reserve denies movement");
+        AssertContains(d.Reason, "reserve-not-committed", "reason");
+    }
+
+    private static void DirectChildGateMainAllowsOnAxisDeniesOffAxis()
+    {
+        // Main: AxisSector=2, PrimarySector=2. IntendedTargetSector=2 (matches AxisSector) → allow.
+        var inputAllowAxis = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.Main, axisSector: 2, primarySector: 2,
+            intendedTargetBearingFromGroupRadians: 0f,
+            intendedTargetDistanceFromGroup: 500f,
+            nearestEnemyBearingFromGroupRadians: 0f,
+            feudMaxDistance: 2000f).WithIntendedTargetSector(2);
+        var dAllowAxis = TacticalDirectChildGate.Decide(inputAllowAxis);
+        AssertTrue(dAllowAxis.Allow, "Main allows movement toward AxisSector");
+
+        // SupportMain: AxisSector=2 (army's main effort), PrimarySector=3 (own sector).
+        // IntendedTargetSector=3 matches PrimarySector → allow (SupportMain may reinforce its own frontage).
+        var inputAllowOwn = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.SupportMain, axisSector: 2, primarySector: 3,
+            0f, 500f, 0f, 2000f).WithIntendedTargetSector(3);
+        var dAllowOwn = TacticalDirectChildGate.Decide(inputAllowOwn);
+        AssertTrue(dAllowOwn.Allow, "SupportMain allows movement toward own PrimarySector");
+
+        // Main: AxisSector=2, PrimarySector=2. IntendedTargetSector=5 (off-axis) → deny.
+        var inputDeny = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.Main, axisSector: 2, primarySector: 2,
+            0f, 500f, 0f, 2000f).WithIntendedTargetSector(5);
+        var dDeny = TacticalDirectChildGate.Decide(inputDeny);
+        AssertTrue(!dDeny.Allow, "Main denies movement to a sector matching neither AxisSector nor PrimarySector");
+        AssertContains(dDeny.Reason, "off-axis", "reason mentions off-axis");
+    }
+
+    private static void DirectChildGateFixAllowsShortDeniesWide()
+    {
+        var inputAllow = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.Fix, 2, 2,
+            0f,
+            intendedTargetDistanceFromGroup: 1000f, // < 0.7 * feudMax
+            nearestEnemyBearingFromGroupRadians: 0f,
+            feudMaxDistance: 2000f);
+        var dAllow = TacticalDirectChildGate.Decide(inputAllow);
+        AssertTrue(dAllow.Allow, "Fix allows short pressure movement");
+        var inputDeny = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.Fix, 2, 2,
+            0f,
+            intendedTargetDistanceFromGroup: 1900f, // > 0.7 * feudMax
+            nearestEnemyBearingFromGroupRadians: 0f,
+            feudMaxDistance: 2000f);
+        var dDeny = TacticalDirectChildGate.Decide(inputDeny);
+        AssertTrue(!dDeny.Allow, "Fix denies wide lateral");
+        AssertContains(dDeny.Reason, "fix-no-wide", "reason");
+    }
+
+    private static void DirectChildGateScreenAllowsInSectorDeniesOutOfSector()
+    {
+        var inputAllow = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.Screen, axisSector: 0, primarySector: 4,
+            0f, 500f, 0f, 2000f);
+        inputAllow = inputAllow.WithIntendedTargetSector(4);
+        var dAllow = TacticalDirectChildGate.Decide(inputAllow);
+        AssertTrue(dAllow.Allow, "Screen allows in-sector");
+        var inputDeny = inputAllow.WithIntendedTargetSector(2);
+        var dDeny = TacticalDirectChildGate.Decide(inputDeny);
+        AssertTrue(!dDeny.Allow, "Screen denies out-of-sector");
+        AssertContains(dDeny.Reason, "screen-out-of-sector", "reason");
+    }
+
+    private static void DirectChildGateFallbackAllowsAwayDeniesToward()
+    {
+        // Enemy is north (bearing PI/2). Withdrawal is south.
+        var inputAllow = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.Fallback, 0, 0,
+            intendedTargetBearingFromGroupRadians: (float)(-Math.PI / 2.0), // south
+            intendedTargetDistanceFromGroup: 500f,
+            nearestEnemyBearingFromGroupRadians: (float)(Math.PI / 2.0),     // north
+            feudMaxDistance: 2000f);
+        var dAllow = TacticalDirectChildGate.Decide(inputAllow);
+        AssertTrue(dAllow.Allow, "Fallback allows withdrawal-bearing");
+
+        var inputDeny = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.Fallback, 0, 0,
+            intendedTargetBearingFromGroupRadians: (float)(Math.PI / 2.0),  // toward enemy
+            intendedTargetDistanceFromGroup: 500f,
+            nearestEnemyBearingFromGroupRadians: (float)(Math.PI / 2.0),
+            feudMaxDistance: 2000f);
+        var dDeny = TacticalDirectChildGate.Decide(inputDeny);
+        AssertTrue(!dDeny.Allow, "Fallback denies toward-enemy");
+        AssertContains(dDeny.Reason, "fallback-not-withdraw", "reason");
+    }
+
+    private static void DirectChildGateRefuseLeftAllowsInSectorDeniesOut()
+    {
+        var inputAllow = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.RefuseLeft, axisSector: 0, primarySector: 0,
+            0f, 500f, 0f, 2000f).WithIntendedTargetSector(0);
+        var dAllow = TacticalDirectChildGate.Decide(inputAllow);
+        AssertTrue(dAllow.Allow, "RefuseLeft allows in flank sector");
+        var inputDeny = inputAllow.WithIntendedTargetSector(3);
+        var dDeny = TacticalDirectChildGate.Decide(inputDeny);
+        AssertTrue(!dDeny.Allow, "RefuseLeft denies out of flank sector");
+        AssertContains(dDeny.Reason, "refuse-out-of-sector", "reason");
+    }
+
+    private static void ParseInstanceIdChildPositive()
+    {
+        AssertEqual(12345, TacticalBattleCoordinator.ParseInstanceIdFromChildId("child-12345"));
+    }
+
+    private static void ParseInstanceIdChildNegative()
+    {
+        // Unity GameObject InstanceIDs are routinely negative; the parser must NOT
+        // treat the sign character as the prefix delimiter (which a LastIndexOf('-')
+        // strategy would). Smoke-driven regression from commit a17ee9c.
+        AssertEqual(-26786, TacticalBattleCoordinator.ParseInstanceIdFromChildId("child--26786"));
+    }
+
+    private static void ParseInstanceIdSynthArmyPositive()
+    {
+        AssertEqual(98765, TacticalBattleCoordinator.ParseInstanceIdFromChildId("synth-army-98765"));
+    }
+
+    private static void ParseInstanceIdSynthArmyNegative()
+    {
+        // Same negative-id contract as child--{id}: the prefix is "synth-army-" and
+        // the suffix retains its leading sign.
+        AssertEqual(-26350, TacticalBattleCoordinator.ParseInstanceIdFromChildId("synth-army--26350"));
+    }
+
+    private static void DirectChildGateNegativeTargetSectorCoercesToPrimary()
+    {
+        // The Input ctor's intendedTargetSector < 0 sentinel must coerce to primarySector
+        // so callers that can't resolve the target sector (e.g. ResolveTargetSector returning -1)
+        // get an in-sector decision for Screen/Refuse roles by default.
+        var input = new TacticalDirectChildGate.Input(
+            gateEnabled: true, sideIsAi: true,
+            role: DirectChildRole.Screen, axisSector: 0, primarySector: 3,
+            intendedTargetBearingFromGroupRadians: 0f,
+            intendedTargetDistanceFromGroup: 100f,
+            nearestEnemyBearingFromGroupRadians: 0f,
+            feudMaxDistance: 2000f,
+            intendedTargetSector: -1);
+        AssertEqual(3, input.IntendedTargetSector);
+        var d = TacticalDirectChildGate.Decide(input);
+        AssertTrue(d.Allow, "Screen with -1 target sector coerces to primary and allows in-sector");
+
+        var refuseInput = new TacticalDirectChildGate.Input(
+            gateEnabled: true, sideIsAi: true,
+            role: DirectChildRole.RefuseLeft, axisSector: 0, primarySector: 5,
+            intendedTargetBearingFromGroupRadians: 0f,
+            intendedTargetDistanceFromGroup: 100f,
+            nearestEnemyBearingFromGroupRadians: 0f,
+            feudMaxDistance: 2000f,
+            intendedTargetSector: -1);
+        AssertEqual(5, refuseInput.IntendedTargetSector);
+        var dRefuse = TacticalDirectChildGate.Decide(refuseInput);
+        AssertTrue(dRefuse.Allow, "RefuseLeft with -1 target sector coerces to primary and allows in-flank-sector");
     }
 }

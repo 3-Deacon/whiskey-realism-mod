@@ -4,6 +4,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -66,7 +67,7 @@ namespace WhiskeyRealism.Patches
                     if (UnityEngine.Random.Range(0f, 1f) > probability || closestEnemy == null) continue;
 
                     bool attachedUnderCommander = ContainsAttachedUnderCommander(group);
-                    var decision = TacticalWlActionGuard.Decide(
+                    var wlDecision = TacticalWlActionGuard.Decide(
                         configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
                         dlcScenarioActive: DLC_WL.dlc_scenarioactive,
                         action: TacticalWlGuardAction.FeudMovement,
@@ -77,21 +78,27 @@ namespace WhiskeyRealism.Patches
                     tookOwnership = true;
                     group.lastfeudactiontime = CurrentBattleHour(bunits);
 
-                    if (decision.Allow)
+                    if (!wlDecision.Allow)
                     {
-                        GameVars.DebugOwnLog("AI: group " + ((object)group)?.ToString() +
-                            " is under feud and moving towards closest enemy: " +
-                            ((object)closestEnemy)?.ToString() +
-                            " curr pos:" + ((object)((Component)group).gameObject.transform.position).ToString() +
-                            " enemy pos:" + ((object)closestEnemy.transform.position).ToString() +
-                            " prob:" + probability +
-                            " init:" + commanderInitiative);
-                        bunits.SetWaypoint(group, closestEnemy.transform.position, newpath: true, doublequick: false, -1f, modifylastwaypoint: false, useorderdelay: true, -1f, -1, showmovementoptions: false);
+                        LogDenied(group, wlDecision.Reason);
+                        continue;
                     }
-                    else
+
+                    var orchDecision = DecideDirectChildGate(__instance, bunits, group, closestEnemy, isPlayerAiOrFeud.Value);
+                    if (!orchDecision.Allow)
                     {
-                        LogDenied(group, decision.Reason);
+                        LogDeniedOrch(group, orchDecision);
+                        continue;
                     }
+
+                    GameVars.DebugOwnLog("AI: group " + ((object)group)?.ToString() +
+                        " is under feud and moving towards closest enemy: " +
+                        ((object)closestEnemy)?.ToString() +
+                        " curr pos:" + ((object)((Component)group).gameObject.transform.position).ToString() +
+                        " enemy pos:" + ((object)closestEnemy.transform.position).ToString() +
+                        " prob:" + probability +
+                        " init:" + commanderInitiative);
+                    bunits.SetWaypoint(group, closestEnemy.transform.position, newpath: true, doublequick: false, -1f, modifylastwaypoint: false, useorderdelay: true, -1f, -1, showmovementoptions: false);
                 }
             }
             catch (Exception ex)
@@ -214,6 +221,141 @@ namespace WhiskeyRealism.Patches
             if (unit == null) return "<null>";
             try { return ((UnityEngine.Object)((Component)unit).gameObject).name; }
             catch { return unit.GetHashCode().ToString(); }
+        }
+
+        // ---- O3: orchestrator direct-child gate branch ----
+
+        private static FieldInfo _sideOfAiField;
+
+        private static DirectChildGateDecision DecideDirectChildGate(
+            AIBattle battle, BattleUnits bunits, Regiment group, GameObject closestEnemy, int isPlayerAiOrFeud)
+        {
+            try
+            {
+                if (Plugin.EnableTacticalOrchestratorDirectChildGate == null
+                    || !Plugin.EnableTacticalOrchestratorDirectChildGate.Value)
+                    return new DirectChildGateDecision(true, "gate-disabled", DirectChildRole.Unknown);
+
+                var sideOrch = ResolveSideOrchestrator(battle, bunits);
+                if (sideOrch == null || sideOrch.Army == null)
+                    return new DirectChildGateDecision(true, "no-orchestrator", DirectChildRole.Unknown);
+
+                bool sideIsAi = !IsPlayerSide(sideOrch.AllianceId);
+                if (!sideIsAi)
+                    return new DirectChildGateDecision(true, "player-side", DirectChildRole.Unknown);
+
+                int instanceId = ((Component)group).gameObject.GetInstanceID();
+                string childId = "child-" + instanceId;
+                var role = sideOrch.Army.GetDirectChildRole(childId);
+                if (role == DirectChildRole.Unknown)
+                {
+                    // Fall back to the synth-army id used by DirectChildDiscovery when an army
+                    // root has no qualifying direct children. The synth represents the army root
+                    // itself, so feud movement on that root should be evaluated against the
+                    // synth's role.
+                    string synthId = "synth-army-" + instanceId;
+                    var synthRole = sideOrch.Army.GetDirectChildRole(synthId);
+                    if (synthRole != DirectChildRole.Unknown)
+                    {
+                        childId = synthId;
+                        role = synthRole;
+                    }
+                }
+                if (role == DirectChildRole.Unknown)
+                    return new DirectChildGateDecision(true, "not-registered", DirectChildRole.Unknown);
+
+                var maybeIntent = sideOrch.Army.GetDirectChildIntent(childId);
+                int axisSector = maybeIntent.HasValue ? maybeIntent.Value.AxisSector : 0;
+                int primarySector = maybeIntent.HasValue ? maybeIntent.Value.PrimarySector : 0;
+
+                Vector3 groupPos = ((Component)group).gameObject.transform.position;
+                Vector3 targetPos = closestEnemy.transform.position;
+                // Both bearings are relative to the group's position so DecideAxis / DecideFallback
+                // compare like-with-like. Since closestEnemy IS the nearest enemy at this call site,
+                // the intended-target bearing and the nearest-enemy bearing are identical here —
+                // which means a feud-driven move toward the closest enemy is always on-axis for
+                // Main/SupportMain. The gate's geometry will diverge from this trivial case once
+                // O3.x lets the orchestrator override the target with a sector-axis hint.
+                float intendedBearingFromGroup = Mathf.Atan2(targetPos.z - groupPos.z, targetPos.x - groupPos.x);
+                float dist = Vector3.Distance(groupPos, targetPos);
+                float enemyBearingFromGroup = intendedBearingFromGroup;
+
+                var input = new TacticalDirectChildGate.Input(
+                    gateEnabled: true,
+                    sideIsAi: true,
+                    role: role,
+                    axisSector: axisSector,
+                    primarySector: primarySector,
+                    intendedTargetBearingFromGroupRadians: intendedBearingFromGroup,
+                    intendedTargetDistanceFromGroup: dist,
+                    nearestEnemyBearingFromGroupRadians: enemyBearingFromGroup,
+                    feudMaxDistance: GamePrefs.neededdistancefeudgroupmovement,
+                    intendedTargetSector: ResolveTargetSector(targetPos));
+
+                return TacticalDirectChildGate.Decide(input);
+            }
+            catch (Exception e)
+            {
+                OnceLog.Warning("tactical-direct-child-gate:exception",
+                    "TacticalDirectChildGate.Decide failed: " + e.GetType().Name + " " + e.Message);
+                return new DirectChildGateDecision(true, "gate-exception", DirectChildRole.Unknown);
+            }
+        }
+
+        private static TacticalBattleOrchestrator ResolveSideOrchestrator(AIBattle battle, BattleUnits bunits)
+        {
+            try
+            {
+                int side = AIBattleSideOf(battle);
+                if (side != 0 && side != 1) return null;
+                if (bunits == null || bunits.alliance == null || side >= bunits.alliance.Length) return null;
+                int allianceId = bunits.alliance[side];
+                return TacticalBattleCoordinator.GetSideOrchestrator(allianceId);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int AIBattleSideOf(AIBattle battle)
+        {
+            if (_sideOfAiField == null) _sideOfAiField = AccessTools.Field(typeof(AIBattle), "sideofai");
+            if (_sideOfAiField == null) return -1;
+            var v = _sideOfAiField.GetValue(battle);
+            return (v is int side) ? side : -1;
+        }
+
+        private static bool IsPlayerSide(int allianceId)
+        {
+            try
+            {
+                if (GameVars.ai_vs_ai) return false;
+                return allianceId == GameVars.playeralliance;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static int ResolveTargetSector(Vector3 targetPos)
+        {
+            // TODO: O3.x — wire to TacticalSectorLedger when a position-→sector resolver lands.
+            // Return -1 so TacticalDirectChildGate.Input ctor coerces it to primarySector,
+            // making Screen/Refuse role decisions degrade to "always in-sector when we can't
+            // tell" (denial precision tightens after smoke calibration). Acceptable because
+            // Main/SupportMain/Fix/Reserve/Fallback decisions don't read this field.
+            return -1;
+        }
+
+        private static void LogDeniedOrch(Regiment group, DirectChildGateDecision decision)
+        {
+            OnceLog.Info("tactical-direct-child-gate:deny:" + SafeName(group) + ":" + decision.Reason,
+                "[TacticalDirectChildGate] action=deny role=" + decision.Role
+                + " reason=" + decision.Reason
+                + " group=" + SafeName(group)
+                + " surface=CheckForFeudGroupActions");
         }
     }
 }

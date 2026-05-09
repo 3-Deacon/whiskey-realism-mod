@@ -52,6 +52,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalOrchestratorArmy;
         public static ConfigEntry<int> TacticalOrchestratorMinReplanSeconds;
         public static ConfigEntry<bool> TacticalOrchestratorVerboseLogging;
+        public static ConfigEntry<bool> EnableTacticalOrchestratorIntentInference;
+        public static ConfigEntry<bool> EnableTacticalOrchestratorDirectChildGate;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
@@ -268,7 +270,7 @@ namespace WhiskeyRealism
                 "Min Replan Seconds",
                 60,
                 new ConfigDescription(
-                    "Minimum game seconds between army replan events. Triggers may detect " +
+                    "Minimum wall-clock seconds between army replan events. Triggers may detect " +
                     "earlier; orchestrator rate-limits actual plan re-pick to avoid thrash.",
                     new AcceptableValueRange<int>(10, 600)));
             TacticalOrchestratorVerboseLogging = Config.Bind(
@@ -277,6 +279,24 @@ namespace WhiskeyRealism
                 false,
                 "Default OFF. When true, emit per-tick [TacticalCascade] and per-trigger " +
                 "[TacticalReplan] lines instead of just first-fire and on-change markers.");
+            EnableTacticalOrchestratorIntentInference = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Tactical Orchestrator Intent Inference",
+                true,
+                "Default ON. O2: per-tick TacticalIntentModel built from visible enemy " +
+                "state, fed into ArmyOrchestrator's replan trigger evaluator and " +
+                "playbook selection bias. Disable to keep O1 initial-pick-only behavior " +
+                "(plans never advance phase or replan during a battle).");
+            EnableTacticalOrchestratorDirectChildGate = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Tactical Orchestrator Direct-Child Gate",
+                false,
+                "Default OFF. O3: when true, BattleFeudActionGatePatch (#42) consults " +
+                "ArmyOrchestrator.GetDirectChildRole(group) between the W&L decision and " +
+                "SetWaypoint, denying off-axis Main/SupportMain, wide Fix, out-of-sector " +
+                "Screen/Refuse, toward-enemy Fallback, and any Reserve movement on AI- " +
+                "controlled sides. Disable to keep #42's existing W&L-only behavior. " +
+                "Telemetry runs regardless of this flag; only deny actions are gated.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",

@@ -17,6 +17,7 @@ namespace WhiskeyRealism.Patches
     internal static class TacticalObserverPatch
     {
         private static readonly Dictionary<string, float> _lastEmittedAt = new Dictionary<string, float>();
+        private static readonly Dictionary<string, FieldInfo> _sideInfoFieldCache = new Dictionary<string, FieldInfo>();
         private static int _chargeBeforeId;
         private static TacticalObserverSnapshot _chargeBefore = TacticalObserverSnapshot.Empty();
         private static TacticalObserverSnapshot _feudBefore = TacticalObserverSnapshot.Empty();
@@ -277,7 +278,7 @@ namespace WhiskeyRealism.Patches
                     // next CheckGlobalAIStrategy invocation to fire the first tick telemetry).
                     if (TacticalBattleCoordinator.IsActive)
                     {
-                        TacticalBattleCoordinator.Tick();
+                        TacticalBattleCoordinator.Tick(__instance);
                     }
                 }
             }
@@ -1920,7 +1921,8 @@ namespace WhiskeyRealism.Patches
                 if (bunits == null || bunits.sideinformation == null) return 0f;
                 if (side < 0 || side >= bunits.sideinformation.Length) return 0f;
                 var info = bunits.sideinformation[side];
-                var field = AccessTools.Field(info.GetType(), fieldName);
+                if (info == null) return 0f;
+                var field = ResolveSideInfoField(info.GetType(), fieldName);
                 if (field == null) return 0f;
                 object value = field.GetValue(info);
                 return value == null ? 0f : Convert.ToSingle(value);
@@ -1929,6 +1931,19 @@ namespace WhiskeyRealism.Patches
             {
                 return 0f;
             }
+        }
+
+        private static FieldInfo ResolveSideInfoField(Type infoType, string fieldName)
+        {
+            if (infoType == null) return null;
+
+            string key = infoType.FullName + ":" + fieldName;
+            if (_sideInfoFieldCache.ContainsKey(key))
+                return _sideInfoFieldCache[key];
+
+            var field = infoType.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            _sideInfoFieldCache[key] = field;
+            return field;
         }
 
         private static string BucketForObserver(float value)

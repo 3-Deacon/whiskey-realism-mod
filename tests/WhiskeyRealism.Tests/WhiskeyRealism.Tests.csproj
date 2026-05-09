@@ -169,9 +169,18 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattleCoordinator.cs" Link="Orchestrator\TacticalBattleCoordinator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattleLifecycleDetector.cs" Link="Orchestrator\TacticalBattleLifecycleDetector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattlePlan.cs" Link="Orchestrator\TacticalBattlePlan.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalIntentModel.cs" Link="Orchestrator\TacticalIntentModel.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\EnemyVisibleState.cs" Link="Orchestrator\EnemyVisibleState.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyIntentInference.cs" Link="Orchestrator\ArmyIntentInference.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyIntent.cs" Link="Orchestrator\ArmyIntent.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildContracts.cs" Link="Orchestrator\DirectChildContracts.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildAllocator.cs" Link="Orchestrator\DirectChildAllocator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildDiscovery.cs" Link="Orchestrator\DirectChildDiscovery.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildEvidenceBuilder.cs" Link="Orchestrator\DirectChildEvidenceBuilder.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalDirectChildGate.cs" Link="Orchestrator\TacticalDirectChildGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyOrchestrator.cs" Link="Orchestrator\ArmyOrchestrator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyReplanTriggers.cs" Link="Orchestrator\ArmyReplanTriggers.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyTickCycle.cs" Link="Orchestrator\ArmyTickCycle.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalPlaybook.cs" Link="Orchestrator\TacticalPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalPlaybookCatalog.cs" Link="Orchestrator\TacticalPlaybookCatalog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericAggressivePlaybook.cs" Link="Orchestrator\Playbooks\GenericAggressivePlaybook.cs" />

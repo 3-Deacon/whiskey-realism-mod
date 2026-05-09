@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Current status (2026-05-09):** implemented on worktree branch `orch/o2-intent` at `a18e74d`, clean-built, harness-verified at **610 PASS / 0 FAIL**, and deployed locally as SHA-256 `cefc3da76dcffbd167cf940b39d31bb714105080d92cf3e9dfc86eb882ad52ed` (715264 bytes). Corrected fresh-launch smoke is pending. A pre-fix run proved `[TacticalIntent]` and `[TacticalReplan]` fire, but exposed a bad guessed field (`BattleUnits.SideInformation.reservescommittedfraction`); vanilla decompile confirms reserve commitment must come from `AIBattle.objectivechain[*].reservegroups`, not a side-info field.
+
 **Goal:** Each side's `ArmyOrchestrator` builds a `TacticalIntentModel` of the opposing army's plan from visible state and feeds it into both playbook selection (`OpposingCommanderHint`) and replan trigger evaluation (`EnemyMainEffortShiftConfidenceWeighted`). A new `ArmyTickCycle` driver wires per-tick evidence refresh + replan-loop into the existing `TacticalBattleCoordinator.Tick()`. Both sides' plans become responses to inferred opposing plans; phase advances and replans actually fire.
 
 **Architecture:** `TacticalIntentModel` is a pure value type — built each tick by `ArmyIntentInference.Build(ownEvidence, enemyVisible)` from existing-ledger inputs (no omniscient reads). `ArmyTickCycle` is a pure driver: refreshes evidence, builds the intent model, evaluates replan triggers (rate-limited by `MinReplanSeconds`), and replans when triggered. The runtime partial of `TacticalBattleCoordinator` adds `ArmyEvidenceBuilder` to extract evidence from vanilla `BattleUnits` each tick. `ArmyOrchestrator` extends with history-tracking fields so triggers can compare current vs prior odds/strength. Patches are unchanged from O1 — #44 still reads `ArmyOrchestrator.CurrentMacroAi`; replans flip the plan id which the macro mapping naturally picks up.
@@ -1331,9 +1333,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float ownMorale = SafeSideInfoFloat(bunits, side, "averagemorale");
                 if (ownMorale <= 0f) ownMorale = 1f;
                 if (ownMorale > 1f) ownMorale = 1f;
-                float ownReservesCommitted = SafeSideInfoFloat(bunits, side, "reservescommittedfraction");
-                if (ownReservesCommitted < 0f) ownReservesCommitted = 0f;
-                if (ownReservesCommitted > 1f) ownReservesCommitted = 1f;
+                float ownReservesCommitted = EstimateReserveCommitFraction(battle, bunits, side, own);
                 float reinforcementsDelta = SafeSideInfoFloat(bunits, side, "reinforcementarrivalswithin24hrs");
 
                 return new Bundle(
@@ -1380,9 +1380,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     sectors.Add(new EnemyVisibleSector(sectorId++, ownStrength, enemyStrength, recentFire));
                 }
 
-                float reserveCommitFraction = SafeSideInfoFloat(bunits, OppositeSide(side), "reservescommittedfraction");
-                if (reserveCommitFraction < 0f) reserveCommitFraction = 0f;
-                if (reserveCommitFraction > 1f) reserveCommitFraction = 1f;
+                float reserveCommitFraction = EstimateReserveCommitFraction(battle, bunits, OppositeSide(side), SafeSideInfoFloat(bunits, OppositeSide(side), "totalactiveforce"));
                 float enemyReinforce = SafeSideInfoFloat(bunits, OppositeSide(side), "reinforcementarrivalswithin24hrs");
 
                 return new EnemyVisibleState(
@@ -1454,7 +1452,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 Key behaviors:
 - Vanilla anchor `BattleUnits.bunits` accessed via reflection (matches O1's idiom).
 - `BattleUnits.completeunitlist` is the same vanilla anchor the lifecycle detector uses (per O0 smoke fix `73e998d`).
-- Field names like `averagemorale`, `reservescommittedfraction`, `reinforcementarrivalswithin24hrs` are guessed from naming conventions in `SideInformation`. **If any of these field names don't exist in the current decompile**, the `SafeSideInfoFloat` returns 0 and the orchestrator gets a degraded but non-crashing input. Verify after first smoke run by grepping the log for `Tactical … failed` warnings. If a field is absent, the harness still passes (test side doesn't exercise this path); only smoke surfaces it.
+- Smoke correction: `BattleUnits.SideInformation` has `averagemorale`, `totalactiveforce`, and `reinforcementarrivalswithin24hrs`, but not `reservescommittedfraction`. Reserve commitment must be derived from vanilla `AIBattle.objectivechain[*].reservegroups` relative to active force. Do not probe a guessed `SideInformation` field for reserve commitment.
 
 - [ ] **Step 2: Build to confirm.**
 
@@ -1473,8 +1471,8 @@ feat(orchestrator): add ArmyEvidenceBuilder runtime partial (O2.6)
 
 Per-tick vanilla evidence extractor. Reads BattleUnits.sideinformation,
 completeunitlist, sideinformation[side].totalactiveforce/averagemorale/
-reservescommittedfraction/reinforcementarrivalswithin24hrs to build the
-ArmyEvidence + EnemyVisibleState + replan-trigger strength signals
+reinforcementarrivalswithin24hrs, and objectivechain reservegroups to build
+the ArmyEvidence + EnemyVisibleState + replan-trigger strength signals
 ArmyTickCycle.MaybeReplan needs.
 
 All vanilla calls wrapped in try/catch; missing fields return 0f rather
@@ -1689,7 +1687,7 @@ Two smoke scenarios. Both should surface `[TacticalIntent]` lines and (over time
 
 - [ ] **Failure modes to watch for:**
   - **Spam:** if `[TacticalIntent]` fires more than ~5 times per battle for the same signature, the OnceLog key is too narrow. Grep `[TacticalIntent]` count and report.
-  - **Missing fields:** if `ArmyEvidenceBuilder.Build degraded: NullReferenceException` appears, one of the `SideInformation` field-name guesses (`averagemorale`, `reservescommittedfraction`) is wrong. Re-decompile and check field names; update `Build` accordingly.
+  - **Missing fields:** if `ArmyEvidenceBuilder.Build degraded: NullReferenceException` appears, one of the runtime vanilla anchors is wrong. Re-decompile and check `SideInformation` fields plus `AIBattle.objectivechain[*].reservegroups`; update `Build` accordingly.
   - **No replan ever:** if no `[TacticalReplan]` appears even after 5+ minutes, either MinReplanSeconds is too aggressive or the inference confidence never crosses 0.6. Likely the latter — collect a longer log sample.
 
 - [ ] **If smoke fails:** capture the failure into `docs/handoff.md` with a "What just happened" callout block. Do not advance to Task 10.
