@@ -1,6 +1,6 @@
 # Tactical Orchestrator O3 — Corps Echelon (Sketch)
 
-> **Status:** sketch only. Promoted to a full implementation plan when O2 ships smoke-verified.
+> **Status:** sketch only. Ready for design brainstorming after O2 implementation, but do not promote to a full implementation plan until the corrected O2 DLL gets a clean fresh-launch smoke.
 
 **Goal:** Add the Corps echelon between Army and (eventual) Division. Each Corps receives `ArmyIntent`, allocates its frontage into main-effort / fixing / screening / refuse sector roles, builds a `CorpsIntent`, and emits down. Personality biases tempo (aggression) and audacity. Corps-level intent inference reads enemy corps within own frontage.
 
@@ -96,4 +96,4 @@ struct CorpsIntent {
 
 ## Promote to plan when
 
-O2 ships smoke-verified AND `[TacticalIntent]` lines confirm visible-state inference works at army echelon. Then this sketch becomes `2026-MM-DD-tactical-orchestrator-o3-corps.md`.
+O2 ships smoke-verified on the corrected `a18e74d`/`cefc3da...` DLL: fresh log has `[TacticalIntent]` and `[TacticalReplan]` evidence, no `reservescommittedfraction` or Harmony missing-field warnings, and no repeated exceptions. Then this sketch becomes `2026-MM-DD-tactical-orchestrator-o3-corps.md`.
