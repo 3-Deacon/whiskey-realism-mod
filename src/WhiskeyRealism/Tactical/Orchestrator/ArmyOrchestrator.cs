@@ -165,6 +165,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _currentIntentModel = enemyIntent;
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
+            // Plan changed → MainEffortSector/FixingSectors/ScreeningSectors may have shifted,
+            // which would change DirectChildAllocator outputs. Invalidate the direct-child
+            // evidence cache so the next signature-equal observe reallocates against the new
+            // plan instead of returning stale pre-replan intents. (AdvancePhase does not need
+            // this — the allocator does not read BattlePhase.)
+            _hasObservedEvidence = false;
         }
 
         private static TacticalIntentModel UnknownIntentModel() =>

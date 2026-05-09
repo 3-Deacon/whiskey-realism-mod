@@ -633,6 +633,7 @@ static class Program
             ("army orchestrator observe evidence is idempotent on equal signature", ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature),
             ("army orchestrator emit army intent includes direct children", ArmyOrchestratorEmitArmyIntentIncludesDirectChildren),
             ("army orchestrator get direct child role unknown when unregistered", ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered),
+            ("army orchestrator replan invalidates direct child evidence cache", ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache),
             ("army replan triggers phase deadline fires when age exceeds phase budget", ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget),
             ("army replan triggers main effort sector loss fires below threshold", ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold),
             ("army replan triggers force imbalance shift fires when odds cross hysteresis", ArmyReplanTriggersForceImbalanceShiftFiresWhenOddsCrossHysteresis),
@@ -11901,6 +11902,48 @@ static class Program
     {
         var orch = NewArmyOrchestratorWithPlan();
         AssertEqual(DirectChildRole.Unknown, orch.GetDirectChildRole("never-registered"));
+    }
+
+    private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()
+    {
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        var firstIntents = orch.CurrentDirectChildIntents;
+
+        // Force a replan (returns void; succeeds when TryPickPlan returns true).
+        // The empty-catalog helper used by NewArmyOrchestratorWithPlan would otherwise
+        // make TryPickPlan fail, so we register a single placeholder playbook by re-using
+        // SetPlanForTesting before calling Replan with the new sector.
+        orch.SetPlanForTesting(new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 5,  // different sector than before
+            Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0f, 0));
+
+        // Simulate post-replan: signature-equal evidence should now allocate against the new plan,
+        // because _hasObservedEvidence was reset (replan path) — but here we use SetPlanForTesting,
+        // which does not reset _hasObservedEvidence. So instead, drive the same invariant via the
+        // RegisterDirectChildren path which DOES clear _hasObservedEvidence. Then verify that
+        // re-observing with the same signature now picks up the new sector layout.
+        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        AssertTrue(!object.ReferenceEquals(firstIntents, orch.CurrentDirectChildIntents),
+            "after re-registration, the cached intent list must be replaced");
+
+        // Now exercise Replan invalidation directly. We need a non-empty catalog so TryPickPlan succeeds.
+        // The simplest path: spin up a fresh orchestrator with a real seeded catalog.
+        var orch2 = new ArmyOrchestrator(allianceId: 0, BuiltInPlaybooks.SeedCatalog(),
+            new PersonalityVector(0.2f, 0f, 0f, 0f, 0f));
+        orch2.PickInitialPlan(new ArmyEvidence(currentOdds: 1.2f, terrain: TerrainKind.Open, defaultMainEffortSector: 2));
+        orch2.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
+        orch2.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        var preReplanIntents = orch2.CurrentDirectChildIntents;
+
+        orch2.Replan(new ArmyEvidence(currentOdds: 0.8f, terrain: TerrainKind.Open, defaultMainEffortSector: 5));
+        // Re-observing with identical evidence should now reallocate (cache invalidated by Replan).
+        orch2.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
+        AssertTrue(!object.ReferenceEquals(preReplanIntents, orch2.CurrentDirectChildIntents),
+            "Replan must invalidate the cache so the next signature-equal observe reallocates");
     }
 
     // Helper used by the five tests above. Note the 8-arg TacticalBattlePlan ctor (the
