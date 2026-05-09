@@ -633,6 +633,7 @@ static class Program
             ("army orchestrator observe evidence is idempotent on equal signature", ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature),
             ("army orchestrator emit army intent includes direct children", ArmyOrchestratorEmitArmyIntentIncludesDirectChildren),
             ("army orchestrator get direct child role unknown when unregistered", ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered),
+            ("army orchestrator returns role for synth army child id", ArmyOrchestratorReturnsRoleForSynthArmyChildId),
             ("army orchestrator replan invalidates direct child evidence cache", ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache),
             ("army replan triggers phase deadline fires when age exceeds phase budget", ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget),
             ("army replan triggers main effort sector loss fires below threshold", ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold),
@@ -11921,6 +11922,25 @@ static class Program
     {
         var orch = NewArmyOrchestratorWithPlan();
         AssertEqual(DirectChildRole.Unknown, orch.GetDirectChildRole("never-registered"));
+    }
+
+    private static void ArmyOrchestratorReturnsRoleForSynthArmyChildId()
+    {
+        // When DirectChildDiscovery synthesizes an army-root snapshot (zero qualifying
+        // direct children), its ChildId is "synth-army-{instanceId}". The orchestrator
+        // must return the assigned role for that exact id so #42's fallback lookup engages.
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        orch.RegisterDirectChildren(new[]
+        {
+            new DirectChildSnapshot("synth-army-12345", "army-12345", 16, 0, "ArmyA", true),
+        });
+        orch.ObserveDirectChildEvidence(new[]
+        {
+            new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
+        });
+        AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("synth-army-12345"));
+        AssertEqual(DirectChildRole.Unknown, orch.GetDirectChildRole("child-12345"),
+            "orchestrator must distinguish synth-army-{id} from child-{id} by exact match");
     }
 
     private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()

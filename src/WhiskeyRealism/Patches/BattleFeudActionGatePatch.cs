@@ -244,8 +244,23 @@ namespace WhiskeyRealism.Patches
                 if (!sideIsAi)
                     return new DirectChildGateDecision(true, "player-side", DirectChildRole.Unknown);
 
-                string childId = "child-" + ((Component)group).gameObject.GetInstanceID();
+                int instanceId = ((Component)group).gameObject.GetInstanceID();
+                string childId = "child-" + instanceId;
                 var role = sideOrch.Army.GetDirectChildRole(childId);
+                if (role == DirectChildRole.Unknown)
+                {
+                    // Fall back to the synth-army id used by DirectChildDiscovery when an army
+                    // root has no qualifying direct children. The synth represents the army root
+                    // itself, so feud movement on that root should be evaluated against the
+                    // synth's role.
+                    string synthId = "synth-army-" + instanceId;
+                    var synthRole = sideOrch.Army.GetDirectChildRole(synthId);
+                    if (synthRole != DirectChildRole.Unknown)
+                    {
+                        childId = synthId;
+                        role = synthRole;
+                    }
+                }
                 if (role == DirectChildRole.Unknown)
                     return new DirectChildGateDecision(true, "not-registered", DirectChildRole.Unknown);
 
