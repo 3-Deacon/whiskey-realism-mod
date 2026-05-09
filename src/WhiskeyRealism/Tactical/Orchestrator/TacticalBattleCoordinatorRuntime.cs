@@ -29,6 +29,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static float _lastTickTimeSeconds;
         private static int _battleSequence;
         private static readonly HashSet<string> _tickWarningKeys = new HashSet<string>();
+        private static readonly HashSet<int> _directChildDeferLogged = new HashSet<int>();
 
         public static void OnBattleStart(AIBattle battle)
         {
@@ -47,6 +48,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     AttachArmyIfActive(side0, battle);
                     AttachArmyIfActive(side1, battle);
+                    AttachDirectChildrenIfReady(side0, battle);
+                    AttachDirectChildrenIfReady(side1, battle);
                 }
 
                 int suppressed = (playerCicAllianceId == 0 || playerCicAllianceId == 1) ? 1 : 0;
@@ -81,6 +84,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 ClearLedgersBetweenBattles();
                 ResetRuntimeTickState();
+                _directChildDeferLogged.Clear();
                 side0 = null;
                 side1 = null;
                 active = false;
@@ -109,6 +113,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     float deltaSeconds = ComputeTickDeltaSeconds();
                     DriveTickCycle(side0, battle, deltaSeconds);
                     DriveTickCycle(side1, battle, deltaSeconds);
+
+                    DriveDirectChildCycle(side0, battle);
+                    DriveDirectChildCycle(side1, battle);
                 }
             }
             catch (Exception e)
@@ -334,6 +341,112 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + " plan=" + army.CurrentPlan.PlanId
                     + " phase=" + army.CurrentPlan.Phase
                     + " mainEffort=" + army.CurrentPlan.MainEffortSector);
+            }
+        }
+
+        private static void AttachDirectChildrenIfReady(TacticalBattleOrchestrator side, AIBattle battle)
+        {
+            try
+            {
+                if (side == null || side.Army == null || !side.Army.HasPlan) return;
+                // Already registered: skip silently. RegisterDirectChildren on a non-empty
+                // list is idempotent in effect but resets allocator caches; avoid the churn.
+                if (side.Army.CurrentDirectChildIntents.Count > 0) return;
+
+                var snapshots = DirectChildDiscovery.Snapshot(battle);
+                if (snapshots.Count == 0)
+                {
+                    if (!_directChildDeferLogged.Contains(side.AllianceId))
+                    {
+                        _directChildDeferLogged.Add(side.AllianceId);
+                        OnceLog.Info("o3-defer-discovery:" + side.AllianceId,
+                            "side=" + side.AllianceId + " reason=empty-or-no-command-units");
+                    }
+                    return;
+                }
+
+                side.Army.RegisterDirectChildren(snapshots);
+
+                Plugin.Log.LogInfo("[TacticalDirectChildDiscovery] side=" + side.AllianceId
+                    + " army=" + (snapshots.Count > 0 ? snapshots[0].ParentArmyId : "<none>")
+                    + " shift=" + (snapshots.Count > 0 ? snapshots[0].CommandHierarchyShift : 0)
+                    + " children=" + snapshots.Count
+                    + " synthetic=" + IsSynthetic(snapshots));
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] AttachDirectChildrenIfReady skipped side="
+                    + (side == null ? "null" : side.AllianceId.ToString())
+                    + ": " + e.GetType().Name + " " + e.Message);
+            }
+        }
+
+        private static bool IsSynthetic(IReadOnlyList<DirectChildSnapshot> snaps)
+        {
+            for (int i = 0; i < snaps.Count; i++)
+                if (snaps[i].ChildId.StartsWith("synth-army-")) return true;
+            return false;
+        }
+
+        private static void DriveDirectChildCycle(TacticalBattleOrchestrator side, AIBattle battle)
+        {
+            try
+            {
+                if (side == null || side.Army == null || !side.Army.HasPlan) return;
+                if (side.Army.CurrentDirectChildIntents.Count == 0)
+                {
+                    AttachDirectChildrenIfReady(side, battle);
+                    if (side.Army.CurrentDirectChildIntents.Count == 0) return;
+                }
+
+                var bundle = ArmyEvidenceBuilder.Build(battle, side.AllianceId);
+                int childCount = side.Army.CurrentDirectChildIntents.Count;
+                var primarySectors = new int[childCount];
+                var flankBuckets = new int[childCount];
+                var perChildIntent = new TacticalIntentModel[childCount];
+                for (int i = 0; i < childCount; i++)
+                {
+                    var existing = side.Army.CurrentDirectChildIntents[i];
+                    primarySectors[i] = existing.PrimarySector >= 0 ? existing.PrimarySector : 0;
+                    flankBuckets[i] = 0;
+                    perChildIntent[i] = ArmyIntentInference.BuildForFrontage(primarySectors[i], bundle.EnemyVisible, ownStrengthBucket: 1);
+                }
+
+                var snapshots = new DirectChildSnapshot[childCount];
+                for (int i = 0; i < childCount; i++)
+                {
+                    var existing = side.Army.CurrentDirectChildIntents[i];
+                    snapshots[i] = new DirectChildSnapshot(
+                        existing.ChildId,
+                        parentArmyId: "army-cached",
+                        rawUnitTyp: existing.RawUnitTyp,
+                        commandHierarchyShift: existing.RawUnitTyp - existing.EffectiveCommandLevel,
+                        displayName: existing.DisplayName,
+                        active: true);
+                }
+
+                var evidence = DirectChildEvidenceBuilder.BuildAll(snapshots, primarySectors, flankBuckets, bundle.EnemyVisible);
+                side.Army.ObserveDirectChildEvidenceWithIntent(evidence, perChildIntent);
+
+                for (int i = 0; i < side.Army.CurrentDirectChildIntents.Count; i++)
+                {
+                    var dci = side.Army.CurrentDirectChildIntents[i];
+                    if (dci.Role == DirectChildRole.Unknown) continue;
+                    OnceLog.Info("o3-direct-child-intent:" + _battleSequence + ":" + side.AllianceId + ":" + dci.ChildId + ":" + dci.Role,
+                        "[TacticalDirectChildIntent] side=" + side.AllianceId
+                        + " child=" + dci.ChildId
+                        + " raw=" + dci.RawUnitTyp
+                        + " effective=" + dci.EffectiveCommandLevel
+                        + " role=" + dci.Role
+                        + " sector=" + dci.PrimarySector
+                        + " support=" + dci.SupportPriority01.ToString("0.00")
+                        + " enemyIntent=" + dci.EnemyIntent.PrimaryIntent
+                        + " confidence=" + dci.EnemyIntent.Confidence01.ToString("0.00"));
+                }
+            }
+            catch (Exception e)
+            {
+                WarnTickCycleOnce(side, e);
             }
         }
 
