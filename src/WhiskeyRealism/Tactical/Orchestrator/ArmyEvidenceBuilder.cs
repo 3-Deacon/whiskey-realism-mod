@@ -16,7 +16,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Between ArmyIntentInference reserve thresholds: not committed, not uncommitted.
         private const float UnknownReserveCommitFraction = 0.35f;
         private static FieldInfo _bunitsFieldCache;
+        private static FieldInfo _objectiveChainFieldCache;
         private static readonly Dictionary<string, FieldInfo> _sideInfoFieldCache = new Dictionary<string, FieldInfo>();
+        private static readonly Dictionary<string, FieldInfo> _objectFieldCache = new Dictionary<string, FieldInfo>();
 
         internal readonly struct Bundle
         {
@@ -63,9 +65,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float odds = enemyActive <= 0f ? 1f : ownActive / Math.Max(1f, enemyActive);
                 var ownEvidence = new ArmyEvidence(odds, TerrainKind.Open, defaultMainEffortSector: 0);
 
-                var enemyVisible = BuildEnemyVisibleState(bunits, side, allianceId);
+                var enemyVisible = BuildEnemyVisibleState(battle, bunits, side, allianceId);
                 float ownMorale = Clamp01OrDefault(SafeSideInfoFloat(bunits, side, "averagemorale"), 1f);
-                float ownReservesCommitted = SafeReserveCommitFraction(bunits, side);
+                float ownReservesCommitted = EstimateReserveCommitFraction(battle, bunits, side, ownActive);
                 float ownReinforcements = SanitizeNonNegative(
                     SafeSideInfoFloat(bunits, side, "reinforcementarrivalswithin24hrs"));
                 float enemyReinforcements = SanitizeNonNegative(
@@ -98,7 +100,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 reinforcementsArrivingDelta: 0f);
         }
 
-        private static EnemyVisibleState BuildEnemyVisibleState(BattleUnits bunits, int ownSide, int ownAllianceId)
+        private static EnemyVisibleState BuildEnemyVisibleState(AIBattle battle, BattleUnits bunits, int ownSide, int ownAllianceId)
         {
             try
             {
@@ -130,7 +132,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         recentFire));
                 }
 
-                float enemyReserveCommitFraction = SafeReserveCommitFraction(bunits, enemySide);
+                float enemyActiveForce = Math.Max(1f, SafeSideInfoFloat(bunits, enemySide, "totalactiveforce"));
+                float enemyReserveCommitFraction = EstimateReserveCommitFraction(battle, bunits, enemySide, enemyActiveForce);
                 float enemyReinforcements = SanitizeNonNegative(
                     SafeSideInfoFloat(bunits, enemySide, "reinforcementarrivalswithin24hrs"));
 
@@ -359,11 +362,141 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return field;
         }
 
-        private static float SafeReserveCommitFraction(BattleUnits bunits, int side)
+        private static float EstimateReserveCommitFraction(AIBattle battle, BattleUnits bunits, int side, float activeForce)
         {
-            return TrySideInfoFloat(bunits, side, "reservescommittedfraction", out var value)
-                ? Clamp01OrDefault(value, UnknownReserveCommitFraction)
-                : UnknownReserveCommitFraction;
+            if (!TrySumReservePoolStrength(battle, bunits, side, out float reserveStrength))
+                return UnknownReserveCommitFraction;
+
+            float committed = 1f - reserveStrength / Math.Max(1f, activeForce);
+            return Clamp01OrDefault(committed, UnknownReserveCommitFraction);
+        }
+
+        private static bool TrySumReservePoolStrength(AIBattle battle, BattleUnits bunits, int side, out float reserveStrength)
+        {
+            reserveStrength = 0f;
+            try
+            {
+                var chains = ResolveObjectiveChains(battle);
+                if (chains == null || chains.Count == 0) return false;
+
+                int alliance = SafeAlliance(bunits, side);
+                if (alliance < 0) return false;
+
+                bool observedChain = false;
+                var seen = new HashSet<int>();
+                for (int i = 0; i < chains.Count; i++)
+                {
+                    object chain = chains[i];
+                    if (chain == null) continue;
+                    observedChain = true;
+
+                    var reserves = SafeObjectList(chain, "reservegroups");
+                    if (reserves == null) continue;
+
+                    for (int j = 0; j < reserves.Count; j++)
+                    {
+                        var group = reserves[j] as Regiment;
+                        if (!IsUsableOwnGroup(group, alliance)) continue;
+
+                        int id = SafeInstanceId(group);
+                        if (id != 0 && !seen.Add(id)) continue;
+
+                        reserveStrength += ActiveGroupStrength(group);
+                    }
+                }
+
+                return observedChain;
+            }
+            catch
+            {
+                reserveStrength = 0f;
+                return false;
+            }
+        }
+
+        private static IList ResolveObjectiveChains(AIBattle battle)
+        {
+            try
+            {
+                if (battle == null) return null;
+                if (_objectiveChainFieldCache == null)
+                    _objectiveChainFieldCache = typeof(AIBattle).GetField(
+                        "objectivechain",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                return _objectiveChainFieldCache?.GetValue(battle) as IList;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static IList SafeObjectList(object instance, string fieldName)
+        {
+            try
+            {
+                if (instance == null) return null;
+                var field = ResolveObjectField(instance.GetType(), fieldName);
+                return field?.GetValue(instance) as IList;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static FieldInfo ResolveObjectField(Type type, string fieldName)
+        {
+            if (type == null) return null;
+
+            string key = type.FullName + ":" + fieldName;
+            if (_objectFieldCache.ContainsKey(key))
+                return _objectFieldCache[key];
+
+            var field = type.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            _objectFieldCache[key] = field;
+            return field;
+        }
+
+        private static int SafeAlliance(BattleUnits bunits, int side)
+        {
+            try
+            {
+                if (bunits == null || bunits.alliance == null) return -1;
+                if (side < 0 || side >= bunits.alliance.Length) return -1;
+                return bunits.alliance[side];
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static int SafeInstanceId(Regiment group)
+        {
+            try
+            {
+                return group == null ? 0 : group.GetInstanceID();
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static float ActiveGroupStrength(Regiment group)
+        {
+            try
+            {
+                if (group == null) return 0f;
+                int strength = group.groupstrengthactive;
+                if (strength <= 0) strength = group.groupstrengthaigroup;
+                return Math.Max(0f, strength);
+            }
+            catch
+            {
+                return 0f;
+            }
         }
 
         private static int SafeRegimentInt(Regiment regiment, string fieldName)
