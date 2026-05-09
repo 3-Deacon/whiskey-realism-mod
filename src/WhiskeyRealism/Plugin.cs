@@ -49,6 +49,9 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
         public static ConfigEntry<bool> EnableTacticalBattleOrchestrator;
+        public static ConfigEntry<bool> EnableTacticalOrchestratorArmy;
+        public static ConfigEntry<int> TacticalOrchestratorMinReplanSeconds;
+        public static ConfigEntry<bool> TacticalOrchestratorVerboseLogging;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public const int TacticalMoraleSnapshotLedgerCapacity = 4;
@@ -251,6 +254,28 @@ namespace WhiskeyRealism
                 "Master switch for the multi-echelon tactical battle orchestrator. " +
                 "Default on per orchestrator umbrella spec. Disable to revert to vanilla " +
                 "+ existing default-off Slice B scorer paths.");
+            EnableTacticalOrchestratorArmy = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Tactical Orchestrator Army",
+                true,
+                "Default ON. O1: instantiate the per-side ArmyOrchestrator at battle start, " +
+                "pick a personality-keyed playbook, and let BattleMacroStrategyPatch read " +
+                "ArmyOrchestrator.CurrentMacroAi instead of running the doctrine scorer. " +
+                "Disable to fall back to the scorer-driven macro behavior for regression triage.");
+            TacticalOrchestratorMinReplanSeconds = Config.Bind(
+                "Tactical Orchestrator",
+                "Min Replan Seconds",
+                60,
+                new ConfigDescription(
+                    "Minimum game seconds between army replan events. Triggers may detect " +
+                    "earlier; orchestrator rate-limits actual plan re-pick to avoid thrash.",
+                    new AcceptableValueRange<int>(10, 600)));
+            TacticalOrchestratorVerboseLogging = Config.Bind(
+                "Tactical Orchestrator",
+                "Verbose Logging",
+                false,
+                "Default OFF. When true, emit per-tick [TacticalCascade] and per-trigger " +
+                "[TacticalReplan] lines instead of just first-fire and on-change markers.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",

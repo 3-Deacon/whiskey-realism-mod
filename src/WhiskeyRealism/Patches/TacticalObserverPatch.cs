@@ -266,7 +266,7 @@ namespace WhiskeyRealism.Patches
                     switch (ev)
                     {
                         case BattleLifecycleEvent.BattleStart:
-                            TacticalBattleCoordinator.OnBattleStart();
+                            TacticalBattleCoordinator.OnBattleStart(__instance);
                             break;
                         case BattleLifecycleEvent.BattleEnd:
                             TacticalBattleCoordinator.OnBattleEnd();
