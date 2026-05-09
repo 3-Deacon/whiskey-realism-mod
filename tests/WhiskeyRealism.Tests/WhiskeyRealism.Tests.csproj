@@ -171,5 +171,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyIntent.cs" Link="Orchestrator\ArmyIntent.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalPlaybook.cs" Link="Orchestrator\TacticalPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalPlaybookCatalog.cs" Link="Orchestrator\TacticalPlaybookCatalog.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericAggressivePlaybook.cs" Link="Orchestrator\Playbooks\GenericAggressivePlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericCautiousPlaybook.cs" Link="Orchestrator\Playbooks\GenericCautiousPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericMethodicalPlaybook.cs" Link="Orchestrator\Playbooks\GenericMethodicalPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericDesperatePlaybook.cs" Link="Orchestrator\Playbooks\GenericDesperatePlaybook.cs" />
   </ItemGroup>
 </Project>

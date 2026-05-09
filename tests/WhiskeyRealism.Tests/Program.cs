@@ -566,7 +566,12 @@ static class Program
             ("tactical battle lifecycle detector requires two consecutive zero ticks for battle end", TacticalBattleLifecycleDetectorRequiresTwoConsecutiveZeroTicksForBattleEnd),
             ("tactical battle lifecycle detector ignores transient zero tick between units ticks", TacticalBattleLifecycleDetectorIgnoresTransientZeroTickBetweenUnitsTicks),
             ("tactical battle lifecycle detector does not fire double start on subsequent units ticks", TacticalBattleLifecycleDetectorDoesNotFireDoubleStartOnSubsequentUnitsTicks),
-            ("tactical battle lifecycle detector restarts battle after end", TacticalBattleLifecycleDetectorRestartsBattleAfterEnd)
+            ("tactical battle lifecycle detector restarts battle after end", TacticalBattleLifecycleDetectorRestartsBattleAfterEnd),
+            ("generic aggressive playbook prefers high aggression", GenericAggressivePlaybookPrefersHighAggression),
+            ("generic cautious playbook prefers high caution", GenericCautiousPlaybookPrefersHighCaution),
+            ("generic methodical playbook scores neutral personality moderately", GenericMethodicalPlaybookScoresNeutralPersonalityModerately),
+            ("generic desperate playbook prefers low caution", GenericDesperatePlaybookPrefersLowCaution),
+            ("each generic instantiates with matching plan id", EachGenericInstantiatesWithMatchingPlanId)
         };
 
         foreach (var test in tests)
@@ -10812,5 +10817,50 @@ static class Program
         var first = cat.Select(ctx).Id;
         var second = cat.Select(ctx).Id;
         AssertEqual(first, second, "same seed yields same selection");
+    }
+
+    // ---- Generic fallback playbook tests (O1.4) ----
+
+    private static void GenericAggressivePlaybookPrefersHighAggression()
+    {
+        var pb = new GenericAggressivePlaybook();
+        var aggressive = new PersonalityVector(0.8f, -0.4f, 0.6f, 0, 0);
+        var passive    = new PersonalityVector(-0.8f, 0.4f, -0.6f, 0, 0);
+        AssertTrue(pb.Fit.Score(aggressive) > pb.Fit.Score(passive),
+            "aggressive personality scores higher than passive on aggressive playbook");
+    }
+
+    private static void GenericCautiousPlaybookPrefersHighCaution()
+    {
+        var pb = new GenericCautiousPlaybook();
+        var cautious   = new PersonalityVector(-0.5f, 0.8f, -0.3f, 0, 0);
+        var aggressive = new PersonalityVector(0.8f, -0.4f, 0.6f, 0, 0);
+        AssertTrue(pb.Fit.Score(cautious) > pb.Fit.Score(aggressive),
+            "cautious personality scores higher than aggressive on cautious playbook");
+    }
+
+    private static void GenericMethodicalPlaybookScoresNeutralPersonalityModerately()
+    {
+        var pb = new GenericMethodicalPlaybook();
+        var neutral = new PersonalityVector(0, 0, 0, 0, 0);
+        AssertTrue(pb.Fit.Score(neutral) > 0.4f, "neutral personality scores >0.4 on methodical playbook");
+    }
+
+    private static void GenericDesperatePlaybookPrefersLowCaution()
+    {
+        var pb = new GenericDesperatePlaybook();
+        var desperate = new PersonalityVector(0.3f, -0.9f, 0.3f, 0, 0);
+        var cautious  = new PersonalityVector(0.0f,  0.9f, 0.0f, 0, 0);
+        AssertTrue(pb.Fit.Score(desperate) > pb.Fit.Score(cautious),
+            "low-caution personality scores higher than cautious on desperate playbook");
+    }
+
+    private static void EachGenericInstantiatesWithMatchingPlanId()
+    {
+        var ctx = new PlaybookContext(default, TerrainKind.Open, 1f, 0f, 0, 1);
+        AssertEqual(BattlePlanId.GenericAggressive, new GenericAggressivePlaybook().Instantiate(ctx).PlanId, "Aggressive id");
+        AssertEqual(BattlePlanId.GenericCautious,   new GenericCautiousPlaybook().Instantiate(ctx).PlanId,   "Cautious id");
+        AssertEqual(BattlePlanId.GenericMethodical, new GenericMethodicalPlaybook().Instantiate(ctx).PlanId, "Methodical id");
+        AssertEqual(BattlePlanId.GenericDesperate,  new GenericDesperatePlaybook().Instantiate(ctx).PlanId,  "Desperate id");
     }
 }
