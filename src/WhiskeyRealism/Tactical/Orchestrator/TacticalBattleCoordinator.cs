@@ -87,5 +87,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (!e.MatchedHistoricalRegistry) n++;
             return n;
         }
+
+        // ---- DirectChild ChildId parser ----
+        //
+        // Parses the trailing integer instanceId from "child-{id}" or "synth-army-{id}".
+        // Unity GameObject InstanceIDs are routinely negative, so we strip the known
+        // prefix (NOT LastIndexOf('-'), which would land on the negative sign).
+        // Returns 0 on parse failure (which never matches a real GameObject InstanceID).
+        internal const string DirectChildIdPrefix = "child-";
+        internal const string DirectChildSynthArmyIdPrefix = "synth-army-";
+        internal static int ParseInstanceIdFromChildId(string childId)
+        {
+            if (string.IsNullOrEmpty(childId)) return 0;
+            string suffix;
+            if (childId.StartsWith(DirectChildSynthArmyIdPrefix, System.StringComparison.Ordinal))
+                suffix = childId.Substring(DirectChildSynthArmyIdPrefix.Length);
+            else if (childId.StartsWith(DirectChildIdPrefix, System.StringComparison.Ordinal))
+                suffix = childId.Substring(DirectChildIdPrefix.Length);
+            else
+                return 0;
+            return int.TryParse(suffix, out int id) ? id : 0;
+        }
     }
 }

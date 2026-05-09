@@ -670,6 +670,10 @@ static class Program
             ("direct child gate fallback allows away from enemy denies toward enemy", DirectChildGateFallbackAllowsAwayDeniesToward),
             ("direct child gate refuse left allows in sector denies out", DirectChildGateRefuseLeftAllowsInSectorDeniesOut),
             ("direct child gate negative target sector coerces to primary", DirectChildGateNegativeTargetSectorCoercesToPrimary),
+            ("parse instance id child positive", ParseInstanceIdChildPositive),
+            ("parse instance id child negative", ParseInstanceIdChildNegative),
+            ("parse instance id synth army positive", ParseInstanceIdSynthArmyPositive),
+            ("parse instance id synth army negative", ParseInstanceIdSynthArmyNegative),
         };
 
         foreach (var test in tests)
@@ -12454,22 +12458,30 @@ static class Program
 
     private static void DirectChildGateMainAllowsOnAxisDeniesOffAxis()
     {
-        // Enemy bearing east (0). Intended target ENE (~28° off enemy direction) — allow.
-        var inputAllow = new TacticalDirectChildGate.Input(
+        // Main: AxisSector=2, PrimarySector=2. IntendedTargetSector=2 (matches AxisSector) → allow.
+        var inputAllowAxis = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Main, axisSector: 2, primarySector: 2,
-            intendedTargetBearingFromGroupRadians: 0.5f,
+            intendedTargetBearingFromGroupRadians: 0f,
             intendedTargetDistanceFromGroup: 500f,
             nearestEnemyBearingFromGroupRadians: 0f,
-            feudMaxDistance: 2000f);
-        var dAllow = TacticalDirectChildGate.Decide(inputAllow);
-        AssertTrue(dAllow.Allow, "Main allows movement within ±60° of nearest-enemy bearing");
+            feudMaxDistance: 2000f).WithIntendedTargetSector(2);
+        var dAllowAxis = TacticalDirectChildGate.Decide(inputAllowAxis);
+        AssertTrue(dAllowAxis.Allow, "Main allows movement toward AxisSector");
 
-        // Intended target due south (~90° off enemy direction) — deny.
+        // SupportMain: AxisSector=2 (army's main effort), PrimarySector=3 (own sector).
+        // IntendedTargetSector=3 matches PrimarySector → allow (SupportMain may reinforce its own frontage).
+        var inputAllowOwn = new TacticalDirectChildGate.Input(
+            true, true, DirectChildRole.SupportMain, axisSector: 2, primarySector: 3,
+            0f, 500f, 0f, 2000f).WithIntendedTargetSector(3);
+        var dAllowOwn = TacticalDirectChildGate.Decide(inputAllowOwn);
+        AssertTrue(dAllowOwn.Allow, "SupportMain allows movement toward own PrimarySector");
+
+        // Main: AxisSector=2, PrimarySector=2. IntendedTargetSector=5 (off-axis) → deny.
         var inputDeny = new TacticalDirectChildGate.Input(
-            true, true, DirectChildRole.Main, 2, 2,
-            (float)(-Math.PI / 2.0), 500f, 0f, 2000f);
+            true, true, DirectChildRole.Main, axisSector: 2, primarySector: 2,
+            0f, 500f, 0f, 2000f).WithIntendedTargetSector(5);
         var dDeny = TacticalDirectChildGate.Decide(inputDeny);
-        AssertTrue(!dDeny.Allow, "Main denies wide-off-axis movement");
+        AssertTrue(!dDeny.Allow, "Main denies movement to a sector matching neither AxisSector nor PrimarySector");
         AssertContains(dDeny.Reason, "off-axis", "reason mentions off-axis");
     }
 
@@ -12542,6 +12554,31 @@ static class Program
         var dDeny = TacticalDirectChildGate.Decide(inputDeny);
         AssertTrue(!dDeny.Allow, "RefuseLeft denies out of flank sector");
         AssertContains(dDeny.Reason, "refuse-out-of-sector", "reason");
+    }
+
+    private static void ParseInstanceIdChildPositive()
+    {
+        AssertEqual(12345, TacticalBattleCoordinator.ParseInstanceIdFromChildId("child-12345"));
+    }
+
+    private static void ParseInstanceIdChildNegative()
+    {
+        // Unity GameObject InstanceIDs are routinely negative; the parser must NOT
+        // treat the sign character as the prefix delimiter (which a LastIndexOf('-')
+        // strategy would). Smoke-driven regression from commit a17ee9c.
+        AssertEqual(-26786, TacticalBattleCoordinator.ParseInstanceIdFromChildId("child--26786"));
+    }
+
+    private static void ParseInstanceIdSynthArmyPositive()
+    {
+        AssertEqual(98765, TacticalBattleCoordinator.ParseInstanceIdFromChildId("synth-army-98765"));
+    }
+
+    private static void ParseInstanceIdSynthArmyNegative()
+    {
+        // Same negative-id contract as child--{id}: the prefix is "synth-army-" and
+        // the suffix retains its leading sign.
+        AssertEqual(-26350, TacticalBattleCoordinator.ParseInstanceIdFromChildId("synth-army--26350"));
     }
 
     private static void DirectChildGateNegativeTargetSectorCoercesToPrimary()

@@ -105,14 +105,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildGateDecision DecideAxis(Input input)
         {
-            // Main / SupportMain "on-axis" = intended target is on the wedge from the group
-            // toward the nearest enemy (within ±60°). Both bearings are relative to the group,
-            // so the comparison captures "is this group pressing toward the enemy" rather than
-            // "do two world positions happen to align angularly from world origin."
-            float deltaToTarget = AbsAngleDelta(input.IntendedTargetBearingFromGroupRadians, input.NearestEnemyBearingFromGroupRadians);
-            return deltaToTarget <= OnAxisToleranceRadians
-                ? new DirectChildGateDecision(true, "on-axis", input.Role)
-                : new DirectChildGateDecision(false, "off-axis", input.Role);
+            // Main / SupportMain "on-axis" = the intended target sector is either the
+            // orchestrator-allocated main-effort axis sector OR the child's own primary
+            // sector. The first arm covers Main child movement toward the army's axis;
+            // the second arm gives SupportMain children freedom to reinforce their own
+            // frontage instead of being forced into the AxisSector lane. When a position-→
+            // sector resolver isn't wired, ResolveTargetSector returns -1 and the Input
+            // ctor coerces IntendedTargetSector to PrimarySector — so the second arm
+            // always matches and SupportMain reinforcement degrades to "always allow."
+            // That's correct for the placeholder; the deny path tightens once the
+            // resolver lands.
+            if (input.IntendedTargetSector == input.AxisSector || input.IntendedTargetSector == input.PrimarySector)
+                return new DirectChildGateDecision(true, "on-axis", input.Role);
+            return new DirectChildGateDecision(false, "off-axis", input.Role);
         }
 
         private static DirectChildGateDecision DecideFix(Input input)

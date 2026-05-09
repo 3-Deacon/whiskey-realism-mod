@@ -478,24 +478,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        // Parse the trailing integer instanceId from "child-{id}" or "synth-army-{id}".
-        // Unity GameObject InstanceIDs are routinely negative, so we strip the known
-        // prefix (not the last dash) to keep the leading sign intact.
-        // Returns 0 on parse failure (which never matches a real GameObject InstanceID).
-        private const string ChildIdPrefix = "child-";
-        private const string SynthArmyIdPrefix = "synth-army-";
-        private static int ParseInstanceIdFromChildId(string childId)
-        {
-            if (string.IsNullOrEmpty(childId)) return 0;
-            string suffix;
-            if (childId.StartsWith(SynthArmyIdPrefix, StringComparison.Ordinal))
-                suffix = childId.Substring(SynthArmyIdPrefix.Length);
-            else if (childId.StartsWith(ChildIdPrefix, StringComparison.Ordinal))
-                suffix = childId.Substring(ChildIdPrefix.Length);
-            else
-                return 0;
-            return int.TryParse(suffix, out int id) ? id : 0;
-        }
+        // ParseInstanceIdFromChildId moved to the test-included partial
+        // TacticalBattleCoordinator.cs so the harness can lock the negative-id parse
+        // contract. Both partials see it via the shared `partial class` declaration.
 
         // Walk BattleUnits.completeunitlist with the same filter ArmyEvidenceBuilder uses
         // (alliance match + unittyp > 13 + not routed) and record each command-level group's
