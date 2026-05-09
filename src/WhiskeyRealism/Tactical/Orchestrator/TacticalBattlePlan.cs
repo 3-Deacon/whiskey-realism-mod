@@ -60,8 +60,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public BattlePlanId PlanId { get; }
         public BattlePhase Phase { get; }
         public int MainEffortSector { get; }
+
+        /// <summary>
+        /// Sector ids assigned the fixing role. Treat as read-only; the orchestrator
+        /// reuses this reference across <see cref="WithPhase"/> / <see cref="WithAge"/>
+        /// instances, so mutating contents corrupts older plan snapshots.
+        /// </summary>
         public int[] FixingSectors { get; }
+
+        /// <summary>
+        /// Sector ids assigned the screening role. Treat as read-only; the orchestrator
+        /// reuses this reference across <see cref="WithPhase"/> / <see cref="WithAge"/>
+        /// instances, so mutating contents corrupts older plan snapshots.
+        /// </summary>
         public int[] ScreeningSectors { get; }
+
         public float ReserveCommitTriggerOdds { get; }
         public float AgeSeconds { get; }
         public int JitterSeed { get; }

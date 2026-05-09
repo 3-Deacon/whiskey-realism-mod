@@ -543,6 +543,9 @@ static class Program
             ("tactical battle plan with phase advances and resets age", TacticalBattlePlanWithPhaseAdvancesAndResetsAge),
             ("tactical battle plan with age changes age only", TacticalBattlePlanWithAgeChangesAgeOnly),
             ("army intent carries plan id phase and aggression bias", ArmyIntentCarriesPlanIdPhaseAndAggressionBias),
+            ("tactical battle plan sanitizes NaN and Infinity floats", TacticalBattlePlanSanitizesNanAndInfinityFloats),
+            ("army intent sanitizes NaN and Infinity floats", ArmyIntentSanitizesNanAndInfinityFloats),
+            ("army intent clamps aggression bias out of range", ArmyIntentClampsAggressionBiasOutOfRange),
             ("tactical sector ledger clear help requests empties state", TacticalSectorLedgerClearHelpRequestsEmptiesState),
             ("tactical morale snapshot ledger clear empties state", TacticalMoraleSnapshotLedgerClearEmptiesState),
             ("tactical battle coordinator starts inactive", TacticalBattleCoordinatorStartsInactive),
@@ -10615,5 +10618,46 @@ static class Program
         AssertEqual(BattlePhase.MainEffort, intent.Phase, "phase");
         AssertEqual(1, intent.MainEffortSector, "main effort sector");
         AssertNear(0.65f, intent.AggressionBias01, 1e-5f, "aggression bias");
+    }
+
+    private static void TacticalBattlePlanSanitizesNanAndInfinityFloats()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.GenericMethodical,
+            BattlePhase.Probe,
+            mainEffortSector: 0,
+            fixingSectors: null,
+            screeningSectors: null,
+            reserveCommitTriggerOdds: float.NaN,
+            ageSeconds: float.PositiveInfinity,
+            jitterSeed: 0);
+        AssertNear(0f, plan.ReserveCommitTriggerOdds, 1e-5f, "NaN reserveOdds sanitized to 0");
+        AssertNear(0f, plan.AgeSeconds, 1e-5f, "Infinity ageSeconds sanitized then clamped to 0");
+        AssertEqual(0, plan.FixingSectors.Length, "null fixingSectors coalesced to empty");
+        AssertEqual(0, plan.ScreeningSectors.Length, "null screeningSectors coalesced to empty");
+    }
+
+    private static void ArmyIntentSanitizesNanAndInfinityFloats()
+    {
+        var intent = new ArmyIntent(
+            BattlePlanId.GenericMethodical,
+            BattlePhase.Probe,
+            mainEffortSector: 0,
+            fixingSectors: null,
+            screeningSectors: null,
+            reserveCommitTriggerOdds: float.PositiveInfinity,
+            aggressionBias01: float.NaN);
+        AssertNear(0f, intent.ReserveCommitTriggerOdds, 1e-5f, "Infinity reserveOdds sanitized to 0");
+        AssertNear(0.5f, intent.AggressionBias01, 1e-5f, "NaN aggressionBias coerced to 0.5");
+        AssertEqual(0, intent.FixingSectors.Length, "null fixingSectors coalesced to empty");
+        AssertEqual(0, intent.ScreeningSectors.Length, "null screeningSectors coalesced to empty");
+    }
+
+    private static void ArmyIntentClampsAggressionBiasOutOfRange()
+    {
+        var below = new ArmyIntent(BattlePlanId.GenericMethodical, BattlePhase.Probe, 0, null, null, 1.0f, -2.0f);
+        var above = new ArmyIntent(BattlePlanId.GenericMethodical, BattlePhase.Probe, 0, null, null, 1.0f, 5.0f);
+        AssertNear(0f, below.AggressionBias01, 1e-5f, "below 0 clamped to 0");
+        AssertNear(1f, above.AggressionBias01, 1e-5f, "above 1 clamped to 1");
     }
 }

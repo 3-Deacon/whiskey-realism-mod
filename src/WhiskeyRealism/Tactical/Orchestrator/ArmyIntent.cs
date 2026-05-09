@@ -23,17 +23,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             MainEffortSector = mainEffortSector;
             FixingSectors = fixingSectors ?? Array.Empty<int>();
             ScreeningSectors = screeningSectors ?? Array.Empty<int>();
-            ReserveCommitTriggerOdds = float.IsNaN(reserveCommitTriggerOdds) ? 1.0f : reserveCommitTriggerOdds;
+            ReserveCommitTriggerOdds = Sanitize(reserveCommitTriggerOdds);
             AggressionBias01 = Clamp01(aggressionBias01);
         }
 
         public BattlePlanId PlanId { get; }
         public BattlePhase Phase { get; }
         public int MainEffortSector { get; }
+
+        /// <summary>
+        /// Sector ids assigned the fixing role. Treat as read-only; the orchestrator
+        /// reuses this reference across cascaded intent instances, so mutating contents
+        /// corrupts older intent snapshots.
+        /// </summary>
         public int[] FixingSectors { get; }
+
+        /// <summary>
+        /// Sector ids assigned the screening role. Treat as read-only; the orchestrator
+        /// reuses this reference across cascaded intent instances, so mutating contents
+        /// corrupts older intent snapshots.
+        /// </summary>
         public int[] ScreeningSectors { get; }
+
         public float ReserveCommitTriggerOdds { get; }
         public float AggressionBias01 { get; }
+
+        private static float Sanitize(float v)
+        {
+            if (float.IsNaN(v) || float.IsInfinity(v)) return 0f;
+            return v;
+        }
 
         private static float Clamp01(float v)
         {
