@@ -581,7 +581,12 @@ static class Program
             ("historical playbook selection hooker in open at favorable odds selects flank departure", HistoricalPlaybookSelectionHookerInOpenAtFavorableOddsSelectsFlankDeparture),
             ("historical playbook selection hood low odds high aggression selects frontal assault", HistoricalPlaybookSelectionHoodLowOddsHighAggressionSelectsFrontalAssault),
             ("historical playbook selection burnside low caution low audacity selects forced assault", HistoricalPlaybookSelectionBurnsideLowCautionLowAudacitySelectsForcedAssault),
-            ("historical playbook selection bragg mid odds low audacity selects indecisive commit", HistoricalPlaybookSelectionBraggMidOddsLowAudacitySelectsIndecisiveCommit)
+            ("historical playbook selection bragg mid odds low audacity selects indecisive commit", HistoricalPlaybookSelectionBraggMidOddsLowAudacitySelectsIndecisiveCommit),
+            ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
+            ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
+            ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
+            ("army orchestrator current macroai defend on consolidate with cautious personality", ArmyOrchestratorCurrentMacroAiDefendOnConsolidateWithCautiousPersonality),
+            ("army orchestrator emit army intent matches current plan", ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan)
         };
 
         foreach (var test in tests)
@@ -11015,5 +11020,54 @@ static class Program
         var bragg = new PersonalityVector(0.5f, 0.3f, -0.4f, 0.4f, 0.4f);
         var ctx = new PlaybookContext(bragg, TerrainKind.Wooded, currentOdds: 1.1f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 5254);
         AssertEqual(BattlePlanId.BraggIndecisiveCommit, cat.Select(ctx).Id, "Bragg personality at mid-odds selects bragg-indecisive-commit");
+    }
+
+    // ---- Army orchestrator tests (O1.7) ----
+
+    private static void ArmyOrchestratorNewHasNoPlanUntilPicked()
+    {
+        var orch = new ArmyOrchestrator(allianceId: 0, catalog: SeedCatalog.AllHistoricalAndGeneric(), commanderPersonality: default);
+        AssertFalse(orch.HasPlan, "new orchestrator has no plan");
+        AssertEqual(-1, orch.CurrentMacroAi, "no plan -> CurrentMacroAi = -1 (dynamic)");
+    }
+
+    private static void ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(currentOdds: 1.1f, terrain: TerrainKind.Wooded, defaultMainEffortSector: 0));
+        AssertTrue(orch.HasPlan, "plan picked");
+        AssertEqual(BattlePlanId.LeeEnvelopment, orch.CurrentPlan.PlanId, "Lee personality + wooded + 1.1 odds picks lee-envelopment");
+        AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase, "initial phase is Probe");
+    }
+
+    private static void ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.2f, TerrainKind.Open, 0));
+        orch.AdvancePhase(BattlePhase.MainEffort);
+        AssertEqual(1, orch.CurrentMacroAi, "MainEffort + aggressive personality -> macroai 1 (attack)");
+    }
+
+    private static void ArmyOrchestratorCurrentMacroAiDefendOnConsolidateWithCautiousPersonality()
+    {
+        var mcc = new PersonalityVector(-0.6f, 0.8f, -0.7f, 0.7f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), mcc);
+        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
+        orch.AdvancePhase(BattlePhase.Consolidate);
+        AssertEqual(2, orch.CurrentMacroAi, "Consolidate phase -> macroai 2 (defend)");
+    }
+
+    private static void ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan()
+    {
+        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 2));
+        var intent = orch.EmitArmyIntent();
+        AssertEqual(BattlePlanId.LeeEnvelopment, intent.PlanId, "intent plan id matches");
+        AssertEqual(BattlePhase.Probe, intent.Phase, "intent phase matches");
+        AssertEqual(2, intent.MainEffortSector, "intent main effort matches plan");
+        AssertTrue(intent.AggressionBias01 > 0.5f, "intent aggression bias positive for aggressive CO");
     }
 }
