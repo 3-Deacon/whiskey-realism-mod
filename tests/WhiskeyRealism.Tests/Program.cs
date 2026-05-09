@@ -12413,8 +12413,7 @@ static class Program
         var input = new TacticalDirectChildGate.Input(
             gateEnabled: false, sideIsAi: true,
             role: DirectChildRole.Reserve, axisSector: 2, primarySector: 2,
-            groupBearingFromOriginRadians: 0f,
-            intendedTargetBearingFromOriginRadians: (float)Math.PI,
+            intendedTargetBearingFromGroupRadians: (float)Math.PI,
             intendedTargetDistanceFromGroup: 100f,
             nearestEnemyBearingFromGroupRadians: (float)Math.PI,
             feudMaxDistance: 2000f);
@@ -12427,7 +12426,7 @@ static class Program
     {
         var input = new TacticalDirectChildGate.Input(
             true, false, DirectChildRole.Reserve, 2, 2,
-            0f, (float)Math.PI, 100f, 0f, 2000f);
+            (float)Math.PI, 100f, 0f, 2000f);
         var d = TacticalDirectChildGate.Decide(input);
         AssertTrue(d.Allow, "player side allows");
         AssertContains(d.Reason, "player-side", "reason mentions player-side");
@@ -12437,7 +12436,7 @@ static class Program
     {
         var input = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Unknown, 2, 2,
-            0f, (float)Math.PI, 100f, 0f, 2000f);
+            (float)Math.PI, 100f, 0f, 2000f);
         var d = TacticalDirectChildGate.Decide(input);
         AssertTrue(d.Allow, "Unknown role yields no opinion");
         AssertContains(d.Reason, "role-unknown", "reason mentions role-unknown");
@@ -12447,7 +12446,7 @@ static class Program
     {
         var input = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Reserve, 2, 2,
-            0f, 0f, 100f, 0f, 2000f);
+            0f, 100f, 0f, 2000f);
         var d = TacticalDirectChildGate.Decide(input);
         AssertTrue(!d.Allow, "Reserve denies movement");
         AssertContains(d.Reason, "reserve-not-committed", "reason");
@@ -12455,22 +12454,20 @@ static class Program
 
     private static void DirectChildGateMainAllowsOnAxisDeniesOffAxis()
     {
-        // axis sector 2, group at sector 2 facing east (axis bearing = 0).
-        // intended target ENE (within ±60° of axis) — allow.
+        // Enemy bearing east (0). Intended target ENE (~28° off enemy direction) — allow.
         var inputAllow = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Main, axisSector: 2, primarySector: 2,
-            groupBearingFromOriginRadians: 0f,
-            intendedTargetBearingFromOriginRadians: 0.5f, // ~28° off axis
+            intendedTargetBearingFromGroupRadians: 0.5f,
             intendedTargetDistanceFromGroup: 500f,
             nearestEnemyBearingFromGroupRadians: 0f,
             feudMaxDistance: 2000f);
         var dAllow = TacticalDirectChildGate.Decide(inputAllow);
-        AssertTrue(dAllow.Allow, "Main allows movement within ±60° of axis");
+        AssertTrue(dAllow.Allow, "Main allows movement within ±60° of nearest-enemy bearing");
 
-        // intended target due south (~90° off axis) — deny.
+        // Intended target due south (~90° off enemy direction) — deny.
         var inputDeny = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Main, 2, 2,
-            0f, (float)(-Math.PI / 2.0), 500f, 0f, 2000f);
+            (float)(-Math.PI / 2.0), 500f, 0f, 2000f);
         var dDeny = TacticalDirectChildGate.Decide(inputDeny);
         AssertTrue(!dDeny.Allow, "Main denies wide-off-axis movement");
         AssertContains(dDeny.Reason, "off-axis", "reason mentions off-axis");
@@ -12480,7 +12477,7 @@ static class Program
     {
         var inputAllow = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Fix, 2, 2,
-            0f, 0f,
+            0f,
             intendedTargetDistanceFromGroup: 1000f, // < 0.7 * feudMax
             nearestEnemyBearingFromGroupRadians: 0f,
             feudMaxDistance: 2000f);
@@ -12488,7 +12485,7 @@ static class Program
         AssertTrue(dAllow.Allow, "Fix allows short pressure movement");
         var inputDeny = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Fix, 2, 2,
-            0f, 0f,
+            0f,
             intendedTargetDistanceFromGroup: 1900f, // > 0.7 * feudMax
             nearestEnemyBearingFromGroupRadians: 0f,
             feudMaxDistance: 2000f);
@@ -12501,7 +12498,7 @@ static class Program
     {
         var inputAllow = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Screen, axisSector: 0, primarySector: 4,
-            0f, 0f, 500f, 0f, 2000f);
+            0f, 500f, 0f, 2000f);
         inputAllow = inputAllow.WithIntendedTargetSector(4);
         var dAllow = TacticalDirectChildGate.Decide(inputAllow);
         AssertTrue(dAllow.Allow, "Screen allows in-sector");
@@ -12516,8 +12513,7 @@ static class Program
         // Enemy is north (bearing PI/2). Withdrawal is south.
         var inputAllow = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Fallback, 0, 0,
-            0f,
-            intendedTargetBearingFromOriginRadians: (float)(-Math.PI / 2.0), // south
+            intendedTargetBearingFromGroupRadians: (float)(-Math.PI / 2.0), // south
             intendedTargetDistanceFromGroup: 500f,
             nearestEnemyBearingFromGroupRadians: (float)(Math.PI / 2.0),     // north
             feudMaxDistance: 2000f);
@@ -12526,8 +12522,7 @@ static class Program
 
         var inputDeny = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.Fallback, 0, 0,
-            0f,
-            intendedTargetBearingFromOriginRadians: (float)(Math.PI / 2.0),  // toward enemy
+            intendedTargetBearingFromGroupRadians: (float)(Math.PI / 2.0),  // toward enemy
             intendedTargetDistanceFromGroup: 500f,
             nearestEnemyBearingFromGroupRadians: (float)(Math.PI / 2.0),
             feudMaxDistance: 2000f);
@@ -12540,7 +12535,7 @@ static class Program
     {
         var inputAllow = new TacticalDirectChildGate.Input(
             true, true, DirectChildRole.RefuseLeft, axisSector: 0, primarySector: 0,
-            0f, 0f, 500f, 0f, 2000f).WithIntendedTargetSector(0);
+            0f, 500f, 0f, 2000f).WithIntendedTargetSector(0);
         var dAllow = TacticalDirectChildGate.Decide(inputAllow);
         AssertTrue(dAllow.Allow, "RefuseLeft allows in flank sector");
         var inputDeny = inputAllow.WithIntendedTargetSector(3);
@@ -12557,8 +12552,7 @@ static class Program
         var input = new TacticalDirectChildGate.Input(
             gateEnabled: true, sideIsAi: true,
             role: DirectChildRole.Screen, axisSector: 0, primarySector: 3,
-            groupBearingFromOriginRadians: 0f,
-            intendedTargetBearingFromOriginRadians: 0f,
+            intendedTargetBearingFromGroupRadians: 0f,
             intendedTargetDistanceFromGroup: 100f,
             nearestEnemyBearingFromGroupRadians: 0f,
             feudMaxDistance: 2000f,
@@ -12570,8 +12564,7 @@ static class Program
         var refuseInput = new TacticalDirectChildGate.Input(
             gateEnabled: true, sideIsAi: true,
             role: DirectChildRole.RefuseLeft, axisSector: 0, primarySector: 5,
-            groupBearingFromOriginRadians: 0f,
-            intendedTargetBearingFromOriginRadians: 0f,
+            intendedTargetBearingFromGroupRadians: 0f,
             intendedTargetDistanceFromGroup: 100f,
             nearestEnemyBearingFromGroupRadians: 0f,
             feudMaxDistance: 2000f,

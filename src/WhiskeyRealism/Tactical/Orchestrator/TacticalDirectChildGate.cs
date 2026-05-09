@@ -27,14 +27,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public readonly struct Input
         {
+            // All bearings are radians measured from the GROUP's position toward another point.
+            // intendedTargetBearingFromGroupRadians = Atan2(target.z - group.z, target.x - group.x).
+            // nearestEnemyBearingFromGroupRadians   = Atan2(enemy.z  - group.z, enemy.x  - group.x).
+            // Both are in the same frame so DecideAxis / DecideFallback compare like-with-like.
             public Input(
                 bool gateEnabled,
                 bool sideIsAi,
                 DirectChildRole role,
                 int axisSector,
                 int primarySector,
-                float groupBearingFromOriginRadians,
-                float intendedTargetBearingFromOriginRadians,
+                float intendedTargetBearingFromGroupRadians,
                 float intendedTargetDistanceFromGroup,
                 float nearestEnemyBearingFromGroupRadians,
                 float feudMaxDistance,
@@ -45,8 +48,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 Role = role;
                 AxisSector = axisSector;
                 PrimarySector = primarySector;
-                GroupBearingFromOriginRadians = groupBearingFromOriginRadians;
-                IntendedTargetBearingFromOriginRadians = intendedTargetBearingFromOriginRadians;
+                IntendedTargetBearingFromGroupRadians = intendedTargetBearingFromGroupRadians;
                 IntendedTargetDistanceFromGroup = intendedTargetDistanceFromGroup;
                 NearestEnemyBearingFromGroupRadians = nearestEnemyBearingFromGroupRadians;
                 FeudMaxDistance = feudMaxDistance;
@@ -58,8 +60,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public DirectChildRole Role { get; }
             public int AxisSector { get; }
             public int PrimarySector { get; }
-            public float GroupBearingFromOriginRadians { get; }
-            public float IntendedTargetBearingFromOriginRadians { get; }
+            public float IntendedTargetBearingFromGroupRadians { get; }
             public float IntendedTargetDistanceFromGroup { get; }
             public float NearestEnemyBearingFromGroupRadians { get; }
             public float FeudMaxDistance { get; }
@@ -67,7 +68,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             public Input WithIntendedTargetSector(int sector) => new Input(
                 GateEnabled, SideIsAi, Role, AxisSector, PrimarySector,
-                GroupBearingFromOriginRadians, IntendedTargetBearingFromOriginRadians,
+                IntendedTargetBearingFromGroupRadians,
                 IntendedTargetDistanceFromGroup, NearestEnemyBearingFromGroupRadians,
                 FeudMaxDistance, sector);
         }
@@ -104,7 +105,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildGateDecision DecideAxis(Input input)
         {
-            float deltaToTarget = AbsAngleDelta(input.IntendedTargetBearingFromOriginRadians, input.GroupBearingFromOriginRadians);
+            // Main / SupportMain "on-axis" = intended target is on the wedge from the group
+            // toward the nearest enemy (within ±60°). Both bearings are relative to the group,
+            // so the comparison captures "is this group pressing toward the enemy" rather than
+            // "do two world positions happen to align angularly from world origin."
+            float deltaToTarget = AbsAngleDelta(input.IntendedTargetBearingFromGroupRadians, input.NearestEnemyBearingFromGroupRadians);
             return deltaToTarget <= OnAxisToleranceRadians
                 ? new DirectChildGateDecision(true, "on-axis", input.Role)
                 : new DirectChildGateDecision(false, "off-axis", input.Role);
@@ -127,9 +132,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildGateDecision DecideFallback(Input input)
         {
-            // Allow when intended bearing is within ±90° of the *opposite* of the enemy bearing.
+            // Allow when the intended bearing (relative to the group) is within ±90° of the
+            // direction opposite the nearest enemy (also relative to the group). Same coordinate
+            // frame on both sides; the away-half-plane is the geometrically correct withdraw arc.
             float awayBearing = WrapPi(input.NearestEnemyBearingFromGroupRadians + (float)Math.PI);
-            float delta = AbsAngleDelta(input.IntendedTargetBearingFromOriginRadians, awayBearing);
+            float delta = AbsAngleDelta(input.IntendedTargetBearingFromGroupRadians, awayBearing);
             return delta <= FallbackAwayToleranceRadians
                 ? new DirectChildGateDecision(true, "withdraw-bearing", input.Role)
                 : new DirectChildGateDecision(false, "fallback-not-withdraw", input.Role);
