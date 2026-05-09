@@ -656,6 +656,9 @@ static class Program
             ("direct child discovery probe handles negative command hierarchy shift", DirectChildDiscoveryProbeHandlesNegativeCommandHierarchyShift),
             ("direct child discovery probe synthesizes when zero direct children", DirectChildDiscoveryProbeSynthesizesWhenZeroDirectChildren),
             ("direct child discovery probe iterates each army root for multi army side", DirectChildDiscoveryProbeIteratesEachArmyRootForMultiArmySide),
+            ("direct child evidence builder buckets strength using 0.5 ratio", DirectChildEvidenceBuilderBucketsStrengthUsing05Ratio),
+            ("direct child evidence builder propagates contact flag", DirectChildEvidenceBuilderPropagatesContactFlag),
+            ("direct child evidence builder zero own when sector missing", DirectChildEvidenceBuilderZeroOwnWhenSectorMissing),
         };
 
         foreach (var test in tests)
@@ -12313,5 +12316,65 @@ static class Program
         AssertEqual(2, snaps.Count);
         AssertEqual("army-100", snaps[0].ParentArmyId);
         AssertEqual("army-200", snaps[1].ParentArmyId);
+    }
+
+    private static void DirectChildEvidenceBuilderBucketsStrengthUsing05Ratio()
+    {
+        // NOTE: plan's verbatim test asserted OwnStrengthBucket=1 with comment "ratio 0.6 → bucket 1",
+        // but the verbatim bucket spec (and self-review checklist) state 1500 ≤ s < 3000 → 2.
+        // Spec/checklist take precedence over the test author's stale ratio-bucket comment;
+        // expectations adjusted to match the canonical strength-bucket scheme.
+        var enemy = new EnemyVisibleState(
+            new[]
+            {
+                new EnemyVisibleSector(0,  100f,  100f, false),
+                new EnemyVisibleSector(1, 1500f, 2500f, false), // own 1500 → bucket 2, enemy 2500 → bucket 2
+            },
+            enemyReserveCommitFraction: 0.4f,
+            anyContactSpotted: false,
+            anyContactBroken: false,
+            enemyReinforcementStrength24h: 0f);
+
+        var evidence = DirectChildEvidenceBuilder.BuildAll(
+            snapshots: new[]
+            {
+                new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            },
+            primarySectorPerSnapshot: new[] { 1 },
+            flankExposureBucketPerSnapshot: new[] { 0 },
+            enemy);
+
+        AssertEqual(1, evidence.Count);
+        AssertEqual(1, evidence[0].PrimarySector);
+        AssertEqual(2, evidence[0].OwnStrengthBucket);
+        AssertEqual(2, evidence[0].EnemyStrengthBucket);
+    }
+
+    private static void DirectChildEvidenceBuilderPropagatesContactFlag()
+    {
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(2, 500f, 500f, recentFire: true) },
+            0.3f, true, false, 0f);
+        var evidence = DirectChildEvidenceBuilder.BuildAll(
+            new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) },
+            new[] { 2 },
+            new[] { 0 },
+            enemy);
+        AssertTrue(evidence[0].ContactFlag, "recent fire propagates as ContactFlag");
+    }
+
+    private static void DirectChildEvidenceBuilderZeroOwnWhenSectorMissing()
+    {
+        var enemy = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 1000f, 0f, false) },
+            0f, false, false, 0f);
+        var evidence = DirectChildEvidenceBuilder.BuildAll(
+            new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) },
+            new[] { 99 /* sector not present in EnemyVisibleState */ },
+            new[] { 0 },
+            enemy);
+        AssertEqual(0, evidence[0].OwnStrengthBucket);
+        AssertEqual(0, evidence[0].EnemyStrengthBucket);
+        AssertTrue(!evidence[0].ContactFlag, "missing sector → no contact");
     }
 }
