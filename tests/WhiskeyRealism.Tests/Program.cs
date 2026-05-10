@@ -57,6 +57,8 @@ static class Program
             ("tactical terrain missing visible enemy rejects when required", TacticalTerrainMissingVisibleEnemyRejectsWhenRequired),
             ("tactical terrain rejects nonfinite vanilla baseline", TacticalTerrainRejectsNonfiniteVanillaBaseline),
             ("tactical terrain rejects nonfinite candidate", TacticalTerrainRejectsNonfiniteCandidate),
+            ("tactical terrain normalizes large positive angles", TacticalTerrainNormalizesLargePositiveAngles),
+            ("tactical terrain normalizes large negative angles", TacticalTerrainNormalizesLargeNegativeAngles),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -1241,6 +1243,34 @@ static class Program
         AssertEqual(TacticalTerrainDecisionReason.NonFiniteCandidate, reason, "nonfinite candidate rejection");
         AssertFalse(decision.Accepted, "nonfinite candidate should not be accepted");
         AssertNear(45f, decision.Candidate.FacingDegrees, 0.01f, "vanilla facing preserved");
+    }
+
+    private static void TacticalTerrainNormalizesLargePositiveAngles()
+    {
+        var enemy = new TacticalEnemyBearingEvidence(true, float.MaxValue, 600f, 1200f);
+        var candidate = TerrainCandidate(100f, 100f, float.MaxValue);
+        float delta = TacticalTerrainFacingDiscipline.AngleDelta(float.MaxValue, 90f);
+
+        AssertFinite(enemy.BearingDegrees, "large positive enemy bearing");
+        AssertTrue(enemy.BearingDegrees >= 0f && enemy.BearingDegrees < 360f, "large positive enemy bearing range");
+        AssertFinite(candidate.FacingDegrees, "large positive candidate facing");
+        AssertTrue(candidate.FacingDegrees >= 0f && candidate.FacingDegrees < 360f, "large positive candidate facing range");
+        AssertFinite(delta, "large positive angle delta");
+        AssertTrue(delta >= 0f && delta <= 180f, "large positive angle delta range");
+    }
+
+    private static void TacticalTerrainNormalizesLargeNegativeAngles()
+    {
+        var enemy = new TacticalEnemyBearingEvidence(true, -float.MaxValue, 600f, 1200f);
+        var candidate = TerrainCandidate(100f, 100f, -float.MaxValue);
+        float delta = TacticalTerrainFacingDiscipline.AngleDelta(-float.MaxValue, 90f);
+
+        AssertFinite(enemy.BearingDegrees, "large negative enemy bearing");
+        AssertTrue(enemy.BearingDegrees >= 0f && enemy.BearingDegrees < 360f, "large negative enemy bearing range");
+        AssertFinite(candidate.FacingDegrees, "large negative candidate facing");
+        AssertTrue(candidate.FacingDegrees >= 0f && candidate.FacingDegrees < 360f, "large negative candidate facing range");
+        AssertFinite(delta, "large negative angle delta");
+        AssertTrue(delta >= 0f && delta <= 180f, "large negative angle delta range");
     }
 
 

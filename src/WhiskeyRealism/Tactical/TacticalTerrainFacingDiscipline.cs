@@ -91,9 +91,9 @@ namespace WhiskeyRealism.Tactical
         internal static float NormalizeAngle(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
-            while (value < 0f) value += 360f;
-            while (value >= 360f) value -= 360f;
-            return value;
+            double normalized = (double)value % 360d;
+            if (normalized < 0d) normalized += 360d;
+            return (float)normalized;
         }
     }
 
