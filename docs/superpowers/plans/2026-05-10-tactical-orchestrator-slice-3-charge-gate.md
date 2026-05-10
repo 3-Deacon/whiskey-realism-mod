@@ -1,5 +1,7 @@
 # Tactical Orchestrator Slice 3 Charge Gate Implementation Plan
 
+Status: implemented on branch `orchestrator-slice-3-charge-gate`; console harness passed; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; worktree `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `ac77b132594e71e8b74c0aa81222fa45f1936f4852467d1489a4841af8fc1b25` (810496 bytes). Focused gate-OFF/gate-ON in-game smoke is still pending because the current `LogOutput.log` predates the deploy. Living status now lives in [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make vanilla charge initiation respect the current command-node role so Main-role commands can charge under favorable conditions while Fix, Reserve, Fallback, Refuse, and Screen roles preserve cohesion.

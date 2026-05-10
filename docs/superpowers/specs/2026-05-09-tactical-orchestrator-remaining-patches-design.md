@@ -1,10 +1,19 @@
 # Tactical Orchestrator — Remaining Patches Design
 
-Status: active design spec. Replaces the obsolete `2026-05-08-tactical-battle-orchestrator-design.md` umbrella and supersedes the first 2026-05-09 "flat direct-child forever" version of this spec.
+Status: active design spec for remaining tactical-orchestrator behavior consumers. Living implementation status is in [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md). This spec replaces the obsolete `2026-05-08-tactical-battle-orchestrator-design.md` umbrella and supersedes the first 2026-05-09 "flat direct-child forever" version of this spec.
 
 The shipped architecture is still `TacticalBattleOrchestrator` → `ArmyOrchestrator` with O3 `DirectChildIntent` role allocation. A 2026-05-09 decompile refresh confirmed that Grand Tactician has enough vanilla hierarchy and order-delay machinery to support a Scourge-inspired command tree, but not Scourge-style per-officer AI callbacks. The new target is therefore a **dynamic command-node hierarchy** built from vanilla `Regiment` command groups (`unittyp > 13`, `parentregiment`, `allattachedunits`, `GetAttachedUnitsReg(directonly: true)`, and `BattleUnits.GetHierarchyTree`) while all behavior writes still happen through vanilla `AIBattle` decision surfaces.
 
 There are still no hard-coded `CorpsOrchestrator`, `DivisionOrchestrator`, or `BrigadeOrchestrator` classes. Corps/division/brigade are runtime properties of vanilla command nodes, not separate mod-side class towers.
+
+## Current implementation status
+
+This spec is not the deployment ledger. The current ledger is [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md). As of 2026-05-10:
+
+- Slice 0 command-node tree is shipped on `main` and smoke-confirmed.
+- Slice 1 reserve commitment gate is shipped on `main`, build/deploy/hash verified, and focused battle smoke is pending.
+- Slice 3 charge gate is implemented on `orchestrator-slice-3-charge-gate`, build/deploy/hash verified, and focused battle smoke is pending before merge/release claims.
+- Slice 2 brigade stance, Slice 4 line fallback, and Slice 5 artillery priority remain unimplemented command-role consumers.
 
 ## What's already shipped on `main` (no work needed)
 
@@ -13,8 +22,10 @@ There are still no hard-coded `CorpsOrchestrator`, `DivisionOrchestrator`, or `B
 - **O2 intent inference + adversarial loop** — `TacticalIntentModel`, `EnemyVisibleState`, `ArmyIntentInference`, `ArmyTickCycle`, replan-trigger evaluator. Each side reacts to the other.
 - **O3 direct-child enrichment + #42 gate** — `DirectChildIntent`, `DirectChildAllocator` (Main / SupportMain / Fix / Screen / Reserve / Refuse / Fallback role assignment), alliance-keyed direct-child discovery from `BattleUnits.completeunitlist`, `TacticalDirectChildGate` consulted by #42 between the W&L decision and `bunits.SetWaypoint`. Default-off behind `Enable Tactical Orchestrator Direct-Child Gate`. This is the shipped substrate, not the final hierarchy model.
 - **#58 deployment observer** — `TacticalDeploymentObserverPatch`, `TacticalDeploymentTelemetry`. Read-only telemetry of vanilla deployment surfaces.
+- **Slice 0 command-node tree** — generic runtime command-node snapshots and intent resolver from vanilla `Regiment` hierarchy. Read-only; smoke-confirmed.
+- **Slice 1 reserve commitment gate** — #59 `BattleReserveCommitGatePatch` plus #57 reserve-list command-role skip. Default-off; build/deploy/hash verified on `main`, focused smoke pending.
 
-The O3 role map is the current read model. The next slice generalizes it into a hierarchy of generic `CommandNode` records so intent can flow Army → direct children → deeper command groups when vanilla exposes them. The vanilla method that decides each below-army surface (reserves, stance, charge, fallback, artillery) remains the integration point.
+The command-node tree is now the current read model. The vanilla method that decides each below-army surface (reserves, stance, charge, fallback, artillery) remains the integration point.
 
 ## Decompile-backed design correction
 
@@ -83,11 +94,13 @@ The `childId` lookup uses `"child-" + group.gameObject.GetInstanceID()` first, f
 
 No hard-coded echelon class proliferation. The generic command tree is orchestrator state; behavior patches are read-only consumers. Each patch still owns one vanilla surface.
 
-## Remaining slices
+## Slice status and remaining work
 
-Each slice below is independently shippable. Listed in priority order; can be reordered by user preference.
+Each slice below is independently shippable. Slice 0 and Slice 1 have shipped to `main`; Slice 3 is implemented on its branch; Slice 2/4/5 remain.
 
 ### Slice 0 — Dynamic command-node tree
+
+**Status:** shipped on `main`; runtime `[TacticalCommandTree]` smoke confirmed both AI sides. Living proof is in [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md).
 
 **Vanilla anchors:**
 - `BattleUnits.completeunitlist` — vanilla battle regiment inventory populated from the battle scene.
@@ -114,6 +127,8 @@ Each slice below is independently shippable. Listed in priority order; can be re
 
 ### Slice 1 — Reserve commitment
 
+**Status:** shipped on `main`; console/build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending.
+
 **Vanilla anchors:**
 - `AIBattle.CheckUseOfReserves()` `:6062` — moves a reserve via `RegimentSetPath(...)` at `:6170`.
 - `AIBattle.AssignReserves()` `:7017` — mutates `ObjectiveChain.reservegroups`.
@@ -137,6 +152,8 @@ Each slice below is independently shippable. Listed in priority order; can be re
 
 ### Slice 2 — Brigade stance under contact
 
+**Status:** not implemented. This was intentionally skipped for the Slice 3 branch.
+
 **Vanilla anchor:** `AIBattle.AdjustGroupAIStance()` `:4221` writes group stance via `bunits.ChangeStance(...)` at `:4272`.
 
 **Role consumption (per resolved command-node intent):**
@@ -157,6 +174,8 @@ Each slice below is independently shippable. Listed in priority order; can be re
 
 ### Slice 3 — Charge gate
 
+**Status:** implemented on branch `orchestrator-slice-3-charge-gate`; console/build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending before merge/release claims.
+
 **Vanilla anchor:** `AIBattle.MicroAICheckForCharges()` `:4905` initiates charges via `SetMovementMode(3)` at `:4919`.
 
 **Role consumption:**
@@ -176,6 +195,8 @@ Each slice below is independently shippable. Listed in priority order; can be re
 
 ### Slice 4 — Line fallback
 
+**Status:** not implemented.
+
 **Vanilla anchor:** `AIBattle.CheckLineFallbacks()` `:5118` — evaluates per-attached-unit fallback under enemy pressure.
 
 **Role consumption:**
@@ -193,6 +214,8 @@ Each slice below is independently shippable. Listed in priority order; can be re
 - Fallback-rate per minute remains bounded.
 
 ### Slice 5 — Artillery target priority
+
+**Status:** not implemented.
 
 **Vanilla anchor:** `AIBattle.CheckAIBombardment()` `:3869` — writes artillery combat behavior.
 
@@ -242,7 +265,7 @@ All anchors below are decompile-confirmed and in-use by shipped or proposed patc
 
 ## Order-of-work and priority
 
-Recommend order: 0 (command-node tree) → 1 (reserves) → 2 (stance) → 3 (charge) → 4 (line fallback) → 5 (artillery).
+Original recommended order was 0 (command-node tree) -> 1 (reserves) -> 2 (stance) -> 3 (charge) -> 4 (line fallback) -> 5 (artillery). Actual execution shipped 0 and 1, then implemented 3 as an independent #41 consumer because the charge surface already had a narrow default-off owner. Slice 2 remains next for visible line behavior unless runtime smoke redirects.
 
 Reasoning: the command-node tree is the required foundation for the Scourge-inspired correction. Reserves are the cleanest first behavior slice because the `Reserve` role is already being assigned and ignored. Stance is the highest-impact for visible AI quality (the "5th brigade not forming line" symptom). Charge already has half a patch in #41. Line fallback completes the defensive picture. Artillery is the most isolated and lowest-risk last.
 
@@ -273,6 +296,6 @@ A slice is accepted when:
 
 ## Doc lifecycle
 
-- This spec is the active source of truth for remaining tactical-orchestrator work. The previous umbrella spec (`docs/superpowers/specs/archive/2026-05-08-tactical-battle-orchestrator-design.md`) is archived as superseded; refer to it only for historical context on the original hard-coded four-echelon design vision.
+- This spec is the active design source for remaining tactical-orchestrator work. Current implementation/deploy/smoke state lives in [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md). The previous umbrella spec (`docs/superpowers/specs/archive/2026-05-08-tactical-battle-orchestrator-design.md`) is archived as superseded; refer to it only for historical context on the original hard-coded four-echelon design vision.
 - Each slice produces its own implementation plan under `docs/superpowers/plans/` when it's promoted to active work, then archives to `docs/superpowers/plans/archive/` post-ship.
 - Updates to this spec when slices ship: tick the "shipped" line in the corresponding slice section. Do not rewrite the spec on every ship; archive it only when ALL slices are complete.
