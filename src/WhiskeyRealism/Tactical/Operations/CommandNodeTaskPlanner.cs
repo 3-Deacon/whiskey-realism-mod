@@ -28,6 +28,8 @@ namespace WhiskeyRealism.Tactical.Operations
                         : CommandTaskType.AttackObjective;
                 case CommandNodeRole.SupportingAttack:
                     return CommandTaskType.SupportAttack;
+                case CommandNodeRole.FlankMarch:
+                    return CommandTaskType.GuardFlank;
                 default:
                     return CommandTaskType.FormUp;
             }

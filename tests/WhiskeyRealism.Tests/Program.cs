@@ -85,6 +85,7 @@ static class Program
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
             ("tactical command monitor player protected no-write", TacticalCommandMonitorPlayerProtectedNoWrite),
             ("tactical command task planner main effort attack vs defensive hold", TacticalCommandTaskPlannerMainEffortAttackVsDefensiveHold),
+            ("tactical command task planner maps role table", TacticalCommandTaskPlannerMapsRoleTable),
             ("tactical command node state sanitizes blank node id", TacticalCommandNodeStateSanitizesBlankNodeId),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
@@ -1755,6 +1756,21 @@ static class Program
             CommandTaskType.HoldObjective,
             CommandNodeTaskPlanner.PlanTask(CommandNodeRole.MainEffort, TacticalOperationShape.DefensiveNetwork, contact: true, atObjective: true),
             "defensive main effort");
+    }
+
+    private static void TacticalCommandTaskPlannerMapsRoleTable()
+    {
+        AssertEqual(CommandTaskType.ReserveWait, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.Reserve, TacticalOperationShape.SingleMainEffort, contact: false, atObjective: false), "reserve");
+        AssertEqual(CommandTaskType.AdvanceToAssembly, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.Defender, TacticalOperationShape.SingleMainEffort, contact: false, atObjective: false), "defender advance");
+        AssertEqual(CommandTaskType.HoldObjective, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.Defender, TacticalOperationShape.SingleMainEffort, contact: false, atObjective: true), "defender hold");
+        AssertEqual(CommandTaskType.FallBackToLine, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.FallbackGuard, TacticalOperationShape.DelayAndFallback, contact: false, atObjective: false), "fallback guard");
+        AssertEqual(CommandTaskType.AdvanceToAssembly, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.FixingForce, TacticalOperationShape.FixAndFlank, contact: false, atObjective: false), "fixing advance");
+        AssertEqual(CommandTaskType.FixEnemy, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.FixingForce, TacticalOperationShape.FixAndFlank, contact: true, atObjective: false), "fixing contact");
+        AssertEqual(CommandTaskType.Screen, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.ScreeningForce, TacticalOperationShape.SingleMainEffort, contact: false, atObjective: false), "screen");
+        AssertEqual(CommandTaskType.Probe, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.Probe, TacticalOperationShape.SingleMainEffort, contact: false, atObjective: false), "probe");
+        AssertEqual(CommandTaskType.SupportAttack, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.SupportingAttack, TacticalOperationShape.ParallelObjectives, contact: true, atObjective: false), "support");
+        AssertEqual(CommandTaskType.GuardFlank, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.FlankMarch, TacticalOperationShape.FixAndFlank, contact: false, atObjective: false), "flank march");
+        AssertEqual(CommandTaskType.FormUp, CommandNodeTaskPlanner.PlanTask(CommandNodeRole.Unknown, TacticalOperationShape.SingleMainEffort, contact: false, atObjective: false), "unknown");
     }
 
     private static void TacticalCommandNodeStateSanitizesBlankNodeId()
