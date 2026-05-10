@@ -7,10 +7,10 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // B1 W&L guard for AIBattle.MicroAICheckForCharges. Vanilla owns charge
-    // initiation and cancellation in one small method; this Prefix mirrors that
-    // body so player-subordinate charge initiation can be blocked without
-    // skipping the cancellation branch.
+    // B1 W&L guard and Slice 3 orchestrator charge gate for
+    // AIBattle.MicroAICheckForCharges. Vanilla owns charge initiation and
+    // cancellation in one small method; this Prefix mirrors that body so charge
+    // initiation can be blocked without skipping the cancellation branch.
     [HarmonyPatch(typeof(AIBattle), "MicroAICheckForCharges")]
     internal static class BattleChargeGatePatch
     {
@@ -36,6 +36,8 @@ namespace WhiskeyRealism.Patches
                 if (!isPlayerAiOrFeud.HasValue) return true;
 
                 Regiment[] allattachedunits = aigroup.allattachedunits;
+                bool orchestratorContextInitialized = false;
+                OrchestratorChargeContext orchestratorContext = default;
 
                 for (int i = 0; i < allattachedunits.Length; i++)
                 {
@@ -74,11 +76,18 @@ namespace WhiskeyRealism.Patches
                             tookOwnership = true;
                             aigroup.lastfeudactiontime = CurrentBattleHour(bunits);
 
+                            if (!orchestratorContextInitialized)
+                            {
+                                orchestratorContext = BuildOrchestratorChargeContext(aigroup);
+                                orchestratorContextInitialized = true;
+                            }
+
+                            bool screenRoutedTargetVisible = ScreenRoutedChargeTargetVisible(unit);
                             TacticalOrchestratorChargeGate.Decision orchestratorDecision =
-                                DecideOrchestratorCharge(unit, aigroup);
+                                DecideOrchestratorCharge(orchestratorContext, screenRoutedTargetVisible);
                             if (orchestratorDecision.Action == TacticalOrchestratorChargeGate.Action.Deny)
                             {
-                                LogDeniedOrchestrator(unit, aigroup, orchestratorDecision);
+                                LogDeniedOrchestrator(unit, aigroup, orchestratorDecision, orchestratorContext, screenRoutedTargetVisible);
                                 continue;
                             }
 
@@ -153,9 +162,31 @@ namespace WhiskeyRealism.Patches
             return true;
         }
 
-        private static TacticalOrchestratorChargeGate.Decision DecideOrchestratorCharge(Regiment unit, Regiment group)
+        private static OrchestratorChargeContext BuildOrchestratorChargeContext(Regiment group)
         {
             if (Plugin.Instance == null || !Plugin.Instance.EnableTacticalOrchestratorChargeGate.Value)
+            {
+                return OrchestratorChargeContext.Disabled;
+            }
+
+            CommandIntentResolution resolution = ResolveIntent(group);
+            bool playerControlled = HasPlayerOwnership(group);
+            float localOdds = LocalOdds(group);
+            bool mainEffortSupportAvailable = MainEffortSupportAvailable(group, resolution);
+
+            return new OrchestratorChargeContext(
+                true,
+                resolution,
+                playerControlled,
+                localOdds,
+                mainEffortSupportAvailable);
+        }
+
+        private static TacticalOrchestratorChargeGate.Decision DecideOrchestratorCharge(
+            OrchestratorChargeContext context,
+            bool screenRoutedTargetVisible)
+        {
+            if (!context.Enabled)
             {
                 return new TacticalOrchestratorChargeGate.Decision(
                     TacticalOrchestratorChargeGate.Action.Allow,
@@ -163,20 +194,14 @@ namespace WhiskeyRealism.Patches
                     "orchestrator-charge-gate-disabled");
             }
 
-            CommandIntentResolution resolution = ResolveIntent(group);
-            bool playerControlled = HasPlayerOwnership(group, unit);
-            float localOdds = LocalOdds(group);
-            bool mainEffortSupportAvailable = MainEffortSupportAvailable(group, resolution);
-            bool screenRoutedTargetVisible = ScreenRoutedTargetVisible(unit);
-
             return TacticalOrchestratorChargeGate.Decide(
                 new TacticalOrchestratorChargeGate.Input(
                     vanillaWouldCharge: true,
                     chargeCancellation: false,
-                    resolution: resolution,
-                    playerControlled: playerControlled,
-                    localOdds: localOdds,
-                    mainEffortSupportAvailable: mainEffortSupportAvailable,
+                    resolution: context.Resolution,
+                    playerControlled: context.PlayerControlled,
+                    localOdds: context.LocalOdds,
+                    mainEffortSupportAvailable: context.MainEffortSupportAvailable,
                     screenRoutedTargetVisible: screenRoutedTargetVisible));
         }
 
@@ -199,14 +224,13 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool HasPlayerOwnership(Regiment group, Regiment unit)
+        private static bool HasPlayerOwnership(Regiment group)
         {
             try
             {
                 if (group == null) return true;
                 if (!SafeAiVsAi() && group.alliance == SafePlayerAlliance()) return true;
                 if (group.dlcw_isundercommander) return true;
-                if (unit != null && unit.dlcw_isundercommander) return true;
                 if (group.allattachedunits == null) return false;
 
                 for (int i = 0; i < group.allattachedunits.Length; i++)
@@ -282,21 +306,17 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool ScreenRoutedTargetVisible(Regiment unit)
+        private static bool ScreenRoutedChargeTargetVisible(Regiment unit)
         {
             try
             {
                 if (unit == null || unit.unitrange == null || unit.unitrange.enemyinrangereg == null)
                     return false;
+                if (unit.unitrange.enemyinrangereg.Count <= 0)
+                    return false;
 
-                for (int i = 0; i < unit.unitrange.enemyinrangereg.Count; i++)
-                {
-                    Regiment enemy = unit.unitrange.enemyinrangereg[i];
-                    if (enemy != null && enemy.isrouted)
-                        return true;
-                }
-
-                return false;
+                Regiment target = unit.unitrange.enemyinrangereg[0];
+                return target != null && target.isrouted;
             }
             catch
             {
@@ -385,7 +405,9 @@ namespace WhiskeyRealism.Patches
         private static void LogDeniedOrchestrator(
             Regiment unit,
             Regiment group,
-            TacticalOrchestratorChargeGate.Decision decision)
+            TacticalOrchestratorChargeGate.Decision decision,
+            OrchestratorChargeContext context,
+            bool screenRoutedTargetVisible)
         {
             OnceLog.Info("tactical-orchestrator-charge-gate", "BattleChargeGatePatch orchestrator branch wired");
             OnceLog.Info(
@@ -393,8 +415,18 @@ namespace WhiskeyRealism.Patches
                 "[TacticalOrchestratorChargeGate] action=deny" +
                 " role=" + decision.Role +
                 " reason=" + decision.Reason +
+                " resolutionReason=" + context.Resolution.Reason +
+                " primarySector=" + SafePrimarySector(context.Resolution) +
+                " localOdds=" + context.LocalOdds +
+                " mainEffortSupportAvailable=" + context.MainEffortSupportAvailable +
+                " screenRoutedTargetVisible=" + screenRoutedTargetVisible +
                 " unit=" + SafeName(unit) + "#" + SafeInstanceId(unit) +
                 " group=" + SafeName(group) + "#" + SafeInstanceId(group));
+        }
+
+        private static int SafePrimarySector(CommandIntentResolution resolution)
+        {
+            return resolution.Found ? resolution.Intent.PrimarySector : -1;
         }
 
         private static void LogMissingRequiredAnchor(string anchor)
@@ -421,6 +453,37 @@ namespace WhiskeyRealism.Patches
             {
                 return 0;
             }
+        }
+
+        private readonly struct OrchestratorChargeContext
+        {
+            public static readonly OrchestratorChargeContext Disabled =
+                new OrchestratorChargeContext(
+                    false,
+                    new CommandIntentResolution(false, default, "orchestrator-charge-gate-disabled"),
+                    false,
+                    1f,
+                    false);
+
+            public OrchestratorChargeContext(
+                bool enabled,
+                CommandIntentResolution resolution,
+                bool playerControlled,
+                float localOdds,
+                bool mainEffortSupportAvailable)
+            {
+                Enabled = enabled;
+                Resolution = resolution;
+                PlayerControlled = playerControlled;
+                LocalOdds = localOdds;
+                MainEffortSupportAvailable = mainEffortSupportAvailable;
+            }
+
+            public bool Enabled { get; }
+            public CommandIntentResolution Resolution { get; }
+            public bool PlayerControlled { get; }
+            public float LocalOdds { get; }
+            public bool MainEffortSupportAvailable { get; }
         }
     }
 }
