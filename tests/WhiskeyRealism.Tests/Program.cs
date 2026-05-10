@@ -59,6 +59,8 @@ static class Program
             ("tactical terrain rejects nonfinite candidate", TacticalTerrainRejectsNonfiniteCandidate),
             ("tactical terrain normalizes large positive angles", TacticalTerrainNormalizesLargePositiveAngles),
             ("tactical terrain normalizes large negative angles", TacticalTerrainNormalizesLargeNegativeAngles),
+            ("tactical terrain rejects unknown terrain evidence", TacticalTerrainRejectsUnknownTerrainEvidence),
+            ("tactical terrain preserves vanilla facing without visible enemy", TacticalTerrainPreservesVanillaFacingWithoutVisibleEnemy),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -1271,6 +1273,60 @@ static class Program
         AssertTrue(candidate.FacingDegrees >= 0f && candidate.FacingDegrees < 360f, "large negative candidate facing range");
         AssertFinite(delta, "large negative angle delta");
         AssertTrue(delta >= 0f && delta <= 180f, "large negative angle delta range");
+    }
+
+    private static void TacticalTerrainRejectsUnknownTerrainEvidence()
+    {
+        var unknownCenter = new TacticalTerrainCandidate(
+            new TacticalPoint2(100f, 100f),
+            90f,
+            TacticalTerrainSample.Unknown,
+            Array.Empty<TacticalTerrainSample>());
+        var unknownCenterReason = TacticalTerrainFacingDiscipline.Reject(
+            new TacticalPoint2(100f, 100f),
+            unknownCenter,
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault,
+            out _,
+            out _);
+
+        AssertEqual(TacticalTerrainDecisionReason.UnknownTerrain, unknownCenterReason, "unknown center rejection");
+
+        var unknownFootprint = new TacticalTerrainCandidate(
+            new TacticalPoint2(100f, 100f),
+            90f,
+            new TacticalTerrainSample(0, false, true),
+            new[] { TacticalTerrainSample.Unknown });
+        var unknownFootprintReason = TacticalTerrainFacingDiscipline.Reject(
+            new TacticalPoint2(100f, 100f),
+            unknownFootprint,
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault,
+            out _,
+            out _);
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            45f,
+            new[] { unknownFootprint },
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertEqual(1, unknownFootprint.Footprint.Count, "unknown footprint retained");
+        AssertEqual(TacticalTerrainDecisionReason.UnknownTerrain, unknownFootprintReason, "unknown footprint rejection");
+        AssertFalse(decision.Accepted, "unknown terrain evidence should not accept correction");
+    }
+
+    private static void TacticalTerrainPreservesVanillaFacingWithoutVisibleEnemy()
+    {
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            45f,
+            new[] { TerrainCandidate(100f, 100f, 180f) },
+            new TacticalEnemyBearingEvidence(false, 0f, 0f, 0f),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertTrue(decision.Accepted, "safe terrain candidate can be accepted without visible enemy under default rules");
+        AssertNear(45f, decision.Candidate.FacingDegrees, 0.01f, "vanilla facing preserved without visible enemy");
     }
 
 

@@ -11,6 +11,7 @@ namespace WhiskeyRealism.Tactical
         VanillaKept,
         NonFiniteBaseline,
         NonFiniteCandidate,
+        UnknownTerrain,
         WaterCenter,
         WaterFootprint,
         OutsideDeploymentZone,
@@ -109,7 +110,6 @@ namespace WhiskeyRealism.Tactical
             FacingDegrees = TacticalEnemyBearingEvidence.NormalizeAngle(facingDegrees);
             Center = center;
             Footprint = (footprint ?? Array.Empty<TacticalTerrainSample>())
-                .Where(s => s.Known)
                 .ToArray();
         }
 
@@ -235,7 +235,10 @@ namespace WhiskeyRealism.Tactical
                 return new TacticalTerrainDecision(false, TacticalTerrainDecisionReason.NoSafeCandidate, kept, 0f, 0f);
             }
 
-            return new TacticalTerrainDecision(true, TacticalTerrainDecisionReason.Accepted, best, bestDistance, bestFacingDelta);
+            var accepted = enemy.Visible
+                ? best
+                : new TacticalTerrainCandidate(best.Point, vanillaFacingDegrees, best.Center, best.Footprint);
+            return new TacticalTerrainDecision(true, TacticalTerrainDecisionReason.Accepted, accepted, bestDistance, bestFacingDelta);
         }
 
         public static TacticalTerrainDecisionReason Reject(
@@ -259,8 +262,14 @@ namespace WhiskeyRealism.Tactical
             if (correctionDistance > rules.MaxCorrectionMeters)
                 return TacticalTerrainDecisionReason.ExcessiveCorrectionDistance;
 
+            if (!candidate.Center.Known)
+                return TacticalTerrainDecisionReason.UnknownTerrain;
+
             if (candidate.Center.Known && candidate.Center.IsWater)
                 return TacticalTerrainDecisionReason.WaterCenter;
+
+            if (candidate.Footprint.Any(s => !s.Known))
+                return TacticalTerrainDecisionReason.UnknownTerrain;
 
             if (candidate.Footprint.Any(s => s.IsWater))
                 return TacticalTerrainDecisionReason.WaterFootprint;
