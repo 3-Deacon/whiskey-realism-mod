@@ -180,10 +180,6 @@ namespace WhiskeyRealism.Patches
             bool routed = SafeBool(() => regiment.isrouted);
             bool active = SafeBool(() => ((Component)regiment).gameObject.activeInHierarchy);
             float facing = SafeFloat(() => ((Component)regiment).transform.eulerAngles.y);
-            TacticalTerrainRuntimeSample centerSample = TacticalTerrainProbe.SampleCenter(regiment, null, position);
-            IReadOnlyList<TacticalTerrainRuntimeSample> footprintSamples = TacticalTerrainProbe.SampleFootprint(regiment, null);
-            bool footprintWater = footprintSamples.Any(sample => sample.Water);
-            TacticalEnemyBearingEvidence enemy = TacticalTerrainProbe.GetVisibleEnemyBearing(regiment, position);
 
             return new TacticalDeploymentGroupSnapshot(
                 key,
@@ -197,13 +193,7 @@ namespace WhiskeyRealism.Patches
                 pathCount,
                 routed,
                 active,
-                centerSample.TerrainId,
-                centerSample.Water,
-                footprintWater,
-                centerSample.InDeploymentZone,
-                facing,
-                enemy.Visible ? enemy.BearingDegrees : 0f,
-                enemy.Visible ? enemy.DistanceMeters : 0f);
+                facing: facing);
         }
 
         private static void EmitDelta(BattleUnits battleUnits, string surface, int alliance, ObservationState state)
@@ -216,7 +206,7 @@ namespace WhiskeyRealism.Patches
                 var after = Capture(battleUnits, "post", alliance, state.Phase);
                 var delta = TacticalDeploymentTelemetry.Delta(surface, before, after);
                 Plugin.Log.LogInfo(TacticalDeploymentTelemetry.FormatSummary(delta));
-                foreach (string line in TopMoveLines(surface, before, after))
+                foreach (string line in TopMoveLines(battleUnits, surface, before, after))
                 {
                     Plugin.Log.LogInfo(line);
                 }
@@ -227,7 +217,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static IEnumerable<string> TopMoveLines(string surface, TacticalDeploymentSnapshot before, TacticalDeploymentSnapshot after)
+        private static IEnumerable<string> TopMoveLines(BattleUnits battleUnits, string surface, TacticalDeploymentSnapshot before, TacticalDeploymentSnapshot after)
         {
             if (before == null || after == null) yield break;
 
@@ -237,7 +227,12 @@ namespace WhiskeyRealism.Patches
                 .Select(g => new { Before = beforeByKey[g.Key], After = g, Distance = beforeByKey[g.Key].DistanceTo(g) })
                 .Where(m => m.Distance >= TacticalDeploymentTelemetry.LargeMoveThreshold)
                 .OrderByDescending(m => m.Distance)
-                .Take(TopMoveLimit);
+                .Take(TopMoveLimit)
+                .ToList();
+
+            if (moves.Count == 0) yield break;
+
+            var liveGroupsByKey = LiveGroupsByKey(battleUnits);
 
             foreach (var move in moves)
             {
@@ -256,9 +251,71 @@ namespace WhiskeyRealism.Patches
                              " routed=" + move.Before.Routed + "->" + move.After.Routed +
                              " active=" + move.Before.Active + "->" + move.After.Active;
 
-                string terrainLine = TerrainEvidenceLine(surface, before.Phase, move.After, move.Distance);
+                string terrainLine = TerrainEvidenceLine(surface, before.Phase, EnrichTerrainEvidence(move.After, liveGroupsByKey), move.Distance);
                 if (terrainLine != null)
                     yield return terrainLine;
+            }
+        }
+
+        private static Dictionary<string, BattleUnits.Grp> LiveGroupsByKey(BattleUnits battleUnits)
+        {
+            var groups = new Dictionary<string, BattleUnits.Grp>();
+            foreach (BattleUnits.Grp group in ReadGroups(battleUnits))
+            {
+                if (group == null || (object)group.regref == null) continue;
+                string key = group.regref.GetInstanceID().ToString(CultureInfo.InvariantCulture);
+                if (!groups.ContainsKey(key))
+                {
+                    groups.Add(key, group);
+                }
+            }
+
+            return groups;
+        }
+
+        private static TacticalDeploymentGroupSnapshot EnrichTerrainEvidence(
+            TacticalDeploymentGroupSnapshot snapshot,
+            IReadOnlyDictionary<string, BattleUnits.Grp> liveGroupsByKey)
+        {
+            if (snapshot == null) return null;
+            if (liveGroupsByKey == null || !liveGroupsByKey.TryGetValue(snapshot.Key, out var group)) return snapshot;
+            if (group == null || (object)group.regref == null) return snapshot;
+
+            try
+            {
+                Regiment regiment = group.regref;
+                Vector3 position = ((Component)regiment).transform.position;
+                TacticalTerrainRuntimeSample centerSample = TacticalTerrainProbe.SampleCenter(regiment, null, position);
+                IReadOnlyList<TacticalTerrainRuntimeSample> footprintSamples = TacticalTerrainProbe.SampleFootprint(regiment, null);
+                bool footprintWater = footprintSamples.Any(sample => sample.Water);
+                TacticalEnemyBearingEvidence enemy = TacticalTerrainProbe.GetVisibleEnemyBearing(regiment, position);
+
+                return new TacticalDeploymentGroupSnapshot(
+                    snapshot.Key,
+                    snapshot.Name,
+                    snapshot.Alliance,
+                    snapshot.UnitType,
+                    snapshot.X,
+                    snapshot.Z,
+                    snapshot.Formation,
+                    snapshot.FormationOrdered,
+                    snapshot.PathCount,
+                    snapshot.Routed,
+                    snapshot.Active,
+                    centerSample.TerrainId,
+                    centerSample.Water,
+                    footprintWater,
+                    centerSample.InDeploymentZone,
+                    snapshot.Facing,
+                    enemy.Visible ? enemy.BearingDegrees : 0f,
+                    enemy.Visible ? enemy.DistanceMeters : 0f);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-observer:terrain-enrich",
+                    "TacticalDeploymentObserverPatch terrain evidence probe failed: " + ex.GetType().Name);
+                return snapshot;
             }
         }
 
