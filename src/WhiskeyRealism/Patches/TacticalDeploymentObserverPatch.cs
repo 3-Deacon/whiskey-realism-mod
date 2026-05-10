@@ -36,7 +36,7 @@ namespace WhiskeyRealism.Patches
         internal static void DoUnitPositioningPrefix(BattleUnits __instance, ref ObservationState __state)
         {
             if (!Enabled()) return;
-            __state = CaptureState(__instance, "pre-unit-positioning", -1, TacticalDeploymentTelemetry.PhaseInitialPositioning);
+            __state = SafeCaptureState(__instance, "pre-unit-positioning", -1, TacticalDeploymentTelemetry.PhaseInitialPositioning);
         }
 
         [HarmonyPatch(typeof(BattleUnits), "DoUnitPositioning")]
@@ -56,7 +56,7 @@ namespace WhiskeyRealism.Patches
             var eod = ReadInt(__instance, EodCycleField, "eodcycle", "eodcycle");
             var days = ReadInt(__instance, BattlePassedDaysField, "battlepasseddays", "battlepasseddays");
             var phase = TacticalDeploymentTelemetry.PhaseFromPrefix(skipped, false, eod, days);
-            __state = CaptureState(__instance, "pre-placement", foralliance, phase);
+            __state = SafeCaptureState(__instance, "pre-placement", foralliance, phase);
         }
 
         [HarmonyPatch(typeof(BattleUnits), "DoPlacementAIUnitsWithinDeploymentzoneNew")]
@@ -87,7 +87,8 @@ namespace WhiskeyRealism.Patches
             var eod = ReadInt(battleUnits, EodCycleField, "eodcycle", "eodcycle");
             var days = ReadInt(battleUnits, BattlePassedDaysField, "battlepasseddays", "battlepasseddays");
             var phase = TacticalDeploymentTelemetry.PhaseFromPrefix(false, false, eod, days);
-            __state = CaptureState(battleUnits, active ? "pre-open" : "pre-close", -1, phase);
+            __state = SafeCaptureState(battleUnits, active ? "pre-open" : "pre-close", -1, phase);
+            if (__state == null) return;
             __state.SuppressOuterDelta = !active && __state.Before != null && __state.Before.EodCycle > 0;
         }
 
@@ -141,6 +142,21 @@ namespace WhiskeyRealism.Patches
                 Before = Capture(battleUnits, label, alliance, phase),
                 Phase = TacticalDeploymentTelemetry.NormalizePhase(phase, 0, 0)
             };
+        }
+
+        private static ObservationState SafeCaptureState(BattleUnits battleUnits, string label, int alliance, string phase)
+        {
+            try
+            {
+                return CaptureState(battleUnits, label, alliance, phase);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-observer:capture:" + label,
+                    "TacticalDeploymentObserverPatch capture failed for " + label + ": " + ex.GetType().Name);
+                return null;
+            }
         }
 
         private static TacticalDeploymentSnapshot Capture(BattleUnits battleUnits, string label, int alliance, string phase)
