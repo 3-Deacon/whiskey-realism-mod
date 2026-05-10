@@ -1545,7 +1545,7 @@ static class Program
         var selected = TacticalOperationSelectionModel.Select(
             first,
             second,
-            new ForceAvailabilitySnapshot(300f, 0.30f),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
             personality);
 
         AssertEqual(TacticalOperationShape.ParallelObjectives, selected, "parallel selection");
@@ -1553,14 +1553,14 @@ static class Program
         var lowReserve = TacticalOperationSelectionModel.Select(
             first,
             second,
-            new ForceAvailabilitySnapshot(300f, 0.05f),
+            new ForceAvailabilitySnapshot(8000f, 0.05f),
             personality);
         AssertTrue(lowReserve != TacticalOperationShape.ParallelObjectives, "low reserve blocks parallel");
 
         var secondStrong = TacticalOperationSelectionModel.Select(
             first,
             ObjectiveRecordFor("ridge-b", enemyStrength: 90f, friendlyAssignedStrength: 100f),
-            new ForceAvailabilitySnapshot(300f, 0.30f),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
             personality);
         AssertTrue(secondStrong != TacticalOperationShape.ParallelObjectives, "per-objective disadvantage blocks parallel");
     }
@@ -1573,7 +1573,7 @@ static class Program
         var selected = TacticalOperationSelectionModel.Select(
             first,
             second,
-            new ForceAvailabilitySnapshot(260f, 0.30f),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
 
         AssertEqual(TacticalOperationShape.FixAndFlank, selected, "strong weak selection");
@@ -1607,8 +1607,32 @@ static class Program
             "normal");
         AssertEqual(
             TacticalReassessmentTier.SoftAbortReview,
-            TacticalOperationsLedgerModel.ReassessCommittedOperation(float.PositiveInfinity, float.NaN, float.PositiveInfinity, forceCollapsed: false, objectiveSecured: false),
-            "nonfinite conservative");
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(float.PositiveInfinity, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
+            "infinite stalled");
+        AssertEqual(
+            TacticalReassessmentTier.Continue,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(float.NaN, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
+            "nan progress is zero");
+        AssertEqual(
+            TacticalReassessmentTier.Continue,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(-10f, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
+            "negative progress is zero");
+        AssertEqual(
+            TacticalReassessmentTier.SoftAbortReview,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, float.NaN, 1.0f, forceCollapsed: false, objectiveSecured: false),
+            "nan confidence is zero");
+        AssertEqual(
+            TacticalReassessmentTier.SoftAbortReview,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, float.PositiveInfinity, 1.0f, forceCollapsed: false, objectiveSecured: false),
+            "infinite confidence is zero");
+        AssertEqual(
+            TacticalReassessmentTier.SoftAbortReview,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, float.NaN, forceCollapsed: false, objectiveSecured: false),
+            "nan odds is zero");
+        AssertEqual(
+            TacticalReassessmentTier.SoftAbortReview,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, float.PositiveInfinity, forceCollapsed: false, objectiveSecured: false),
+            "infinite odds is zero");
     }
 
     private static ObjectiveRecord ObjectiveRecordFor(string objectiveId, float enemyStrength, float friendlyAssignedStrength)
