@@ -46,6 +46,7 @@ namespace WhiskeyRealism.Tactical.Operations
         public TacticalObjectiveStatus Status { get; }
         public float EnemyStrength { get; }
         public float FriendlyAssignedStrength { get; }
+        public bool HasUsableStrengthEvidence { get; }
 
         public ObjectiveRecord(
             ObjectiveObservationInput observation,
@@ -57,12 +58,20 @@ namespace WhiskeyRealism.Tactical.Operations
             Status = status;
             EnemyStrength = SanitizeFloorZero(enemyStrength);
             FriendlyAssignedStrength = SanitizeFloorZero(friendlyAssignedStrength);
+            HasUsableStrengthEvidence = IsFiniteNonnegative(enemyStrength) &&
+                IsFiniteNonnegative(friendlyAssignedStrength) &&
+                (enemyStrength > 0f || friendlyAssignedStrength > 0f);
         }
 
         private static float SanitizeFloorZero(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
             return value < 0f ? 0f : value;
+        }
+
+        private static bool IsFiniteNonnegative(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value) && value >= 0f;
         }
     }
 

@@ -79,6 +79,7 @@ static class Program
             ("tactical vision infinite age is stale", TacticalVisionInfiniteAgeIsStale),
             ("tactical operations parallel requires per objective advantage", TacticalOperationsParallelRequiresPerObjectiveAdvantage),
             ("tactical operations strong and weak selects fix and flank", TacticalOperationsStrongWeakSelectsFixAndFlank),
+            ("tactical operations unknown strength does not look weak", TacticalOperationsUnknownStrengthDoesNotLookWeak),
             ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
@@ -1577,6 +1578,28 @@ static class Program
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
 
         AssertEqual(TacticalOperationShape.FixAndFlank, selected, "strong weak selection");
+    }
+
+    private static void TacticalOperationsUnknownStrengthDoesNotLookWeak()
+    {
+        var personality = new PersonalityVector(0.4f, 0f, 0f, 0f, 0f);
+
+        var defaultSelection = TacticalOperationSelectionModel.Select(
+            default(ObjectiveRecord),
+            default(ObjectiveRecord),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            personality);
+
+        AssertTrue(defaultSelection != TacticalOperationShape.ParallelObjectives, "default objectives do not drive parallel");
+        AssertTrue(defaultSelection != TacticalOperationShape.FixAndFlank, "default objectives do not drive fix and flank");
+
+        var nonfiniteEnemy = TacticalOperationSelectionModel.Select(
+            ObjectiveRecordFor("bad-a", enemyStrength: float.PositiveInfinity, friendlyAssignedStrength: 100f),
+            ObjectiveRecordFor("bad-b", enemyStrength: float.NaN, friendlyAssignedStrength: 100f),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            personality);
+
+        AssertTrue(nonfiniteEnemy != TacticalOperationShape.ParallelObjectives, "nonfinite enemy strength does not drive parallel");
     }
 
     private static void TacticalOperationsSoftAbortBeforeCollapse()

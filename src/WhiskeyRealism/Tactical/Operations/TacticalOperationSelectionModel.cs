@@ -36,8 +36,10 @@ namespace WhiskeyRealism.Tactical.Operations
             PersonalityVector personality)
         {
             float aggression = Clamp01((personality.Aggression + 1f) * 0.5f);
-            bool firstWeak = first.EnemyStrength <= Max(1f, first.FriendlyAssignedStrength) * 0.75f;
-            bool secondWeak = second.EnemyStrength <= Max(1f, second.FriendlyAssignedStrength) * 0.75f;
+            bool firstUsable = HasUsableObjectiveEvidence(first);
+            bool secondUsable = HasUsableObjectiveEvidence(second);
+            bool firstWeak = firstUsable && first.EnemyStrength <= Max(1f, first.FriendlyAssignedStrength) * 0.75f;
+            bool secondWeak = secondUsable && second.EnemyStrength <= Max(1f, second.FriendlyAssignedStrength) * 0.75f;
             bool reserveSafe = force.ReserveFraction >= (aggression > 0.65f ? 0.15f : 0.25f);
 
             if (firstWeak && secondWeak && reserveSafe && aggression >= 0.45f)
@@ -56,6 +58,13 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             return TacticalOperationShape.SingleMainEffort;
+        }
+
+        private static bool HasUsableObjectiveEvidence(ObjectiveRecord record)
+        {
+            return record.HasUsableStrengthEvidence &&
+                record.Status != TacticalObjectiveStatus.Unknown &&
+                record.Observation.SourceConfidence > 0f;
         }
 
         private static float Clamp01(float value)
