@@ -182,6 +182,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildDiscovery.cs" Link="Orchestrator\DirectChildDiscovery.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildEvidenceBuilder.cs" Link="Orchestrator\DirectChildEvidenceBuilder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalDirectChildGate.cs" Link="Orchestrator\TacticalDirectChildGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalReserveCommitGate.cs" Link="Orchestrator\TacticalReserveCommitGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyOrchestrator.cs" Link="Orchestrator\ArmyOrchestrator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyReplanTriggers.cs" Link="Orchestrator\ArmyReplanTriggers.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyTickCycle.cs" Link="Orchestrator\ArmyTickCycle.cs" />

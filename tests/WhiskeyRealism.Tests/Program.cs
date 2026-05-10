@@ -635,6 +635,13 @@ static class Program
             ("command intent resolver finds exact node by instance", TestCommandIntentResolverFindsExactNode),
             ("command intent resolver preserves negative instance ids", TestCommandIntentResolverPreservesNegativeInstanceIds),
             ("command intent resolver reports missing node without throwing", TestCommandIntentResolverMissingNode),
+            ("tactical reserve commit gate observes when vanilla did not move", TacticalReserveCommitGateObservesWhenNoVanillaMove),
+            ("tactical reserve commit gate denies reserve role movement", TacticalReserveCommitGateDeniesReserveRoleMovement),
+            ("tactical reserve commit gate allows main understrength movement", TacticalReserveCommitGateAllowsMainUnderstrengthMovement),
+            ("tactical reserve commit gate allows fallback screen movement", TacticalReserveCommitGateAllowsFallbackScreenMovement),
+            ("tactical reserve commit gate observes player controlled group", TacticalReserveCommitGateObservesPlayerControlledGroup),
+            ("tactical reserve commit gate allows already engaged reserve", TacticalReserveCommitGateAllowsAlreadyEngagedReserve),
+            ("tactical reserve list bias rejects reserve role candidate", TacticalReserveListBiasRejectsReserveRoleCandidate),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -12391,6 +12398,92 @@ static class Program
         AssertEqual("o3-direct-child-fallback", resolution.Reason);
         AssertEqual(army.GetDirectChildRole("synth-army-200"), resolution.Intent.Role);
         AssertEqual(4, resolution.Intent.PrimarySector);
+    }
+
+    private static TacticalReserveCommitGate.Input ReserveGateInput(
+        bool vanillaCommitted = true,
+        bool resolved = true,
+        DirectChildRole role = DirectChildRole.Reserve,
+        bool playerControlled = false,
+        bool committedUnitAlreadyEngaged = false,
+        float ownStrengthRatio = 1.0f,
+        float localOdds = 1.0f)
+    {
+        return new TacticalReserveCommitGate.Input(
+            vanillaCommitted,
+            new CommandIntentResolution(
+                resolved,
+                new CommandNodeIntent(
+                    "node-200",
+                    "node-200",
+                    role,
+                    DirectChildAxis.Hold,
+                    primarySector: 2,
+                    supportPriority: 50,
+                    aggressionBias01: 0.5f,
+                    depth: 1),
+                resolved ? "exact-command-node" : "command-node-not-found"),
+            playerControlled,
+            committedUnitAlreadyEngaged,
+            ownStrengthRatio,
+            localOdds);
+    }
+
+    private static void TacticalReserveCommitGateObservesWhenNoVanillaMove()
+    {
+        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(vanillaCommitted: false));
+        AssertEqual(TacticalReserveCommitGate.Action.Observe, d.Action, "action");
+        AssertEqual("no-vanilla-commit", d.Reason, "reason");
+    }
+
+    private static void TacticalReserveCommitGateDeniesReserveRoleMovement()
+    {
+        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(role: DirectChildRole.Reserve));
+        AssertEqual(TacticalReserveCommitGate.Action.Deny, d.Action, "action");
+        AssertEqual("role-reserve-hold", d.Reason, "reason");
+    }
+
+    private static void TacticalReserveCommitGateAllowsMainUnderstrengthMovement()
+    {
+        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(role: DirectChildRole.Main, ownStrengthRatio: 0.60f));
+        AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
+        AssertEqual("main-understrength-release", d.Reason, "reason");
+    }
+
+    private static void TacticalReserveCommitGateAllowsFallbackScreenMovement()
+    {
+        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(role: DirectChildRole.Fallback, localOdds: 0.70f));
+        AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
+        AssertEqual("fallback-screen-retreat", d.Reason, "reason");
+    }
+
+    private static void TacticalReserveCommitGateObservesPlayerControlledGroup()
+    {
+        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(playerControlled: true));
+        AssertEqual(TacticalReserveCommitGate.Action.Observe, d.Action, "action");
+        AssertEqual("player-controlled", d.Reason, "reason");
+    }
+
+    private static void TacticalReserveCommitGateAllowsAlreadyEngagedReserve()
+    {
+        var d = TacticalReserveCommitGate.Decide(ReserveGateInput(role: DirectChildRole.Reserve, committedUnitAlreadyEngaged: true));
+        AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
+        AssertEqual("already-committed-contact", d.Reason, "reason");
+    }
+
+    private static void TacticalReserveListBiasRejectsReserveRoleCandidate()
+    {
+        var reserve = new CommandIntentResolution(
+            true,
+            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Reserve, DirectChildAxis.Hold, 2, 50, 0.5f, 1),
+            "exact-command-node");
+        var main = new CommandIntentResolution(
+            true,
+            new CommandNodeIntent("node-201", "node-201", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 90, 0.8f, 1),
+            "exact-command-node");
+
+        AssertFalse(TacticalReserveCommitGate.PermitReserveListBias(reserve), "reserve role is not list-bias eligible");
+        AssertTrue(TacticalReserveCommitGate.PermitReserveListBias(main), "main role can be list-bias eligible");
     }
 
     private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()
