@@ -56,9 +56,9 @@ That is the design target after focused in-game smoke. The shipped default must
 still obey the repo's tactical patch-hygiene rule: new vanilla-state writers
 ship behind an explicit default-off behavior gate until smoke proves bounded
 logs, stable Harmony anchors, no repeated exceptions, no player-subordinate
-retasking, and no unintended side effects. Therefore the first shipped default
-for this system is `MonitorOnly`; promotion to `Active` is a verified release
-step, not a downscope.
+retasking, and no unintended side effects. Therefore `MonitorOnly` is a
+pre-release implementation checkpoint only. The release/default target for this
+system is `Active` after that smoke gate is met.
 
 ## Confirmed Vanilla Anchors
 
@@ -1003,12 +1003,11 @@ If the log cannot explain the idle state, the behavior is wrong.
 
 ## Config Contract
 
-The final intended behavior is active, but the first shipped default is
-`MonitorOnly` until focused smoke promotes it:
+The release/default behavior is active:
 
 ```ini
 [Tactical Orchestrator]
-Tactical Commander Mode = MonitorOnly
+Tactical Commander Mode = Active
 ```
 
 Mode semantics:
@@ -1020,7 +1019,8 @@ Off:
 
 MonitorOnly:
   vision, ledger, assignments, tasks, monitor, and telemetry run; executor emits
-  NoWrite diagnostics.
+  NoWrite diagnostics. This is a pre-release smoke/debug mode, not the intended
+  released default.
 
 Active:
   full loop runs for AI sides and executor may issue bounded vanilla-safe writes.
@@ -1030,12 +1030,12 @@ This master mode should reduce reliance on many scattered behavior toggles. The
 implementation may preserve legacy flags for migration and emergency debugging,
 but the design target is one tactical commander system, not feature fragments.
 
-Promotion rule:
+Release rule:
 
 ```text
-MonitorOnly is the shipped default.
-Active is opt-in until focused smoke passes.
-After smoke passes, Active may become the default in a release note/docs update.
+MonitorOnly is used for the pre-release full-loop smoke checkpoint.
+Active is the release/default target.
+Do not publish an Active-default build until focused smoke passes.
 ```
 
 Config migration must handle existing BepInEx config files, because once
@@ -1049,8 +1049,10 @@ migration semantics:
   to `Active`.
 - first-run migration should log one bounded line explaining mode and legacy
   compatibility.
-- if master mode is absent, default to `MonitorOnly` for the new system and
-  leave existing legacy flags unchanged.
+- if master mode is absent in a dev/pre-smoke build, use `MonitorOnly` for the
+  new system and leave existing legacy flags unchanged.
+- if master mode is absent in a smoke-verified release build, write/log the
+  migrated default as `Active`.
 - implementation plan must identify each legacy flag that becomes subordinate to
   the master mode and define precedence explicitly.
 
@@ -1194,14 +1196,14 @@ implementable without violating repo policy.
 2. **Boundary implementation.** Land the macro boundary, reserve boundary,
    mod-state write contract, confidence model, config migration, and telemetry
    throttle contracts before behavior writes.
-3. **MonitorOnly full loop.** Vision, ledger, operation selection, command-node
+3. **MonitorOnly full-loop smoke checkpoint.** Vision, ledger, operation selection, command-node
    assignments, task planning, monitor, and executor decisions all run, but
    executor writes are logged as `NoWrite`.
-4. **Active opt-in smoke.** Enable `Active` in local config for focused battle
+4. **Active release smoke.** Enable `Active` in local config for focused battle
    smoke and prove bounded logs, stable anchors, no repeated exceptions, no
    player-subordinate retasking, and no unintended side effects.
-5. **Default promotion.** Only after smoke passes may `Active` become the shipped
-   default for the new tactical commander mode.
+5. **Default publication.** After smoke passes, publish the tactical commander
+   mode with `Active` as the default.
 
 ## Approval
 
@@ -1215,5 +1217,4 @@ Approved user direction on 2026-05-10:
 - parallel attacks are allowed when there is a fair strength advantage and
   personality supports the risk.
 - both sides should act dynamically and period-appropriately.
-- the finished system should be on and working in active mode after smoke
-  promotion, with monitoring always part of the loop.
+- the finished system default is active, with monitoring always part of the loop.
