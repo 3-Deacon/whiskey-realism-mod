@@ -84,7 +84,8 @@ static class Program
             ("tactical command posture monitor-only suppresses active task writes", TacticalCommandPostureMonitorOnlySuppressesActiveTaskWrites),
             ("tactical command posture eligibility precedence", TacticalCommandPostureEligibilityPrecedence),
             ("tactical command posture interrupted illegal idle recovery", TacticalCommandPostureInterruptedIllegalIdleRecovery),
-            ("tactical command posture reserve wait no-write", TacticalCommandPostureReserveWaitNoWrite),
+            ("tactical command posture no-write gates after eligibility", TacticalCommandPostureNoWriteGatesAfterEligibility),
+            ("tactical command posture reserve wait distinguishes reserve area", TacticalCommandPostureReserveWaitDistinguishesReserveArea),
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
@@ -1759,14 +1760,68 @@ static class Program
         AssertPostureDecision(PostureExecutionAction.RecoverInterruptedOrder, "illegal-idle-path-interrupted", decision);
     }
 
-    private static void TacticalCommandPostureReserveWaitNoWrite()
+    private static void TacticalCommandPostureNoWriteGatesAfterEligibility()
     {
-        var decision = CommandPostureExecutor.Decide(
-            CommandState(CommandTaskType.ReserveWait),
-            PhysicalState(),
-            EligibilityAllowsWrites());
+        AssertPostureDecision(
+            PostureExecutionAction.NoWrite,
+            "movement-in-progress",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                new CommandPhysicalState(
+                    routed: false,
+                    playerProtected: false,
+                    pathInterrupted: false,
+                    paths: 2,
+                    activeMove: true,
+                    formation: 1),
+                EligibilityAllowsWrites()));
 
-        AssertPostureDecision(PostureExecutionAction.NoWrite, "valid-reserve-wait", decision);
+        AssertPostureDecision(
+            PostureExecutionAction.NoWrite,
+            "already-correct",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                PhysicalState(),
+                new WriteEligibilitySnapshot(
+                    modeAllowsWrites: true,
+                    playerProtected: false,
+                    routed: false,
+                    orderPending: false,
+                    recentOrder: false,
+                    alreadyDoingCorrectTask: true)));
+
+        AssertPostureDecision(
+            PostureExecutionAction.NoWrite,
+            "missing-ledger-assignment",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.None),
+                PhysicalState(),
+                EligibilityAllowsWrites()));
+    }
+
+    private static void TacticalCommandPostureReserveWaitDistinguishesReserveArea()
+    {
+        AssertPostureDecision(
+            PostureExecutionAction.SetWaypoint,
+            "reserve-area",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.ReserveWait),
+                PhysicalState(),
+                EligibilityAllowsWrites()));
+
+        AssertPostureDecision(
+            PostureExecutionAction.SetFormation,
+            "reserve-hold",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.ReserveWait),
+                PhysicalState(),
+                new WriteEligibilitySnapshot(
+                    modeAllowsWrites: true,
+                    playerProtected: false,
+                    routed: false,
+                    orderPending: false,
+                    recentOrder: false,
+                    atAssignedLocation: true)));
     }
 
     private static void TacticalCommandPostureMapsTaskFamilies()
@@ -1781,9 +1836,15 @@ static class Program
         AssertPostureDecision(PostureExecutionAction.SetFormation, "probe", DecidePosture(CommandTaskType.Probe));
         AssertPostureDecision(PostureExecutionAction.SetFormation, "support-attack", DecidePosture(CommandTaskType.SupportAttack));
         AssertPostureDecision(PostureExecutionAction.SetFormation, "guard-flank", DecidePosture(CommandTaskType.GuardFlank));
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "scout", DecidePosture(CommandTaskType.Scout));
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "hold-choke", DecidePosture(CommandTaskType.HoldChoke));
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "delay", DecidePosture(CommandTaskType.Delay));
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "consolidate", DecidePosture(CommandTaskType.Consolidate));
 
         AssertPostureDecision(PostureExecutionAction.FallbackToLine, "fallback-line", DecidePosture(CommandTaskType.FallBackToLine));
-        AssertPostureDecision(PostureExecutionAction.NoWrite, "already-valid", DecidePosture(CommandTaskType.None));
+        AssertPostureDecision(PostureExecutionAction.ReleaseReserve, "release-reserve", DecidePosture(CommandTaskType.ReleaseReserve));
+        AssertPostureDecision(PostureExecutionAction.RecoverInterruptedOrder, "recover-stuck-order", DecidePosture(CommandTaskType.RecoverStuckOrder));
+        AssertPostureDecision(PostureExecutionAction.NoWrite, "missing-ledger-assignment", DecidePosture(CommandTaskType.None));
     }
 
     private static PostureExecutionDecision DecidePosture(CommandTaskType task)

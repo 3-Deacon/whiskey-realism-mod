@@ -31,13 +31,19 @@ namespace WhiskeyRealism.Tactical.Operations
             bool playerProtected,
             bool routed,
             bool orderPending,
-            bool recentOrder)
+            bool recentOrder,
+            bool alreadyDoingCorrectTask = false,
+            bool atAssignedLocation = false,
+            bool missingLedgerAssignment = false)
         {
             ModeAllowsWrites = modeAllowsWrites;
             PlayerProtected = playerProtected;
             Routed = routed;
             OrderPending = orderPending;
             RecentOrder = recentOrder;
+            AlreadyDoingCorrectTask = alreadyDoingCorrectTask;
+            AtAssignedLocation = atAssignedLocation;
+            MissingLedgerAssignment = missingLedgerAssignment;
         }
 
         public bool ModeAllowsWrites { get; }
@@ -45,6 +51,9 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool Routed { get; }
         public bool OrderPending { get; }
         public bool RecentOrder { get; }
+        public bool AlreadyDoingCorrectTask { get; }
+        public bool AtAssignedLocation { get; }
+        public bool MissingLedgerAssignment { get; }
     }
 
     public static class CommandPostureExecutor
@@ -79,6 +88,21 @@ namespace WhiskeyRealism.Tactical.Operations
                 return NoWrite("recent-order");
             }
 
+            if (eligibility.MissingLedgerAssignment || state.Task == CommandTaskType.None)
+            {
+                return NoWrite("missing-ledger-assignment");
+            }
+
+            if (eligibility.AlreadyDoingCorrectTask)
+            {
+                return NoWrite("already-correct");
+            }
+
+            if (physical.ActiveMove)
+            {
+                return NoWrite("movement-in-progress");
+            }
+
             if (physical.PathInterrupted && physical.Paths <= 0 && !physical.ActiveMove)
             {
                 return new PostureExecutionDecision(
@@ -88,6 +112,8 @@ namespace WhiskeyRealism.Tactical.Operations
 
             switch (state.Task)
             {
+                case CommandTaskType.Scout:
+                    return Formation("scout");
                 case CommandTaskType.FormUp:
                     return FormationAndWaypoint("form-up");
                 case CommandTaskType.AdvanceToAssembly:
@@ -104,12 +130,26 @@ namespace WhiskeyRealism.Tactical.Operations
                     return Formation("probe");
                 case CommandTaskType.SupportAttack:
                     return Formation("support-attack");
+                case CommandTaskType.HoldChoke:
+                    return Formation("hold-choke");
                 case CommandTaskType.GuardFlank:
                     return Formation("guard-flank");
+                case CommandTaskType.Delay:
+                    return Formation("delay");
+                case CommandTaskType.Consolidate:
+                    return Formation("consolidate");
                 case CommandTaskType.FallBackToLine:
                     return new PostureExecutionDecision(PostureExecutionAction.FallbackToLine, "fallback-line");
+                case CommandTaskType.ReleaseReserve:
+                    return new PostureExecutionDecision(PostureExecutionAction.ReleaseReserve, "release-reserve");
+                case CommandTaskType.RecoverStuckOrder:
+                    return new PostureExecutionDecision(
+                        PostureExecutionAction.RecoverInterruptedOrder,
+                        "recover-stuck-order");
                 case CommandTaskType.ReserveWait:
-                    return NoWrite("valid-reserve-wait");
+                    return eligibility.AtAssignedLocation
+                        ? Formation("reserve-hold")
+                        : new PostureExecutionDecision(PostureExecutionAction.SetWaypoint, "reserve-area");
                 default:
                     return NoWrite("already-valid");
             }
