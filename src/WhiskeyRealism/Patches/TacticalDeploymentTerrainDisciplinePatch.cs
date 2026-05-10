@@ -24,6 +24,7 @@ namespace WhiskeyRealism.Patches
         private const float DefaultPreferredFacingDeltaDegrees = 90f;
 
         private static readonly FieldInfo GrpField = AccessTools.Field(typeof(BattleUnits), "grp");
+        private static readonly FieldInfo BattlePassedDaysField = AccessTools.Field(typeof(BattleUnits), "battlepasseddays");
         private static readonly HashSet<string> EmittedAdvice = new HashSet<string>();
 
         [HarmonyPostfix]
@@ -35,9 +36,13 @@ namespace WhiskeyRealism.Patches
             {
                 if ((object)__instance == null) return;
                 if (GameVars.playeralliance == foralliance && !GameVars.ai_vs_ai) return;
+                if (GameVars.tutorialactive && !Tutorial.engaged) return;
 
                 BattleUnits.Grp[] groups = ReadGroups(__instance);
                 if (groups.Length == 0) return;
+
+                if (!TryReadInitialDeployment(__instance, out bool initialDeployment))
+                    return;
 
                 OnceLog.Info(
                     "tactical-deployment-terrain-advice",
@@ -49,7 +54,15 @@ namespace WhiskeyRealism.Patches
                     if (group == null || (object)group.regref == null) continue;
 
                     Regiment regiment = group.regref;
-                    if (!Eligible(regiment, foralliance)) continue;
+                    if (!EligibleForVanillaDeploymentPlacement(
+                            __instance,
+                            group,
+                            regiment,
+                            foralliance,
+                            initialDeployment))
+                    {
+                        continue;
+                    }
 
                     TryDisciplineGroup(__instance, group, regiment);
                 }
@@ -71,19 +84,119 @@ namespace WhiskeyRealism.Patches
                    Plugin.EnableTacticalDeploymentTerrainDiscipline.Value;
         }
 
-        private static bool Eligible(Regiment regiment, int alliance)
+        private static bool EligibleForVanillaDeploymentPlacement(
+            BattleUnits battleUnits,
+            BattleUnits.Grp group,
+            Regiment regiment,
+            int alliance,
+            bool initialDeployment)
         {
+            if ((object)battleUnits == null || group == null) return false;
             if (regiment == null) return false;
+            if (group.alliance != alliance) return false;
             if (regiment.alliance != alliance) return false;
             if (regiment.unittyp <= 13) return false;
             if (regiment.isrouted) return false;
 
             try
             {
-                return regiment.gameObject != null && regiment.gameObject.activeInHierarchy;
+                if (regiment.gameObject == null || !regiment.gameObject.activeInHierarchy)
+                    return false;
+                if ((object)group.go == null)
+                    return false;
+
+                bool vanillaOwned =
+                    group.isbattledataunit ||
+                    (UnityEngine.Object)regiment.groupaiobject == (UnityEngine.Object)regiment.gameObject;
+                if (!vanillaOwned)
+                    return false;
+                if (regiment.groupposition == null)
+                    return false;
+                if (!TryIsWlCurrentCommandExcluded(regiment, out bool excluded) || excluded)
+                    return false;
+
+                return !group.IsApplicableForDeployment(battleUnits, initialDeployment);
             }
-            catch
+            catch (Exception ex)
             {
+                OnceLog.Warning(
+                    "tactical-deployment-terrain:eligibility",
+                    "TacticalDeploymentTerrainDisciplinePatch eligibility failed: " + ex.GetType().Name);
+                return false;
+            }
+        }
+
+        private static bool TryReadInitialDeployment(BattleUnits battleUnits, out bool initialDeployment)
+        {
+            initialDeployment = false;
+            if ((object)battleUnits == null)
+                return false;
+            if (BattlePassedDaysField == null)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-terrain:missing-battlepasseddays",
+                    "Missing BattleUnits.battlepasseddays; tactical deployment terrain discipline disabled.");
+                return false;
+            }
+
+            try
+            {
+                object value = BattlePassedDaysField.GetValue(battleUnits);
+                if (value is int days)
+                {
+                    initialDeployment = days <= 0;
+                    return true;
+                }
+                if (value is float daysFloat)
+                {
+                    initialDeployment = daysFloat <= 0f;
+                    return true;
+                }
+
+                OnceLog.Warning(
+                    "tactical-deployment-terrain:battlepasseddays-type",
+                    "Unsupported BattleUnits.battlepasseddays type; tactical deployment terrain discipline disabled.");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-terrain:battlepasseddays",
+                    "Failed reading BattleUnits.battlepasseddays: " + ex.GetType().Name);
+                return false;
+            }
+        }
+
+        private static bool TryIsWlCurrentCommandExcluded(Regiment regiment, out bool excluded)
+        {
+            excluded = false;
+
+            try
+            {
+                if (!DLC_WL.dlc_scenarioactive)
+                    return true;
+                if (DLC_WL.dlc_chosencommander < 0)
+                    return true;
+                if (GameVars.commander == null || DLC_WL.dlc_chosencommander >= GameVars.commander.Count)
+                    return false;
+
+                Regiment currentCommand = GameVars.commander[DLC_WL.dlc_chosencommander].currentcommand;
+                if ((UnityEngine.Object)currentCommand == null)
+                    return true;
+                if ((UnityEngine.Object)currentCommand.groupaiobjectreg == null)
+                    return true;
+
+                excluded =
+                    (UnityEngine.Object)currentCommand.groupaiobjectreg == (UnityEngine.Object)currentCommand &&
+                    (UnityEngine.Object)currentCommand == (UnityEngine.Object)regiment;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-terrain:wl-current-command",
+                    "Failed reading W&L current-command deployment exclusion: " + ex.GetType().Name);
+                excluded = false;
                 return false;
             }
         }
