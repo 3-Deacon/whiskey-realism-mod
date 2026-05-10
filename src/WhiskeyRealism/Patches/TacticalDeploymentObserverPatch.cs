@@ -179,6 +179,11 @@ namespace WhiskeyRealism.Patches
             int pathCount = SafeInt(() => regiment.regimentpaths);
             bool routed = SafeBool(() => regiment.isrouted);
             bool active = SafeBool(() => ((Component)regiment).gameObject.activeInHierarchy);
+            float facing = SafeFloat(() => ((Component)regiment).transform.eulerAngles.y);
+            TacticalTerrainRuntimeSample centerSample = TacticalTerrainProbe.SampleCenter(regiment, null, position);
+            IReadOnlyList<TacticalTerrainRuntimeSample> footprintSamples = TacticalTerrainProbe.SampleFootprint(regiment, null);
+            bool footprintWater = footprintSamples.Any(sample => sample.Water);
+            TacticalEnemyBearingEvidence enemy = TacticalTerrainProbe.GetVisibleEnemyBearing(regiment, position);
 
             return new TacticalDeploymentGroupSnapshot(
                 key,
@@ -191,7 +196,14 @@ namespace WhiskeyRealism.Patches
                 formationOrdered,
                 pathCount,
                 routed,
-                active);
+                active,
+                centerSample.TerrainId,
+                centerSample.Water,
+                footprintWater,
+                centerSample.InDeploymentZone,
+                facing,
+                enemy.Visible ? enemy.BearingDegrees : 0f,
+                enemy.Visible ? enemy.DistanceMeters : 0f);
         }
 
         private static void EmitDelta(BattleUnits battleUnits, string surface, int alliance, ObservationState state)
@@ -243,7 +255,60 @@ namespace WhiskeyRealism.Patches
                              " paths=" + move.Before.PathCount + "->" + move.After.PathCount +
                              " routed=" + move.Before.Routed + "->" + move.After.Routed +
                              " active=" + move.Before.Active + "->" + move.After.Active;
+
+                string terrainLine = TerrainEvidenceLine(surface, before.Phase, move.After, move.Distance);
+                if (terrainLine != null)
+                    yield return terrainLine;
             }
+        }
+
+        private static string TerrainEvidenceLine(
+            string surface,
+            string phase,
+            TacticalDeploymentGroupSnapshot group,
+            float moveDistance)
+        {
+            if (group == null) return null;
+            if (!group.HasTerrainEvidence && !group.CenterWater && !group.FootprintWater) return null;
+
+            var center = new TacticalTerrainSample(
+                group.TerrainId,
+                group.CenterWater,
+                group.InsideDeploymentZone,
+                group.TerrainId >= 0);
+            var footprint = new TacticalTerrainSample(
+                group.TerrainId,
+                group.FootprintWater,
+                group.InsideDeploymentZone,
+                group.TerrainId >= 0);
+            var candidate = new TacticalTerrainCandidate(
+                new TacticalPoint2(group.X, group.Z),
+                group.Facing,
+                center,
+                new[] { footprint });
+            float facingDelta = group.HasVisibleEnemyBearing
+                ? TacticalTerrainFacingDiscipline.AngleDelta(group.Facing, group.NearestVisibleEnemyBearing)
+                : 0f;
+            var decision = new TacticalTerrainDecision(
+                false,
+                TacticalTerrainDecisionReason.VanillaKept,
+                candidate,
+                moveDistance,
+                facingDelta);
+
+            return TacticalTerrainFacingTelemetry.Format(new TacticalTerrainFacingLogRow(
+                surface,
+                phase,
+                group.Alliance,
+                group.Name,
+                group.TerrainId,
+                group.CenterWater,
+                group.FootprintWater,
+                group.InsideDeploymentZone,
+                group.Facing,
+                group.NearestVisibleEnemyBearing,
+                group.NearestVisibleEnemyDistance,
+                decision));
         }
 
         private static BattleUnits.Grp[] ReadGroups(BattleUnits battleUnits)
@@ -335,6 +400,19 @@ namespace WhiskeyRealism.Patches
         {
             try { return read(); }
             catch { return false; }
+        }
+
+        private static float SafeFloat(Func<float> read)
+        {
+            try
+            {
+                float value = read();
+                return float.IsNaN(value) || float.IsInfinity(value) ? 0f : value;
+            }
+            catch
+            {
+                return 0f;
+            }
         }
 
         private static string FormatFloat(float value)
