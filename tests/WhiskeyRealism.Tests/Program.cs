@@ -48,6 +48,15 @@ static class Program
             ("tactical deployment telemetry tracks new and removed groups", TacticalDeploymentTelemetryTracksNewAndRemovedGroups),
             ("tactical deployment telemetry matches stable keys across reorder", TacticalDeploymentTelemetryMatchesStableKeysAcrossReorder),
             ("tactical deployment telemetry formats skipped phase", TacticalDeploymentTelemetryFormatsSkippedPhase),
+            ("tactical terrain rejects water center", TacticalTerrainRejectsWaterCenter),
+            ("tactical terrain rejects water footprint", TacticalTerrainRejectsWaterFootprint),
+            ("tactical terrain rejects outside deployment zone", TacticalTerrainRejectsOutsideDeploymentZone),
+            ("tactical terrain picks closest safe candidate", TacticalTerrainPicksClosestSafeCandidate),
+            ("tactical terrain prefers visible enemy facing", TacticalTerrainPrefersVisibleEnemyFacing),
+            ("tactical terrain no safe candidate keeps vanilla", TacticalTerrainNoSafeCandidateKeepsVanilla),
+            ("tactical terrain missing visible enemy rejects when required", TacticalTerrainMissingVisibleEnemyRejectsWhenRequired),
+            ("tactical terrain rejects nonfinite vanilla baseline", TacticalTerrainRejectsNonfiniteVanillaBaseline),
+            ("tactical terrain rejects nonfinite candidate", TacticalTerrainRejectsNonfiniteCandidate),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -1034,6 +1043,204 @@ static class Program
         AssertContains(formatted, "phase=skipped", "skipped phase");
         AssertContains(formatted, "matched=1", "matched count");
         AssertContains(formatted, "moved=0", "skipped move count");
+    }
+
+    private static TacticalTerrainCandidate TerrainCandidate(
+        float x,
+        float z,
+        float facing,
+        bool centerWater = false,
+        bool footprintWater = false,
+        bool insideZone = true)
+    {
+        return new TacticalTerrainCandidate(
+            new TacticalPoint2(x, z),
+            facing,
+            new TacticalTerrainSample(centerWater ? 4 : 0, centerWater, insideZone),
+            new[]
+            {
+                new TacticalTerrainSample(0, false, insideZone),
+                new TacticalTerrainSample(footprintWater ? 4 : 0, footprintWater, insideZone)
+            });
+    }
+
+    private static TacticalEnemyBearingEvidence VisibleEnemy(float bearing = 90f, float distance = 600f, float strength = 1200f)
+    {
+        return new TacticalEnemyBearingEvidence(true, bearing, distance, strength);
+    }
+
+    private static void TacticalTerrainRejectsWaterCenter()
+    {
+        var candidate = TerrainCandidate(100f, 100f, 90f, centerWater: true);
+        var reason = TacticalTerrainFacingDiscipline.Reject(
+            new TacticalPoint2(100f, 100f),
+            candidate,
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault,
+            out _,
+            out _);
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            0f,
+            new[] { candidate },
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertEqual(TacticalTerrainDecisionReason.WaterCenter, reason, "water center rejection");
+        AssertFalse(decision.Accepted, "water center should not be accepted");
+        AssertEqual(TacticalTerrainDecisionReason.NoSafeCandidate, decision.Reason, "no accepted candidates");
+    }
+
+    private static void TacticalTerrainRejectsWaterFootprint()
+    {
+        var candidate = TerrainCandidate(100f, 100f, 90f, footprintWater: true);
+        var reason = TacticalTerrainFacingDiscipline.Reject(
+            new TacticalPoint2(100f, 100f),
+            candidate,
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault,
+            out _,
+            out _);
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            0f,
+            new[] { candidate },
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertEqual(TacticalTerrainDecisionReason.WaterFootprint, reason, "water footprint rejection");
+        AssertFalse(decision.Accepted, "water footprint should not be accepted");
+    }
+
+    private static void TacticalTerrainRejectsOutsideDeploymentZone()
+    {
+        var candidate = TerrainCandidate(105f, 100f, 90f, insideZone: false);
+        var reason = TacticalTerrainFacingDiscipline.Reject(
+            new TacticalPoint2(100f, 100f),
+            candidate,
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault,
+            out _,
+            out _);
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            0f,
+            new[] { candidate },
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertEqual(TacticalTerrainDecisionReason.OutsideDeploymentZone, reason, "outside zone rejection");
+        AssertFalse(decision.Accepted, "outside deployment zone should not be accepted");
+    }
+
+    private static void TacticalTerrainPicksClosestSafeCandidate()
+    {
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            0f,
+            new[]
+            {
+                TerrainCandidate(140f, 100f, 90f),
+                TerrainCandidate(110f, 100f, 90f)
+            },
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertTrue(decision.Accepted, "safe candidate should be accepted");
+        AssertNear(110f, decision.Candidate.Point.X, 0.01f, "closest x");
+    }
+
+    private static void TacticalTerrainPrefersVisibleEnemyFacing()
+    {
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            0f,
+            new[]
+            {
+                TerrainCandidate(110f, 100f, 270f),
+                TerrainCandidate(111f, 100f, 90f)
+            },
+            VisibleEnemy(bearing: 90f),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertTrue(decision.Accepted, "visible enemy candidate should be accepted");
+        AssertNear(90f, decision.Candidate.FacingDegrees, 0.01f, "enemy-facing candidate");
+    }
+
+    private static void TacticalTerrainNoSafeCandidateKeepsVanilla()
+    {
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            45f,
+            new[]
+            {
+                TerrainCandidate(200f, 100f, 90f),
+                TerrainCandidate(100f, 100f, 90f, centerWater: true)
+            },
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertFalse(decision.Accepted, "unsafe candidates should not be accepted");
+        AssertEqual(TacticalTerrainDecisionReason.NoSafeCandidate, decision.Reason, "reason");
+        AssertNear(45f, decision.Candidate.FacingDegrees, 0.01f, "vanilla facing preserved");
+    }
+
+    private static void TacticalTerrainMissingVisibleEnemyRejectsWhenRequired()
+    {
+        var rules = new TacticalTerrainRules(60f, 90f, requireDeploymentZone: true, requireVisibleEnemyForFacing: true);
+        var candidate = TerrainCandidate(100f, 100f, 90f);
+        var reason = TacticalTerrainFacingDiscipline.Reject(
+            new TacticalPoint2(100f, 100f),
+            candidate,
+            new TacticalEnemyBearingEvidence(false, 0f, 0f, 0f),
+            rules,
+            out _,
+            out _);
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            0f,
+            new[] { candidate },
+            new TacticalEnemyBearingEvidence(false, 0f, 0f, 0f),
+            rules);
+
+        AssertEqual(TacticalTerrainDecisionReason.MissingVisibleEnemy, reason, "missing visible enemy rejection");
+        AssertFalse(decision.Accepted, "missing visible enemy should reject when required");
+    }
+
+    private static void TacticalTerrainRejectsNonfiniteVanillaBaseline()
+    {
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(float.NaN, 100f),
+            45f,
+            new[] { TerrainCandidate(100f, 100f, 90f) },
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertFalse(decision.Accepted, "nonfinite vanilla baseline should fail closed");
+        AssertEqual(TacticalTerrainDecisionReason.NonFiniteBaseline, decision.Reason, "nonfinite baseline reason");
+        AssertNear(45f, decision.Candidate.FacingDegrees, 0.01f, "vanilla facing preserved");
+    }
+
+    private static void TacticalTerrainRejectsNonfiniteCandidate()
+    {
+        var candidate = TerrainCandidate(float.PositiveInfinity, 100f, 90f);
+        var reason = TacticalTerrainFacingDiscipline.Reject(
+            new TacticalPoint2(100f, 100f),
+            candidate,
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault,
+            out _,
+            out _);
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            45f,
+            new[] { candidate },
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertEqual(TacticalTerrainDecisionReason.NonFiniteCandidate, reason, "nonfinite candidate rejection");
+        AssertFalse(decision.Accepted, "nonfinite candidate should not be accepted");
+        AssertNear(45f, decision.Candidate.FacingDegrees, 0.01f, "vanilla facing preserved");
     }
 
 

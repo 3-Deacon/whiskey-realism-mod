@@ -9,6 +9,7 @@ namespace WhiskeyRealism.Tactical
     {
         Accepted,
         VanillaKept,
+        NonFiniteBaseline,
         NonFiniteCandidate,
         WaterCenter,
         WaterFootprint,
@@ -191,6 +192,16 @@ namespace WhiskeyRealism.Tactical
             TacticalEnemyBearingEvidence enemy,
             TacticalTerrainRules rules)
         {
+            if (!vanillaPoint.IsFinite)
+            {
+                var kept = new TacticalTerrainCandidate(
+                    vanillaPoint,
+                    vanillaFacingDegrees,
+                    TacticalTerrainSample.Unknown,
+                    Array.Empty<TacticalTerrainSample>());
+                return new TacticalTerrainDecision(false, TacticalTerrainDecisionReason.NonFiniteBaseline, kept, 0f, 0f);
+            }
+
             var best = default(TacticalTerrainCandidate);
             float bestScore = float.MinValue;
             float bestDistance = 0f;
@@ -237,6 +248,9 @@ namespace WhiskeyRealism.Tactical
         {
             correctionDistance = 0f;
             facingDelta = 0f;
+
+            if (!vanillaPoint.IsFinite)
+                return TacticalTerrainDecisionReason.NonFiniteBaseline;
 
             if (!candidate.Point.IsFinite)
                 return TacticalTerrainDecisionReason.NonFiniteCandidate;
