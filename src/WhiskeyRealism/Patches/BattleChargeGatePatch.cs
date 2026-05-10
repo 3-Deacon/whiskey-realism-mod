@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -72,6 +73,15 @@ namespace WhiskeyRealism.Patches
                         {
                             tookOwnership = true;
                             aigroup.lastfeudactiontime = CurrentBattleHour(bunits);
+
+                            TacticalOrchestratorChargeGate.Decision orchestratorDecision =
+                                DecideOrchestratorCharge(unit, aigroup);
+                            if (orchestratorDecision.Action == TacticalOrchestratorChargeGate.Action.Deny)
+                            {
+                                LogDeniedOrchestrator(unit, aigroup, orchestratorDecision);
+                                continue;
+                            }
+
                             if (TryB6cDeny(unit, aigroup)) continue;
 
                             unit.SetMovementMode(3);
@@ -119,7 +129,8 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null &&
                 Plugin.Instance.Enabled.Value &&
                 (Plugin.Instance.EnableWlTacticalChargeGuard.Value ||
-                    Plugin.Instance.EnableTacticalChargeDenial.Value);
+                    Plugin.Instance.EnableTacticalChargeDenial.Value ||
+                    Plugin.Instance.EnableTacticalOrchestratorChargeGate.Value);
         }
 
         private static bool LocalReactionProducerEnabled()
@@ -140,6 +151,175 @@ namespace WhiskeyRealism.Patches
 
             LogDeniedB6c(unit, group, reaction);
             return true;
+        }
+
+        private static TacticalOrchestratorChargeGate.Decision DecideOrchestratorCharge(Regiment unit, Regiment group)
+        {
+            if (Plugin.Instance == null || !Plugin.Instance.EnableTacticalOrchestratorChargeGate.Value)
+            {
+                return new TacticalOrchestratorChargeGate.Decision(
+                    TacticalOrchestratorChargeGate.Action.Allow,
+                    DirectChildRole.Unknown,
+                    "orchestrator-charge-gate-disabled");
+            }
+
+            CommandIntentResolution resolution = ResolveIntent(group);
+            bool playerControlled = HasPlayerOwnership(group, unit);
+            float localOdds = LocalOdds(group);
+            bool mainEffortSupportAvailable = MainEffortSupportAvailable(group, resolution);
+            bool screenRoutedTargetVisible = ScreenRoutedTargetVisible(unit);
+
+            return TacticalOrchestratorChargeGate.Decide(
+                new TacticalOrchestratorChargeGate.Input(
+                    vanillaWouldCharge: true,
+                    chargeCancellation: false,
+                    resolution: resolution,
+                    playerControlled: playerControlled,
+                    localOdds: localOdds,
+                    mainEffortSupportAvailable: mainEffortSupportAvailable,
+                    screenRoutedTargetVisible: screenRoutedTargetVisible));
+        }
+
+        private static CommandIntentResolution ResolveIntent(Regiment group)
+        {
+            try
+            {
+                if (group == null)
+                    return new CommandIntentResolution(false, default, "no-group");
+
+                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
+                if (side == null || side.Army == null)
+                    return new CommandIntentResolution(false, default, "no-side-orchestrator");
+
+                return side.Army.ResolveCommandIntentForGroup(group.GetInstanceID());
+            }
+            catch (Exception ex)
+            {
+                return new CommandIntentResolution(false, default, "resolve-error:" + ex.GetType().Name);
+            }
+        }
+
+        private static bool HasPlayerOwnership(Regiment group, Regiment unit)
+        {
+            try
+            {
+                if (group == null) return true;
+                if (!SafeAiVsAi() && group.alliance == SafePlayerAlliance()) return true;
+                if (group.dlcw_isundercommander) return true;
+                if (unit != null && unit.dlcw_isundercommander) return true;
+                if (group.allattachedunits == null) return false;
+
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment attached = group.allattachedunits[i];
+                    if (attached != null && attached.dlcw_isundercommander) return true;
+                }
+
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static float LocalOdds(Regiment group)
+        {
+            try
+            {
+                if (group == null) return 1f;
+                float own = Math.Max(Sanitize(group.groupowninrange), Sanitize(group.groupstrengthaigroup));
+                float enemy = Math.Max(Sanitize(group.groupenemiesinrange), SumEnemyStrengthWithinAngle(group));
+                return enemy <= 0f ? 1f : own / Math.Max(1f, enemy);
+            }
+            catch
+            {
+                return 1f;
+            }
+        }
+
+        private static float SumEnemyStrengthWithinAngle(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.unitrange == null || group.unitrange.enemystrengthwithinangle == null)
+                    return 0f;
+
+                float total = 0f;
+                for (int i = 0; i < group.unitrange.enemystrengthwithinangle.Length; i++)
+                    total += Math.Max(0f, group.unitrange.enemystrengthwithinangle[i]);
+                return total;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static bool MainEffortSupportAvailable(Regiment group, CommandIntentResolution resolution)
+        {
+            try
+            {
+                if (group == null || !resolution.Found) return false;
+                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
+                if (side == null || side.Army == null || side.Army.CurrentCommandNodeIntents == null) return false;
+
+                int sector = resolution.Intent.PrimarySector;
+                var intents = side.Army.CurrentCommandNodeIntents;
+                for (int i = 0; i < intents.Count; i++)
+                {
+                    CommandNodeIntent intent = intents[i];
+                    if (intent.Role != DirectChildRole.Main) continue;
+                    if (Math.Abs(intent.PrimarySector - sector) <= 1)
+                        return true;
+                }
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool ScreenRoutedTargetVisible(Regiment unit)
+        {
+            try
+            {
+                if (unit == null || unit.unitrange == null || unit.unitrange.enemyinrangereg == null)
+                    return false;
+
+                for (int i = 0; i < unit.unitrange.enemyinrangereg.Count; i++)
+                {
+                    Regiment enemy = unit.unitrange.enemyinrangereg[i];
+                    if (enemy != null && enemy.isrouted)
+                        return true;
+                }
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static int SafePlayerAlliance()
+        {
+            try { return GameVars.playeralliance; }
+            catch { return -99; }
+        }
+
+        private static bool SafeAiVsAi()
+        {
+            try { return GameVars.ai_vs_ai; }
+            catch { return false; }
+        }
+
+        private static float Sanitize(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
+            return Math.Max(0f, value);
         }
 
         private static bool IsExplicitChargeDenial(TacticalLocalReactionDecision reaction)
@@ -200,6 +380,21 @@ namespace WhiskeyRealism.Patches
                 " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
                 " reaction=" + reaction.Reaction +
                 " reason=" + reaction.Reason);
+        }
+
+        private static void LogDeniedOrchestrator(
+            Regiment unit,
+            Regiment group,
+            TacticalOrchestratorChargeGate.Decision decision)
+        {
+            OnceLog.Info("tactical-orchestrator-charge-gate", "BattleChargeGatePatch orchestrator branch wired");
+            OnceLog.Info(
+                "tactical-orchestrator-charge-gate:deny:" + SafeName(unit),
+                "[TacticalOrchestratorChargeGate] action=deny" +
+                " role=" + decision.Role +
+                " reason=" + decision.Reason +
+                " unit=" + SafeName(unit) + "#" + SafeInstanceId(unit) +
+                " group=" + SafeName(group) + "#" + SafeInstanceId(group));
         }
 
         private static void LogMissingRequiredAnchor(string anchor)
