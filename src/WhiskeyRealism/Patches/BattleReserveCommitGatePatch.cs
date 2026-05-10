@@ -362,24 +362,39 @@ namespace WhiskeyRealism.Patches
 
         private static ReserveCommitState Snapshot(Regiment group)
         {
+            Regiment[] attachedUnits;
             try
             {
                 if (group == null || group.allattachedunits == null)
                     return new ReserveCommitState();
 
-                UnitState[] units = new UnitState[group.allattachedunits.Length];
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    Regiment unit = group.allattachedunits[i];
-                    units[i] = SnapshotUnit(unit);
-                }
-
-                return new ReserveCommitState { Units = units };
+                attachedUnits = group.allattachedunits;
             }
-            catch
+            catch (Exception ex)
             {
+                OnceLog.Warning(
+                    "tactical-reserve-commit-gate:snapshot-group",
+                    "[TacticalReserveCommitGate] Could not snapshot reserve group; vanilla reserve movement remains active: " + ex.Message);
                 return new ReserveCommitState();
             }
+
+            UnitState[] units = new UnitState[attachedUnits.Length];
+            for (int i = 0; i < attachedUnits.Length; i++)
+            {
+                try
+                {
+                    units[i] = SnapshotUnit(attachedUnits[i]);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "tactical-reserve-commit-gate:snapshot-unit",
+                        "[TacticalReserveCommitGate] Could not snapshot one reserve unit; unit skipped: " + ex.Message);
+                    units[i] = default(UnitState);
+                }
+            }
+
+            return new ReserveCommitState { Units = units };
         }
 
         private static UnitState SnapshotUnit(Regiment unit)
@@ -435,8 +450,8 @@ namespace WhiskeyRealism.Patches
                 SafeRegiment(() => unit.targetedenemyunitreg),
                 SafeInt(() => unit.targetedenemyunittype),
                 SafeBool(() => unit.reattachmentorder),
-                SnapshotGameObjectList(unit.gunobjectstotake),
-                SnapshotWaypointAdjustment(unit.waypointadjustment, SafeWaypointPathLimit(unit)),
+                SnapshotGameObjectList(() => unit.gunobjectstotake),
+                SnapshotWaypointAdjustment(() => unit.waypointadjustment, SafeWaypointPathLimit(unit)),
                 SnapshotWaypointBlockAdjustments(unit),
                 hasLastDrawnPathCorner,
                 lastDrawnPathCorner,
@@ -582,6 +597,12 @@ namespace WhiskeyRealism.Patches
             catch { return null; }
         }
 
+        private static List<GameObject> SnapshotGameObjectList(Func<List<GameObject>> read)
+        {
+            try { return SnapshotGameObjectList(read != null ? read() : null); }
+            catch { return null; }
+        }
+
         private static void RestoreGameObjectList(ref List<GameObject> target, List<GameObject> snapshot)
         {
             if (target == null)
@@ -644,6 +665,12 @@ namespace WhiskeyRealism.Patches
             {
                 return default(WaypointAdjustmentState);
             }
+        }
+
+        private static WaypointAdjustmentState SnapshotWaypointAdjustment(Func<Regiment.WaypointAdjustment> read, int pathLimit)
+        {
+            try { return SnapshotWaypointAdjustment(read != null ? read() : null, pathLimit); }
+            catch { return default(WaypointAdjustmentState); }
         }
 
         private static WaypointAdjustmentState[] SnapshotWaypointBlockAdjustments(Regiment unit)
