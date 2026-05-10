@@ -46,15 +46,19 @@ Both AI sides should behave like Civil War armies:
 - reform, pull back, hold, stage, or attack instead of sitting unexplained.
 - dynamically react to strong new evidence without omniscient RTS twitching.
 
-The intended operating mode is active, not dormant:
+The finished operating mode is active, not dormant:
 
 ```text
 TacticalCommanderMode = Active
 ```
 
-The system may keep one emergency kill switch, but the normal target is that
-vision, ledger, echelon command, task planning, execution, and monitoring run
-together for AI sides.
+That is the design target after focused in-game smoke. The shipped default must
+still obey the repo's tactical patch-hygiene rule: new vanilla-state writers
+ship behind an explicit default-off behavior gate until smoke proves bounded
+logs, stable Harmony anchors, no repeated exceptions, no player-subordinate
+retasking, and no unintended side effects. Therefore the first shipped default
+for this system is `MonitorOnly`; promotion to `Active` is a verified release
+step, not a downscope.
 
 ## Confirmed Vanilla Anchors
 
@@ -67,7 +71,7 @@ decompile coordinates, not source symbols shipped by the game.
 | Tactical loop | `AIBattle.UpdateAITasks()` `:5857` | Calls `AssignReserves`, `UpdateMovingTargets`, flank calculations, `CheckGlobalAIStrategy`, `CheckEndOfActions`, `AdjustGroupAIStance`, `AdjustGroupFormations`, and `CheckForFeudGroupActions`. | Whiskey command monitoring should tick from existing orchestrator lifecycle and consume these surfaces rather than replacing the whole battle loop. |
 | Stance | `AIBattle.AdjustGroupAIStance()` `:4221` | Strength/macro based stance writer through `BattleUnits.ChangeStance`; respects `PerformAIActionDLCWL`. | Existing #45 is a valid stance-consumer surface, but stance alone cannot create objective/task discipline. |
 | Formation | `AIBattle.AdjustGroupFormations()` `:5875` | Converts ordered stance into group formation only when stance matches ordered stance, stance > 0, paths are clear, and subordinates are not moving/engaged. | Vanilla formation logic skips many stuck/moving cases; Whiskey must monitor illegal idle and use bounded group-formation corrections when eligible. |
-| Objective-chain movement | `AIBattle.UpdateMovingTargets()` `:6900` | Moves objective-chain center groups with `BattleUnits.SetWaypoint`; skips when `pathinterrupted`, blocked order, active order, active combat, or subordinates moving. | The observed `pathInterrupted=True` state can prevent vanilla movement. Whiskey must detect and recover stalled objective movement instead of assuming vanilla will fix it. |
+| Objective-chain movement | `AIBattle.UpdateMovingTargets()` method head `:6870`; movement loop body `:6900` | Moves objective-chain center groups with `BattleUnits.SetWaypoint`; skips when `pathinterrupted`, blocked order, active order, active combat, or subordinates moving. | The observed `pathInterrupted=True` state can prevent vanilla movement. Whiskey must detect and recover stalled objective movement instead of assuming vanilla will fix it. |
 | Line fallback | `AIBattle.CheckLineFallbacks(Regiment)` `:5118` | Reactive per-attached-unit fallback on morale/outflank pressure; writes paths and movement/combat behavior. | Existing fallback surfaces are reactive. Ledger-driven fallback lines must be planned, not only panic retreat. |
 | Reserve local support | `AIBattle.CheckUseOfReserves(Regiment)` `:6062` | Moves nearby attached units to support outflanked attached units through direct `RegimentSetPath`. | #59 can gate reserve misuse, but the full system also needs reserve areas, covered objectives, and release triggers. |
 | Reserve assignment | `AIBattle.AssignReserves()` `:7017` | Assigns reserve groups into objective-chain line/flank/artillery groups based on vanilla objective chains and flank strength. | Whiskey can read and monitor vanilla reserve/objective-chain state, but should not rely on it as the whole operations ledger. |
@@ -81,8 +85,19 @@ Not verified as a clean vanilla API: battle-local bridge/road/town/choke-point
 enumeration. The spec treats those as Whiskey battlefield-intelligence products
 derived from available vanilla objects, objective-chain targets, terrain samples,
 unit positions, movement corridors, and future verified anchors. Do not claim
-Grand Tactician exposes a complete POI graph until a follow-up anchor review
-proves the exact source.
+Grand Tactician exposes a complete POI graph until the prerequisite anchor
+review proves the exact source.
+
+Because objective type is load-bearing for operation selection, a verified
+objective-anchor sub-slice is prerequisite implementation work before wiring
+`ObjectiveIntel.type` into `OperationSelection`. Until that sub-slice ships, the
+system may still build generic objectives from objective-chain positions, current
+objective references, contact lines, and unit positions, but those records must
+use `UnknownVanillaObjective` or another source-specific non-POI type and must
+not drive bridge/ford/road/choke-specific scoring. Generic objectives can support
+purpose, formation, reserve, scouting, and anti-idle behavior; they cannot claim
+terrain-value, approach-difficulty, or road-connectivity authority that has not
+been anchored.
 
 ## Current Whiskey Mod Anchors
 
@@ -111,6 +126,34 @@ The new system should not duplicate those patches. It should promote the current
 orchestrator from plan/role/gate substrate into an operations-ledger command
 system, then retarget the existing patch consumers to that state.
 
+## State Ownership Contract
+
+Strategic and tactical-orchestrator mod state remains read-only to Harmony
+patches. This spec does not change that contract.
+
+Authoritative tactical state writes happen only in the per-battle orchestrator
+tick cycle owned by `TacticalBattleCoordinator` / `TacticalBattleOrchestrator`
+/ `ArmyOrchestrator`. That tick may update the operations ledger, battlefield
+picture, command-node operational state, task records, `lastOrderIssuedAt`,
+`lastProgressTime`, and `stuckReason`.
+
+Harmony patches may:
+
+- read the latest immutable orchestrator snapshot.
+- call pure decision functions such as `CommandPostureExecutor.Decide(...)`.
+- write vanilla battle state through approved vanilla surfaces when the decision
+  allows it.
+- emit bounded telemetry.
+- maintain patch-local throttles/cooldowns needed to avoid repeated writes.
+
+Harmony patches must not directly mutate `TacticalOperationsLedger`,
+`CommandNodeOperationalState`, task state, vision state, or army-plan state. The
+orchestrator tick observes vanilla state on the next cycle and records progress,
+stuck state, and order timestamps from that observation. If an implementation
+needs an event queue from patches back to the orchestrator, that queue must be
+explicitly owned and drained by the orchestrator tick; patches may append only
+plain observations and must not update authoritative command state in place.
+
 ## Architecture
 
 ```text
@@ -123,7 +166,7 @@ TacticalOperationsLedger
 ArmyCommandOrchestrator
   -> operation shape, main effort, supporting/fixing objectives, reserve policy
 
-EchelonCommandOrchestrator
+CommandNodeOperationsRuntime
   -> corps/division/brigade-like node assignments from generic command tree
 
 BrigadeTaskPlanner
@@ -136,11 +179,21 @@ TacticalCommandMonitor
   -> continuous purpose/progress/stuck/idle validation and correction requests
 ```
 
-Implementation may keep generic command-node types internally because Grand
-Tactician command hierarchy varies by scenario and `GamePrefs.commandhierarchyshift`.
-The behavior must still be echelon-aware. "Corps-like", "division-like", and
-"brigade-like" are runtime roles assigned to generic command nodes, not a
-requirement to hard-code brittle class towers.
+The repo already has `EchelonOrchestrator` with `EchelonKind` and child
+propagation, but current shipped tactical behavior effectively lives on
+`ArmyOrchestrator` plus the generic command-node tree. This design should not
+introduce a second ambiguous `EchelonCommandOrchestrator` class name. The new
+work should either extend the existing `EchelonOrchestrator` base deliberately
+or add a clearly named command-node operations runtime that wraps generic
+command nodes. The implementation plan must pick one. The behavioral contract is
+echelon-aware either way: "corps-like", "division-like", and "brigade-like" are
+runtime interpretations of command nodes, not assumptions that GT always exposes
+a perfect class tower.
+
+The monitor and vision/ledger ticks must obey the same side gate as vanilla
+`AIBattle.UpdateAITasks`: run behavior for AI sides only, and run both sides
+only when `GameVars.ai_vs_ai` permits it. Player-side telemetry that is needed
+for debugging must stay read-only and must not feed executor writes.
 
 ## Tactical Vision Orchestrator
 
@@ -241,6 +294,72 @@ Initial objective discovery must be conservative:
 The AI is not omniscient. Reports carry confidence and staleness. Aggressive
 commanders may act on lower confidence; cautious/methodical commanders require
 more scouting before commitment.
+
+## Confidence Model
+
+Confidence must come from a single pure model, not ad hoc constants scattered
+through operation selection. The runtime adapter converts vanilla observations
+into a typed `ContactObservationInput`; the pure model converts those inputs into
+confidence and staleness.
+
+Confirmed vanilla / shipped inputs available now:
+
+- `Regiment.unitrange.closestenemyunitfarreg` and
+  `Regiment.unitrange.closestenemyunit` for visible/nearest contact.
+- `Regiment.unitrange.enemyinrangereg`,
+  `Regiment.unitrange.enemystrengthwithinangle`, and group enemy-strength fields
+  already read by `ArmyEvidenceBuilder` and `TacticalObserverPatch`.
+- `Regiment.receivedfire` as recent-fire evidence.
+- `group.groupenemiesinrange`, `group.groupowninrange`,
+  `group.groupstrengthaigroup`, and subordinate combat-status fields.
+- objective-chain center/current objective positions where #35 already observes
+  them.
+
+Pure input shape:
+
+```text
+ContactObservationInput
+  source:
+    VisualContact
+    RecentFire
+    ObjectivePressure
+    FriendlyRoutedFromArea
+    InferredMovement
+  distance
+  estimatedStrength
+  ownStrength
+  secondsSinceObserved
+  currentlyVisible
+  receivedFire
+  objectiveLinked
+  scoutTaskLinked
+```
+
+Initial source weights:
+
+```text
+VisualContact:         0.90
+RecentFire:            0.65
+ObjectivePressure:     0.55
+FriendlyRoutedFromArea:0.50
+InferredMovement:      0.35
+```
+
+Confidence calculation should be deterministic and testable:
+
+```text
+base = sourceWeight
+visibilityBonus = currentlyVisible ? 0.10 : 0.00
+objectiveBonus = objectiveLinked ? 0.05 : 0.00
+scoutBonus = scoutTaskLinked ? 0.05 : 0.00
+staleness = clamp01(secondsSinceObserved / staleAfterSeconds)
+confidence = clamp01((base + visibilityBonus + objectiveBonus + scoutBonus) * (1 - staleness))
+```
+
+`staleAfterSeconds` is task/source dependent. Visual contact can stay credible
+longer than recent-fire-only contact; scout-confirmed reports can stay credible
+longer than incidental fire. Personality changes the confidence threshold for
+commitment; it must not mutate the confidence value itself.
 
 ## Tactical Operations Ledger
 
@@ -351,7 +470,37 @@ ReserveAssignment
 
 Anti-thrash rule: once an operation is `Committed`, it should not switch targets
 until a commitment window expires or an explicit abort/success condition fires.
-Major replans require strong evidence:
+Commit windows must scale with battle phase, operation shape, and time remaining;
+the 20-30 minute examples in this spec are upper tactical examples, not a fixed
+minimum. Early scouting/probing windows must be shorter than main-effort commit
+windows, and late-battle windows must shrink as remaining time falls.
+
+Reassessment tiers:
+
+```text
+Continue:
+  operation remains committed; only local posture corrections are allowed.
+
+SoftAbortReview:
+  operation is still active, but the parent echelon may halt, request support,
+  shift a support node, shorten the next review, or convert attack to Fix/Hold.
+
+HardAbort:
+  operation is abandoned or converted to fallback/defense; requires strong
+  evidence or catastrophic degradation.
+```
+
+Soft abort can trigger before the force is destroyed:
+
+- progress stalled for the review window while support is unavailable.
+- confidence falls below the commander's commitment threshold.
+- per-objective odds drop below the soft floor.
+- reserve release trigger is met but no reserve remains.
+- supporting attack cannot form in time.
+- new high-confidence enemy contact threatens flank/rear but is not yet
+  catastrophic.
+
+Major replans and hard aborts require stronger evidence:
 
 - objective secured or lost.
 - assigned force routed, badly mauled, or no longer combat-effective.
@@ -394,6 +543,25 @@ casualty pressure
 time pressure
 ```
 
+Battle-local operation selection may read strategic intent through an explicit
+read-only interface, not by letting battle patches reach into mutable strategic
+state. Required shape:
+
+```text
+StrategicBattleIntentSnapshot
+  alliance
+  campaignObjectiveId
+  theaterPriority
+  casualtyTolerance
+  timePressure
+  preserveForceBias
+  commanderPersonality
+```
+
+The snapshot is produced by the strategic/orchestrator layer and copied into
+per-battle orchestrator state before patches consume it. Patches read the
+per-battle snapshot only.
+
 Parallel attacks are allowed, but require a fair strength advantage at each
 target, not merely total-map superiority:
 
@@ -424,7 +592,7 @@ Objective B is weakly held.
 Assign one division to fix A.
 Assign stronger force to attack B.
 Keep central reserve.
-Commit for 20-30 minutes unless abort conditions fire.
+Commit for a phase-scaled review window unless soft or hard abort conditions fire.
 ```
 
 ```text
@@ -434,7 +602,52 @@ Launch parallel attacks.
 Reserve remains central and unreleased.
 ```
 
-## Echelon Command Orchestration
+## Vanilla CheckGlobalAIStrategy Boundary
+
+`AIBattle.CheckGlobalAIStrategy()` remains the live vanilla macro-AI brain and
+runs inside `UpdateAITasks`. Whiskey already owns the macro boundary through #44
+`BattleMacroStrategyPatch`, a Postfix on `CheckGlobalAIStrategy` that lets
+vanilla retreat/end-battle/dynamic paths run, then applies
+`ArmyOrchestrator.CurrentMacroAi` when the orchestrator has a valid plan.
+
+This design keeps #44 as the single macro-AI write boundary:
+
+- `ArmyCommandOrchestrator` / operation selection produces a macro
+  recommendation into `ArmyOrchestrator`.
+- #44 remains the only patch that writes `macroai` from Whiskey tactical command
+  state.
+- No new executor patch may also write `macroai`.
+- Vanilla `CheckGlobalAIStrategy` is not Prefix-blocked by this design.
+- Retreat/end-battle paths remain vanilla-owned unless a separate approved spec
+  changes that.
+
+The implementation plan must update #44 to consume the operations ledger result
+through `ArmyOrchestrator` rather than adding another macro writer.
+
+## Vanilla AssignReserves Boundary
+
+`AIBattle.AssignReserves()` continues to run every tactical AI task cycle and
+mutates vanilla `objectivechain` reserve/line/flank/artillery group membership.
+The operations ledger cannot pretend it owns reserves while vanilla keeps
+silently reassigning them.
+
+Required boundary:
+
+- Do not Prefix-block or replace `AssignReserves` in this design.
+- Treat vanilla `AssignReserves` output as observed input to the ledger.
+- #57 reserve-list bias and #59 reserve-commit rollback become the only reserve
+  mutation/gating consumers for ledger reserve policy.
+- If vanilla assigns a ledger-protected reserve into a line/flank group, #57/#59
+  must use the existing snapshot/restore style only where already proven safe or
+  where a new test/smoke gate proves it.
+- `ReserveAssignment` is authoritative for Whiskey decisions, but vanilla
+  reserve lists are still a source of facts that may disagree and must be logged
+  as drift.
+
+Any future plan to Prefix-block `AssignReserves` or fully replace it requires
+separate approval because repo policy treats broad Prefix-blocking as high risk.
+
+## Command-Node Operations Runtime
 
 Each command node receives persistent operational state:
 
@@ -654,6 +867,15 @@ The executor should be implemented through Postfix consumers or existing
 write-surface extensions where possible. Prefixes require explicit justification
 because repo policy treats Prefix-blocking and Transpilers as brittle.
 
+Executor bookkeeping boundary:
+
+- `Decide(...)` is pure and can run in a patch.
+- vanilla writes can run in the patch only after the write eligibility gate.
+- authoritative command-state fields are updated later by the orchestrator tick
+  from observed vanilla state.
+- patch-local throttles may suppress duplicate writes/logs but are not the
+  source of truth for command progress.
+
 ## Tactical Command Monitor
 
 Monitoring is part of active mode. It is not optional debug-only behavior.
@@ -694,6 +916,26 @@ Illegal idle should create a correction request, not only a log line.
 
 Telemetry must explain what the army knows, what it decided, and why each
 command is moving, holding, waiting, or left alone.
+
+Logging discipline is mandatory. Per-command decision logs must be emitted only
+on state change, material reason change, or a per-node throttle interval. The
+summary line is the only cadence-based emission and must itself be throttled.
+
+Initial throttles:
+
+```text
+TacticalOpsLedger:          on material ledger signature change, min 30s
+TacticalObjectiveIntel:     on status/confidence bucket change, min 30s
+TacticalOperation:          on operation phase/shape/assignment change
+TacticalCommandAssignment:  on node task/role/objective/state change, min 30s
+TacticalCommandPosture:     on write, illegal-idle classification change, or
+                            no-write reason change, min 30s per node
+TacticalPostureSummary:     min 15s per side in normal mode
+Verbose diagnostics:        opt-in only
+```
+
+Use existing `OnceLog` / `TacticalTelemetry.ShouldEmit` style helpers or a new
+per-node signature throttle. Do not emit per-node posture lines every tick.
 
 Ledger:
 
@@ -761,11 +1003,12 @@ If the log cannot explain the idle state, the behavior is wrong.
 
 ## Config Contract
 
-The normal intended mode is active:
+The final intended behavior is active, but the first shipped default is
+`MonitorOnly` until focused smoke promotes it:
 
 ```ini
 [Tactical Orchestrator]
-Tactical Commander Mode = Active
+Tactical Commander Mode = MonitorOnly
 ```
 
 Mode semantics:
@@ -785,8 +1028,31 @@ Active:
 
 This master mode should reduce reliance on many scattered behavior toggles. The
 implementation may preserve legacy flags for migration and emergency debugging,
-but the design target is one active tactical commander system, not dormant
-feature fragments.
+but the design target is one tactical commander system, not feature fragments.
+
+Promotion rule:
+
+```text
+MonitorOnly is the shipped default.
+Active is opt-in until focused smoke passes.
+After smoke passes, Active may become the default in a release note/docs update.
+```
+
+Config migration must handle existing BepInEx config files, because once
+`dev.kyle.whiskey-realism.cfg` exists, its values override C# defaults. Required
+migration semantics:
+
+- `Tactical Commander Mode`, when present, is the master behavior authority for
+  the new operations-ledger system.
+- legacy tactical writer flags remain readable for their existing patches during
+  migration, but they do not silently promote the new operations-ledger executor
+  to `Active`.
+- first-run migration should log one bounded line explaining mode and legacy
+  compatibility.
+- if master mode is absent, default to `MonitorOnly` for the new system and
+  leave existing legacy flags unchanged.
+- implementation plan must identify each legacy flag that becomes subordinate to
+  the master mode and define precedence explicitly.
 
 ## Integration Boundaries
 
@@ -836,6 +1102,43 @@ Pure harness coverage should lock:
 - W&L/player-subordinate NoWrite decisions.
 - path-interrupted recovery decisions.
 
+Each pure test must use explicit typed input contracts. Runtime adapters are
+excluded from the pure harness unless they can compile without Unity/game
+references, following the existing pure/runtime split used elsewhere in the
+project.
+
+Required pure/runtime splits:
+
+```text
+TacticalVisionModel
+  pure input: ContactObservationInput[], ObjectiveObservationInput[]
+  runtime adapter: TacticalVisionRuntimeAdapter
+
+TacticalOperationsLedgerModel
+  pure input: BattlefieldPictureSnapshot, StrategicBattleIntentSnapshot,
+              CommandTreePlanningSnapshot
+  runtime adapter: TacticalOperationsLedgerRuntime
+
+OperationSelectionModel
+  pure input: ObjectiveRecord[], ForceAvailabilitySnapshot, PersonalityVector,
+              BattleClockSnapshot
+  runtime adapter: ArmyCommandRuntime
+
+CommandNodeTaskPlanner
+  pure input: OperationRecord[], CommandTreePlanningSnapshot,
+              CommandNodeReadinessSnapshot
+  runtime adapter: CommandNodeOperationsRuntime
+
+CommandPostureExecutor.Decide
+  pure input: CommandTaskRecord, CommandNodeOperationalState,
+              VanillaGroupPostureSnapshot, WriteEligibilitySnapshot
+  runtime adapter: patch-specific snapshot builders
+```
+
+Runtime adapters must be small, named, and separately smoke-tested through
+bounded telemetry. The pure harness tests the decision models, not Unity
+reflection.
+
 Runtime smoke success for the observed failure class:
 
 ```text
@@ -862,8 +1165,10 @@ BepInEx plugin before asking for in-game smoke.
 
 ## Open Anchor Work
 
-Before implementing objective classification beyond generic objective positions,
-verify and document exact vanilla sources for:
+This is prerequisite work, not optional follow-up, before typed objective
+classification drives operation selection. Before implementing objective
+classification beyond generic objective positions, verify and document exact
+vanilla sources for:
 
 - battle monuments / victory locations / objective scene objects.
 - bridges, fords, roads, and rail/road junction objects if exposed.
@@ -877,6 +1182,27 @@ objectives from known unit contact, objective-chain target positions, terrain
 sampling, and movement corridor observations, and label the source explicitly in
 telemetry.
 
+## Required Implementation Sequence
+
+This is not a downscope; it is the order required to make the full system
+implementable without violating repo policy.
+
+1. **Anchor verification and typed read API.** Verify objective/terrain/route
+   anchors, then ship a read-only objective-source adapter. If full POI anchors
+   are not available, ship conservative generic objective sources with explicit
+   telemetry labels.
+2. **Boundary implementation.** Land the macro boundary, reserve boundary,
+   mod-state write contract, confidence model, config migration, and telemetry
+   throttle contracts before behavior writes.
+3. **MonitorOnly full loop.** Vision, ledger, operation selection, command-node
+   assignments, task planning, monitor, and executor decisions all run, but
+   executor writes are logged as `NoWrite`.
+4. **Active opt-in smoke.** Enable `Active` in local config for focused battle
+   smoke and prove bounded logs, stable anchors, no repeated exceptions, no
+   player-subordinate retasking, and no unintended side effects.
+5. **Default promotion.** Only after smoke passes may `Active` become the shipped
+   default for the new tactical commander mode.
+
 ## Approval
 
 Approved user direction on 2026-05-10:
@@ -889,5 +1215,5 @@ Approved user direction on 2026-05-10:
 - parallel attacks are allowed when there is a fair strength advantage and
   personality supports the risk.
 - both sides should act dynamically and period-appropriately.
-- the system should be on and working in active mode, with monitoring always
-  part of the loop.
+- the finished system should be on and working in active mode after smoke
+  promotion, with monitoring always part of the loop.
