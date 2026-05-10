@@ -54,6 +54,7 @@ static class Program
             ("tactical terrain rejects water center", TacticalTerrainRejectsWaterCenter),
             ("tactical terrain rejects water footprint", TacticalTerrainRejectsWaterFootprint),
             ("tactical terrain rejects outside deployment zone", TacticalTerrainRejectsOutsideDeploymentZone),
+            ("tactical terrain rejects footprint outside deployment zone", TacticalTerrainRejectsFootprintOutsideDeploymentZone),
             ("tactical terrain picks closest safe candidate", TacticalTerrainPicksClosestSafeCandidate),
             ("tactical terrain prefers visible enemy facing", TacticalTerrainPrefersVisibleEnemyFacing),
             ("tactical terrain no safe candidate keeps vanilla", TacticalTerrainNoSafeCandidateKeepsVanilla),
@@ -1233,6 +1234,35 @@ static class Program
 
         AssertEqual(TacticalTerrainDecisionReason.OutsideDeploymentZone, reason, "outside zone rejection");
         AssertFalse(decision.Accepted, "outside deployment zone should not be accepted");
+    }
+
+    private static void TacticalTerrainRejectsFootprintOutsideDeploymentZone()
+    {
+        var candidate = new TacticalTerrainCandidate(
+            new TacticalPoint2(105f, 100f),
+            90f,
+            new TacticalTerrainSample(0, false, true),
+            new[]
+            {
+                new TacticalTerrainSample(0, false, true),
+                new TacticalTerrainSample(0, false, false)
+            });
+        var reason = TacticalTerrainFacingDiscipline.Reject(
+            new TacticalPoint2(100f, 100f),
+            candidate,
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault,
+            out _,
+            out _);
+        var decision = TacticalTerrainFacingDiscipline.Choose(
+            new TacticalPoint2(100f, 100f),
+            0f,
+            new[] { candidate },
+            VisibleEnemy(),
+            TacticalTerrainRules.DeploymentDefault);
+
+        AssertEqual(TacticalTerrainDecisionReason.OutsideDeploymentZone, reason, "footprint outside zone rejection");
+        AssertFalse(decision.Accepted, "footprint outside deployment zone should not be accepted");
     }
 
     private static void TacticalTerrainPicksClosestSafeCandidate()

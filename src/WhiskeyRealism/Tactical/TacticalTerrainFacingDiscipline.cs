@@ -274,6 +274,9 @@ namespace WhiskeyRealism.Tactical
             if (candidate.Footprint.Any(s => s.IsWater))
                 return TacticalTerrainDecisionReason.WaterFootprint;
 
+            if (rules.RequireDeploymentZone && candidate.Footprint.Any(s => s.Known && !s.IsInsideDeploymentZone))
+                return TacticalTerrainDecisionReason.OutsideDeploymentZone;
+
             if (rules.RequireDeploymentZone && candidate.Center.Known && !candidate.Center.IsInsideDeploymentZone)
                 return TacticalTerrainDecisionReason.OutsideDeploymentZone;
 

@@ -104,7 +104,7 @@ namespace WhiskeyRealism.Tactical
                 for (int i = 0; i < regiment.unitrange.enemyinrangereg.Count; i++)
                 {
                     Regiment enemy = regiment.unitrange.enemyinrangereg[i];
-                    if (enemy == null || enemy.isrouted || !enemy.gameObject.activeInHierarchy)
+                    if (!IsBearingEligibleEnemy(regiment, enemy))
                         continue;
 
                     float distance = XzDistance(origin, enemy.transform.position);
@@ -158,11 +158,11 @@ namespace WhiskeyRealism.Tactical
             try
             {
                 Vector3 correctedPoint = WithTerrainHeight(point);
+                float facing = enemy.Visible ? enemy.BearingDegrees : fallbackFacingDegrees;
                 TacticalTerrainRuntimeSample center = SamplePoint(regiment, deploymentZone, correctedPoint);
                 IReadOnlyList<TacticalTerrainRuntimeSample> footprint =
-                    SampleFootprint(regiment, deploymentZone, correctedPoint, useOffset: true);
+                    SampleFootprint(regiment, deploymentZone, correctedPoint, facing, projectCandidate: true);
 
-                float facing = enemy.Visible ? enemy.BearingDegrees : fallbackFacingDegrees;
                 candidate = new TacticalTerrainCandidate(
                     new TacticalPoint2(correctedPoint.x, correctedPoint.z),
                     facing,
@@ -218,6 +218,20 @@ namespace WhiskeyRealism.Tactical
             Vector3 candidateCenter,
             bool useOffset)
         {
+            float facing = 0f;
+            if (regiment != null)
+                facing = regiment.transform.eulerAngles.y;
+
+            return SampleFootprint(regiment, deploymentZone, candidateCenter, facing, useOffset);
+        }
+
+        private static IReadOnlyList<TacticalTerrainRuntimeSample> SampleFootprint(
+            Regiment regiment,
+            Frontline2 deploymentZone,
+            Vector3 candidateCenter,
+            float candidateFacingDegrees,
+            bool projectCandidate)
+        {
             var samples = new List<TacticalTerrainRuntimeSample>();
             if (regiment == null || regiment.blockobject == null || regiment.blockobject.Length == 0)
             {
@@ -225,9 +239,10 @@ namespace WhiskeyRealism.Tactical
                 return samples;
             }
 
-            Vector3 offset = Vector3.zero;
-            if (useOffset)
-                offset = candidateCenter - regiment.transform.position;
+            Vector3 currentCenter = regiment.transform.position;
+            float facingDelta = projectCandidate
+                ? candidateFacingDegrees - regiment.transform.eulerAngles.y
+                : 0f;
 
             int count = regiment.blockobjectsused > 0
                 ? Math.Min(regiment.blockobjectsused, regiment.blockobject.Length)
@@ -242,11 +257,21 @@ namespace WhiskeyRealism.Tactical
                 Renderer renderer = block.GetComponentInChildren<Renderer>();
                 if ((object)renderer != null)
                 {
-                    AddBoundsSamples(samples, regiment, deploymentZone, renderer.bounds, offset);
+                    AddBoundsSamples(
+                        samples,
+                        regiment,
+                        deploymentZone,
+                        renderer.bounds,
+                        currentCenter,
+                        candidateCenter,
+                        facingDelta);
                 }
                 else
                 {
-                    samples.Add(SamplePoint(regiment, deploymentZone, block.transform.position + offset));
+                    samples.Add(SamplePoint(
+                        regiment,
+                        deploymentZone,
+                        ProjectFootprintPoint(block.transform.position, currentCenter, candidateCenter, facingDelta)));
                 }
             }
 
@@ -261,15 +286,17 @@ namespace WhiskeyRealism.Tactical
             Regiment regiment,
             Frontline2 deploymentZone,
             Bounds bounds,
-            Vector3 offset)
+            Vector3 currentCenter,
+            Vector3 candidateCenter,
+            float facingDelta)
         {
-            Vector3 center = bounds.center + offset;
+            Vector3 center = bounds.center;
             Vector3 extents = bounds.extents;
-            AddSample(samples, regiment, deploymentZone, center);
-            AddSample(samples, regiment, deploymentZone, center + new Vector3(extents.x, 0f, extents.z));
-            AddSample(samples, regiment, deploymentZone, center + new Vector3(extents.x, 0f, -extents.z));
-            AddSample(samples, regiment, deploymentZone, center + new Vector3(-extents.x, 0f, extents.z));
-            AddSample(samples, regiment, deploymentZone, center + new Vector3(-extents.x, 0f, -extents.z));
+            AddSample(samples, regiment, deploymentZone, ProjectFootprintPoint(center, currentCenter, candidateCenter, facingDelta));
+            AddSample(samples, regiment, deploymentZone, ProjectFootprintPoint(center + new Vector3(extents.x, 0f, extents.z), currentCenter, candidateCenter, facingDelta));
+            AddSample(samples, regiment, deploymentZone, ProjectFootprintPoint(center + new Vector3(extents.x, 0f, -extents.z), currentCenter, candidateCenter, facingDelta));
+            AddSample(samples, regiment, deploymentZone, ProjectFootprintPoint(center + new Vector3(-extents.x, 0f, extents.z), currentCenter, candidateCenter, facingDelta));
+            AddSample(samples, regiment, deploymentZone, ProjectFootprintPoint(center + new Vector3(-extents.x, 0f, -extents.z), currentCenter, candidateCenter, facingDelta));
         }
 
         private static void AddSample(
@@ -290,6 +317,16 @@ namespace WhiskeyRealism.Tactical
         private static bool IsWater(Vector3 point, int terrainId)
         {
             return terrainId == WaterTerrainId;
+        }
+
+        private static bool IsBearingEligibleEnemy(Regiment regiment, Regiment enemy)
+        {
+            if (enemy == null || regiment == null) return false;
+            if (enemy.alliance == regiment.alliance) return false;
+            if (enemy.isrouted || !enemy.gameObject.activeInHierarchy) return false;
+            if (enemy.unittyp == 3 || enemy.unittyp == 4) return false;
+            if (enemy.inmelee > 0f) return false;
+            return true;
         }
 
         private static bool IsInsideDeploymentZone(
@@ -316,6 +353,24 @@ namespace WhiskeyRealism.Tactical
             {
                 return true;
             }
+        }
+
+        private static Vector3 ProjectFootprintPoint(
+            Vector3 sample,
+            Vector3 currentCenter,
+            Vector3 candidateCenter,
+            float facingDeltaDegrees)
+        {
+            float radians = facingDeltaDegrees * (float)Math.PI / 180f;
+            float sin = (float)Math.Sin(radians);
+            float cos = (float)Math.Cos(radians);
+            float dx = sample.x - currentCenter.x;
+            float dz = sample.z - currentCenter.z;
+
+            return new Vector3(
+                candidateCenter.x + dx * cos - dz * sin,
+                sample.y,
+                candidateCenter.z + dx * sin + dz * cos);
         }
 
         private static BattlefieldSetup GetBattlefieldSetup()
