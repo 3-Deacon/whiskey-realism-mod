@@ -1,8 +1,10 @@
 # Tactical Terrain And Facing Discipline Design
 
-Status: draft design spec, not implemented.
+Status: implemented and merged to local main; runtime smoke pending before archive.
 Date: 2026-05-10.
 Owner: Whiskey Realism tactical AI workstream.
+
+> Living runtime reference: [`docs/tactical-terrain-facing-discipline.md`](../../tactical-terrain-facing-discipline.md). This spec is the design artifact; use the living doc for current config, deployed hash, smoke checklist, rollback, and post-implementation deltas.
 
 ## Goal
 

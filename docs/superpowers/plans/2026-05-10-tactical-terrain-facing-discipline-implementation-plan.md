@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Current state:** implemented, merged to local `main`, and hash-deployed locally in the final merged DLL `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8` (841216 bytes; 717 PASS). Focused runtime smoke is pending before this plan can be archived. Living runtime reference: [`docs/tactical-terrain-facing-discipline.md`](../../tactical-terrain-facing-discipline.md). Use that living doc for current config, deployed hash, smoke checklist, rollback, and post-implementation deltas.
+
 **Goal:** Add terrain/facing evidence and default-off AI deployment discipline so tactical groups avoid water/weird deployment positions and face visible enemies more naturally without replacing vanilla pathfinding.
 
 **Architecture:** Keep Grand Tactician's native NavMesh, formation placement, deployment-zone, and water-correction surfaces. Add pure, testable Whiskey scoring for terrain/facing decisions, then add runtime adapters and bounded Harmony patches that read vanilla state and only mutate AI deployment under explicit config. Facing behavior is applied where Whiskey owns the decision or deployment correction, not as a generic player/vanilla movement override.

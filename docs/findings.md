@@ -77,6 +77,30 @@ All line numbers are in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 | `LinkReservesToLineGroup` | 6643 | Reserve linking |
 | `CheckLineFallbacks` | 5117 | Line-unit fallback decisions |
 
+### Tactical deployment, pathing, terrain, and facing
+
+These anchors back #53 pathfinder discipline, #58 deployment terrain/facing telemetry, and #60 deployment terrain discipline. Current runtime behavior lives in `docs/tactical-terrain-facing-discipline.md`.
+
+| Symbol | Line | Notes |
+|---|---|---|
+| `BattleUI.CheckPathSetting` | 168982 | Manual tactical pathing raycasts `NavTarget` and creates `SetWaypointData(... manualfinalrotation: -1f ...)`. |
+| `BattleUnits.SetWaypoint` | 91304 | Group deployment mode clamps move targets through `frontline2.GetClosestPointInDeploymentZone(...)`, then calls `RegimentSetPath`. |
+| `BattleUnits.SetWaypoint` | 91453 | Deployment mode directly positions land units or calls `SetGroupFormation(...)`, then checks water and deployment-zone state. |
+| `BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew` | 85524 | Native AI deployment placement loop used by #58 telemetry and #60 terrain discipline. |
+| `BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew` | 85873 | Vanilla final cleanup clears `lastsetwaypointposition` and `immediateunitplacement` on active units. #60 mirrors only these fields after a correction. |
+| `BattleUnits.SetGroupFormation(GameObject, ...)` | 91815 | Public formation placement overload used by #60 instead of custom positioning. |
+| `BattleUnits.SetGroupFormation` | 92056 | Immediate placement writes `lastsetwaypointposition` / `lastsetwaypointrotation` and walks attached units. |
+| `Regiment.AddPath` | 130259 | Native NavMesh area-cost and path calculation surface guarded by #53. |
+| `Regiment.RegimentSetPath` | 131073 | Final tactical target terrain-id-4 clamp and target height. |
+| `Regiment.RegimentSetPath` | 131167 | Retry loop can step away from target via `Vector3.MoveTowards(..., -0.5f)`. |
+| `Regiment.RegimentSetPath` | 131211 | Final waypoint rotation uses supplied `manualfinalrotation`, otherwise `GetLastWaypointAngle()`. |
+| `Regiment.SetNewPosition` | 131303 | Position/facing setter called by vanilla formation placement. |
+| `Regiment.CheckIfPositionIsOnWater*` | 131432 | Vanilla water correction primarily checks terrain id `4`. |
+| `BattlefieldSetup.CheckTerrainLine` | 27638 | Runtime probe checks water-crossing evidence along candidate lines. |
+| `Regiment.UpdateUnitRangeFast` | 122545 | Visible enemy lists are fog-checked; closest-enemy fields alone are not enough for Whiskey facing. |
+| `Regiment.UpdateFlanking` | 122989 | Filters scouts/cavalry/melee-style contacts for comparable enemy/flank reasoning. |
+| `BattleUnits.Grp.IsApplicableForDeployment` | 78275 | Vanilla deployment eligibility guard mirrored by #60. |
+
 ### W&L gates
 
 | Symbol | Line | Notes |

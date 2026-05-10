@@ -5,11 +5,9 @@ Living status for the Grand Tactician tactical orchestrator workstream. This fil
 ## Current State
 
 - **Released game-facing version:** `v0.2.2` is still the latest public release.
-- **Current `main` tactical orchestrator state:** O0/O1/O2/O3, #58 deployment observer, Slice 0 command-node tree, and Slice 1 reserve commitment gate are on `main`.
-- **Current `main` verification:** console harness `689 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `82b1d91a31d4e269398d237690f279f80974c86bb69756bf59dd0e0a3254c4d5` (803328 bytes).
-- **Active branch:** `orchestrator-slice-3-charge-gate`.
-- **Active branch verification:** Slice 3 #41 charge gate is implemented and locally deployed from the worktree. Console harness passed; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `ac77b132594e71e8b74c0aa81222fa45f1936f4852467d1489a4841af8fc1b25` (810496 bytes).
-- **Runtime smoke boundary:** the current `LogOutput.log` predates the Slice 3 deploy, so focused gate-OFF and gate-ON battle smoke is still pending. Do not merge or release Slice 3 as smoke-verified until a fresh battle log proves it.
+- **Current `main` tactical orchestrator state:** O0/O1/O2/O3, #58 deployment observer, Slice 0 command-node tree, Slice 1 reserve commitment gate, Slice 3 #41 charge gate, and #60 deployment terrain/facing discipline are on `main`.
+- **Current `main` verification:** console harness `717 PASS`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8` (841216 bytes).
+- **Runtime smoke boundary:** the current `LogOutput.log` predates the merged `main` deploy, so focused battle smoke is still pending for Slice 1, Slice 3, and #60. Do not release these as smoke-verified until a fresh battle log proves them.
 
 ## Architecture
 
@@ -34,7 +32,8 @@ The hierarchy is Scourge-inspired but Grand Tactician-native: runtime command no
 | #58 deployment observer | Shipped on `main` | Read-only observer integrated; runtime first-fire still opportunistic |
 | Slice 0 command-node tree | Shipped on `main` | `[TacticalCommandTree]` markers observed for both AI sides, no focused error hits |
 | Slice 1 reserve commitment gate | Shipped on `main` | Build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending |
-| Slice 3 charge gate | Implemented on `orchestrator-slice-3-charge-gate` | Build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending |
+| Slice 3 charge gate | Shipped on `main` | Build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending |
+| #60 terrain/facing discipline | Shipped on `main` | Build/deploy/hash verified; focused enabled terrain-correction smoke pending |
 
 ## Patch Consumers
 
@@ -46,6 +45,7 @@ The hierarchy is Scourge-inspired but Grand Tactician-native: runtime command no
 | Reserve commitment | #59 `BattleReserveCommitGatePatch` | Slice 1 command-role gate | `Enable Tactical Orchestrator Reserve Commit Gate` |
 | Reserve-list bias | #57 `BattleReserveDoctrinePatch` | B6c reserve intent plus Slice 1 command-role skip | `Enable Tactical Reserve List Mutation` |
 | Charge initiation | #41 `BattleChargeGatePatch` | W&L guard, B6c charge denial, Slice 3 command-role gate | `Enable W&L Tactical Charge Guard`, `Enable Tactical Charge Denial`, `Enable Tactical Orchestrator Charge Gate` |
+| Deployment terrain/facing correction | #60 `TacticalDeploymentTerrainDisciplinePatch` | Deployment terrain/facing discipline | `Enable Tactical Deployment Terrain Discipline` |
 | Brigade stance under contact | #45 `BattleGroupStancePatch` | Existing B5 scorer writer; not yet retargeted to command-node roles | `Enable Tactical Group Sector Stance` |
 | Line fallback | B8 fallback/withdrawal patches | Existing doctrine wiring; not yet retargeted to command-node roles | `Enable Tactical Withdrawal Doctrine` |
 | Artillery priority | B7 bombardment patch | Existing doctrine wiring; not yet retargeted to command-node roles | `Enable Tactical Artillery Doctrine` |
@@ -103,12 +103,11 @@ Expected:
 
 ## Remaining Work
 
-1. Run Slice 3 gate-OFF and gate-ON battle smoke on the deployed branch DLL `ac77b132594e71e8b74c0aa81222fa45f1936f4852467d1489a4841af8fc1b25`.
-2. If smoke passes, fast-forward/merge the Slice 3 branch to `main`, rerun harness/build/deploy/hash, and update this file plus `docs/handoff.md`, `docs/patch-catalog.md`, and `MEMORY.md`.
-3. Run focused Slice 1 reserve gate smoke on the merged current DLL if not covered by the same battle pass.
-4. Implement Slice 2 brigade stance under contact by retargeting #45 to command-node roles.
-5. Implement Slice 4 line fallback gate.
-6. Implement Slice 5 artillery target priority.
+1. Run Slice 1, Slice 3, and #60 focused battle smoke on the deployed merged `main` DLL `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8`.
+2. If smoke passes, archive the Slice 3 plan and update this file plus `docs/handoff.md`, `docs/patch-catalog.md`, and `MEMORY.md` with runtime proof.
+3. Implement Slice 2 brigade stance under contact by retargeting #45 to command-node roles.
+4. Implement Slice 4 line fallback gate.
+5. Implement Slice 5 artillery target priority.
 
 ## Source Files
 
@@ -118,4 +117,4 @@ Expected:
 - Patch catalog: `docs/patch-catalog.md`
 - Master handoff: `docs/handoff.md`
 - Active remaining-slices design: `docs/superpowers/specs/2026-05-09-tactical-orchestrator-remaining-patches-design.md`
-- Active Slice 3 execution plan: `docs/superpowers/plans/2026-05-10-tactical-orchestrator-slice-3-charge-gate.md`
+- Current Slice 3 execution plan: `docs/superpowers/plans/2026-05-10-tactical-orchestrator-slice-3-charge-gate.md`

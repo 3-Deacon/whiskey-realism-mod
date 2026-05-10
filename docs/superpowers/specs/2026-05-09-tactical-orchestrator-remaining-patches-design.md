@@ -12,7 +12,7 @@ This spec is not the deployment ledger. The current ledger is [`docs/tactical-or
 
 - Slice 0 command-node tree is shipped on `main` and smoke-confirmed.
 - Slice 1 reserve commitment gate is shipped on `main`, build/deploy/hash verified, and focused battle smoke is pending.
-- Slice 3 charge gate is implemented on `orchestrator-slice-3-charge-gate`, build/deploy/hash verified, and focused battle smoke is pending before merge/release claims.
+- Slice 3 charge gate is implemented and merged to local `main`, build/deploy/hash verified in the final merged DLL, and focused battle smoke is pending before release claims.
 - Slice 2 brigade stance, Slice 4 line fallback, and Slice 5 artillery priority remain unimplemented command-role consumers.
 
 ## What's already shipped on `main` (no work needed)
@@ -152,7 +152,7 @@ Each slice below is independently shippable. Slice 0 and Slice 1 have shipped to
 
 ### Slice 2 — Brigade stance under contact
 
-**Status:** not implemented. This was intentionally skipped for the Slice 3 branch.
+**Status:** not implemented. This was intentionally skipped while Slice 3 went first.
 
 **Vanilla anchor:** `AIBattle.AdjustGroupAIStance()` `:4221` writes group stance via `bunits.ChangeStance(...)` at `:4272`.
 
@@ -174,7 +174,7 @@ Each slice below is independently shippable. Slice 0 and Slice 1 have shipped to
 
 ### Slice 3 — Charge gate
 
-**Status:** implemented on branch `orchestrator-slice-3-charge-gate`; console/build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending before merge/release claims.
+**Status:** implemented and merged to local `main`; console/build/deploy/hash verified in the final merged DLL; focused gate-OFF/gate-ON battle smoke pending before release claims.
 
 **Vanilla anchor:** `AIBattle.MicroAICheckForCharges()` `:4905` initiates charges via `SetMovementMode(3)` at `:4919`.
 

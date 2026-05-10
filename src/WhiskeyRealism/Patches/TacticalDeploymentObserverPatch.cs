@@ -36,7 +36,7 @@ namespace WhiskeyRealism.Patches
         internal static void DoUnitPositioningPrefix(BattleUnits __instance, ref ObservationState __state)
         {
             if (!Enabled()) return;
-            __state = CaptureState(__instance, "pre-unit-positioning", -1, TacticalDeploymentTelemetry.PhaseInitialPositioning);
+            __state = SafeCaptureState(__instance, "pre-unit-positioning", -1, TacticalDeploymentTelemetry.PhaseInitialPositioning);
         }
 
         [HarmonyPatch(typeof(BattleUnits), "DoUnitPositioning")]
@@ -56,7 +56,7 @@ namespace WhiskeyRealism.Patches
             var eod = ReadInt(__instance, EodCycleField, "eodcycle", "eodcycle");
             var days = ReadInt(__instance, BattlePassedDaysField, "battlepasseddays", "battlepasseddays");
             var phase = TacticalDeploymentTelemetry.PhaseFromPrefix(skipped, false, eod, days);
-            __state = CaptureState(__instance, "pre-placement", foralliance, phase);
+            __state = SafeCaptureState(__instance, "pre-placement", foralliance, phase);
         }
 
         [HarmonyPatch(typeof(BattleUnits), "DoPlacementAIUnitsWithinDeploymentzoneNew")]
@@ -87,7 +87,8 @@ namespace WhiskeyRealism.Patches
             var eod = ReadInt(battleUnits, EodCycleField, "eodcycle", "eodcycle");
             var days = ReadInt(battleUnits, BattlePassedDaysField, "battlepasseddays", "battlepasseddays");
             var phase = TacticalDeploymentTelemetry.PhaseFromPrefix(false, false, eod, days);
-            __state = CaptureState(battleUnits, active ? "pre-open" : "pre-close", -1, phase);
+            __state = SafeCaptureState(battleUnits, active ? "pre-open" : "pre-close", -1, phase);
+            if (__state == null) return;
             __state.SuppressOuterDelta = !active && __state.Before != null && __state.Before.EodCycle > 0;
         }
 
@@ -143,6 +144,21 @@ namespace WhiskeyRealism.Patches
             };
         }
 
+        private static ObservationState SafeCaptureState(BattleUnits battleUnits, string label, int alliance, string phase)
+        {
+            try
+            {
+                return CaptureState(battleUnits, label, alliance, phase);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-observer:capture:" + label,
+                    "TacticalDeploymentObserverPatch capture failed for " + label + ": " + ex.GetType().Name);
+                return null;
+            }
+        }
+
         private static TacticalDeploymentSnapshot Capture(BattleUnits battleUnits, string label, int alliance, string phase)
         {
             if ((object)battleUnits == null)
@@ -179,6 +195,7 @@ namespace WhiskeyRealism.Patches
             int pathCount = SafeInt(() => regiment.regimentpaths);
             bool routed = SafeBool(() => regiment.isrouted);
             bool active = SafeBool(() => ((Component)regiment).gameObject.activeInHierarchy);
+            float facing = SafeFloat(() => ((Component)regiment).transform.eulerAngles.y);
 
             return new TacticalDeploymentGroupSnapshot(
                 key,
@@ -191,7 +208,8 @@ namespace WhiskeyRealism.Patches
                 formationOrdered,
                 pathCount,
                 routed,
-                active);
+                active,
+                facing: facing);
         }
 
         private static void EmitDelta(BattleUnits battleUnits, string surface, int alliance, ObservationState state)
@@ -204,7 +222,7 @@ namespace WhiskeyRealism.Patches
                 var after = Capture(battleUnits, "post", alliance, state.Phase);
                 var delta = TacticalDeploymentTelemetry.Delta(surface, before, after);
                 Plugin.Log.LogInfo(TacticalDeploymentTelemetry.FormatSummary(delta));
-                foreach (string line in TopMoveLines(surface, before, after))
+                foreach (string line in TopMoveLines(battleUnits, surface, before, after))
                 {
                     Plugin.Log.LogInfo(line);
                 }
@@ -215,7 +233,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static IEnumerable<string> TopMoveLines(string surface, TacticalDeploymentSnapshot before, TacticalDeploymentSnapshot after)
+        private static IEnumerable<string> TopMoveLines(BattleUnits battleUnits, string surface, TacticalDeploymentSnapshot before, TacticalDeploymentSnapshot after)
         {
             if (before == null || after == null) yield break;
 
@@ -225,7 +243,12 @@ namespace WhiskeyRealism.Patches
                 .Select(g => new { Before = beforeByKey[g.Key], After = g, Distance = beforeByKey[g.Key].DistanceTo(g) })
                 .Where(m => m.Distance >= TacticalDeploymentTelemetry.LargeMoveThreshold)
                 .OrderByDescending(m => m.Distance)
-                .Take(TopMoveLimit);
+                .Take(TopMoveLimit)
+                .ToList();
+
+            if (moves.Count == 0) yield break;
+
+            var liveGroupsByKey = LiveGroupsByKey(battleUnits);
 
             foreach (var move in moves)
             {
@@ -243,7 +266,122 @@ namespace WhiskeyRealism.Patches
                              " paths=" + move.Before.PathCount + "->" + move.After.PathCount +
                              " routed=" + move.Before.Routed + "->" + move.After.Routed +
                              " active=" + move.Before.Active + "->" + move.After.Active;
+
+                string terrainLine = TerrainEvidenceLine(surface, before.Phase, EnrichTerrainEvidence(move.After, liveGroupsByKey), move.Distance);
+                if (terrainLine != null)
+                    yield return terrainLine;
             }
+        }
+
+        private static Dictionary<string, BattleUnits.Grp> LiveGroupsByKey(BattleUnits battleUnits)
+        {
+            var groups = new Dictionary<string, BattleUnits.Grp>();
+            foreach (BattleUnits.Grp group in ReadGroups(battleUnits))
+            {
+                if (group == null || (object)group.regref == null) continue;
+                string key = group.regref.GetInstanceID().ToString(CultureInfo.InvariantCulture);
+                if (!groups.ContainsKey(key))
+                {
+                    groups.Add(key, group);
+                }
+            }
+
+            return groups;
+        }
+
+        private static TacticalDeploymentGroupSnapshot EnrichTerrainEvidence(
+            TacticalDeploymentGroupSnapshot snapshot,
+            IReadOnlyDictionary<string, BattleUnits.Grp> liveGroupsByKey)
+        {
+            if (snapshot == null) return null;
+            if (liveGroupsByKey == null || !liveGroupsByKey.TryGetValue(snapshot.Key, out var group)) return snapshot;
+            if (group == null || (object)group.regref == null) return snapshot;
+
+            try
+            {
+                Regiment regiment = group.regref;
+                Vector3 position = ((Component)regiment).transform.position;
+                TacticalTerrainRuntimeSample centerSample = TacticalTerrainProbe.SampleCenter(regiment, null, position);
+                IReadOnlyList<TacticalTerrainRuntimeSample> footprintSamples = TacticalTerrainProbe.SampleFootprint(regiment, null);
+                bool footprintWater = footprintSamples.Any(sample => sample.Water);
+                TacticalEnemyBearingEvidence enemy = TacticalTerrainProbe.GetVisibleEnemyBearing(regiment, position);
+
+                return new TacticalDeploymentGroupSnapshot(
+                    snapshot.Key,
+                    snapshot.Name,
+                    snapshot.Alliance,
+                    snapshot.UnitType,
+                    snapshot.X,
+                    snapshot.Z,
+                    snapshot.Formation,
+                    snapshot.FormationOrdered,
+                    snapshot.PathCount,
+                    snapshot.Routed,
+                    snapshot.Active,
+                    centerSample.TerrainId,
+                    centerSample.Water,
+                    footprintWater,
+                    centerSample.InDeploymentZone,
+                    snapshot.Facing,
+                    enemy.Visible ? enemy.BearingDegrees : 0f,
+                    enemy.Visible ? enemy.DistanceMeters : 0f);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-observer:terrain-enrich",
+                    "TacticalDeploymentObserverPatch terrain evidence probe failed: " + ex.GetType().Name);
+                return snapshot;
+            }
+        }
+
+        private static string TerrainEvidenceLine(
+            string surface,
+            string phase,
+            TacticalDeploymentGroupSnapshot group,
+            float moveDistance)
+        {
+            if (group == null) return null;
+            if (!group.HasTerrainEvidence && !group.CenterWater && !group.FootprintWater) return null;
+
+            var center = new TacticalTerrainSample(
+                group.TerrainId,
+                group.CenterWater,
+                group.InsideDeploymentZone,
+                group.TerrainId >= 0);
+            var footprint = new TacticalTerrainSample(
+                group.TerrainId,
+                group.FootprintWater,
+                group.InsideDeploymentZone,
+                group.TerrainId >= 0);
+            var candidate = new TacticalTerrainCandidate(
+                new TacticalPoint2(group.X, group.Z),
+                group.Facing,
+                center,
+                new[] { footprint });
+            float facingDelta = group.HasVisibleEnemyBearing
+                ? TacticalTerrainFacingDiscipline.AngleDelta(group.Facing, group.NearestVisibleEnemyBearing)
+                : 0f;
+            var decision = new TacticalTerrainDecision(
+                false,
+                TacticalTerrainDecisionReason.VanillaKept,
+                candidate,
+                moveDistance,
+                facingDelta);
+
+            return TacticalTerrainFacingTelemetry.Format(new TacticalTerrainFacingLogRow(
+                surface,
+                phase,
+                group.Alliance,
+                group.Name,
+                group.TerrainId,
+                group.CenterWater,
+                group.FootprintWater,
+                group.InsideDeploymentZone,
+                group.Facing,
+                group.NearestVisibleEnemyBearing,
+                group.NearestVisibleEnemyDistance,
+                decision));
         }
 
         private static BattleUnits.Grp[] ReadGroups(BattleUnits battleUnits)
@@ -335,6 +473,19 @@ namespace WhiskeyRealism.Patches
         {
             try { return read(); }
             catch { return false; }
+        }
+
+        private static float SafeFloat(Func<float> read)
+        {
+            try
+            {
+                float value = read();
+                return float.IsNaN(value) || float.IsInfinity(value) ? 0f : value;
+            }
+            catch
+            {
+                return 0f;
+            }
         }
 
         private static string FormatFloat(float value)

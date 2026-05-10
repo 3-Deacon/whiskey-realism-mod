@@ -18,7 +18,14 @@ namespace WhiskeyRealism.Tactical
             int formationOrdered,
             int pathCount,
             bool routed,
-            bool active)
+            bool active,
+            int terrainId = -1,
+            bool centerWater = false,
+            bool footprintWater = false,
+            bool insideDeploymentZone = true,
+            float facing = 0f,
+            float nearestVisibleEnemyBearing = 0f,
+            float nearestVisibleEnemyDistance = 0f)
         {
             Key = Safe(key);
             Name = Safe(name);
@@ -31,6 +38,13 @@ namespace WhiskeyRealism.Tactical
             PathCount = Math.Max(0, pathCount);
             Routed = routed;
             Active = active;
+            TerrainId = terrainId;
+            CenterWater = centerWater;
+            FootprintWater = footprintWater;
+            InsideDeploymentZone = insideDeploymentZone;
+            Facing = Sanitize(facing);
+            NearestVisibleEnemyBearing = Sanitize(nearestVisibleEnemyBearing);
+            NearestVisibleEnemyDistance = Sanitize(nearestVisibleEnemyDistance);
         }
 
         public string Key { get; }
@@ -44,6 +58,15 @@ namespace WhiskeyRealism.Tactical
         public int PathCount { get; }
         public bool Routed { get; }
         public bool Active { get; }
+        public int TerrainId { get; }
+        public bool CenterWater { get; }
+        public bool FootprintWater { get; }
+        public bool InsideDeploymentZone { get; }
+        public float Facing { get; }
+        public float NearestVisibleEnemyBearing { get; }
+        public float NearestVisibleEnemyDistance { get; }
+        public bool HasTerrainEvidence => TerrainId >= 0 || CenterWater || FootprintWater;
+        public bool HasVisibleEnemyBearing => NearestVisibleEnemyDistance > 0f;
 
         public float DistanceTo(TacticalDeploymentGroupSnapshot other)
         {
