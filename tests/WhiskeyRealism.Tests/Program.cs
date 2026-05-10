@@ -1521,7 +1521,7 @@ static class Program
         AssertEqual("objective-unknown", input.ObjectiveId, "id");
         AssertEqual(0f, input.Location.X, "x");
         AssertEqual(0f, input.Location.Z, "z");
-        AssertEqual(1f, input.SourceConfidence, "confidence");
+        AssertEqual(0f, input.SourceConfidence, "confidence");
         AssertEqual(0f, input.Value, "value");
     }
 

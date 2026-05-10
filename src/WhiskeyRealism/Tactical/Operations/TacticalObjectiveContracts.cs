@@ -29,8 +29,8 @@ namespace WhiskeyRealism.Tactical.Operations
 
     public readonly struct TacticalMapPoint
     {
-        public readonly float X;
-        public readonly float Z;
+        public float X { get; }
+        public float Z { get; }
 
         public TacticalMapPoint(float x, float z)
         {
@@ -46,21 +46,13 @@ namespace WhiskeyRealism.Tactical.Operations
 
     public readonly struct ObjectiveObservationInput
     {
-        public readonly string objectiveId;
-        public readonly TacticalObjectiveType type;
-        public readonly TacticalObjectiveSource source;
-        public readonly TacticalMapPoint location;
-        public readonly float sourceConfidence;
-        public readonly float value;
-        public readonly bool typeAnchorVerified;
-
-        public string ObjectiveId => objectiveId;
-        public TacticalObjectiveType Type => type;
-        public TacticalObjectiveSource Source => source;
-        public TacticalMapPoint Location => location;
-        public float SourceConfidence => sourceConfidence;
-        public float Value => value;
-        public bool TypeAnchorVerified => typeAnchorVerified;
+        public string ObjectiveId { get; }
+        public TacticalObjectiveType Type { get; }
+        public TacticalObjectiveSource Source { get; }
+        public TacticalMapPoint Location { get; }
+        public float SourceConfidence { get; }
+        public float Value { get; }
+        public bool TypeAnchorVerified { get; }
 
         public ObjectiveObservationInput(
             string objectiveId,
@@ -71,20 +63,18 @@ namespace WhiskeyRealism.Tactical.Operations
             float value,
             bool typeAnchorVerified)
         {
-            this.objectiveId = string.IsNullOrWhiteSpace(objectiveId) ? "objective-unknown" : objectiveId;
-            this.type = type;
-            this.source = source;
-            this.location = location;
-            this.sourceConfidence = Clamp01(sourceConfidence);
-            this.value = SanitizeValue(value);
-            this.typeAnchorVerified = typeAnchorVerified;
+            ObjectiveId = string.IsNullOrWhiteSpace(objectiveId) ? "objective-unknown" : objectiveId;
+            Type = type;
+            Source = source;
+            Location = location;
+            SourceConfidence = Clamp01(sourceConfidence);
+            Value = SanitizeValue(value);
+            TypeAnchorVerified = typeAnchorVerified;
         }
 
         private static float Clamp01(float input)
         {
-            if (float.IsNaN(input)) return 0f;
-            if (float.IsNegativeInfinity(input)) return 0f;
-            if (float.IsPositiveInfinity(input)) return 1f;
+            if (float.IsNaN(input) || float.IsInfinity(input)) return 0f;
             if (input < 0f) return 0f;
             return input > 1f ? 1f : input;
         }
