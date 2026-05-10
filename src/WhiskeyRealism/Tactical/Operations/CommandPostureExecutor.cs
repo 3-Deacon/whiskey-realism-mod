@@ -34,7 +34,8 @@ namespace WhiskeyRealism.Tactical.Operations
             bool recentOrder,
             bool alreadyDoingCorrectTask = false,
             bool atAssignedLocation = false,
-            bool missingLedgerAssignment = false)
+            bool missingLedgerAssignment = false,
+            bool closeEngaged = false)
         {
             ModeAllowsWrites = modeAllowsWrites;
             PlayerProtected = playerProtected;
@@ -44,6 +45,7 @@ namespace WhiskeyRealism.Tactical.Operations
             AlreadyDoingCorrectTask = alreadyDoingCorrectTask;
             AtAssignedLocation = atAssignedLocation;
             MissingLedgerAssignment = missingLedgerAssignment;
+            CloseEngaged = closeEngaged;
         }
 
         public bool ModeAllowsWrites { get; }
@@ -54,6 +56,7 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool AlreadyDoingCorrectTask { get; }
         public bool AtAssignedLocation { get; }
         public bool MissingLedgerAssignment { get; }
+        public bool CloseEngaged { get; }
     }
 
     public static class CommandPostureExecutor
@@ -108,6 +111,11 @@ namespace WhiskeyRealism.Tactical.Operations
                 return new PostureExecutionDecision(
                     PostureExecutionAction.RecoverInterruptedOrder,
                     "illegal-idle-path-interrupted");
+            }
+
+            if (eligibility.CloseEngaged)
+            {
+                return Formation("close-engaged-" + TaskReason(state.Task));
             }
 
             switch (state.Task)
@@ -168,6 +176,49 @@ namespace WhiskeyRealism.Tactical.Operations
         private static PostureExecutionDecision FormationAndWaypoint(string reason)
         {
             return new PostureExecutionDecision(PostureExecutionAction.SetFormationAndWaypoint, reason);
+        }
+
+        private static string TaskReason(CommandTaskType task)
+        {
+            switch (task)
+            {
+                case CommandTaskType.Scout:
+                    return "scout";
+                case CommandTaskType.Probe:
+                    return "probe";
+                case CommandTaskType.Screen:
+                    return "screen";
+                case CommandTaskType.FormUp:
+                    return "form-up";
+                case CommandTaskType.AdvanceToAssembly:
+                    return "advance-to-assembly";
+                case CommandTaskType.AttackObjective:
+                    return "attack-objective";
+                case CommandTaskType.FixEnemy:
+                    return "fix-enemy";
+                case CommandTaskType.SupportAttack:
+                    return "support-attack";
+                case CommandTaskType.HoldObjective:
+                    return "hold-objective";
+                case CommandTaskType.HoldChoke:
+                    return "hold-choke";
+                case CommandTaskType.GuardFlank:
+                    return "guard-flank";
+                case CommandTaskType.ReserveWait:
+                    return "reserve-wait";
+                case CommandTaskType.ReleaseReserve:
+                    return "release-reserve";
+                case CommandTaskType.FallBackToLine:
+                    return "fallback-line";
+                case CommandTaskType.Delay:
+                    return "delay";
+                case CommandTaskType.Consolidate:
+                    return "consolidate";
+                case CommandTaskType.RecoverStuckOrder:
+                    return "recover-stuck-order";
+                default:
+                    return "unknown";
+            }
         }
     }
 }

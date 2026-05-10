@@ -85,6 +85,7 @@ static class Program
             ("tactical command posture eligibility precedence", TacticalCommandPostureEligibilityPrecedence),
             ("tactical command posture interrupted illegal idle recovery", TacticalCommandPostureInterruptedIllegalIdleRecovery),
             ("tactical command posture no-write gates after eligibility", TacticalCommandPostureNoWriteGatesAfterEligibility),
+            ("tactical command posture close engagement limits movement writes", TacticalCommandPostureCloseEngagementLimitsMovementWrites),
             ("tactical command posture reserve wait distinguishes reserve area", TacticalCommandPostureReserveWaitDistinguishesReserveArea),
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
@@ -1822,6 +1823,37 @@ static class Program
                     orderPending: false,
                     recentOrder: false,
                     atAssignedLocation: true)));
+    }
+
+    private static void TacticalCommandPostureCloseEngagementLimitsMovementWrites()
+    {
+        AssertPostureDecision(
+            PostureExecutionAction.SetFormation,
+            "close-engaged-attack-objective",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                PhysicalState(),
+                new WriteEligibilitySnapshot(
+                    modeAllowsWrites: true,
+                    playerProtected: false,
+                    routed: false,
+                    orderPending: false,
+                    recentOrder: false,
+                    closeEngaged: true)));
+
+        AssertPostureDecision(
+            PostureExecutionAction.SetFormation,
+            "close-engaged-form-up",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.FormUp),
+                PhysicalState(),
+                new WriteEligibilitySnapshot(
+                    modeAllowsWrites: true,
+                    playerProtected: false,
+                    routed: false,
+                    orderPending: false,
+                    recentOrder: false,
+                    closeEngaged: true)));
     }
 
     private static void TacticalCommandPostureMapsTaskFamilies()
