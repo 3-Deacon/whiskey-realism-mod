@@ -44,11 +44,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             try
             {
-                int playerCicAllianceId = SafeAiVsAi() ? -1 : ResolvePlayerCicAllianceId();
+                bool aiVsAi = SafeAiVsAi();
+                int playerAllianceId = aiVsAi ? -1 : SafePlayerAllianceId();
+                if (!aiVsAi && playerAllianceId < 0)
+                {
+                    Plugin.Log.LogWarning("[TacticalOrchestrator] OnBattleStart skipped: player alliance unresolved and ai_vs_ai=false");
+                    ClearForFailure();
+                    return;
+                }
+
+                int playerCicAllianceId = aiVsAi ? -1 : ResolvePlayerCicAllianceId();
+                int suppressedAllianceId = aiVsAi ? -1 : playerAllianceId;
                 var commanders = DiscoverCommandersFromVanilla(battle);
                 var roster = TacticalCommanderRoster.BuildFromSynthetic(commanders);
-                BuildAndActivate(playerCicAllianceId, roster);
-                _playerAllianceId = SafeAiVsAi() ? -1 : SafePlayerAllianceId();
+                BuildAndActivate(suppressedAllianceId, roster);
+                _playerAllianceId = playerAllianceId;
                 _battleSequence++;
 
                 if (Plugin.EnableTacticalOrchestratorArmy != null && Plugin.EnableTacticalOrchestratorArmy.Value)
@@ -61,7 +71,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     AttachCommandTreeIfReady(side1, battle);
                 }
 
-                int suppressed = (playerCicAllianceId == 0 || playerCicAllianceId == 1) ? 1 : 0;
+                int suppressed = (suppressedAllianceId == 0 || suppressedAllianceId == 1) ? 1 : 0;
                 int activated = 2 - suppressed;
                 Plugin.Log.LogInfo("[TacticalCommanderRoster] alliance=0 total=" + roster.GetSide(0).Count
                     + " matched=" + MatchedCount(roster, 0) + " unknown=" + UnknownCount(roster, 0));
@@ -258,7 +268,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 var plugin = Plugin.Instance;
                 if (side == null || side.Army == null || plugin == null) return;
-                if (!plugin.TacticalOperationsLedgerEnabled) return;
+                TacticalCommanderMode mode = plugin.TacticalCommanderModeValue;
+                if (!TacticalCommanderModePolicy.RunsLedger(mode))
+                {
+                    side.TickOperationsLedger(
+                        mode,
+                        Array.Empty<ObjectiveRecord>(),
+                        StrategicBattleIntentSnapshot.Empty,
+                        new ForceAvailabilitySnapshot(0f, 0f),
+                        side.Army.CommanderPersonality);
+                    return;
+                }
 
                 var bundle = ArmyEvidenceBuilder.Build(battle, side.AllianceId);
                 var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, side.AllianceId);
@@ -268,7 +288,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     Math.Max(0f, 1f - Clamp01(bundle.OwnReservesCommittedFraction)));
 
                 side.TickOperationsLedger(
-                    plugin.TacticalCommanderModeValue,
+                    mode,
                     objectives,
                     strategic,
                     force,

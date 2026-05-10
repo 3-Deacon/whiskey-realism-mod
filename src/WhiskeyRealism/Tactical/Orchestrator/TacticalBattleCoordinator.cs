@@ -43,11 +43,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             active = false;
         }
 
-        public static void OnBattleStartForTest(int playerCicAllianceId, IEnumerable<SyntheticCommanderInput> commanders)
+        public static void OnBattleStartForTest(int suppressedAllianceId, IEnumerable<SyntheticCommanderInput> commanders)
         {
             if (active) return;
             var roster = TacticalCommanderRoster.BuildFromSynthetic(commanders);
-            BuildAndActivate(playerCicAllianceId, roster);
+            BuildAndActivate(suppressedAllianceId, roster);
         }
 
         public static void OnBattleEndForTest()
@@ -60,13 +60,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // ---- Internal builder (used by both test and runtime paths) ----
 
         /// <summary>
-        /// Instantiates per-side orchestrators, suppresses the player-CIC side, and sets
+        /// Instantiates per-side orchestrators, suppresses one protected side, and sets
         /// active = true. No telemetry — callers in the runtime partial add logging on top.
         /// </summary>
-        internal static void BuildAndActivate(int playerCicAllianceId, TacticalCommanderRoster roster)
+        internal static void BuildAndActivate(int suppressedAllianceId, TacticalCommanderRoster roster)
         {
-            side0 = (playerCicAllianceId == 0) ? null : new TacticalBattleOrchestrator(allianceId: 0, roster);
-            side1 = (playerCicAllianceId == 1) ? null : new TacticalBattleOrchestrator(allianceId: 1, roster);
+            side0 = (suppressedAllianceId == 0) ? null : new TacticalBattleOrchestrator(allianceId: 0, roster);
+            side1 = (suppressedAllianceId == 1) ? null : new TacticalBattleOrchestrator(allianceId: 1, roster);
             active = true;
         }
 

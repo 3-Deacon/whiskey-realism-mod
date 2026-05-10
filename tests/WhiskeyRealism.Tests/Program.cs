@@ -1912,6 +1912,18 @@ static class Program
         AssertTrue(ReferenceEquals(firstLedger, side.OperationsLedger), "per-side ledger reused");
         AssertEqual(TacticalCommanderMode.MonitorOnly, army.CommanderMode, "second mode");
         AssertEqual("ridge-b", army.CurrentOperation.PrimaryObjectiveId, "second operation");
+
+        side.TickOperationsLedger(
+            TacticalCommanderMode.Off,
+            new[] { ObjectiveRecordFor("stale", enemyStrength: 10f, friendlyAssignedStrength: 10f) },
+            new StrategicBattleIntentSnapshot(0.9f, 0.9f, "stale", "stale"),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+
+        AssertTrue(ReferenceEquals(firstLedger, side.OperationsLedger), "off mode reuses ledger");
+        AssertEqual(TacticalCommanderMode.Off, army.CommanderMode, "off mode clears mode");
+        AssertEqual("objective-unknown", army.CurrentOperation.PrimaryObjectiveId, "off mode clears operation");
+        AssertEqual(0, army.CurrentCommandOperations.Count, "off mode clears command operations");
     }
 
     private static void TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi()
