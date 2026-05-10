@@ -808,7 +808,7 @@ namespace WhiskeyRealism.Patches
                     supportPriority: 0,
                     aggressionBias01: 0f,
                     depth: 0),
-                "operations-ledger:" + state.Role + ":" + state.Task);
+                "operations-ledger-command-state:" + state.Role + ":" + state.Task);
         }
 
         private static DirectChildRole DirectChildRoleFromLedger(CommandNodeOperationalState state)

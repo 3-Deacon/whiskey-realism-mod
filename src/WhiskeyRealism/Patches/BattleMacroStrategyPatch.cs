@@ -86,6 +86,7 @@ namespace WhiskeyRealism.Patches
             // -1 means "let vanilla decide" -- return true so we DON'T fall through to the scorer.
             // The orchestrator/ledger has spoken; its choice is "no opinion this tick."
             if (macro < -1 || macro > 3) return true;
+            if (macro == -1) return true;
             if (macro == vanillaMacro) return true;        // already aligned; no write needed
             if (_macroAiField == null) return true;
 
