@@ -12,8 +12,9 @@ namespace WhiskeyRealism.Patches
 {
     // Vanilla BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew places AI groups
     // immediately, then clamps deployment-zone and terrain state. This default-off
-    // Postfix samples bounded terrain/facing candidates and corrects clear AI
-    // deployment failures through vanilla SetGroupFormation when a safe candidate exists.
+    // Postfix samples bounded terrain-safe candidates and corrects clear AI
+    // terrain/deployment failures through vanilla SetGroupFormation when a safe candidate exists.
+    // Visible enemy bearing may shape final facing only after that terrain/deployment gate trips.
     [HarmonyPatch(typeof(BattleUnits), "DoPlacementAIUnitsWithinDeploymentzoneNew")]
     internal static class TacticalDeploymentTerrainDisciplinePatch
     {
@@ -104,16 +105,12 @@ namespace WhiskeyRealism.Patches
                 TacticalEnemyBearingEvidence enemy =
                     TacticalTerrainProbe.GetVisibleEnemyBearing(regiment, original);
 
-                float preferredFacingDelta = ReadPreferredFacingDeltaDegrees();
-                float facingDelta = enemy.Visible
-                    ? TacticalTerrainFacingDiscipline.AngleDelta(originalFacing, enemy.BearingDegrees)
-                    : 0f;
                 bool terrainFailure = center.Water || footprintWater || !center.InDeploymentZone || footprintOutOfZone;
-                bool facingAdvice = enemy.Visible && facingDelta > preferredFacingDelta;
 
-                if (!terrainFailure && !facingAdvice)
+                if (!terrainFailure)
                     return;
 
+                float preferredFacingDelta = ReadPreferredFacingDeltaDegrees();
                 var rules = new TacticalTerrainRules(
                     ReadTerrainMaxCorrectionMeters(),
                     preferredFacingDelta,
