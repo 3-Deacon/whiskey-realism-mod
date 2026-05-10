@@ -81,6 +81,11 @@ static class Program
             ("tactical operations strong and weak selects fix and flank", TacticalOperationsStrongWeakSelectsFixAndFlank),
             ("tactical operations unknown strength does not look weak", TacticalOperationsUnknownStrengthDoesNotLookWeak),
             ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
+            ("tactical command posture monitor-only suppresses active task writes", TacticalCommandPostureMonitorOnlySuppressesActiveTaskWrites),
+            ("tactical command posture eligibility precedence", TacticalCommandPostureEligibilityPrecedence),
+            ("tactical command posture interrupted illegal idle recovery", TacticalCommandPostureInterruptedIllegalIdleRecovery),
+            ("tactical command posture reserve wait no-write", TacticalCommandPostureReserveWaitNoWrite),
+            ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
             ("tactical command monitor player protected no-write", TacticalCommandMonitorPlayerProtectedNoWrite),
@@ -1686,6 +1691,144 @@ static class Program
             TacticalObjectiveStatus.Scouting,
             enemyStrength,
             friendlyAssignedStrength);
+    }
+
+    private static void TacticalCommandPostureMonitorOnlySuppressesActiveTaskWrites()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            CommandState(CommandTaskType.AttackObjective),
+            PhysicalState(),
+            new WriteEligibilitySnapshot(
+                modeAllowsWrites: false,
+                playerProtected: false,
+                routed: false,
+                orderPending: false,
+                recentOrder: false));
+
+        AssertPostureDecision(PostureExecutionAction.NoWrite, "mode-monitor-only", decision);
+    }
+
+    private static void TacticalCommandPostureEligibilityPrecedence()
+    {
+        AssertPostureDecision(
+            PostureExecutionAction.NoWrite,
+            "player-protected",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                PhysicalState(),
+                new WriteEligibilitySnapshot(true, playerProtected: true, routed: true, orderPending: true, recentOrder: true)));
+
+        AssertPostureDecision(
+            PostureExecutionAction.NoWrite,
+            "routed",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                PhysicalState(),
+                new WriteEligibilitySnapshot(true, playerProtected: false, routed: true, orderPending: true, recentOrder: true)));
+
+        AssertPostureDecision(
+            PostureExecutionAction.NoWrite,
+            "order-pending",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                PhysicalState(),
+                new WriteEligibilitySnapshot(true, playerProtected: false, routed: false, orderPending: true, recentOrder: true)));
+
+        AssertPostureDecision(
+            PostureExecutionAction.NoWrite,
+            "recent-order",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                PhysicalState(),
+                new WriteEligibilitySnapshot(true, playerProtected: false, routed: false, orderPending: false, recentOrder: true)));
+    }
+
+    private static void TacticalCommandPostureInterruptedIllegalIdleRecovery()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            CommandState(CommandTaskType.AttackObjective),
+            new CommandPhysicalState(
+                routed: false,
+                playerProtected: false,
+                pathInterrupted: true,
+                paths: 0,
+                activeMove: false,
+                formation: 1),
+            EligibilityAllowsWrites());
+
+        AssertPostureDecision(PostureExecutionAction.RecoverInterruptedOrder, "illegal-idle-path-interrupted", decision);
+    }
+
+    private static void TacticalCommandPostureReserveWaitNoWrite()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            CommandState(CommandTaskType.ReserveWait),
+            PhysicalState(),
+            EligibilityAllowsWrites());
+
+        AssertPostureDecision(PostureExecutionAction.NoWrite, "valid-reserve-wait", decision);
+    }
+
+    private static void TacticalCommandPostureMapsTaskFamilies()
+    {
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "form-up", DecidePosture(CommandTaskType.FormUp));
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "advance-to-assembly", DecidePosture(CommandTaskType.AdvanceToAssembly));
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "attack-objective", DecidePosture(CommandTaskType.AttackObjective));
+
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "hold-objective", DecidePosture(CommandTaskType.HoldObjective));
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "fix-enemy", DecidePosture(CommandTaskType.FixEnemy));
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "screen", DecidePosture(CommandTaskType.Screen));
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "probe", DecidePosture(CommandTaskType.Probe));
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "support-attack", DecidePosture(CommandTaskType.SupportAttack));
+        AssertPostureDecision(PostureExecutionAction.SetFormation, "guard-flank", DecidePosture(CommandTaskType.GuardFlank));
+
+        AssertPostureDecision(PostureExecutionAction.FallbackToLine, "fallback-line", DecidePosture(CommandTaskType.FallBackToLine));
+        AssertPostureDecision(PostureExecutionAction.NoWrite, "already-valid", DecidePosture(CommandTaskType.None));
+    }
+
+    private static PostureExecutionDecision DecidePosture(CommandTaskType task)
+    {
+        return CommandPostureExecutor.Decide(CommandState(task), PhysicalState(), EligibilityAllowsWrites());
+    }
+
+    private static CommandNodeOperationalState CommandState(CommandTaskType task)
+    {
+        return new CommandNodeOperationalState(
+            "node-1",
+            CommandEchelonKind.DivisionLike,
+            CommandNodeRole.MainEffort,
+            task,
+            CommandTaskState.Committed);
+    }
+
+    private static CommandPhysicalState PhysicalState()
+    {
+        return new CommandPhysicalState(
+            routed: false,
+            playerProtected: false,
+            pathInterrupted: false,
+            paths: 1,
+            activeMove: false,
+            formation: 1);
+    }
+
+    private static WriteEligibilitySnapshot EligibilityAllowsWrites()
+    {
+        return new WriteEligibilitySnapshot(
+            modeAllowsWrites: true,
+            playerProtected: false,
+            routed: false,
+            orderPending: false,
+            recentOrder: false);
+    }
+
+    private static void AssertPostureDecision(
+        PostureExecutionAction action,
+        string reason,
+        PostureExecutionDecision decision)
+    {
+        AssertEqual(action, decision.Action, "posture action");
+        AssertEqual(reason, decision.Reason, "posture reason");
     }
 
     private static void TacticalCommandMonitorReserveIdleValid()
