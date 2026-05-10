@@ -72,6 +72,9 @@ static class Program
             ("tactical commander mode active allows writes", TacticalCommanderModeActiveAllowsWrites),
             ("tactical commander mode monitor runs ledger without writes", TacticalCommanderModeMonitorRunsNoWrites),
             ("tactical commander mode parses spacing and fallback", TacticalCommanderModeParsesSpacingAndFallback),
+            ("tactical vision visual contact high confidence", TacticalVisionVisualContactHighConfidence),
+            ("tactical vision stale recent fire decays", TacticalVisionStaleRecentFireDecays),
+            ("tactical vision sanitizes nonfinite inputs", TacticalVisionSanitizesNonfiniteInputs),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -1566,6 +1569,46 @@ static class Program
             "blank fallback");
         AssertFalse(TacticalCommanderModePolicy.RunsLedger(TacticalCommanderMode.Off), "off ledger");
         AssertFalse(TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderMode.Off), "off writes");
+    }
+
+    private static void TacticalVisionVisualContactHighConfidence()
+    {
+        var report = TacticalVisionModel.BuildContact(
+            new ContactObservationInput(TacticalContactSource.VisualContact, 1200f, 0f, true, true, true),
+            staleAfterSeconds: 600f);
+
+        AssertTrue(report.Confidence > 0.95f, "confidence");
+    }
+
+    private static void TacticalVisionStaleRecentFireDecays()
+    {
+        var fresh = TacticalVisionModel.BuildContact(
+            new ContactObservationInput(TacticalContactSource.RecentFire, 800f, 0f, false, false, false),
+            staleAfterSeconds: 300f);
+        var stale = TacticalVisionModel.BuildContact(
+            new ContactObservationInput(TacticalContactSource.RecentFire, 800f, 240f, false, false, false),
+            staleAfterSeconds: 300f);
+
+        AssertTrue(fresh.Confidence > stale.Confidence, "decay");
+        AssertTrue(stale.Confidence < 0.25f, "stale confidence");
+    }
+
+    private static void TacticalVisionSanitizesNonfiniteInputs()
+    {
+        var report = TacticalVisionModel.BuildContact(
+            new ContactObservationInput(
+                TacticalContactSource.InferredMovement,
+                float.PositiveInfinity,
+                float.NaN,
+                currentlyVisible: false,
+                objectiveLinked: true,
+                scoutTaskLinked: false),
+            staleAfterSeconds: float.NegativeInfinity);
+
+        AssertEqual(0f, report.Input.EstimatedStrength, "strength");
+        AssertEqual(0f, report.Input.SecondsSinceObserved, "seconds");
+        AssertTrue(!float.IsNaN(report.Confidence) && !float.IsInfinity(report.Confidence), "finite confidence");
+        AssertTrue(report.Confidence >= 0f && report.Confidence <= 1f, "bounded confidence");
     }
 
     private static void TacticalContactNoSightingIsNone()
