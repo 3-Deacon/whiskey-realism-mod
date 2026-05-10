@@ -26,7 +26,7 @@ namespace WhiskeyRealism.Tactical
         }
 
         public static TacticalTerrainRuntimeSample Unknown =>
-            new TacticalTerrainRuntimeSample(-1, false, false);
+            new TacticalTerrainRuntimeSample(-1, false, true);
     }
 
     internal static class TacticalTerrainProbe
@@ -195,6 +195,23 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
+        internal static bool CrossesWater(Vector3 from, Vector3 to)
+        {
+            try
+            {
+                BattlefieldSetup setup = GetBattlefieldSetup();
+                if ((object)setup == null) return true;
+                return setup.CheckTerrainLine(from, to, new[] { WaterTerrainId }, 2f);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-terrain-probe:water-line",
+                    "TacticalTerrainProbe water line sample failed: " + ex.GetType().Name);
+                return true;
+            }
+        }
+
         private static IReadOnlyList<TacticalTerrainRuntimeSample> SampleFootprint(
             Regiment regiment,
             Frontline2 deploymentZone,
@@ -283,7 +300,7 @@ namespace WhiskeyRealism.Tactical
             try
             {
                 if (regiment == null || (object)deploymentZone == null)
-                    return false;
+                    return true;
 
                 Vector3 closest = deploymentZone.GetClosestPointInDeploymentZone(
                     point,
