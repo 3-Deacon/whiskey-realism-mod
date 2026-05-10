@@ -53,7 +53,17 @@ namespace WhiskeyRealism.Tactical
 
         private static string Safe(string value)
         {
-            return string.IsNullOrWhiteSpace(value) ? "-" : value.Replace(' ', '_');
+            if (string.IsNullOrWhiteSpace(value)) return "-";
+
+            var chars = value.ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                char c = chars[i];
+                if (char.IsControl(c) || char.IsWhiteSpace(c) || c == '|' || c == '=' || c == '{' || c == '}')
+                    chars[i] = '_';
+            }
+
+            return new string(chars);
         }
     }
 

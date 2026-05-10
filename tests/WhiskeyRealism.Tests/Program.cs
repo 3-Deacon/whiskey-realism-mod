@@ -49,6 +49,7 @@ static class Program
             ("tactical deployment telemetry matches stable keys across reorder", TacticalDeploymentTelemetryMatchesStableKeysAcrossReorder),
             ("tactical deployment telemetry formats skipped phase", TacticalDeploymentTelemetryFormatsSkippedPhase),
             ("tactical terrain telemetry formats bounded row", TacticalTerrainTelemetryFormatsBoundedRow),
+            ("tactical terrain telemetry sanitizes unsafe tokens", TacticalTerrainTelemetrySanitizesUnsafeTokens),
             ("tactical terrain rejects water center", TacticalTerrainRejectsWaterCenter),
             ("tactical terrain rejects water footprint", TacticalTerrainRejectsWaterFootprint),
             ("tactical terrain rejects outside deployment zone", TacticalTerrainRejectsOutsideDeploymentZone),
@@ -1080,6 +1081,39 @@ static class Program
         AssertContains(line, "centerWater=false", "center water");
         AssertContains(line, "decision=Accepted", "reason");
         AssertContains(line, "accepted=true", "accepted");
+    }
+
+    private static void TacticalTerrainTelemetrySanitizesUnsafeTokens()
+    {
+        var candidate = TerrainCandidate(100f, 100f, 90f);
+        var decision = new TacticalTerrainDecision(
+            true,
+            TacticalTerrainDecisionReason.Accepted,
+            candidate,
+            correctionDistance: 10f,
+            facingDelta: 5f);
+
+        string line = TacticalTerrainFacingTelemetry.Format(new TacticalTerrainFacingLogRow(
+            "Do\nPlacement=AI|Units{New}",
+            "initial\tphase|bad",
+            1,
+            "Test\r\nDivision=One|{A}",
+            0,
+            centerWater: false,
+            footprintWater: false,
+            insideDeploymentZone: true,
+            facing: float.NaN,
+            enemyBearing: float.PositiveInfinity,
+            enemyDistance: float.NegativeInfinity,
+            decision));
+
+        AssertFalse(line.Contains("\r") || line.Contains("\n") || line.Contains("\t"), "telemetry row should stay single-line");
+        AssertContains(line, "surface=Do_Placement_AI_Units_New", "safe surface");
+        AssertContains(line, "phase=initial_phase_bad", "safe phase");
+        AssertContains(line, "unit=Test__Division_One__A", "safe unit");
+        AssertContains(line, "facing=0.0", "nonfinite facing");
+        AssertContains(line, "enemyBearing=0.0", "nonfinite enemy bearing");
+        AssertContains(line, "enemyDistance=0.0", "nonfinite enemy distance");
     }
 
     private static TacticalTerrainCandidate TerrainCandidate(
