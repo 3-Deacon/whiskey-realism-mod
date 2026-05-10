@@ -21,7 +21,7 @@ namespace WhiskeyRealism.Patches
         private static readonly Dictionary<string, string> _operationsTelemetrySignatures = new Dictionary<string, string>();
         private static readonly Dictionary<string, float> _operationsSummaryEmittedAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, FieldInfo> _sideInfoFieldCache = new Dictionary<string, FieldInfo>();
-        private const float OperationsPostureTelemetrySeconds = 15f;
+        private const float OperationsDetailTelemetrySeconds = 30f;
         private const float OperationsSummaryTelemetrySeconds = 15f;
         private static int _chargeBeforeId;
         private static TacticalObserverSnapshot _chargeBefore = TacticalObserverSnapshot.Empty();
@@ -710,6 +710,7 @@ namespace WhiskeyRealism.Patches
             var commandOperations = army.CurrentCommandOperations ?? Array.Empty<CommandNodeOperationalState>();
             var operation = army.CurrentOperation;
             var strategic = army.CurrentStrategicBattleIntent;
+            float now = Time.realtimeSinceStartup;
 
             string ledgerSignature = TacticalOperationsTelemetry.OpsLedgerSignature(
                 side,
@@ -720,7 +721,13 @@ namespace WhiskeyRealism.Patches
             if (TacticalOperationsTelemetry.ShouldEmitSignatureChange(
                 _operationsTelemetrySignatures,
                 "ops-ledger:" + side,
-                ledgerSignature))
+                ledgerSignature) &&
+                TacticalOperationsTelemetry.ShouldEmitInterval(
+                    _operationsSummaryEmittedAt,
+                    "ops-ledger:" + side,
+                    now,
+                    OperationsDetailTelemetrySeconds,
+                    verbose: false))
             {
                 Plugin.Log.LogInfo(TacticalOperationsTelemetry.OpsLedger(
                     side,
@@ -735,7 +742,6 @@ namespace WhiskeyRealism.Patches
             int recoveringStuck = 0;
             int activeAttacks = 0;
             int reservesWaiting = 0;
-            float now = Time.realtimeSinceStartup;
 
             for (int i = 0; i < commandOperations.Count; i++)
             {
@@ -747,7 +753,13 @@ namespace WhiskeyRealism.Patches
                 if (TacticalOperationsTelemetry.ShouldEmitSignatureChange(
                     _operationsTelemetrySignatures,
                     "command-assignment:" + side + ":" + state.NodeId,
-                    assignmentSignature))
+                    assignmentSignature) &&
+                    TacticalOperationsTelemetry.ShouldEmitInterval(
+                        _operationsSummaryEmittedAt,
+                        "command-assignment:" + side + ":" + TacticalOperationsTelemetry.SafeToken(state.NodeId),
+                        now,
+                        OperationsDetailTelemetrySeconds,
+                        verbose: false))
                 {
                     Plugin.Log.LogInfo(TacticalOperationsTelemetry.CommandAssignment(side, state, operation));
                 }
@@ -779,7 +791,7 @@ namespace WhiskeyRealism.Patches
                     "TacticalCommandPosture:" + side + ":" + TacticalOperationsTelemetry.SafeToken(state.NodeId),
                     postureSignature,
                     now,
-                    OperationsPostureTelemetrySeconds,
+                    OperationsDetailTelemetrySeconds,
                     verbose: false))
                 {
                     continue;
