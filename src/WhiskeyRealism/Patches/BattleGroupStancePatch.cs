@@ -73,6 +73,12 @@ namespace WhiskeyRealism.Patches
                 var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
                 if (IsExplicitChargeDenial(reaction))
                 {
+                    if (!AllowsVanillaWrites())
+                    {
+                        LogChargePreserved(side, group, "mode-monitor-only");
+                        return;
+                    }
+
                     DemoteCharge(bunits, group, side, reaction);
                     return;
                 }
@@ -96,6 +102,7 @@ namespace WhiskeyRealism.Patches
             if (decision.GroupStance == vanillaOrdered) return;
             if (decision.GroupStance == 4) return;
             if (decision.GroupStance < 0 || decision.GroupStance > 3) return;
+            if (!AllowsVanillaWrites()) return;
 
             var gameObject = UnityObject(group);
             if (gameObject == null || !gameObject.activeInHierarchy) return;
@@ -116,6 +123,7 @@ namespace WhiskeyRealism.Patches
             if (stance < 0) return true;
             if (stance == vanillaOrdered) return true;
             if (stance == 4 || stance < 0 || stance > 3) return true;
+            if (!AllowsVanillaWrites()) return true;
 
             var gameObject = UnityObject(group);
             if (gameObject == null || !gameObject.activeInHierarchy) return true;
@@ -316,6 +324,19 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null &&
                 Plugin.Instance.Enabled.Value &&
                 Plugin.Instance.EnableTacticalGroupSectorStance.Value;
+        }
+
+        private static bool AllowsVanillaWrites()
+        {
+            try
+            {
+                return Plugin.Instance != null &&
+                    TacticalCommanderModePolicy.AllowsWrites(Plugin.Instance.TacticalCommanderModeValue);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool LocalReactionProducerEnabled()

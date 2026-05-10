@@ -327,6 +327,12 @@ namespace WhiskeyRealism.Patches
                     localOdds: LocalOdds(aigroup));
 
                 TacticalReserveCommitGate.Decision decision = TacticalReserveCommitGate.Decide(input);
+                if (!AllowsVanillaWrites())
+                {
+                    Log(aigroup, TacticalReserveCommitGate.Action.Observe, decision.Role, "mode-monitor-only", changed.Length);
+                    return;
+                }
+
                 if (decision.Action == TacticalReserveCommitGate.Action.Deny)
                 {
                     RollBackChangedUnits(changed);
@@ -360,6 +366,19 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning(
                     "tactical-reserve-commit-gate:enabled",
                     "[TacticalReserveCommitGate] Enable check failed; patch disabled: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool AllowsVanillaWrites()
+        {
+            try
+            {
+                return Plugin.Instance != null &&
+                    TacticalCommanderModePolicy.AllowsWrites(Plugin.Instance.TacticalCommanderModeValue);
+            }
+            catch
+            {
                 return false;
             }
         }

@@ -64,6 +64,7 @@ namespace WhiskeyRealism.Patches
             if (decision.MacroAi == vanillaMacro) return;
             if (decision.MacroAi < -1 || decision.MacroAi > 3) return;
             if (_macroAiField == null) return;
+            if (!AllowsVanillaWrites()) return;
 
             _macroAiField.SetValue(battle, decision.MacroAi);
             LogDecision(side, vanillaMacro, decision, odds);
@@ -89,6 +90,7 @@ namespace WhiskeyRealism.Patches
             if (macro == -1) return true;
             if (macro == vanillaMacro) return true;        // already aligned; no write needed
             if (_macroAiField == null) return true;
+            if (!AllowsVanillaWrites()) return true;
 
             _macroAiField.SetValue(battle, macro);
             string planId = sideOrch.Army.HasPlan ? sideOrch.Army.CurrentPlan.PlanId.ToString() : "no-plan";
@@ -197,6 +199,19 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null &&
                 Plugin.Instance.Enabled.Value &&
                 Plugin.Instance.EnableTacticalMacroStanceScorer.Value;
+        }
+
+        private static bool AllowsVanillaWrites()
+        {
+            try
+            {
+                return Plugin.Instance != null &&
+                    TacticalCommanderModePolicy.AllowsWrites(Plugin.Instance.TacticalCommanderModeValue);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)
