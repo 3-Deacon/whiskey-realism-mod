@@ -176,6 +176,36 @@ namespace WhiskeyRealism.Tactical.Operations
             return false;
         }
 
+        public static bool ShouldEmitChangedAfterInterval(
+            IDictionary<string, string> emittedSignatures,
+            IDictionary<string, string> pendingSignatures,
+            IDictionary<string, float> lastEmittedAt,
+            string key,
+            string signature,
+            float nowSeconds,
+            float minSeconds,
+            bool verbose)
+        {
+            if (emittedSignatures == null || pendingSignatures == null || lastEmittedAt == null)
+                return true;
+
+            string safeKey = SafeToken(key);
+            string safeSignature = SafeToken(signature);
+            if (emittedSignatures.TryGetValue(safeKey, out var lastEmitted) && lastEmitted == safeSignature)
+            {
+                pendingSignatures.Remove(safeKey);
+                return false;
+            }
+
+            pendingSignatures[safeKey] = safeSignature;
+            if (!ShouldEmitInterval(lastEmittedAt, safeKey, nowSeconds, minSeconds, verbose))
+                return false;
+
+            emittedSignatures[safeKey] = safeSignature;
+            pendingSignatures.Remove(safeKey);
+            return true;
+        }
+
         public static string SafeToken(string value)
         {
             if (string.IsNullOrWhiteSpace(value)) return "-";

@@ -19,6 +19,7 @@ namespace WhiskeyRealism.Patches
     {
         private static readonly Dictionary<string, float> _lastEmittedAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, string> _operationsTelemetrySignatures = new Dictionary<string, string>();
+        private static readonly Dictionary<string, string> _operationsPendingTelemetrySignatures = new Dictionary<string, string>();
         private static readonly Dictionary<string, float> _operationsSummaryEmittedAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, FieldInfo> _sideInfoFieldCache = new Dictionary<string, FieldInfo>();
         private const float OperationsDetailTelemetrySeconds = 30f;
@@ -299,6 +300,7 @@ namespace WhiskeyRealism.Patches
         private static void ResetOperationsTelemetry()
         {
             _operationsTelemetrySignatures.Clear();
+            _operationsPendingTelemetrySignatures.Clear();
             _operationsSummaryEmittedAt.Clear();
         }
 
@@ -718,16 +720,15 @@ namespace WhiskeyRealism.Patches
                 operation,
                 strategic,
                 commandOperations.Count);
-            if (TacticalOperationsTelemetry.ShouldEmitSignatureChange(
+            if (TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(
                 _operationsTelemetrySignatures,
+                _operationsPendingTelemetrySignatures,
+                _operationsSummaryEmittedAt,
                 "ops-ledger:" + side,
-                ledgerSignature) &&
-                TacticalOperationsTelemetry.ShouldEmitInterval(
-                    _operationsSummaryEmittedAt,
-                    "ops-ledger:" + side,
-                    now,
-                    OperationsDetailTelemetrySeconds,
-                    verbose: false))
+                ledgerSignature,
+                now,
+                OperationsDetailTelemetrySeconds,
+                verbose: false))
             {
                 Plugin.Log.LogInfo(TacticalOperationsTelemetry.OpsLedger(
                     side,
@@ -750,16 +751,15 @@ namespace WhiskeyRealism.Patches
                     side,
                     state,
                     operation);
-                if (TacticalOperationsTelemetry.ShouldEmitSignatureChange(
+                if (TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(
                     _operationsTelemetrySignatures,
+                    _operationsPendingTelemetrySignatures,
+                    _operationsSummaryEmittedAt,
                     "command-assignment:" + side + ":" + state.NodeId,
-                    assignmentSignature) &&
-                    TacticalOperationsTelemetry.ShouldEmitInterval(
-                        _operationsSummaryEmittedAt,
-                        "command-assignment:" + side + ":" + TacticalOperationsTelemetry.SafeToken(state.NodeId),
-                        now,
-                        OperationsDetailTelemetrySeconds,
-                        verbose: false))
+                    assignmentSignature,
+                    now,
+                    OperationsDetailTelemetrySeconds,
+                    verbose: false))
                 {
                     Plugin.Log.LogInfo(TacticalOperationsTelemetry.CommandAssignment(side, state, operation));
                 }
@@ -786,8 +786,10 @@ namespace WhiskeyRealism.Patches
                 if (decision.Action != PostureExecutionAction.NoWrite) continue;
 
                 string postureSignature = TacticalOperationsTelemetry.CommandPostureSignature(side, state, decision, idle);
-                if (!TacticalTelemetry.ShouldEmit(
-                    _lastEmittedAt,
+                if (!TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(
+                    _operationsTelemetrySignatures,
+                    _operationsPendingTelemetrySignatures,
+                    _operationsSummaryEmittedAt,
                     "TacticalCommandPosture:" + side + ":" + TacticalOperationsTelemetry.SafeToken(state.NodeId),
                     postureSignature,
                     now,

@@ -2001,6 +2001,22 @@ static class Program
         AssertFalse(TacticalOperationsTelemetry.ShouldEmitInterval(emittedAt, "summary:1", 20f, 15f, verbose: false), "interval suppresses early repeat");
         AssertTrue(TacticalOperationsTelemetry.ShouldEmitInterval(emittedAt, "summary:1", 25f, 15f, verbose: false), "interval emits after window");
         AssertTrue(TacticalOperationsTelemetry.ShouldEmitInterval(emittedAt, "summary:1", 26f, 15f, verbose: true), "verbose interval emits");
+
+        var emittedSignatures = new Dictionary<string, string>();
+        var pendingSignatures = new Dictionary<string, string>();
+        var detailEmittedAt = new Dictionary<string, float>();
+        AssertTrue(TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(
+            emittedSignatures, pendingSignatures, detailEmittedAt, "node:1", "sig-a", 0f, 30f, verbose: false),
+            "first detail emits");
+        AssertFalse(TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(
+            emittedSignatures, pendingSignatures, detailEmittedAt, "node:1", "sig-b", 10f, 30f, verbose: false),
+            "changed detail suppressed before interval");
+        AssertTrue(TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(
+            emittedSignatures, pendingSignatures, detailEmittedAt, "node:1", "sig-b", 30f, 30f, verbose: false),
+            "pending changed detail emits after interval");
+        AssertFalse(TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(
+            emittedSignatures, pendingSignatures, detailEmittedAt, "node:1", "sig-b", 60f, 30f, verbose: false),
+            "unchanged detail stays suppressed");
     }
 
     private static void TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi()
