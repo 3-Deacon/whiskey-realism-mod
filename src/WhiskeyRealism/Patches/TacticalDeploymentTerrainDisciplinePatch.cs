@@ -24,6 +24,7 @@ namespace WhiskeyRealism.Patches
         private const float DefaultPreferredFacingDeltaDegrees = 90f;
 
         private static readonly FieldInfo GrpField = AccessTools.Field(typeof(BattleUnits), "grp");
+        private static readonly FieldInfo EodCycleField = AccessTools.Field(typeof(BattleUnits), "eodcycle");
         private static readonly FieldInfo BattlePassedDaysField = AccessTools.Field(typeof(BattleUnits), "battlepasseddays");
         private static readonly HashSet<string> EmittedAdvice = new HashSet<string>();
         private static string _emittedAdviceBattleKey;
@@ -45,7 +46,8 @@ namespace WhiskeyRealism.Patches
                 if (!TryReadInitialDeployment(__instance, out bool initialDeployment))
                     return;
 
-                ResetAdviceLogForBattle(__instance, initialDeployment);
+                string phase = ReadDeploymentPhase(__instance);
+                ResetAdviceLogForBattle(__instance, phase);
 
                 OnceLog.Info(
                     "tactical-deployment-terrain-advice",
@@ -67,7 +69,7 @@ namespace WhiskeyRealism.Patches
                         continue;
                     }
 
-                    TryDisciplineGroup(__instance, group, regiment);
+                    TryDisciplineGroup(__instance, group, regiment, phase);
                 }
             }
             catch (Exception ex)
@@ -204,7 +206,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void TryDisciplineGroup(BattleUnits battleUnits, BattleUnits.Grp group, Regiment regiment)
+        private static void TryDisciplineGroup(BattleUnits battleUnits, BattleUnits.Grp group, Regiment regiment, string phase)
         {
             try
             {
@@ -240,7 +242,7 @@ namespace WhiskeyRealism.Patches
                     enemy,
                     rules);
 
-                EmitEvidence(group, regiment, center, footprintWater, enemy, decision);
+                EmitEvidence(group, regiment, phase, center, footprintWater, enemy, decision);
                 if (!decision.Accepted)
                     return;
 
@@ -287,6 +289,8 @@ namespace WhiskeyRealism.Patches
                     showmovementoptions: false,
                     placeentrenchments: false,
                     adjustbyterrainshape: true);
+
+                ClearPostDeploymentState(regiment);
             }
             catch (Exception ex)
             {
@@ -339,6 +343,7 @@ namespace WhiskeyRealism.Patches
         private static void EmitEvidence(
             BattleUnits.Grp group,
             Regiment regiment,
+            string phase,
             TacticalTerrainRuntimeSample center,
             bool footprintWater,
             TacticalEnemyBearingEvidence enemy,
@@ -361,7 +366,7 @@ namespace WhiskeyRealism.Patches
 
                 string line = TacticalTerrainFacingTelemetry.Format(new TacticalTerrainFacingLogRow(
                     "DoPlacementAIUnitsWithinDeploymentzoneNew",
-                    TacticalDeploymentTelemetry.PhaseInitial,
+                    phase,
                     regiment != null ? regiment.alliance : -1,
                     unit,
                     center.TerrainId,
@@ -380,9 +385,9 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void ResetAdviceLogForBattle(BattleUnits battleUnits, bool initialDeployment)
+        private static void ResetAdviceLogForBattle(BattleUnits battleUnits, string phase)
         {
-            string key = BuildAdviceBattleKey(battleUnits, initialDeployment);
+            string key = BuildAdviceBattleKey(battleUnits, phase);
             if (string.Equals(_emittedAdviceBattleKey, key, StringComparison.Ordinal))
                 return;
 
@@ -390,28 +395,85 @@ namespace WhiskeyRealism.Patches
             EmittedAdvice.Clear();
         }
 
-        private static string BuildAdviceBattleKey(BattleUnits battleUnits, bool initialDeployment)
+        private static string BuildAdviceBattleKey(BattleUnits battleUnits, string phase)
         {
             try
             {
                 int instanceId = (UnityEngine.Object)battleUnits != null
                     ? ((UnityEngine.Object)battleUnits).GetInstanceID()
                     : 0;
-                int days = 0;
-                if (BattlePassedDaysField != null && (object)battleUnits != null)
-                {
-                    object value = BattlePassedDaysField.GetValue(battleUnits);
-                    if (value is int intValue) days = intValue;
-                    else if (value is float floatValue) days = (int)Math.Floor(floatValue);
-                }
+                int days = ReadIntField(battleUnits, BattlePassedDaysField, "battlepasseddays");
+                int eod = ReadIntField(battleUnits, EodCycleField, "eodcycle");
 
                 return instanceId.ToString(CultureInfo.InvariantCulture) +
                     ":" + days.ToString(CultureInfo.InvariantCulture) +
-                    ":" + initialDeployment;
+                    ":" + eod.ToString(CultureInfo.InvariantCulture) +
+                    ":" + phase;
             }
             catch
             {
-                return initialDeployment ? "initial" : "eod";
+                return string.IsNullOrWhiteSpace(phase) ? "unknown" : phase;
+            }
+        }
+
+        private static string ReadDeploymentPhase(BattleUnits battleUnits)
+        {
+            int eod = ReadIntField(battleUnits, EodCycleField, "eodcycle");
+            int days = ReadIntField(battleUnits, BattlePassedDaysField, "battlepasseddays");
+            return TacticalDeploymentTelemetry.PhaseFromPrefix(false, false, eod, days);
+        }
+
+        private static int ReadIntField(BattleUnits battleUnits, FieldInfo field, string fieldName)
+        {
+            if ((object)battleUnits == null || field == null) return 0;
+
+            try
+            {
+                object value = field.GetValue(battleUnits);
+                if (value is int intValue) return intValue;
+                if (value is float floatValue) return (int)Math.Floor(floatValue);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-terrain:" + fieldName,
+                    "Failed reading BattleUnits." + fieldName + ": " + ex.GetType().Name);
+                return 0;
+            }
+        }
+
+        private static void ClearPostDeploymentState(Regiment regiment)
+        {
+            var visited = new HashSet<int>();
+            ClearPostDeploymentState(regiment, visited);
+        }
+
+        private static void ClearPostDeploymentState(Regiment regiment, HashSet<int> visited)
+        {
+            try
+            {
+                if ((UnityEngine.Object)regiment == null) return;
+                int id = regiment.GetInstanceID();
+                if (!visited.Add(id)) return;
+
+                regiment.lastsetwaypointposition = default(Vector3);
+                regiment.immediateunitplacement = false;
+
+                if (regiment.groupposition == null || regiment.groupposition.attachedunitreg == null)
+                    return;
+
+                int attached = Math.Min(
+                    regiment.groupposition.attachedunits,
+                    regiment.groupposition.attachedunitreg.Length);
+                for (int i = 0; i < attached; i++)
+                    ClearPostDeploymentState(regiment.groupposition.attachedunitreg[i], visited);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-terrain:cleanup",
+                    "TacticalDeploymentTerrainDisciplinePatch cleanup failed: " + ex.GetType().Name);
             }
         }
 
