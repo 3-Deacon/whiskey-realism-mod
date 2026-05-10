@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -42,6 +43,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public void PropagateIntent()
         {
             for (int i = 0; i < Echelons.Count; i++) Echelons[i]?.PropagateIntent();
+        }
+
+        public void UpdateOperationsLedger(
+            TacticalOperationsLedgerRuntime ledger,
+            IReadOnlyList<CommandNodeOperationalState> commandOperations)
+        {
+            Army?.UpdateOperationsLedger(ledger, commandOperations);
         }
     }
 }

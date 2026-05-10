@@ -81,6 +81,14 @@ static class Program
             ("tactical operations strong and weak selects fix and flank", TacticalOperationsStrongWeakSelectsFixAndFlank),
             ("tactical operations unknown strength does not look weak", TacticalOperationsUnknownStrengthDoesNotLookWeak),
             ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
+            ("strategic battle intent snapshot sanitizes nonfinite pressure", StrategicBattleIntentSnapshotSanitizesNonfinitePressure),
+            ("tactical vision runtime adapter builds reports and objectives", TacticalVisionRuntimeAdapterBuildsReportsAndObjectives),
+            ("tactical operations ledger runtime active selects operation", TacticalOperationsLedgerRuntimeActiveSelectsOperation),
+            ("tactical operations ledger runtime off does not run ledger", TacticalOperationsLedgerRuntimeOffDoesNotRunLedger),
+            ("command node operations runtime maps roles tasks and echelons", CommandNodeOperationsRuntimeMapsRolesTasksAndEchelons),
+            ("army orchestrator update operations ledger replaces snapshots", ArmyOrchestratorUpdateOperationsLedgerReplacesSnapshots),
+            ("tactical battle orchestrator forwards operations ledger update", TacticalBattleOrchestratorForwardsOperationsLedgerUpdate),
+            ("tactical battle coordinator side gate blocks player side unless ai vs ai", TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi),
             ("tactical command posture monitor-only suppresses active task writes", TacticalCommandPostureMonitorOnlySuppressesActiveTaskWrites),
             ("tactical command posture eligibility precedence", TacticalCommandPostureEligibilityPrecedence),
             ("tactical command posture physical protection fails closed", TacticalCommandPosturePhysicalProtectionFailsClosed),
@@ -1678,6 +1686,215 @@ static class Program
             TacticalReassessmentTier.SoftAbortReview,
             TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, float.PositiveInfinity, forceCollapsed: false, objectiveSecured: false),
             "infinite odds is zero");
+    }
+
+    private static void StrategicBattleIntentSnapshotSanitizesNonfinitePressure()
+    {
+        var snapshot = new StrategicBattleIntentSnapshot(
+            casualtyPressure: float.PositiveInfinity,
+            timePressure: float.NaN,
+            theaterIntent: null,
+            campaignIntent: "  ");
+
+        AssertEqual(0f, snapshot.CasualtyPressure, "casualty pressure");
+        AssertEqual(0f, snapshot.TimePressure, "time pressure");
+        AssertEqual(string.Empty, snapshot.TheaterIntent, "theater intent");
+        AssertEqual(string.Empty, snapshot.CampaignIntent, "campaign intent");
+    }
+
+    private static void TacticalVisionRuntimeAdapterBuildsReportsAndObjectives()
+    {
+        var reports = TacticalVisionRuntimeAdapter.BuildContactReports(new[]
+        {
+            new ContactObservationInput(TacticalContactSource.VisualContact, 1000f, 0f, true, true, false),
+            new ContactObservationInput(TacticalContactSource.RecentFire, 500f, 600f, false, false, false),
+        }, staleAfterSeconds: 300f);
+
+        AssertEqual(2, reports.Length, "report count");
+        AssertTrue(reports[0].Confidence > reports[1].Confidence, "fresh visual outranks stale fire");
+
+        var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecords(
+            new[]
+            {
+                new ObjectiveObservationInput(
+                    "ridge-a",
+                    TacticalObjectiveType.Ridge,
+                    TacticalObjectiveSource.VerifiedSceneObject,
+                    new TacticalMapPoint(10f, 20f),
+                    0.9f,
+                    1.0f,
+                    typeAnchorVerified: true),
+                new ObjectiveObservationInput(
+                    "bridge-unverified",
+                    TacticalObjectiveType.Bridge,
+                    TacticalObjectiveSource.ObjectiveChain,
+                    new TacticalMapPoint(float.NaN, float.PositiveInfinity),
+                    float.PositiveInfinity,
+                    float.NaN,
+                    typeAnchorVerified: false),
+            },
+            new[] { TacticalObjectiveStatus.WeaklyHeld, TacticalObjectiveStatus.StronglyHeld },
+            new[] { 70f, float.PositiveInfinity },
+            new[] { 100f, 50f });
+
+        AssertEqual(2, objectives.Length, "objective count");
+        AssertEqual("ridge-a", objectives[0].Observation.ObjectiveId, "first id");
+        AssertEqual(TacticalObjectiveStatus.WeaklyHeld, objectives[0].Status, "first status");
+        AssertEqual(70f, objectives[0].EnemyStrength, "first enemy strength");
+        AssertEqual(TacticalObjectiveType.UnknownVanillaObjective, objectives[1].Observation.Type, "unverified bridge downgraded");
+        AssertEqual(0f, objectives[1].EnemyStrength, "nonfinite enemy strength");
+        AssertFalse(objectives[1].HasUsableStrengthEvidence, "nonfinite strength is not usable");
+
+        var empty = TacticalVisionRuntimeAdapter.BuildContactReports(null, 300f);
+        AssertEqual(0, empty.Length, "null contacts");
+    }
+
+    private static void TacticalOperationsLedgerRuntimeActiveSelectsOperation()
+    {
+        var runtime = new TacticalOperationsLedgerRuntime();
+        var snapshot = new StrategicBattleIntentSnapshot(0.4f, 0.6f, "hold-theater", "campaign-push");
+        var objectives = new[]
+        {
+            ObjectiveRecordFor("enemy-line", enemyStrength: 140f, friendlyAssignedStrength: 100f),
+            ObjectiveRecordFor("bridge", enemyStrength: 50f, friendlyAssignedStrength: 100f),
+        };
+
+        runtime.Replace(
+            TacticalCommanderMode.Active,
+            objectives,
+            snapshot,
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+
+        AssertTrue(runtime.RunsLedger, "active runs ledger");
+        AssertEqual(TacticalCommanderMode.Active, runtime.CommanderMode, "mode");
+        AssertEqual(TacticalOperationShape.FixAndFlank, runtime.CurrentOperation.Shape, "operation shape");
+        AssertEqual("enemy-line", runtime.CurrentOperation.PrimaryObjectiveId, "primary objective");
+        AssertEqual("campaign-push", runtime.CurrentStrategicBattleIntent.CampaignIntent, "strategic snapshot");
+        AssertEqual(2, runtime.CurrentObjectives.Count, "objectives stored");
+    }
+
+    private static void TacticalOperationsLedgerRuntimeOffDoesNotRunLedger()
+    {
+        var runtime = new TacticalOperationsLedgerRuntime();
+
+        runtime.Replace(
+            TacticalCommanderMode.Off,
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f) },
+            new StrategicBattleIntentSnapshot(0.4f, 0.6f, "hold", "push"),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+
+        AssertFalse(runtime.RunsLedger, "off does not run ledger");
+        AssertEqual(TacticalCommanderMode.Off, runtime.CommanderMode, "mode");
+        AssertEqual(TacticalOperationShape.SingleMainEffort, runtime.CurrentOperation.Shape, "safe noop shape");
+        AssertEqual("objective-unknown", runtime.CurrentOperation.PrimaryObjectiveId, "safe noop objective");
+        AssertEqual(0, runtime.CurrentObjectives.Count, "objectives cleared");
+        AssertEqual(string.Empty, runtime.CurrentStrategicBattleIntent.CampaignIntent, "strategic snapshot cleared");
+    }
+
+    private static void CommandNodeOperationsRuntimeMapsRolesTasksAndEchelons()
+    {
+        var states = CommandNodeOperationsRuntime.Build(new[]
+        {
+            new CommandNodeIntent("army", "army", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 0.5f, 0),
+            new CommandNodeIntent("corps", "corps", DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 2, 80, 0.4f, 1),
+            new CommandNodeIntent("division", "division", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 0.3f, 2),
+            new CommandNodeIntent("brigade", "brigade", DirectChildRole.Screen, DirectChildAxis.Hold, 4, 40, 0.2f, 3),
+            new CommandNodeIntent("reserve", "reserve", DirectChildRole.Reserve, DirectChildAxis.Hold, 0, 20, 0.1f, 4),
+            new CommandNodeIntent("fallback", "fallback", DirectChildRole.Fallback, DirectChildAxis.Withdraw, 0, 20, 0.1f, 1),
+            new CommandNodeIntent("refuse", "refuse", DirectChildRole.RefuseLeft, DirectChildAxis.Hold, 0, 20, 0.1f, 2),
+            new CommandNodeIntent("unknown", "unknown", DirectChildRole.Unknown, DirectChildAxis.None, 0, 0, 0f, 2),
+        }, TacticalOperationShape.FixAndFlank);
+
+        AssertEqual(8, states.Count, "state count");
+        AssertEqual(CommandEchelonKind.ArmyLike, states[0].Echelon, "army echelon");
+        AssertEqual(CommandEchelonKind.CorpsLike, states[1].Echelon, "corps echelon");
+        AssertEqual(CommandEchelonKind.DivisionLike, states[2].Echelon, "division echelon");
+        AssertEqual(CommandEchelonKind.BrigadeLike, states[3].Echelon, "brigade echelon");
+        AssertEqual(CommandNodeRole.MainEffort, states[0].Role, "main role");
+        AssertEqual(CommandTaskType.AttackObjective, states[0].Task, "main task");
+        AssertEqual(CommandNodeRole.SupportingAttack, states[1].Role, "support role");
+        AssertEqual(CommandTaskType.SupportAttack, states[1].Task, "support task");
+        AssertEqual(CommandNodeRole.FixingForce, states[2].Role, "fix role");
+        AssertEqual(CommandTaskType.AdvanceToAssembly, states[2].Task, "fix task without contact");
+        AssertEqual(CommandNodeRole.ScreeningForce, states[3].Role, "screen role");
+        AssertEqual(CommandTaskType.Screen, states[3].Task, "screen task");
+        AssertEqual(CommandNodeRole.Reserve, states[4].Role, "reserve role");
+        AssertEqual(CommandNodeRole.FallbackGuard, states[5].Role, "fallback role");
+        AssertEqual(CommandNodeRole.Defender, states[6].Role, "refuse role");
+        AssertEqual(CommandNodeRole.Unknown, states[7].Role, "unknown role");
+        AssertEqual("division", states[2].NodeId, "node id preserved");
+        AssertEqual(0, CommandNodeOperationsRuntime.Build(null, TacticalOperationShape.SingleMainEffort).Count, "null input");
+    }
+
+    private static void ArmyOrchestratorUpdateOperationsLedgerReplacesSnapshots()
+    {
+        var army = NewArmyOrchestratorWithPlan();
+        var first = new TacticalOperationsLedgerRuntime();
+        first.Replace(
+            TacticalCommanderMode.MonitorOnly,
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f) },
+            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "first", "first-campaign"),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+
+        army.UpdateOperationsLedger(first, new[]
+        {
+            new CommandNodeOperationalState(
+                "node-a",
+                CommandEchelonKind.CorpsLike,
+                CommandNodeRole.MainEffort,
+                CommandTaskType.AttackObjective,
+                CommandTaskState.Planning),
+        });
+
+        AssertEqual(TacticalCommanderMode.MonitorOnly, army.CommanderMode, "mode");
+        AssertEqual("ridge-a", army.CurrentOperation.PrimaryObjectiveId, "operation");
+        AssertEqual(1, army.CurrentCommandOperations.Count, "command operation count");
+        AssertEqual("first-campaign", army.CurrentStrategicBattleIntent.CampaignIntent, "strategic intent");
+
+        var second = new TacticalOperationsLedgerRuntime();
+        second.Replace(
+            TacticalCommanderMode.Off,
+            Array.Empty<ObjectiveRecord>(),
+            StrategicBattleIntentSnapshot.Empty,
+            new ForceAvailabilitySnapshot(0f, 0f),
+            new PersonalityVector(0f, 0f, 0f, 0f, 0f));
+
+        army.UpdateOperationsLedger(second, Array.Empty<CommandNodeOperationalState>());
+
+        AssertEqual(TacticalCommanderMode.Off, army.CommanderMode, "replaced mode");
+        AssertEqual(0, army.CurrentCommandOperations.Count, "replaced command operations");
+        AssertEqual("objective-unknown", army.CurrentOperation.PrimaryObjectiveId, "replaced operation");
+        AssertEqual(string.Empty, army.CurrentStrategicBattleIntent.CampaignIntent, "replaced strategic intent");
+    }
+
+    private static void TacticalBattleOrchestratorForwardsOperationsLedgerUpdate()
+    {
+        var side = new TacticalBattleOrchestrator(1, TacticalCommanderRoster.BuildFromSynthetic(Array.Empty<SyntheticCommanderInput>()));
+        var army = NewArmyOrchestratorWithPlan();
+        side.AttachArmy(army);
+        var runtime = new TacticalOperationsLedgerRuntime();
+        runtime.Replace(
+            TacticalCommanderMode.Active,
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f) },
+            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+
+        side.UpdateOperationsLedger(runtime, Array.Empty<CommandNodeOperationalState>());
+
+        AssertEqual(TacticalCommanderMode.Active, army.CommanderMode, "forwarded mode");
+        AssertEqual("ridge-a", army.CurrentOperation.PrimaryObjectiveId, "forwarded operation");
+    }
+
+    private static void TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi()
+    {
+        AssertFalse(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(0, 0, aiVsAi: false), "player side blocked");
+        AssertTrue(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(0, 0, aiVsAi: true), "ai vs ai allows player side");
+        AssertTrue(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(1, 0, aiVsAi: false), "opposing side allowed");
+        AssertFalse(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(2, 0, aiVsAi: true), "invalid alliance blocked");
     }
 
     private static ObjectiveRecord ObjectiveRecordFor(string objectiveId, float enemyStrength, float friendlyAssignedStrength)

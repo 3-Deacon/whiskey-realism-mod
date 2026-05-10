@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -206,9 +207,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private IReadOnlyList<DirectChildIntent> _directChildIntents = Array.Empty<DirectChildIntent>();
         private CommandTreeSnapshot _commandTree = CommandTreeSnapshot.Empty;
         private IReadOnlyList<CommandNodeIntent> _commandNodeIntents = Array.Empty<CommandNodeIntent>();
+        private TacticalCommanderMode _commanderMode = TacticalCommanderMode.Off;
+        private IReadOnlyList<CommandNodeOperationalState> _currentCommandOperations = Array.Empty<CommandNodeOperationalState>();
+        private OperationRecord _currentOperation = new OperationRecord(
+            TacticalOperationShape.SingleMainEffort,
+            TacticalOperationPhase.Planning,
+            "objective-unknown",
+            0f);
+        private StrategicBattleIntentSnapshot _currentStrategicBattleIntent = StrategicBattleIntentSnapshot.Empty;
         private bool _hasObservedEvidence;
 
         public IReadOnlyList<DirectChildIntent> CurrentDirectChildIntents => _directChildIntents;
+        public TacticalCommanderMode CommanderMode => _commanderMode;
+        public IReadOnlyList<CommandNodeOperationalState> CurrentCommandOperations => _currentCommandOperations;
+        public OperationRecord CurrentOperation => _currentOperation;
+        public StrategicBattleIntentSnapshot CurrentStrategicBattleIntent => _currentStrategicBattleIntent;
         internal CommandTreeSnapshot CurrentCommandTree => _commandTree;
         internal IReadOnlyList<CommandNodeIntent> CurrentCommandNodeIntents => _commandNodeIntents;
 
@@ -308,6 +321,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return null;
         }
 
+        public void UpdateOperationsLedger(
+            TacticalOperationsLedgerRuntime ledger,
+            IReadOnlyList<CommandNodeOperationalState> commandOperations)
+        {
+            if (ledger == null)
+            {
+                _commanderMode = TacticalCommanderMode.Off;
+                _currentOperation = new OperationRecord(
+                    TacticalOperationShape.SingleMainEffort,
+                    TacticalOperationPhase.Planning,
+                    "objective-unknown",
+                    0f);
+                _currentStrategicBattleIntent = StrategicBattleIntentSnapshot.Empty;
+                _currentCommandOperations = Array.Empty<CommandNodeOperationalState>();
+                return;
+            }
+
+            _commanderMode = ledger.CommanderMode;
+            _currentOperation = ledger.CurrentOperation;
+            _currentStrategicBattleIntent = ledger.CurrentStrategicBattleIntent;
+            _currentCommandOperations = CopyCommandOperations(commandOperations);
+        }
+
         /// <summary>Test-only: directly install a plan without going through a playbook.</summary>
         internal void SetPlanForTesting(TacticalBattlePlan plan)
         {
@@ -315,6 +351,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             HasPlan = true;
             _planAgeSeconds = 0f;
             _historyGlobalOdds = 1f;
+        }
+
+        private static IReadOnlyList<CommandNodeOperationalState> CopyCommandOperations(
+            IReadOnlyList<CommandNodeOperationalState> commandOperations)
+        {
+            if (commandOperations == null || commandOperations.Count == 0) return Array.Empty<CommandNodeOperationalState>();
+
+            var copy = new CommandNodeOperationalState[commandOperations.Count];
+            for (int i = 0; i < commandOperations.Count; i++) copy[i] = commandOperations[i];
+            return copy;
         }
 
         private static bool SignatureEqual(IReadOnlyList<DirectChildEvidence> a, DirectChildEvidence[] b)
