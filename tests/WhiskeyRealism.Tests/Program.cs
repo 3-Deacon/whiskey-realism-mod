@@ -85,6 +85,8 @@ static class Program
             ("tactical vision runtime adapter builds reports and objectives", TacticalVisionRuntimeAdapterBuildsReportsAndObjectives),
             ("tactical operations ledger runtime active selects operation", TacticalOperationsLedgerRuntimeActiveSelectsOperation),
             ("tactical operations ledger runtime off does not run ledger", TacticalOperationsLedgerRuntimeOffDoesNotRunLedger),
+            ("tactical operations telemetry formats bounded monitor rows", TacticalOperationsTelemetryFormatsBoundedMonitorRows),
+            ("tactical operations telemetry throttle helpers bound monitor loop", TacticalOperationsTelemetryThrottleHelpersBoundMonitorLoop),
             ("command node operations runtime maps roles tasks and echelons", CommandNodeOperationsRuntimeMapsRolesTasksAndEchelons),
             ("army orchestrator update operations ledger replaces snapshots", ArmyOrchestratorUpdateOperationsLedgerReplacesSnapshots),
             ("tactical battle orchestrator forwards operations ledger update", TacticalBattleOrchestratorForwardsOperationsLedgerUpdate),
@@ -1924,6 +1926,81 @@ static class Program
         AssertEqual(TacticalCommanderMode.Off, army.CommanderMode, "off mode clears mode");
         AssertEqual("objective-unknown", army.CurrentOperation.PrimaryObjectiveId, "off mode clears operation");
         AssertEqual(0, army.CurrentCommandOperations.Count, "off mode clears command operations");
+    }
+
+    private static void TacticalOperationsTelemetryFormatsBoundedMonitorRows()
+    {
+        var operation = new OperationRecord(
+            TacticalOperationShape.FixAndFlank,
+            TacticalOperationPhase.Forming,
+            "ridge A/left",
+            12.25f);
+        var strategic = new StrategicBattleIntentSnapshot(
+            0.25f,
+            0.5f,
+            "Attack Left",
+            "Plan Alpha",
+            allianceId: 1,
+            campaignObjectiveId: "Obj X",
+            theaterPriority: 0.75f,
+            casualtyTolerance: -0.25f,
+            preserveForceBias: 0.40f);
+        var state = new CommandNodeOperationalState(
+            "node A/1",
+            CommandEchelonKind.DivisionLike,
+            CommandNodeRole.MainEffort,
+            CommandTaskType.AttackObjective,
+            CommandTaskState.MovingToAssembly);
+        var decision = new PostureExecutionDecision(
+            PostureExecutionAction.NoWrite,
+            "mode monitor only",
+            PostureExecutionTarget.ObjectiveApproach);
+
+        string ledger = TacticalOperationsTelemetry.OpsLedger(
+            1,
+            TacticalCommanderMode.MonitorOnly,
+            operation,
+            strategic,
+            commandCount: 3);
+        string assignment = TacticalOperationsTelemetry.CommandAssignment(1, state, operation);
+        string posture = TacticalOperationsTelemetry.CommandPosture(
+            1,
+            state,
+            decision,
+            TacticalIdleClassification.IllegalIdle);
+        string summary = TacticalOperationsTelemetry.PostureSummary(
+            1,
+            validIdle: 2,
+            illegalIdle: 1,
+            recoveringStuck: 1,
+            activeAttacks: 2,
+            reservesWaiting: 1);
+
+        AssertContains(ledger, "[TacticalOpsLedger]", "ledger prefix");
+        AssertContains(ledger, "primary=ridge_A/left", "ledger objective token");
+        AssertContains(ledger, "campaign=Plan_Alpha", "ledger campaign token");
+        AssertContains(assignment, "[TacticalCommandAssignment]", "assignment prefix");
+        AssertContains(assignment, "node=node_A/1", "assignment node token");
+        AssertContains(assignment, "objective=ridge_A/left", "assignment objective token");
+        AssertContains(posture, "[TacticalCommandPosture]", "posture prefix");
+        AssertContains(posture, "reason=mode_monitor_only", "posture reason token");
+        AssertContains(posture, "idle=IllegalIdle", "posture idle classification");
+        AssertContains(summary, "[TacticalPostureSummary]", "summary prefix");
+        AssertContains(summary, "illegalIdle=1", "summary illegal count");
+    }
+
+    private static void TacticalOperationsTelemetryThrottleHelpersBoundMonitorLoop()
+    {
+        var signatures = new Dictionary<string, string>();
+        AssertTrue(TacticalOperationsTelemetry.ShouldEmitSignatureChange(signatures, "ledger:1", "shape=a"), "first signature emits");
+        AssertFalse(TacticalOperationsTelemetry.ShouldEmitSignatureChange(signatures, "ledger:1", "shape=a"), "same signature suppressed");
+        AssertTrue(TacticalOperationsTelemetry.ShouldEmitSignatureChange(signatures, "ledger:1", "shape=b"), "changed signature emits");
+
+        var emittedAt = new Dictionary<string, float>();
+        AssertTrue(TacticalOperationsTelemetry.ShouldEmitInterval(emittedAt, "summary:1", 10f, 15f, verbose: false), "first interval emits");
+        AssertFalse(TacticalOperationsTelemetry.ShouldEmitInterval(emittedAt, "summary:1", 20f, 15f, verbose: false), "interval suppresses early repeat");
+        AssertTrue(TacticalOperationsTelemetry.ShouldEmitInterval(emittedAt, "summary:1", 25f, 15f, verbose: false), "interval emits after window");
+        AssertTrue(TacticalOperationsTelemetry.ShouldEmitInterval(emittedAt, "summary:1", 26f, 15f, verbose: true), "verbose interval emits");
     }
 
     private static void TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi()

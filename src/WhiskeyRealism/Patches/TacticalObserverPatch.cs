@@ -6,6 +6,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
@@ -17,7 +18,11 @@ namespace WhiskeyRealism.Patches
     internal static class TacticalObserverPatch
     {
         private static readonly Dictionary<string, float> _lastEmittedAt = new Dictionary<string, float>();
+        private static readonly Dictionary<string, string> _operationsTelemetrySignatures = new Dictionary<string, string>();
+        private static readonly Dictionary<string, float> _operationsSummaryEmittedAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, FieldInfo> _sideInfoFieldCache = new Dictionary<string, FieldInfo>();
+        private const float OperationsPostureTelemetrySeconds = 15f;
+        private const float OperationsSummaryTelemetrySeconds = 15f;
         private static int _chargeBeforeId;
         private static TacticalObserverSnapshot _chargeBefore = TacticalObserverSnapshot.Empty();
         private static TacticalObserverSnapshot _feudBefore = TacticalObserverSnapshot.Empty();
@@ -267,10 +272,12 @@ namespace WhiskeyRealism.Patches
                     switch (ev)
                     {
                         case BattleLifecycleEvent.BattleStart:
+                            ResetOperationsTelemetry();
                             TacticalBattleCoordinator.OnBattleStart(__instance);
                             break;
                         case BattleLifecycleEvent.BattleEnd:
                             TacticalBattleCoordinator.OnBattleEnd();
+                            ResetOperationsTelemetry();
                             break;
                     }
                     // First Tick is intentionally colocated with OnBattleStart to give the coordinator
@@ -279,6 +286,7 @@ namespace WhiskeyRealism.Patches
                     if (TacticalBattleCoordinator.IsActive)
                     {
                         TacticalBattleCoordinator.Tick(__instance);
+                        EmitOperationsMonitorTelemetry();
                     }
                 }
             }
@@ -286,6 +294,12 @@ namespace WhiskeyRealism.Patches
             {
                 Plugin.Log.LogWarning("[TacticalOrchestrator] observer wiring skipped: " + e.GetType().Name + " " + e.Message);
             }
+        }
+
+        private static void ResetOperationsTelemetry()
+        {
+            _operationsTelemetrySignatures.Clear();
+            _operationsSummaryEmittedAt.Clear();
         }
 
         /// <summary>
@@ -669,6 +683,199 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("tactical-observer:" + eventType, "Tactical observer " + eventType + " failed: " + ex.Message);
             }
+        }
+
+        private static void EmitOperationsMonitorTelemetry()
+        {
+            if (!DecisionMatrixEnabled()) return;
+
+            try
+            {
+                EmitOperationsMonitorTelemetryForSide(0, TacticalBattleCoordinator.GetSideOrchestrator(0));
+                EmitOperationsMonitorTelemetryForSide(1, TacticalBattleCoordinator.GetSideOrchestrator(1));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-ops-monitor", "Tactical operations monitor telemetry failed: " + ex.Message);
+            }
+        }
+
+        private static void EmitOperationsMonitorTelemetryForSide(int side, TacticalBattleOrchestrator orchestrator)
+        {
+            if (orchestrator == null || orchestrator.Army == null) return;
+
+            var army = orchestrator.Army;
+            if (army.CommanderMode != TacticalCommanderMode.MonitorOnly) return;
+
+            var commandOperations = army.CurrentCommandOperations ?? Array.Empty<CommandNodeOperationalState>();
+            var operation = army.CurrentOperation;
+            var strategic = army.CurrentStrategicBattleIntent;
+
+            string ledgerSignature = TacticalOperationsTelemetry.OpsLedgerSignature(
+                side,
+                army.CommanderMode,
+                operation,
+                strategic,
+                commandOperations.Count);
+            if (TacticalOperationsTelemetry.ShouldEmitSignatureChange(
+                _operationsTelemetrySignatures,
+                "ops-ledger:" + side,
+                ledgerSignature))
+            {
+                Plugin.Log.LogInfo(TacticalOperationsTelemetry.OpsLedger(
+                    side,
+                    army.CommanderMode,
+                    operation,
+                    strategic,
+                    commandOperations.Count));
+            }
+
+            int validIdle = 0;
+            int illegalIdle = 0;
+            int recoveringStuck = 0;
+            int activeAttacks = 0;
+            int reservesWaiting = 0;
+            float now = Time.realtimeSinceStartup;
+
+            for (int i = 0; i < commandOperations.Count; i++)
+            {
+                var state = commandOperations[i];
+                string assignmentSignature = TacticalOperationsTelemetry.CommandAssignmentSignature(
+                    side,
+                    state,
+                    operation);
+                if (TacticalOperationsTelemetry.ShouldEmitSignatureChange(
+                    _operationsTelemetrySignatures,
+                    "command-assignment:" + side + ":" + state.NodeId,
+                    assignmentSignature))
+                {
+                    Plugin.Log.LogInfo(TacticalOperationsTelemetry.CommandAssignment(side, state, operation));
+                }
+
+                Regiment group = FindCommandNodeGroup(state.NodeId);
+                var physical = BuildCommandPhysicalState(group);
+                var idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
+                var decision = CommandPostureExecutor.Decide(
+                    state,
+                    physical,
+                    new WriteEligibilitySnapshot(
+                        modeAllowsWrites: false,
+                        playerProtected: physical.PlayerProtected,
+                        routed: physical.Routed,
+                        orderPending: group != null && (SafeOrderQueueCount(group) > 0 || SafeOrderState(group) > 0),
+                        recentOrder: false,
+                        alreadyDoingCorrectTask: false,
+                        atAssignedLocation: idle == TacticalIdleClassification.ValidIdle,
+                        missingLedgerAssignment: false,
+                        closeEngaged: false));
+
+                CountPosture(state, physical, idle, ref validIdle, ref illegalIdle, ref recoveringStuck, ref activeAttacks, ref reservesWaiting);
+
+                if (decision.Action != PostureExecutionAction.NoWrite) continue;
+
+                string postureSignature = TacticalOperationsTelemetry.CommandPostureSignature(side, state, decision, idle);
+                if (!TacticalTelemetry.ShouldEmit(
+                    _lastEmittedAt,
+                    "TacticalCommandPosture:" + side + ":" + TacticalOperationsTelemetry.SafeToken(state.NodeId),
+                    postureSignature,
+                    now,
+                    OperationsPostureTelemetrySeconds,
+                    verbose: false))
+                {
+                    continue;
+                }
+
+                Plugin.Log.LogInfo(TacticalOperationsTelemetry.CommandPosture(side, state, decision, idle));
+            }
+
+            if (TacticalOperationsTelemetry.ShouldEmitInterval(
+                _operationsSummaryEmittedAt,
+                "posture-summary:" + side,
+                now,
+                OperationsSummaryTelemetrySeconds,
+                verbose: false))
+            {
+                Plugin.Log.LogInfo(TacticalOperationsTelemetry.PostureSummary(
+                    side,
+                    validIdle,
+                    illegalIdle,
+                    recoveringStuck,
+                    activeAttacks,
+                    reservesWaiting));
+            }
+        }
+
+        private static void CountPosture(
+            CommandNodeOperationalState state,
+            CommandPhysicalState physical,
+            TacticalIdleClassification idle,
+            ref int validIdle,
+            ref int illegalIdle,
+            ref int recoveringStuck,
+            ref int activeAttacks,
+            ref int reservesWaiting)
+        {
+            if (idle == TacticalIdleClassification.ValidIdle) validIdle++;
+            if (idle == TacticalIdleClassification.IllegalIdle) illegalIdle++;
+            if ((physical.PathInterrupted && physical.Paths <= 0 && !physical.ActiveMove) ||
+                state.Task == CommandTaskType.RecoverStuckOrder)
+            {
+                recoveringStuck++;
+            }
+            if (state.Task == CommandTaskType.AttackObjective || state.Task == CommandTaskType.SupportAttack)
+            {
+                activeAttacks++;
+            }
+            if (state.Task == CommandTaskType.ReserveWait)
+            {
+                reservesWaiting++;
+            }
+        }
+
+        private static CommandPhysicalState BuildCommandPhysicalState(Regiment group)
+        {
+            return new CommandPhysicalState(
+                routed: SafeRouted(group),
+                playerProtected: group != null && group.dlcw_isundercommander,
+                pathInterrupted: group != null && group.pathinterrupted,
+                paths: SafeRegimentPaths(group),
+                activeMove: HasActiveMoveOrder(group),
+                formation: SafeFormation(group));
+        }
+
+        private static Regiment FindCommandNodeGroup(string nodeId)
+        {
+            int instanceId = ParseCommandNodeInstanceId(nodeId);
+            if (instanceId == 0) return null;
+
+            try
+            {
+                var all = BattleUnits.completeunitlist;
+                if (all == null) return null;
+                for (int i = 0; i < all.Count; i++)
+                {
+                    var reg = all[i] as Regiment;
+                    if (reg != null && SafeInstanceId(reg) == instanceId) return reg;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+
+            return null;
+        }
+
+        private static int ParseCommandNodeInstanceId(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId)) return 0;
+            const string prefix = "node-";
+            if (nodeId.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return int.TryParse(nodeId.Substring(prefix.Length), out int id) ? id : 0;
+            }
+
+            return TacticalBattleCoordinator.ParseInstanceIdFromChildId(nodeId);
         }
 
         private static void ObserveQueuedOrder(
@@ -2169,6 +2376,12 @@ namespace WhiskeyRealism.Patches
         {
             try { return unit != null ? unit.movementmode : -1; }
             catch { return -1; }
+        }
+
+        private static bool SafeRouted(Regiment unit)
+        {
+            try { return unit != null && (unit.isrouted || unit.markedforrout); }
+            catch { return false; }
         }
 
         private static FormationChangeState SnapshotFormationChange(Regiment unit)
