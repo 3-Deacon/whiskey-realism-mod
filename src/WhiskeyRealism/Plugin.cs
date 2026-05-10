@@ -58,6 +58,10 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
+        public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
+        public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
+        public static ConfigEntry<int> TacticalDeploymentTerrainMaxCandidates;
+        public static ConfigEntry<float> TacticalDeploymentFacingPreferredDeltaDegrees;
         public const int TacticalMoraleSnapshotLedgerCapacity = 4;
         public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
@@ -327,6 +331,26 @@ namespace WhiskeyRealism
                 "Enable Tactical Deployment Observer",
                 true,
                 "Default-on. Read-only deployment/redeployment observer for battle-start and end-of-day placement. Logs [TacDeployObs], [TacDeployObsMove], and [TacticalDeploymentPhase] rows; does not change unit positions or orders.");
+            EnableTacticalDeploymentTerrainDiscipline = Config.Bind(
+                "Tactical",
+                "Enable Tactical Deployment Terrain Discipline",
+                false,
+                "Default off. When enabled, AI deployment placement may correct clear water/out-of-zone terrain failures after vanilla deployment.");
+            TacticalDeploymentTerrainMaxCorrectionMeters = Config.Bind(
+                "Tactical",
+                "Tactical Deployment Terrain Discipline Max Correction Meters",
+                60f,
+                "Maximum distance Whiskey may move an AI deployment group while correcting a terrain failure.");
+            TacticalDeploymentTerrainMaxCandidates = Config.Bind(
+                "Tactical",
+                "Tactical Deployment Terrain Discipline Max Candidates",
+                16,
+                "Maximum candidate points sampled around a failed AI deployment placement.");
+            TacticalDeploymentFacingPreferredDeltaDegrees = Config.Bind(
+                "Tactical",
+                "Tactical Deployment Facing Preferred Delta Degrees",
+                90f,
+                "Preferred maximum final facing delta from visible enemy bearing for deployment terrain corrections.");
             EnableConstructionIntentLedger = Config.Bind(
                 "Construction", "Enable Construction Intent Ledger", true,
                 "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
