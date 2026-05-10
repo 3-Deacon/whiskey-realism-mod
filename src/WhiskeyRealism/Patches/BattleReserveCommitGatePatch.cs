@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
+using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Orchestrator;
@@ -16,6 +18,11 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
     internal static class BattleReserveCommitGatePatch
     {
+        private static FieldInfo _lastDrawnPathCornerField;
+        private static FieldInfo _firstWpAdjustmentMadeField;
+        private static bool _lastDrawnPathCornerFieldMissing;
+        private static bool _firstWpAdjustmentMadeFieldMissing;
+
         internal sealed class ReserveCommitState
         {
             public UnitState[] Units = Array.Empty<UnitState>();
@@ -23,13 +30,54 @@ namespace WhiskeyRealism.Patches
 
         internal readonly struct UnitState
         {
-            public UnitState(Regiment unit, int paths, int queueCount, bool doubleQuick, bool inEngagement)
+            public UnitState(
+                Regiment unit,
+                int paths,
+                int queueCount,
+                bool doubleQuick,
+                bool inEngagement,
+                int pathsBeforeRotation,
+                Regiment unitWhoGaveLastMovingOrder,
+                float coverValue,
+                int coverObject,
+                float coverValueTemp,
+                int coverObjectTemp,
+                Vector3[] lastWaypointPosition,
+                float[] lastWaypointRotation,
+                Vector3 lastSetWaypointPosition,
+                float lastSetWaypointRotation,
+                float lastMovingUpdate,
+                bool lastPathSetOutOfSafetyZone,
+                bool lastPathSetOutOfManualMove,
+                int priorMountingState,
+                bool hasLastDrawnPathCorner,
+                int lastDrawnPathCorner,
+                bool hasFirstWpAdjustmentMade,
+                bool firstWpAdjustmentMade)
             {
                 Unit = unit;
                 Paths = Math.Max(0, paths);
                 QueueCount = Math.Max(0, queueCount);
                 DoubleQuick = doubleQuick;
                 InEngagement = inEngagement;
+                PathsBeforeRotation = Math.Max(0, pathsBeforeRotation);
+                UnitWhoGaveLastMovingOrder = unitWhoGaveLastMovingOrder;
+                CoverValue = coverValue;
+                CoverObject = coverObject;
+                CoverValueTemp = coverValueTemp;
+                CoverObjectTemp = coverObjectTemp;
+                LastWaypointPosition = Clone(lastWaypointPosition);
+                LastWaypointRotation = Clone(lastWaypointRotation);
+                LastSetWaypointPosition = lastSetWaypointPosition;
+                LastSetWaypointRotation = lastSetWaypointRotation;
+                LastMovingUpdate = lastMovingUpdate;
+                LastPathSetOutOfSafetyZone = lastPathSetOutOfSafetyZone;
+                LastPathSetOutOfManualMove = lastPathSetOutOfManualMove;
+                PriorMountingState = priorMountingState;
+                HasLastDrawnPathCorner = hasLastDrawnPathCorner;
+                LastDrawnPathCorner = lastDrawnPathCorner;
+                HasFirstWpAdjustmentMade = hasFirstWpAdjustmentMade;
+                FirstWpAdjustmentMade = firstWpAdjustmentMade;
             }
 
             public Regiment Unit { get; }
@@ -37,6 +85,40 @@ namespace WhiskeyRealism.Patches
             public int QueueCount { get; }
             public bool DoubleQuick { get; }
             public bool InEngagement { get; }
+            public int PathsBeforeRotation { get; }
+            public Regiment UnitWhoGaveLastMovingOrder { get; }
+            public float CoverValue { get; }
+            public int CoverObject { get; }
+            public float CoverValueTemp { get; }
+            public int CoverObjectTemp { get; }
+            public Vector3[] LastWaypointPosition { get; }
+            public float[] LastWaypointRotation { get; }
+            public Vector3 LastSetWaypointPosition { get; }
+            public float LastSetWaypointRotation { get; }
+            public float LastMovingUpdate { get; }
+            public bool LastPathSetOutOfSafetyZone { get; }
+            public bool LastPathSetOutOfManualMove { get; }
+            public int PriorMountingState { get; }
+            public bool HasLastDrawnPathCorner { get; }
+            public int LastDrawnPathCorner { get; }
+            public bool HasFirstWpAdjustmentMade { get; }
+            public bool FirstWpAdjustmentMade { get; }
+
+            private static Vector3[] Clone(Vector3[] source)
+            {
+                if (source == null) return null;
+                var clone = new Vector3[source.Length];
+                Array.Copy(source, clone, source.Length);
+                return clone;
+            }
+
+            private static float[] Clone(float[] source)
+            {
+                if (source == null) return null;
+                var clone = new float[source.Length];
+                Array.Copy(source, clone, source.Length);
+                return clone;
+            }
         }
 
         [HarmonyPrefix]
@@ -127,12 +209,7 @@ namespace WhiskeyRealism.Patches
                 for (int i = 0; i < group.allattachedunits.Length; i++)
                 {
                     Regiment unit = group.allattachedunits[i];
-                    units[i] = new UnitState(
-                        unit,
-                        SafePathCount(unit),
-                        SafeQueueCount(unit),
-                        SafeDoubleQuick(unit),
-                        SafeInEngagement(unit));
+                    units[i] = SnapshotUnit(unit);
                 }
 
                 return new ReserveCommitState { Units = units };
@@ -141,6 +218,42 @@ namespace WhiskeyRealism.Patches
             {
                 return new ReserveCommitState();
             }
+        }
+
+        private static UnitState SnapshotUnit(Regiment unit)
+        {
+            if (unit == null)
+                return new UnitState(null, 0, 0, false, false, 0, null, 0f, 0, 0f, 0, null, null, default(Vector3), 0f, 0f, false, false, 0, false, 0, false, false);
+
+            int lastDrawnPathCorner = 0;
+            bool hasLastDrawnPathCorner = TryGetPrivateInt(unit, ref _lastDrawnPathCornerField, "lastdrawnpathcorner", ref _lastDrawnPathCornerFieldMissing, out lastDrawnPathCorner);
+            bool firstWpAdjustmentMade = false;
+            bool hasFirstWpAdjustmentMade = TryGetPrivateBool(unit, ref _firstWpAdjustmentMadeField, "firstwpadjustmentmade", ref _firstWpAdjustmentMadeFieldMissing, out firstWpAdjustmentMade);
+
+            return new UnitState(
+                unit,
+                SafePathCount(unit),
+                SafeQueueCount(unit),
+                SafeDoubleQuick(unit),
+                SafeInEngagement(unit),
+                SafeInt(() => unit.regimentpathsbeforerotation),
+                SafeRegiment(() => unit.unitwhogavelastmovingorder),
+                SafeFloat(() => unit.covervalue),
+                SafeInt(() => unit.coverobject),
+                SafeFloat(() => unit.covervaluetemp),
+                SafeInt(() => unit.coverobjecttemp),
+                SafeVectorArray(() => unit.lastwaypointposition),
+                SafeFloatArray(() => unit.lastwaypointrotation),
+                SafeVector(() => unit.lastsetwaypointposition),
+                SafeFloat(() => unit.lastsetwaypointrotation),
+                SafeFloat(() => unit.lastmovingupdate),
+                SafeBool(() => unit.lastpathsetoutofsafetyzone),
+                SafeBool(() => unit.lastpathsetoutofmanualmove),
+                SafeInt(() => unit.priormountingstate),
+                hasLastDrawnPathCorner,
+                lastDrawnPathCorner,
+                hasFirstWpAdjustmentMade,
+                firstWpAdjustmentMade);
         }
 
         private static UnitState[] FindChangedUnits(ReserveCommitState state)
@@ -170,8 +283,63 @@ namespace WhiskeyRealism.Patches
                 if (unit == null) continue;
 
                 RemoveAddedPaths(unit, before.Paths, SafePathCount(unit));
-                unit.doublequick = before.DoubleQuick;
+                RestoreMovementState(unit, before);
             }
+        }
+
+        private static void RestoreMovementState(Regiment unit, UnitState before)
+        {
+            try { unit.regimentpathsbeforerotation = before.PathsBeforeRotation; } catch { }
+            try { unit.unitwhogavelastmovingorder = before.UnitWhoGaveLastMovingOrder; } catch { }
+            try { unit.covervalue = before.CoverValue; } catch { }
+            try { unit.coverobject = before.CoverObject; } catch { }
+            try { unit.covervaluetemp = before.CoverValueTemp; } catch { }
+            try { unit.coverobjecttemp = before.CoverObjectTemp; } catch { }
+            try { RestoreVectorArray(ref unit.lastwaypointposition, before.LastWaypointPosition); } catch { }
+            try { RestoreFloatArray(ref unit.lastwaypointrotation, before.LastWaypointRotation); } catch { }
+            try { unit.lastsetwaypointposition = before.LastSetWaypointPosition; } catch { }
+            try { unit.lastsetwaypointrotation = before.LastSetWaypointRotation; } catch { }
+            try { unit.lastmovingupdate = before.LastMovingUpdate; } catch { }
+            try { unit.lastpathsetoutofsafetyzone = before.LastPathSetOutOfSafetyZone; } catch { }
+            try { unit.lastpathsetoutofmanualmove = before.LastPathSetOutOfManualMove; } catch { }
+            try { unit.priormountingstate = before.PriorMountingState; } catch { }
+            try { unit.doublequick = before.DoubleQuick; } catch { }
+            if (before.HasLastDrawnPathCorner)
+                TrySetPrivateInt(unit, ref _lastDrawnPathCornerField, "lastdrawnpathcorner", ref _lastDrawnPathCornerFieldMissing, before.LastDrawnPathCorner);
+            if (before.HasFirstWpAdjustmentMade)
+                TrySetPrivateBool(unit, ref _firstWpAdjustmentMadeField, "firstwpadjustmentmade", ref _firstWpAdjustmentMadeFieldMissing, before.FirstWpAdjustmentMade);
+        }
+
+        private static void RestoreVectorArray(ref Vector3[] target, Vector3[] snapshot)
+        {
+            if (snapshot == null)
+            {
+                target = null;
+                return;
+            }
+
+            if (target == null || target.Length != snapshot.Length)
+                target = new Vector3[snapshot.Length];
+
+            int max = Math.Min(target.Length, snapshot.Length);
+            for (int i = 0; i < max; i++)
+                target[i] = snapshot[i];
+        }
+
+        private static void RestoreFloatArray(ref float[] target, float[] snapshot)
+        {
+            if (snapshot == null)
+            {
+                target = null;
+                return;
+            }
+
+            if (target == null || target.Length != snapshot.Length)
+                target = new float[snapshot.Length];
+
+            int max = Math.Min(target.Length, snapshot.Length);
+            for (int i = 0; i < max; i++)
+                target[i] = snapshot[i];
         }
 
         private static CommandIntentResolution ResolveIntent(Regiment group)
@@ -337,6 +505,163 @@ namespace WhiskeyRealism.Patches
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
             return Math.Max(0f, value);
+        }
+
+        private static int SafeInt(Func<int> read)
+        {
+            try { return read != null ? read() : 0; }
+            catch { return 0; }
+        }
+
+        private static float SafeFloat(Func<float> read)
+        {
+            try { return read != null ? read() : 0f; }
+            catch { return 0f; }
+        }
+
+        private static bool SafeBool(Func<bool> read)
+        {
+            try { return read != null && read(); }
+            catch { return false; }
+        }
+
+        private static Regiment SafeRegiment(Func<Regiment> read)
+        {
+            try { return read != null ? read() : null; }
+            catch { return null; }
+        }
+
+        private static Vector3 SafeVector(Func<Vector3> read)
+        {
+            try { return read != null ? read() : default(Vector3); }
+            catch { return default(Vector3); }
+        }
+
+        private static Vector3[] SafeVectorArray(Func<Vector3[]> read)
+        {
+            try { return read != null ? read() : null; }
+            catch { return null; }
+        }
+
+        private static float[] SafeFloatArray(Func<float[]> read)
+        {
+            try { return read != null ? read() : null; }
+            catch { return null; }
+        }
+
+        private static bool TryGetPrivateInt(
+            Regiment unit,
+            ref FieldInfo field,
+            string fieldName,
+            ref bool missingLogged,
+            out int value)
+        {
+            value = 0;
+            try
+            {
+                field = ResolvePrivateField(ref field, fieldName, ref missingLogged);
+                if (field == null) return false;
+                object raw = field.GetValue(unit);
+                if (raw is int intValue)
+                {
+                    value = intValue;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-reserve-commit-gate:read-private:" + fieldName,
+                    "[TacticalReserveCommitGate] failed reading Regiment." + fieldName + ": " + ex.Message);
+            }
+
+            return false;
+        }
+
+        private static bool TryGetPrivateBool(
+            Regiment unit,
+            ref FieldInfo field,
+            string fieldName,
+            ref bool missingLogged,
+            out bool value)
+        {
+            value = false;
+            try
+            {
+                field = ResolvePrivateField(ref field, fieldName, ref missingLogged);
+                if (field == null) return false;
+                object raw = field.GetValue(unit);
+                if (raw is bool boolValue)
+                {
+                    value = boolValue;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-reserve-commit-gate:read-private:" + fieldName,
+                    "[TacticalReserveCommitGate] failed reading Regiment." + fieldName + ": " + ex.Message);
+            }
+
+            return false;
+        }
+
+        private static void TrySetPrivateInt(
+            Regiment unit,
+            ref FieldInfo field,
+            string fieldName,
+            ref bool missingLogged,
+            int value)
+        {
+            try
+            {
+                field = ResolvePrivateField(ref field, fieldName, ref missingLogged);
+                if (field != null) field.SetValue(unit, value);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-reserve-commit-gate:write-private:" + fieldName,
+                    "[TacticalReserveCommitGate] failed restoring Regiment." + fieldName + ": " + ex.Message);
+            }
+        }
+
+        private static void TrySetPrivateBool(
+            Regiment unit,
+            ref FieldInfo field,
+            string fieldName,
+            ref bool missingLogged,
+            bool value)
+        {
+            try
+            {
+                field = ResolvePrivateField(ref field, fieldName, ref missingLogged);
+                if (field != null) field.SetValue(unit, value);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-reserve-commit-gate:write-private:" + fieldName,
+                    "[TacticalReserveCommitGate] failed restoring Regiment." + fieldName + ": " + ex.Message);
+            }
+        }
+
+        private static FieldInfo ResolvePrivateField(ref FieldInfo field, string fieldName, ref bool missingLogged)
+        {
+            if (field != null) return field;
+            if (missingLogged) return null;
+
+            field = AccessTools.Field(typeof(Regiment), fieldName);
+            if (field == null)
+            {
+                missingLogged = true;
+                OnceLog.Warning(
+                    "tactical-reserve-commit-gate:missing-private:" + fieldName,
+                    "[TacticalReserveCommitGate] missing Regiment." + fieldName + " anchor; restore will skip that field.");
+            }
+
+            return field;
         }
 
         private static void Log(
