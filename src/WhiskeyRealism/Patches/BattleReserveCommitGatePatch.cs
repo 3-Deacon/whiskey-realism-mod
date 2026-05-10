@@ -35,6 +35,7 @@ namespace WhiskeyRealism.Patches
                 int paths,
                 int queueCount,
                 bool doubleQuick,
+                bool running,
                 bool inEngagement,
                 int pathsBeforeRotation,
                 Regiment unitWhoGaveLastMovingOrder,
@@ -59,6 +60,7 @@ namespace WhiskeyRealism.Patches
                 Paths = Math.Max(0, paths);
                 QueueCount = Math.Max(0, queueCount);
                 DoubleQuick = doubleQuick;
+                Running = running;
                 InEngagement = inEngagement;
                 PathsBeforeRotation = Math.Max(0, pathsBeforeRotation);
                 UnitWhoGaveLastMovingOrder = unitWhoGaveLastMovingOrder;
@@ -84,6 +86,7 @@ namespace WhiskeyRealism.Patches
             public int Paths { get; }
             public int QueueCount { get; }
             public bool DoubleQuick { get; }
+            public bool Running { get; }
             public bool InEngagement { get; }
             public int PathsBeforeRotation { get; }
             public Regiment UnitWhoGaveLastMovingOrder { get; }
@@ -223,7 +226,7 @@ namespace WhiskeyRealism.Patches
         private static UnitState SnapshotUnit(Regiment unit)
         {
             if (unit == null)
-                return new UnitState(null, 0, 0, false, false, 0, null, 0f, 0, 0f, 0, null, null, default(Vector3), 0f, 0f, false, false, 0, false, 0, false, false);
+                return new UnitState(null, 0, 0, false, false, false, 0, null, 0f, 0, 0f, 0, null, null, default(Vector3), 0f, 0f, false, false, 0, false, 0, false, false);
 
             int lastDrawnPathCorner = 0;
             bool hasLastDrawnPathCorner = TryGetPrivateInt(unit, ref _lastDrawnPathCornerField, "lastdrawnpathcorner", ref _lastDrawnPathCornerFieldMissing, out lastDrawnPathCorner);
@@ -235,6 +238,7 @@ namespace WhiskeyRealism.Patches
                 SafePathCount(unit),
                 SafeQueueCount(unit),
                 SafeDoubleQuick(unit),
+                SafeRunning(unit),
                 SafeInEngagement(unit),
                 SafeInt(() => unit.regimentpathsbeforerotation),
                 SafeRegiment(() => unit.unitwhogavelastmovingorder),
@@ -304,6 +308,7 @@ namespace WhiskeyRealism.Patches
             try { unit.lastpathsetoutofmanualmove = before.LastPathSetOutOfManualMove; } catch { }
             try { unit.priormountingstate = before.PriorMountingState; } catch { }
             try { unit.doublequick = before.DoubleQuick; } catch { }
+            try { unit.running = before.Running; } catch { }
             if (before.HasLastDrawnPathCorner)
                 TrySetPrivateInt(unit, ref _lastDrawnPathCornerField, "lastdrawnpathcorner", ref _lastDrawnPathCornerFieldMissing, before.LastDrawnPathCorner);
             if (before.HasFirstWpAdjustmentMade)
@@ -480,6 +485,12 @@ namespace WhiskeyRealism.Patches
         private static bool SafeDoubleQuick(Regiment unit)
         {
             try { return unit != null && unit.doublequick; }
+            catch { return false; }
+        }
+
+        private static bool SafeRunning(Regiment unit)
+        {
+            try { return unit != null && unit.running; }
             catch { return false; }
         }
 
