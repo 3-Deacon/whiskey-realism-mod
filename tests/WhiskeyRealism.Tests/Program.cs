@@ -5,6 +5,7 @@ using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 
 static class Program
@@ -65,6 +66,9 @@ static class Program
             ("tactical terrain normalizes large negative angles", TacticalTerrainNormalizesLargeNegativeAngles),
             ("tactical terrain rejects unknown terrain evidence", TacticalTerrainRejectsUnknownTerrainEvidence),
             ("tactical terrain preserves vanilla facing without visible enemy", TacticalTerrainPreservesVanillaFacingWithoutVisibleEnemy),
+            ("tactical objective unverified bridge downgrades to generic", TacticalObjectiveUnverifiedBridgeDowngrades),
+            ("tactical objective verified bridge drives typed scoring", TacticalObjectiveVerifiedBridgeDrivesTypedScoring),
+            ("tactical objective input sanitizes nonfinite values", TacticalObjectiveInputSanitizesNonfiniteValues),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -1468,6 +1472,58 @@ static class Program
         AssertNear(45f, decision.Candidate.FacingDegrees, 0.01f, "vanilla facing preserved without visible enemy");
     }
 
+    private static void TacticalObjectiveUnverifiedBridgeDowngrades()
+    {
+        var input = new ObjectiveObservationInput(
+            "bridge-a",
+            TacticalObjectiveType.Bridge,
+            TacticalObjectiveSource.ObjectiveChain,
+            new TacticalMapPoint(10f, 20f),
+            0.8f,
+            1.0f,
+            typeAnchorVerified: false);
+
+        var result = TacticalObjectiveSourceModel.Normalize(input);
+
+        AssertEqual(TacticalObjectiveType.UnknownVanillaObjective, result.Type, "type");
+        AssertTrue(result.Value <= 0.35f, "unverified POI value capped");
+        AssertFalse(TacticalObjectiveSourceModel.CanDriveTypedOperationScoring(result), "typed scoring");
+    }
+
+    private static void TacticalObjectiveVerifiedBridgeDrivesTypedScoring()
+    {
+        var input = new ObjectiveObservationInput(
+            "bridge-a",
+            TacticalObjectiveType.Bridge,
+            TacticalObjectiveSource.VerifiedSceneObject,
+            new TacticalMapPoint(10f, 20f),
+            0.9f,
+            1.0f,
+            typeAnchorVerified: true);
+
+        var result = TacticalObjectiveSourceModel.Normalize(input);
+
+        AssertEqual(TacticalObjectiveType.Bridge, result.Type, "type");
+        AssertTrue(TacticalObjectiveSourceModel.CanDriveTypedOperationScoring(result), "typed scoring");
+    }
+
+    private static void TacticalObjectiveInputSanitizesNonfiniteValues()
+    {
+        var input = new ObjectiveObservationInput(
+            "",
+            TacticalObjectiveType.EnemyLine,
+            TacticalObjectiveSource.VisibleEnemyLine,
+            new TacticalMapPoint(float.NaN, float.PositiveInfinity),
+            float.PositiveInfinity,
+            float.NaN,
+            typeAnchorVerified: true);
+
+        AssertEqual("objective-unknown", input.ObjectiveId, "id");
+        AssertEqual(0f, input.Location.X, "x");
+        AssertEqual(0f, input.Location.Z, "z");
+        AssertEqual(1f, input.SourceConfidence, "confidence");
+        AssertEqual(0f, input.Value, "value");
+    }
 
     private static void TacticalContactNoSightingIsNone()
     {

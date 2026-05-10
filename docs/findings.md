@@ -181,6 +181,13 @@ Collected during v0.2.0 / v0.2.1 / v0.2.1.1 smoke-testing. Pattern: many vanilla
 
 **BepInEx-specific gotcha:** `Config.Bind("[General]", ...)` throws `ArgumentException`. BepInEx 5.4 forbids `[` `]` in section names; it adds the brackets when writing the .cfg file. Pass `"General"`, not `"[General]"`. Plugin Awake exceptions land in Unity's `Player.log` (`<persistentDataPath>/Player.log`), NOT `BepInEx/LogOutput.log` — always check both when diagnosing silent failures.
 
+## Tactical Operations Objective Anchors
+
+- `AIBattle.objectivechain`: confirmed readable as `public List<ObjectiveChain> objectivechain` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:3282`; `ObjectiveChain.objectives` is a `List<Objectives>` at lines 2966-2970. Current implementation should treat this as an initial generic objective source only. Existing #35-adjacent read paths already reflect the objective-chain field (`src/WhiskeyRealism/Tactical/Orchestrator/ArmyEvidenceBuilder.cs`) and observe objective movement without mutation.
+- `Regiment.currentsetobjective`: confirmed readable as `public Objectives currentsetobjective` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:111076`; vanilla assigns it from `objectivechain[i].objectives[0]` at line 6963 and uses the objective name for current-order updates at lines 6994-7002. Existing #35 reflection reads the field in `TacticalObserverPatch.SafeCurrentObjectiveId`, mapping command groups to vanilla objective references when present.
+- Bridge/ford/road/choke enumeration: no clean typed battle-objective enumeration API found in the current decompile. Partial crossing anchors exist: `BattlefieldSetup.rivercrossingpositions` is declared at line 24723, populated from NavMesh areas including `"Bridges"` and `"River Crossings"` at lines 26614-26637, and consumed by `AIBattle` blocked-crossing sampling at lines 7932-7967. Road hits in this scan are EasyRoads/editor/campaign-railroad surfaces, not a confirmed tactical POI source. Do not use typed Bridge/Ford/RoadJunction/ChokePoint scoring from these anchors alone; first implementation must classify them as generic positions unless a verified scene object/source is added.
+- Terrain safety: use existing #58/#60 terrain/deployment sampling until a broader terrain source is verified. `BattlefieldSetup.TerrainShape` exists at lines 24121-24139 and current #58/#60 terrain/facing discipline remains the bounded source for terrain safety.
+
 ## Game-update re-decompile inventory
 
 When GTCW patches:
