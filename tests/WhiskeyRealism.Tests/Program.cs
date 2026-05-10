@@ -48,6 +48,7 @@ static class Program
             ("tactical deployment telemetry tracks new and removed groups", TacticalDeploymentTelemetryTracksNewAndRemovedGroups),
             ("tactical deployment telemetry matches stable keys across reorder", TacticalDeploymentTelemetryMatchesStableKeysAcrossReorder),
             ("tactical deployment telemetry formats skipped phase", TacticalDeploymentTelemetryFormatsSkippedPhase),
+            ("tactical terrain telemetry formats bounded row", TacticalTerrainTelemetryFormatsBoundedRow),
             ("tactical terrain rejects water center", TacticalTerrainRejectsWaterCenter),
             ("tactical terrain rejects water footprint", TacticalTerrainRejectsWaterFootprint),
             ("tactical terrain rejects outside deployment zone", TacticalTerrainRejectsOutsideDeploymentZone),
@@ -1047,6 +1048,38 @@ static class Program
         AssertContains(formatted, "phase=skipped", "skipped phase");
         AssertContains(formatted, "matched=1", "matched count");
         AssertContains(formatted, "moved=0", "skipped move count");
+    }
+
+    private static void TacticalTerrainTelemetryFormatsBoundedRow()
+    {
+        var candidate = TerrainCandidate(100f, 100f, 90f);
+        var decision = new TacticalTerrainDecision(
+            true,
+            TacticalTerrainDecisionReason.Accepted,
+            candidate,
+            correctionDistance: 10f,
+            facingDelta: 5f);
+
+        string line = TacticalTerrainFacingTelemetry.Format(new TacticalTerrainFacingLogRow(
+            "DoPlacementAIUnitsWithinDeploymentzoneNew",
+            TacticalDeploymentTelemetry.PhaseInitial,
+            1,
+            "Test Division",
+            0,
+            centerWater: false,
+            footprintWater: false,
+            insideDeploymentZone: true,
+            facing: 90f,
+            enemyBearing: 95f,
+            enemyDistance: 600f,
+            decision));
+
+        AssertContains(line, "[TacDeployTerrain]", "marker");
+        AssertContains(line, "surface=DoPlacementAIUnitsWithinDeploymentzoneNew", "surface");
+        AssertContains(line, "unit=Test_Division", "safe unit");
+        AssertContains(line, "centerWater=false", "center water");
+        AssertContains(line, "decision=Accepted", "reason");
+        AssertContains(line, "accepted=true", "accepted");
     }
 
     private static TacticalTerrainCandidate TerrainCandidate(
