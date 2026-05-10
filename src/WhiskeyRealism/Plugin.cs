@@ -54,6 +54,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> TacticalOrchestratorVerboseLogging;
         public static ConfigEntry<bool> EnableTacticalOrchestratorIntentInference;
         public static ConfigEntry<bool> EnableTacticalOrchestratorDirectChildGate;
+        internal ConfigEntry<bool> EnableTacticalOrchestratorReserveCommitGate;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
@@ -297,6 +298,14 @@ namespace WhiskeyRealism
                 "Screen/Refuse, toward-enemy Fallback, and any Reserve movement on AI- " +
                 "controlled sides. Disable to keep #42's existing W&L-only behavior. " +
                 "Telemetry runs regardless of this flag; only deny actions are gated.");
+            EnableTacticalOrchestratorReserveCommitGate = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Tactical Orchestrator Reserve Commit Gate",
+                false,
+                "Default OFF. Slice 1: when true, AIBattle.CheckUseOfReserves consults " +
+                "the command-node intent for the calling command group and rolls back new " +
+                "vanilla reserve support paths when the group resolves to a Reserve role. " +
+                "Allowed vanilla reserve movement remains eligible for the separate order-delay guard.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",
