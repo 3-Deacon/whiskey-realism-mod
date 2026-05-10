@@ -314,7 +314,7 @@ namespace WhiskeyRealism.Tactical
             }
             catch
             {
-                return false;
+                return true;
             }
         }
 
