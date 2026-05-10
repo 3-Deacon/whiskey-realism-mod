@@ -77,6 +77,9 @@ static class Program
             ("tactical vision sanitizes nonfinite inputs", TacticalVisionSanitizesNonfiniteInputs),
             ("tactical vision default input is low confidence", TacticalVisionDefaultInputIsLowConfidence),
             ("tactical vision infinite age is stale", TacticalVisionInfiniteAgeIsStale),
+            ("tactical operations parallel requires per objective advantage", TacticalOperationsParallelRequiresPerObjectiveAdvantage),
+            ("tactical operations strong and weak selects fix and flank", TacticalOperationsStrongWeakSelectsFixAndFlank),
+            ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -1531,6 +1534,97 @@ static class Program
         AssertEqual(0f, input.Location.Z, "z");
         AssertEqual(0f, input.SourceConfidence, "confidence");
         AssertEqual(0f, input.Value, "value");
+    }
+
+    private static void TacticalOperationsParallelRequiresPerObjectiveAdvantage()
+    {
+        var first = ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f);
+        var second = ObjectiveRecordFor("ridge-b", enemyStrength: 60f, friendlyAssignedStrength: 100f);
+        var personality = new PersonalityVector(0.4f, 0f, 0f, 0f, 0f);
+
+        var selected = TacticalOperationSelectionModel.Select(
+            first,
+            second,
+            new ForceAvailabilitySnapshot(300f, 0.30f),
+            personality);
+
+        AssertEqual(TacticalOperationShape.ParallelObjectives, selected, "parallel selection");
+
+        var lowReserve = TacticalOperationSelectionModel.Select(
+            first,
+            second,
+            new ForceAvailabilitySnapshot(300f, 0.05f),
+            personality);
+        AssertTrue(lowReserve != TacticalOperationShape.ParallelObjectives, "low reserve blocks parallel");
+
+        var secondStrong = TacticalOperationSelectionModel.Select(
+            first,
+            ObjectiveRecordFor("ridge-b", enemyStrength: 90f, friendlyAssignedStrength: 100f),
+            new ForceAvailabilitySnapshot(300f, 0.30f),
+            personality);
+        AssertTrue(secondStrong != TacticalOperationShape.ParallelObjectives, "per-objective disadvantage blocks parallel");
+    }
+
+    private static void TacticalOperationsStrongWeakSelectsFixAndFlank()
+    {
+        var first = ObjectiveRecordFor("enemy-line", enemyStrength: 140f, friendlyAssignedStrength: 100f);
+        var second = ObjectiveRecordFor("bridge", enemyStrength: 50f, friendlyAssignedStrength: 100f);
+
+        var selected = TacticalOperationSelectionModel.Select(
+            first,
+            second,
+            new ForceAvailabilitySnapshot(260f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+
+        AssertEqual(TacticalOperationShape.FixAndFlank, selected, "strong weak selection");
+    }
+
+    private static void TacticalOperationsSoftAbortBeforeCollapse()
+    {
+        AssertEqual(
+            TacticalReassessmentTier.SoftAbortReview,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(300f, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
+            "stalled");
+        AssertEqual(
+            TacticalReassessmentTier.SoftAbortReview,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.34f, 1.0f, forceCollapsed: false, objectiveSecured: false),
+            "low confidence");
+        AssertEqual(
+            TacticalReassessmentTier.SoftAbortReview,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, 0.64f, forceCollapsed: false, objectiveSecured: false),
+            "low odds");
+        AssertEqual(
+            TacticalReassessmentTier.HardAbort,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, 1.0f, forceCollapsed: true, objectiveSecured: false),
+            "collapse");
+        AssertEqual(
+            TacticalReassessmentTier.HardAbort,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: true),
+            "secured");
+        AssertEqual(
+            TacticalReassessmentTier.Continue,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(120f, 0.8f, 1.0f, forceCollapsed: false, objectiveSecured: false),
+            "normal");
+        AssertEqual(
+            TacticalReassessmentTier.SoftAbortReview,
+            TacticalOperationsLedgerModel.ReassessCommittedOperation(float.PositiveInfinity, float.NaN, float.PositiveInfinity, forceCollapsed: false, objectiveSecured: false),
+            "nonfinite conservative");
+    }
+
+    private static ObjectiveRecord ObjectiveRecordFor(string objectiveId, float enemyStrength, float friendlyAssignedStrength)
+    {
+        return new ObjectiveRecord(
+            new ObjectiveObservationInput(
+                objectiveId,
+                TacticalObjectiveType.Ridge,
+                TacticalObjectiveSource.VerifiedSceneObject,
+                new TacticalMapPoint(10f, 20f),
+                0.9f,
+                1.0f,
+                typeAnchorVerified: true),
+            TacticalObjectiveStatus.Scouting,
+            enemyStrength,
+            friendlyAssignedStrength);
     }
 
     private static void TacticalCommanderModeActiveAllowsWrites()
