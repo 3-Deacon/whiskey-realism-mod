@@ -44,6 +44,23 @@ namespace WhiskeyRealism.Patches
                 int coverObject,
                 float coverValueTemp,
                 int coverObjectTemp,
+                float coverAngle,
+                bool orderToCrossBridge,
+                int[] blockObjectCurrentPath,
+                int[] blockObjectCurrentCorner,
+                bool distanceMarchColumn,
+                int formation,
+                int groupFormation,
+                int formationOrdered,
+                int lastFormation,
+                Vector3 lastFormationChangePosition,
+                int orderState,
+                float timedMovement,
+                float timeOfArrival,
+                float aiArrivalFactor,
+                GameObject unitToTarget,
+                float lastFiredShotTime,
+                int lastPathState,
                 Vector3[] lastWaypointPosition,
                 float[] lastWaypointRotation,
                 Vector3 lastSetWaypointPosition,
@@ -55,7 +72,9 @@ namespace WhiskeyRealism.Patches
                 bool hasLastDrawnPathCorner,
                 int lastDrawnPathCorner,
                 bool hasFirstWpAdjustmentMade,
-                bool firstWpAdjustmentMade)
+                bool firstWpAdjustmentMade,
+                TransformState unitTransform,
+                TransformState[] blockTransforms)
             {
                 Unit = unit;
                 Paths = Math.Max(0, paths);
@@ -70,6 +89,23 @@ namespace WhiskeyRealism.Patches
                 CoverObject = coverObject;
                 CoverValueTemp = coverValueTemp;
                 CoverObjectTemp = coverObjectTemp;
+                CoverAngle = coverAngle;
+                OrderToCrossBridge = orderToCrossBridge;
+                BlockObjectCurrentPath = Clone(blockObjectCurrentPath);
+                BlockObjectCurrentCorner = Clone(blockObjectCurrentCorner);
+                DistanceMarchColumn = distanceMarchColumn;
+                Formation = formation;
+                GroupFormation = groupFormation;
+                FormationOrdered = formationOrdered;
+                LastFormation = lastFormation;
+                LastFormationChangePosition = lastFormationChangePosition;
+                OrderState = orderState;
+                TimedMovement = timedMovement;
+                TimeOfArrival = timeOfArrival;
+                AiArrivalFactor = aiArrivalFactor;
+                UnitToTarget = unitToTarget;
+                LastFiredShotTime = lastFiredShotTime;
+                LastPathState = lastPathState;
                 LastWaypointPosition = Clone(lastWaypointPosition);
                 LastWaypointRotation = Clone(lastWaypointRotation);
                 LastSetWaypointPosition = lastSetWaypointPosition;
@@ -82,6 +118,8 @@ namespace WhiskeyRealism.Patches
                 LastDrawnPathCorner = lastDrawnPathCorner;
                 HasFirstWpAdjustmentMade = hasFirstWpAdjustmentMade;
                 FirstWpAdjustmentMade = firstWpAdjustmentMade;
+                UnitTransform = unitTransform;
+                BlockTransforms = Clone(blockTransforms);
             }
 
             public Regiment Unit { get; }
@@ -97,6 +135,23 @@ namespace WhiskeyRealism.Patches
             public int CoverObject { get; }
             public float CoverValueTemp { get; }
             public int CoverObjectTemp { get; }
+            public float CoverAngle { get; }
+            public bool OrderToCrossBridge { get; }
+            public int[] BlockObjectCurrentPath { get; }
+            public int[] BlockObjectCurrentCorner { get; }
+            public bool DistanceMarchColumn { get; }
+            public int Formation { get; }
+            public int GroupFormation { get; }
+            public int FormationOrdered { get; }
+            public int LastFormation { get; }
+            public Vector3 LastFormationChangePosition { get; }
+            public int OrderState { get; }
+            public float TimedMovement { get; }
+            public float TimeOfArrival { get; }
+            public float AiArrivalFactor { get; }
+            public GameObject UnitToTarget { get; }
+            public float LastFiredShotTime { get; }
+            public int LastPathState { get; }
             public Vector3[] LastWaypointPosition { get; }
             public float[] LastWaypointRotation { get; }
             public Vector3 LastSetWaypointPosition { get; }
@@ -109,6 +164,16 @@ namespace WhiskeyRealism.Patches
             public int LastDrawnPathCorner { get; }
             public bool HasFirstWpAdjustmentMade { get; }
             public bool FirstWpAdjustmentMade { get; }
+            public TransformState UnitTransform { get; }
+            public TransformState[] BlockTransforms { get; }
+
+            private static int[] Clone(int[] source)
+            {
+                if (source == null) return null;
+                var clone = new int[source.Length];
+                Array.Copy(source, clone, source.Length);
+                return clone;
+            }
 
             private static Vector3[] Clone(Vector3[] source)
             {
@@ -125,6 +190,28 @@ namespace WhiskeyRealism.Patches
                 Array.Copy(source, clone, source.Length);
                 return clone;
             }
+
+            private static TransformState[] Clone(TransformState[] source)
+            {
+                if (source == null) return null;
+                var clone = new TransformState[source.Length];
+                Array.Copy(source, clone, source.Length);
+                return clone;
+            }
+        }
+
+        internal readonly struct TransformState
+        {
+            public TransformState(bool hasValue, Vector3 position, Quaternion rotation)
+            {
+                HasValue = hasValue;
+                Position = position;
+                Rotation = rotation;
+            }
+
+            public bool HasValue { get; }
+            public Vector3 Position { get; }
+            public Quaternion Rotation { get; }
         }
 
         [HarmonyPrefix]
@@ -229,7 +316,7 @@ namespace WhiskeyRealism.Patches
         private static UnitState SnapshotUnit(Regiment unit)
         {
             if (unit == null)
-                return new UnitState(null, 0, 0, false, false, false, false, 0, null, 0f, 0, 0f, 0, null, null, default(Vector3), 0f, 0f, false, false, 0, false, 0, false, false);
+                return default(UnitState);
 
             int lastDrawnPathCorner = 0;
             bool hasLastDrawnPathCorner = TryGetPrivateInt(unit, ref _lastDrawnPathCornerField, "lastdrawnpathcorner", ref _lastDrawnPathCornerFieldMissing, out lastDrawnPathCorner);
@@ -250,6 +337,23 @@ namespace WhiskeyRealism.Patches
                 SafeInt(() => unit.coverobject),
                 SafeFloat(() => unit.covervaluetemp),
                 SafeInt(() => unit.coverobjecttemp),
+                SafeFloat(() => unit.coverangle),
+                SafeBool(() => unit.ordertocrossbridge),
+                SafeIntArray(() => unit.blockobjectcurrentpath),
+                SafeIntArray(() => unit.blockobjectcurrentcorner),
+                SafeBool(() => unit.distancemarchcolumn),
+                SafeInt(() => unit.formation),
+                SafeInt(() => unit.groupformation),
+                SafeInt(() => unit.formationordered),
+                SafeInt(() => unit.lastformation),
+                SafeVector(() => unit.lastformationchangeposition),
+                SafeInt(() => unit.orderstate),
+                SafeFloat(() => unit.timedmovement),
+                SafeFloat(() => unit.timeofarrival),
+                SafeFloat(() => unit.aiarrivalfactor),
+                SafeGameObject(() => unit.unittotarget),
+                SafeFloat(() => unit.lastfiredshottime),
+                SafeInt(() => unit.lastpathstate),
                 SafeVectorArray(() => unit.lastwaypointposition),
                 SafeFloatArray(() => unit.lastwaypointrotation),
                 SafeVector(() => unit.lastsetwaypointposition),
@@ -261,7 +365,9 @@ namespace WhiskeyRealism.Patches
                 hasLastDrawnPathCorner,
                 lastDrawnPathCorner,
                 hasFirstWpAdjustmentMade,
-                firstWpAdjustmentMade);
+                firstWpAdjustmentMade,
+                SnapshotTransform(unit),
+                SnapshotBlockTransforms(unit));
         }
 
         private static UnitState[] FindChangedUnits(ReserveCommitState state)
@@ -303,6 +409,23 @@ namespace WhiskeyRealism.Patches
             try { unit.coverobject = before.CoverObject; } catch { }
             try { unit.covervaluetemp = before.CoverValueTemp; } catch { }
             try { unit.coverobjecttemp = before.CoverObjectTemp; } catch { }
+            try { unit.coverangle = before.CoverAngle; } catch { }
+            try { unit.ordertocrossbridge = before.OrderToCrossBridge; } catch { }
+            try { RestoreIntArray(ref unit.blockobjectcurrentpath, before.BlockObjectCurrentPath); } catch { }
+            try { RestoreIntArray(ref unit.blockobjectcurrentcorner, before.BlockObjectCurrentCorner); } catch { }
+            try { unit.distancemarchcolumn = before.DistanceMarchColumn; } catch { }
+            try { unit.formation = before.Formation; } catch { }
+            try { unit.groupformation = before.GroupFormation; } catch { }
+            try { unit.formationordered = before.FormationOrdered; } catch { }
+            try { unit.lastformation = before.LastFormation; } catch { }
+            try { unit.lastformationchangeposition = before.LastFormationChangePosition; } catch { }
+            try { unit.orderstate = before.OrderState; } catch { }
+            try { unit.timedmovement = before.TimedMovement; } catch { }
+            try { unit.timeofarrival = before.TimeOfArrival; } catch { }
+            try { unit.aiarrivalfactor = before.AiArrivalFactor; } catch { }
+            try { unit.unittotarget = before.UnitToTarget; } catch { }
+            try { unit.lastfiredshottime = before.LastFiredShotTime; } catch { }
+            try { unit.lastpathstate = before.LastPathState; } catch { }
             try { RestoreVectorArray(ref unit.lastwaypointposition, before.LastWaypointPosition); } catch { }
             try { RestoreFloatArray(ref unit.lastwaypointrotation, before.LastWaypointRotation); } catch { }
             try { unit.lastsetwaypointposition = before.LastSetWaypointPosition; } catch { }
@@ -318,6 +441,24 @@ namespace WhiskeyRealism.Patches
                 TrySetPrivateInt(unit, ref _lastDrawnPathCornerField, "lastdrawnpathcorner", ref _lastDrawnPathCornerFieldMissing, before.LastDrawnPathCorner);
             if (before.HasFirstWpAdjustmentMade)
                 TrySetPrivateBool(unit, ref _firstWpAdjustmentMadeField, "firstwpadjustmentmade", ref _firstWpAdjustmentMadeFieldMissing, before.FirstWpAdjustmentMade);
+            RestoreTransform(unit, before.UnitTransform);
+            RestoreBlockTransforms(unit, before.BlockTransforms);
+        }
+
+        private static void RestoreIntArray(ref int[] target, int[] snapshot)
+        {
+            if (snapshot == null)
+            {
+                target = null;
+                return;
+            }
+
+            if (target == null || target.Length != snapshot.Length)
+                target = new int[snapshot.Length];
+
+            int max = Math.Min(target.Length, snapshot.Length);
+            for (int i = 0; i < max; i++)
+                target[i] = snapshot[i];
         }
 
         private static void RestoreVectorArray(ref Vector3[] target, Vector3[] snapshot)
@@ -569,6 +710,102 @@ namespace WhiskeyRealism.Patches
         {
             try { return read != null ? read() : null; }
             catch { return null; }
+        }
+
+        private static int[] SafeIntArray(Func<int[]> read)
+        {
+            try { return read != null ? read() : null; }
+            catch { return null; }
+        }
+
+        private static GameObject SafeGameObject(Func<GameObject> read)
+        {
+            try { return read != null ? read() : null; }
+            catch { return null; }
+        }
+
+        private static TransformState SnapshotTransform(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return default(TransformState);
+                Transform transform = unit.transform;
+                if (transform == null) return default(TransformState);
+                return new TransformState(true, transform.position, transform.rotation);
+            }
+            catch
+            {
+                return default(TransformState);
+            }
+        }
+
+        private static TransformState SnapshotTransform(GameObject gameObject)
+        {
+            try
+            {
+                if (gameObject == null) return default(TransformState);
+                Transform transform = gameObject.transform;
+                if (transform == null) return default(TransformState);
+                return new TransformState(true, transform.position, transform.rotation);
+            }
+            catch
+            {
+                return default(TransformState);
+            }
+        }
+
+        private static TransformState[] SnapshotBlockTransforms(Regiment unit)
+        {
+            try
+            {
+                if (unit == null || unit.blockobject == null) return null;
+                var snapshots = new TransformState[unit.blockobject.Length];
+                for (int i = 0; i < snapshots.Length; i++)
+                    snapshots[i] = SnapshotTransform(unit.blockobject[i]);
+                return snapshots;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void RestoreTransform(Regiment unit, TransformState snapshot)
+        {
+            try
+            {
+                if (!snapshot.HasValue || unit == null) return;
+                Transform transform = unit.transform;
+                if (transform == null) return;
+                transform.position = snapshot.Position;
+                transform.rotation = snapshot.Rotation;
+            }
+            catch { }
+        }
+
+        private static void RestoreTransform(GameObject gameObject, TransformState snapshot)
+        {
+            try
+            {
+                if (!snapshot.HasValue || gameObject == null) return;
+                Transform transform = gameObject.transform;
+                if (transform == null) return;
+                transform.position = snapshot.Position;
+                transform.rotation = snapshot.Rotation;
+            }
+            catch { }
+        }
+
+        private static void RestoreBlockTransforms(Regiment unit, TransformState[] snapshots)
+        {
+            try
+            {
+                if (unit == null || snapshots == null || unit.blockobject == null) return;
+                int max = Math.Min(unit.blockobject.Length, snapshots.Length);
+                for (int i = 0; i < max; i++)
+                    RestoreTransform(unit.blockobject[i], snapshots[i]);
+            }
+            catch { }
         }
 
         private static bool TryGetPrivateInt(
