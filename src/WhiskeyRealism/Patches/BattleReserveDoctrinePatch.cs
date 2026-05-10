@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -140,6 +141,7 @@ namespace WhiskeyRealism.Patches
             {
                 Regiment group = reserves[i] as Regiment;
                 if (!ValidReserveForRanking(group)) continue;
+                if (!TacticalReserveCommitGate.PermitReserveListBias(ResolveCommandIntent(group))) continue;
 
                 float score = ReserveStrengthScore(group);
                 if (score > best)
@@ -155,6 +157,25 @@ namespace WhiskeyRealism.Patches
         private static bool ValidReserveForRanking(Regiment group)
         {
             return group != null && !group.dlcw_isundercommander && !HasPlayerCommandedAttachedUnit(group);
+        }
+
+        private static CommandIntentResolution ResolveCommandIntent(Regiment group)
+        {
+            try
+            {
+                if (group == null)
+                    return new CommandIntentResolution(false, default, "no-group");
+
+                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
+                if (side == null || side.Army == null)
+                    return new CommandIntentResolution(false, default, "no-side-orchestrator");
+
+                return side.Army.ResolveCommandIntentForGroup(group.GetInstanceID());
+            }
+            catch (Exception ex)
+            {
+                return new CommandIntentResolution(false, default, "resolve-error:" + ex.GetType().Name);
+            }
         }
 
         private static float ReserveStrengthScore(Regiment group)
