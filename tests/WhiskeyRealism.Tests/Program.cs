@@ -69,6 +69,9 @@ static class Program
             ("tactical objective unverified bridge downgrades to generic", TacticalObjectiveUnverifiedBridgeDowngrades),
             ("tactical objective verified bridge drives typed scoring", TacticalObjectiveVerifiedBridgeDrivesTypedScoring),
             ("tactical objective input sanitizes nonfinite values", TacticalObjectiveInputSanitizesNonfiniteValues),
+            ("tactical commander mode active allows writes", TacticalCommanderModeActiveAllowsWrites),
+            ("tactical commander mode monitor runs ledger without writes", TacticalCommanderModeMonitorRunsNoWrites),
+            ("tactical commander mode parses spacing and fallback", TacticalCommanderModeParsesSpacingAndFallback),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -1523,6 +1526,46 @@ static class Program
         AssertEqual(0f, input.Location.Z, "z");
         AssertEqual(0f, input.SourceConfidence, "confidence");
         AssertEqual(0f, input.Value, "value");
+    }
+
+    private static void TacticalCommanderModeActiveAllowsWrites()
+    {
+        var mode = TacticalCommanderModePolicy.Parse("Active", TacticalCommanderMode.MonitorOnly);
+
+        AssertEqual(TacticalCommanderMode.Active, mode, "mode");
+        AssertTrue(TacticalCommanderModePolicy.RunsLedger(mode), "ledger");
+        AssertTrue(TacticalCommanderModePolicy.AllowsWrites(mode), "writes");
+    }
+
+    private static void TacticalCommanderModeMonitorRunsNoWrites()
+    {
+        var mode = TacticalCommanderModePolicy.Parse("MonitorOnly", TacticalCommanderMode.Active);
+
+        AssertEqual(TacticalCommanderMode.MonitorOnly, mode, "mode");
+        AssertTrue(TacticalCommanderModePolicy.RunsLedger(mode), "ledger");
+        AssertFalse(TacticalCommanderModePolicy.AllowsWrites(mode), "writes");
+    }
+
+    private static void TacticalCommanderModeParsesSpacingAndFallback()
+    {
+        AssertEqual(
+            TacticalCommanderMode.MonitorOnly,
+            TacticalCommanderModePolicy.Parse(" monitor only ", TacticalCommanderMode.Off),
+            "monitor only spacing");
+        AssertEqual(
+            TacticalCommanderMode.MonitorOnly,
+            TacticalCommanderModePolicy.Parse("monitor-only", TacticalCommanderMode.Off),
+            "monitor hyphen");
+        AssertEqual(
+            TacticalCommanderMode.Active,
+            TacticalCommanderModePolicy.Parse("unknown", TacticalCommanderMode.Active),
+            "unknown fallback");
+        AssertEqual(
+            TacticalCommanderMode.Off,
+            TacticalCommanderModePolicy.Parse(" ", TacticalCommanderMode.Off),
+            "blank fallback");
+        AssertFalse(TacticalCommanderModePolicy.RunsLedger(TacticalCommanderMode.Off), "off ledger");
+        AssertFalse(TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderMode.Off), "off writes");
     }
 
     private static void TacticalContactNoSightingIsNone()

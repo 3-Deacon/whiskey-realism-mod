@@ -5,6 +5,7 @@ using BepInEx.Logging;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism
 {
@@ -54,6 +55,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> TacticalOrchestratorVerboseLogging;
         public static ConfigEntry<bool> EnableTacticalOrchestratorIntentInference;
         public static ConfigEntry<bool> EnableTacticalOrchestratorDirectChildGate;
+        internal ConfigEntry<string> TacticalCommanderModeRaw;
         internal ConfigEntry<bool> EnableTacticalOrchestratorReserveCommitGate;
         internal ConfigEntry<bool> EnableTacticalOrchestratorChargeGate;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
@@ -113,6 +115,34 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> ForceAllSuccessionEvents;
 
         private Harmony _harmony;
+        private bool _loggedTacticalCommanderMode;
+
+        internal TacticalCommanderMode TacticalCommanderModeValue =>
+            ResolveTacticalCommanderMode();
+
+        internal bool TacticalOperationsLedgerEnabled =>
+            TacticalCommanderModePolicy.RunsLedger(TacticalCommanderModeValue);
+
+        internal bool TacticalOperationsLedgerAllowsWrites =>
+            TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderModeValue);
+
+        private TacticalCommanderMode ResolveTacticalCommanderMode()
+        {
+            var mode = TacticalCommanderModePolicy.Parse(
+                TacticalCommanderModeRaw?.Value,
+                TacticalCommanderMode.Active);
+
+            LogTacticalCommanderModeOnce(mode);
+            return mode;
+        }
+
+        private void LogTacticalCommanderModeOnce(TacticalCommanderMode mode)
+        {
+            if (_loggedTacticalCommanderMode || Log == null) return;
+
+            _loggedTacticalCommanderMode = true;
+            Log.LogInfo($"[TacticalCommanderMode] mode={mode} source=config legacyFlags=ignored-for-ledger releaseDefault=Active");
+        }
 
         private void Awake()
         {
@@ -256,6 +286,12 @@ namespace WhiskeyRealism
                 "Enable Tactical Withdrawal Doctrine",
                 false,
                 "Default-off. When true, B8 may call BattleUnits.SetWithdrawal for individual units classified as WithdrawalCandidate or CollapseCandidate by TacticalWithdrawalDoctrine. Read the patch source before enabling.");
+            TacticalCommanderModeRaw = Config.Bind(
+                "Tactical Orchestrator",
+                "Tactical Commander Mode",
+                "Active",
+                "Default Active. Off disables the operations-ledger command system; MonitorOnly runs vision/ledger/tasks/monitor without vanilla writes; Active runs the full tactical command system for AI sides.");
+            _ = TacticalCommanderModeValue;
             EnableTacticalBattleOrchestrator = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Battle Orchestrator",
