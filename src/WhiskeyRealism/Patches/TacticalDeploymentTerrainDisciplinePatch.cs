@@ -26,6 +26,7 @@ namespace WhiskeyRealism.Patches
         private static readonly FieldInfo GrpField = AccessTools.Field(typeof(BattleUnits), "grp");
         private static readonly FieldInfo BattlePassedDaysField = AccessTools.Field(typeof(BattleUnits), "battlepasseddays");
         private static readonly HashSet<string> EmittedAdvice = new HashSet<string>();
+        private static string _emittedAdviceBattleKey;
 
         [HarmonyPostfix]
         internal static void Postfix(BattleUnits __instance, int foralliance)
@@ -43,6 +44,8 @@ namespace WhiskeyRealism.Patches
 
                 if (!TryReadInitialDeployment(__instance, out bool initialDeployment))
                     return;
+
+                ResetAdviceLogForBattle(__instance, initialDeployment);
 
                 OnceLog.Info(
                     "tactical-deployment-terrain-advice",
@@ -374,6 +377,41 @@ namespace WhiskeyRealism.Patches
             }
             catch
             {
+            }
+        }
+
+        private static void ResetAdviceLogForBattle(BattleUnits battleUnits, bool initialDeployment)
+        {
+            string key = BuildAdviceBattleKey(battleUnits, initialDeployment);
+            if (string.Equals(_emittedAdviceBattleKey, key, StringComparison.Ordinal))
+                return;
+
+            _emittedAdviceBattleKey = key;
+            EmittedAdvice.Clear();
+        }
+
+        private static string BuildAdviceBattleKey(BattleUnits battleUnits, bool initialDeployment)
+        {
+            try
+            {
+                int instanceId = (UnityEngine.Object)battleUnits != null
+                    ? ((UnityEngine.Object)battleUnits).GetInstanceID()
+                    : 0;
+                int days = 0;
+                if (BattlePassedDaysField != null && (object)battleUnits != null)
+                {
+                    object value = BattlePassedDaysField.GetValue(battleUnits);
+                    if (value is int intValue) days = intValue;
+                    else if (value is float floatValue) days = (int)Math.Floor(floatValue);
+                }
+
+                return instanceId.ToString(CultureInfo.InvariantCulture) +
+                    ":" + days.ToString(CultureInfo.InvariantCulture) +
+                    ":" + initialDeployment;
+            }
+            catch
+            {
+                return initialDeployment ? "initial" : "eod";
             }
         }
 
