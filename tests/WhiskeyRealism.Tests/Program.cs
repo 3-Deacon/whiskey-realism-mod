@@ -81,6 +81,11 @@ static class Program
             ("tactical operations strong and weak selects fix and flank", TacticalOperationsStrongWeakSelectsFixAndFlank),
             ("tactical operations unknown strength does not look weak", TacticalOperationsUnknownStrengthDoesNotLookWeak),
             ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
+            ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
+            ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
+            ("tactical command monitor player protected no-write", TacticalCommandMonitorPlayerProtectedNoWrite),
+            ("tactical command task planner main effort attack vs defensive hold", TacticalCommandTaskPlannerMainEffortAttackVsDefensiveHold),
+            ("tactical command node state sanitizes blank node id", TacticalCommandNodeStateSanitizesBlankNodeId),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -1680,6 +1685,92 @@ static class Program
             TacticalObjectiveStatus.Scouting,
             enemyStrength,
             friendlyAssignedStrength);
+    }
+
+    private static void TacticalCommandMonitorReserveIdleValid()
+    {
+        var state = new CommandNodeOperationalState(
+            "reserve-1",
+            CommandEchelonKind.DivisionLike,
+            CommandNodeRole.Reserve,
+            CommandTaskType.ReserveWait,
+            CommandTaskState.WaitingForCommit);
+        var physical = new CommandPhysicalState(
+            routed: false,
+            playerProtected: false,
+            pathInterrupted: true,
+            paths: 0,
+            activeMove: false,
+            formation: 0);
+
+        AssertEqual(TacticalIdleClassification.ValidIdle, TacticalCommandMonitor.ClassifyIdle(state, physical), "reserve wait idle");
+    }
+
+    private static void TacticalCommandMonitorPathInterruptedIdleIllegal()
+    {
+        var state = new CommandNodeOperationalState(
+            "main-1",
+            CommandEchelonKind.DivisionLike,
+            CommandNodeRole.MainEffort,
+            CommandTaskType.AttackObjective,
+            CommandTaskState.Committed);
+        var physical = new CommandPhysicalState(
+            routed: false,
+            playerProtected: false,
+            pathInterrupted: true,
+            paths: -3,
+            activeMove: false,
+            formation: 1);
+
+        AssertEqual(0, physical.Paths, "negative paths sanitize");
+        AssertEqual(TacticalIdleClassification.IllegalIdle, TacticalCommandMonitor.ClassifyIdle(state, physical), "interrupted idle");
+    }
+
+    private static void TacticalCommandMonitorPlayerProtectedNoWrite()
+    {
+        var state = new CommandNodeOperationalState(
+            "player-child",
+            CommandEchelonKind.BrigadeLike,
+            CommandNodeRole.MainEffort,
+            CommandTaskType.AttackObjective,
+            CommandTaskState.Committed);
+        var physical = new CommandPhysicalState(
+            routed: false,
+            playerProtected: true,
+            pathInterrupted: true,
+            paths: 0,
+            activeMove: false,
+            formation: 2);
+
+        AssertEqual(TacticalIdleClassification.ProtectedNoWrite, TacticalCommandMonitor.ClassifyIdle(state, physical), "player protected");
+    }
+
+    private static void TacticalCommandTaskPlannerMainEffortAttackVsDefensiveHold()
+    {
+        AssertEqual(
+            CommandTaskType.AttackObjective,
+            CommandNodeTaskPlanner.PlanTask(CommandNodeRole.MainEffort, TacticalOperationShape.SingleMainEffort, contact: false, atObjective: false),
+            "offensive main effort");
+        AssertEqual(
+            CommandTaskType.HoldObjective,
+            CommandNodeTaskPlanner.PlanTask(CommandNodeRole.MainEffort, TacticalOperationShape.DefensiveNetwork, contact: true, atObjective: true),
+            "defensive main effort");
+    }
+
+    private static void TacticalCommandNodeStateSanitizesBlankNodeId()
+    {
+        var state = new CommandNodeOperationalState(
+            " ",
+            CommandEchelonKind.CorpsLike,
+            CommandNodeRole.SupportingAttack,
+            CommandTaskType.SupportAttack,
+            CommandTaskState.Planning);
+
+        AssertEqual("node-unknown", state.NodeId, "blank node id");
+        AssertEqual(CommandEchelonKind.CorpsLike, state.Echelon, "echelon");
+        AssertEqual(CommandNodeRole.SupportingAttack, state.Role, "role");
+        AssertEqual(CommandTaskType.SupportAttack, state.Task, "task");
+        AssertEqual(CommandTaskState.Planning, state.TaskState, "task state");
     }
 
     private static void TacticalCommanderModeActiveAllowsWrites()
