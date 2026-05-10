@@ -21,7 +21,6 @@ namespace WhiskeyRealism.Patches
         private const float TelemetrySeconds = 30f;
         private const float ObjectiveApproachStandOff = 75f;
         private const float AssemblyStandOff = 200f;
-        private const float FallbackDistance = 150f;
         private const float MaxConservativeWaypointDistance = 2500f;
         private const float MinWaypointDistance = 15f;
 
@@ -230,9 +229,7 @@ namespace WhiskeyRealism.Patches
                 case PostureExecutionTarget.AssemblyArea:
                     return TryObjectiveApproach(group, orchestrator, AssemblyStandOff, out target);
                 case PostureExecutionTarget.FallbackLine:
-                    return TryFallbackTarget(group, out target);
                 case PostureExecutionTarget.RecoveryPath:
-                    return TryLastWaypoint(group, out target);
                 case PostureExecutionTarget.CurrentPosition:
                 case PostureExecutionTarget.ReserveArea:
                 case PostureExecutionTarget.None:
@@ -282,9 +279,7 @@ namespace WhiskeyRealism.Patches
                 return !IsDefaultVector(objective);
             }
 
-            var first = objectives[0];
-            objective = new Vector3(first.Observation.Location.X, SafeBattleY(), first.Observation.Location.Z);
-            return !IsDefaultVector(objective);
+            return false;
         }
 
         private static bool TryCurrentSetObjectivePoint(Regiment group, out Vector3 objective)
@@ -304,32 +299,6 @@ namespace WhiskeyRealism.Patches
             {
                 return false;
             }
-        }
-
-        private static bool TryFallbackTarget(Regiment group, out Vector3 target)
-        {
-            target = default(Vector3);
-            Vector3 current = SafePosition(group);
-            if (IsDefaultVector(current)) return false;
-
-            Regiment enemy = SafeClosestEnemy(group);
-            if (enemy == null) return false;
-
-            Vector3 enemyPos = SafePosition(enemy);
-            if (IsDefaultVector(enemyPos)) return false;
-
-            Vector3 away = current - enemyPos;
-            if (away.sqrMagnitude < 1f) return false;
-
-            target = current + away.normalized * FallbackDistance;
-            target.y = SafeBattleY();
-            return IsSafeWaypoint(group, target);
-        }
-
-        private static bool TryLastWaypoint(Regiment group, out Vector3 target)
-        {
-            target = SafeLastWaypoint(group);
-            return IsSafeWaypoint(group, target);
         }
 
         private static bool IsSafeWaypoint(Regiment group, Vector3 target)
@@ -629,19 +598,6 @@ namespace WhiskeyRealism.Patches
             catch { return true; }
         }
 
-        private static Regiment SafeClosestEnemy(Regiment group)
-        {
-            try
-            {
-                GameObject enemy = group != null ? group.GetClosestEnemyUnit(9999f) : null;
-                return enemy != null ? enemy.GetComponent<Regiment>() : null;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         private static int SafeRegimentPaths(Regiment group)
         {
             try { return group != null ? Math.Max(0, group.regimentpaths) : 0; }
@@ -657,12 +613,6 @@ namespace WhiskeyRealism.Patches
         private static Vector3 SafePosition(Regiment group)
         {
             try { return group != null ? group.transform.position : default(Vector3); }
-            catch { return default(Vector3); }
-        }
-
-        private static Vector3 SafeLastWaypoint(Regiment group)
-        {
-            try { return group != null ? group.lastsetwaypointposition : default(Vector3); }
             catch { return default(Vector3); }
         }
 
