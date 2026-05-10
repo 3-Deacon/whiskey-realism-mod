@@ -48,6 +48,7 @@ static class Program
             ("tactical deployment telemetry tracks new and removed groups", TacticalDeploymentTelemetryTracksNewAndRemovedGroups),
             ("tactical deployment telemetry matches stable keys across reorder", TacticalDeploymentTelemetryMatchesStableKeysAcrossReorder),
             ("tactical deployment telemetry formats skipped phase", TacticalDeploymentTelemetryFormatsSkippedPhase),
+            ("tactical deployment snapshot carries terrain facing evidence", TacticalDeploymentSnapshotCarriesTerrainFacingEvidence),
             ("tactical terrain telemetry formats bounded row", TacticalTerrainTelemetryFormatsBoundedRow),
             ("tactical terrain telemetry sanitizes unsafe tokens", TacticalTerrainTelemetrySanitizesUnsafeTokens),
             ("tactical terrain rejects water center", TacticalTerrainRejectsWaterCenter),
@@ -1049,6 +1050,36 @@ static class Program
         AssertContains(formatted, "phase=skipped", "skipped phase");
         AssertContains(formatted, "matched=1", "matched count");
         AssertContains(formatted, "moved=0", "skipped move count");
+    }
+
+    private static void TacticalDeploymentSnapshotCarriesTerrainFacingEvidence()
+    {
+        var group = new TacticalDeploymentGroupSnapshot(
+            "key",
+            "Unit Name",
+            1,
+            15,
+            10f,
+            20f,
+            1,
+            1,
+            0,
+            routed: false,
+            active: true,
+            terrainId: 4,
+            centerWater: true,
+            footprintWater: false,
+            insideDeploymentZone: false,
+            facing: 180f,
+            nearestVisibleEnemyBearing: 175f,
+            nearestVisibleEnemyDistance: 500f);
+
+        AssertEqual(4, group.TerrainId, "terrain id");
+        AssertTrue(group.CenterWater, "center water");
+        AssertFalse(group.InsideDeploymentZone, "zone");
+        AssertTrue(group.HasTerrainEvidence, "terrain evidence");
+        AssertTrue(group.HasVisibleEnemyBearing, "enemy bearing evidence");
+        AssertNear(180f, group.Facing, 0.01f, "facing");
     }
 
     private static void TacticalTerrainTelemetryFormatsBoundedRow()
