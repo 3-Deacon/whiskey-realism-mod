@@ -55,6 +55,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalOrchestratorIntentInference;
         public static ConfigEntry<bool> EnableTacticalOrchestratorDirectChildGate;
         internal ConfigEntry<bool> EnableTacticalOrchestratorReserveCommitGate;
+        internal ConfigEntry<bool> EnableTacticalOrchestratorChargeGate;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
@@ -306,6 +307,15 @@ namespace WhiskeyRealism
                 "the command-node intent for the calling command group and rolls back new " +
                 "vanilla reserve support paths when the group resolves to a Reserve role. " +
                 "Allowed vanilla reserve movement remains eligible for the separate order-delay guard.");
+            EnableTacticalOrchestratorChargeGate = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Tactical Orchestrator Charge Gate",
+                false,
+                "Default OFF. Slice 3: when true, AIBattle.MicroAICheckForCharges consults " +
+                "the command-node intent for the calling command group before allowing vanilla " +
+                "SetMovementMode(3) charge initiation. Main charges require favorable local odds; " +
+                "SupportMain requires main-effort support evidence; Fix/Reserve/Fallback/Refuse/Screen " +
+                "roles deny charge initiation unless the Screen routed-target exception is proven.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",
