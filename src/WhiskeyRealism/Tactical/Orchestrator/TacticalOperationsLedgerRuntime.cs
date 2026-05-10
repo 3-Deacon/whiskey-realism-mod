@@ -5,7 +5,7 @@ using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
-    public sealed class TacticalOperationsLedgerRuntime
+    internal sealed class TacticalOperationsLedgerRuntime
     {
         private IReadOnlyList<ObjectiveRecord> _currentObjectives = Array.Empty<ObjectiveRecord>();
         private StrategicBattleIntentSnapshot _currentStrategicBattleIntent = StrategicBattleIntentSnapshot.Empty;
@@ -18,7 +18,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public StrategicBattleIntentSnapshot CurrentStrategicBattleIntent => _currentStrategicBattleIntent;
         public OperationRecord CurrentOperation => _currentOperation;
 
-        public void Update(
+        internal void Update(
             TacticalCommanderMode mode,
             IReadOnlyList<ObjectiveRecord> objectives,
             StrategicBattleIntentSnapshot strategicBattleIntent,
@@ -28,7 +28,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Replace(mode, objectives, strategicBattleIntent, force, personality);
         }
 
-        public void Replace(
+        internal void Replace(
             TacticalCommanderMode mode,
             IReadOnlyList<ObjectiveRecord> objectives,
             StrategicBattleIntentSnapshot strategicBattleIntent,

@@ -4,6 +4,8 @@ using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -30,6 +32,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static FieldInfo _bunitsFieldCache;
         private static float _lastTickTimeSeconds;
         private static int _battleSequence;
+        private static int _playerCicAllianceId = -1;
         private static readonly HashSet<string> _tickWarningKeys = new HashSet<string>();
         private static readonly HashSet<int> _directChildDeferLogged = new HashSet<int>();
         private static readonly Dictionary<string, string> _commandTreeTelemetrySignatures = new Dictionary<string, string>();
@@ -41,10 +44,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             try
             {
-                int playerCicAllianceId = ResolvePlayerCicAllianceId();
+                int playerCicAllianceId = SafeAiVsAi() ? -1 : ResolvePlayerCicAllianceId();
                 var commanders = DiscoverCommandersFromVanilla(battle);
                 var roster = TacticalCommanderRoster.BuildFromSynthetic(commanders);
                 BuildAndActivate(playerCicAllianceId, roster);
+                _playerCicAllianceId = playerCicAllianceId;
                 _battleSequence++;
 
                 if (Plugin.EnableTacticalOrchestratorArmy != null && Plugin.EnableTacticalOrchestratorArmy.Value)
@@ -93,6 +97,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _commandTreeTelemetrySignatures.Clear();
                 side0 = null;
                 side1 = null;
+                _playerCicAllianceId = -1;
                 active = false;
                 OnceLog.Info("orch-teardown", "[TacticalOrchestrator] teardown");
             }
@@ -110,21 +115,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 OnceLog.Info("orch-coordinator", "[TacticalOrchestrator] coordinator first tick");
-                side0?.Tick();
-                side1?.Tick();
-
-                if (Plugin.EnableTacticalOrchestratorIntentInference != null
-                    && Plugin.EnableTacticalOrchestratorIntentInference.Value)
-                {
-                    float deltaSeconds = ComputeTickDeltaSeconds();
-                    DriveTickCycle(side0, battle, deltaSeconds);
-                    DriveTickCycle(side1, battle, deltaSeconds);
-
-                    AttachCommandTreeIfReady(side0, battle);
-                    AttachCommandTreeIfReady(side1, battle);
-                    DriveDirectChildCycle(side0, battle);
-                    DriveDirectChildCycle(side1, battle);
-                }
+                bool aiVsAi = SafeAiVsAi();
+                float deltaSeconds = ComputeTickDeltaSeconds();
+                DriveTacticalCommanderSide(side0, battle, aiVsAi, deltaSeconds);
+                DriveTacticalCommanderSide(side1, battle, aiVsAi, deltaSeconds);
             }
             catch (Exception e)
             {
@@ -134,6 +128,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         // ---- Private runtime helpers ----
+
+        private static bool SafeAiVsAi()
+        {
+            try { return GameVars.ai_vs_ai; }
+            catch { return false; }
+        }
+
+        private static void DriveTacticalCommanderSide(
+            TacticalBattleOrchestrator side,
+            AIBattle battle,
+            bool aiVsAi,
+            float deltaSeconds)
+        {
+            if (side == null) return;
+            if (!ShouldRunTacticalCommanderForSide(side.AllianceId, _playerCicAllianceId, aiVsAi)) return;
+
+            side.Tick();
+
+            if (Plugin.EnableTacticalOrchestratorIntentInference != null
+                && Plugin.EnableTacticalOrchestratorIntentInference.Value)
+            {
+                DriveTickCycle(side, battle, deltaSeconds);
+                AttachCommandTreeIfReady(side, battle);
+                DriveDirectChildCycle(side, battle);
+            }
+
+            DriveOperationsLedger(side, battle);
+        }
 
         private static float ComputeTickDeltaSeconds()
         {
@@ -215,6 +237,74 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + sideKey + ": " + e.GetType().Name + " " + e.Message);
             }
             catch { }
+        }
+
+        private static void DriveOperationsLedger(TacticalBattleOrchestrator side, AIBattle battle)
+        {
+            try
+            {
+                var plugin = Plugin.Instance;
+                if (side == null || side.Army == null || plugin == null) return;
+                if (!plugin.TacticalOperationsLedgerEnabled) return;
+
+                var bundle = ArmyEvidenceBuilder.Build(battle, side.AllianceId);
+                var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, side.AllianceId);
+                var strategic = BuildStrategicBattleIntentSnapshot(side, bundle);
+                var force = new ForceAvailabilitySnapshot(
+                    bundle.OwnMainEffortStrength,
+                    Math.Max(0f, 1f - Clamp01(bundle.OwnReservesCommittedFraction)));
+
+                var ledger = new TacticalOperationsLedgerRuntime();
+                ledger.Replace(
+                    plugin.TacticalCommanderModeValue,
+                    objectives,
+                    strategic,
+                    force,
+                    side.Army.CommanderPersonality);
+
+                var commandOperations = CommandNodeOperationsRuntime.Build(
+                    side.Army.CurrentCommandNodeIntents,
+                    ledger.CurrentOperation.Shape);
+                side.UpdateOperationsLedger(ledger, commandOperations);
+            }
+            catch (Exception e)
+            {
+                WarnTickCycleOnce(side, e);
+            }
+        }
+
+        private static StrategicBattleIntentSnapshot BuildStrategicBattleIntentSnapshot(
+            TacticalBattleOrchestrator side,
+            ArmyEvidenceBuilder.Bundle bundle)
+        {
+            var personality = side != null && side.Army != null
+                ? side.Army.CommanderPersonality
+                : default(PersonalityVector);
+            string currentPlan = side != null && side.Army != null && side.Army.HasPlan
+                ? side.Army.CurrentPlan.PlanId.ToString()
+                : string.Empty;
+            string intent = side != null && side.Army != null
+                ? side.Army.CurrentIntentModel.PrimaryIntent.ToString()
+                : string.Empty;
+
+            return new StrategicBattleIntentSnapshot(
+                casualtyPressure: Clamp01(1f - bundle.OwnArmyMorale),
+                timePressure: 0f,
+                theaterIntent: intent,
+                campaignIntent: currentPlan,
+                allianceId: side == null ? -1 : side.AllianceId,
+                campaignObjectiveId: currentPlan,
+                theaterPriority: Clamp01(bundle.OwnEvidence.CurrentOdds / 2f),
+                casualtyTolerance: personality.CasualtyTolerance,
+                preserveForceBias: Clamp01((personality.Caution + 1f) * 0.5f),
+                commanderPersonality: personality);
+        }
+
+        private static float Clamp01(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
+            if (value < 0f) return 0f;
+            return value > 1f ? 1f : value;
         }
 
         private static int ResolvePlayerCicAllianceId()
@@ -671,6 +761,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             ResetRuntimeTickState();
             side0 = null;
             side1 = null;
+            _playerCicAllianceId = -1;
             active = false;
         }
     }

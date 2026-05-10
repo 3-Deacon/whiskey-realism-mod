@@ -1694,12 +1694,26 @@ static class Program
             casualtyPressure: float.PositiveInfinity,
             timePressure: float.NaN,
             theaterIntent: null,
-            campaignIntent: "  ");
+            campaignIntent: "  ",
+            allianceId: 3,
+            campaignObjectiveId: null,
+            theaterPriority: float.PositiveInfinity,
+            casualtyTolerance: -2f,
+            preserveForceBias: float.NaN,
+            commanderPersonality: new PersonalityVector(2f, -2f, float.NaN, 0.5f, 0f));
 
         AssertEqual(0f, snapshot.CasualtyPressure, "casualty pressure");
         AssertEqual(0f, snapshot.TimePressure, "time pressure");
         AssertEqual(string.Empty, snapshot.TheaterIntent, "theater intent");
         AssertEqual(string.Empty, snapshot.CampaignIntent, "campaign intent");
+        AssertEqual(-1, snapshot.AllianceId, "invalid alliance");
+        AssertEqual(string.Empty, snapshot.CampaignObjectiveId, "campaign objective id");
+        AssertEqual(0f, snapshot.TheaterPriority, "theater priority");
+        AssertEqual(-1f, snapshot.CasualtyTolerance, "casualty tolerance");
+        AssertEqual(0f, snapshot.PreserveForceBias, "preserve force bias");
+        AssertEqual(1f, snapshot.CommanderPersonality.Aggression, "commander aggression");
+        AssertEqual(-1f, snapshot.CommanderPersonality.Caution, "commander caution");
+        AssertEqual(0f, snapshot.CommanderPersonality.Audacity, "commander audacity");
     }
 
     private static void TacticalVisionRuntimeAdapterBuildsReportsAndObjectives()

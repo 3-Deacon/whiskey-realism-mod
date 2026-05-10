@@ -45,7 +45,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int i = 0; i < Echelons.Count; i++) Echelons[i]?.PropagateIntent();
         }
 
-        public void UpdateOperationsLedger(
+        internal void UpdateOperationsLedger(
             TacticalOperationsLedgerRuntime ledger,
             IReadOnlyList<CommandNodeOperationalState> commandOperations)
         {

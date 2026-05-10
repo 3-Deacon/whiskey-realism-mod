@@ -321,7 +321,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return null;
         }
 
-        public void UpdateOperationsLedger(
+        internal void UpdateOperationsLedger(
             TacticalOperationsLedgerRuntime ledger,
             IReadOnlyList<CommandNodeOperationalState> commandOperations)
         {
