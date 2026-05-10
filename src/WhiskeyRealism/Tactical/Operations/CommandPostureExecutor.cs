@@ -12,16 +12,36 @@ namespace WhiskeyRealism.Tactical.Operations
         RecoverInterruptedOrder
     }
 
+    public enum PostureExecutionTarget
+    {
+        None,
+        CurrentPosition,
+        AssemblyArea,
+        ObjectiveApproach,
+        ReserveArea,
+        FallbackLine,
+        RecoveryPath,
+        ReleasePoint
+    }
+
     public readonly struct PostureExecutionDecision
     {
-        public PostureExecutionDecision(PostureExecutionAction action, string reason)
+        public PostureExecutionDecision(
+            PostureExecutionAction action,
+            string reason,
+            PostureExecutionTarget target = PostureExecutionTarget.None,
+            bool clearInterruptedPaths = false)
         {
             Action = action;
             Reason = string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason;
+            Target = target;
+            ClearInterruptedPaths = clearInterruptedPaths;
         }
 
         public PostureExecutionAction Action { get; }
         public string Reason { get; }
+        public PostureExecutionTarget Target { get; }
+        public bool ClearInterruptedPaths { get; }
     }
 
     public readonly struct WriteEligibilitySnapshot
@@ -71,12 +91,12 @@ namespace WhiskeyRealism.Tactical.Operations
                 return NoWrite("mode-monitor-only");
             }
 
-            if (eligibility.PlayerProtected)
+            if (eligibility.PlayerProtected || physical.PlayerProtected)
             {
                 return NoWrite("player-protected");
             }
 
-            if (eligibility.Routed)
+            if (eligibility.Routed || physical.Routed)
             {
                 return NoWrite("routed");
             }
@@ -115,7 +135,9 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 return new PostureExecutionDecision(
                     PostureExecutionAction.RecoverInterruptedOrder,
-                    "illegal-idle-path-interrupted");
+                    "illegal-idle-path-interrupted",
+                    PostureExecutionTarget.RecoveryPath,
+                    clearInterruptedPaths: true);
             }
 
             switch (state.Task)
@@ -123,11 +145,11 @@ namespace WhiskeyRealism.Tactical.Operations
                 case CommandTaskType.Scout:
                     return Formation("scout");
                 case CommandTaskType.FormUp:
-                    return FormationAndWaypoint("form-up");
+                    return FormationAndWaypoint("form-up", PostureExecutionTarget.AssemblyArea);
                 case CommandTaskType.AdvanceToAssembly:
-                    return FormationAndWaypoint("advance-to-assembly");
+                    return FormationAndWaypoint("advance-to-assembly", PostureExecutionTarget.AssemblyArea);
                 case CommandTaskType.AttackObjective:
-                    return FormationAndWaypoint("attack-objective");
+                    return FormationAndWaypoint("attack-objective", PostureExecutionTarget.ObjectiveApproach);
                 case CommandTaskType.HoldObjective:
                     return Formation("hold-objective");
                 case CommandTaskType.FixEnemy:
@@ -147,17 +169,28 @@ namespace WhiskeyRealism.Tactical.Operations
                 case CommandTaskType.Consolidate:
                     return Formation("consolidate");
                 case CommandTaskType.FallBackToLine:
-                    return new PostureExecutionDecision(PostureExecutionAction.FallbackToLine, "fallback-line");
+                    return new PostureExecutionDecision(
+                        PostureExecutionAction.FallbackToLine,
+                        "fallback-line",
+                        PostureExecutionTarget.FallbackLine);
                 case CommandTaskType.ReleaseReserve:
-                    return new PostureExecutionDecision(PostureExecutionAction.ReleaseReserve, "release-reserve");
+                    return new PostureExecutionDecision(
+                        PostureExecutionAction.ReleaseReserve,
+                        "release-reserve",
+                        PostureExecutionTarget.ReleasePoint);
                 case CommandTaskType.RecoverStuckOrder:
                     return new PostureExecutionDecision(
                         PostureExecutionAction.RecoverInterruptedOrder,
-                        "recover-stuck-order");
+                        "recover-stuck-order",
+                        PostureExecutionTarget.RecoveryPath,
+                        clearInterruptedPaths: true);
                 case CommandTaskType.ReserveWait:
                     return eligibility.AtAssignedLocation
                         ? Formation("reserve-hold")
-                        : new PostureExecutionDecision(PostureExecutionAction.SetWaypoint, "reserve-area");
+                        : new PostureExecutionDecision(
+                            PostureExecutionAction.SetWaypoint,
+                            "reserve-area",
+                            PostureExecutionTarget.ReserveArea);
                 default:
                     return NoWrite("already-valid");
             }
@@ -170,12 +203,20 @@ namespace WhiskeyRealism.Tactical.Operations
 
         private static PostureExecutionDecision Formation(string reason)
         {
-            return new PostureExecutionDecision(PostureExecutionAction.SetFormation, reason);
+            return new PostureExecutionDecision(
+                PostureExecutionAction.SetFormation,
+                reason,
+                PostureExecutionTarget.CurrentPosition);
         }
 
-        private static PostureExecutionDecision FormationAndWaypoint(string reason)
+        private static PostureExecutionDecision FormationAndWaypoint(
+            string reason,
+            PostureExecutionTarget target)
         {
-            return new PostureExecutionDecision(PostureExecutionAction.SetFormationAndWaypoint, reason);
+            return new PostureExecutionDecision(
+                PostureExecutionAction.SetFormationAndWaypoint,
+                reason,
+                target);
         }
 
         private static string TaskReason(CommandTaskType task)

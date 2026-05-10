@@ -83,6 +83,7 @@ static class Program
             ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
             ("tactical command posture monitor-only suppresses active task writes", TacticalCommandPostureMonitorOnlySuppressesActiveTaskWrites),
             ("tactical command posture eligibility precedence", TacticalCommandPostureEligibilityPrecedence),
+            ("tactical command posture physical protection fails closed", TacticalCommandPosturePhysicalProtectionFailsClosed),
             ("tactical command posture interrupted illegal idle recovery", TacticalCommandPostureInterruptedIllegalIdleRecovery),
             ("tactical command posture no-write gates after eligibility", TacticalCommandPostureNoWriteGatesAfterEligibility),
             ("tactical command posture close engagement limits movement writes", TacticalCommandPostureCloseEngagementLimitsMovementWrites),
@@ -1745,6 +1746,37 @@ static class Program
                 new WriteEligibilitySnapshot(true, playerProtected: false, routed: false, orderPending: false, recentOrder: true)));
     }
 
+    private static void TacticalCommandPosturePhysicalProtectionFailsClosed()
+    {
+        AssertPostureDecision(
+            PostureExecutionAction.NoWrite,
+            "player-protected",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                new CommandPhysicalState(
+                    routed: false,
+                    playerProtected: true,
+                    pathInterrupted: false,
+                    paths: 1,
+                    activeMove: false,
+                    formation: 1),
+                EligibilityAllowsWrites()));
+
+        AssertPostureDecision(
+            PostureExecutionAction.NoWrite,
+            "routed",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                new CommandPhysicalState(
+                    routed: true,
+                    playerProtected: false,
+                    pathInterrupted: false,
+                    paths: 1,
+                    activeMove: false,
+                    formation: 1),
+                EligibilityAllowsWrites()));
+    }
+
     private static void TacticalCommandPostureInterruptedIllegalIdleRecovery()
     {
         var decision = CommandPostureExecutor.Decide(
@@ -1809,6 +1841,10 @@ static class Program
                 CommandState(CommandTaskType.ReserveWait),
                 PhysicalState(),
                 EligibilityAllowsWrites()));
+        AssertPostureTarget(PostureExecutionTarget.ReserveArea, false, CommandPostureExecutor.Decide(
+            CommandState(CommandTaskType.ReserveWait),
+            PhysicalState(),
+            EligibilityAllowsWrites()));
 
         AssertPostureDecision(
             PostureExecutionAction.SetFormation,
@@ -1830,6 +1866,19 @@ static class Program
         AssertPostureDecision(
             PostureExecutionAction.SetFormation,
             "close-engaged-attack-objective",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                PhysicalState(),
+                new WriteEligibilitySnapshot(
+                    modeAllowsWrites: true,
+                    playerProtected: false,
+                    routed: false,
+                    orderPending: false,
+                    recentOrder: false,
+                    closeEngaged: true)));
+        AssertPostureTarget(
+            PostureExecutionTarget.CurrentPosition,
+            false,
             CommandPostureExecutor.Decide(
                 CommandState(CommandTaskType.AttackObjective),
                 PhysicalState(),
@@ -1881,6 +1930,7 @@ static class Program
         AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "form-up", DecidePosture(CommandTaskType.FormUp));
         AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "advance-to-assembly", DecidePosture(CommandTaskType.AdvanceToAssembly));
         AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "attack-objective", DecidePosture(CommandTaskType.AttackObjective));
+        AssertPostureTarget(PostureExecutionTarget.ObjectiveApproach, false, DecidePosture(CommandTaskType.AttackObjective));
 
         AssertPostureDecision(PostureExecutionAction.SetFormation, "hold-objective", DecidePosture(CommandTaskType.HoldObjective));
         AssertPostureDecision(PostureExecutionAction.SetFormation, "fix-enemy", DecidePosture(CommandTaskType.FixEnemy));
@@ -1894,8 +1944,11 @@ static class Program
         AssertPostureDecision(PostureExecutionAction.SetFormation, "consolidate", DecidePosture(CommandTaskType.Consolidate));
 
         AssertPostureDecision(PostureExecutionAction.FallbackToLine, "fallback-line", DecidePosture(CommandTaskType.FallBackToLine));
+        AssertPostureTarget(PostureExecutionTarget.FallbackLine, false, DecidePosture(CommandTaskType.FallBackToLine));
         AssertPostureDecision(PostureExecutionAction.ReleaseReserve, "release-reserve", DecidePosture(CommandTaskType.ReleaseReserve));
+        AssertPostureTarget(PostureExecutionTarget.ReleasePoint, false, DecidePosture(CommandTaskType.ReleaseReserve));
         AssertPostureDecision(PostureExecutionAction.RecoverInterruptedOrder, "recover-stuck-order", DecidePosture(CommandTaskType.RecoverStuckOrder));
+        AssertPostureTarget(PostureExecutionTarget.RecoveryPath, true, DecidePosture(CommandTaskType.RecoverStuckOrder));
         AssertPostureDecision(PostureExecutionAction.NoWrite, "missing-ledger-assignment", DecidePosture(CommandTaskType.None));
     }
 
@@ -1942,6 +1995,15 @@ static class Program
     {
         AssertEqual(action, decision.Action, "posture action");
         AssertEqual(reason, decision.Reason, "posture reason");
+    }
+
+    private static void AssertPostureTarget(
+        PostureExecutionTarget target,
+        bool clearInterruptedPaths,
+        PostureExecutionDecision decision)
+    {
+        AssertEqual(target, decision.Target, "posture target");
+        AssertEqual(clearInterruptedPaths, decision.ClearInterruptedPaths, "posture clear interrupted paths");
     }
 
     private static void TacticalCommandMonitorReserveIdleValid()
