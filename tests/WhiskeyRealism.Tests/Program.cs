@@ -75,6 +75,8 @@ static class Program
             ("tactical vision visual contact high confidence", TacticalVisionVisualContactHighConfidence),
             ("tactical vision stale recent fire decays", TacticalVisionStaleRecentFireDecays),
             ("tactical vision sanitizes nonfinite inputs", TacticalVisionSanitizesNonfiniteInputs),
+            ("tactical vision default input is low confidence", TacticalVisionDefaultInputIsLowConfidence),
+            ("tactical vision infinite age is stale", TacticalVisionInfiniteAgeIsStale),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
@@ -1609,6 +1611,28 @@ static class Program
         AssertEqual(0f, report.Input.SecondsSinceObserved, "seconds");
         AssertTrue(!float.IsNaN(report.Confidence) && !float.IsInfinity(report.Confidence), "finite confidence");
         AssertTrue(report.Confidence >= 0f && report.Confidence <= 1f, "bounded confidence");
+    }
+
+    private static void TacticalVisionDefaultInputIsLowConfidence()
+    {
+        var report = TacticalVisionModel.BuildContact(default(ContactObservationInput), staleAfterSeconds: 600f);
+
+        AssertTrue(report.Confidence <= 0.25f, "default confidence");
+    }
+
+    private static void TacticalVisionInfiniteAgeIsStale()
+    {
+        var report = TacticalVisionModel.BuildContact(
+            new ContactObservationInput(
+                TacticalContactSource.VisualContact,
+                1200f,
+                float.PositiveInfinity,
+                currentlyVisible: true,
+                objectiveLinked: true,
+                scoutTaskLinked: true),
+            staleAfterSeconds: 600f);
+
+        AssertEqual(0f, report.Confidence, "infinite age confidence");
     }
 
     private static void TacticalContactNoSightingIsNone()

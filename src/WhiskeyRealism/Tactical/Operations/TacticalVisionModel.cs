@@ -28,7 +28,7 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             Source = source;
             EstimatedStrength = SanitizeFloorZero(estimatedStrength);
-            SecondsSinceObserved = SanitizeFloorZero(secondsSinceObserved);
+            SecondsSinceObserved = SanitizeElapsedSeconds(secondsSinceObserved);
             CurrentlyVisible = currentlyVisible;
             ObjectiveLinked = objectiveLinked;
             ScoutTaskLinked = scoutTaskLinked;
@@ -37,6 +37,13 @@ namespace WhiskeyRealism.Tactical.Operations
         private static float SanitizeFloorZero(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
+            return value < 0f ? 0f : value;
+        }
+
+        private static float SanitizeElapsedSeconds(float value)
+        {
+            if (float.IsNaN(value) || float.IsNegativeInfinity(value)) return 0f;
+            if (float.IsPositiveInfinity(value)) return float.MaxValue;
             return value < 0f ? 0f : value;
         }
     }
@@ -57,7 +64,12 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         public static EnemyContactReport BuildContact(ContactObservationInput input, float staleAfterSeconds)
         {
-            float baseWeight = SourceWeight(input.Source);
+            bool emptyDefaultVisualContact = input.Source == TacticalContactSource.VisualContact &&
+                !input.CurrentlyVisible &&
+                input.EstimatedStrength <= 0f &&
+                !input.ObjectiveLinked &&
+                !input.ScoutTaskLinked;
+            float baseWeight = emptyDefaultVisualContact ? 0.25f : SourceWeight(input.Source);
             float bonuses = 0f;
             if (input.CurrentlyVisible) bonuses += 0.10f;
             if (input.ObjectiveLinked) bonuses += 0.05f;
