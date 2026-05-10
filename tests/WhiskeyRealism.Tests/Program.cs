@@ -651,6 +651,8 @@ static class Program
             ("tactical orchestrator charge gate allows support main with support evidence", TacticalOrchestratorChargeGateAllowsSupportMainWithEvidence),
             ("tactical orchestrator charge gate denies support main without support evidence", TacticalOrchestratorChargeGateDeniesSupportMainWithoutEvidence),
             ("tactical orchestrator charge gate denies fix reserve fallback refuse and screen", TacticalOrchestratorChargeGateDeniesHoldRoles),
+            ("tactical orchestrator charge gate reason strings are stable", TacticalOrchestratorChargeGateReasonStringsStable),
+            ("tactical orchestrator charge gate unknown role fails open", TacticalOrchestratorChargeGateUnknownRoleFailsOpen),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -12621,6 +12623,33 @@ static class Program
         AssertChargeGate(
             TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Unknown)),
             TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Unknown, "unknown-role");
+    }
+
+    private static void TacticalOrchestratorChargeGateReasonStringsStable()
+    {
+        var cases = new[]
+        {
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Fix)).Reason,
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Reserve)).Reason,
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Fallback)).Reason,
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.RefuseLeft)).Reason,
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.RefuseRight)).Reason,
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Screen)).Reason,
+        };
+
+        AssertEqual("role-fix-hold", cases[0], "fix reason");
+        AssertEqual("role-reserve-hold", cases[1], "reserve reason");
+        AssertEqual("role-fallback-no-charge", cases[2], "fallback reason");
+        AssertEqual("role-refuse-left-no-charge", cases[3], "refuse-left reason");
+        AssertEqual("role-refuse-right-no-charge", cases[4], "refuse-right reason");
+        AssertEqual("screen-no-routed-target", cases[5], "screen reason");
+    }
+
+    private static void TacticalOrchestratorChargeGateUnknownRoleFailsOpen()
+    {
+        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Unknown));
+        AssertEqual(TacticalOrchestratorChargeGate.Action.Allow, d.Action, "action");
+        AssertEqual("unknown-role", d.Reason, "reason");
     }
 
     private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()
