@@ -22,6 +22,8 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _firstWpAdjustmentMadeField;
         private static bool _lastDrawnPathCornerFieldMissing;
         private static bool _firstWpAdjustmentMadeFieldMissing;
+        private const int WaypointPathSnapshotLimit = 75;
+        private const int WaypointCornerSnapshotLimit = 200;
 
         internal sealed class ReserveCommitState
         {
@@ -69,6 +71,13 @@ namespace WhiskeyRealism.Patches
                 bool lastPathSetOutOfSafetyZone,
                 bool lastPathSetOutOfManualMove,
                 int priorMountingState,
+                GameObject targetedEnemyUnit,
+                Regiment targetedEnemyUnitReg,
+                int targetedEnemyUnitType,
+                bool reattachmentOrder,
+                List<GameObject> gunObjectsToTake,
+                WaypointAdjustmentState waypointAdjustment,
+                WaypointAdjustmentState[] waypointBlockAdjustments,
                 bool hasLastDrawnPathCorner,
                 int lastDrawnPathCorner,
                 bool hasFirstWpAdjustmentMade,
@@ -114,6 +123,13 @@ namespace WhiskeyRealism.Patches
                 LastPathSetOutOfSafetyZone = lastPathSetOutOfSafetyZone;
                 LastPathSetOutOfManualMove = lastPathSetOutOfManualMove;
                 PriorMountingState = priorMountingState;
+                TargetedEnemyUnit = targetedEnemyUnit;
+                TargetedEnemyUnitReg = targetedEnemyUnitReg;
+                TargetedEnemyUnitType = targetedEnemyUnitType;
+                ReattachmentOrder = reattachmentOrder;
+                GunObjectsToTake = Clone(gunObjectsToTake);
+                WaypointAdjustment = waypointAdjustment;
+                WaypointBlockAdjustments = Clone(waypointBlockAdjustments);
                 HasLastDrawnPathCorner = hasLastDrawnPathCorner;
                 LastDrawnPathCorner = lastDrawnPathCorner;
                 HasFirstWpAdjustmentMade = hasFirstWpAdjustmentMade;
@@ -160,6 +176,13 @@ namespace WhiskeyRealism.Patches
             public bool LastPathSetOutOfSafetyZone { get; }
             public bool LastPathSetOutOfManualMove { get; }
             public int PriorMountingState { get; }
+            public GameObject TargetedEnemyUnit { get; }
+            public Regiment TargetedEnemyUnitReg { get; }
+            public int TargetedEnemyUnitType { get; }
+            public bool ReattachmentOrder { get; }
+            public List<GameObject> GunObjectsToTake { get; }
+            public WaypointAdjustmentState WaypointAdjustment { get; }
+            public WaypointAdjustmentState[] WaypointBlockAdjustments { get; }
             public bool HasLastDrawnPathCorner { get; }
             public int LastDrawnPathCorner { get; }
             public bool HasFirstWpAdjustmentMade { get; }
@@ -191,10 +214,24 @@ namespace WhiskeyRealism.Patches
                 return clone;
             }
 
+            private static List<GameObject> Clone(List<GameObject> source)
+            {
+                if (source == null) return null;
+                return new List<GameObject>(source);
+            }
+
             private static TransformState[] Clone(TransformState[] source)
             {
                 if (source == null) return null;
                 var clone = new TransformState[source.Length];
+                Array.Copy(source, clone, source.Length);
+                return clone;
+            }
+
+            private static WaypointAdjustmentState[] Clone(WaypointAdjustmentState[] source)
+            {
+                if (source == null) return null;
+                var clone = new WaypointAdjustmentState[source.Length];
                 Array.Copy(source, clone, source.Length);
                 return clone;
             }
@@ -212,6 +249,38 @@ namespace WhiskeyRealism.Patches
             public bool HasValue { get; }
             public Vector3 Position { get; }
             public Quaternion Rotation { get; }
+        }
+
+        internal readonly struct WaypointAdjustmentState
+        {
+            public WaypointAdjustmentState(bool hasValue, PathState[] paths)
+            {
+                HasValue = hasValue;
+                Paths = paths;
+            }
+
+            public bool HasValue { get; }
+            public PathState[] Paths { get; }
+        }
+
+        internal readonly struct PathState
+        {
+            public PathState(int pathIndex, Vector3[] corners)
+            {
+                PathIndex = Math.Max(0, pathIndex);
+                Corners = Clone(corners);
+            }
+
+            public int PathIndex { get; }
+            public Vector3[] Corners { get; }
+
+            private static Vector3[] Clone(Vector3[] source)
+            {
+                if (source == null) return null;
+                var clone = new Vector3[source.Length];
+                Array.Copy(source, clone, source.Length);
+                return clone;
+            }
         }
 
         [HarmonyPrefix]
@@ -362,6 +431,13 @@ namespace WhiskeyRealism.Patches
                 SafeBool(() => unit.lastpathsetoutofsafetyzone),
                 SafeBool(() => unit.lastpathsetoutofmanualmove),
                 SafeInt(() => unit.priormountingstate),
+                SafeGameObject(() => unit.targetedenemyunit),
+                SafeRegiment(() => unit.targetedenemyunitreg),
+                SafeInt(() => unit.targetedenemyunittype),
+                SafeBool(() => unit.reattachmentorder),
+                SnapshotGameObjectList(unit.gunobjectstotake),
+                SnapshotWaypointAdjustment(unit.waypointadjustment, SafeWaypointPathLimit(unit)),
+                SnapshotWaypointBlockAdjustments(unit),
                 hasLastDrawnPathCorner,
                 lastDrawnPathCorner,
                 hasFirstWpAdjustmentMade,
@@ -434,6 +510,13 @@ namespace WhiskeyRealism.Patches
             try { unit.lastpathsetoutofsafetyzone = before.LastPathSetOutOfSafetyZone; } catch { }
             try { unit.lastpathsetoutofmanualmove = before.LastPathSetOutOfManualMove; } catch { }
             try { unit.priormountingstate = before.PriorMountingState; } catch { }
+            try { unit.targetedenemyunit = before.TargetedEnemyUnit; } catch { }
+            try { unit.targetedenemyunitreg = before.TargetedEnemyUnitReg; } catch { }
+            try { unit.targetedenemyunittype = before.TargetedEnemyUnitType; } catch { }
+            try { unit.reattachmentorder = before.ReattachmentOrder; } catch { }
+            try { RestoreGameObjectList(ref unit.gunobjectstotake, before.GunObjectsToTake); } catch { }
+            RestoreWaypointAdjustment(unit.waypointadjustment, before.WaypointAdjustment);
+            RestoreWaypointBlockAdjustments(unit, before.WaypointBlockAdjustments);
             try { unit.doublequick = before.DoubleQuick; } catch { }
             try { unit.running = before.Running; } catch { }
             try { unit.liedown = before.LieDown; } catch { }
@@ -491,6 +574,147 @@ namespace WhiskeyRealism.Patches
             int max = Math.Min(target.Length, snapshot.Length);
             for (int i = 0; i < max; i++)
                 target[i] = snapshot[i];
+        }
+
+        private static List<GameObject> SnapshotGameObjectList(List<GameObject> source)
+        {
+            try { return source != null ? new List<GameObject>(source) : null; }
+            catch { return null; }
+        }
+
+        private static void RestoreGameObjectList(ref List<GameObject> target, List<GameObject> snapshot)
+        {
+            if (target == null)
+                target = new List<GameObject>();
+
+            target.Clear();
+            if (snapshot == null) return;
+
+            for (int i = 0; i < snapshot.Count; i++)
+                target.Add(snapshot[i]);
+        }
+
+        private static int SafeWaypointPathLimit(Regiment unit)
+        {
+            int limit = 0;
+            try
+            {
+                if (unit != null && unit.regimentpath != null)
+                    limit = Math.Max(limit, unit.regimentpath.Length);
+            }
+            catch { }
+
+            try
+            {
+                if (unit != null && unit.pathstatus != null)
+                    limit = Math.Max(limit, unit.pathstatus.Length);
+            }
+            catch { }
+
+            limit = Math.Max(limit, SafePathCount(unit));
+            if (limit <= 0) return WaypointPathSnapshotLimit;
+            return Math.Min(WaypointPathSnapshotLimit, limit);
+        }
+
+        private static WaypointAdjustmentState SnapshotWaypointAdjustment(Regiment.WaypointAdjustment adjustment, int pathLimit)
+        {
+            try
+            {
+                if (adjustment == null)
+                    return default(WaypointAdjustmentState);
+
+                int safePathLimit = Math.Min(WaypointPathSnapshotLimit, Math.Max(0, pathLimit));
+                var paths = new List<PathState>();
+                for (int path = 0; path < safePathLimit; path++)
+                {
+                    int corners = SafeCornerLength(adjustment, path);
+                    if (corners <= 0) continue;
+
+                    int safeCorners = Math.Min(WaypointCornerSnapshotLimit, corners);
+                    var values = new Vector3[safeCorners];
+                    for (int corner = 0; corner < safeCorners; corner++)
+                        values[corner] = SafePathCorner(adjustment, path, corner);
+
+                    paths.Add(new PathState(path, values));
+                }
+
+                return new WaypointAdjustmentState(true, paths.ToArray());
+            }
+            catch
+            {
+                return default(WaypointAdjustmentState);
+            }
+        }
+
+        private static WaypointAdjustmentState[] SnapshotWaypointBlockAdjustments(Regiment unit)
+        {
+            try
+            {
+                if (unit == null || unit.waypointblockadjustment == null)
+                    return null;
+
+                int pathLimit = SafeWaypointPathLimit(unit);
+                var snapshots = new WaypointAdjustmentState[unit.waypointblockadjustment.Count];
+                for (int i = 0; i < snapshots.Length; i++)
+                    snapshots[i] = SnapshotWaypointAdjustment(unit.waypointblockadjustment[i], pathLimit);
+                return snapshots;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void RestoreWaypointAdjustment(Regiment.WaypointAdjustment target, WaypointAdjustmentState snapshot)
+        {
+            try
+            {
+                if (target == null || !snapshot.HasValue) return;
+
+                target.ClearAllValues();
+                if (snapshot.Paths == null) return;
+
+                for (int i = 0; i < snapshot.Paths.Length; i++)
+                {
+                    PathState path = snapshot.Paths[i];
+                    if (path.Corners == null) continue;
+
+                    for (int corner = 0; corner < path.Corners.Length; corner++)
+                        target.SetPathCorner(path.PathIndex, corner, path.Corners[corner]);
+                }
+            }
+            catch { }
+        }
+
+        private static void RestoreWaypointBlockAdjustments(Regiment unit, WaypointAdjustmentState[] snapshots)
+        {
+            try
+            {
+                if (unit == null || snapshots == null) return;
+                if (unit.waypointblockadjustment == null)
+                    unit.waypointblockadjustment = new List<Regiment.WaypointAdjustment>();
+
+                for (int i = 0; i < snapshots.Length; i++)
+                {
+                    while (unit.waypointblockadjustment.Count <= i)
+                        unit.waypointblockadjustment.Add(new Regiment.WaypointAdjustment());
+
+                    RestoreWaypointAdjustment(unit.waypointblockadjustment[i], snapshots[i]);
+                }
+            }
+            catch { }
+        }
+
+        private static int SafeCornerLength(Regiment.WaypointAdjustment adjustment, int path)
+        {
+            try { return adjustment != null ? Math.Max(0, adjustment.GetCornerLength(path)) : 0; }
+            catch { return 0; }
+        }
+
+        private static Vector3 SafePathCorner(Regiment.WaypointAdjustment adjustment, int path, int corner)
+        {
+            try { return adjustment != null ? adjustment.GetPathCorner(path, corner) : default(Vector3); }
+            catch { return default(Vector3); }
         }
 
         private static CommandIntentResolution ResolveIntent(Regiment group)
