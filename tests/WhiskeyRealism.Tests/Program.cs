@@ -642,6 +642,15 @@ static class Program
             ("tactical reserve commit gate observes player controlled group", TacticalReserveCommitGateObservesPlayerControlledGroup),
             ("tactical reserve commit gate allows already engaged reserve", TacticalReserveCommitGateAllowsAlreadyEngagedReserve),
             ("tactical reserve list bias rejects reserve role candidate", TacticalReserveListBiasRejectsReserveRoleCandidate),
+            ("tactical orchestrator charge gate observes when vanilla would not charge", TacticalOrchestratorChargeGateObservesWhenNoVanillaCharge),
+            ("tactical orchestrator charge gate preserves vanilla cancellation", TacticalOrchestratorChargeGatePreservesCancellation),
+            ("tactical orchestrator charge gate fails open without command intent", TacticalOrchestratorChargeGateFailsOpenWithoutIntent),
+            ("tactical orchestrator charge gate observes player controlled group", TacticalOrchestratorChargeGateObservesPlayerControlled),
+            ("tactical orchestrator charge gate allows main with favorable odds", TacticalOrchestratorChargeGateAllowsMainFavorableOdds),
+            ("tactical orchestrator charge gate denies main with poor odds", TacticalOrchestratorChargeGateDeniesMainPoorOdds),
+            ("tactical orchestrator charge gate allows support main with support evidence", TacticalOrchestratorChargeGateAllowsSupportMainWithEvidence),
+            ("tactical orchestrator charge gate denies support main without support evidence", TacticalOrchestratorChargeGateDeniesSupportMainWithoutEvidence),
+            ("tactical orchestrator charge gate denies fix reserve fallback refuse and screen", TacticalOrchestratorChargeGateDeniesHoldRoles),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -12484,6 +12493,134 @@ static class Program
 
         AssertFalse(TacticalReserveCommitGate.PermitReserveListBias(reserve), "reserve role is not list-bias eligible");
         AssertTrue(TacticalReserveCommitGate.PermitReserveListBias(main), "main role can be list-bias eligible");
+    }
+
+    private static TacticalOrchestratorChargeGate.Input ChargeGateInput(
+        bool vanillaWouldCharge = true,
+        bool chargeCancellation = false,
+        bool resolved = true,
+        DirectChildRole role = DirectChildRole.Main,
+        bool playerControlled = false,
+        float localOdds = 1.10f,
+        bool mainEffortSupportAvailable = false,
+        bool screenRoutedTargetVisible = false)
+    {
+        return new TacticalOrchestratorChargeGate.Input(
+            vanillaWouldCharge,
+            chargeCancellation,
+            new CommandIntentResolution(
+                resolved,
+                new CommandNodeIntent(
+                    "node-200",
+                    "node-200",
+                    role,
+                    DirectChildAxis.SectorAxis,
+                    primarySector: 2,
+                    supportPriority: 50,
+                    aggressionBias01: 0.5f,
+                    depth: 1),
+                resolved ? "exact-command-node" : "command-node-not-found"),
+            playerControlled,
+            localOdds,
+            mainEffortSupportAvailable,
+            screenRoutedTargetVisible);
+    }
+
+    private static void AssertChargeGate(
+        TacticalOrchestratorChargeGate.Decision decision,
+        TacticalOrchestratorChargeGate.Action action,
+        DirectChildRole role,
+        string reason)
+    {
+        AssertEqual(action, decision.Action, "action");
+        AssertEqual(role, decision.Role, "role");
+        AssertEqual(reason, decision.Reason, "reason");
+        AssertEqual(action != TacticalOrchestratorChargeGate.Action.Deny, decision.AllowsCharge, "allows charge");
+    }
+
+    private static void TacticalOrchestratorChargeGateObservesWhenNoVanillaCharge()
+    {
+        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(vanillaWouldCharge: false));
+        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Observe, DirectChildRole.Unknown, "no-vanilla-charge");
+    }
+
+    private static void TacticalOrchestratorChargeGatePreservesCancellation()
+    {
+        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(chargeCancellation: true, role: DirectChildRole.Reserve));
+        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Unknown, "charge-cancellation");
+    }
+
+    private static void TacticalOrchestratorChargeGateFailsOpenWithoutIntent()
+    {
+        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(resolved: false, role: DirectChildRole.Reserve));
+        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Unknown, "no-command-intent");
+    }
+
+    private static void TacticalOrchestratorChargeGateObservesPlayerControlled()
+    {
+        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(playerControlled: true));
+        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Observe, DirectChildRole.Unknown, "player-controlled");
+    }
+
+    private static void TacticalOrchestratorChargeGateAllowsMainFavorableOdds()
+    {
+        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Main, localOdds: 1.10f));
+        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Main, "main-favorable-odds");
+
+        AssertNear(1f, ChargeGateInput(localOdds: float.NaN).LocalOdds, 1e-5f, "NaN odds fallback");
+        AssertNear(1f, ChargeGateInput(localOdds: float.PositiveInfinity).LocalOdds, 1e-5f, "Infinity odds fallback");
+    }
+
+    private static void TacticalOrchestratorChargeGateDeniesMainPoorOdds()
+    {
+        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Main, localOdds: 1.09f));
+        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Main, "main-unfavorable-odds");
+
+        AssertNear(0f, ChargeGateInput(localOdds: -0.25f).LocalOdds, 1e-5f, "negative odds clamp");
+    }
+
+    private static void TacticalOrchestratorChargeGateAllowsSupportMainWithEvidence()
+    {
+        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(
+            role: DirectChildRole.SupportMain,
+            mainEffortSupportAvailable: true));
+        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.SupportMain, "support-main-charge-support");
+    }
+
+    private static void TacticalOrchestratorChargeGateDeniesSupportMainWithoutEvidence()
+    {
+        var d = TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.SupportMain));
+        AssertChargeGate(d, TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.SupportMain, "support-main-no-main-charge");
+    }
+
+    private static void TacticalOrchestratorChargeGateDeniesHoldRoles()
+    {
+        AssertChargeGate(
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Fix)),
+            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Fix, "role-fix-hold");
+        AssertChargeGate(
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Reserve)),
+            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Reserve, "role-reserve-hold");
+        AssertChargeGate(
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Fallback)),
+            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Fallback, "role-fallback-no-charge");
+        AssertChargeGate(
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.RefuseLeft)),
+            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.RefuseLeft, "role-refuse-left-no-charge");
+        AssertChargeGate(
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.RefuseRight)),
+            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.RefuseRight, "role-refuse-right-no-charge");
+        AssertChargeGate(
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Screen)),
+            TacticalOrchestratorChargeGate.Action.Deny, DirectChildRole.Screen, "screen-no-routed-target");
+        AssertChargeGate(
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(
+                role: DirectChildRole.Screen,
+                screenRoutedTargetVisible: true)),
+            TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Screen, "screen-chase-routed-target");
+        AssertChargeGate(
+            TacticalOrchestratorChargeGate.Decide(ChargeGateInput(role: DirectChildRole.Unknown)),
+            TacticalOrchestratorChargeGate.Action.Allow, DirectChildRole.Unknown, "unknown-role");
     }
 
     private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()
