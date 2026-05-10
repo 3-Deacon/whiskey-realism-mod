@@ -1593,6 +1593,14 @@ static class Program
         AssertTrue(defaultSelection != TacticalOperationShape.ParallelObjectives, "default objectives do not drive parallel");
         AssertTrue(defaultSelection != TacticalOperationShape.FixAndFlank, "default objectives do not drive fix and flank");
 
+        var corruptFirstWeakSecond = TacticalOperationSelectionModel.Select(
+            ObjectiveRecordFor("bad-a", enemyStrength: float.PositiveInfinity, friendlyAssignedStrength: 100f),
+            ObjectiveRecordFor("ridge-b", enemyStrength: 50f, friendlyAssignedStrength: 100f),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            personality);
+
+        AssertTrue(corruptFirstWeakSecond != TacticalOperationShape.FixAndFlank, "corrupt first objective does not drive fix and flank");
+
         var nonfiniteEnemy = TacticalOperationSelectionModel.Select(
             ObjectiveRecordFor("bad-a", enemyStrength: float.PositiveInfinity, friendlyAssignedStrength: 100f),
             ObjectiveRecordFor("bad-b", enemyStrength: float.NaN, friendlyAssignedStrength: 100f),

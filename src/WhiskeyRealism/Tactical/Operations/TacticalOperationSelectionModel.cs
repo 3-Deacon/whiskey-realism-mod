@@ -40,6 +40,7 @@ namespace WhiskeyRealism.Tactical.Operations
             bool secondUsable = HasUsableObjectiveEvidence(second);
             bool firstWeak = firstUsable && first.EnemyStrength <= Max(1f, first.FriendlyAssignedStrength) * 0.75f;
             bool secondWeak = secondUsable && second.EnemyStrength <= Max(1f, second.FriendlyAssignedStrength) * 0.75f;
+            bool firstStrong = firstUsable && !firstWeak;
             bool reserveSafe = force.ReserveFraction >= (aggression > 0.65f ? 0.15f : 0.25f);
 
             if (firstWeak && secondWeak && reserveSafe && aggression >= 0.45f)
@@ -47,7 +48,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return TacticalOperationShape.ParallelObjectives;
             }
 
-            if (!firstWeak && secondWeak)
+            if (firstStrong && secondWeak)
             {
                 return TacticalOperationShape.FixAndFlank;
             }
