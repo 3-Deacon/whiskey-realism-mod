@@ -5,6 +5,8 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -46,7 +48,7 @@ namespace WhiskeyRealism.Patches
             if (side < 0 || bunits == null) return;
 
             int allianceId = ResolveAllianceId(bunits, side);
-            if (TryApplyOrchestrator(battle, vanillaMacro, allianceId)) return;
+            if (TryApplyOrchestrator(battle, bunits, vanillaMacro, allianceId)) return;
 
             // Fallback: existing scorer path preserved verbatim for regression triage.
             var odds = BuildRuntimeOdds(bunits, side, units);
@@ -67,29 +69,71 @@ namespace WhiskeyRealism.Patches
             LogDecision(side, vanillaMacro, decision, odds);
         }
 
-        private static bool TryApplyOrchestrator(AIBattle battle, int vanillaMacro, int allianceId)
+        private static bool TryApplyOrchestrator(AIBattle battle, BattleUnits bunits, int vanillaMacro, int allianceId)
         {
             if (Plugin.EnableTacticalOrchestratorArmy == null || !Plugin.EnableTacticalOrchestratorArmy.Value) return false;
             if (allianceId < 0 || allianceId >= 2) return false;
+            if (vanillaMacro == 3 || EndBattleActive(bunits)) return true;
 
-            var sideOrch = WhiskeyRealism.Tactical.Orchestrator.TacticalBattleCoordinator.GetSideOrchestrator(allianceId);
-            if (sideOrch?.Army == null || !sideOrch.Army.HasPlan) return false;
+            var sideOrch = TacticalBattleCoordinator.GetSideOrchestrator(allianceId);
+            if (sideOrch?.Army == null) return false;
 
-            int macro = sideOrch.Army.CurrentMacroAi;
-            // CurrentMacroAi -1 means "let vanilla decide" — return true so we DON'T fall through to the scorer.
-            // (The orchestrator has spoken; its choice is "no opinion this tick.")
+            int macro = OperationMacroAi(sideOrch.Army);
+            if (macro == int.MinValue && !sideOrch.Army.HasPlan) return false;
+            if (macro == int.MinValue)
+                macro = sideOrch.Army.CurrentMacroAi;
+
+            // -1 means "let vanilla decide" -- return true so we DON'T fall through to the scorer.
+            // The orchestrator/ledger has spoken; its choice is "no opinion this tick."
             if (macro < -1 || macro > 3) return true;
             if (macro == vanillaMacro) return true;        // already aligned; no write needed
             if (_macroAiField == null) return true;
 
             _macroAiField.SetValue(battle, macro);
+            string planId = sideOrch.Army.HasPlan ? sideOrch.Army.CurrentPlan.PlanId.ToString() : "no-plan";
+            string planPhase = sideOrch.Army.HasPlan ? sideOrch.Army.CurrentPlan.Phase.ToString() : "no-plan";
             OnceLog.Info("orch-macro-write:" + allianceId + ":" + vanillaMacro + "->" + macro,
                 "[TacticalMacroDecision] side=" + allianceId
                 + " old=" + TacticalTelemetry.MacroName(vanillaMacro)
                 + " orchestrator=" + TacticalTelemetry.MacroName(macro)
-                + " plan=" + sideOrch.Army.CurrentPlan.PlanId
-                + " phase=" + sideOrch.Army.CurrentPlan.Phase);
+                + " operation=" + sideOrch.Army.CurrentOperation.Shape
+                + " opPhase=" + sideOrch.Army.CurrentOperation.Phase
+                + " plan=" + planId
+                + " phase=" + planPhase);
             return true;
+        }
+
+        private static int OperationMacroAi(ArmyOrchestrator army)
+        {
+            if (army == null || army.CommanderMode == TacticalCommanderMode.Off)
+                return int.MinValue;
+
+            OperationRecord operation = army.CurrentOperation;
+            switch (operation.Phase)
+            {
+                case TacticalOperationPhase.Planning:
+                case TacticalOperationPhase.Scouting:
+                case TacticalOperationPhase.Forming:
+                case TacticalOperationPhase.Complete:
+                    return -1;
+                case TacticalOperationPhase.Consolidating:
+                case TacticalOperationPhase.Aborting:
+                    return 2;
+            }
+
+            switch (operation.Shape)
+            {
+                case TacticalOperationShape.SingleMainEffort:
+                case TacticalOperationShape.SequentialObjectives:
+                case TacticalOperationShape.ParallelObjectives:
+                case TacticalOperationShape.FixAndFlank:
+                    return 1;
+                case TacticalOperationShape.DefensiveNetwork:
+                case TacticalOperationShape.DelayAndFallback:
+                    return 2;
+                default:
+                    return -1;
+            }
         }
 
         private static int ResolveAllianceId(BattleUnits bunits, int side)

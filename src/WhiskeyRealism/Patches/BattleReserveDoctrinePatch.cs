@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
@@ -33,11 +34,12 @@ namespace WhiskeyRealism.Patches
             if (!BattleCommanderIntentObserverPatch.RefreshRuntimeState(__instance, emitTelemetry: false))
                 return;
 
-            TacticalReserveIntentDecision intent = TacticalReactionContext.Shared.GetReserveIntent(side);
-            if (!intent.AllowsRuntimeMutation || intent.Intent == TacticalReserveIntent.None) return;
-
             IList chain = ObjectiveChain(__instance);
             if (chain == null || chain.Count == 0) return;
+            LogProtectedReserveDrift(side, chain);
+
+            TacticalReserveIntentDecision intent = TacticalReactionContext.Shared.GetReserveIntent(side);
+            if (!intent.AllowsRuntimeMutation || intent.Intent == TacticalReserveIntent.None) return;
 
             List<ReserveSnapshot> snapshot = SnapshotReserves(chain);
             if (snapshot.Count == 0) return;
@@ -141,6 +143,7 @@ namespace WhiskeyRealism.Patches
             {
                 Regiment group = reserves[i] as Regiment;
                 if (!ValidReserveForRanking(group)) continue;
+                if (IsLedgerProtectedReserve(group)) continue;
                 if (!TacticalReserveCommitGate.PermitReserveListBias(ResolveCommandIntent(group))) continue;
 
                 float score = ReserveStrengthScore(group);
@@ -176,6 +179,84 @@ namespace WhiskeyRealism.Patches
             {
                 return new CommandIntentResolution(false, default, "resolve-error:" + ex.GetType().Name);
             }
+        }
+
+        private static void LogProtectedReserveDrift(int side, IList chain)
+        {
+            try
+            {
+                for (int i = 0; i < chain.Count; i++)
+                {
+                    IList reserves = ReserveGroups(chain[i]);
+                    if (reserves == null || reserves.Count == 0) continue;
+
+                    Regiment first = reserves[0] as Regiment;
+                    if (!TryResolveLedgerState(first, out CommandNodeOperationalState state)) continue;
+                    if (!IsProtectedReserve(state)) continue;
+
+                    OnceLog.Info(
+                        "tactical-reserve-drift:assign-reserves:" + side + ":" + i + ":" + SafeInstanceId(first),
+                        "[TacticalReserveDrift] surface=AssignReserves side=" + side +
+                        " chain=" + i +
+                        " group=" + SafeName(first) + "#" + SafeInstanceId(first) +
+                        " ledgerRole=" + state.Role +
+                        " ledgerTask=" + state.Task +
+                        " reason=protected-reserve-in-next-commit-slot");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-reserve-drift:assign-reserves:failed",
+                    "[TacticalReserveDrift] AssignReserves drift inspection failed: " + ex.Message);
+            }
+        }
+
+        private static bool IsLedgerProtectedReserve(Regiment group)
+        {
+            return TryResolveLedgerState(group, out CommandNodeOperationalState state) && IsProtectedReserve(state);
+        }
+
+        private static bool IsProtectedReserve(CommandNodeOperationalState state)
+        {
+            return state.Role == CommandNodeRole.Reserve || state.Task == CommandTaskType.ReserveWait;
+        }
+
+        private static bool TryResolveLedgerState(Regiment group, out CommandNodeOperationalState state)
+        {
+            state = default;
+            try
+            {
+                if (group == null) return false;
+                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
+                var operations = side?.Army?.CurrentCommandOperations;
+                if (operations == null || operations.Count == 0) return false;
+
+                string nodeId = "node-" + group.GetInstanceID();
+                for (int i = 0; i < operations.Count; i++)
+                {
+                    if (string.Equals(operations[i].NodeId, nodeId, StringComparison.Ordinal))
+                    {
+                        state = operations[i];
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static int SafeInstanceId(Regiment group)
+        {
+            try { return group != null ? group.GetInstanceID() : 0; }
+            catch { return 0; }
+        }
+
+        private static string SafeName(Regiment group)
+        {
+            try { return group != null ? TacticalCurrentOrderSignature.Safe(group.name) : "-"; }
+            catch { return "-"; }
         }
 
         private static float ReserveStrengthScore(Regiment group)

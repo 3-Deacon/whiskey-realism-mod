@@ -5,6 +5,8 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -79,6 +81,9 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
+            if (TryApplyLedgerTaskStance(bunits, side, macro, group, vanillaOrdered))
+                return;
+
             var sector = BuildGroupSector(group, index);
             var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
                 vanillaOrdered,
@@ -100,6 +105,84 @@ namespace WhiskeyRealism.Patches
             group.ai_stanceordered = decision.GroupStance;
             group.lastaistancechangetime = GameVars.currenttimefromstart;
             LogDecision(side, group, sector, decision);
+        }
+
+        private static bool TryApplyLedgerTaskStance(BattleUnits bunits, int side, int macro, Regiment group, int vanillaOrdered)
+        {
+            if (macro == 3) return true;
+            if (!TryResolveLedgerState(group, out CommandNodeOperationalState state)) return false;
+
+            int stance = StanceForTask(state.Task, vanillaOrdered);
+            if (stance < 0) return true;
+            if (stance == vanillaOrdered) return true;
+            if (stance == 4 || stance < 0 || stance > 3) return true;
+
+            var gameObject = UnityObject(group);
+            if (gameObject == null || !gameObject.activeInHierarchy) return true;
+
+            bunits.ChangeStance(gameObject, stance, immediate: false, overwriteaigroups: false);
+            group.ai_stance = stance;
+            group.ai_stanceordered = stance;
+            group.lastaistancechangetime = GameVars.currenttimefromstart;
+            LogLedgerTaskDecision(side, group, state, stance);
+            return true;
+        }
+
+        private static int StanceForTask(CommandTaskType task, int vanillaOrdered)
+        {
+            switch (task)
+            {
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                    return 3;
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.HoldObjective:
+                case CommandTaskType.HoldChoke:
+                case CommandTaskType.ReserveWait:
+                case CommandTaskType.FallBackToLine:
+                    return 2;
+                default:
+                    return -1;
+            }
+        }
+
+        private static bool TryResolveLedgerState(Regiment group, out CommandNodeOperationalState state)
+        {
+            state = default;
+            try
+            {
+                if (group == null) return false;
+                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
+                var operations = side?.Army?.CurrentCommandOperations;
+                if (operations == null || operations.Count == 0) return false;
+
+                string nodeId = "node-" + group.GetInstanceID();
+                for (int i = 0; i < operations.Count; i++)
+                {
+                    if (string.Equals(operations[i].NodeId, nodeId, StringComparison.Ordinal))
+                    {
+                        state = operations[i];
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static void LogLedgerTaskDecision(int side, Regiment group, CommandNodeOperationalState state, int stance)
+        {
+            string signature = side + "|" + SafeInstanceId(group) + "|" + state.Task + "|" + stance;
+            if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "group-ledger-task", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            Plugin.Log.LogInfo("[TacticalGroupDecision] side=" + side +
+                " group=" + SafeInstanceId(group) +
+                " stance=" + stance +
+                " ledgerTask=" + state.Task +
+                " ledgerRole=" + state.Role +
+                " reason=operations-ledger-task");
         }
 
         private static bool IsExplicitChargeDenial(TacticalLocalReactionDecision reaction)

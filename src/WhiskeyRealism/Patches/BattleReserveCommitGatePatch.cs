@@ -5,6 +5,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
@@ -327,7 +328,10 @@ namespace WhiskeyRealism.Patches
 
                 TacticalReserveCommitGate.Decision decision = TacticalReserveCommitGate.Decide(input);
                 if (decision.Action == TacticalReserveCommitGate.Action.Deny)
+                {
                     RollBackChangedUnits(changed);
+                    LogProtectedReserveDrift(aigroup, resolution, decision, changed.Length);
+                }
 
                 Log(aigroup, decision.Action, decision.Role, decision.Reason, changed.Length);
             }
@@ -755,11 +759,79 @@ namespace WhiskeyRealism.Patches
                 if (side == null || side.Army == null)
                     return new CommandIntentResolution(false, default, "no-side-orchestrator");
 
+                if (TryResolveLedgerState(side.Army, group.GetInstanceID(), out CommandNodeOperationalState state))
+                    return LedgerResolution(group.GetInstanceID(), state);
+
                 return side.Army.ResolveCommandIntentForGroup(group.GetInstanceID());
             }
             catch (Exception ex)
             {
                 return new CommandIntentResolution(false, default, "resolve-error:" + ex.GetType().Name);
+            }
+        }
+
+        private static bool TryResolveLedgerState(ArmyOrchestrator army, int instanceId, out CommandNodeOperationalState state)
+        {
+            state = default;
+            try
+            {
+                var operations = army?.CurrentCommandOperations;
+                if (operations == null || operations.Count == 0) return false;
+
+                string nodeId = "node-" + instanceId;
+                for (int i = 0; i < operations.Count; i++)
+                {
+                    if (string.Equals(operations[i].NodeId, nodeId, StringComparison.Ordinal))
+                    {
+                        state = operations[i];
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static CommandIntentResolution LedgerResolution(int instanceId, CommandNodeOperationalState state)
+        {
+            DirectChildRole role = DirectChildRoleFromLedger(state);
+            DirectChildAxis axis = state.Task == CommandTaskType.FallBackToLine ? DirectChildAxis.Withdraw : DirectChildAxis.Hold;
+            return new CommandIntentResolution(
+                true,
+                new CommandNodeIntent(
+                    "node-" + instanceId,
+                    state.NodeId,
+                    role,
+                    axis,
+                    primarySector: 0,
+                    supportPriority: 0,
+                    aggressionBias01: 0f,
+                    depth: 0),
+                "operations-ledger:" + state.Role + ":" + state.Task);
+        }
+
+        private static DirectChildRole DirectChildRoleFromLedger(CommandNodeOperationalState state)
+        {
+            if (state.Role == CommandNodeRole.Reserve || state.Task == CommandTaskType.ReserveWait)
+                return DirectChildRole.Reserve;
+            if (state.Role == CommandNodeRole.FallbackGuard || state.Task == CommandTaskType.FallBackToLine)
+                return DirectChildRole.Fallback;
+
+            switch (state.Role)
+            {
+                case CommandNodeRole.MainEffort:
+                    return DirectChildRole.Main;
+                case CommandNodeRole.SupportingAttack:
+                    return DirectChildRole.SupportMain;
+                case CommandNodeRole.FixingForce:
+                    return DirectChildRole.Fix;
+                case CommandNodeRole.ScreeningForce:
+                    return DirectChildRole.Screen;
+                case CommandNodeRole.Defender:
+                    return DirectChildRole.RefuseLeft;
+                default:
+                    return DirectChildRole.Unknown;
             }
         }
 
@@ -1197,6 +1269,30 @@ namespace WhiskeyRealism.Patches
                     + " action=" + action
                     + " role=" + role
                     + " reason=" + safeReason
+                    + " changedUnits=" + Math.Max(0, changedUnits));
+            }
+            catch { }
+        }
+
+        private static void LogProtectedReserveDrift(
+            Regiment group,
+            CommandIntentResolution resolution,
+            TacticalReserveCommitGate.Decision decision,
+            int changedUnits)
+        {
+            try
+            {
+                string key = "tactical-reserve-drift:commit-gate:"
+                    + (group != null ? group.GetInstanceID().ToString() : "null")
+                    + ":" + TacticalCurrentOrderSignature.Safe(resolution.Reason)
+                    + ":" + Math.Max(0, changedUnits);
+                OnceLog.Info(
+                    key,
+                    "[TacticalReserveDrift] surface=CheckUseOfReserves group=" + SafeGroupName(group)
+                    + " action=" + decision.Action
+                    + " role=" + decision.Role
+                    + " reason=" + TacticalCurrentOrderSignature.Safe(decision.Reason)
+                    + " assignment=" + TacticalCurrentOrderSignature.Safe(resolution.Reason)
                     + " changedUnits=" + Math.Max(0, changedUnits));
             }
             catch { }
