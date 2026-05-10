@@ -12,8 +12,8 @@ namespace WhiskeyRealism.Patches
 {
     // Vanilla BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew places AI groups
     // immediately, then clamps deployment-zone and terrain state. This default-off
-    // Postfix is advice-only for now: it samples terrain/facing candidates and logs
-    // bounded evidence rows without changing vanilla deployment state.
+    // Postfix samples bounded terrain/facing candidates and corrects clear AI
+    // deployment failures through vanilla SetGroupFormation when a safe candidate exists.
     [HarmonyPatch(typeof(BattleUnits), "DoPlacementAIUnitsWithinDeploymentzoneNew")]
     internal static class TacticalDeploymentTerrainDisciplinePatch
     {
@@ -50,14 +50,14 @@ namespace WhiskeyRealism.Patches
                     Regiment regiment = group.regref;
                     if (!Eligible(regiment, foralliance)) continue;
 
-                    TryAdviseGroup(__instance, group, regiment);
+                    TryDisciplineGroup(__instance, group, regiment);
                 }
             }
             catch (Exception ex)
             {
                 OnceLog.Warning(
-                    "tactical-deployment-terrain-advice:failed",
-                    "TacticalDeploymentTerrainDisciplinePatch advice failed: " + ex.GetType().Name + ": " + ex.Message);
+                    "tactical-deployment-terrain:failed",
+                    "TacticalDeploymentTerrainDisciplinePatch failed: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -87,7 +87,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void TryAdviseGroup(BattleUnits battleUnits, BattleUnits.Grp group, Regiment regiment)
+        private static void TryDisciplineGroup(BattleUnits battleUnits, BattleUnits.Grp group, Regiment regiment)
         {
             try
             {
@@ -127,13 +127,59 @@ namespace WhiskeyRealism.Patches
                     enemy,
                     rules);
 
-                EmitAdvice(group, regiment, center, footprintWater, enemy, decision);
+                EmitEvidence(group, regiment, center, footprintWater, enemy, decision);
+                if (!decision.Accepted)
+                    return;
+
+                ApplyCorrection(battleUnits, group, regiment, original, decision);
             }
             catch (Exception ex)
             {
                 OnceLog.Warning(
-                    "tactical-deployment-terrain-advice:group",
-                    "TacticalDeploymentTerrainDisciplinePatch group advice failed: " + ex.GetType().Name);
+                    "tactical-deployment-terrain:group",
+                    "TacticalDeploymentTerrainDisciplinePatch group correction failed: " + ex.GetType().Name);
+            }
+        }
+
+        private static void ApplyCorrection(
+            BattleUnits battleUnits,
+            BattleUnits.Grp group,
+            Regiment regiment,
+            Vector3 original,
+            TacticalTerrainDecision decision)
+        {
+            try
+            {
+                if ((object)battleUnits == null || group == null || (object)group.go == null || regiment == null)
+                    return;
+
+                Vector3 corrected = new Vector3(
+                    decision.Candidate.Point.X,
+                    original.y,
+                    decision.Candidate.Point.Z);
+                corrected = TacticalTerrainProbe.WithTerrainHeight(corrected);
+
+                battleUnits.SetGroupFormation(
+                    group.go,
+                    regiment.groupformation,
+                    decision.Candidate.FacingDegrees,
+                    corrected,
+                    immediateplacement: true,
+                    newpath: true,
+                    modifylastwaypoint: false,
+                    newstate: 2,
+                    refuseflank: -1,
+                    ignoredeplyomentzone: false,
+                    skiprotation: false,
+                    showmovementoptions: false,
+                    placeentrenchments: false,
+                    adjustbyterrainshape: true);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-deployment-terrain:set-group-formation",
+                    "TacticalDeploymentTerrainDisciplinePatch SetGroupFormation failed: " + ex.GetType().Name);
             }
         }
 
@@ -177,7 +223,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void EmitAdvice(
+        private static void EmitEvidence(
             BattleUnits.Grp group,
             Regiment regiment,
             TacticalTerrainRuntimeSample center,
