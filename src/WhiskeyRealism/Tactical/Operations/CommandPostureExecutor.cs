@@ -106,16 +106,16 @@ namespace WhiskeyRealism.Tactical.Operations
                 return NoWrite("movement-in-progress");
             }
 
+            if (eligibility.CloseEngaged)
+            {
+                return Formation("close-engaged-" + TaskReason(state.Task));
+            }
+
             if (physical.PathInterrupted && physical.Paths <= 0 && !physical.ActiveMove)
             {
                 return new PostureExecutionDecision(
                     PostureExecutionAction.RecoverInterruptedOrder,
                     "illegal-idle-path-interrupted");
-            }
-
-            if (eligibility.CloseEngaged)
-            {
-                return Formation("close-engaged-" + TaskReason(state.Task));
             }
 
             switch (state.Task)

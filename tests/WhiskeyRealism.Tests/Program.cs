@@ -1854,6 +1854,26 @@ static class Program
                     orderPending: false,
                     recentOrder: false,
                     closeEngaged: true)));
+
+        AssertPostureDecision(
+            PostureExecutionAction.SetFormation,
+            "close-engaged-attack-objective",
+            CommandPostureExecutor.Decide(
+                CommandState(CommandTaskType.AttackObjective),
+                new CommandPhysicalState(
+                    routed: false,
+                    playerProtected: false,
+                    pathInterrupted: true,
+                    paths: 0,
+                    activeMove: false,
+                    formation: 1),
+                new WriteEligibilitySnapshot(
+                    modeAllowsWrites: true,
+                    playerProtected: false,
+                    routed: false,
+                    orderPending: false,
+                    recentOrder: false,
+                    closeEngaged: true)));
     }
 
     private static void TacticalCommandPostureMapsTaskFamilies()
