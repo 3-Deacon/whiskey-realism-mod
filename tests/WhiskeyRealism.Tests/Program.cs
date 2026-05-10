@@ -1889,18 +1889,29 @@ static class Program
         var side = new TacticalBattleOrchestrator(1, TacticalCommanderRoster.BuildFromSynthetic(Array.Empty<SyntheticCommanderInput>()));
         var army = NewArmyOrchestratorWithPlan();
         side.AttachArmy(army);
-        var runtime = new TacticalOperationsLedgerRuntime();
-        runtime.Replace(
+        var firstLedger = side.OperationsLedger;
+
+        side.TickOperationsLedger(
             TacticalCommanderMode.Active,
             new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f) },
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
             new ForceAvailabilitySnapshot(8000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
 
-        side.UpdateOperationsLedger(runtime, Array.Empty<CommandNodeOperationalState>());
-
         AssertEqual(TacticalCommanderMode.Active, army.CommanderMode, "forwarded mode");
         AssertEqual("ridge-a", army.CurrentOperation.PrimaryObjectiveId, "forwarded operation");
+        AssertTrue(ReferenceEquals(firstLedger, side.OperationsLedger), "per-side ledger persists");
+
+        side.TickOperationsLedger(
+            TacticalCommanderMode.MonitorOnly,
+            new[] { ObjectiveRecordFor("ridge-b", enemyStrength: 40f, friendlyAssignedStrength: 100f) },
+            new StrategicBattleIntentSnapshot(0.1f, 0.2f, "theater", "second-campaign"),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+
+        AssertTrue(ReferenceEquals(firstLedger, side.OperationsLedger), "per-side ledger reused");
+        AssertEqual(TacticalCommanderMode.MonitorOnly, army.CommanderMode, "second mode");
+        AssertEqual("ridge-b", army.CurrentOperation.PrimaryObjectiveId, "second operation");
     }
 
     private static void TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi()
@@ -1909,6 +1920,7 @@ static class Program
         AssertTrue(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(0, 0, aiVsAi: true), "ai vs ai allows player side");
         AssertTrue(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(1, 0, aiVsAi: false), "opposing side allowed");
         AssertFalse(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(2, 0, aiVsAi: true), "invalid alliance blocked");
+        AssertFalse(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(1, -1, aiVsAi: false), "unknown player alliance fails closed");
     }
 
     private static ObjectiveRecord ObjectiveRecordFor(string objectiveId, float enemyStrength, float friendlyAssignedStrength)

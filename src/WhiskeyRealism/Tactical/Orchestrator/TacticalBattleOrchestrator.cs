@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -15,6 +17,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             AllianceId = allianceId;
             Roster = roster;
             Echelons = new List<EchelonOrchestrator>();
+            OperationsLedger = new TacticalOperationsLedgerRuntime();
         }
 
         public int AllianceId { get; }
@@ -22,6 +25,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public List<EchelonOrchestrator> Echelons { get; }
         public int TickCount { get; private set; }
         public ArmyOrchestrator Army { get; private set; }
+        internal TacticalOperationsLedgerRuntime OperationsLedger { get; }
 
         /// <summary>
         /// Attach the per-side ArmyOrchestrator. No-op if <paramref name="army"/> is null.
@@ -45,11 +49,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int i = 0; i < Echelons.Count; i++) Echelons[i]?.PropagateIntent();
         }
 
-        internal void UpdateOperationsLedger(
-            TacticalOperationsLedgerRuntime ledger,
-            IReadOnlyList<CommandNodeOperationalState> commandOperations)
+        internal void TickOperationsLedger(
+            TacticalCommanderMode mode,
+            IReadOnlyList<ObjectiveRecord> objectives,
+            StrategicBattleIntentSnapshot strategicBattleIntent,
+            ForceAvailabilitySnapshot force,
+            PersonalityVector personality)
         {
-            Army?.UpdateOperationsLedger(ledger, commandOperations);
+            if (Army == null) return;
+
+            OperationsLedger.Update(mode, objectives, strategicBattleIntent, force, personality);
+            var commandOperations = CommandNodeOperationsRuntime.Build(
+                Army.CurrentCommandNodeIntents,
+                OperationsLedger.CurrentOperation.Shape);
+            Army.UpdateOperationsLedger(OperationsLedger, commandOperations ?? Array.Empty<CommandNodeOperationalState>());
         }
     }
 }

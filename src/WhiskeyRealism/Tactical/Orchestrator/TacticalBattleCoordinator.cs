@@ -70,10 +70,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             active = true;
         }
 
-        public static bool ShouldRunTacticalCommanderForSide(int allianceId, int playerCicAllianceId, bool aiVsAi)
+        public static bool ShouldRunTacticalCommanderForSide(int allianceId, int playerAllianceId, bool aiVsAi)
         {
             if (allianceId < 0 || allianceId > 1) return false;
-            return aiVsAi || allianceId != playerCicAllianceId;
+            if (aiVsAi) return true;
+            if (playerAllianceId < 0 || playerAllianceId > 1) return false;
+            return allianceId != playerAllianceId;
         }
 
         // ---- Pure helpers used by the runtime partial for telemetry ----
