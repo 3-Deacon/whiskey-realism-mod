@@ -66,7 +66,8 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null &&
                    Plugin.Instance.Enabled != null &&
                    Plugin.Instance.Enabled.Value &&
-                   ReadBoolConfig("EnableTacticalDeploymentTerrainDiscipline", false);
+                   Plugin.EnableTacticalDeploymentTerrainDiscipline != null &&
+                   Plugin.EnableTacticalDeploymentTerrainDiscipline.Value;
         }
 
         private static bool Eligible(Regiment regiment, int alliance)
@@ -103,9 +104,7 @@ namespace WhiskeyRealism.Patches
                 TacticalEnemyBearingEvidence enemy =
                     TacticalTerrainProbe.GetVisibleEnemyBearing(regiment, original);
 
-                float preferredFacingDelta = ReadFloatConfig(
-                    "TacticalDeploymentFacingPreferredDeltaDegrees",
-                    DefaultPreferredFacingDeltaDegrees);
+                float preferredFacingDelta = ReadPreferredFacingDeltaDegrees();
                 float facingDelta = enemy.Visible
                     ? TacticalTerrainFacingDiscipline.AngleDelta(originalFacing, enemy.BearingDegrees)
                     : 0f;
@@ -116,7 +115,7 @@ namespace WhiskeyRealism.Patches
                     return;
 
                 var rules = new TacticalTerrainRules(
-                    ReadFloatConfig("TacticalDeploymentTerrainMaxCorrectionMeters", DefaultMaxCorrectionMeters),
+                    ReadTerrainMaxCorrectionMeters(),
                     preferredFacingDelta,
                     requireDeploymentZone: true,
                     requireVisibleEnemyForFacing: false);
@@ -145,10 +144,10 @@ namespace WhiskeyRealism.Patches
             float originalFacing,
             TacticalEnemyBearingEvidence enemy)
         {
-            int max = Math.Max(1, ReadIntConfig("TacticalDeploymentTerrainMaxCandidates", DefaultMaxCandidates));
-            float maxCorrection = ReadFloatConfig(
-                "TacticalDeploymentTerrainMaxCorrectionMeters",
-                DefaultMaxCorrectionMeters);
+            int max = Math.Max(1, Plugin.TacticalDeploymentTerrainMaxCandidates != null
+                ? Plugin.TacticalDeploymentTerrainMaxCandidates.Value
+                : DefaultMaxCandidates);
+            float maxCorrection = ReadTerrainMaxCorrectionMeters();
             float[] radii = { 0f, 8f, 16f, 32f, 48f, 60f };
             int produced = 0;
 
@@ -246,65 +245,20 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool ReadBoolConfig(string fieldName, bool fallback)
+        private static float ReadPreferredFacingDeltaDegrees()
         {
-            object value = ReadConfigValue(fieldName);
-            return value is bool boolValue ? boolValue : fallback;
+            float value = Plugin.TacticalDeploymentFacingPreferredDeltaDegrees != null
+                ? Plugin.TacticalDeploymentFacingPreferredDeltaDegrees.Value
+                : DefaultPreferredFacingDeltaDegrees;
+            return IsPositiveFinite(value) ? value : DefaultPreferredFacingDeltaDegrees;
         }
 
-        private static int ReadIntConfig(string fieldName, int fallback)
+        private static float ReadTerrainMaxCorrectionMeters()
         {
-            object value = ReadConfigValue(fieldName);
-            if (value is int intValue) return intValue;
-
-            try
-            {
-                return value != null ? Convert.ToInt32(value, CultureInfo.InvariantCulture) : fallback;
-            }
-            catch
-            {
-                return fallback;
-            }
-        }
-
-        private static float ReadFloatConfig(string fieldName, float fallback)
-        {
-            object value = ReadConfigValue(fieldName);
-            if (value is float floatValue && IsPositiveFinite(floatValue)) return floatValue;
-
-            try
-            {
-                float converted = value != null
-                    ? Convert.ToSingle(value, CultureInfo.InvariantCulture)
-                    : fallback;
-                return IsPositiveFinite(converted) ? converted : fallback;
-            }
-            catch
-            {
-                return fallback;
-            }
-        }
-
-        private static object ReadConfigValue(string fieldName)
-        {
-            try
-            {
-                FieldInfo field = typeof(Plugin).GetField(
-                    fieldName,
-                    BindingFlags.Static | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (field == null) return null;
-
-                object owner = field.IsStatic ? null : Plugin.Instance;
-                object entry = field.GetValue(owner);
-                if (entry == null) return null;
-
-                PropertyInfo valueProperty = entry.GetType().GetProperty("Value");
-                return valueProperty != null ? valueProperty.GetValue(entry, null) : null;
-            }
-            catch
-            {
-                return null;
-            }
+            float value = Plugin.TacticalDeploymentTerrainMaxCorrectionMeters != null
+                ? Plugin.TacticalDeploymentTerrainMaxCorrectionMeters.Value
+                : DefaultMaxCorrectionMeters;
+            return IsPositiveFinite(value) ? value : DefaultMaxCorrectionMeters;
         }
 
         private static Vector3 PointAt(Vector3 origin, float angleDegrees, float distance)

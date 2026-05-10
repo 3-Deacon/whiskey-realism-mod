@@ -335,12 +335,12 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Deployment Terrain Discipline",
                 false,
-                "Default off. When enabled, AI deployment placement may correct clear water/out-of-zone terrain failures after vanilla deployment.");
+                "Default off. When enabled, logs bounded AI deployment terrain/facing advice after vanilla deployment. Does not move units.");
             TacticalDeploymentTerrainMaxCorrectionMeters = Config.Bind(
                 "Tactical",
                 "Tactical Deployment Terrain Discipline Max Correction Meters",
                 60f,
-                "Maximum distance Whiskey may move an AI deployment group while correcting a terrain failure.");
+                "Maximum candidate correction distance sampled while logging deployment terrain advice.");
             TacticalDeploymentTerrainMaxCandidates = Config.Bind(
                 "Tactical",
                 "Tactical Deployment Terrain Discipline Max Candidates",
