@@ -119,6 +119,9 @@ static class Program
             ("tactical command posture close engagement limits movement writes", TacticalCommandPostureCloseEngagementLimitsMovementWrites),
             ("tactical command posture reserve wait distinguishes reserve area", TacticalCommandPostureReserveWaitDistinguishesReserveArea),
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
+            ("posture executor uses doctrine attack target", PostureExecutorUsesDoctrineAttackTarget),
+            ("posture executor clears interrupted inactive order", PostureExecutorClearsInterruptedInactiveOrder),
+            ("posture executor preserves legal reserve idle", PostureExecutorPreservesLegalReserveIdle),
             ("doctrine order sanitizes ids and exposes purpose", DoctrineOrderSanitizesIdsAndPurpose),
             ("doctrine order distinguishes no assignment from form up", DoctrineOrderDistinguishesNoAssignmentFromFormUp),
             ("doctrine order requires target for movement tasks", DoctrineOrderRequiresTargetForMovementTasks),
@@ -2816,6 +2819,53 @@ static class Program
         AssertPostureDecision(PostureExecutionAction.NoWrite, "missing-ledger-assignment", DecidePosture(CommandTaskType.None));
     }
 
+    private static void PostureExecutorUsesDoctrineAttackTarget()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            DoctrineOrder(CommandTaskType.AttackObjective, primary: DoctrineTargetPoint.From(125f, 250f)),
+            PhysicalState(),
+            nowSeconds: 100f);
+
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "attack-objective", decision);
+        AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, decision);
+    }
+
+    private static void PostureExecutorClearsInterruptedInactiveOrder()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            DoctrineOrder(CommandTaskType.SupportAttack, primary: DoctrineTargetPoint.From(125f, 250f)),
+            new CommandPhysicalState(
+                routed: false,
+                playerProtected: false,
+                pathInterrupted: true,
+                paths: 2,
+                activeMove: false,
+                formation: 1),
+            nowSeconds: 100f);
+
+        AssertPostureDecision(PostureExecutionAction.RecoverInterruptedOrder, "interrupted-inactive", decision);
+        AssertPostureTarget(PostureExecutionTarget.RecoveryPath, true, decision);
+    }
+
+    private static void PostureExecutorPreservesLegalReserveIdle()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            DoctrineOrder(
+                CommandTaskType.ReserveWait,
+                allowedIdle: DoctrineAllowedIdleReason.HeldReserve),
+            new CommandPhysicalState(
+                routed: false,
+                playerProtected: false,
+                pathInterrupted: true,
+                paths: 0,
+                activeMove: false,
+                formation: 1),
+            nowSeconds: 100f);
+
+        AssertPostureDecision(PostureExecutionAction.NoWrite, "legal-idle", decision);
+        AssertPostureTarget(PostureExecutionTarget.None, false, decision);
+    }
+
     private static void DoctrineOrderSanitizesIdsAndPurpose()
     {
         CommandDoctrineOrder order = CommandDoctrineOrder.Create(
@@ -3269,6 +3319,28 @@ static class Program
             routed: false,
             orderPending: false,
             recentOrder: false);
+    }
+
+    private static CommandDoctrineOrder DoctrineOrder(
+        CommandTaskType task,
+        DoctrineTargetPoint primary = default(DoctrineTargetPoint),
+        DoctrineTargetPoint support = default(DoctrineTargetPoint),
+        DoctrineTargetPoint fallback = default(DoctrineTargetPoint),
+        DoctrineAllowedIdleReason allowedIdle = DoctrineAllowedIdleReason.None)
+    {
+        return CommandDoctrineOrder.Create(
+            "node-1",
+            CommandNodeRole.MainEffort,
+            task,
+            "objective-1",
+            primary,
+            support,
+            fallback,
+            allowedIdle,
+            minCommitUntilSeconds: 600f,
+            issuedAtSeconds: 50f,
+            confidence01: 0.8f,
+            reason: "test");
     }
 
     private static void AssertPostureDecision(

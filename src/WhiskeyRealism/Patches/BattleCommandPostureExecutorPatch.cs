@@ -83,6 +83,17 @@ namespace WhiskeyRealism.Patches
                 return;
 
             int instanceId = SafeInstanceId(group);
+            bool hasDoctrineOrder = TryResolveDoctrineOrder(group, orchestrator?.Army, state.NodeId, out CommandDoctrineOrder doctrineOrder);
+            if (hasDoctrineOrder && doctrineOrder.Task != state.Task)
+            {
+                state = new CommandNodeOperationalState(
+                    state.NodeId,
+                    state.Echelon,
+                    doctrineOrder.Role,
+                    doctrineOrder.Task,
+                    state.TaskState);
+            }
+
             bool playerProtected = IsPlayerProtected(group);
             bool routed = SafeRouted(group);
             var physical = BuildPhysicalState(group, playerProtected, routed);
@@ -135,7 +146,9 @@ namespace WhiskeyRealism.Patches
                 missingLedgerAssignment: false,
                 closeEngaged: closeEngaged);
 
-            var decision = CommandPostureExecutor.Decide(state, physical, eligibility);
+            var decision = hasDoctrineOrder
+                ? CommandPostureExecutor.Decide(doctrineOrder, physical, eligibility, Time.realtimeSinceStartup)
+                : CommandPostureExecutor.Decide(state, physical, eligibility);
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: decision.Reason);
@@ -148,7 +161,7 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            bool hasTarget = TryResolveTarget(group, orchestrator, state, decision.Target, out Vector3 target);
+            bool hasTarget = TryResolveTarget(group, orchestrator, state, doctrineOrder, decision.Target, out Vector3 target);
             bool wrote = ApplyDecision(bunits, group, state, decision, targetFormation, eligibility.CloseEngaged, hasTarget, target);
 
             if (wrote)
@@ -307,12 +320,25 @@ namespace WhiskeyRealism.Patches
             Regiment group,
             TacticalBattleOrchestrator orchestrator,
             CommandNodeOperationalState state,
+            CommandDoctrineOrder doctrineOrder,
             PostureExecutionTarget targetKind,
             out Vector3 target)
         {
             target = default(Vector3);
             switch (targetKind)
             {
+                case PostureExecutionTarget.DoctrinePrimaryTarget:
+                    if (TryDoctrineTarget(doctrineOrder.PrimaryTarget, out target) && IsSafeWaypoint(group, target))
+                        return true;
+                    return TryObjectiveApproach(group, orchestrator, ObjectiveApproachStandOff, out target);
+                case PostureExecutionTarget.DoctrineSupportTarget:
+                    if (TryDoctrineTarget(doctrineOrder.SupportTarget, out target) && IsSafeWaypoint(group, target))
+                        return true;
+                    return TryObjectiveApproach(group, orchestrator, ObjectiveApproachStandOff, out target);
+                case PostureExecutionTarget.DoctrineFallbackTarget:
+                    if (TryDoctrineTarget(doctrineOrder.FallbackTarget, out target) && IsSafeWaypoint(group, target))
+                        return true;
+                    return TryFallbackFromObjective(group, orchestrator, out target);
                 case PostureExecutionTarget.ObjectiveApproach:
                 case PostureExecutionTarget.ReleasePoint:
                     return TryObjectiveApproach(group, orchestrator, ObjectiveApproachStandOff, out target);
@@ -330,6 +356,15 @@ namespace WhiskeyRealism.Patches
                 default:
                     return false;
             }
+        }
+
+        private static bool TryDoctrineTarget(DoctrineTargetPoint point, out Vector3 target)
+        {
+            target = default(Vector3);
+            if (!point.HasValue) return false;
+
+            target = new Vector3(point.X, SafeBattleY(), point.Z);
+            return !IsDefaultVector(target);
         }
 
         private static bool TryObjectiveApproach(Regiment group, TacticalBattleOrchestrator orchestrator, float standOff, out Vector3 target)
@@ -562,6 +597,38 @@ namespace WhiskeyRealism.Patches
                         side?.OperationsLedger?.CurrentObjectives,
                         out state))
                     return true;
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static bool TryResolveDoctrineOrder(
+            Regiment group,
+            ArmyOrchestrator army,
+            string nodeId,
+            out CommandDoctrineOrder order)
+        {
+            order = default(CommandDoctrineOrder);
+
+            try
+            {
+                var orders = army?.CurrentDoctrineOrders;
+                if (orders == null || orders.Count == 0) return false;
+
+                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
+                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                for (int i = 0; i < orders.Count; i++)
+                {
+                    CommandDoctrineOrder candidate = orders[i];
+                    if (!string.Equals(candidate.NodeId, nodeId, StringComparison.Ordinal) &&
+                        !TacticalPatchIds.NodeIdMatches(candidate.NodeId, gameObjectInstanceId, componentInstanceId))
+                        continue;
+
+                    if (!candidate.HasPurpose) return false;
+                    order = candidate;
+                    return true;
+                }
             }
             catch { }
 

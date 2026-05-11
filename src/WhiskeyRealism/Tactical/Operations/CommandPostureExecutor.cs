@@ -21,7 +21,10 @@ namespace WhiskeyRealism.Tactical.Operations
         ReserveArea,
         FallbackLine,
         RecoveryPath,
-        ReleasePoint
+        ReleasePoint,
+        DoctrinePrimaryTarget,
+        DoctrineSupportTarget,
+        DoctrineFallbackTarget
     }
 
     public readonly struct PostureExecutionDecision
@@ -81,6 +84,122 @@ namespace WhiskeyRealism.Tactical.Operations
 
     public static class CommandPostureExecutor
     {
+        public static PostureExecutionDecision Decide(
+            CommandDoctrineOrder order,
+            CommandPhysicalState physical,
+            float nowSeconds)
+        {
+            return Decide(
+                order,
+                physical,
+                new WriteEligibilitySnapshot(
+                    modeAllowsWrites: true,
+                    playerProtected: physical.PlayerProtected,
+                    routed: physical.Routed,
+                    orderPending: false,
+                    recentOrder: false),
+                nowSeconds);
+        }
+
+        public static PostureExecutionDecision Decide(
+            CommandDoctrineOrder order,
+            CommandPhysicalState physical,
+            WriteEligibilitySnapshot eligibility,
+            float nowSeconds)
+        {
+            if (!eligibility.ModeAllowsWrites)
+            {
+                return NoWrite("mode-monitor-only");
+            }
+
+            if (eligibility.PlayerProtected || physical.PlayerProtected)
+            {
+                return NoWrite("player-protected");
+            }
+
+            if (eligibility.Routed || physical.Routed)
+            {
+                return NoWrite("routed");
+            }
+
+            if (eligibility.OrderPending)
+            {
+                return NoWrite("order-pending");
+            }
+
+            if (eligibility.RecentOrder)
+            {
+                return NoWrite("recent-order");
+            }
+
+            if (!order.HasPurpose || order.Task == CommandTaskType.None)
+            {
+                return NoWrite("missing-ledger-assignment");
+            }
+
+            if (eligibility.AlreadyDoingCorrectTask)
+            {
+                return NoWrite("already-correct");
+            }
+
+            if (order.AllowsIdle && order.Task == CommandTaskType.ReserveWait)
+            {
+                return NoWrite("legal-idle");
+            }
+
+            if (physical.PathInterrupted && !physical.ActiveMove)
+            {
+                return new PostureExecutionDecision(
+                    PostureExecutionAction.RecoverInterruptedOrder,
+                    "interrupted-inactive",
+                    PostureExecutionTarget.RecoveryPath,
+                    clearInterruptedPaths: true);
+            }
+
+            if (physical.ActiveMove)
+            {
+                return NoWrite("movement-in-progress");
+            }
+
+            if (eligibility.CloseEngaged)
+            {
+                if (order.Task == CommandTaskType.FallBackToLine)
+                {
+                    return new PostureExecutionDecision(
+                        PostureExecutionAction.SetFormationAndWaypoint,
+                        "close-engaged-fallback-line",
+                        PostureExecutionTarget.DoctrineFallbackTarget);
+                }
+
+                return Formation("close-engaged-" + TaskReason(order.Task));
+            }
+
+            switch (order.Task)
+            {
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.Screen:
+                    return FormationAndWaypoint(TaskReason(order.Task), PostureExecutionTarget.DoctrinePrimaryTarget);
+                case CommandTaskType.FallBackToLine:
+                    return new PostureExecutionDecision(
+                        PostureExecutionAction.FallbackToLine,
+                        "fallback-line",
+                        PostureExecutionTarget.DoctrineFallbackTarget,
+                        clearInterruptedPaths: true);
+                default:
+                    return Decide(
+                        new CommandNodeOperationalState(
+                            order.NodeId,
+                            CommandEchelonKind.DivisionLike,
+                            order.Role,
+                            order.Task,
+                            CommandTaskState.Committed),
+                        physical,
+                        eligibility);
+            }
+        }
+
         public static PostureExecutionDecision Decide(
             CommandNodeOperationalState state,
             CommandPhysicalState physical,
