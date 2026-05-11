@@ -103,6 +103,10 @@ static class Program
             ("tactical command posture close engagement limits movement writes", TacticalCommandPostureCloseEngagementLimitsMovementWrites),
             ("tactical command posture reserve wait distinguishes reserve area", TacticalCommandPostureReserveWaitDistinguishesReserveArea),
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
+            ("doctrine order sanitizes ids and exposes purpose", DoctrineOrderSanitizesIdsAndPurpose),
+            ("doctrine order distinguishes no assignment from form up", DoctrineOrderDistinguishesNoAssignmentFromFormUp),
+            ("doctrine order requires target for movement tasks", DoctrineOrderRequiresTargetForMovementTasks),
+            ("doctrine order classifies legal idle reasons", DoctrineOrderClassifiesLegalIdleReasons),
             ("command fallback target resolver uses visible threat without objective", CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective),
             ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
             ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
@@ -2435,6 +2439,122 @@ static class Program
         AssertPostureDecision(PostureExecutionAction.RecoverInterruptedOrder, "recover-stuck-order", DecidePosture(CommandTaskType.RecoverStuckOrder));
         AssertPostureTarget(PostureExecutionTarget.RecoveryPath, true, DecidePosture(CommandTaskType.RecoverStuckOrder));
         AssertPostureDecision(PostureExecutionAction.NoWrite, "missing-ledger-assignment", DecidePosture(CommandTaskType.None));
+    }
+
+    private static void DoctrineOrderSanitizesIdsAndPurpose()
+    {
+        CommandDoctrineOrder order = CommandDoctrineOrder.Create(
+            nodeId: "",
+            role: CommandNodeRole.MainEffort,
+            task: CommandTaskType.AttackObjective,
+            objectiveId: "",
+            primaryTarget: DoctrineTargetPoint.From(100f, 200f),
+            supportTarget: DoctrineTargetPoint.None,
+            fallbackTarget: DoctrineTargetPoint.None,
+            allowedIdle: DoctrineAllowedIdleReason.None,
+            minCommitUntilSeconds: 900f,
+            issuedAtSeconds: 12f,
+            confidence01: 1.25f,
+            reason: "");
+
+        AssertEqual("node-unknown", order.NodeId, "node id");
+        AssertEqual("objective-unknown", order.ObjectiveId, "objective id");
+        AssertEqual(CommandNodeRole.MainEffort, order.Role, "role");
+        AssertEqual(CommandTaskType.AttackObjective, order.Task, "task");
+        AssertTrue(order.HasPurpose, "attack order has purpose");
+        AssertTrue(order.PrimaryTarget.HasValue, "primary target");
+        AssertEqual(1f, order.Confidence01, "confidence clamps high");
+        AssertEqual("unspecified", order.Reason, "reason");
+    }
+
+    private static void DoctrineOrderRequiresTargetForMovementTasks()
+    {
+        CommandDoctrineOrder missingTarget = CommandDoctrineOrder.Create(
+            "node-1",
+            CommandNodeRole.SupportingAttack,
+            CommandTaskType.SupportAttack,
+            "ridge-a",
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineAllowedIdleReason.None,
+            600f,
+            0f,
+            0.8f,
+            "support");
+
+        CommandDoctrineOrder withTarget = CommandDoctrineOrder.Create(
+            "node-1",
+            CommandNodeRole.SupportingAttack,
+            CommandTaskType.SupportAttack,
+            "ridge-a",
+            DoctrineTargetPoint.From(50f, 75f),
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineAllowedIdleReason.None,
+            600f,
+            0f,
+            0.8f,
+            "support");
+
+        AssertTrue(!missingTarget.HasConcreteMovementTarget, "missing movement target");
+        AssertTrue(withTarget.HasConcreteMovementTarget, "movement target");
+    }
+
+    private static void DoctrineOrderDistinguishesNoAssignmentFromFormUp()
+    {
+        CommandDoctrineOrder noAssignment = CommandDoctrineOrder.Create(
+            "node-1",
+            CommandNodeRole.Unknown,
+            CommandTaskType.None,
+            "ridge-a",
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineAllowedIdleReason.None,
+            0f,
+            0f,
+            0f,
+            "none");
+
+        CommandDoctrineOrder formUp = CommandDoctrineOrder.Create(
+            "node-1",
+            CommandNodeRole.Unknown,
+            CommandTaskType.FormUp,
+            "ridge-a",
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineAllowedIdleReason.FormingUp,
+            0f,
+            0f,
+            0.6f,
+            "form");
+
+        AssertTrue(!noAssignment.HasPurpose, "none is not a doctrine assignment");
+        AssertTrue(formUp.HasPurpose, "form up is an executable doctrine assignment");
+    }
+
+    private static void DoctrineOrderClassifiesLegalIdleReasons()
+    {
+        CommandDoctrineOrder reserve = CommandDoctrineOrder.Create(
+            "node-r",
+            CommandNodeRole.Reserve,
+            CommandTaskType.ReserveWait,
+            "ridge-a",
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineTargetPoint.None,
+            DoctrineAllowedIdleReason.HeldReserve,
+            1200f,
+            10f,
+            0.7f,
+            "reserve");
+
+        CommandDoctrineOrder stalled = reserve.WithAllowedIdle(DoctrineAllowedIdleReason.None);
+
+        AssertTrue(reserve.AllowsIdle, "reserve wait is legal idle");
+        AssertTrue(!stalled.AllowsIdle, "no idle reason is illegal idle");
     }
 
     private static void CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective()
