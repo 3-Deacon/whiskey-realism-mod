@@ -104,6 +104,8 @@ namespace WhiskeyRealism.Tactical
 
     public static class TacticalOrderFriction
     {
+        private const float BugleDeliveryProcessGraceHours = 0.05f;
+
         public static TacticalOrderFrictionDecision Evaluate(TacticalOrderFrictionInput input)
         {
             bool pathLag = input.IntendedPathId != input.TransmittedPathId;
@@ -167,7 +169,11 @@ namespace WhiskeyRealism.Tactical
 
         private static bool HasQueueOrProcessDelay(TacticalOrderFrictionInput input)
         {
-            return (input.QueueProcessing && input.QueueDelayHours > 0f) || input.DeliveryProcessHours > 0f;
+            if (input.QueueProcessing && input.QueueDelayHours > 0f) return true;
+            float processThreshold = input.Delivery == TacticalOrderDelivery.Bugle
+                ? BugleDeliveryProcessGraceHours
+                : 0f;
+            return input.DeliveryProcessHours > processThreshold;
         }
 
         private static float DelayPressure(TacticalOrderFrictionInput input)

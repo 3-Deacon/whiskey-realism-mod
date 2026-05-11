@@ -73,8 +73,8 @@ namespace WhiskeyRealism.Tactical
         {
             if (unitType < 0) return TacticalCommandTier.Unknown;
             if (unitType <= 13) return TacticalCommandTier.Regiment;
-            if (unitType == 14) return TacticalCommandTier.Division;
-            if (unitType == 15) return TacticalCommandTier.Brigade;
+            if (unitType == 14) return TacticalCommandTier.Brigade;
+            if (unitType == 15) return TacticalCommandTier.Division;
             if (unitType == 16) return isTopUnit ? TacticalCommandTier.Army : TacticalCommandTier.Corps;
             if (unitType > 16) return TacticalCommandTier.Army;
             return TacticalCommandTier.Unknown;

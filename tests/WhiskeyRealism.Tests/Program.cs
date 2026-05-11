@@ -117,6 +117,7 @@ static class Program
             ("tactical command task planner maps role table", TacticalCommandTaskPlannerMapsRoleTable),
             ("tactical command node state sanitizes blank node id", TacticalCommandNodeStateSanitizesBlankNodeId),
             ("tactical order outside bugle range is delayed", TacticalOrderOutsideBugleRangeIsDelayed),
+            ("tactical order short bugle process time is delivered", TacticalOrderShortBugleProcessTimeIsDelivered),
             ("tactical order delivered transmitted path differs while delayed", TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed),
             ("tactical order stale delayed order downgrades on material contact change", TacticalOrderStaleDelayedOrderDowngradesOnContactChange),
             ("tactical order high initiative reduces delay pressure without instant delivery", TacticalOrderHighInitiativeReducesDelayPressureWithoutInstant),
@@ -125,6 +126,7 @@ static class Program
             ("tactical order settlement blocks delivered pending stance retask", TacticalOrderSettlementBlocksDeliveredPendingStanceRetask),
             ("tactical order settlement blocks unknown order state", TacticalOrderSettlementBlocksUnknownOrderState),
             ("tactical command army and corps intent does not retask regiments directly", TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly),
+            ("tactical command maps vanilla battle unit tiers", TacticalCommandMapsVanillaBattleUnitTiers),
             ("tactical command division mission maps to brigade actions", TacticalCommandDivisionMissionMapsToBrigadeActions),
             ("tactical contact no sighting is none", TacticalContactNoSightingIsNone),
             ("tactical contact stale sighting ages down", TacticalContactStaleSightingAgesDown),
@@ -3161,6 +3163,26 @@ static class Program
         AssertTrue(decision.DelayPressure > 0.10f, "delay pressure should exceed .10");
     }
 
+    private static void TacticalOrderShortBugleProcessTimeIsDelivered()
+    {
+        var decision = TacticalOrderFriction.Evaluate(new TacticalOrderFrictionInput(
+            orderDelayEnabled: true,
+            queueProcessing: false,
+            queueDelayHours: 0f,
+            delivery: TacticalOrderDelivery.Bugle,
+            deliveryProcessHours: 0.02f,
+            courierMissing: false,
+            orderState: 0,
+            intendedPathId: 4,
+            transmittedPathId: 4,
+            contactChangedMaterially: false,
+            commanderInitiative01: 0.50f));
+
+        AssertEqual(TacticalOrderFrictionState.Immediate, decision.State, "state");
+        AssertTrue(decision.IsDelivered, "short bugle process time should be treated as delivered");
+        AssertFalse(decision.IsDelayed, "short bugle process time should not create delay friction");
+    }
+
     private static void TacticalOrderDeliveredTransmittedPathDiffersWhileDelayed()
     {
         var decision = TacticalOrderFriction.Evaluate(new TacticalOrderFrictionInput(
@@ -3337,12 +3359,21 @@ static class Program
         AssertEqual("army-corps-intent-must-flow-through-subcommand", corpsDecision.Reason, "corps reason");
     }
 
+    private static void TacticalCommandMapsVanillaBattleUnitTiers()
+    {
+        AssertEqual(TacticalCommandTier.Regiment, TacticalCommanderProfile.TierFromUnitType(13, false), "regiment");
+        AssertEqual(TacticalCommandTier.Brigade, TacticalCommanderProfile.TierFromUnitType(14, false), "brigade");
+        AssertEqual(TacticalCommandTier.Division, TacticalCommanderProfile.TierFromUnitType(15, false), "division");
+        AssertEqual(TacticalCommandTier.Army, TacticalCommanderProfile.TierFromUnitType(16, true), "army");
+        AssertEqual(TacticalCommandTier.Corps, TacticalCommanderProfile.TierFromUnitType(16, false), "corps");
+    }
+
     private static void TacticalCommandDivisionMissionMapsToBrigadeActions()
     {
         var division = TacticalCommanderProfile.FromVanillaShape(
             stableId: 200,
             displayName: "First Division",
-            unitType: 14,
+            unitType: 15,
             isTopUnit: false,
             underPlayerCommander: false,
             parentId: 10,
@@ -3352,7 +3383,7 @@ static class Program
         var brigade = TacticalCommanderProfile.FromVanillaShape(
             stableId: 201,
             displayName: "First Brigade",
-            unitType: 15,
+            unitType: 14,
             isTopUnit: false,
             underPlayerCommander: false,
             parentId: 200,
