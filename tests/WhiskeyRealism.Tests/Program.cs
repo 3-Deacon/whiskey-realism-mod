@@ -2357,6 +2357,28 @@ static class Program
                     orderPending: false,
                     recentOrder: false,
                     closeEngaged: true)));
+
+        var closeFallback = CommandPostureExecutor.Decide(
+            CommandState(CommandTaskType.FallBackToLine),
+            new CommandPhysicalState(
+                routed: false,
+                playerProtected: false,
+                pathInterrupted: true,
+                paths: 1,
+                activeMove: false,
+                formation: 0),
+            new WriteEligibilitySnapshot(
+                modeAllowsWrites: true,
+                playerProtected: false,
+                routed: false,
+                orderPending: false,
+                recentOrder: false,
+                closeEngaged: true));
+        AssertPostureDecision(
+            PostureExecutionAction.SetFormationAndWaypoint,
+            "close-engaged-fallback-line",
+            closeFallback);
+        AssertPostureTarget(PostureExecutionTarget.FallbackLine, false, closeFallback);
     }
 
     private static void TacticalCommandPostureMapsTaskFamilies()

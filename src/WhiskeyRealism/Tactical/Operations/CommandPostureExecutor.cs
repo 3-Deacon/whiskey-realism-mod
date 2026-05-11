@@ -128,6 +128,14 @@ namespace WhiskeyRealism.Tactical.Operations
 
             if (eligibility.CloseEngaged)
             {
+                if (state.Task == CommandTaskType.FallBackToLine)
+                {
+                    return new PostureExecutionDecision(
+                        PostureExecutionAction.SetFormationAndWaypoint,
+                        "close-engaged-fallback-line",
+                        PostureExecutionTarget.FallbackLine);
+                }
+
                 return Formation("close-engaged-" + TaskReason(state.Task));
             }
 
