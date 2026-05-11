@@ -4,15 +4,17 @@ Living reference for the tactical operations-ledger command system, active comma
 
 ## Current State
 
-- **Implementation state:** merged to `main`; release/default config is `Tactical Commander Mode = Active`.
+- **Implementation state:** full-spectrum tactical command doctrine is implemented and intended for `main`; release/default config is `Tactical Commander Mode = Active`.
 - **Patch ordinal:** #61 `BattleCommandPostureExecutorPatch`.
 - **Config contract:** `Active` is the release/default mode; `MonitorOnly` is for smoke and diagnostics; rollback is `Off`.
-- **Build/deploy proof:** console harness `771 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `f5af359f71ed0a56f2ee2856d8634ea9913ff8bf96c768913216eb5fa7282ec8` (891904 bytes).
-- **Runtime smoke:** pending. Current `LogOutput.log` predates the deployed plugin timestamp `2026-05-10 22:37:49 -0500`, so it cannot prove Active operations-ledger runtime behavior.
+- **Build/deploy proof:** console harness `825 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `f2b2e7b8c2c1c78b608870cb6b729d166c5a718410979aebf1ba20db8eb4c4c0` (930304 bytes).
+- **Runtime smoke:** pending. Current `LogOutput.log` mtime is `2026-05-11 00:24:28 -0500`, which predates the deployed plugin timestamp `2026-05-11 16:26:57 -0500`, so it cannot prove Active operations-ledger runtime behavior for this build.
 
 The system turns the tactical orchestrator's command tree into a per-side operations ledger. The ledger classifies the current battle operation, assigns command-node tasks, monitors whether assigned commands are validly idle or illegally stuck, and lets #61 issue bounded vanilla commands only when the mode is `Active`.
 
 The 2026-05-10 log review first found `1st_Brigade#-27662` repeatedly in `MarchColumn` with `pathInterrupted=True`, `paths=0`, `activeMove=False`, and `queue=0` while the old idle classifier still treated `HoldObjective` as valid idle. That fix makes interrupted non-reserve hold/fallback tasks illegal idle, lets the posture executor recover them with a bounded `RecoveryPath` waypoint, emits ledger telemetry in both `Active` and `MonitorOnly`, and falls back from missing exact command-operation snapshots to `ArmyOrchestrator.ResolveCommandIntentForGroup(...)` plus the current operations ledger before deciding a write. A later 2026-05-10 log review of the `1st Brigade` / `38th New York` courier traffic found the next blocker: command-tree nodes were keyed by the `Regiment.gameObject.GetInstanceID()` value, while #61, #41, #57, #59, B8 fallback observation, #35 monitor lookup, and #45 stance lookup were resolving with the `Regiment` component `GetInstanceID()` value. Current code resolves command intent and operations-ledger nodes by GameObject id first and component id as fallback, so live command consumers can attach to the ledger rows they are supposed to execute. Hampton's Legion / 8th Brigade then exposed allocator-ordering blockers: the direct-child allocator could assign `Fix`, and later `Main`, before testing severe local overmatch. A badly outmatched command now receives `Fallback` before either `Fix` or `Main`, causing isolated commands under active pressure to withdraw toward fallback behavior instead of continuing an unsupported pin or main-effort attack. The 1st/3rd Brigade facing trace exposed a #61 formation-state blocker: `groupformation` could already be `Line` while the visible `formation` was still `MarchColumn`, so the executor could misclassify defensive formation work or wait behind recent-order cooldowns while units remained visibly exposed. Formation correction now checks visible, ordered, and group formation, close defensive/fallback refreshes use the visible threat bearing as `manualfinalrotation`, and urgent visible-mismatch retries use a 5-second cooldown. The Hampton flank cluster exposed the mirror problem on the Confederate side: a close-engaged attacking command with `flanksthreated` / `outflanked` evidence could stay in `AttackObjective` and be blocked by courier `order-pending`. #61 now treats that as a local flank emergency and temporarily executes the posture as `GuardFlank`. The fresh Hampton log also showed close defensive/fallback formation corrections could still be blocked by pending courier state, then create a fresh vanilla formation path that left units visually in interrupted `MarchColumn`; close defensive/fallback local reform now bypasses pending courier state for the non-moving correction and avoids `SetGroupFormation(newpath:true)` while close engaged so line/facing refreshes reform in place.
+
+The 2026-05-11 full-spectrum doctrine implementation extends the ledger from posture recovery into battle command. `TacticalBattlefieldPicture` raises objective confidence from visible formed infantry/cavalry contact and keeps skirmisher, detachment, permanently-detached, and cavalry-screen evidence from being treated as an exposed main line. `TacticalOperationDirector` selects and commits battle operations, `CommandDoctrineOrder` and `CommandDoctrineAssignment` publish primary/support/fallback targets, and `DoctrineConsumerDecisions` retargets #45 stance, #41 charge, B8 reserve/fallback, and B7 artillery consumers to that ledger. Known objective-id misses fail closed; coordinate fallback is allowed only for unknown-objective doctrine targets. A doctrine charge allow cannot override W&L/player gates, the orchestrator charge gate, or B6c explicit denial. Reserve deny now owns a full #59-style movement-state rollback in B8, while #56 order-delay conversion deliberately skips doctrine-denied movement so rollback ownership is deterministic. Artillery support-main-effort currently emits bounded `SuppressStrongpoint` telemetry without inventing a new bombardment write, while friendly-close doctrine remains conservative and cancels active bombardment.
 
 ## System Overview
 
@@ -92,6 +94,9 @@ Expected operations-ledger markers:
 - `[TacticalCommandPosture]` from #61 posture decisions and writes.
 - `[TacticalPostureSummary]` from valid-idle, illegal-idle, stuck-recovery, attack, and reserve-wait summaries.
 - `[TacticalReserveDrift]` from reserve-list drift inspection around `AssignReserves`.
+- `[TacticalDoctrineCharge]` from #41 doctrine charge allow/deny decisions.
+- `[TacticalGroupDecision]` from #45 doctrine stance decisions.
+- `[B8]` / `[TacticalReserveOrderDelayGuard]` reserve/fallback decisions where the doctrine ledger accepts or rejects vanilla reserve movement.
 - `[once:tactical-command-posture-executor]` first-fire marker when #61 wires.
 
 Rows should be signature-gated or interval-bounded. Repeated `missing-anchor`, Harmony failure, `Exception`, or `ERROR` lines are smoke failures until proven unrelated.
@@ -150,11 +155,14 @@ Pass criteria:
 - `[TacticalReserveDrift]` has no repeated drift-failure warning.
 - No player-side or player-subordinate retasking is observed.
 - No repeated non-reserve command nodes remain in `MarchColumn + pathInterrupted=True + paths=0 + activeMove=False` without a valid ledger reason.
+- Visible enemy-line contact near Hampton-style fights raises sector/objective confidence; high-odds `AttackWeakPoint` / main-effort orders should not resolve to defensive hold just because the strategic macro is defensive.
+- Formed regiments commit only when the enemy line is exposed and outnumbered; skirmisher/screen-only contact must not pull the main line into a false assault.
+- Doctrine reserve deny removes direct reserve paths and restores movement/order/cover/formation/target state rather than leaving a stale active path behind.
 - No repeated `Exception`, `ERROR`, `missing-anchor`, Harmony failure, or #61 failure marker.
 
 If the active smoke fails, set `Tactical Commander Mode = Off` for rollback. If evidence is needed before a fix, set `MonitorOnly` to keep ledger telemetry while suppressing writes.
 
-Current Active smoke boundary: not passed. The only current log hit for the smoke/error pattern is an unrelated HarmonyX warning, `AccessTools.TypeByName: Could not find type named CommunityHotfix`; no fresh operations-ledger markers exist because the log predates the deployed DLL.
+Current Active smoke boundary: not passed. The only current log is stale for this build: `LogOutput.log` mtime `2026-05-11 00:24:28 -0500` predates the deployed plugin timestamp `2026-05-11 16:26:57 -0500`, so fresh operations-ledger and doctrine-consumer markers are still required.
 
 ## Risks
 

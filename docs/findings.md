@@ -77,6 +77,28 @@ All line numbers are in `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 | `LinkReservesToLineGroup` | 6643 | Reserve linking |
 | `CheckLineFallbacks` | 5117 | Line-unit fallback decisions |
 
+### Tactical doctrine command/writer anchors
+
+These anchors back the operations-ledger and full-spectrum doctrine consumers. Current behavior lives in `docs/tactical-operations-ledger.md`; bridge/ford/road/town typed tactical POI enumeration remains unverified and must not be treated as a clean vanilla API.
+
+| Symbol | Line | Notes |
+|---|---|---|
+| `AIBattle.CheckAIBombardment` | 3869 | B7 artillery doctrine surface; vanilla bombardment ownership must be preserved unless an existing safe combat-behavior write applies. |
+| `AIBattle.AdjustGroupAIStance` | 4222 | #45 stance consumer surface; vanilla stance ladder is still the immediate stance owner. |
+| `AIBattle.MicroAICheckForCharges` | 4906 | #41 charge consumer surface; charge allows remain subordinate to W&L/player, orchestrator, and B6c deny gates. |
+| `AIBattle.AdjustGroupFormations` | 5875 | #61 posture executor surface; runs after vanilla group formation decisions. |
+| `AIBattle.CheckUseOfReserves` | 6062 | B8 and #59 reserve/fallback surface; direct reserve move is inside this method around line 6170. |
+| `AIBattle.CheckGlobalAIStrategy` | 6314 | Live vanilla macro-AI strategy writer; Whiskey operation selection must have an explicit boundary here rather than racing another macro writer. |
+| `AIBattle.AssignReserves` | 7018 | Vanilla reserve grouping surface; reserve-list mutation must snapshot/restore and never invent membership. |
+| `BattleUnits.ChangeStance` | 90772 | Vanilla stance API used by #61 for bounded posture corrections. |
+| `BattleUnits.SetWaypoint(Regiment, ...)` | 91232 | Vanilla movement-order API used by #61 and by #56 delayed reserve conversion. |
+| `BattleUnits.SetGroupFormation(Regiment, ...)` | 91822 | Vanilla command/group-formation API; returns immediately for `unittyp <= 13`. |
+| `Regiment.RegimentSetPath` | 130966 | Calls `StopRegiment()` before creating a new path. Reserve-deny rollback must restore movement state when this path was created by vanilla. |
+| `Regiment.RegimentSetPath` | 131098 | Writes `unitwhogavelastmovingorder`; rollback must avoid leaving a stale order owner. |
+| `Regiment.RegimentSetPath` | 131130 | Updates cover/target bookkeeping before waypoint creation. |
+| `Regiment.RegimentSetPath` | 131250 | Writes final waypoint position/rotation. |
+| `Regiment.RegimentSetPath` | 131267 | Updates movement bookkeeping after path creation. |
+
 ### Tactical deployment, pathing, terrain, and facing
 
 These anchors back #53 pathfinder discipline, #58 deployment terrain/facing telemetry, and #60 deployment terrain discipline. Current runtime behavior lives in `docs/tactical-terrain-facing-discipline.md`.
