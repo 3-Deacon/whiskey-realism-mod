@@ -127,6 +127,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalTerrainFacingDiscipline.cs" Link="TacticalTerrainFacingDiscipline.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalTerrainFacingTelemetry.cs" Link="TacticalTerrainFacingTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalObjectiveContracts.cs" Link="Operations\TacticalObjectiveContracts.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalBattlefieldPicture.cs" Link="Operations\TacticalBattlefieldPicture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalObjectiveSourceModel.cs" Link="Operations\TacticalObjectiveSourceModel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalCommanderMode.cs" Link="Operations\TacticalCommanderMode.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalVisionModel.cs" Link="Operations\TacticalVisionModel.cs" />

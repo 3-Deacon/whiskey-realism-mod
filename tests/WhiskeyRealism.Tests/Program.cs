@@ -69,6 +69,12 @@ static class Program
             ("tactical objective unverified bridge downgrades to generic", TacticalObjectiveUnverifiedBridgeDowngrades),
             ("tactical objective verified bridge drives typed scoring", TacticalObjectiveVerifiedBridgeDrivesTypedScoring),
             ("tactical objective input sanitizes nonfinite values", TacticalObjectiveInputSanitizesNonfiniteValues),
+            ("battlefield picture visible formed enemy raises objective confidence", BattlefieldPictureVisibleFormedEnemyRaisesObjectiveConfidence),
+            ("battlefield picture skirmisher contact does not expose main line", BattlefieldPictureSkirmisherContactDoesNotExposeMainLine),
+            ("battlefield picture repeated screens do not become main body confidence", BattlefieldPictureRepeatedScreensDoNotBecomeMainBodyConfidence),
+            ("battlefield picture duplicate contact ids do not double count strength", BattlefieldPictureDuplicateContactIdsDoNotDoubleCountStrength),
+            ("battlefield picture nonfinite now fails stale not fresh", BattlefieldPictureNonfiniteNowFailsStaleNotFresh),
+            ("battlefield picture stale contacts decay but do not vanish instantly", BattlefieldPictureStaleContactsDecayButDoNotVanishInstantly),
             ("tactical commander mode active allows writes", TacticalCommanderModeActiveAllowsWrites),
             ("tactical commander mode monitor runs ledger without writes", TacticalCommanderModeMonitorRunsNoWrites),
             ("tactical commander mode parses spacing and fallback", TacticalCommanderModeParsesSpacingAndFallback),
@@ -1586,6 +1592,118 @@ static class Program
         AssertEqual(0f, input.Location.Z, "z");
         AssertEqual(0f, input.SourceConfidence, "confidence");
         AssertEqual(0f, input.Value, "value");
+    }
+
+    private static void BattlefieldPictureVisibleFormedEnemyRaisesObjectiveConfidence()
+    {
+        var contacts = new[]
+        {
+            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 800f, 0f, true, true, 100f, 200f),
+        };
+        var objectives = new[]
+        {
+            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
+        };
+
+        var snapshot = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
+
+        AssertEqual(1, snapshot.Objectives.Length, "objective count");
+        AssertEqual("ridge-a", snapshot.Objectives[0].ObjectiveId, "objective id");
+        AssertTrue(snapshot.Objectives[0].EnemyStrength > 0f, "enemy strength");
+        AssertTrue(snapshot.Objectives[0].Confidence01 >= 0.75f, "confidence");
+        AssertTrue(snapshot.Objectives[0].MainLineExposed, "main line exposed");
+    }
+
+    private static void BattlefieldPictureSkirmisherContactDoesNotExposeMainLine()
+    {
+        var contacts = new[]
+        {
+            new BattlefieldContactInput("screen", "ridge-a", TacticalContactKind.SkirmisherScreen, 80f, 5f, true, false, 100f, 200f),
+        };
+        var objectives = new[]
+        {
+            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
+        };
+
+        var snapshot = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
+
+        AssertTrue(snapshot.Objectives[0].EnemyStrength > 0f, "enemy strength");
+        AssertFalse(snapshot.Objectives[0].MainLineExposed, "main line exposed");
+        AssertTrue(snapshot.Objectives[0].Confidence01 < 0.75f, "confidence");
+    }
+
+    private static void BattlefieldPictureRepeatedScreensDoNotBecomeMainBodyConfidence()
+    {
+        var contacts = new[]
+        {
+            new BattlefieldContactInput("screen-a", "ridge-a", TacticalContactKind.SkirmisherScreen, 80f, 5f, true, false, 100f, 200f),
+            new BattlefieldContactInput("screen-b", "ridge-a", TacticalContactKind.SkirmisherScreen, 80f, 5f, true, false, 110f, 200f),
+            new BattlefieldContactInput("screen-c", "ridge-a", TacticalContactKind.SkirmisherScreen, 80f, 5f, true, false, 120f, 200f),
+        };
+        var objectives = new[]
+        {
+            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
+        };
+
+        var snapshot = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
+
+        AssertFalse(snapshot.Objectives[0].MainLineExposed, "main line exposed");
+        AssertTrue(snapshot.Objectives[0].Confidence01 < 0.75f, "screen-only confidence cap");
+    }
+
+    private static void BattlefieldPictureDuplicateContactIdsDoNotDoubleCountStrength()
+    {
+        var contacts = new[]
+        {
+            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 800f, 0f, true, true, 100f, 200f),
+            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 800f, 0f, true, true, 101f, 201f),
+        };
+        var objectives = new[]
+        {
+            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
+        };
+
+        var snapshot = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
+
+        AssertEqual(800f, snapshot.Objectives[0].EnemyStrength, "duplicate strength");
+    }
+
+    private static void BattlefieldPictureNonfiniteNowFailsStaleNotFresh()
+    {
+        var contacts = new[]
+        {
+            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 800f, 0f, true, true, 100f, 200f),
+        };
+        var objectives = new[]
+        {
+            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
+        };
+
+        var infinite = TacticalBattlefieldPicture.Build(contacts, objectives, float.PositiveInfinity);
+        var nan = TacticalBattlefieldPicture.Build(contacts, objectives, float.NaN);
+
+        AssertTrue(infinite.Objectives[0].Confidence01 < 0.75f, "infinite time confidence");
+        AssertTrue(nan.Objectives[0].Confidence01 < 0.75f, "nan time confidence");
+        AssertFalse(infinite.Objectives[0].MainLineExposed, "infinite time exposure");
+        AssertFalse(nan.Objectives[0].MainLineExposed, "nan time exposure");
+    }
+
+    private static void BattlefieldPictureStaleContactsDecayButDoNotVanishInstantly()
+    {
+        var contacts = new[]
+        {
+            new BattlefieldContactInput("hampton", "ridge-a", TacticalContactKind.FormedLine, 600f, 0f, true, true, 100f, 200f),
+        };
+        var objectives = new[]
+        {
+            new BattlefieldObjectiveInput("ridge-a", TacticalObjectiveType.Ridge, 0.8f, 100f, 200f, 0.4f, 0.2f, 0.2f),
+        };
+
+        var fresh = TacticalBattlefieldPicture.Build(contacts, objectives, 20f);
+        var stale = TacticalBattlefieldPicture.Build(contacts, objectives, 260f);
+
+        AssertTrue(fresh.Objectives[0].Confidence01 > stale.Objectives[0].Confidence01, "confidence decays");
+        AssertTrue(stale.Objectives[0].EnemyStrength > 0f, "stale strength remains");
     }
 
     private static void TacticalOperationsParallelRequiresPerObjectiveAdvantage()
