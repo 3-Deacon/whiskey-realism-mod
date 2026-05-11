@@ -33,5 +33,8 @@ namespace WhiskeyRealism.Tactical.Operations
 
         public static bool AllowsWrites(TacticalCommanderMode mode) =>
             mode == TacticalCommanderMode.Active;
+
+        public static bool EmitsLedgerTelemetry(TacticalCommanderMode mode) =>
+            RunsLedger(mode);
     }
 }

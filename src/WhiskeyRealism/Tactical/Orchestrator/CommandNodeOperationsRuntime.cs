@@ -47,6 +47,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return states;
         }
 
+        public static bool TryBuildSingle(
+            CommandNodeIntent intent,
+            OperationRecord operation,
+            IReadOnlyList<ObjectiveRecord> objectives,
+            out CommandNodeOperationalState state)
+        {
+            var states = Build(new[] { intent }, operation, objectives);
+            if (states.Count == 0)
+            {
+                state = default(CommandNodeOperationalState);
+                return false;
+            }
+
+            state = states[0];
+            return true;
+        }
+
         private static bool HasObjectiveContact(OperationRecord operation, IReadOnlyList<ObjectiveRecord> objectives)
         {
             var record = FindPrimaryObjective(operation, objectives);

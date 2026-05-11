@@ -707,7 +707,7 @@ namespace WhiskeyRealism.Patches
             if (orchestrator == null || orchestrator.Army == null) return;
 
             var army = orchestrator.Army;
-            if (army.CommanderMode != TacticalCommanderMode.MonitorOnly) return;
+            if (!TacticalCommanderModePolicy.EmitsLedgerTelemetry(army.CommanderMode)) return;
 
             var commandOperations = army.CurrentCommandOperations ?? Array.Empty<CommandNodeOperationalState>();
             var operation = army.CurrentOperation;

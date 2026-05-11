@@ -72,6 +72,7 @@ static class Program
             ("tactical commander mode active allows writes", TacticalCommanderModeActiveAllowsWrites),
             ("tactical commander mode monitor runs ledger without writes", TacticalCommanderModeMonitorRunsNoWrites),
             ("tactical commander mode parses spacing and fallback", TacticalCommanderModeParsesSpacingAndFallback),
+            ("tactical commander mode active emits ledger telemetry", TacticalCommanderModeActiveEmitsLedgerTelemetry),
             ("tactical vision visual contact high confidence", TacticalVisionVisualContactHighConfidence),
             ("tactical vision stale recent fire decays", TacticalVisionStaleRecentFireDecays),
             ("tactical vision sanitizes nonfinite inputs", TacticalVisionSanitizesNonfiniteInputs),
@@ -89,6 +90,7 @@ static class Program
             ("tactical operations telemetry throttle helpers bound monitor loop", TacticalOperationsTelemetryThrottleHelpersBoundMonitorLoop),
             ("command node operations runtime maps roles tasks and echelons", CommandNodeOperationsRuntimeMapsRolesTasksAndEchelons),
             ("command node operations runtime uses objective situation", CommandNodeOperationsRuntimeUsesObjectiveSituation),
+            ("command node operations runtime builds single fallback state", CommandNodeOperationsRuntimeBuildsSingleFallbackState),
             ("army orchestrator update operations ledger replaces snapshots", ArmyOrchestratorUpdateOperationsLedgerReplacesSnapshots),
             ("tactical battle orchestrator forwards operations ledger update", TacticalBattleOrchestratorForwardsOperationsLedgerUpdate),
             ("tactical battle coordinator side gate blocks player side unless ai vs ai", TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi),
@@ -102,6 +104,7 @@ static class Program
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
+            ("tactical command monitor interrupted hold is illegal", TacticalCommandMonitorInterruptedHoldIsIllegal),
             ("tactical command monitor player protected no-write", TacticalCommandMonitorPlayerProtectedNoWrite),
             ("tactical command task planner main effort attack vs defensive hold", TacticalCommandTaskPlannerMainEffortAttackVsDefensiveHold),
             ("tactical command task planner maps role table", TacticalCommandTaskPlannerMapsRoleTable),
@@ -1878,6 +1881,42 @@ static class Program
         AssertEqual(CommandTaskType.HoldObjective, states[1].Task, "defender at contested objective holds instead of marching");
     }
 
+    private static void CommandNodeOperationsRuntimeBuildsSingleFallbackState()
+    {
+        var operation = new OperationRecord(
+            TacticalOperationShape.SingleMainEffort,
+            TacticalOperationPhase.Committed,
+            "crossroad-a",
+            300f);
+        var objectives = new[]
+        {
+            new ObjectiveRecord(
+                new ObjectiveObservationInput(
+                    "crossroad-a",
+                    TacticalObjectiveType.RoadJunction,
+                    TacticalObjectiveSource.VerifiedSceneObject,
+                    new TacticalMapPoint(10f, 20f),
+                    0.9f,
+                    1.0f,
+                    typeAnchorVerified: true),
+                TacticalObjectiveStatus.WeaklyHeld,
+                enemyStrength: 40f,
+                friendlyAssignedStrength: 120f)
+        };
+
+        bool built = CommandNodeOperationsRuntime.TryBuildSingle(
+            new CommandNodeIntent("node--27662", "node--26354", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 0.6f, 3),
+            operation,
+            objectives,
+            out CommandNodeOperationalState state);
+
+        AssertTrue(built, "fallback state built");
+        AssertEqual("node--27662", state.NodeId, "node id");
+        AssertEqual(CommandEchelonKind.BrigadeLike, state.Echelon, "brigade echelon");
+        AssertEqual(CommandNodeRole.MainEffort, state.Role, "main role");
+        AssertEqual(CommandTaskType.AttackObjective, state.Task, "main effort attacks weak objective");
+    }
+
     private static void ArmyOrchestratorUpdateOperationsLedgerReplacesSnapshots()
     {
         var army = NewArmyOrchestratorWithPlan();
@@ -2427,6 +2466,29 @@ static class Program
         AssertEqual(TacticalIdleClassification.IllegalIdle, TacticalCommandMonitor.ClassifyIdle(state, physical), "interrupted idle");
     }
 
+    private static void TacticalCommandMonitorInterruptedHoldIsIllegal()
+    {
+        var state = new CommandNodeOperationalState(
+            "hold-1",
+            CommandEchelonKind.BrigadeLike,
+            CommandNodeRole.MainEffort,
+            CommandTaskType.HoldObjective,
+            CommandTaskState.Committed);
+        var physical = new CommandPhysicalState(
+            routed: false,
+            playerProtected: false,
+            pathInterrupted: true,
+            paths: 0,
+            activeMove: false,
+            formation: 3);
+
+        AssertEqual(TacticalIdleClassification.IllegalIdle, TacticalCommandMonitor.ClassifyIdle(state, physical), "interrupted hold needs recovery");
+        AssertPostureDecision(
+            PostureExecutionAction.RecoverInterruptedOrder,
+            "illegal-idle-path-interrupted",
+            CommandPostureExecutor.Decide(state, physical, EligibilityAllowsWrites()));
+    }
+
     private static void TacticalCommandMonitorPlayerProtectedNoWrite()
     {
         var state = new CommandNodeOperationalState(
@@ -2527,6 +2589,13 @@ static class Program
             "blank fallback");
         AssertFalse(TacticalCommanderModePolicy.RunsLedger(TacticalCommanderMode.Off), "off ledger");
         AssertFalse(TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderMode.Off), "off writes");
+    }
+
+    private static void TacticalCommanderModeActiveEmitsLedgerTelemetry()
+    {
+        AssertTrue(TacticalCommanderModePolicy.EmitsLedgerTelemetry(TacticalCommanderMode.Active), "active telemetry");
+        AssertTrue(TacticalCommanderModePolicy.EmitsLedgerTelemetry(TacticalCommanderMode.MonitorOnly), "monitor telemetry");
+        AssertFalse(TacticalCommanderModePolicy.EmitsLedgerTelemetry(TacticalCommanderMode.Off), "off telemetry");
     }
 
     private static void TacticalVisionVisualContactHighConfidence()

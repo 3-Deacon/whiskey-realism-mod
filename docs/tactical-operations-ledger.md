@@ -7,10 +7,12 @@ Living reference for the tactical operations-ledger command system, active comma
 - **Implementation state:** merged to `main`; release/default config is `Tactical Commander Mode = Active`.
 - **Patch ordinal:** #61 `BattleCommandPostureExecutorPatch`.
 - **Config contract:** `Active` is the release/default mode; `MonitorOnly` is for smoke and diagnostics; rollback is `Off`.
-- **Build/deploy proof:** console harness `757 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `d634f46e74aeae205b3a8b4763e556bc8782214c423cfcef72cdd27dac3b5330` (887808 bytes).
-- **Runtime smoke:** pending. Current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the deployed plugin timestamp `2026-05-10 20:54:56 -0500`, so it cannot prove Active operations-ledger runtime behavior.
+- **Build/deploy proof:** console harness `760 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `9e76ce41c4a85cb25fd3ca00536a782eeb49d4922459de3579c25ab31fcb62b8` (888320 bytes).
+- **Runtime smoke:** pending. Current `LogOutput.log` mtime `2026-05-10 21:06:40 -0500` predates the deployed plugin timestamp `2026-05-10 21:15:04 -0500`, so it cannot prove Active operations-ledger runtime behavior.
 
 The system turns the tactical orchestrator's command tree into a per-side operations ledger. The ledger classifies the current battle operation, assigns command-node tasks, monitors whether assigned commands are validly idle or illegally stuck, and lets #61 issue bounded vanilla commands only when the mode is `Active`.
+
+The 2026-05-10 log review found `1st_Brigade#-27662` repeatedly in `MarchColumn` with `pathInterrupted=True`, `paths=0`, `activeMove=False`, and `queue=0` while the old idle classifier still treated `HoldObjective` as valid idle. The deployed fix makes interrupted non-reserve hold/fallback tasks illegal idle, lets the posture executor recover them with a bounded `RecoveryPath` waypoint, emits ledger telemetry in both `Active` and `MonitorOnly`, and falls back from missing exact command-operation snapshots to `ArmyOrchestrator.ResolveCommandIntentForGroup(...)` plus the current operations ledger before deciding a write.
 
 ## System Overview
 
@@ -26,6 +28,8 @@ The operations ledger sits inside the existing tactical orchestrator runtime:
 Harmony patches do not write ledger state. Ledger state is written during the orchestrator tick. #61 reads ledger assignments and current vanilla physical state, then either does nothing or issues one bounded vanilla posture correction for eligible AI command groups.
 
 Eligibility is ledger-first. #61 does not prefilter command nodes out solely because `unittyp <= 13`; if the orchestrator ledger assigned a vanilla `Regiment` component as a command node, the executor can consider waypoint, stance, reserve, fallback, or recovery actions for it. `unittyp > 13` is used only as the guard for `BattleUnits.SetGroupFormation`, because vanilla returns immediately for lower `unittyp` values on that API. AI-issued `SetWaypoint` / `SetGroupFormation` calls keep `showmovementoptions: false` so Whiskey does not open player movement UI while correcting AI posture.
+
+Ledger resolution is tolerant but still ledger-bound. #61 first looks for an exact `CurrentCommandOperations` node id. If that tick snapshot is missing the group, it resolves the command intent through `ArmyOrchestrator.ResolveCommandIntentForGroup(...)` and builds a single operational state from the current operation/objective ledger. If both paths fail, it writes nothing.
 
 ## Config Contract
 
@@ -109,7 +113,7 @@ Pass criteria:
 - `[TacticalOpsLedger]` appears for at least one AI side.
 - `[TacticalCommandAssignment]` appears when command-node assignments materialize.
 - `[TacticalPostureSummary]` appears and reports interpretable command counts.
-- No `[TacticalCommandPosture]` lines show applied active writes.
+- `[TacticalCommandPosture]` lines may appear for diagnostics, but none should report `applied=True`.
 - No repeated `Exception`, `ERROR`, `missing-anchor`, or Harmony failure lines.
 
 ## Active Smoke Checklist

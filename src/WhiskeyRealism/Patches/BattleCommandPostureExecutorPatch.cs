@@ -423,15 +423,27 @@ namespace WhiskeyRealism.Patches
                 side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
                 ArmyOrchestrator army = side?.Army;
                 var operations = army?.CurrentCommandOperations;
-                if (operations == null || operations.Count == 0) return false;
-
-                string nodeId = "node-" + group.GetInstanceID();
-                for (int i = 0; i < operations.Count; i++)
+                int instanceId = SafeInstanceId(group);
+                string nodeId = "node-" + instanceId;
+                if (operations != null)
                 {
-                    if (!string.Equals(operations[i].NodeId, nodeId, StringComparison.Ordinal)) continue;
-                    state = operations[i];
-                    return true;
+                    for (int i = 0; i < operations.Count; i++)
+                    {
+                        if (!string.Equals(operations[i].NodeId, nodeId, StringComparison.Ordinal)) continue;
+                        state = operations[i];
+                        return true;
+                    }
                 }
+
+                var resolution = army?.ResolveCommandIntentForGroup(instanceId);
+                if (resolution.HasValue &&
+                    resolution.Value.Found &&
+                    CommandNodeOperationsRuntime.TryBuildSingle(
+                        resolution.Value.Intent,
+                        army.CurrentOperation,
+                        side?.OperationsLedger?.CurrentObjectives,
+                        out state))
+                    return true;
             }
             catch { }
 

@@ -44,17 +44,19 @@ namespace WhiskeyRealism.Tactical.Operations
                 return TacticalIdleClassification.ProtectedNoWrite;
             }
 
+            if (physical.PathInterrupted && physical.Paths <= 0 && !physical.ActiveMove)
+            {
+                return state.Task == CommandTaskType.ReserveWait
+                    ? TacticalIdleClassification.ValidIdle
+                    : TacticalIdleClassification.IllegalIdle;
+            }
+
             if (state.Task == CommandTaskType.ReserveWait ||
                 state.Task == CommandTaskType.HoldObjective ||
                 state.Task == CommandTaskType.HoldChoke ||
                 state.Task == CommandTaskType.FallBackToLine)
             {
                 return TacticalIdleClassification.ValidIdle;
-            }
-
-            if (physical.PathInterrupted && physical.Paths <= 0 && !physical.ActiveMove)
-            {
-                return TacticalIdleClassification.IllegalIdle;
             }
 
             if (state.Task == CommandTaskType.None)
