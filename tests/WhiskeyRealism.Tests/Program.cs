@@ -674,6 +674,7 @@ static class Program
             ("direct child allocator assigns main on main effort sector with strength", DirectChildAllocatorAssignsMainOnMainEffortSectorWithStrength),
             ("direct child allocator assigns support main to adjacent strong child", DirectChildAllocatorAssignsSupportMainToAdjacentStrongChild),
             ("direct child allocator assigns fix on fixing sector with contact", DirectChildAllocatorAssignsFixOnFixingSectorWithContact),
+            ("direct child allocator falls back before fixing under severe overmatch", DirectChildAllocatorFallbackBeatsFixUnderSevereOvermatch),
             ("direct child allocator assigns reserve to uncommitted strong child", DirectChildAllocatorAssignsReserveToUncommittedStrongChild),
             ("direct child allocator assigns fallback on adverse odds and attack", DirectChildAllocatorAssignsFallbackOnAdverseOddsAndAttack),
             ("direct child allocator allocates refuse to flank with exposure", DirectChildAllocatorAllocatesRefuseToFlankWithExposure),
@@ -694,6 +695,8 @@ static class Program
             ("command intent allocator inherits nearest ancestor role", TestCommandIntentAllocatorInheritsNearestAncestorRole),
             ("command intent allocator assigns bounded reserve for root fallback", TestCommandIntentAllocatorRootFallbackReserve),
             ("command intent resolver finds exact node by instance", TestCommandIntentResolverFindsExactNode),
+            ("command intent resolver prefers game object id over component id", TestCommandIntentResolverPrefersGameObjectId),
+            ("command intent resolver direct child fallback uses game object id", TestCommandIntentResolverDirectChildFallbackUsesGameObjectId),
             ("command intent resolver preserves negative instance ids", TestCommandIntentResolverPreservesNegativeInstanceIds),
             ("command intent resolver reports missing node without throwing", TestCommandIntentResolverMissingNode),
             ("tactical reserve commit gate observes when vanilla did not move", TacticalReserveCommitGateObservesWhenNoVanillaMove),
@@ -13124,6 +13127,22 @@ static class Program
         AssertEqual(DirectChildRole.Fix, intents[0].Role);
     }
 
+    private static void DirectChildAllocatorFallbackBeatsFixUnderSevereOvermatch()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            2, new[] { 7 }, new[] { 4 }, 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed Fixing Force", true) };
+        var evidence = new[] { new DirectChildEvidence(2, 4, true, 7, 0, 0.95f) };
+        var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 7, 0.9f, 0f, Array.Empty<EvidenceTag>());
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+
+        var intents = DirectChildAllocator.AllocateWithChildIntent(plan, personality, snapshots, evidence, new[] { enemyAttack });
+
+        AssertEqual(DirectChildRole.Fallback, intents[0].Role);
+        AssertEqual(DirectChildAxis.Withdraw, intents[0].Axis);
+    }
+
     private static void DirectChildAllocatorAssignsReserveToUncommittedStrongChild()
     {
         var plan = new TacticalBattlePlan(
@@ -13489,6 +13508,41 @@ static class Program
         AssertTrue(resolution.Found, "exact node should resolve");
         AssertEqual("exact-command-node", resolution.Reason);
         AssertEqual(DirectChildRole.Main, resolution.Intent.Role);
+    }
+
+    private static void TestCommandIntentResolverPrefersGameObjectId()
+    {
+        var intents = new[]
+        {
+            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 75, 0.6f, 1),
+        };
+
+        var resolution = CommandIntentResolver.ResolveForInstance(
+            componentInstanceId: 204,
+            gameObjectInstanceId: 200,
+            intents,
+            directChildIntents: null);
+
+        AssertTrue(resolution.Found, "game object command node should resolve when component id differs");
+        AssertEqual("exact-command-node", resolution.Reason);
+        AssertEqual("node-200", resolution.Intent.NodeId);
+    }
+
+    private static void TestCommandIntentResolverDirectChildFallbackUsesGameObjectId()
+    {
+        var resolution = CommandIntentResolver.ResolveForInstance(
+            componentInstanceId: 304,
+            gameObjectInstanceId: 300,
+            Array.Empty<CommandNodeIntent>(),
+            new[]
+            {
+                DirectIntent("child-300", DirectChildRole.Fix, DirectChildAxis.Hold, 4, 0.4f, 0.25f),
+            });
+
+        AssertTrue(resolution.Found, "game object direct child id should resolve when component id differs");
+        AssertEqual("o3-direct-child-fallback", resolution.Reason);
+        AssertEqual("node-300", resolution.Intent.NodeId);
+        AssertEqual(DirectChildRole.Fix, resolution.Intent.Role);
     }
 
     private static void TestCommandIntentResolverPreservesNegativeInstanceIds()

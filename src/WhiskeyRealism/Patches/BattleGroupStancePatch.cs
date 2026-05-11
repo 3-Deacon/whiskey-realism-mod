@@ -164,10 +164,11 @@ namespace WhiskeyRealism.Patches
                 var operations = side?.Army?.CurrentCommandOperations;
                 if (operations == null || operations.Count == 0) return false;
 
-                string nodeId = "node-" + group.GetInstanceID();
+                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
+                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
                 for (int i = 0; i < operations.Count; i++)
                 {
-                    if (string.Equals(operations[i].NodeId, nodeId, StringComparison.Ordinal))
+                    if (TacticalPatchIds.NodeIdMatches(operations[i].NodeId, gameObjectInstanceId, componentInstanceId))
                     {
                         state = operations[i];
                         return true;

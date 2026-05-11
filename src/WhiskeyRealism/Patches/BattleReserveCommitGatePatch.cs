@@ -778,10 +778,12 @@ namespace WhiskeyRealism.Patches
                 if (side == null || side.Army == null)
                     return new CommandIntentResolution(false, default, "no-side-orchestrator");
 
-                if (TryResolveLedgerState(side.Army, group.GetInstanceID(), out CommandNodeOperationalState state))
-                    return LedgerResolution(group.GetInstanceID(), state);
+                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
+                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                if (TryResolveLedgerState(side.Army, componentInstanceId, gameObjectInstanceId, out CommandNodeOperationalState state))
+                    return LedgerResolution(gameObjectInstanceId != 0 ? gameObjectInstanceId : componentInstanceId, state);
 
-                return side.Army.ResolveCommandIntentForGroup(group.GetInstanceID());
+                return side.Army.ResolveCommandIntentForGroup(componentInstanceId, gameObjectInstanceId);
             }
             catch (Exception ex)
             {
@@ -789,7 +791,11 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool TryResolveLedgerState(ArmyOrchestrator army, int instanceId, out CommandNodeOperationalState state)
+        private static bool TryResolveLedgerState(
+            ArmyOrchestrator army,
+            int componentInstanceId,
+            int gameObjectInstanceId,
+            out CommandNodeOperationalState state)
         {
             state = default;
             try
@@ -797,10 +803,9 @@ namespace WhiskeyRealism.Patches
                 var operations = army?.CurrentCommandOperations;
                 if (operations == null || operations.Count == 0) return false;
 
-                string nodeId = "node-" + instanceId;
                 for (int i = 0; i < operations.Count; i++)
                 {
-                    if (string.Equals(operations[i].NodeId, nodeId, StringComparison.Ordinal))
+                    if (TacticalPatchIds.NodeIdMatches(operations[i].NodeId, gameObjectInstanceId, componentInstanceId))
                     {
                         state = operations[i];
                         return true;

@@ -60,10 +60,11 @@ namespace WhiskeyRealism.Patches
                 var operations = army?.CurrentCommandOperations;
                 if (operations == null || operations.Count == 0) return false;
 
-                string nodeId = "node-" + group.GetInstanceID();
+                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
+                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
                 for (int i = 0; i < operations.Count; i++)
                 {
-                    if (!string.Equals(operations[i].NodeId, nodeId, System.StringComparison.Ordinal)) continue;
+                    if (!TacticalPatchIds.NodeIdMatches(operations[i].NodeId, gameObjectInstanceId, componentInstanceId)) continue;
                     state = operations[i];
                     operation = army.CurrentOperation;
                     return true;

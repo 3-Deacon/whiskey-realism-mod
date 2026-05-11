@@ -34,6 +34,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return ResolveDirectChildFallback(instanceId, directChildIntents, "command-node-not-found");
         }
 
+        public static CommandIntentResolution ResolveForInstance(
+            int componentInstanceId,
+            int gameObjectInstanceId,
+            IReadOnlyList<CommandNodeIntent> intents,
+            IReadOnlyList<DirectChildIntent> directChildIntents)
+        {
+            var primaryId = gameObjectInstanceId != 0 ? gameObjectInstanceId : componentInstanceId;
+            var primary = ResolveForInstance(primaryId, intents, directChildIntents);
+            if (primary.Found || componentInstanceId == 0 || componentInstanceId == primaryId)
+            {
+                return primary;
+            }
+
+            var fallback = ResolveForInstance(componentInstanceId, intents, directChildIntents);
+            return fallback.Found ? fallback : primary;
+        }
+
         private static CommandIntentResolution ResolveDirectChildFallback(
             int instanceId,
             IReadOnlyList<DirectChildIntent> directChildIntents,

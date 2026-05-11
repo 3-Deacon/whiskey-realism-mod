@@ -54,6 +54,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (roles[i] != DirectChildRole.Unknown) continue;
                 var ev = evidence[i];
 
+                if (ShouldFallbackUnderSevereOvermatch(ev, perChildEnemyIntent[i]))
+                {
+                    roles[i] = DirectChildRole.Fallback;
+                    continue;
+                }
+
                 if (Contains(plan.FixingSectors, ev.PrimarySector) && ev.ContactFlag)
                 {
                     roles[i] = DirectChildRole.Fix;
@@ -149,6 +155,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         private static bool IsAdjacentSector(int s, int main) => Math.Abs(s - main) == 1;
+
+        private static bool ShouldFallbackUnderSevereOvermatch(
+            DirectChildEvidence evidence,
+            TacticalIntentModel enemyIntent)
+        {
+            bool severeBucketMismatch = evidence.EnemyStrengthBucket > evidence.OwnStrengthBucket + 1;
+            bool largeEnemyOvermatch = evidence.EnemyStrengthBucket >= 4 &&
+                evidence.OwnStrengthBucket <= 3 &&
+                evidence.Confidence01 >= 0.9f;
+            bool activePressure = enemyIntent.PrimaryIntent == InferredIntent.Attack ||
+                evidence.Confidence01 >= 0.9f;
+
+            return activePressure && (severeBucketMismatch || largeEnemyOvermatch);
+        }
 
         private static DirectChildAxis AxisFor(DirectChildRole role)
         {

@@ -270,6 +270,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return CommandIntentResolver.ResolveForInstance(regimentInstanceId, _commandNodeIntents, _directChildIntents);
         }
 
+        internal CommandIntentResolution ResolveCommandIntentForGroup(int regimentInstanceId, int gameObjectInstanceId)
+        {
+            return CommandIntentResolver.ResolveForInstance(
+                regimentInstanceId,
+                gameObjectInstanceId,
+                _commandNodeIntents,
+                _directChildIntents);
+        }
+
         public void ObserveDirectChildEvidence(IReadOnlyList<DirectChildEvidence> evidence)
         {
             if (!HasPlan) return;

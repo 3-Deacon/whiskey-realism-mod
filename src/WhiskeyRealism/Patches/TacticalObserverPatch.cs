@@ -869,7 +869,9 @@ namespace WhiskeyRealism.Patches
                 for (int i = 0; i < all.Count; i++)
                 {
                     var reg = all[i] as Regiment;
-                    if (reg != null && SafeInstanceId(reg) == instanceId) return reg;
+                    if (reg == null) continue;
+                    if (SafeInstanceId(reg) == instanceId || TacticalPatchIds.GameObjectInstanceId(reg) == instanceId)
+                        return reg;
                 }
             }
             catch

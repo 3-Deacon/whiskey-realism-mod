@@ -216,7 +216,9 @@ namespace WhiskeyRealism.Patches
                 if (side == null || side.Army == null)
                     return new CommandIntentResolution(false, default, "no-side-orchestrator");
 
-                return side.Army.ResolveCommandIntentForGroup(group.GetInstanceID());
+                return side.Army.ResolveCommandIntentForGroup(
+                    TacticalPatchIds.ComponentInstanceId(group),
+                    TacticalPatchIds.GameObjectInstanceId(group));
             }
             catch (Exception ex)
             {
