@@ -154,6 +154,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalHqLinkGuard.cs" Link="TacticalHqLinkGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalContactLedger.cs" Link="TacticalContactLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalSectorLedger.cs" Link="TacticalSectorLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalGroupSectorEstimator.cs" Link="TacticalGroupSectorEstimator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalOddsDoctrine.cs" Link="TacticalOddsDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalDoctrineDecisionContracts.cs" Link="TacticalDoctrineDecisionContracts.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalDoctrineScorer.cs" Link="TacticalDoctrineScorer.cs" />

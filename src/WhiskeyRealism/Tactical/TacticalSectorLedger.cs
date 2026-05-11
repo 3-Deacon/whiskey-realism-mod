@@ -140,6 +140,7 @@ namespace WhiskeyRealism.Tactical
         private static bool CanDriveDecisiveSector(TacticalSectorAssessment sector)
         {
             if (sector.EnemyStrength <= 0f) return false;
+            if (sector.Source == TacticalSectorSource.VisibleLineContact) return true;
             if (sector.Source != TacticalSectorSource.AngleSlice) return true;
 
             float minimum = Math.Max(500f, sector.OwnStrength * 0.05f);

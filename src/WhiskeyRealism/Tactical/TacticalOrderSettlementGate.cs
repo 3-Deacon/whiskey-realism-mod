@@ -9,6 +9,7 @@ namespace WhiskeyRealism.Tactical
             public int RegimentPaths;
             public bool PathInterrupted;
             public int MovementMode;
+            public bool ActiveMove;
         }
 
         public readonly struct Decision
@@ -30,6 +31,13 @@ namespace WhiskeyRealism.Tactical
 
             if (input.OrderState < 0)
                 return new Decision(false, "unknown-orderstate");
+
+            if (input.OrderState == 1 &&
+                input.PathInterrupted &&
+                input.RegimentPaths <= 0 &&
+                input.MovementMode <= 0 &&
+                !input.ActiveMove)
+                return new Decision(true, "stalled-interrupted-order");
 
             if (input.OrderState > 0)
                 return new Decision(false, "pending-orderstate");

@@ -63,6 +63,9 @@ namespace WhiskeyRealism.Tactical
                 (input.MacroAi == 0 || input.MacroAi == 1))
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 3, "attack-weak-point");
             if (input.MacroAi == 2 &&
+                ShouldCommitVisibleWeakPoint(input.Sector))
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 3, "defensive-counterstroke");
+            if (input.MacroAi == 2 &&
                 (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint ||
                  input.Sector.Mission == TacticalSectorMission.Fix ||
                  input.Sector.Mission == TacticalSectorMission.EconomyOfForce))
@@ -74,6 +77,16 @@ namespace WhiskeyRealism.Tactical
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 1, "fix");
 
             return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 2, "hold");
+        }
+
+        public static bool ShouldCommitVisibleWeakPoint(TacticalSectorAssessment sector)
+        {
+            return sector.Source == TacticalSectorSource.VisibleLineContact &&
+                sector.Mission == TacticalSectorMission.AttackWeakPoint &&
+                sector.Confidence >= 0.75f &&
+                sector.Odds >= 1.75f &&
+                !sector.StrongPoint &&
+                !sector.FlankRisk;
         }
     }
 }

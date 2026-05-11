@@ -6,7 +6,8 @@ namespace WhiskeyRealism.Tactical
     {
         None = 0,
         ObjectiveChain = 1,
-        AngleSlice = 2
+        AngleSlice = 2,
+        VisibleLineContact = 3
     }
 
     public enum TacticalObservedEvent

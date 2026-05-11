@@ -24,6 +24,7 @@ namespace WhiskeyRealism.Tactical
             {
                 case TacticalSectorSource.ObjectiveChain: return "objective-chain";
                 case TacticalSectorSource.AngleSlice: return "angle-slice";
+                case TacticalSectorSource.VisibleLineContact: return "visible-line-contact";
                 default: return "none";
             }
         }

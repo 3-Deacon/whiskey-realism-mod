@@ -87,10 +87,11 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            if (TryApplyLedgerTaskStance(bunits, side, macro, group, vanillaOrdered))
+            var sector = BuildGroupSector(group, index);
+
+            if (TryApplyLedgerTaskStance(bunits, side, macro, group, vanillaOrdered, sector))
                 return;
 
-            var sector = BuildGroupSector(group, index);
             var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
                 vanillaOrdered,
                 macro,
@@ -114,12 +115,12 @@ namespace WhiskeyRealism.Patches
             LogDecision(side, group, sector, decision);
         }
 
-        private static bool TryApplyLedgerTaskStance(BattleUnits bunits, int side, int macro, Regiment group, int vanillaOrdered)
+        private static bool TryApplyLedgerTaskStance(BattleUnits bunits, int side, int macro, Regiment group, int vanillaOrdered, TacticalSectorAssessment sector)
         {
             if (macro == 3) return true;
             if (!TryResolveLedgerState(group, out CommandNodeOperationalState state)) return false;
 
-            int stance = StanceForTask(state.Task, vanillaOrdered);
+            int stance = StanceForTask(state.Task, vanillaOrdered, sector);
             if (stance < 0) return true;
             if (stance == vanillaOrdered) return true;
             if (stance == 4 || stance < 0 || stance > 3) return true;
@@ -136,8 +137,14 @@ namespace WhiskeyRealism.Patches
             return true;
         }
 
-        private static int StanceForTask(CommandTaskType task, int vanillaOrdered)
+        private static int StanceForTask(CommandTaskType task, int vanillaOrdered, TacticalSectorAssessment sector)
         {
+            if ((task == CommandTaskType.HoldObjective ||
+                 task == CommandTaskType.HoldChoke ||
+                 task == CommandTaskType.FixEnemy) &&
+                TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector))
+                return 3;
+
             switch (task)
             {
                 case CommandTaskType.AttackObjective:
@@ -237,24 +244,19 @@ namespace WhiskeyRealism.Patches
 
         private static TacticalSectorAssessment BuildGroupSector(Regiment group, int index)
         {
-            float own = Math.Max(group.groupowninrange, group.groupstrengthaigroup);
-            float enemy = Math.Max(0f, group.groupenemiesinrange);
-            bool hasEnemy = enemy > 0f;
-            bool hasClosestEnemy = group.unitrange != null && group.unitrange.closestenemyunitfarreg != null;
-            float confidence = hasEnemy ? (hasClosestEnemy ? 0.8f : 0.55f) : 0.45f;
-            bool flankRisk = group.flanksthreated > 0f || group.outflanked > 0;
-            bool strongPoint = group.covervalue > 0.5f || group.fortinrange;
-            var sector = new TacticalSectorAssessment(
+            Regiment closest = group != null && group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+            return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                 index,
-                TacticalSectorSource.AngleSlice,
-                own,
-                enemy,
-                confidence,
-                strongPoint,
-                flankRisk,
-                TacticalSectorMission.Hold);
-            var result = TacticalSectorLedger.Evaluate(new[] { sector });
-            return result.Sectors.Length > 0 ? result.Sectors[0] : sector;
+                group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
+                group != null ? group.groupenemiesinrange : 0f,
+                SumEnemyStrengthWithinAngle(group),
+                closest != null ? closest.strength : 0f,
+                closest != null ? closest.unittyp : -1,
+                closest != null ? SafeName(closest) : string.Empty,
+                closest != null && closest.isrouted,
+                closest != null && closest.permanentlydetached,
+                group != null && (group.flanksthreated > 0f || group.outflanked > 0),
+                group != null && (group.covervalue > 0.5f || group.fortinrange)));
         }
 
         private static bool WlAllowsControl(Regiment group)
@@ -289,8 +291,42 @@ namespace WhiskeyRealism.Patches
                 OrderState = group != null ? group.orderstate : -1,
                 RegimentPaths = group != null ? group.regimentpaths : 0,
                 PathInterrupted = group != null && group.pathinterrupted,
-                MovementMode = group != null ? group.movementmode : -1
+                MovementMode = group != null ? group.movementmode : -1,
+                ActiveMove = HasActiveMoveOrder(group)
             }).AllowChange;
+        }
+
+        private static float SumEnemyStrengthWithinAngle(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.unitrange == null || group.unitrange.enemystrengthwithinangle == null)
+                    return 0f;
+
+                float total = 0f;
+                for (int i = 0; i < group.unitrange.enemystrengthwithinangle.Length; i++)
+                    total += Math.Max(0f, group.unitrange.enemystrengthwithinangle[i]);
+                return total;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static bool HasActiveMoveOrder(Regiment unit)
+        {
+            try
+            {
+                return unit != null &&
+                    unit.ordertypeactive != null &&
+                    unit.ordertypeactive.Length > 1 &&
+                    (unit.ordertypeactive[0] || unit.ordertypeactive[1]);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static int SafeOrderQueueCount(Regiment group)

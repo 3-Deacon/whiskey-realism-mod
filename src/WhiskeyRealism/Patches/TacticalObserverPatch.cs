@@ -1574,24 +1574,19 @@ namespace WhiskeyRealism.Patches
 
         private static TacticalSectorAssessment BuildMatrixSector(Regiment group, int index)
         {
-            float own = Math.Max(group.groupowninrange, group.groupstrengthaigroup);
-            float enemy = Math.Max(0f, Math.Max(group.groupenemiesinrange, MatrixEnemyAngleStrength(group)));
-            bool hasEnemy = enemy > 0f;
-            bool hasClosestEnemy = group.unitrange != null && group.unitrange.closestenemyunitfarreg != null;
-            float confidence = hasEnemy ? (hasClosestEnemy ? 0.8f : 0.55f) : 0.45f;
-            bool flankRisk = group.flanksthreated > 0f || group.outflanked > 0;
-            bool strongPoint = group.covervalue > 0.5f || group.fortinrange;
-            var sector = new TacticalSectorAssessment(
+            Regiment closest = group != null && group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+            return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                 index,
-                TacticalSectorSource.AngleSlice,
-                own,
-                enemy,
-                confidence,
-                strongPoint,
-                flankRisk,
-                TacticalSectorMission.Hold);
-            var result = TacticalSectorLedger.Evaluate(new[] { sector });
-            return result.Sectors.Length > 0 ? result.Sectors[0] : sector;
+                group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
+                group != null ? group.groupenemiesinrange : 0f,
+                MatrixEnemyAngleStrength(group),
+                closest != null ? closest.strength : 0f,
+                closest != null ? closest.unittyp : -1,
+                closest != null ? SafeUnitName(closest) : string.Empty,
+                closest != null && closest.isrouted,
+                closest != null && closest.permanentlydetached,
+                group != null && (group.flanksthreated > 0f || group.outflanked > 0),
+                group != null && (group.covervalue > 0.5f || group.fortinrange)));
         }
 
         private static bool MatrixOrderFrictionAllowsChange(Regiment group)
@@ -1602,7 +1597,8 @@ namespace WhiskeyRealism.Patches
                 OrderState = SafeOrderState(group),
                 RegimentPaths = group != null ? group.regimentpaths : 0,
                 PathInterrupted = group != null && group.pathinterrupted,
-                MovementMode = group != null ? group.movementmode : -1
+                MovementMode = group != null ? group.movementmode : -1,
+                ActiveMove = HasActiveMoveOrder(group)
             }).AllowChange;
         }
 
@@ -1750,22 +1746,19 @@ namespace WhiskeyRealism.Patches
                 var group = units[i] as Regiment;
                 if (group == null || group.unittyp <= 13) continue;
 
-                float own = Math.Max(group.groupowninrange, group.groupstrengthaigroup);
-                float enemy = Math.Max(0f, Math.Max(group.groupenemiesinrange, MatrixEnemyAngleStrength(group)));
-                bool hasEnemy = enemy > 0f;
-                bool hasClosestEnemy = group.unitrange != null && group.unitrange.closestenemyunitfarreg != null;
-                float confidence = hasEnemy ? (hasClosestEnemy ? 0.8f : 0.55f) : 0.45f;
-                bool flankRisk = group.flanksthreated > 0f || group.outflanked > 0;
-                bool strongPoint = group.covervalue > 0.5f || group.fortinrange;
-                sectors.Add(new TacticalSectorAssessment(
+                Regiment closest = group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+                sectors.Add(TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                     sectorId++,
-                    TacticalSectorSource.AngleSlice,
-                    own,
-                    enemy,
-                    confidence,
-                    strongPoint,
-                    flankRisk,
-                    TacticalSectorMission.Hold));
+                    Math.Max(group.groupowninrange, group.groupstrengthaigroup),
+                    group.groupenemiesinrange,
+                    MatrixEnemyAngleStrength(group),
+                    closest != null ? closest.strength : 0f,
+                    closest != null ? closest.unittyp : -1,
+                    closest != null ? SafeUnitName(closest) : string.Empty,
+                    closest != null && closest.isrouted,
+                    closest != null && closest.permanentlydetached,
+                    group.flanksthreated > 0f || group.outflanked > 0,
+                    group.covervalue > 0.5f || group.fortinrange)));
             }
 
             return sectors.ToArray();

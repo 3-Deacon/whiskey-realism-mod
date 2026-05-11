@@ -124,6 +124,7 @@ static class Program
             ("tactical order settlement allows idle stance retask", TacticalOrderSettlementAllowsIdleStanceRetask),
             ("tactical order settlement blocks queued stance retask", TacticalOrderSettlementBlocksQueuedStanceRetask),
             ("tactical order settlement blocks delivered pending stance retask", TacticalOrderSettlementBlocksDeliveredPendingStanceRetask),
+            ("tactical order settlement allows stalled interrupted pending retask", TacticalOrderSettlementAllowsStalledInterruptedPendingRetask),
             ("tactical order settlement blocks unknown order state", TacticalOrderSettlementBlocksUnknownOrderState),
             ("tactical command army and corps intent does not retask regiments directly", TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly),
             ("tactical command maps vanilla battle unit tiers", TacticalCommandMapsVanillaBattleUnitTiers),
@@ -137,10 +138,13 @@ static class Program
             ("tactical sector no measured enemy is not weak point", TacticalSectorNoMeasuredEnemyIsNotWeakPoint),
             ("tactical sector tiny angle contact is not weak point", TacticalSectorTinyAngleContactIsNotWeakPoint),
             ("tactical sector substantial contact remains weak point", TacticalSectorSubstantialContactRemainsWeakPoint),
+            ("tactical group visible line contact drives weak point", TacticalGroupVisibleLineContactDrivesWeakPoint),
+            ("tactical group screen contact does not drive weak point", TacticalGroupScreenContactDoesNotDriveWeakPoint),
             ("tactical macro dynamic is not attack", TacticalMacroDynamicIsNotAttack),
             ("tactical macro debug override skips", TacticalMacroDebugOverrideSkips),
             ("tactical macro inferior no relief retreats", TacticalMacroInferiorNoReliefRetreats),
             ("tactical group decisive sector attacks without charge", TacticalGroupDecisiveSectorAttacksWithoutCharge),
+            ("tactical group defensive visible weak point counterattacks", TacticalGroupDefensiveVisibleWeakPointCounterattacks),
             ("tactical group weak point under defend holds", TacticalGroupWeakPointUnderDefendHolds),
             ("tactical group fix under defend holds", TacticalGroupFixUnderDefendHolds),
             ("tactical group local stance writer only controls brigades", TacticalGroupLocalStanceWriterOnlyControlsBrigades),
@@ -3003,6 +3007,47 @@ static class Program
         AssertEqual(TacticalSectorMission.AttackWeakPoint, result.Sectors[0].Mission, "real contact should still attack weak point");
     }
 
+    private static void TacticalGroupVisibleLineContactDrivesWeakPoint()
+    {
+        var sector = TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
+            sectorId: 4,
+            ownStrength: 17651f,
+            enemiesInRangeStrength: 0f,
+            angleEnemyStrength: 0f,
+            closestEnemyStrength: 914f,
+            closestEnemyUnitType: TacticalUnitType.Infantry,
+            closestEnemyName: "Hampton's Legion",
+            closestEnemyRouted: false,
+            closestEnemyPermanentlyDetached: false,
+            flankRisk: false,
+            strongPoint: false));
+
+        AssertEqual(TacticalSectorSource.VisibleLineContact, sector.Source, "source");
+        AssertEqual(TacticalSectorMission.AttackWeakPoint, sector.Mission, "visible line contact should drive weak point");
+        AssertTrue(sector.Confidence >= 0.75f, "visible line contact should raise confidence");
+        AssertNear(914f, sector.EnemyStrength, 0.01f, "closest visible line strength feeds sector enemy");
+    }
+
+    private static void TacticalGroupScreenContactDoesNotDriveWeakPoint()
+    {
+        var sector = TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
+            sectorId: 4,
+            ownStrength: 17651f,
+            enemiesInRangeStrength: 0f,
+            angleEnemyStrength: 0f,
+            closestEnemyStrength: 914f,
+            closestEnemyUnitType: TacticalUnitType.Skirmisher,
+            closestEnemyName: "Berry's Detachment",
+            closestEnemyRouted: false,
+            closestEnemyPermanentlyDetached: true,
+            flankRisk: false,
+            strongPoint: false));
+
+        AssertTrue(sector.Mission != TacticalSectorMission.AttackWeakPoint, "screen contact must not commit formed regiments");
+        AssertEqual(0f, sector.EnemyStrength, "screen-only contact should not become line strength");
+        AssertTrue(sector.Confidence <= 0.50f, "screen-only contact should not become high confidence");
+    }
+
     private static TacticalOddsAssessment Odds(
         float current,
         int decisive = -1,
@@ -3072,6 +3117,21 @@ static class Program
 
         AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
         AssertEqual(3, decision.GroupStance, "attack stance, not charge");
+    }
+
+    private static void TacticalGroupDefensiveVisibleWeakPointCounterattacks()
+    {
+        var sector = new TacticalSectorAssessment(4, TacticalSectorSource.VisibleLineContact, 17651f, 914f, 0.85f, strongPoint: false, flankRisk: false, TacticalSectorMission.AttackWeakPoint);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 2,
+            macroAi: 2,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
+        AssertEqual(3, decision.GroupStance, "defensive visible weak point should counterattack");
+        AssertEqual("defensive-counterstroke", decision.Reason, "reason");
     }
 
     private static void TacticalGroupWeakPointUnderDefendHolds()
@@ -3319,6 +3379,22 @@ static class Program
 
         AssertFalse(decision.AllowChange, "delivered but unapplied orderstate must block stance retask");
         AssertEqual("pending-orderstate", decision.Reason, "reason");
+    }
+
+    private static void TacticalOrderSettlementAllowsStalledInterruptedPendingRetask()
+    {
+        var decision = TacticalOrderSettlementGate.Evaluate(new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 0,
+            OrderState = 1,
+            RegimentPaths = 0,
+            PathInterrupted = true,
+            MovementMode = 0,
+            ActiveMove = false
+        });
+
+        AssertTrue(decision.AllowChange, "stalled interrupted pending order should allow recovery retask");
+        AssertEqual("stalled-interrupted-order", decision.Reason, "reason");
     }
 
     private static void TacticalOrderSettlementBlocksUnknownOrderState()

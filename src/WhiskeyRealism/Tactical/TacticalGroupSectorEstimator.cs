@@ -1,0 +1,100 @@
+using System;
+
+namespace WhiskeyRealism.Tactical
+{
+    public readonly struct TacticalGroupContactInput
+    {
+        public TacticalGroupContactInput(
+            int sectorId,
+            float ownStrength,
+            float enemiesInRangeStrength,
+            float angleEnemyStrength,
+            float closestEnemyStrength,
+            int closestEnemyUnitType,
+            string closestEnemyName,
+            bool closestEnemyRouted,
+            bool closestEnemyPermanentlyDetached,
+            bool flankRisk,
+            bool strongPoint)
+        {
+            SectorId = sectorId;
+            OwnStrength = NonNegative(ownStrength);
+            EnemiesInRangeStrength = NonNegative(enemiesInRangeStrength);
+            AngleEnemyStrength = NonNegative(angleEnemyStrength);
+            ClosestEnemyStrength = NonNegative(closestEnemyStrength);
+            ClosestEnemyUnitType = closestEnemyUnitType;
+            ClosestEnemyName = string.IsNullOrEmpty(closestEnemyName) ? string.Empty : closestEnemyName;
+            ClosestEnemyRouted = closestEnemyRouted;
+            ClosestEnemyPermanentlyDetached = closestEnemyPermanentlyDetached;
+            FlankRisk = flankRisk;
+            StrongPoint = strongPoint;
+        }
+
+        public int SectorId { get; }
+        public float OwnStrength { get; }
+        public float EnemiesInRangeStrength { get; }
+        public float AngleEnemyStrength { get; }
+        public float ClosestEnemyStrength { get; }
+        public int ClosestEnemyUnitType { get; }
+        public string ClosestEnemyName { get; }
+        public bool ClosestEnemyRouted { get; }
+        public bool ClosestEnemyPermanentlyDetached { get; }
+        public bool FlankRisk { get; }
+        public bool StrongPoint { get; }
+
+        private static float NonNegative(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
+            return Math.Max(0f, value);
+        }
+    }
+
+    public static class TacticalGroupSectorEstimator
+    {
+        public static TacticalSectorAssessment BuildSector(TacticalGroupContactInput input)
+        {
+            bool lineContact = IsVisibleLineContact(input);
+            float enemy = Math.Max(input.EnemiesInRangeStrength, input.AngleEnemyStrength);
+            TacticalSectorSource source = TacticalSectorSource.AngleSlice;
+
+            if (lineContact)
+            {
+                enemy = Math.Max(enemy, input.ClosestEnemyStrength);
+                source = TacticalSectorSource.VisibleLineContact;
+            }
+
+            bool hasEnemy = enemy > 0f;
+            float confidence = hasEnemy
+                ? (lineContact ? 0.85f : 0.55f)
+                : (lineContact ? 0.60f : 0.45f);
+
+            var sector = new TacticalSectorAssessment(
+                input.SectorId,
+                source,
+                input.OwnStrength,
+                enemy,
+                confidence,
+                input.StrongPoint,
+                input.FlankRisk,
+                TacticalSectorMission.Hold);
+            var result = TacticalSectorLedger.Evaluate(new[] { sector });
+            return result.Sectors.Length > 0 ? result.Sectors[0] : sector;
+        }
+
+        public static bool IsVisibleLineContact(TacticalGroupContactInput input)
+        {
+            if (input.ClosestEnemyRouted) return false;
+            if (input.ClosestEnemyPermanentlyDetached) return false;
+            if (input.ClosestEnemyStrength <= 0f) return false;
+            if (input.ClosestEnemyUnitType != TacticalUnitType.Infantry &&
+                input.ClosestEnemyUnitType != TacticalUnitType.Cavalry)
+                return false;
+
+            string name = input.ClosestEnemyName ?? string.Empty;
+            if (name.IndexOf("skirm", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+            if (name.IndexOf("detachment", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+
+            return true;
+        }
+    }
+}
