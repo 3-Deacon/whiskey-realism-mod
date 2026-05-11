@@ -73,6 +73,51 @@ namespace WhiskeyRealism.Tactical.Operations
             return Math.Abs(delta) > tolerance;
         }
 
+        public static float RecentOrderCooldownSeconds(
+            bool closeEngaged,
+            bool visibleFormationMismatch,
+            CommandTaskType task,
+            float defaultSeconds,
+            float urgentSeconds)
+        {
+            if (closeEngaged && visibleFormationMismatch && ShouldFaceThreat(task))
+                return Math.Max(0f, urgentSeconds);
+
+            return Math.Max(0f, defaultSeconds);
+        }
+
+        public static CommandTaskType TaskForLocalFlankEmergency(
+            CommandTaskType currentTask,
+            bool closeEngaged,
+            bool flankRisk)
+        {
+            if (!closeEngaged || !flankRisk) return currentTask;
+
+            switch (currentTask)
+            {
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.AdvanceToAssembly:
+                case CommandTaskType.ReleaseReserve:
+                    return CommandTaskType.GuardFlank;
+                default:
+                    return currentTask;
+            }
+        }
+
+        public static bool CanBypassPendingOrderForLocalFormation(
+            bool closeEngaged,
+            bool flankRisk,
+            bool visibleFormationMismatch,
+            CommandTaskType task)
+        {
+            return closeEngaged &&
+                flankRisk &&
+                visibleFormationMismatch &&
+                task == CommandTaskType.GuardFlank;
+        }
+
         private static float NormalizeDelta(float value)
         {
             float delta = value % 360f;

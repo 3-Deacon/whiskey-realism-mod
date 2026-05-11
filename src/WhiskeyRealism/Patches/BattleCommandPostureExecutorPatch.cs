@@ -18,6 +18,7 @@ namespace WhiskeyRealism.Patches
     internal static class BattleCommandPostureExecutorPatch
     {
         private const float RecentOrderSeconds = 30f;
+        private const float UrgentFormationRetrySeconds = 5f;
         private const float TelemetrySeconds = 30f;
         private const float ObjectiveApproachStandOff = 75f;
         private const float AssemblyStandOff = 200f;
@@ -84,11 +85,43 @@ namespace WhiskeyRealism.Patches
             int instanceId = SafeInstanceId(group);
             bool playerProtected = IsPlayerProtected(group);
             bool routed = SafeRouted(group);
-            bool orderPending = HasPendingOrder(group);
-            bool recentOrder = HasRecentExecutorOrder(instanceId);
             var physical = BuildPhysicalState(group, playerProtected, routed);
             TacticalIdleClassification idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
+            bool closeEngaged = HasCloseEngagement(group);
+            bool flankRisk = HasLocalFlankRisk(group);
+            CommandTaskType effectiveTask = CommandFormationCorrection.TaskForLocalFlankEmergency(
+                state.Task,
+                closeEngaged,
+                flankRisk);
+            if (effectiveTask != state.Task)
+            {
+                state = new CommandNodeOperationalState(
+                    state.NodeId,
+                    state.Echelon,
+                    state.Role,
+                    effectiveTask,
+                    state.TaskState);
+            }
+
             int targetFormation = TargetFormationForTask(state.Task, group);
+            bool visibleFormationMismatch = CommandFormationCorrection.NeedsCorrection(
+                SafeFormation(group),
+                SafeFormationOrdered(group),
+                SafeGroupFormation(group),
+                targetFormation);
+            bool allowPendingLocalFormation = CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
+                closeEngaged,
+                flankRisk,
+                visibleFormationMismatch,
+                state.Task);
+            bool orderPending = HasPendingOrder(group) && !allowPendingLocalFormation;
+            float recentOrderSeconds = CommandFormationCorrection.RecentOrderCooldownSeconds(
+                closeEngaged,
+                visibleFormationMismatch,
+                state.Task,
+                RecentOrderSeconds,
+                UrgentFormationRetrySeconds);
+            bool recentOrder = HasRecentExecutorOrder(instanceId, recentOrderSeconds);
             bool alreadyCorrect = IsAlreadyDoingCorrectTask(group, state, physical, targetFormation, idle);
 
             var eligibility = new WriteEligibilitySnapshot(
@@ -100,7 +133,7 @@ namespace WhiskeyRealism.Patches
                 alreadyDoingCorrectTask: alreadyCorrect,
                 atAssignedLocation: idle == TacticalIdleClassification.ValidIdle,
                 missingLedgerAssignment: false,
-                closeEngaged: HasCloseEngagement(group));
+                closeEngaged: closeEngaged);
 
             var decision = CommandPostureExecutor.Decide(state, physical, eligibility);
             if (decision.Action == PostureExecutionAction.NoWrite)
@@ -109,7 +142,7 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            if (!CanWrite(group, eligibility, physical))
+            if (!CanWrite(group, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation))
             {
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "write-gate-denied");
                 return;
@@ -413,7 +446,9 @@ namespace WhiskeyRealism.Patches
         private static bool CanWrite(
             Regiment group,
             WriteEligibilitySnapshot eligibility,
-            CommandPhysicalState physical)
+            CommandPhysicalState physical,
+            float recentOrderSeconds,
+            bool allowPendingLocalFormation)
         {
             if (!eligibility.ModeAllowsWrites) return false;
             if (eligibility.PlayerProtected || physical.PlayerProtected) return false;
@@ -421,8 +456,8 @@ namespace WhiskeyRealism.Patches
             if (eligibility.OrderPending) return false;
             if (eligibility.RecentOrder) return false;
             if (physical.ActiveMove) return false;
-            if (HasPendingOrder(group)) return false;
-            if (HasRecentExecutorOrder(SafeInstanceId(group))) return false;
+            if (!allowPendingLocalFormation && HasPendingOrder(group)) return false;
+            if (HasRecentExecutorOrder(SafeInstanceId(group), recentOrderSeconds)) return false;
             return true;
         }
 
@@ -613,9 +648,14 @@ namespace WhiskeyRealism.Patches
 
         private static bool HasRecentExecutorOrder(int instanceId)
         {
+            return HasRecentExecutorOrder(instanceId, RecentOrderSeconds);
+        }
+
+        private static bool HasRecentExecutorOrder(int instanceId, float cooldownSeconds)
+        {
             if (instanceId == 0) return true;
             if (!_lastExecutorOrderAt.TryGetValue(instanceId, out float last)) return false;
-            return Time.realtimeSinceStartup - last < RecentOrderSeconds;
+            return Time.realtimeSinceStartup - last < Math.Max(0f, cooldownSeconds);
         }
 
         private static bool HasActiveMoveMakingProgress(Regiment group)
@@ -648,6 +688,19 @@ namespace WhiskeyRealism.Patches
             catch
             {
                 return true;
+            }
+        }
+
+        private static bool HasLocalFlankRisk(Regiment group)
+        {
+            try
+            {
+                return group != null &&
+                    (group.flanksthreated > 0f || group.outflanked > 0);
+            }
+            catch
+            {
+                return false;
             }
         }
 

@@ -105,6 +105,9 @@ static class Program
             ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
             ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
             ("command formation correction bounds repeated facing refreshes", CommandFormationCorrectionBoundsRepeatedFacingRefreshes),
+            ("command formation correction shortens retry when close engaged and still wrong", CommandFormationCorrectionShortensRetryWhenCloseEngagedAndStillWrong),
+            ("command formation correction overrides attack posture under flank emergency", CommandFormationCorrectionOverridesAttackPostureUnderFlankEmergency),
+            ("command formation correction allows pending order bypass only for local flank formation", CommandFormationCorrectionAllowsPendingOrderBypassOnlyForLocalFlankFormation),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
             ("tactical command monitor interrupted hold is illegal", TacticalCommandMonitorInterruptedHoldIsIllegal),
@@ -2411,6 +2414,96 @@ static class Program
         AssertTrue(CommandFormationCorrection.NeedsFacingCorrection(40f, 0f, 15f), "large delta needs facing");
         AssertTrue(!CommandFormationCorrection.NeedsFacingCorrection(355f, 0f, 15f), "wraparound small delta is already facing");
         AssertTrue(CommandFormationCorrection.NeedsFacingCorrection(180f, 0f, 15f), "opposite facing needs correction");
+    }
+
+    private static void CommandFormationCorrectionShortensRetryWhenCloseEngagedAndStillWrong()
+    {
+        AssertNear(
+            5f,
+            CommandFormationCorrection.RecentOrderCooldownSeconds(
+                closeEngaged: true,
+                visibleFormationMismatch: true,
+                task: CommandTaskType.FallBackToLine,
+                defaultSeconds: 30f,
+                urgentSeconds: 5f),
+            0.001f,
+            "close fallback mismatch should retry faster");
+
+        AssertNear(
+            30f,
+            CommandFormationCorrection.RecentOrderCooldownSeconds(
+                closeEngaged: true,
+                visibleFormationMismatch: false,
+                task: CommandTaskType.FallBackToLine,
+                defaultSeconds: 30f,
+                urgentSeconds: 5f),
+            0.001f,
+            "matched formation should keep normal cooldown");
+
+        AssertNear(
+            30f,
+            CommandFormationCorrection.RecentOrderCooldownSeconds(
+                closeEngaged: true,
+                visibleFormationMismatch: true,
+                task: CommandTaskType.AttackObjective,
+                defaultSeconds: 30f,
+                urgentSeconds: 5f),
+            0.001f,
+            "attack movement should keep normal cooldown");
+    }
+
+    private static void CommandFormationCorrectionOverridesAttackPostureUnderFlankEmergency()
+    {
+        AssertEqual(
+            CommandTaskType.GuardFlank,
+            CommandFormationCorrection.TaskForLocalFlankEmergency(
+                CommandTaskType.AttackObjective,
+                closeEngaged: true,
+                flankRisk: true),
+            "flanked attack should refuse/guard flank");
+
+        AssertEqual(
+            CommandTaskType.SupportAttack,
+            CommandFormationCorrection.TaskForLocalFlankEmergency(
+                CommandTaskType.SupportAttack,
+                closeEngaged: false,
+                flankRisk: true),
+            "unengaged flank risk should not interrupt support task");
+
+        AssertEqual(
+            CommandTaskType.FallBackToLine,
+            CommandFormationCorrection.TaskForLocalFlankEmergency(
+                CommandTaskType.FallBackToLine,
+                closeEngaged: true,
+                flankRisk: true),
+            "fallback task is already defensive");
+    }
+
+    private static void CommandFormationCorrectionAllowsPendingOrderBypassOnlyForLocalFlankFormation()
+    {
+        AssertTrue(
+            CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
+                closeEngaged: true,
+                flankRisk: true,
+                visibleFormationMismatch: true,
+                task: CommandTaskType.GuardFlank),
+            "local flank formation emergency can bypass a pending courier");
+
+        AssertTrue(
+            !CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
+                closeEngaged: true,
+                flankRisk: true,
+                visibleFormationMismatch: true,
+                task: CommandTaskType.AttackObjective),
+            "attack objective cannot bypass pending order");
+
+        AssertTrue(
+            !CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
+                closeEngaged: true,
+                flankRisk: true,
+                visibleFormationMismatch: false,
+                task: CommandTaskType.GuardFlank),
+            "already-formed unit cannot bypass pending order");
     }
 
     private static PostureExecutionDecision DecidePosture(CommandTaskType task)
