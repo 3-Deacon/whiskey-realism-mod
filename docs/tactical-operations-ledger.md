@@ -52,7 +52,7 @@ Modes:
 
 Rollback is config-only: set `Tactical Commander Mode = Off` and restart the game. If the failure is limited to write behavior, `MonitorOnly` keeps ledger evidence alive while suppressing writes.
 
-Task 11 machine-state note: the current local BepInEx config already has `Enable Tactical Decision Matrix Logging = true`, `Enable Tactical Battle Orchestrator = true`, `Enable Tactical Orchestrator Army = true`, and `Enable Tactical Orchestrator Intent Inference = true`. It did not yet contain an explicit `Tactical Commander Mode` row at deploy time because the new plugin had not been launched; the code default is `Active` and BepInEx should persist the key on next load.
+Task 11 machine-state note: the current local BepInEx config has `Tactical Commander Mode = Active`, `Enable Tactical Decision Matrix Logging = true`, `Enable Tactical Battle Orchestrator = true`, `Enable Tactical Orchestrator Army = true`, and `Enable Tactical Orchestrator Intent Inference = true`. The mode row was added explicitly after deploy so the next smoke run does not depend on first-load default persistence.
 
 ## Vanilla Anchors
 
