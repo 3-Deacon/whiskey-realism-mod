@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text;
 using WhiskeyRealism.Tactical.Orchestrator;
 
@@ -7,6 +8,9 @@ namespace WhiskeyRealism.Tactical.Operations
 {
     public static class TacticalOperationsTelemetry
     {
+        private static readonly ConditionalWeakTable<IDictionary<string, float>, Dictionary<string, string>> _intervalSignatures =
+            new ConditionalWeakTable<IDictionary<string, float>, Dictionary<string, string>>();
+
         public static string OpsLedger(
             int side,
             TacticalCommanderMode mode,
@@ -204,6 +208,29 @@ namespace WhiskeyRealism.Tactical.Operations
             emittedSignatures[safeKey] = safeSignature;
             pendingSignatures.Remove(safeKey);
             return true;
+        }
+
+        public static bool ShouldEmitChangedAfterInterval(
+            IDictionary<string, float> lastEmittedAt,
+            string key,
+            string signature,
+            float nowSeconds,
+            float minSeconds)
+        {
+            if (lastEmittedAt == null) return true;
+
+            string safeKey = SafeToken(key);
+            string safeSignature = SafeToken(signature);
+            var signatures = _intervalSignatures.GetValue(lastEmittedAt, _ => new Dictionary<string, string>());
+
+            if (!signatures.TryGetValue(safeKey, out var lastSignature) || lastSignature != safeSignature)
+            {
+                signatures[safeKey] = safeSignature;
+                lastEmittedAt[safeKey] = nowSeconds;
+                return true;
+            }
+
+            return ShouldEmitInterval(lastEmittedAt, safeKey, nowSeconds, minSeconds, verbose: false);
         }
 
         public static string SafeToken(string value)

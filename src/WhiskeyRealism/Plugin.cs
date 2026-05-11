@@ -289,6 +289,7 @@ namespace WhiskeyRealism
             TacticalCommanderModeRaw = Config.Bind(
                 "Tactical Orchestrator",
                 "Tactical Commander Mode",
+                // User-approved default for the full doctrine feature: Active. Existing config files still take precedence over this default.
                 "Active",
                 "Default Active. Off disables the operations-ledger command system; MonitorOnly runs vision/ledger/tasks/monitor without vanilla writes; Active runs the full tactical command system for AI sides.");
             _ = TacticalCommanderModeValue;

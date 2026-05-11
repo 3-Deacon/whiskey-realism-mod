@@ -79,6 +79,7 @@ static class Program
             ("tactical commander mode monitor runs ledger without writes", TacticalCommanderModeMonitorRunsNoWrites),
             ("tactical commander mode parses spacing and fallback", TacticalCommanderModeParsesSpacingAndFallback),
             ("tactical commander mode active emits ledger telemetry", TacticalCommanderModeActiveEmitsLedgerTelemetry),
+            ("tactical commander active remains configured default", TacticalCommanderActiveRemainsConfiguredDefault),
             ("tactical vision visual contact high confidence", TacticalVisionVisualContactHighConfidence),
             ("tactical vision stale recent fire decays", TacticalVisionStaleRecentFireDecays),
             ("tactical vision sanitizes nonfinite inputs", TacticalVisionSanitizesNonfiniteInputs),
@@ -104,6 +105,7 @@ static class Program
             ("operations ledger retargets stale forming operation", OperationsLedgerRetargetsStaleFormingOperation),
             ("tactical operations telemetry formats bounded monitor rows", TacticalOperationsTelemetryFormatsBoundedMonitorRows),
             ("tactical operations telemetry throttle helpers bound monitor loop", TacticalOperationsTelemetryThrottleHelpersBoundMonitorLoop),
+            ("doctrine telemetry throttles repeated signatures", DoctrineTelemetryThrottlesRepeatedSignatures),
             ("command node operations runtime maps roles tasks and echelons", CommandNodeOperationsRuntimeMapsRolesTasksAndEchelons),
             ("command node operations runtime uses objective situation", CommandNodeOperationsRuntimeUsesObjectiveSituation),
             ("command node operations runtime builds single fallback state", CommandNodeOperationsRuntimeBuildsSingleFallbackState),
@@ -2531,6 +2533,15 @@ static class Program
             "unchanged detail stays suppressed");
     }
 
+    private static void DoctrineTelemetryThrottlesRepeatedSignatures()
+    {
+        var emittedAt = new Dictionary<string, float>();
+
+        AssertTrue(TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(emittedAt, "doctrine:node-1", "a", 0f, 15f), "first emits");
+        AssertTrue(!TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(emittedAt, "doctrine:node-1", "a", 1f, 15f), "same throttled");
+        AssertTrue(TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(emittedAt, "doctrine:node-1", "b", 2f, 15f), "changed emits");
+    }
+
     private static void TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi()
     {
         AssertFalse(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(0, 0, aiVsAi: false), "player side blocked");
@@ -3734,6 +3745,17 @@ static class Program
         AssertTrue(TacticalCommanderModePolicy.EmitsLedgerTelemetry(TacticalCommanderMode.Active), "active telemetry");
         AssertTrue(TacticalCommanderModePolicy.EmitsLedgerTelemetry(TacticalCommanderMode.MonitorOnly), "monitor telemetry");
         AssertFalse(TacticalCommanderModePolicy.EmitsLedgerTelemetry(TacticalCommanderMode.Off), "off telemetry");
+    }
+
+    private static void TacticalCommanderActiveRemainsConfiguredDefault()
+    {
+        var configuredDefault = TacticalCommanderModePolicy.Parse("Active", TacticalCommanderMode.Off);
+
+        AssertEqual(TacticalCommanderMode.Active, configuredDefault, "configured default");
+        AssertTrue(TacticalCommanderModePolicy.RunsLedger(configuredDefault), "default runs ledger");
+        AssertTrue(TacticalCommanderModePolicy.AllowsWrites(configuredDefault), "default allows writes");
+        AssertEqual(TacticalCommanderMode.Off, TacticalCommanderModePolicy.Parse("Off", configuredDefault), "off still available");
+        AssertEqual(TacticalCommanderMode.MonitorOnly, TacticalCommanderModePolicy.Parse("MonitorOnly", configuredDefault), "monitor-only still available");
     }
 
     private static void TacticalVisionVisualContactHighConfidence()
