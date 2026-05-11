@@ -2,7 +2,7 @@
 
 Status: active design spec for remaining tactical-orchestrator behavior consumers. Living implementation status is in [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md). This spec replaces the obsolete `2026-05-08-tactical-battle-orchestrator-design.md` umbrella and supersedes the first 2026-05-09 "flat direct-child forever" version of this spec.
 
-The shipped architecture is still `TacticalBattleOrchestrator` → `ArmyOrchestrator` with O3 `DirectChildIntent` role allocation. A 2026-05-09 decompile refresh confirmed that Grand Tactician has enough vanilla hierarchy and order-delay machinery to support a Scourge-inspired command tree, but not Scourge-style per-officer AI callbacks. The new target is therefore a **dynamic command-node hierarchy** built from vanilla `Regiment` command groups (`unittyp > 13`, `parentregiment`, `allattachedunits`, `GetAttachedUnitsReg(directonly: true)`, and `BattleUnits.GetHierarchyTree`) while all behavior writes still happen through vanilla `AIBattle` decision surfaces.
+The shipped architecture is still `TacticalBattleOrchestrator` -> `ArmyOrchestrator` with O3 `DirectChildIntent` role allocation. A 2026-05-09 decompile refresh confirmed that Grand Tactician has enough vanilla hierarchy and order-delay machinery to support a Scourge-inspired command tree, but not Scourge-style per-officer AI callbacks. The new target is therefore a **dynamic command-node hierarchy** built from vanilla `Regiment` command groups (`parentregiment`, `allattachedunits`, `GetAttachedUnitsReg(directonly: true)`, and `BattleUnits.GetHierarchyTree`). Command-node eligibility must use the shifted threshold `TacticalUnitType.MaxCombat + 1 + GamePrefs.commandhierarchyshift`, clamped to the shipped pure model's bounds; `unittyp > 13` is only a vanilla formation-API guard. All behavior writes still happen through vanilla `AIBattle` / `BattleUnits` decision surfaces.
 
 There are still no hard-coded `CorpsOrchestrator`, `DivisionOrchestrator`, or `BrigadeOrchestrator` classes. Corps/division/brigade are runtime properties of vanilla command nodes, not separate mod-side class towers.
 
@@ -67,7 +67,7 @@ This is still a single generic hierarchy model. Do not create separate concrete 
 ### Tree construction rules
 
 1. Root at the side's best available command group. Prefer the existing O3 army root if resolved; otherwise synthesize the same `synth-army-{id}` fallback O3 already uses.
-2. Include vanilla command groups where `unittyp > 13`, active, same alliance, not routed, and present in `BattleUnits.completeunitlist`.
+2. Include vanilla command groups where `rawUnitTyp >= TacticalUnitType.MaxCombat + 1 + GamePrefs.commandhierarchyshift` after the same clamp used by `CommandTreeBuilder`, active, same alliance, not routed, and present in `BattleUnits.completeunitlist`. Do not use `unittyp > 13` as a complete echelon classifier; keep it only where the vanilla `SetGroupFormation` API itself requires it.
 3. Build edges from `GetAttachedUnitsReg(excludedechainedunits: true, excludeskirmishers: true, searchonlytype: -1, directonly: true, includenonactiveunits: false, ...)`.
 4. Keep raw `unittyp` and derived `EchelonKind` as data only. If hierarchy shift or scenario structure makes a top group a division, it is still the root command node.
 5. Rebuild on the orchestrator tick, not inside Harmony patches. Patches read the latest immutable snapshot.

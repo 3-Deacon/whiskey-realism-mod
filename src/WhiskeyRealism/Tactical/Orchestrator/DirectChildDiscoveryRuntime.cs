@@ -42,8 +42,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                var probes = BuildProbesForAlliance(allianceId);
                 int shift = ReadCommandHierarchyShift();
+                var probes = BuildProbesForAlliance(allianceId, shift);
                 return Probe(probes, shift);
             }
             catch (Exception e)
@@ -54,10 +54,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static IReadOnlyList<RegimentProbe> BuildProbesForAlliance(int allianceId)
+        private static IReadOnlyList<RegimentProbe> BuildProbesForAlliance(int allianceId, int commandHierarchyShift)
         {
             var units = BattleUnits.completeunitlist as System.Collections.IList;
             if (units == null || units.Count == 0) return Array.Empty<RegimentProbe>();
+            int effectiveCommandMin = ClampShiftedMin(commandHierarchyShift);
 
             // First pass: walk every command-level group on this alliance and collect
             // instanceIds of regiments flagged as direct children via vanilla's
@@ -70,7 +71,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (reg.alliance != allianceId) continue;
                 var regGo = ((Component)reg).gameObject;
                 if (regGo == null) continue;
-                if (reg.unittyp <= TacticalUnitType.MaxCombat) continue;
+                if (reg.unittyp < effectiveCommandMin) continue;
                 Regiment[] kids;
                 try { kids = reg.GetAttachedUnitsReg(true, true, -1, true, false, false, false, false); }
                 catch { kids = null; }
@@ -150,5 +151,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return 0;
             }
         }
+
     }
 }

@@ -7,8 +7,8 @@ Living reference for the tactical operations-ledger command system, active comma
 - **Implementation state:** merged to `main`; release/default config is `Tactical Commander Mode = Active`.
 - **Patch ordinal:** #61 `BattleCommandPostureExecutorPatch`.
 - **Config contract:** `Active` is the release/default mode; `MonitorOnly` is for smoke and diagnostics; rollback is `Off`.
-- **Build/deploy proof:** console harness `756 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `25f3e4168d6303c9d75377def4f6eb7dd730486469fae4f3e497fb593f2de474` (886272 bytes).
-- **Runtime smoke:** pending. Current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the deployed plugin timestamp `2026-05-10 19:12:03 -0500`, so it cannot prove Active operations-ledger runtime behavior.
+- **Build/deploy proof:** console harness `757 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `d634f46e74aeae205b3a8b4763e556bc8782214c423cfcef72cdd27dac3b5330` (887808 bytes).
+- **Runtime smoke:** pending. Current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the deployed plugin timestamp `2026-05-10 20:54:56 -0500`, so it cannot prove Active operations-ledger runtime behavior.
 
 The system turns the tactical orchestrator's command tree into a per-side operations ledger. The ledger classifies the current battle operation, assigns command-node tasks, monitors whether assigned commands are validly idle or illegally stuck, and lets #61 issue bounded vanilla commands only when the mode is `Active`.
 
@@ -24,6 +24,8 @@ The operations ledger sits inside the existing tactical orchestrator runtime:
 - #61 `BattleCommandPostureExecutorPatch` is the only new write surface. It runs after vanilla `AIBattle.AdjustGroupFormations` and writes through vanilla `BattleUnits.ChangeStance`, `BattleUnits.SetWaypoint`, and `BattleUnits.SetGroupFormation`.
 
 Harmony patches do not write ledger state. Ledger state is written during the orchestrator tick. #61 reads ledger assignments and current vanilla physical state, then either does nothing or issues one bounded vanilla posture correction for eligible AI command groups.
+
+Eligibility is ledger-first. #61 does not prefilter command nodes out solely because `unittyp <= 13`; if the orchestrator ledger assigned a vanilla `Regiment` component as a command node, the executor can consider waypoint, stance, reserve, fallback, or recovery actions for it. `unittyp > 13` is used only as the guard for `BattleUnits.SetGroupFormation`, because vanilla returns immediately for lower `unittyp` values on that API. AI-issued `SetWaypoint` / `SetGroupFormation` calls keep `showmovementoptions: false` so Whiskey does not open player movement UI while correcting AI posture.
 
 ## Config Contract
 
@@ -67,7 +69,7 @@ Known anchors for this system, confirmed against `/tmp/gt_src/asm/Assembly-CShar
 | `BattleUnits.ChangeStance` 90772 | Vanilla stance API used by #61 for bounded stance corrections. |
 | `BattleUnits.SetWaypoint` 91232 | Vanilla movement-order API used by #61 with order delay and native movement guards. |
 | `BattleUnits.SetGroupFormation` 91822 | Vanilla formation API used by #61 for command posture changes. |
-| `BattleUI.CheckPathSetting` 168980 -> `BattleUI.CheckGroupRotation` 166042 -> `BattleUnits.SetWaypoint` 91232 | Regular non-W&L campaign/battle right-click movement path. Campaign formations are represented by the `Regiment` component, but `unittyp` encodes brigade/division/corps/army command nodes. |
+| `BattleUI.CheckPathSetting` 168980 -> `BattleUI.CheckGroupRotation` 166042 -> `BattleUnits.SetWaypoint` 91232 | Regular non-W&L campaign/battle right-click movement path. Campaign formations are represented by the `Regiment` component; UI echelon labels come from `overridesymbol`, while `unittyp > 13` is the confirmed `SetGroupFormation` command/group-formation guard. |
 | `BattleUnits.GetHierarchyTree` 92720 | Vanilla hierarchy reader used by `SetGroupFormation` to walk attached command nodes. |
 | `AIBattle.CheckCurrentOrderUpdate` 8233 | W&L current-order/message bridge only. It hard-gates on `DLC_WL.dlc_scenarioactive`; do not treat it as the regular campaign movement API. |
 

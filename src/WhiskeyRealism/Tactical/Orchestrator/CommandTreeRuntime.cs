@@ -25,7 +25,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                var probes = BuildProbes(allianceId);
+                var probes = BuildProbes(allianceId, commandHierarchyShift);
                 return CommandTreeBuilder.Build(probes, allianceId, commandHierarchyShift);
             }
             catch (Exception e)
@@ -37,7 +37,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static IReadOnlyList<CommandTreeBuilder.CommandProbe> BuildProbes(int allianceId)
+        private static IReadOnlyList<CommandTreeBuilder.CommandProbe> BuildProbes(int allianceId, int commandHierarchyShift)
         {
             var units = BattleUnits.completeunitlist as System.Collections.IList;
             if (units == null || units.Count == 0)
@@ -45,7 +45,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return Array.Empty<CommandTreeBuilder.CommandProbe>();
             }
 
-            var attachedParentByChild = BuildAttachedParentMap(units, allianceId);
+            var attachedParentByChild = BuildAttachedParentMap(units, allianceId, commandHierarchyShift);
             var probes = new List<CommandTreeBuilder.CommandProbe>(units.Count);
             for (int i = 0; i < units.Count; i++)
             {
@@ -82,8 +82,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return probes;
         }
 
-        private static Dictionary<int, int> BuildAttachedParentMap(System.Collections.IList units, int allianceId)
+        private static Dictionary<int, int> BuildAttachedParentMap(System.Collections.IList units, int allianceId, int commandHierarchyShift)
         {
+            int effectiveCommandMin = ClampShiftedMin(commandHierarchyShift);
             var parentByChild = new Dictionary<int, int>();
             for (int i = 0; i < units.Count; i++)
             {
@@ -94,7 +95,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
 
                 var parentGo = ((Component)parent).gameObject;
-                if (parentGo == null || parent.unittyp <= TacticalUnitType.MaxCombat)
+                if (parentGo == null || parent.unittyp < effectiveCommandMin)
                 {
                     continue;
                 }
@@ -199,6 +200,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 return 0;
             }
+        }
+
+        private static int ClampShiftedMin(int shift)
+        {
+            int min = TacticalUnitType.MaxCombat + 1 + shift;
+            if (min < 1) return 1;
+            if (min > 18) return 18;
+            return min;
         }
     }
 }

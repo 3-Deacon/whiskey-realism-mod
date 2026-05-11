@@ -88,6 +88,7 @@ static class Program
             ("tactical operations telemetry formats bounded monitor rows", TacticalOperationsTelemetryFormatsBoundedMonitorRows),
             ("tactical operations telemetry throttle helpers bound monitor loop", TacticalOperationsTelemetryThrottleHelpersBoundMonitorLoop),
             ("command node operations runtime maps roles tasks and echelons", CommandNodeOperationsRuntimeMapsRolesTasksAndEchelons),
+            ("command node operations runtime uses objective situation", CommandNodeOperationsRuntimeUsesObjectiveSituation),
             ("army orchestrator update operations ledger replaces snapshots", ArmyOrchestratorUpdateOperationsLedgerReplacesSnapshots),
             ("tactical battle orchestrator forwards operations ledger update", TacticalBattleOrchestratorForwardsOperationsLedgerUpdate),
             ("tactical battle coordinator side gate blocks player side unless ai vs ai", TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi),
@@ -1842,6 +1843,39 @@ static class Program
         AssertEqual(CommandNodeRole.Unknown, states[7].Role, "unknown role");
         AssertEqual("division", states[2].NodeId, "node id preserved");
         AssertEqual(0, CommandNodeOperationsRuntime.Build(null, TacticalOperationShape.SingleMainEffort).Count, "null input");
+    }
+
+    private static void CommandNodeOperationsRuntimeUsesObjectiveSituation()
+    {
+        var operation = new OperationRecord(
+            TacticalOperationShape.FixAndFlank,
+            TacticalOperationPhase.Committed,
+            "ridge-a",
+            600f);
+        var objectives = new[]
+        {
+            new ObjectiveRecord(
+                new ObjectiveObservationInput(
+                    "ridge-a",
+                    TacticalObjectiveType.Ridge,
+                    TacticalObjectiveSource.VerifiedSceneObject,
+                    new TacticalMapPoint(10f, 20f),
+                    0.9f,
+                    1.0f,
+                    typeAnchorVerified: true),
+                TacticalObjectiveStatus.Contested,
+                enemyStrength: 90f,
+                friendlyAssignedStrength: 100f)
+        };
+
+        var states = CommandNodeOperationsRuntime.Build(new[]
+        {
+            new CommandNodeIntent("fix", "fix", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 0.3f, 2),
+            new CommandNodeIntent("defend", "defend", DirectChildRole.RefuseLeft, DirectChildAxis.Hold, 3, 50, 0.3f, 2),
+        }, operation, objectives);
+
+        AssertEqual(CommandTaskType.FixEnemy, states[0].Task, "fixing force reacts to contested objective as contact");
+        AssertEqual(CommandTaskType.HoldObjective, states[1].Task, "defender at contested objective holds instead of marching");
     }
 
     private static void ArmyOrchestratorUpdateOperationsLedgerReplacesSnapshots()

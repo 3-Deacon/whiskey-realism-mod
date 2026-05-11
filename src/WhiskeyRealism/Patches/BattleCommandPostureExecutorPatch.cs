@@ -21,6 +21,8 @@ namespace WhiskeyRealism.Patches
         private const float TelemetrySeconds = 30f;
         private const float ObjectiveApproachStandOff = 75f;
         private const float AssemblyStandOff = 200f;
+        private const float ReserveStandOff = 350f;
+        private const float FallbackStandOff = 250f;
         private const float MaxConservativeWaypointDistance = 2500f;
         private const float MinWaypointDistance = 15f;
 
@@ -140,8 +142,8 @@ namespace WhiskeyRealism.Patches
                 case PostureExecutionAction.SetFormation:
                     return SetFormation(bunits, group, targetFormation);
                 case PostureExecutionAction.SetFormationAndWaypoint:
+                    if (!hasTarget) return false;
                     bool formed = SetFormation(bunits, group, targetFormation);
-                    if (!hasTarget) return formed;
                     return SetWaypoint(bunits, group, target) || formed;
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
@@ -157,6 +159,7 @@ namespace WhiskeyRealism.Patches
 
         private static bool SetFormation(BattleUnits bunits, Regiment group, int targetFormation)
         {
+            if (!CanUseGroupFormation(group)) return false;
             if (targetFormation < 0 || targetFormation > 4) return false;
             if (SafeGroupFormation(group) == targetFormation) return false;
 
@@ -172,7 +175,7 @@ namespace WhiskeyRealism.Patches
                 refuseflank: -1,
                 ignoredeplyomentzone: false,
                 skiprotation: false,
-                showmovementoptions: true,
+                showmovementoptions: false,
                 placeentrenchments: false,
                 adjustbyterrainshape: true);
             return true;
@@ -192,7 +195,7 @@ namespace WhiskeyRealism.Patches
                 useorderdelay: true,
                 timetomove: -1f,
                 direction: -1,
-                showmovementoptions: true,
+                showmovementoptions: false,
                 ignorebattlemonuments: false,
                 groupmoveonly: false,
                 ignoredisabledships: false,
@@ -229,9 +232,12 @@ namespace WhiskeyRealism.Patches
                 case PostureExecutionTarget.AssemblyArea:
                     return TryObjectiveApproach(group, orchestrator, AssemblyStandOff, out target);
                 case PostureExecutionTarget.FallbackLine:
+                    return TryFallbackFromObjective(group, orchestrator, out target);
                 case PostureExecutionTarget.RecoveryPath:
-                case PostureExecutionTarget.CurrentPosition:
+                    return TryRecoveryPath(group, orchestrator, out target);
                 case PostureExecutionTarget.ReserveArea:
+                    return TryObjectiveApproach(group, orchestrator, ReserveStandOff, out target);
+                case PostureExecutionTarget.CurrentPosition:
                 case PostureExecutionTarget.None:
                     return false;
                 default:
@@ -253,6 +259,52 @@ namespace WhiskeyRealism.Patches
             float offset = Math.Min(Math.Max(standOff, 0f), Math.Max(0f, distance - MinWaypointDistance));
             target = Vector3.MoveTowards(objective, current, offset);
             return IsSafeWaypoint(group, target);
+        }
+
+        private static bool TryFallbackFromObjective(
+            Regiment group,
+            TacticalBattleOrchestrator orchestrator,
+            out Vector3 target)
+        {
+            target = default(Vector3);
+            if (!TryPrimaryObjectivePoint(group, orchestrator, out Vector3 objective)) return false;
+
+            Vector3 current = SafePosition(group);
+            if (IsDefaultVector(current)) return false;
+
+            float dx = current.x - objective.x;
+            float dz = current.z - objective.z;
+            float length = (float)Math.Sqrt(dx * dx + dz * dz);
+            if (length < 0.01f) return false;
+
+            target = new Vector3(
+                current.x + (dx / length * FallbackStandOff),
+                SafeBattleY(),
+                current.z + (dz / length * FallbackStandOff));
+            return IsSafeWaypoint(group, target);
+        }
+
+        private static bool TryRecoveryPath(
+            Regiment group,
+            TacticalBattleOrchestrator orchestrator,
+            out Vector3 target)
+        {
+            target = default(Vector3);
+            try
+            {
+                if (group != null)
+                {
+                    Vector3 lastWaypoint = group.lastsetwaypointposition;
+                    if (IsSafeWaypoint(group, lastWaypoint))
+                    {
+                        target = lastWaypoint;
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            return TryObjectiveApproach(group, orchestrator, AssemblyStandOff, out target);
         }
 
         private static bool TryPrimaryObjectivePoint(
@@ -391,7 +443,6 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (group == null) return false;
-                if (group.unittyp <= 13) return false;
                 if (group.alliance == GameVars.playeralliance && !GameVars.ai_vs_ai) return false;
                 GameObject gameObject = UnityObject(group);
                 return gameObject != null && gameObject.activeInHierarchy;
@@ -541,6 +592,8 @@ namespace WhiskeyRealism.Patches
 
         private static int TargetFormationForTask(CommandTaskType task, Regiment group)
         {
+            if (!CanUseGroupFormation(group)) return -1;
+
             switch (task)
             {
                 case CommandTaskType.AttackObjective:
@@ -565,6 +618,18 @@ namespace WhiskeyRealism.Patches
                     return SafeGroupFormation(group) == 4 ? 0 : SafeGroupFormation(group);
                 default:
                     return SafeGroupFormation(group);
+            }
+        }
+
+        private static bool CanUseGroupFormation(Regiment group)
+        {
+            try
+            {
+                return group != null && group.unittyp > 13;
+            }
+            catch
+            {
+                return false;
             }
         }
 

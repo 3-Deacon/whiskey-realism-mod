@@ -705,8 +705,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // TacticalBattleCoordinator.cs so the harness can lock the negative-id parse
         // contract. Both partials see it via the shared `partial class` declaration.
 
-        // Walk BattleUnits.completeunitlist with the same filter ArmyEvidenceBuilder uses
-        // (alliance match + unittyp > 13 + not routed) and record each command-level group's
+        // Walk BattleUnits.completeunitlist with the same shifted command-level
+        // filter ArmyEvidenceBuilder uses and record each command-level group's
         // GameObject InstanceID → post-filter index. The post-filter index equals the SectorId
         // assigned by ArmyEvidenceBuilder, so per-child primary-sector lookups stay aligned.
         private static System.Collections.Generic.Dictionary<int, int> BuildInstanceToSectorIndexMap(AIBattle battle, int allianceId)
@@ -716,13 +716,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 var units = BattleUnits.completeunitlist as System.Collections.IList;
                 if (units == null) return map;
+                int effectiveCommandMin = ArmyEvidenceBuilder.ClampShiftedMin(ArmyEvidenceBuilder.ReadCommandHierarchyShift());
                 int sectorIndex = 0;
                 for (int i = 0; i < units.Count; i++)
                 {
                     var group = units[i] as Regiment;
                     if (group == null) continue;
                     if (group.alliance != allianceId) continue;
-                    if (group.unittyp <= TacticalUnitType.MaxCombat) continue;
+                    if (group.unittyp < effectiveCommandMin) continue;
                     if (group.isrouted || group.markedforrout) continue;
                     var go = ((Component)group).gameObject;
                     if (go == null) continue;

@@ -17,6 +17,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private const float UnknownReserveCommitFraction = 0.35f;
         private static FieldInfo _bunitsFieldCache;
         private static FieldInfo _objectiveChainFieldCache;
+        private static FieldInfo _commandHierarchyShiftField;
         private static readonly Dictionary<string, FieldInfo> _sideInfoFieldCache = new Dictionary<string, FieldInfo>();
         private static readonly Dictionary<string, FieldInfo> _objectFieldCache = new Dictionary<string, FieldInfo>();
 
@@ -108,6 +109,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (units == null) return EmptyEnemyVisible();
 
                 int enemySide = OppositeSide(ownSide);
+                int effectiveCommandMin = ClampShiftedMin(ReadCommandHierarchyShift());
                 var sectors = new List<EnemyVisibleSector>();
                 bool anyContactSpotted = false;
                 bool anyContactBroken = false;
@@ -115,7 +117,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < units.Count; i++)
                 {
                     var group = units[i] as Regiment;
-                    if (!IsUsableOwnGroup(group, ownAllianceId)) continue;
+                    if (!IsUsableOwnGroup(group, ownAllianceId, effectiveCommandMin)) continue;
 
                     float ownStrength = Math.Max(1f, SafeRegimentFloat(group, "groupstrengthaigroup"));
                     float enemyStrength = VisibleEnemyStrength(group);
@@ -200,13 +202,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return total;
         }
 
-        private static bool IsUsableOwnGroup(Regiment group, int ownAllianceId)
+        private static bool IsUsableOwnGroup(Regiment group, int ownAllianceId, int effectiveCommandMin)
         {
             try
             {
                 if (group == null) return false;
                 if (group.alliance != ownAllianceId) return false;
-                if (group.unittyp <= 13) return false;
+                if (group.unittyp < effectiveCommandMin) return false;
                 if (group.isrouted || group.markedforrout) return false;
                 return true;
             }
@@ -381,6 +383,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 int alliance = SafeAlliance(bunits, side);
                 if (alliance < 0) return false;
+                int effectiveCommandMin = ClampShiftedMin(ReadCommandHierarchyShift());
 
                 bool observedChain = false;
                 var seen = new HashSet<int>();
@@ -396,7 +399,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     for (int j = 0; j < reserves.Count; j++)
                     {
                         var group = reserves[j] as Regiment;
-                        if (!IsUsableOwnGroup(group, alliance)) continue;
+                        if (!IsUsableOwnGroup(group, alliance, effectiveCommandMin)) continue;
 
                         int id = SafeInstanceId(group);
                         if (id != 0 && !seen.Add(id)) continue;
@@ -541,6 +544,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 return null;
             }
+        }
+
+        internal static int ReadCommandHierarchyShift()
+        {
+            try
+            {
+                if (_commandHierarchyShiftField == null)
+                {
+                    _commandHierarchyShiftField = AccessTools.Field(typeof(GamePrefs), "commandhierarchyshift");
+                }
+
+                if (_commandHierarchyShiftField == null) return 0;
+                var value = _commandHierarchyShiftField.GetValue(null);
+                return value is int shift ? shift : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        internal static int ClampShiftedMin(int shift)
+        {
+            int min = TacticalUnitType.MaxCombat + 1 + shift;
+            if (min < 1) return 1;
+            if (min > 18) return 18;
+            return min;
         }
 
         private static int OppositeSide(int side)

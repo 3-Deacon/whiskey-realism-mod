@@ -61,7 +61,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             OperationsLedger.Update(mode, objectives, strategicBattleIntent, force, personality);
             var commandOperations = CommandNodeOperationsRuntime.Build(
                 Army.CurrentCommandNodeIntents,
-                OperationsLedger.CurrentOperation.Shape);
+                OperationsLedger.CurrentOperation,
+                OperationsLedger.CurrentObjectives);
             Army.UpdateOperationsLedger(OperationsLedger, commandOperations ?? Array.Empty<CommandNodeOperationalState>());
         }
     }
