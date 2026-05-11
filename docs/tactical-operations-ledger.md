@@ -67,6 +67,9 @@ Known anchors for this system, confirmed against `/tmp/gt_src/asm/Assembly-CShar
 | `BattleUnits.ChangeStance` 90772 | Vanilla stance API used by #61 for bounded stance corrections. |
 | `BattleUnits.SetWaypoint` 91232 | Vanilla movement-order API used by #61 with order delay and native movement guards. |
 | `BattleUnits.SetGroupFormation` 91822 | Vanilla formation API used by #61 for command posture changes. |
+| `BattleUI.CheckPathSetting` 168980 -> `BattleUI.CheckGroupRotation` 166042 -> `BattleUnits.SetWaypoint` 91232 | Regular non-W&L campaign/battle right-click movement path. Campaign formations are represented by the `Regiment` component, but `unittyp` encodes brigade/division/corps/army command nodes. |
+| `BattleUnits.GetHierarchyTree` 92720 | Vanilla hierarchy reader used by `SetGroupFormation` to walk attached command nodes. |
+| `AIBattle.CheckCurrentOrderUpdate` 8233 | W&L current-order/message bridge only. It hard-gates on `DLC_WL.dlc_scenarioactive`; do not treat it as the regular campaign movement API. |
 
 The executor must not add broad replacements for these anchors. It only uses the vanilla APIs as bounded outputs after ledger and safety gates pass.
 

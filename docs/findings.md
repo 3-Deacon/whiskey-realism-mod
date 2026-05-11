@@ -188,6 +188,15 @@ Collected during v0.2.0 / v0.2.1 / v0.2.1.1 smoke-testing. Pattern: many vanilla
 - Bridge/ford/road/choke enumeration: no clean typed battle-objective enumeration API found in the current decompile. Partial crossing anchors exist: `BattlefieldSetup.rivercrossingpositions` is declared at line 24723, populated from NavMesh areas including `"Bridges"` and `"River Crossings"` at lines 26614-26637, and consumed by `AIBattle` blocked-crossing sampling at lines 7932-7967. Road hits in this scan are EasyRoads/editor/campaign-railroad surfaces, not a confirmed tactical POI source. Do not use typed Bridge/Ford/RoadJunction/ChokePoint scoring from these anchors alone; first implementation must classify them as generic positions unless a verified scene object/source is added.
 - Terrain safety: use existing #58/#60 terrain/deployment sampling until a broader terrain source is verified. `BattlefieldSetup.TerrainShape` exists at lines 24121-24139 and current #58/#60 terrain/facing discipline remains the bounded source for terrain safety.
 
+## Regular Campaign Command Movement Anchors
+
+- Regular campaign formations are still instances of the vanilla `Regiment` component. Do not infer literal battlefield-regiment scope from the C# class name. Campaign command tier is encoded by `unittyp` / `overridesymbol`: `13` brigade, `14` division, `15` corps, `16` army. `CampaignArmyPanel` labels these tiers at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:219088-219100`.
+- Manual regular campaign/battle right-click movement is `BattleUI.CheckPathSetting()` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:168980`, which creates `SetWaypointData` at line 169019, then `BattleUI.CheckGroupRotation()` consumes it and calls `BattleUnits.SetWaypoint(...)` at lines 166132 and 166163.
+- `BattleUnits.SetWaypoint(Regiment, ...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:91232` is the regular movement-order API. It has explicit `IsCampaign` branches, readiness checks, order-delay handling, and calls `SetGroupFormation(...)` for command nodes where `reg.unittyp > 13` at line 91559.
+- `BattleUnits.SetGroupFormation(Regiment, ...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:91822` is the vanilla group/command-node formation API. It returns immediately for `unittyp <= 13`, then walks the attached hierarchy with `GetHierarchyTree(...)` at lines 91988-91999.
+- `BattleUnits.GetHierarchyTree(Regiment, ...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:92720` reads direct attached units and builds the vanilla command tree used by group formation movement.
+- `AIBattle.CheckCurrentOrderUpdate(...)` at `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:8233` is not a regular campaign movement anchor. It returns immediately unless `DLC_WL.dlc_scenarioactive` is true, then creates `DLC_WL.GivenOrders` and career-panel order messages. Treat it as W&L current-order/message machinery only.
+
 ## Game-update re-decompile inventory
 
 When GTCW patches:

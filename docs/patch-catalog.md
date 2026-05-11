@@ -88,6 +88,7 @@ Canonical numbered catalog of all shipped Harmony patches. Each item has a stabl
 - **One concern per file:** Every patch class lives in its own `.cs` file under `src/WhiskeyRealism/Patches/`; helper/runtime catalog rows may live under `src/WhiskeyRealism/Strategic/`.
 - **Targets column** lists `Class.Method` and the decompile line number from `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`.
 - **Source-of-truth order:** shipped code > this catalog > per-patch design doc > umbrella spec > archived plan. If they disagree, trust the code.
+- **Regular campaign command movement boundary:** regular campaign formations use the vanilla `Regiment` component, but command tier is `unittyp` / `overridesymbol` (`13` brigade, `14` division, `15` corps, `16` army). Non-W&L campaign movement is `BattleUI.CheckPathSetting` / `CheckGroupRotation` -> `BattleUnits.SetWaypoint` -> `BattleUnits.SetGroupFormation` / `GetHierarchyTree`. `AIBattle.CheckCurrentOrderUpdate` is W&L-only current-order/message machinery, not the regular campaign movement API.
 
 ## v0.2.1 — what shipped
 
