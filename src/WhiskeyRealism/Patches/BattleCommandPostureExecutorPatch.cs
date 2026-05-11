@@ -738,8 +738,15 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (unit == null) return false;
-                if (unit.orderstate > 0) return true;
-                return unit.orderqueue != null && unit.orderqueue.Count > 0;
+                return TacticalOrderSettlementGate.HasBlockingPendingOrder(new TacticalOrderSettlementGate.Input
+                {
+                    OrderQueueCount = unit.orderqueue != null ? unit.orderqueue.Count : 0,
+                    OrderState = unit.orderstate,
+                    RegimentPaths = unit.regimentpaths,
+                    PathInterrupted = unit.pathinterrupted,
+                    MovementMode = unit.movementmode,
+                    ActiveMove = HasActiveMoveMakingProgress(unit)
+                });
             }
             catch
             {

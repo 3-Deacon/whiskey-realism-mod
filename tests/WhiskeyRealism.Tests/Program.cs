@@ -171,6 +171,7 @@ static class Program
             ("tactical order settlement blocks queued stance retask", TacticalOrderSettlementBlocksQueuedStanceRetask),
             ("tactical order settlement blocks delivered pending stance retask", TacticalOrderSettlementBlocksDeliveredPendingStanceRetask),
             ("tactical order settlement allows stalled interrupted pending retask", TacticalOrderSettlementAllowsStalledInterruptedPendingRetask),
+            ("tactical order settlement stalled interrupted does not block posture write", TacticalOrderSettlementStalledInterruptedDoesNotBlockPostureWrite),
             ("tactical order settlement blocks unknown order state", TacticalOrderSettlementBlocksUnknownOrderState),
             ("tactical command army and corps intent does not retask regiments directly", TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly),
             ("tactical command maps vanilla battle unit tiers", TacticalCommandMapsVanillaBattleUnitTiers),
@@ -4395,6 +4396,32 @@ static class Program
 
         AssertTrue(decision.AllowChange, "stalled interrupted pending order should allow recovery retask");
         AssertEqual("stalled-interrupted-order", decision.Reason, "reason");
+    }
+
+    private static void TacticalOrderSettlementStalledInterruptedDoesNotBlockPostureWrite()
+    {
+        bool stalledBlocks = TacticalOrderSettlementGate.HasBlockingPendingOrder(new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 0,
+            OrderState = 1,
+            RegimentPaths = 0,
+            PathInterrupted = true,
+            MovementMode = 0,
+            ActiveMove = false
+        });
+
+        bool queuedBlocks = TacticalOrderSettlementGate.HasBlockingPendingOrder(new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 1,
+            OrderState = 0,
+            RegimentPaths = 0,
+            PathInterrupted = false,
+            MovementMode = 0,
+            ActiveMove = false
+        });
+
+        AssertFalse(stalledBlocks, "stalled interrupted orderstate should not block recovery posture write");
+        AssertTrue(queuedBlocks, "queued courier order should still block posture write");
     }
 
     private static void TacticalOrderSettlementBlocksUnknownOrderState()

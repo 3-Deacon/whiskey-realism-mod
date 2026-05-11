@@ -50,5 +50,14 @@ namespace WhiskeyRealism.Tactical
 
             return new Decision(true, "settled");
         }
+
+        public static bool HasBlockingPendingOrder(in Input input)
+        {
+            if (input.OrderQueueCount > 0) return true;
+            if (input.OrderState < 0) return true;
+            if (input.OrderState <= 0) return false;
+
+            return !Evaluate(input).AllowChange;
+        }
     }
 }
