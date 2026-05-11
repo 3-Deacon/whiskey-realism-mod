@@ -88,6 +88,12 @@ static class Program
             ("tactical operations strong and weak selects fix and flank", TacticalOperationsStrongWeakSelectsFixAndFlank),
             ("tactical operations unknown strength does not look weak", TacticalOperationsUnknownStrengthDoesNotLookWeak),
             ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
+            ("operation director picks parallel attack only with advantage", OperationDirectorParallelRequiresAdvantage),
+            ("operation director preserves committed push through noise", OperationDirectorPreservesCommittedPush),
+            ("operation director soft aborts before catastrophic loss", OperationDirectorSoftAbortsBeforeCatastrophe),
+            ("operation director aborts catastrophic collapse inside commit window", OperationDirectorAbortsCatastrophicCollapseInsideCommitWindow),
+            ("operation director preserves active operation when picture is missing", OperationDirectorPreservesActiveOperationWhenPictureMissing),
+            ("operation macro ai maps soft abort to defend", OperationMacroAiMapsSoftAbortToDefend),
             ("strategic battle intent snapshot sanitizes nonfinite pressure", StrategicBattleIntentSnapshotSanitizesNonfinitePressure),
             ("tactical vision runtime adapter builds reports and objectives", TacticalVisionRuntimeAdapterBuildsReportsAndObjectives),
             ("tactical vision runtime adapter fallback objective uses visible enemy point", TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint),
@@ -1833,6 +1839,134 @@ static class Program
             TacticalReassessmentTier.SoftAbortReview,
             TacticalOperationsLedgerModel.ReassessCommittedOperation(0f, 0.8f, float.PositiveInfinity, forceCollapsed: false, objectiveSecured: false),
             "infinite odds is zero");
+    }
+
+    private static void OperationDirectorParallelRequiresAdvantage()
+    {
+        TacticalOperationDirectorInput strong = TacticalOperationDirectorInput.ForTest(
+            current: OperationRecord.Noop,
+            currentTimeSeconds: 120f,
+            ownStrength: 5000f,
+            reserveFraction: 0.35f,
+            aggression01: 0.8f,
+            caution01: 0.1f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("left", TacticalObjectiveType.Ridge, 1000f, 0.85f, true, 0.8f, 100f, 100f, 0.3f, 0.2f),
+                new BattlefieldObjectiveEstimate("right", TacticalObjectiveType.Town, 900f, 0.85f, true, 0.9f, 400f, 120f, 0.4f, 0.3f)
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(strong);
+        AssertEqual(TacticalOperationShape.ParallelObjectives, decision.Operation.Shape, "parallel shape");
+
+        TacticalOperationDirectorDecision weak = TacticalOperationDirector.Decide(strong.WithOwnStrength(2200f));
+        AssertTrue(weak.Operation.Shape != TacticalOperationShape.ParallelObjectives, "weak force cannot parallel attack");
+    }
+
+    private static void OperationDirectorPreservesCommittedPush()
+    {
+        OperationRecord current = OperationRecord.CreateCommittedForTest(TacticalOperationShape.FixAndFlank, "ridge-a", minCommitUntilSeconds: 1800f);
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            current,
+            currentTimeSeconds: 600f,
+            ownStrength: 3000f,
+            reserveFraction: 0.25f,
+            aggression01: 0.5f,
+            caution01: 0.5f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("ridge-b", TacticalObjectiveType.Ridge, 700f, 0.55f, true, 0.9f, 250f, 300f, 0.2f, 0.2f)
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+        AssertEqual("ridge-a", decision.Operation.PrimaryObjectiveId, "commit preserves primary objective");
+        AssertEqual(TacticalOperationPhase.Committed, decision.Operation.Phase, "phase");
+        AssertEqual("commit-window", decision.Reason, "reason");
+    }
+
+    private static void OperationDirectorSoftAbortsBeforeCatastrophe()
+    {
+        OperationRecord current = OperationRecord.CreateCommittedForTest(TacticalOperationShape.SingleMainEffort, "ridge-a", minCommitUntilSeconds: 300f);
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            current,
+            currentTimeSeconds: 500f,
+            ownStrength: 1000f,
+            reserveFraction: 0.02f,
+            aggression01: 0.4f,
+            caution01: 0.7f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 2200f, 0.9f, true, 0.8f, 100f, 100f, 0.5f, 0.6f)
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+        AssertEqual(TacticalOperationPhase.SoftAbort, decision.Operation.Phase, "soft abort phase");
+        AssertEqual("odds-collapse", decision.Reason, "reason");
+    }
+
+    private static void OperationDirectorAbortsCatastrophicCollapseInsideCommitWindow()
+    {
+        OperationRecord current = OperationRecord.CreateCommittedForTest(TacticalOperationShape.SingleMainEffort, "ridge-a", minCommitUntilSeconds: 1800f);
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            current,
+            currentTimeSeconds: 600f,
+            ownStrength: 1000f,
+            reserveFraction: 0.02f,
+            aggression01: 0.4f,
+            caution01: 0.7f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 2200f, 0.9f, true, 0.8f, 100f, 100f, 0.5f, 0.6f)
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+        AssertEqual(TacticalOperationPhase.SoftAbort, decision.Operation.Phase, "soft abort inside commit");
+        AssertEqual("odds-collapse", decision.Reason, "reason");
+    }
+
+    private static void OperationDirectorPreservesActiveOperationWhenPictureMissing()
+    {
+        OperationRecord current = OperationRecord.CreateCommittedForTest(TacticalOperationShape.FixAndFlank, "ridge-a", minCommitUntilSeconds: 300f);
+        TacticalOperationDirectorInput emptyPicture = TacticalOperationDirectorInput.ForTest(
+            current,
+            currentTimeSeconds: 500f,
+            ownStrength: 3000f,
+            reserveFraction: 0.25f,
+            aggression01: 0.5f,
+            caution01: 0.5f,
+            objectives: Array.Empty<BattlefieldObjectiveEstimate>());
+        TacticalOperationDirectorInput missingPrimary = TacticalOperationDirectorInput.ForTest(
+            current,
+            currentTimeSeconds: 500f,
+            ownStrength: 3000f,
+            reserveFraction: 0.25f,
+            aggression01: 0.5f,
+            caution01: 0.5f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("ridge-b", TacticalObjectiveType.Ridge, 700f, 0.55f, true, 0.9f, 250f, 300f, 0.2f, 0.2f)
+            });
+
+        TacticalOperationDirectorDecision emptyDecision = TacticalOperationDirector.Decide(emptyPicture);
+        TacticalOperationDirectorDecision missingDecision = TacticalOperationDirector.Decide(missingPrimary);
+
+        AssertEqual("ridge-a", emptyDecision.Operation.PrimaryObjectiveId, "empty picture preserves objective");
+        AssertEqual(TacticalOperationPhase.Committed, emptyDecision.Operation.Phase, "empty picture preserves phase");
+        AssertEqual("objective-picture-missing", emptyDecision.Reason, "empty picture reason");
+        AssertEqual("ridge-a", missingDecision.Operation.PrimaryObjectiveId, "missing primary preserves objective");
+        AssertEqual(TacticalOperationPhase.Committed, missingDecision.Operation.Phase, "missing primary preserves phase");
+        AssertEqual("objective-picture-missing", missingDecision.Reason, "missing primary reason");
+    }
+
+    private static void OperationMacroAiMapsSoftAbortToDefend()
+    {
+        OperationRecord softAbort = new OperationRecord(
+            TacticalOperationShape.SingleMainEffort,
+            TacticalOperationPhase.SoftAbort,
+            "ridge-a",
+            300f);
+
+        AssertEqual(2, TacticalOperationsLedgerModel.OperationMacroAi(softAbort), "soft abort macro");
     }
 
     private static void StrategicBattleIntentSnapshotSanitizesNonfinitePressure()

@@ -132,6 +132,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalCommanderMode.cs" Link="Operations\TacticalCommanderMode.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalVisionModel.cs" Link="Operations\TacticalVisionModel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalOperationsLedgerModel.cs" Link="Operations\TacticalOperationsLedgerModel.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalOperationDirector.cs" Link="Operations\TacticalOperationDirector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalOperationSelectionModel.cs" Link="Operations\TacticalOperationSelectionModel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalOperationsTelemetry.cs" Link="Operations\TacticalOperationsTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandNodeOperationalState.cs" Link="Operations\CommandNodeOperationalState.cs" />

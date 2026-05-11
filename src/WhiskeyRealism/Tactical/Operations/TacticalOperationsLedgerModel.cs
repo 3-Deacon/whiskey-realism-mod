@@ -19,7 +19,8 @@ namespace WhiskeyRealism.Tactical.Operations
         Exploiting,
         Consolidating,
         Aborting,
-        Complete
+        Complete,
+        SoftAbort
     }
 
     public enum TacticalObjectiveStatus
@@ -82,6 +83,11 @@ namespace WhiskeyRealism.Tactical.Operations
         public string PrimaryObjectiveId { get; }
         public float MinimumCommitSeconds { get; }
 
+        public static OperationRecord Noop
+        {
+            get { return new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Planning, "objective-unknown", 0f); }
+        }
+
         public OperationRecord(
             TacticalOperationShape shape,
             TacticalOperationPhase phase,
@@ -94,6 +100,14 @@ namespace WhiskeyRealism.Tactical.Operations
             MinimumCommitSeconds = SanitizeFloorZero(minimumCommitSeconds);
         }
 
+        public static OperationRecord CreateCommittedForTest(
+            TacticalOperationShape shape,
+            string primaryObjectiveId,
+            float minCommitUntilSeconds)
+        {
+            return new OperationRecord(shape, TacticalOperationPhase.Committed, primaryObjectiveId, minCommitUntilSeconds);
+        }
+
         private static float SanitizeFloorZero(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
@@ -103,6 +117,36 @@ namespace WhiskeyRealism.Tactical.Operations
 
     public static class TacticalOperationsLedgerModel
     {
+        public static int OperationMacroAi(OperationRecord operation)
+        {
+            switch (operation.Phase)
+            {
+                case TacticalOperationPhase.Planning:
+                case TacticalOperationPhase.Scouting:
+                case TacticalOperationPhase.Forming:
+                case TacticalOperationPhase.Complete:
+                    return -1;
+                case TacticalOperationPhase.Consolidating:
+                case TacticalOperationPhase.Aborting:
+                case TacticalOperationPhase.SoftAbort:
+                    return 2;
+            }
+
+            switch (operation.Shape)
+            {
+                case TacticalOperationShape.SingleMainEffort:
+                case TacticalOperationShape.SequentialObjectives:
+                case TacticalOperationShape.ParallelObjectives:
+                case TacticalOperationShape.FixAndFlank:
+                    return 1;
+                case TacticalOperationShape.DefensiveNetwork:
+                case TacticalOperationShape.DelayAndFallback:
+                    return 2;
+                default:
+                    return -1;
+            }
+        }
+
         public static TacticalReassessmentTier ReassessCommittedOperation(
             float progressStalledSeconds,
             float confidence,

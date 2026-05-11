@@ -111,32 +111,7 @@ namespace WhiskeyRealism.Patches
             if (army == null || army.CommanderMode == TacticalCommanderMode.Off)
                 return int.MinValue;
 
-            OperationRecord operation = army.CurrentOperation;
-            switch (operation.Phase)
-            {
-                case TacticalOperationPhase.Planning:
-                case TacticalOperationPhase.Scouting:
-                case TacticalOperationPhase.Forming:
-                case TacticalOperationPhase.Complete:
-                    return -1;
-                case TacticalOperationPhase.Consolidating:
-                case TacticalOperationPhase.Aborting:
-                    return 2;
-            }
-
-            switch (operation.Shape)
-            {
-                case TacticalOperationShape.SingleMainEffort:
-                case TacticalOperationShape.SequentialObjectives:
-                case TacticalOperationShape.ParallelObjectives:
-                case TacticalOperationShape.FixAndFlank:
-                    return 1;
-                case TacticalOperationShape.DefensiveNetwork:
-                case TacticalOperationShape.DelayAndFallback:
-                    return 2;
-                default:
-                    return -1;
-            }
+            return TacticalOperationsLedgerModel.OperationMacroAi(army.CurrentOperation);
         }
 
         private static int ResolveAllianceId(BattleUnits bunits, int side)
