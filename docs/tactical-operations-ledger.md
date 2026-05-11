@@ -7,8 +7,8 @@ Living reference for the tactical operations-ledger command system, active comma
 - **Implementation state:** merged to `main`; release/default config is `Tactical Commander Mode = Active`.
 - **Patch ordinal:** #61 `BattleCommandPostureExecutorPatch`.
 - **Config contract:** `Active` is the release/default mode; `MonitorOnly` is for smoke and diagnostics; rollback is `Off`.
-- **Build/deploy proof:** Task 11 console harness `756 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `25f3e4168d6303c9d75377def4f6eb7dd730486469fae4f3e497fb593f2de474` (886272 bytes).
-- **Runtime smoke:** pending. Current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the Task 11 deployed plugin timestamp `2026-05-10 19:12:03 -0500`, so it cannot prove Active operations-ledger runtime behavior.
+- **Build/deploy proof:** console harness `756 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `25f3e4168d6303c9d75377def4f6eb7dd730486469fae4f3e497fb593f2de474` (886272 bytes).
+- **Runtime smoke:** pending. Current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the deployed plugin timestamp `2026-05-10 19:12:03 -0500`, so it cannot prove Active operations-ledger runtime behavior.
 
 The system turns the tactical orchestrator's command tree into a per-side operations ledger. The ledger classifies the current battle operation, assigns command-node tasks, monitors whether assigned commands are validly idle or illegally stuck, and lets #61 issue bounded vanilla commands only when the mode is `Active`.
 
@@ -52,7 +52,7 @@ Modes:
 
 Rollback is config-only: set `Tactical Commander Mode = Off` and restart the game. If the failure is limited to write behavior, `MonitorOnly` keeps ledger evidence alive while suppressing writes.
 
-Task 11 machine-state note: the current local BepInEx config has `Tactical Commander Mode = Active`, `Enable Tactical Decision Matrix Logging = true`, `Enable Tactical Battle Orchestrator = true`, `Enable Tactical Orchestrator Army = true`, and `Enable Tactical Orchestrator Intent Inference = true`. The mode row was added explicitly after deploy so the next smoke run does not depend on first-load default persistence.
+Current machine-state note: the local BepInEx config has `Tactical Commander Mode = Active`, `Enable Tactical Decision Matrix Logging = true`, `Enable Tactical Battle Orchestrator = true`, `Enable Tactical Orchestrator Army = true`, and `Enable Tactical Orchestrator Intent Inference = true`. The mode row was added explicitly after deploy so the next smoke run does not depend on first-load default persistence.
 
 ## Vanilla Anchors
 
@@ -141,7 +141,7 @@ Pass criteria:
 
 If the active smoke fails, set `Tactical Commander Mode = Off` for rollback. If evidence is needed before a fix, set `MonitorOnly` to keep ledger telemetry while suppressing writes.
 
-Current Task 11 smoke boundary: not passed. The only current log hit for the smoke/error pattern is an unrelated HarmonyX warning, `AccessTools.TypeByName: Could not find type named CommunityHotfix`; no fresh operations-ledger markers exist because the log predates the deployed DLL.
+Current Active smoke boundary: not passed. The only current log hit for the smoke/error pattern is an unrelated HarmonyX warning, `AccessTools.TypeByName: Could not find type named CommunityHotfix`; no fresh operations-ledger markers exist because the log predates the deployed DLL.
 
 ## Risks
 

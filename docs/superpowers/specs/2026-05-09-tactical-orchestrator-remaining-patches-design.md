@@ -8,11 +8,13 @@ There are still no hard-coded `CorpsOrchestrator`, `DivisionOrchestrator`, or `B
 
 ## Current implementation status
 
-This spec is not the deployment ledger. The current ledger is [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md). As of 2026-05-10:
+This spec is not the deployment ledger. The current ledger is [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md). As of 2026-05-11:
 
 - Slice 0 command-node tree is shipped on `main` and smoke-confirmed.
 - Slice 1 reserve commitment gate is shipped on `main`, build/deploy/hash verified, and focused battle smoke is pending.
-- Slice 3 charge gate is implemented and merged to local `main`, build/deploy/hash verified in the final merged DLL, and focused battle smoke is pending before release claims.
+- Slice 3 charge gate is shipped on `main`, build/deploy/hash verified, and focused battle smoke is pending.
+- #60 deployment terrain/facing discipline is shipped on `main`, build/deploy/hash verified, and focused battle smoke is pending.
+- #61 operations-ledger posture execution is shipped on `main` with `Tactical Commander Mode = Active`, build/deploy/hash verified, and Active battle smoke is pending. Current behavior lives in [`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md).
 - Slice 2 brigade stance, Slice 4 line fallback, and Slice 5 artillery priority remain unimplemented command-role consumers.
 
 ## What's already shipped on `main` (no work needed)
@@ -174,7 +176,7 @@ Each slice below is independently shippable. Slice 0 and Slice 1 have shipped to
 
 ### Slice 3 — Charge gate
 
-**Status:** implemented and merged to local `main`; console/build/deploy/hash verified in the final merged DLL; focused gate-OFF/gate-ON battle smoke pending before release claims.
+**Status:** implemented and merged to `main`; console/build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending before release claims.
 
 **Vanilla anchor:** `AIBattle.MicroAICheckForCharges()` `:4905` initiates charges via `SetMovementMode(3)` at `:4919`.
 

@@ -5,9 +5,9 @@ Living status for the Grand Tactician tactical orchestrator workstream. This fil
 ## Current State
 
 - **Released game-facing version:** `v0.2.2` is still the latest public release.
-- **Current branch tactical orchestrator state:** O0/O1/O2/O3, #58 deployment observer, Slice 0 command-node tree, Slice 1 reserve commitment gate, Slice 3 #41 charge gate, #60 deployment terrain/facing discipline, and #61 operations-ledger posture executor are present on `implement/tactical-ops-ledger`.
-- **Current Task 11 verification:** console harness `756 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `38a39fece3b970b4542beb702177a171709ae790a550a3ec62f0d82496df5414` (886272 bytes).
-- **Runtime smoke boundary:** Active operations-ledger smoke is pending because current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the Task 11 deployed plugin timestamp `2026-05-10 18:58:28 -0500`. A fresh battle log must prove `[TacticalOpsLedger]`, `[TacticalCommandAssignment]`, `[TacticalCommandPosture]`, and `[TacticalPostureSummary]` without repeated errors before #61 is release-smoke-verified.
+- **Current main tactical orchestrator state:** O0/O1/O2/O3, #58 deployment observer, Slice 0 command-node tree, Slice 1 reserve commitment gate, Slice 3 #41 charge gate, #60 deployment terrain/facing discipline, and #61 operations-ledger posture executor are merged on `main`.
+- **Current verification:** console harness `756 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `25f3e4168d6303c9d75377def4f6eb7dd730486469fae4f3e497fb593f2de474` (886272 bytes).
+- **Runtime smoke boundary:** Active operations-ledger smoke is pending because current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the deployed plugin timestamp `2026-05-10 19:12:03 -0500`. A fresh battle log must prove `[TacticalOpsLedger]`, `[TacticalCommandAssignment]`, `[TacticalCommandPosture]`, and `[TacticalPostureSummary]` without repeated errors before #61 is release-smoke-verified.
 
 ## Architecture
 
@@ -34,7 +34,7 @@ The hierarchy is Scourge-inspired but Grand Tactician-native: runtime command no
 | Slice 1 reserve commitment gate | Shipped on `main` | Build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending |
 | Slice 3 charge gate | Shipped on `main` | Build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending |
 | #60 terrain/facing discipline | Shipped on `main` | Build/deploy/hash verified; focused enabled terrain-correction smoke pending |
-| #61 operations-ledger posture executor | Implemented/deployed on `implement/tactical-ops-ledger` | Harness/build/deploy/hash verified at `38a39fece3b970b4542beb702177a171709ae790a550a3ec62f0d82496df5414`; Active smoke pending fresh battle log |
+| #61 operations-ledger posture executor | Shipped on `main` | Harness/build/deploy/hash verified at `25f3e4168d6303c9d75377def4f6eb7dd730486469fae4f3e497fb593f2de474`; Active smoke pending fresh battle log |
 
 ## Patch Consumers
 
@@ -113,7 +113,7 @@ Expected:
 
 ## Remaining Work
 
-1. Run Active operations-ledger battle smoke on deployed DLL `38a39fece3b970b4542beb702177a171709ae790a550a3ec62f0d82496df5414` and prove `[TacticalOpsLedger]`, `[TacticalCommandAssignment]`, `[TacticalCommandPosture]`, `[TacticalPostureSummary]`, no repeated errors, and no player-subordinate retasking.
+1. Run Active operations-ledger battle smoke on deployed DLL `25f3e4168d6303c9d75377def4f6eb7dd730486469fae4f3e497fb593f2de474` and prove `[TacticalOpsLedger]`, `[TacticalCommandAssignment]`, `[TacticalCommandPosture]`, `[TacticalPostureSummary]`, no repeated errors, and no player-subordinate retasking.
 2. Run Slice 1, Slice 3, and #60 focused battle smoke on the latest deployed tactical DLL.
 3. If smoke passes, archive the operations-ledger plan and update this file plus `docs/handoff.md`, `docs/patch-catalog.md`, and `MEMORY.md` with runtime proof.
 4. Implement remaining retargeted consumers only after #61 Active smoke: line fallback, artillery priority, and any surviving brigade-stance handoff.
@@ -127,4 +127,4 @@ Expected:
 - Master handoff: `docs/handoff.md`
 - Operations-ledger living reference: `docs/tactical-operations-ledger.md`
 - Active remaining-slices design: `docs/superpowers/specs/2026-05-09-tactical-orchestrator-remaining-patches-design.md`
-- Current operations-ledger execution plan: `docs/superpowers/plans/2026-05-10-tactical-operations-ledger-command-system-implementation-plan.md`
+- Operations-ledger execution plan: `docs/superpowers/plans/2026-05-10-tactical-operations-ledger-command-system-implementation-plan.md` (point-in-time traceability; current behavior lives in `docs/tactical-operations-ledger.md`)

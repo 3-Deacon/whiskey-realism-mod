@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Current state:** implemented, merged to local `main`, and hash-deployed locally in the final merged DLL `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8` (841216 bytes; 717 PASS). Focused runtime smoke is pending before this plan can be archived. Living runtime reference: [`docs/tactical-terrain-facing-discipline.md`](../../tactical-terrain-facing-discipline.md). Use that living doc for current config, deployed hash, smoke checklist, rollback, and post-implementation deltas.
+> **Current state:** implemented and merged to `main`. #60 was hash-deployed in DLL `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8` (841216 bytes; 717 PASS), now superseded by the current operations-ledger `main` DLL `25f3e4168d6303c9d75377def4f6eb7dd730486469fae4f3e497fb593f2de474` (886272 bytes; 756 PASS). Focused #60 runtime smoke is pending before this plan can be archived. Living runtime reference: [`docs/tactical-terrain-facing-discipline.md`](../../tactical-terrain-facing-discipline.md). Use that living doc for current config, deployed hash, smoke checklist, rollback, and post-implementation deltas.
 
 **Goal:** Add terrain/facing evidence and default-off AI deployment discipline so tactical groups avoid water/weird deployment positions and face visible enemies more naturally without replacing vanilla pathfinding.
 

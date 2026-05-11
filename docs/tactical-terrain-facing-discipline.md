@@ -4,10 +4,10 @@ Living reference for tactical deployment terrain evidence, AI deployment terrain
 
 ## Current State
 
-- **Implementation state:** merged to local `main`
+- **Implementation state:** merged to `main`; current tactical runtime is superseded by the operations-ledger DLL.
 - **Patch ordinal:** #60 `TacticalDeploymentTerrainDisciplinePatch`
 - **Telemetry extension:** #58 `TacticalDeploymentObserverPatch` emits terrain/facing evidence for large deployment moves.
-- **Build/deploy proof:** local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8` (841216 bytes) on merged `main`.
+- **Build/deploy proof:** #60 was merged and hash-deployed in DLL `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8` (841216 bytes; 717 PASS). Current `main` and deployed BepInEx plugin are now `25f3e4168d6303c9d75377def4f6eb7dd730486469fae4f3e497fb593f2de474` (886272 bytes; 756 PASS) after #61 operations-ledger integration.
 - **Live local config:** `Enable Tactical Deployment Terrain Discipline = true` in `<GTCW>/BepInEx/config/dev.kyle.whiskey-realism.cfg` for focused smoke.
 - **Runtime smoke:** pending. Do not mark this slice shipped/archived until a fresh game run proves bounded logs and no repeated exceptions with the flag enabled.
 

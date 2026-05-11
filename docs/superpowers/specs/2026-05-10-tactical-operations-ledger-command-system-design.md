@@ -1,12 +1,12 @@
 # Tactical Operations Ledger Command System Design
 
-Status: approved design direction. This spec defines the full integrated tactical
-command system target for Whiskey Realism battle AI. It supersedes any narrower
-"retarget one remaining patch" framing for the current idle/scattered-unit
-problem, but does not archive
-[`2026-05-09-tactical-orchestrator-remaining-patches-design.md`](2026-05-09-tactical-orchestrator-remaining-patches-design.md);
-that document remains useful for existing shipped slice status and patch
-ownership until this design is implemented.
+Status: implemented on `main`; Active smoke still pending. This spec is now a
+point-in-time design artifact for the full integrated tactical command system.
+Current behavior, config, smoke checklist, rollback, deployed hash, and remaining
+proof gates live in
+[`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md) and
+[`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md). Do not use
+this spec as the current operational source of truth.
 
 ## Problem
 
@@ -46,19 +46,15 @@ Both AI sides should behave like Civil War armies:
 - reform, pull back, hold, stage, or attack instead of sitting unexplained.
 - dynamically react to strong new evidence without omniscient RTS twitching.
 
-The finished operating mode is active, not dormant:
+The shipped operating mode is active, not dormant:
 
 ```text
 TacticalCommanderMode = Active
 ```
 
-That is the design target after focused in-game smoke. The shipped default must
-still obey the repo's tactical patch-hygiene rule: new vanilla-state writers
-ship behind an explicit default-off behavior gate until smoke proves bounded
-logs, stable Harmony anchors, no repeated exceptions, no player-subordinate
-retasking, and no unintended side effects. Therefore `MonitorOnly` is a
-pre-release implementation checkpoint only. The release/default target for this
-system is `Active` after that smoke gate is met.
+`Active` is the release/default mode for this system. `MonitorOnly` remains a
+diagnostic and smoke mode that runs vision, ledger, task assignment, monitoring,
+and telemetry without vanilla writes. `Off` is rollback.
 
 ## Confirmed Vanilla Anchors
 

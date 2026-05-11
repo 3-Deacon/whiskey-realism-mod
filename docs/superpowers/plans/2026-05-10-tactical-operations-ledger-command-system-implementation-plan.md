@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status as of 2026-05-11:** Implementation is merged to `main`, pushed, built,
+> deployed, and hash-verified through Task 11. The current operational source of
+> truth is now [`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md);
+> this plan remains active only for Task 12 Active smoke and final archive
+> closeout. Do not use unchecked historical task boxes below to infer missing
+> code without checking shipped source and the living docs.
+
 **Goal:** Build the full tactical operations ledger command system so AI armies scout, evaluate objectives, assign corps/division/brigade-like command nodes, commit to operations, keep reserves, recover idle/stuck commands, and release with `Tactical Commander Mode = Active` as the default after smoke verification.
 
 **Architecture:** Add a pure decision core under `Tactical/Operations/` and small runtime adapters under `Tactical/Orchestrator/` / `Patches/`. Harmony patches read immutable orchestrator snapshots and write vanilla state only through bounded, gated surfaces; authoritative Whiskey tactical state is updated only by the orchestrator tick.
