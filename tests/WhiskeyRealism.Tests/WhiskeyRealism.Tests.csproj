@@ -140,6 +140,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalCommandMonitor.cs" Link="Operations\TacticalCommandMonitor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\DoctrineTargetPoint.cs" Link="Operations\DoctrineTargetPoint.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandDoctrineOrder.cs" Link="Operations\CommandDoctrineOrder.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandDoctrineAssignment.cs" Link="Operations\CommandDoctrineAssignment.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandPostureExecutor.cs" Link="Operations\CommandPostureExecutor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandFallbackTargetResolver.cs" Link="Operations\CommandFallbackTargetResolver.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandFormationCorrection.cs" Link="Operations\CommandFormationCorrection.cs" />

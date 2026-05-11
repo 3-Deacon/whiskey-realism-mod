@@ -119,6 +119,12 @@ static class Program
             ("doctrine order distinguishes no assignment from form up", DoctrineOrderDistinguishesNoAssignmentFromFormUp),
             ("doctrine order requires target for movement tasks", DoctrineOrderRequiresTargetForMovementTasks),
             ("doctrine order classifies legal idle reasons", DoctrineOrderClassifiesLegalIdleReasons),
+            ("doctrine assignment high odds attack weak point attacks", DoctrineAssignmentHighOddsAttackWeakPointAttacks),
+            ("doctrine assignment reserve gets legal idle", DoctrineAssignmentReserveGetsLegalIdle),
+            ("doctrine assignment fallback guard pulls toward fallback line", DoctrineAssignmentFallbackGuardPullsBack),
+            ("doctrine assignment stale objective fails closed", DoctrineAssignmentStaleObjectiveFailsClosed),
+            ("doctrine assignment unknown role has no legal idle", DoctrineAssignmentUnknownRoleHasNoLegalIdle),
+            ("doctrine assignment fallback target remains finite for large coordinates", DoctrineAssignmentFallbackTargetRemainsFiniteForLargeCoordinates),
             ("command fallback target resolver uses visible threat without objective", CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective),
             ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
             ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
@@ -2807,6 +2813,130 @@ static class Program
 
         AssertTrue(reserve.AllowsIdle, "reserve wait is legal idle");
         AssertTrue(!stalled.AllowsIdle, "no idle reason is illegal idle");
+    }
+
+    private static void DoctrineAssignmentHighOddsAttackWeakPointAttacks()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("brigade-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 400f, 0.9f, true, 0.8f, 100f, 250f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1600f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandTaskType.AttackObjective, orders[0].Task, "task");
+        AssertEqual("ridge-a", orders[0].ObjectiveId, "objective");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "target");
+        AssertTrue(!orders[0].AllowsIdle, "attacker should not idle");
+    }
+
+    private static void DoctrineAssignmentReserveGetsLegalIdle()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("reserve-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.Reserve, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 400f, 0.9f, true, 0.8f, 100f, 250f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1600f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandTaskType.ReserveWait, orders[0].Task, "task");
+        AssertEqual(DoctrineAllowedIdleReason.HeldReserve, orders[0].AllowedIdle, "idle reason");
+        AssertTrue(orders[0].AllowsIdle, "reserve may idle");
+    }
+
+    private static void DoctrineAssignmentFallbackGuardPullsBack()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("fallback-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.FallbackGuard, CommandTaskType.FormUp, 200f, 300f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.DelayAndFallback, TacticalOperationPhase.SoftAbort, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 2000f, 0.9f, true, 0.8f, 100f, 250f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1000f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandTaskType.FallBackToLine, orders[0].Task, "task");
+        AssertTrue(orders[0].FallbackTarget.HasValue, "fallback target");
+        AssertEqual(DoctrineAllowedIdleReason.None, orders[0].AllowedIdle, "fallback should move");
+        AssertTrue(
+            DistanceSquared(orders[0].FallbackTarget.X, orders[0].FallbackTarget.Z, 100f, 250f) >
+            DistanceSquared(nodes[0].X, nodes[0].Z, 100f, 250f),
+            "fallback target farther from objective than node");
+    }
+
+    private static void DoctrineAssignmentStaleObjectiveFailsClosed()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("brigade-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "stale-objective", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 400f, 0.9f, true, 0.8f, 100f, 250f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1600f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandTaskType.FormUp, orders[0].Task, "stale primary should not attack fallback objective");
+        AssertTrue(!orders[0].PrimaryTarget.HasValue, "stale primary should not receive attack target");
+        AssertTrue(!orders[0].AllowsIdle, "committed stale objective is not legal idle");
+    }
+
+    private static void DoctrineAssignmentUnknownRoleHasNoLegalIdle()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            default(CommandNodeOperationalState)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 400f, 0.9f, true, 0.8f, 100f, 250f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1600f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandNodeRole.Unknown, orders[0].Role, "role");
+        AssertEqual(CommandTaskType.None, orders[0].Task, "unknown role should not get purposeful task");
+        AssertTrue(!orders[0].AllowsIdle, "unknown role should not get legal idle");
+    }
+
+    private static void DoctrineAssignmentFallbackTargetRemainsFiniteForLargeCoordinates()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("fallback-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.FallbackGuard, CommandTaskType.FormUp, float.MaxValue / 4f, float.MaxValue / 4f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.DelayAndFallback, TacticalOperationPhase.SoftAbort, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 2000f, 0.9f, true, 0.8f, -float.MaxValue / 4f, -float.MaxValue / 4f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1000f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandTaskType.FallBackToLine, orders[0].Task, "task");
+        AssertTrue(orders[0].FallbackTarget.HasValue, "fallback target should remain finite");
     }
 
     private static void CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective()
@@ -10731,6 +10861,13 @@ static class Program
             throw new Exception(label + ": expected finite values but got expected " + expected + " actual " + actual);
         if (Math.Abs(expected - actual) > tolerance)
             throw new Exception(label + ": expected " + expected + " got " + actual);
+    }
+
+    private static float DistanceSquared(float ax, float az, float bx, float bz)
+    {
+        float dx = ax - bx;
+        float dz = az - bz;
+        return dx * dx + dz * dz;
     }
 
     private static void AssertThrows(Action action, string label)
