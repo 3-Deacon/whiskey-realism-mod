@@ -71,16 +71,19 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (__state == null || __state.Units == null) return;
-                if (!SafeUseOrderDelays()) return;
-
-                BattleUnits battleUnits = ResolveBattleUnits(__instance);
-                if (battleUnits == null) return;
 
                 bool doctrineDeny = __state.HasDoctrineDecision &&
                     __state.DoctrineDecision.Action == DoctrineConsumerAction.Deny;
                 bool doctrineFallback = __state.HasDoctrineDecision &&
                     __state.DoctrineDecision.Action == DoctrineConsumerAction.Allow &&
                     __state.DoctrineDecision.Task == CommandTaskType.FallBackToLine;
+                bool useOrderDelays = SafeUseOrderDelays();
+
+                if (doctrineDeny) return;
+                if (!useOrderDelays) return;
+
+                BattleUnits battleUnits = ResolveBattleUnits(__instance);
+                if (battleUnits == null) return;
 
                 for (int i = 0; i < __state.Units.Length; i++)
                 {
@@ -90,22 +93,20 @@ namespace WhiskeyRealism.Patches
 
                     int afterPaths = SafePathCount(unit);
                     int afterQueue = SafeQueueCount(unit);
-                    if (afterPaths <= before.Paths) continue;
-                    if (afterQueue > before.QueueCount) continue;
+                    if (!TacticalReservePolicyLedger.ShouldDelayGuardConsumeReserveMovement(
+                        doctrineDeny,
+                        before.Paths,
+                        afterPaths,
+                        before.QueueCount,
+                        afterQueue,
+                        useOrderDelays))
+                    {
+                        continue;
+                    }
 
                     Vector3 target = unit.lastsetwaypointposition;
                     float rotation = SafeTargetAngle(unit, target);
                     RemoveAddedPaths(unit, before.Paths, afterPaths);
-                    if (doctrineDeny)
-                    {
-                        OnceLog.Info(
-                            "tactical-reserve-delay-guard:doctrine-deny:" + SafeUnitName(unit),
-                            "[TacticalReserveOrderDelayGuard] removed direct reserve path action=deny reason=" +
-                            __state.DoctrineDecision.Reason +
-                            " unit=" + SafeUnitName(unit) +
-                            " group=" + SafeUnitName(aigroup));
-                        continue;
-                    }
 
                     battleUnits.SetWaypoint(
                         unit,

@@ -203,6 +203,7 @@ static class Program
             ("tactical b6b reserve wl ownership unsafe holds reserve", TacticalB6bReserveWlOwnershipUnsafeHoldsReserve),
             ("tactical b6b reserve stale order prepares without mutation", TacticalB6bReserveStaleOrderPreparesWithoutMutation),
             ("tactical reserve doctrine deny removal ignores order delays", TacticalReserveDoctrineDenyRemovalIgnoresOrderDelays),
+            ("tactical reserve delay guard does not consume doctrine deny movement", TacticalReserveDelayGuardDoesNotConsumeDoctrineDenyMovement),
             ("tactical b6c reaction context returns last decision per group", TacticalB6cReactionContextReturnsLastDecisionPerGroup),
             ("tactical b6c reaction context clear discards all entries", TacticalB6cReactionContextClearDiscardsAllEntries),
             ("tactical b6c reaction context missing key returns default maintain", TacticalB6cReactionContextMissingKeyReturnsDefaultMaintain),
@@ -5630,6 +5631,37 @@ static class Program
                 afterQueueCount: 1,
                 useOrderDelays: false),
             "queued delayed order is not the direct vanilla path shape");
+    }
+
+    private static void TacticalReserveDelayGuardDoesNotConsumeDoctrineDenyMovement()
+    {
+        AssertFalse(
+            TacticalReservePolicyLedger.ShouldDelayGuardConsumeReserveMovement(
+                doctrineDeny: true,
+                beforePaths: 0,
+                afterPaths: 1,
+                beforeQueueCount: 0,
+                afterQueueCount: 0,
+                useOrderDelays: true),
+            "delay guard must not remove doctrine-denied direct movement before full restore owner runs");
+        AssertTrue(
+            TacticalReservePolicyLedger.ShouldDelayGuardConsumeReserveMovement(
+                doctrineDeny: false,
+                beforePaths: 0,
+                afterPaths: 1,
+                beforeQueueCount: 0,
+                afterQueueCount: 0,
+                useOrderDelays: true),
+            "non-deny direct reserve movement remains eligible for delay conversion");
+        AssertFalse(
+            TacticalReservePolicyLedger.ShouldDelayGuardConsumeReserveMovement(
+                doctrineDeny: false,
+                beforePaths: 0,
+                afterPaths: 1,
+                beforeQueueCount: 0,
+                afterQueueCount: 0,
+                useOrderDelays: false),
+            "delay conversion still requires order delays");
     }
 
     private static void TacticalGateHelpersWlOwnership()

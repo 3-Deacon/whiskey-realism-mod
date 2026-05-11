@@ -101,6 +101,26 @@ namespace WhiskeyRealism.Tactical
                 safeAfterQueue <= safeBeforeQueue;
         }
 
+        public static bool ShouldDelayGuardConsumeReserveMovement(
+            bool doctrineDeny,
+            int beforePaths,
+            int afterPaths,
+            int beforeQueueCount,
+            int afterQueueCount,
+            bool useOrderDelays)
+        {
+            if (doctrineDeny) return false;
+            if (!useOrderDelays) return false;
+
+            int safeBeforePaths = Math.Max(0, beforePaths);
+            int safeAfterPaths = Math.Max(0, afterPaths);
+            int safeBeforeQueue = Math.Max(0, beforeQueueCount);
+            int safeAfterQueue = Math.Max(0, afterQueueCount);
+
+            return safeAfterPaths > safeBeforePaths &&
+                safeAfterQueue <= safeBeforeQueue;
+        }
+
         public static TacticalReserveIntentDecision Decide(TacticalReserveIntentInput input)
         {
             TacticalReserveAvailability availability = input.Availability;
