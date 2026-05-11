@@ -682,6 +682,7 @@ static class Program
             ("direct child allocator assigns support main to adjacent strong child", DirectChildAllocatorAssignsSupportMainToAdjacentStrongChild),
             ("direct child allocator assigns fix on fixing sector with contact", DirectChildAllocatorAssignsFixOnFixingSectorWithContact),
             ("direct child allocator falls back before fixing under severe overmatch", DirectChildAllocatorFallbackBeatsFixUnderSevereOvermatch),
+            ("direct child allocator falls back before main under severe overmatch", DirectChildAllocatorFallbackBeatsMainUnderSevereOvermatch),
             ("direct child allocator assigns reserve to uncommitted strong child", DirectChildAllocatorAssignsReserveToUncommittedStrongChild),
             ("direct child allocator assigns fallback on adverse odds and attack", DirectChildAllocatorAssignsFallbackOnAdverseOddsAndAttack),
             ("direct child allocator allocates refuse to flank with exposure", DirectChildAllocatorAllocatesRefuseToFlankWithExposure),
@@ -13304,6 +13305,22 @@ static class Program
         var evidence = new[] { new DirectChildEvidence(2, 4, true, 7, 0, 0.95f) };
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 7, 0.9f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+
+        var intents = DirectChildAllocator.AllocateWithChildIntent(plan, personality, snapshots, evidence, new[] { enemyAttack });
+
+        AssertEqual(DirectChildRole.Fallback, intents[0].Role);
+        AssertEqual(DirectChildAxis.Withdraw, intents[0].Axis);
+    }
+
+    private static void DirectChildAllocatorFallbackBeatsMainUnderSevereOvermatch()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            7, new[] { 2 }, new[] { 4 }, 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Overmatched Main Effort", true) };
+        var evidence = new[] { new DirectChildEvidence(2, 4, true, 7, 0, 0.95f) };
+        var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 7, 0.9f, 0f, Array.Empty<EvidenceTag>());
+        var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
 
         var intents = DirectChildAllocator.AllocateWithChildIntent(plan, personality, snapshots, evidence, new[] { enemyAttack });
 

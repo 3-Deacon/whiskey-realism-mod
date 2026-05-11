@@ -47,7 +47,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int i = 0; i < roles.Length; i++) roles[i] = DirectChildRole.Unknown;
 
             int mainIdx = PickMainEffort(plan.MainEffortSector, snapshots, evidence);
-            if (mainIdx >= 0) roles[mainIdx] = DirectChildRole.Main;
+            if (mainIdx >= 0 && !ShouldFallbackUnderSevereOvermatch(evidence[mainIdx], perChildEnemyIntent[mainIdx]))
+                roles[mainIdx] = DirectChildRole.Main;
 
             for (int i = 0; i < snapshots.Count; i++)
             {
