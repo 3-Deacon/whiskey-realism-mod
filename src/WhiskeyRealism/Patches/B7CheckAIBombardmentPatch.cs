@@ -1,6 +1,9 @@
+using System;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -50,6 +53,15 @@ namespace WhiskeyRealism.Patches
                     var screenInput = TacticalArtilleryInputAdapter.ToSupportScreenInput(snapshot);
                     var screenResult = TacticalSupportScreen.Score(screenInput);
 
+                    DoctrineArtilleryDecision doctrineDecision = default(DoctrineArtilleryDecision);
+                    if (TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder doctrineOrder, out BattlefieldPictureSnapshot picture))
+                    {
+                        doctrineDecision = DoctrineConsumerDecisions.DecideArtillery(
+                            doctrineOrder,
+                            DoctrineConsumerDecisions.EnemyMainLineExposed(doctrineOrder, picture),
+                            HasFriendlyCloseRangeRisk(unit, unit.firerange));
+                    }
+
                     var doctrineInput = new TacticalArtilleryDoctrine.Input
                     {
                         ScreenResult = screenResult,
@@ -61,6 +73,7 @@ namespace WhiskeyRealism.Patches
                         CombatBehaviorOrdered = snapshot.CombatBehaviorOrdered,
                         AiFeudStance = snapshot.AiFeudStance,
                         IsPlayerAiOrFeud = snapshot.IsPlayerAiOrFeud,
+                        DoctrineDecision = doctrineDecision,
                     };
                     var decision = TacticalArtilleryDoctrine.Score(doctrineInput);
 
@@ -169,6 +182,70 @@ namespace WhiskeyRealism.Patches
                 }
             }
             catch { }
+            return false;
+        }
+
+        private static bool HasFriendlyCloseRangeRisk(Regiment unit, float fireRange)
+        {
+            try
+            {
+                if (unit == null || unit.unitrange == null || unit.unitrange.temp_owninrangeregs == null)
+                    return false;
+
+                float closeRange = Math.Max(80f, fireRange * 0.20f);
+                for (int i = 0; i < unit.unitrange.temp_owninrangeregs.Count; i++)
+                {
+                    Regiment friend = unit.unitrange.temp_owninrangeregs[i];
+                    if (friend == null) continue;
+                    if (friend.isrouted || friend.markedforrout) continue;
+                    if (friend.unittyp != TacticalUnitType.Infantry &&
+                        friend.unittyp != TacticalUnitType.Cavalry)
+                        continue;
+
+                    float distance = UnityEngine.Vector3.Distance(
+                        ((UnityEngine.Component)unit).transform.position,
+                        ((UnityEngine.Component)friend).transform.position);
+                    if (distance <= closeRange) return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static bool TryResolveDoctrineOrder(
+            Regiment group,
+            out CommandDoctrineOrder order,
+            out BattlefieldPictureSnapshot picture)
+        {
+            order = default(CommandDoctrineOrder);
+            picture = new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>());
+
+            try
+            {
+                if (group == null) return false;
+                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
+                ArmyOrchestrator army = side?.Army;
+                var orders = army?.CurrentDoctrineOrders;
+                if (orders == null || orders.Count == 0) return false;
+
+                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
+                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                for (int i = 0; i < orders.Count; i++)
+                {
+                    CommandDoctrineOrder candidate = orders[i];
+                    if (!TacticalPatchIds.NodeIdMatches(candidate.NodeId, gameObjectInstanceId, componentInstanceId))
+                        continue;
+                    if (!candidate.HasPurpose) return false;
+
+                    order = candidate;
+                    if (side?.OperationsLedger != null)
+                        picture = side.OperationsLedger.CurrentBattlefieldPicture;
+                    return true;
+                }
+            }
+            catch { }
+
             return false;
         }
 

@@ -1,3 +1,5 @@
+using WhiskeyRealism.Tactical.Operations;
+
 namespace WhiskeyRealism.Tactical
 {
     public static class TacticalArtilleryDoctrine
@@ -22,6 +24,7 @@ namespace WhiskeyRealism.Tactical
             public int CombatBehaviorOrdered;
             public int AiFeudStance;
             public int IsPlayerAiOrFeud;
+            public DoctrineArtilleryDecision DoctrineDecision;
         }
 
         public static Decision Score(in Input input)
@@ -29,6 +32,9 @@ namespace WhiskeyRealism.Tactical
             // W&L gate: safe default is PreserveFire (no write).
             if (!TacticalGateHelpers.PassesWlOwnership(input.AiFeudStance, input.IsPlayerAiOrFeud))
                 return Decision.PreserveFire;
+
+            if (input.DoctrineDecision.Action == DoctrineConsumerAction.Deny)
+                return Decision.CancelBombard;
 
             // Low ammo cancels regardless of screen.
             if (input.AmmoTotalRatio < 0.10f)
@@ -42,6 +48,10 @@ namespace WhiskeyRealism.Tactical
             // Shaken close-enemy -> defensive fallback telemetry (vanilla writes movement).
             if (input.ScreenResult == TacticalSupportScreen.Result.Shaken && enemyClose)
                 return Decision.DefensiveFallback;
+
+            if (input.DoctrineDecision.Action == DoctrineConsumerAction.Allow &&
+                input.DoctrineDecision.Reason == "support-main-effort")
+                return Decision.SuppressStrongpoint;
 
             // Counterbattery if enemy artillery is visible and we are in fire range.
             if (input.EnemyArtilleryVisible && input.ClosestEnemyDistance <= input.UnitFireRange)

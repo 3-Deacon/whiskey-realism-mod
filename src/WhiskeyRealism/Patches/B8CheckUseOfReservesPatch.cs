@@ -3,6 +3,8 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -35,6 +37,25 @@ namespace WhiskeyRealism.Patches
                 int? isPlayerAiOrFeud = IsPlayerAiOrFeud(__instance);
                 if (!isPlayerAiOrFeud.HasValue) return;
                 if (!HasPerformAiActionDlcWl()) return;
+
+                if (TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder doctrineOrder))
+                {
+                    DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
+                        doctrineOrder,
+                        LocalOdds(aigroup),
+                        ReserveFraction(aigroup),
+                        SafeCurrentTimeSeconds());
+                    if (doctrineDecision.Action == DoctrineConsumerAction.Deny)
+                    {
+                        EmitHelpRequest(aigroup, TacticalWithdrawalDoctrine.Decision.HoldLine);
+                        OnceLog.Info(
+                            "b8-check-reserves:doctrine-deny:" + SafeInstanceId(aigroup),
+                            "[B8] reserve doctrine denied reserve mutation reason=" + doctrineDecision.Reason +
+                            " task=" + doctrineDecision.Task +
+                            " group=" + SafeName(aigroup));
+                        return;
+                    }
+                }
 
                 if (allUnits == null)
                 {
@@ -328,6 +349,125 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning("b8-check-reserves-perform-ai-action-dlcwl-error", "[B8] Failed invoking AIBattle.PerformAIActionDLCWL: " + ex.Message);
                 return false;
             }
+        }
+
+        private static bool TryResolveDoctrineOrder(Regiment group, out CommandDoctrineOrder order)
+        {
+            order = default(CommandDoctrineOrder);
+
+            try
+            {
+                if (group == null) return false;
+                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
+                ArmyOrchestrator army = side?.Army;
+                var orders = army?.CurrentDoctrineOrders;
+                if (orders == null || orders.Count == 0) return false;
+
+                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
+                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                for (int i = 0; i < orders.Count; i++)
+                {
+                    CommandDoctrineOrder candidate = orders[i];
+                    if (!TacticalPatchIds.NodeIdMatches(candidate.NodeId, gameObjectInstanceId, componentInstanceId))
+                        continue;
+                    if (!candidate.HasPurpose) return false;
+
+                    order = candidate;
+                    return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static float LocalOdds(Regiment group)
+        {
+            try
+            {
+                if (group == null) return 1f;
+                float own = System.Math.Max(Sanitize(group.groupowninrange), Sanitize(group.groupstrengthaigroup));
+                float enemy = System.Math.Max(Sanitize(group.groupenemiesinrange), SumEnemyStrengthWithinAngle(group));
+                if (enemy <= 0f) return own > 0f ? 2f : 1f;
+                return own / System.Math.Max(1f, enemy);
+            }
+            catch
+            {
+                return 1f;
+            }
+        }
+
+        private static float ReserveFraction(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.allattachedunits == null || group.allattachedunits.Length == 0)
+                    return 0f;
+
+                float total = 0f;
+                float reserve = 0f;
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit == null) continue;
+                    if (unit.isrouted || unit.markedforrout || unit.permanentlydetached) continue;
+                    if (unit.unittyp > TacticalUnitType.Cavalry) continue;
+
+                    float strength = Sanitize(unit.groupstrengthactive);
+                    total += strength;
+                    if (unit.regimentpaths <= 0 && !unit.inengagement)
+                        reserve += strength;
+                }
+
+                if (total <= 0f) return 0f;
+                return reserve / total;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float SumEnemyStrengthWithinAngle(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.unitrange == null || group.unitrange.enemystrengthwithinangle == null)
+                    return 0f;
+
+                float total = 0f;
+                for (int i = 0; i < group.unitrange.enemystrengthwithinangle.Length; i++)
+                    total += System.Math.Max(0f, group.unitrange.enemystrengthwithinangle[i]);
+                return total;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float SafeCurrentTimeSeconds()
+        {
+            try { return Time.realtimeSinceStartup; }
+            catch { return 0f; }
+        }
+
+        private static float Sanitize(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
+            return value;
+        }
+
+        private static int SafeInstanceId(Regiment group)
+        {
+            try { return group != null ? group.GetInstanceID() : 0; }
+            catch { return 0; }
+        }
+
+        private static string SafeName(Regiment group)
+        {
+            try { return group != null ? TacticalCurrentOrderSignature.Safe(group.name) : "-"; }
+            catch { return "-"; }
         }
     }
 }

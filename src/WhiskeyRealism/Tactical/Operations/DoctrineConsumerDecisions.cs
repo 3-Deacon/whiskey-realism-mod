@@ -33,6 +33,32 @@ namespace WhiskeyRealism.Tactical.Operations
         public string Reason { get; }
     }
 
+    public readonly struct DoctrineReserveDecision
+    {
+        public DoctrineReserveDecision(DoctrineConsumerAction action, CommandTaskType task, string reason)
+        {
+            Action = action;
+            Task = task;
+            Reason = string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason.Trim();
+        }
+
+        public DoctrineConsumerAction Action { get; }
+        public CommandTaskType Task { get; }
+        public string Reason { get; }
+    }
+
+    public readonly struct DoctrineArtilleryDecision
+    {
+        public DoctrineArtilleryDecision(DoctrineConsumerAction action, string reason)
+        {
+            Action = action;
+            Reason = string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason.Trim();
+        }
+
+        public DoctrineConsumerAction Action { get; }
+        public string Reason { get; }
+    }
+
     public static class DoctrineConsumerDecisions
     {
         private const float FreshExposureConfidenceFloor = 0.75f;
@@ -75,6 +101,49 @@ namespace WhiskeyRealism.Tactical.Operations
                 return new DoctrineChargeDecision(DoctrineConsumerAction.Allow, "doctrine-charge");
 
             return new DoctrineChargeDecision(DoctrineConsumerAction.Observe, "odds-not-ready");
+        }
+
+        public static DoctrineReserveDecision DecideReserve(
+            CommandDoctrineOrder order,
+            float mainEffortOdds,
+            float reserveFraction,
+            float currentTimeSeconds)
+        {
+            if (order.Task == CommandTaskType.FallBackToLine)
+                return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.FallBackToLine, "fallback-relief");
+
+            if (order.Role == CommandNodeRole.Reserve &&
+                order.Task == CommandTaskType.ReserveWait &&
+                IsFinite(mainEffortOdds) &&
+                IsFinite(reserveFraction) &&
+                mainEffortOdds < 0.9f &&
+                reserveFraction >= 0.15f)
+            {
+                return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.ReleaseReserve, "main-effort-under-pressure");
+            }
+
+            if (order.Role == CommandNodeRole.Reserve)
+                return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, "reserve-held");
+
+            return new DoctrineReserveDecision(DoctrineConsumerAction.Observe, order.Task, "no-doctrine-opinion");
+        }
+
+        public static DoctrineArtilleryDecision DecideArtillery(
+            CommandDoctrineOrder order,
+            bool enemyMainLineExposed,
+            bool friendlyCloseRange)
+        {
+            if (friendlyCloseRange)
+                return new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, "friendly-close-range");
+            if (enemyMainLineExposed &&
+                (order.Task == CommandTaskType.AttackObjective ||
+                 order.Task == CommandTaskType.SupportAttack ||
+                 order.Task == CommandTaskType.FixEnemy))
+            {
+                return new DoctrineArtilleryDecision(DoctrineConsumerAction.Allow, "support-main-effort");
+            }
+
+            return new DoctrineArtilleryDecision(DoctrineConsumerAction.Observe, "no-doctrine-opinion");
         }
 
         public static bool EnemyMainLineExposed(CommandDoctrineOrder order, BattlefieldPictureSnapshot picture)

@@ -138,6 +138,11 @@ static class Program
             ("doctrine consumer battlefield picture screen does not expose line", DoctrineConsumerBattlefieldPictureScreenDoesNotExposeLine),
             ("doctrine consumer known objective miss does not coordinate match", DoctrineConsumerKnownObjectiveMissDoesNotCoordinateMatch),
             ("doctrine consumer allow cannot override charge denial", DoctrineConsumerAllowCannotOverrideChargeDenial),
+            ("doctrine reserve releases to support endangered main effort", DoctrineReserveReleasesToSupportEndangeredMainEffort),
+            ("doctrine fallback relief beats stale held order", DoctrineFallbackReliefBeatsStaleHeldOrder),
+            ("doctrine reserve nonfinite reserve fraction fails closed", DoctrineReserveNonfiniteReserveFractionFailsClosed),
+            ("doctrine artillery supports committed main effort", DoctrineArtillerySupportsCommittedMainEffort),
+            ("doctrine artillery no exposed main line does not allow support", DoctrineArtilleryNoExposedMainLineDoesNotAllowSupport),
             ("command fallback target resolver uses visible threat without objective", CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective),
             ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
             ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
@@ -3214,6 +3219,91 @@ static class Program
         AssertFalse(allowed, "doctrine allow should not supersede an authoritative denial");
     }
 
+    private static void DoctrineReserveReleasesToSupportEndangeredMainEffort()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.ReserveWait,
+            role: CommandNodeRole.Reserve,
+            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
+
+        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
+            order,
+            mainEffortOdds: 0.85f,
+            reserveFraction: 0.20f,
+            currentTimeSeconds: 100f);
+
+        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
+        AssertEqual(CommandTaskType.ReleaseReserve, decision.Task, "task");
+        AssertEqual("main-effort-under-pressure", decision.Reason, "reason");
+    }
+
+    private static void DoctrineFallbackReliefBeatsStaleHeldOrder()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.FallBackToLine,
+            role: CommandNodeRole.Reserve,
+            fallback: DoctrineTargetPoint.From(90f, 120f),
+            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
+
+        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
+            order,
+            mainEffortOdds: 0.5f,
+            reserveFraction: 0f,
+            currentTimeSeconds: 1000f);
+
+        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
+        AssertEqual(CommandTaskType.FallBackToLine, decision.Task, "task");
+        AssertEqual("fallback-relief", decision.Reason, "reason");
+    }
+
+    private static void DoctrineReserveNonfiniteReserveFractionFailsClosed()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.ReserveWait,
+            role: CommandNodeRole.Reserve,
+            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
+
+        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
+            order,
+            mainEffortOdds: 0.80f,
+            reserveFraction: float.PositiveInfinity,
+            currentTimeSeconds: 100f);
+
+        AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
+        AssertEqual(CommandTaskType.ReserveWait, decision.Task, "task");
+        AssertEqual("reserve-held", decision.Reason, "reason");
+    }
+
+    private static void DoctrineArtillerySupportsCommittedMainEffort()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.SupportAttack,
+            role: CommandNodeRole.SupportingAttack);
+
+        DoctrineArtilleryDecision decision = DoctrineConsumerDecisions.DecideArtillery(
+            order,
+            enemyMainLineExposed: true,
+            friendlyCloseRange: false);
+
+        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
+        AssertEqual("support-main-effort", decision.Reason, "reason");
+    }
+
+    private static void DoctrineArtilleryNoExposedMainLineDoesNotAllowSupport()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.SupportAttack,
+            role: CommandNodeRole.SupportingAttack);
+
+        DoctrineArtilleryDecision decision = DoctrineConsumerDecisions.DecideArtillery(
+            order,
+            enemyMainLineExposed: false,
+            friendlyCloseRange: false);
+
+        AssertEqual(DoctrineConsumerAction.Observe, decision.Action, "action");
+        AssertEqual("no-doctrine-opinion", decision.Reason, "reason");
+    }
+
     private static void CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective()
     {
         bool resolved = CommandFallbackTargetResolver.TryResolve(
@@ -3435,11 +3525,12 @@ static class Program
         DoctrineTargetPoint support = default(DoctrineTargetPoint),
         DoctrineTargetPoint fallback = default(DoctrineTargetPoint),
         DoctrineAllowedIdleReason allowedIdle = DoctrineAllowedIdleReason.None,
-        string objectiveId = "objective-1")
+        string objectiveId = "objective-1",
+        CommandNodeRole role = CommandNodeRole.MainEffort)
     {
         return CommandDoctrineOrder.Create(
             "node-1",
-            CommandNodeRole.MainEffort,
+            role,
             task,
             objectiveId,
             primary,
