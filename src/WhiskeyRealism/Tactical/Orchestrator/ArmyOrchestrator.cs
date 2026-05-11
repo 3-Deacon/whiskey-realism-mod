@@ -209,6 +209,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private IReadOnlyList<CommandNodeIntent> _commandNodeIntents = Array.Empty<CommandNodeIntent>();
         private TacticalCommanderMode _commanderMode = TacticalCommanderMode.Off;
         private IReadOnlyList<CommandNodeOperationalState> _currentCommandOperations = Array.Empty<CommandNodeOperationalState>();
+        private IReadOnlyList<CommandDoctrineOrder> _currentDoctrineOrders = Array.Empty<CommandDoctrineOrder>();
         private OperationRecord _currentOperation = new OperationRecord(
             TacticalOperationShape.SingleMainEffort,
             TacticalOperationPhase.Planning,
@@ -220,6 +221,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public IReadOnlyList<DirectChildIntent> CurrentDirectChildIntents => _directChildIntents;
         public TacticalCommanderMode CommanderMode => _commanderMode;
         public IReadOnlyList<CommandNodeOperationalState> CurrentCommandOperations => _currentCommandOperations;
+        public IReadOnlyList<CommandDoctrineOrder> CurrentDoctrineOrders => _currentDoctrineOrders;
         public OperationRecord CurrentOperation => _currentOperation;
         public StrategicBattleIntentSnapshot CurrentStrategicBattleIntent => _currentStrategicBattleIntent;
         internal CommandTreeSnapshot CurrentCommandTree => _commandTree;
@@ -330,27 +332,45 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return null;
         }
 
+        public void ApplyTacticalCommanderMode(TacticalCommanderMode mode)
+        {
+            _commanderMode = mode;
+            if (TacticalCommanderModePolicy.RunsLedger(mode)) return;
+
+            _currentOperation = new OperationRecord(
+                TacticalOperationShape.SingleMainEffort,
+                TacticalOperationPhase.Planning,
+                "objective-unknown",
+                0f);
+            _currentStrategicBattleIntent = StrategicBattleIntentSnapshot.Empty;
+            _currentCommandOperations = Array.Empty<CommandNodeOperationalState>();
+            _currentDoctrineOrders = Array.Empty<CommandDoctrineOrder>();
+        }
+
         internal void UpdateOperationsLedger(
             TacticalOperationsLedgerRuntime ledger,
             IReadOnlyList<CommandNodeOperationalState> commandOperations)
         {
             if (ledger == null)
             {
-                _commanderMode = TacticalCommanderMode.Off;
-                _currentOperation = new OperationRecord(
-                    TacticalOperationShape.SingleMainEffort,
-                    TacticalOperationPhase.Planning,
-                    "objective-unknown",
-                    0f);
-                _currentStrategicBattleIntent = StrategicBattleIntentSnapshot.Empty;
-                _currentCommandOperations = Array.Empty<CommandNodeOperationalState>();
+                ApplyTacticalCommanderMode(TacticalCommanderMode.Off);
                 return;
             }
 
             _commanderMode = ledger.CommanderMode;
-            _currentOperation = ledger.CurrentOperation;
             _currentStrategicBattleIntent = ledger.CurrentStrategicBattleIntent;
-            _currentCommandOperations = CopyCommandOperations(commandOperations);
+            CommandNodeOperationalState[] copiedCommandOperations = CopyCommandOperations(commandOperations);
+            _currentCommandOperations = copiedCommandOperations;
+
+            if (!ledger.RunsLedger)
+            {
+                ApplyTacticalCommanderMode(ledger.CommanderMode);
+                return;
+            }
+
+            ledger.StoreDoctrineForCommandStates(copiedCommandOperations);
+            _currentOperation = ledger.CurrentOperation;
+            _currentDoctrineOrders = ledger.CurrentDoctrineOrders;
         }
 
         /// <summary>Test-only: directly install a plan without going through a playbook.</summary>
@@ -362,7 +382,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _historyGlobalOdds = 1f;
         }
 
-        private static IReadOnlyList<CommandNodeOperationalState> CopyCommandOperations(
+        private static CommandNodeOperationalState[] CopyCommandOperations(
             IReadOnlyList<CommandNodeOperationalState> commandOperations)
         {
             if (commandOperations == null || commandOperations.Count == 0) return Array.Empty<CommandNodeOperationalState>();

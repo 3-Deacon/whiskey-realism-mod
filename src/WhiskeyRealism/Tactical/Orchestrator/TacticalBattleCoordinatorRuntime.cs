@@ -271,6 +271,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 TacticalCommanderMode mode = plugin.TacticalCommanderModeValue;
                 if (!TacticalCommanderModePolicy.RunsLedger(mode))
                 {
+                    side.OperationsLedger.SetRuntimeClock(SafeRealtimeSeconds());
                     side.TickOperationsLedger(
                         mode,
                         Array.Empty<ObjectiveRecord>(),
@@ -287,6 +288,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     bundle.OwnMainEffortStrength,
                     Math.Max(0f, 1f - Clamp01(bundle.OwnReservesCommittedFraction)));
 
+                side.OperationsLedger.SetRuntimeClock(SafeRealtimeSeconds());
                 side.TickOperationsLedger(
                     mode,
                     objectives,
@@ -297,6 +299,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch (Exception e)
             {
                 WarnTickCycleOnce(side, e);
+            }
+        }
+
+        private static float SafeRealtimeSeconds()
+        {
+            try
+            {
+                float now = UnityEngine.Time.realtimeSinceStartup;
+                if (float.IsNaN(now) || float.IsInfinity(now) || now < 0f) return 0f;
+                return now;
+            }
+            catch
+            {
+                return 0f;
             }
         }
 

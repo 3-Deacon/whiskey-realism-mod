@@ -99,12 +99,16 @@ static class Program
             ("tactical vision runtime adapter fallback objective uses visible enemy point", TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint),
             ("tactical operations ledger runtime active selects operation", TacticalOperationsLedgerRuntimeActiveSelectsOperation),
             ("tactical operations ledger runtime off does not run ledger", TacticalOperationsLedgerRuntimeOffDoesNotRunLedger),
+            ("operations ledger stores picture and doctrine orders", OperationsLedgerStoresPictureAndDoctrineOrders),
+            ("operations ledger preserves committed operation across ticks", OperationsLedgerPreservesCommittedOperationAcrossTicks),
+            ("operations ledger retargets stale forming operation", OperationsLedgerRetargetsStaleFormingOperation),
             ("tactical operations telemetry formats bounded monitor rows", TacticalOperationsTelemetryFormatsBoundedMonitorRows),
             ("tactical operations telemetry throttle helpers bound monitor loop", TacticalOperationsTelemetryThrottleHelpersBoundMonitorLoop),
             ("command node operations runtime maps roles tasks and echelons", CommandNodeOperationsRuntimeMapsRolesTasksAndEchelons),
             ("command node operations runtime uses objective situation", CommandNodeOperationsRuntimeUsesObjectiveSituation),
             ("command node operations runtime builds single fallback state", CommandNodeOperationsRuntimeBuildsSingleFallbackState),
             ("army orchestrator update operations ledger replaces snapshots", ArmyOrchestratorUpdateOperationsLedgerReplacesSnapshots),
+            ("army orchestrator clears doctrine orders when off", ArmyOrchestratorClearsDoctrineOrdersWhenOff),
             ("tactical battle orchestrator forwards operations ledger update", TacticalBattleOrchestratorForwardsOperationsLedgerUpdate),
             ("tactical battle coordinator side gate blocks player side unless ai vs ai", TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi),
             ("tactical command posture monitor-only suppresses active task writes", TacticalCommandPostureMonitorOnlySuppressesActiveTaskWrites),
@@ -2117,6 +2121,92 @@ static class Program
         AssertEqual(string.Empty, runtime.CurrentStrategicBattleIntent.CampaignIntent, "strategic snapshot cleared");
     }
 
+    private static void OperationsLedgerStoresPictureAndDoctrineOrders()
+    {
+        TacticalOperationsLedgerRuntime ledger = new TacticalOperationsLedgerRuntime();
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 300f, 0.9f, true, 0.8f, 100f, 200f, 0.2f, 0.2f)
+        });
+        CommandDoctrineOrder[] orders =
+        {
+            CommandDoctrineOrder.Create("node-1", CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, "ridge-a", DoctrineTargetPoint.From(100f, 200f), DoctrineTargetPoint.None, DoctrineTargetPoint.None, DoctrineAllowedIdleReason.None, 900f, 100f, 0.9f, "test")
+        };
+
+        ledger.StoreDoctrine(picture, orders);
+
+        AssertEqual(1, ledger.CurrentBattlefieldPicture.Objectives.Length, "picture objective count");
+        AssertEqual(1, ledger.CurrentDoctrineOrders.Count, "doctrine order count");
+        AssertEqual("node-1", ledger.CurrentDoctrineOrders[0].NodeId, "node id");
+    }
+
+    private static void OperationsLedgerPreservesCommittedOperationAcrossTicks()
+    {
+        var ledger = new TacticalOperationsLedgerRuntime();
+        var commandStates = new[]
+        {
+            CommandNodeOperationalState.Create("node-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+
+        ledger.SetRuntimeClock(0f);
+        ledger.Replace(
+            TacticalCommanderMode.Active,
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 1000f, friendlyAssignedStrength: 100f) },
+            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
+            new ForceAvailabilitySnapshot(3000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+        ledger.StoreDoctrineForCommandStates(commandStates);
+
+        AssertEqual(TacticalOperationPhase.Committed, ledger.CurrentOperation.Phase, "initial committed phase");
+        AssertEqual("ridge-a", ledger.CurrentOperation.PrimaryObjectiveId, "initial primary");
+
+        ledger.SetRuntimeClock(100f);
+        ledger.Replace(
+            TacticalCommanderMode.Active,
+            new[] { ObjectiveRecordFor("ridge-b", enemyStrength: 100f, friendlyAssignedStrength: 100f) },
+            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
+            new ForceAvailabilitySnapshot(3000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+        ledger.StoreDoctrineForCommandStates(commandStates);
+
+        AssertEqual(TacticalOperationPhase.Committed, ledger.CurrentOperation.Phase, "committed phase preserved");
+        AssertEqual("ridge-a", ledger.CurrentOperation.PrimaryObjectiveId, "committed primary preserved");
+        AssertEqual(1, ledger.CurrentDoctrineOrders.Count, "doctrine regenerated from preserved operation");
+    }
+
+    private static void OperationsLedgerRetargetsStaleFormingOperation()
+    {
+        var ledger = new TacticalOperationsLedgerRuntime();
+        var commandStates = new[]
+        {
+            CommandNodeOperationalState.Create("node-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+
+        ledger.SetRuntimeClock(0f);
+        ledger.Replace(
+            TacticalCommanderMode.Active,
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 5000f, friendlyAssignedStrength: 100f) },
+            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
+            new ForceAvailabilitySnapshot(3000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+        ledger.StoreDoctrineForCommandStates(commandStates);
+
+        AssertEqual(TacticalOperationPhase.Forming, ledger.CurrentOperation.Phase, "initial forming phase");
+        AssertEqual("ridge-a", ledger.CurrentOperation.PrimaryObjectiveId, "initial primary");
+
+        ledger.SetRuntimeClock(100f);
+        ledger.Replace(
+            TacticalCommanderMode.Active,
+            new[] { ObjectiveRecordFor("ridge-b", enemyStrength: 1000f, friendlyAssignedStrength: 100f) },
+            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
+            new ForceAvailabilitySnapshot(3000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+        ledger.StoreDoctrineForCommandStates(commandStates);
+
+        AssertEqual(TacticalOperationPhase.Committed, ledger.CurrentOperation.Phase, "forming may retarget before commit");
+        AssertEqual("ridge-b", ledger.CurrentOperation.PrimaryObjectiveId, "forming retargeted to live objective");
+    }
+
     private static void CommandNodeOperationsRuntimeMapsRolesTasksAndEchelons()
     {
         var states = CommandNodeOperationsRuntime.Build(new[]
@@ -2263,6 +2353,33 @@ static class Program
         AssertEqual(string.Empty, army.CurrentStrategicBattleIntent.CampaignIntent, "replaced strategic intent");
     }
 
+    private static void ArmyOrchestratorClearsDoctrineOrdersWhenOff()
+    {
+        ArmyOrchestrator army = NewArmyOrchestratorWithPlan();
+        var ledger = new TacticalOperationsLedgerRuntime();
+        ledger.Replace(
+            TacticalCommanderMode.Active,
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f) },
+            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
+            new ForceAvailabilitySnapshot(8000f, 0.30f),
+            new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+        army.UpdateOperationsLedger(ledger, new[]
+        {
+            new CommandNodeOperationalState(
+                "node-a",
+                CommandEchelonKind.CorpsLike,
+                CommandNodeRole.MainEffort,
+                CommandTaskType.AttackObjective,
+                CommandTaskState.Planning),
+        });
+
+        AssertEqual(1, army.CurrentDoctrineOrders.Count, "orders populated");
+
+        army.ApplyTacticalCommanderMode(TacticalCommanderMode.Off);
+
+        AssertEqual(0, army.CurrentDoctrineOrders.Count, "orders cleared");
+    }
+
     private static void TacticalBattleOrchestratorForwardsOperationsLedgerUpdate()
     {
         var side = new TacticalBattleOrchestrator(1, TacticalCommanderRoster.BuildFromSynthetic(Array.Empty<SyntheticCommanderInput>()));
@@ -2290,7 +2407,7 @@ static class Program
 
         AssertTrue(ReferenceEquals(firstLedger, side.OperationsLedger), "per-side ledger reused");
         AssertEqual(TacticalCommanderMode.MonitorOnly, army.CommanderMode, "second mode");
-        AssertEqual("ridge-b", army.CurrentOperation.PrimaryObjectiveId, "second operation");
+        AssertEqual("ridge-a", army.CurrentOperation.PrimaryObjectiveId, "committed operation preserved");
 
         side.TickOperationsLedger(
             TacticalCommanderMode.Off,
