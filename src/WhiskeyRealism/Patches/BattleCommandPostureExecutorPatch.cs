@@ -25,6 +25,7 @@ namespace WhiskeyRealism.Patches
         private const float FallbackStandOff = 250f;
         private const float MaxConservativeWaypointDistance = 2500f;
         private const float MinWaypointDistance = 15f;
+        private const float FacingRefreshToleranceDegrees = 15f;
 
         private static readonly Dictionary<int, float> _lastExecutorOrderAt = new Dictionary<int, float>();
         private static readonly Dictionary<string, float> _lastTelemetryAt = new Dictionary<string, float>();
@@ -140,10 +141,10 @@ namespace WhiskeyRealism.Patches
             switch (decision.Action)
             {
                 case PostureExecutionAction.SetFormation:
-                    return SetFormation(bunits, group, targetFormation);
+                    return SetFormation(bunits, group, state.Task, targetFormation);
                 case PostureExecutionAction.SetFormationAndWaypoint:
                     if (!hasTarget) return false;
-                    bool formed = SetFormation(bunits, group, targetFormation);
+                    bool formed = SetFormation(bunits, group, state.Task, targetFormation);
                     return SetWaypoint(bunits, group, target) || formed;
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
@@ -157,20 +158,36 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool SetFormation(BattleUnits bunits, Regiment group, int targetFormation)
+        private static bool SetFormation(
+            BattleUnits bunits,
+            Regiment group,
+            CommandTaskType task,
+            int targetFormation)
         {
             if (!CanUseGroupFormation(group)) return false;
             if (targetFormation < 0 || targetFormation > 4) return false;
-            if (SafeGroupFormation(group) == targetFormation) return false;
+
+            bool needsFormation = CommandFormationCorrection.NeedsCorrection(
+                SafeFormation(group),
+                SafeFormationOrdered(group),
+                SafeGroupFormation(group),
+                targetFormation);
+            bool hasThreatFacing = TryThreatFacingRotation(group, task, out float manualFinalRotation);
+            bool needsFacing = hasThreatFacing &&
+                CommandFormationCorrection.NeedsFacingCorrection(
+                    SafeRotationY(group),
+                    manualFinalRotation,
+                    FacingRefreshToleranceDegrees);
+            if (!needsFormation && !needsFacing) return false;
 
             bunits.SetGroupFormation(
                 group,
                 targetFormation,
-                manualfinalrotation: -1f,
+                manualfinalrotation: hasThreatFacing ? manualFinalRotation : -1f,
                 targetpos: default(Vector3),
                 immediateplacement: false,
-                newpath: true,
-                modifylastwaypoint: false,
+                newpath: needsFormation,
+                modifylastwaypoint: !needsFormation && needsFacing,
                 newstate: 2,
                 refuseflank: -1,
                 ignoredeplyomentzone: false,
@@ -179,6 +196,38 @@ namespace WhiskeyRealism.Patches
                 placeentrenchments: false,
                 adjustbyterrainshape: true);
             return true;
+        }
+
+        private static bool TryThreatFacingRotation(
+            Regiment group,
+            CommandTaskType task,
+            out float manualFinalRotation)
+        {
+            manualFinalRotation = -1f;
+            if (!CommandFormationCorrection.ShouldFaceThreat(task)) return false;
+
+            try
+            {
+                Regiment enemy = group != null && group.unitrange != null
+                    ? group.unitrange.closestenemyunitfarreg
+                    : null;
+                if (enemy == null) return false;
+
+                Vector3 own = SafePosition(group);
+                Vector3 enemyPosition = SafePosition(enemy);
+                if (IsDefaultVector(own) || IsDefaultVector(enemyPosition)) return false;
+
+                BattlefieldSetup bfs = SafeBattlefieldSetup();
+                manualFinalRotation = bfs != null
+                    ? bfs.GetAngleTerrain(own, enemyPosition) + 180f
+                    : CommandFormationCorrection.ThreatFacingRotationDegrees(own.x, own.z, enemyPosition.x, enemyPosition.z);
+                return !float.IsNaN(manualFinalRotation) && !float.IsInfinity(manualFinalRotation);
+            }
+            catch
+            {
+                manualFinalRotation = -1f;
+                return false;
+            }
         }
 
         private static bool SetWaypoint(BattleUnits bunits, Regiment group, Vector3 target)
@@ -687,10 +736,48 @@ namespace WhiskeyRealism.Patches
             catch { return -1; }
         }
 
+        private static int SafeFormation(Regiment group)
+        {
+            try { return group != null ? group.formation : -1; }
+            catch { return -1; }
+        }
+
+        private static int SafeFormationOrdered(Regiment group)
+        {
+            try { return group != null ? group.formationordered : -1; }
+            catch { return -1; }
+        }
+
         private static Vector3 SafePosition(Regiment group)
         {
             try { return group != null ? group.transform.position : default(Vector3); }
             catch { return default(Vector3); }
+        }
+
+        private static BattlefieldSetup SafeBattlefieldSetup()
+        {
+            try
+            {
+                GameObject controller = GameObject.Find("GameController");
+                return controller != null ? controller.GetComponent<BattlefieldSetup>() : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static float SafeRotationY(Regiment group)
+        {
+            try
+            {
+                if (group == null) return float.NaN;
+                return group.transform.rotation.eulerAngles.y;
+            }
+            catch
+            {
+                return float.NaN;
+            }
         }
 
         private static float SafeBattleY()

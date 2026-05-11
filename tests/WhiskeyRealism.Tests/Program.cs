@@ -102,6 +102,9 @@ static class Program
             ("tactical command posture close engagement limits movement writes", TacticalCommandPostureCloseEngagementLimitsMovementWrites),
             ("tactical command posture reserve wait distinguishes reserve area", TacticalCommandPostureReserveWaitDistinguishesReserveArea),
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
+            ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
+            ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
+            ("command formation correction bounds repeated facing refreshes", CommandFormationCorrectionBoundsRepeatedFacingRefreshes),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
             ("tactical command monitor interrupted hold is illegal", TacticalCommandMonitorInterruptedHoldIsIllegal),
@@ -2374,6 +2377,40 @@ static class Program
         AssertPostureDecision(PostureExecutionAction.RecoverInterruptedOrder, "recover-stuck-order", DecidePosture(CommandTaskType.RecoverStuckOrder));
         AssertPostureTarget(PostureExecutionTarget.RecoveryPath, true, DecidePosture(CommandTaskType.RecoverStuckOrder));
         AssertPostureDecision(PostureExecutionAction.NoWrite, "missing-ledger-assignment", DecidePosture(CommandTaskType.None));
+    }
+
+    private static void CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation()
+    {
+        AssertTrue(
+            CommandFormationCorrection.NeedsCorrection(
+                actualFormation: 3,
+                orderedFormation: 0,
+                groupFormation: 0,
+                targetFormation: 0),
+            "visible march column must still be corrected even when groupformation already says line");
+
+        AssertTrue(
+            !CommandFormationCorrection.NeedsCorrection(
+                actualFormation: 0,
+                orderedFormation: 0,
+                groupFormation: 0,
+                targetFormation: 0),
+            "matching visible, ordered, and group formation needs no correction");
+    }
+
+    private static void CommandFormationCorrectionComputesVanillaThreatFacing()
+    {
+        AssertNear(90f, CommandFormationCorrection.ThreatFacingRotationDegrees(0f, 0f, 10f, 0f), 0.001f, "east threat");
+        AssertNear(0f, CommandFormationCorrection.ThreatFacingRotationDegrees(0f, 0f, 0f, 10f), 0.001f, "north threat");
+        AssertNear(-90f, CommandFormationCorrection.ThreatFacingRotationDegrees(0f, 0f, -10f, 0f), 0.001f, "west threat");
+    }
+
+    private static void CommandFormationCorrectionBoundsRepeatedFacingRefreshes()
+    {
+        AssertTrue(!CommandFormationCorrection.NeedsFacingCorrection(4f, 0f, 15f), "small delta is already facing");
+        AssertTrue(CommandFormationCorrection.NeedsFacingCorrection(40f, 0f, 15f), "large delta needs facing");
+        AssertTrue(!CommandFormationCorrection.NeedsFacingCorrection(355f, 0f, 15f), "wraparound small delta is already facing");
+        AssertTrue(CommandFormationCorrection.NeedsFacingCorrection(180f, 0f, 15f), "opposite facing needs correction");
     }
 
     private static PostureExecutionDecision DecidePosture(CommandTaskType task)
