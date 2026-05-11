@@ -132,6 +132,12 @@ static class Program
             ("doctrine assignment stale objective fails closed", DoctrineAssignmentStaleObjectiveFailsClosed),
             ("doctrine assignment unknown role has no legal idle", DoctrineAssignmentUnknownRoleHasNoLegalIdle),
             ("doctrine assignment fallback target remains finite for large coordinates", DoctrineAssignmentFallbackTargetRemainsFiniteForLargeCoordinates),
+            ("doctrine consumer attack order permits assault stance", DoctrineConsumerAttackOrderPermitsAssaultStance),
+            ("doctrine consumer reserve order denies charge", DoctrineConsumerReserveOrderDeniesCharge),
+            ("doctrine consumer skirmisher-only contact holds formed regiments", DoctrineConsumerSkirmisherOnlyContactHoldsFormedRegiments),
+            ("doctrine consumer battlefield picture screen does not expose line", DoctrineConsumerBattlefieldPictureScreenDoesNotExposeLine),
+            ("doctrine consumer known objective miss does not coordinate match", DoctrineConsumerKnownObjectiveMissDoesNotCoordinateMatch),
+            ("doctrine consumer allow cannot override charge denial", DoctrineConsumerAllowCannotOverrideChargeDenial),
             ("command fallback target resolver uses visible threat without objective", CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective),
             ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
             ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
@@ -3106,6 +3112,108 @@ static class Program
         AssertTrue(orders[0].FallbackTarget.HasValue, "fallback target should remain finite");
     }
 
+    private static void DoctrineConsumerAttackOrderPermitsAssaultStance()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.AttackObjective,
+            primary: DoctrineTargetPoint.From(100f, 200f));
+
+        DoctrineStanceDecision decision = DoctrineConsumerDecisions.DecideStance(
+            order,
+            enemyMainLineExposed: true,
+            localOdds: 1.20f);
+
+        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
+        AssertEqual("doctrine-attack", decision.Reason, "reason");
+    }
+
+    private static void DoctrineConsumerReserveOrderDeniesCharge()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.ReserveWait,
+            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
+
+        DoctrineChargeDecision decision = DoctrineConsumerDecisions.DecideCharge(
+            order,
+            enemyMainLineExposed: true,
+            localOdds: 2.0f,
+            targetRouted: true);
+
+        AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
+        AssertEqual("reserve-held", decision.Reason, "reason");
+    }
+
+    private static void DoctrineConsumerSkirmisherOnlyContactHoldsFormedRegiments()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.AttackObjective,
+            primary: DoctrineTargetPoint.From(100f, 200f));
+
+        DoctrineChargeDecision decision = DoctrineConsumerDecisions.DecideCharge(
+            order,
+            enemyMainLineExposed: false,
+            localOdds: 2.0f,
+            targetRouted: false);
+
+        AssertEqual(DoctrineConsumerAction.Observe, decision.Action, "action");
+        AssertEqual("main-line-not-exposed", decision.Reason, "reason");
+    }
+
+    private static void DoctrineConsumerBattlefieldPictureScreenDoesNotExposeLine()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.AttackObjective,
+            primary: DoctrineTargetPoint.From(100f, 200f));
+        BattlefieldPictureSnapshot picture = TacticalBattlefieldPicture.Build(
+            new[]
+            {
+                new BattlefieldContactInput("cavalry-screen", "objective-1", TacticalContactKind.CavalryScreen, 900f, 10f, true, false, 100f, 200f),
+            },
+            new[]
+            {
+                new BattlefieldObjectiveInput("objective-1", TacticalObjectiveType.EnemyLine, 0.8f, 100f, 200f, 0.2f, 0.2f, 0.8f),
+            },
+            nowSeconds: 20f);
+
+        bool exposed = DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture);
+        DoctrineChargeDecision decision = DoctrineConsumerDecisions.DecideCharge(
+            order,
+            exposed,
+            localOdds: 2.0f,
+            targetRouted: false);
+
+        AssertFalse(exposed, "screen contact should not expose formed line");
+        AssertEqual(DoctrineConsumerAction.Observe, decision.Action, "action");
+        AssertEqual("main-line-not-exposed", decision.Reason, "reason");
+    }
+
+    private static void DoctrineConsumerKnownObjectiveMissDoesNotCoordinateMatch()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.AttackObjective,
+            primary: DoctrineTargetPoint.From(100f, 200f),
+            objectiveId: "objective-missing");
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("objective-1", TacticalObjectiveType.EnemyLine, 900f, 0.9f, true, 0.8f, 100f, 200f, 0.2f, 0.2f),
+        });
+
+        bool exposed = DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture);
+
+        AssertFalse(exposed, "known objective id miss should not fall back to coordinates");
+    }
+
+    private static void DoctrineConsumerAllowCannotOverrideChargeDenial()
+    {
+        DoctrineChargeDecision doctrineAllow = new DoctrineChargeDecision(DoctrineConsumerAction.Allow, "doctrine-charge");
+
+        bool allowed = DoctrineConsumerDecisions.AllowsChargeAfterAuthoritativeGate(
+            doctrineAllow,
+            authoritativeDenied: true);
+
+        AssertFalse(allowed, "doctrine allow should not supersede an authoritative denial");
+    }
+
     private static void CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective()
     {
         bool resolved = CommandFallbackTargetResolver.TryResolve(
@@ -3326,13 +3434,14 @@ static class Program
         DoctrineTargetPoint primary = default(DoctrineTargetPoint),
         DoctrineTargetPoint support = default(DoctrineTargetPoint),
         DoctrineTargetPoint fallback = default(DoctrineTargetPoint),
-        DoctrineAllowedIdleReason allowedIdle = DoctrineAllowedIdleReason.None)
+        DoctrineAllowedIdleReason allowedIdle = DoctrineAllowedIdleReason.None,
+        string objectiveId = "objective-1")
     {
         return CommandDoctrineOrder.Create(
             "node-1",
             CommandNodeRole.MainEffort,
             task,
-            "objective-1",
+            objectiveId,
             primary,
             support,
             fallback,

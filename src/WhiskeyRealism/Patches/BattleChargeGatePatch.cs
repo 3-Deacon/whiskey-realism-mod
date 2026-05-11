@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
@@ -38,6 +39,10 @@ namespace WhiskeyRealism.Patches
                 Regiment[] allattachedunits = aigroup.allattachedunits;
                 bool orchestratorContextInitialized = false;
                 OrchestratorChargeContext orchestratorContext = default;
+                bool doctrineContextInitialized = false;
+                bool hasDoctrineOrder = false;
+                CommandDoctrineOrder doctrineOrder = default(CommandDoctrineOrder);
+                BattlefieldPictureSnapshot doctrinePicture = new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>());
 
                 for (int i = 0; i < allattachedunits.Length; i++)
                 {
@@ -76,22 +81,46 @@ namespace WhiskeyRealism.Patches
                             tookOwnership = true;
                             aigroup.lastfeudactiontime = CurrentBattleHour(bunits);
 
+                            if (!doctrineContextInitialized)
+                            {
+                                hasDoctrineOrder = TryResolveDoctrineOrder(aigroup, out doctrineOrder, out doctrinePicture);
+                                doctrineContextInitialized = true;
+                            }
+
+                            bool screenRoutedTargetVisible = ScreenRoutedChargeTargetVisible(unit);
+                            DoctrineChargeDecision doctrineDecision = new DoctrineChargeDecision(DoctrineConsumerAction.Observe, "no-doctrine-order");
+                            if (hasDoctrineOrder)
+                            {
+                                float localOdds = LocalOdds(aigroup);
+                                doctrineDecision = DoctrineConsumerDecisions.DecideCharge(
+                                    doctrineOrder,
+                                    DoctrineConsumerDecisions.EnemyMainLineExposed(doctrineOrder, doctrinePicture),
+                                    localOdds,
+                                    screenRoutedTargetVisible);
+                                if (doctrineDecision.Action == DoctrineConsumerAction.Deny)
+                                {
+                                    LogDeniedDoctrine(unit, aigroup, doctrineOrder, doctrineDecision, localOdds, screenRoutedTargetVisible);
+                                    continue;
+                                }
+                            }
+
                             if (!orchestratorContextInitialized)
                             {
                                 orchestratorContext = BuildOrchestratorChargeContext(aigroup);
                                 orchestratorContextInitialized = true;
                             }
 
-                            bool screenRoutedTargetVisible = ScreenRoutedChargeTargetVisible(unit);
                             TacticalOrchestratorChargeGate.Decision orchestratorDecision =
                                 DecideOrchestratorCharge(orchestratorContext, screenRoutedTargetVisible);
-                            if (orchestratorDecision.Action == TacticalOrchestratorChargeGate.Action.Deny)
+                            bool orchestratorDenied = orchestratorDecision.Action == TacticalOrchestratorChargeGate.Action.Deny;
+                            if (!DoctrineConsumerDecisions.AllowsChargeAfterAuthoritativeGate(doctrineDecision, orchestratorDenied))
                             {
                                 LogDeniedOrchestrator(unit, aigroup, orchestratorDecision, orchestratorContext, screenRoutedTargetVisible);
                                 continue;
                             }
 
-                            if (TryB6cDeny(unit, aigroup)) continue;
+                            bool b6cDenied = TryB6cDeny(unit, aigroup);
+                            if (!DoctrineConsumerDecisions.AllowsChargeAfterAuthoritativeGate(doctrineDecision, b6cDenied)) continue;
 
                             unit.SetMovementMode(3);
                         }
@@ -139,7 +168,8 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.Enabled.Value &&
                 (Plugin.Instance.EnableWlTacticalChargeGuard.Value ||
                     Plugin.Instance.EnableTacticalChargeDenial.Value ||
-                    Plugin.Instance.EnableTacticalOrchestratorChargeGate.Value);
+                    Plugin.Instance.EnableTacticalOrchestratorChargeGate.Value ||
+                    Plugin.Instance.TacticalOperationsLedgerAllowsWrites);
         }
 
         private static bool LocalReactionProducerEnabled()
@@ -326,6 +356,41 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        private static bool TryResolveDoctrineOrder(
+            Regiment group,
+            out CommandDoctrineOrder order,
+            out BattlefieldPictureSnapshot picture)
+        {
+            order = default(CommandDoctrineOrder);
+            picture = new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>());
+            try
+            {
+                if (group == null) return false;
+                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
+                ArmyOrchestrator army = side?.Army;
+                var orders = army?.CurrentDoctrineOrders;
+                if (orders == null || orders.Count == 0) return false;
+
+                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
+                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                for (int i = 0; i < orders.Count; i++)
+                {
+                    CommandDoctrineOrder candidate = orders[i];
+                    if (!TacticalPatchIds.NodeIdMatches(candidate.NodeId, gameObjectInstanceId, componentInstanceId))
+                        continue;
+                    if (!candidate.HasPurpose) return false;
+
+                    order = candidate;
+                    if (side?.OperationsLedger != null)
+                        picture = side.OperationsLedger.CurrentBattlefieldPicture;
+                    return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
         private static int SafePlayerAlliance()
         {
             try { return GameVars.playeralliance; }
@@ -402,6 +467,25 @@ namespace WhiskeyRealism.Patches
                 " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
                 " reaction=" + reaction.Reaction +
                 " reason=" + reaction.Reason);
+        }
+
+        private static void LogDeniedDoctrine(
+            Regiment unit,
+            Regiment group,
+            CommandDoctrineOrder order,
+            DoctrineChargeDecision decision,
+            float localOdds,
+            bool targetRouted)
+        {
+            OnceLog.Info(
+                "tactical-doctrine-charge:deny:" + SafeName(unit),
+                "[TacticalDoctrineCharge] action=deny" +
+                " task=" + order.Task +
+                " reason=" + decision.Reason +
+                " localOdds=" + localOdds +
+                " targetRouted=" + targetRouted +
+                " unit=" + SafeName(unit) + "#" + SafeInstanceId(unit) +
+                " group=" + SafeName(group) + "#" + SafeInstanceId(group));
         }
 
         private static void LogDeniedOrchestrator(

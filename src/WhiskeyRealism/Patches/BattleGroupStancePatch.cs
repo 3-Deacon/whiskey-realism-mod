@@ -62,6 +62,11 @@ namespace WhiskeyRealism.Patches
             if (!OrderFrictionAllowsChange(group)) return;
 
             int vanillaOrdered = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
+            var sector = BuildGroupSector(group, index);
+
+            if (TryApplyDoctrineStance(bunits, side, macro, group, vanillaOrdered, sector))
+                return;
+
             if (vanillaOrdered == 4)
             {
                 if (!Plugin.Instance.EnableTacticalChargeDenial.Value || !LocalReactionProducerEnabled())
@@ -87,10 +92,10 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            var sector = BuildGroupSector(group, index);
-
             if (TryApplyLedgerTaskStance(bunits, side, macro, group, vanillaOrdered, sector))
                 return;
+
+            if (!Plugin.Instance.EnableTacticalGroupSectorStance.Value) return;
 
             var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
                 vanillaOrdered,
@@ -113,6 +118,38 @@ namespace WhiskeyRealism.Patches
             group.ai_stanceordered = decision.GroupStance;
             group.lastaistancechangetime = GameVars.currenttimefromstart;
             LogDecision(side, group, sector, decision);
+        }
+
+        private static bool TryApplyDoctrineStance(
+            BattleUnits bunits,
+            int side,
+            int macro,
+            Regiment group,
+            int vanillaOrdered,
+            TacticalSectorAssessment sector)
+        {
+            if (macro == 3) return false;
+            if (!TryResolveDoctrineOrder(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture)) return false;
+
+            DoctrineStanceDecision decision = DoctrineConsumerDecisions.DecideStance(
+                order,
+                DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture),
+                sector.Odds);
+            if (decision.Action == DoctrineConsumerAction.Observe) return false;
+
+            int stance = decision.Action == DoctrineConsumerAction.Allow ? 3 : 2;
+            if (stance == vanillaOrdered) return true;
+            if (!AllowsVanillaWrites()) return true;
+
+            var gameObject = UnityObject(group);
+            if (gameObject == null || !gameObject.activeInHierarchy) return true;
+
+            bunits.ChangeStance(gameObject, stance, immediate: false, overwriteaigroups: false);
+            group.ai_stance = stance;
+            group.ai_stanceordered = stance;
+            group.lastaistancechangetime = GameVars.currenttimefromstart;
+            LogDoctrineStanceDecision(side, group, order, decision, stance);
+            return true;
         }
 
         private static bool TryApplyLedgerTaskStance(BattleUnits bunits, int side, int macro, Regiment group, int vanillaOrdered, TacticalSectorAssessment sector)
@@ -185,6 +222,61 @@ namespace WhiskeyRealism.Patches
             catch { }
 
             return false;
+        }
+
+        private static bool TryResolveDoctrineOrder(
+            Regiment group,
+            out CommandDoctrineOrder order,
+            out BattlefieldPictureSnapshot picture)
+        {
+            order = default(CommandDoctrineOrder);
+            picture = new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>());
+            try
+            {
+                if (group == null) return false;
+                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
+                ArmyOrchestrator army = side?.Army;
+                var orders = army?.CurrentDoctrineOrders;
+                if (orders == null || orders.Count == 0) return false;
+
+                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
+                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                for (int i = 0; i < orders.Count; i++)
+                {
+                    CommandDoctrineOrder candidate = orders[i];
+                    if (!TacticalPatchIds.NodeIdMatches(candidate.NodeId, gameObjectInstanceId, componentInstanceId))
+                        continue;
+                    if (!candidate.HasPurpose) return false;
+
+                    order = candidate;
+                    if (side?.OperationsLedger != null)
+                        picture = side.OperationsLedger.CurrentBattlefieldPicture;
+                    return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static void LogDoctrineStanceDecision(
+            int side,
+            Regiment group,
+            CommandDoctrineOrder order,
+            DoctrineStanceDecision decision,
+            int stance)
+        {
+            string signature = side + "|" + SafeInstanceId(group) + "|" + order.Task + "|" +
+                decision.Action + "|" + stance + "|" + decision.Reason;
+            if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "group-doctrine-consumer", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            Plugin.Log.LogInfo("[TacticalGroupDecision] side=" + side +
+                " group=" + SafeInstanceId(group) +
+                " stance=" + stance +
+                " doctrineTask=" + order.Task +
+                " action=" + decision.Action +
+                " reason=" + decision.Reason);
         }
 
         private static void LogLedgerTaskDecision(int side, Regiment group, CommandNodeOperationalState state, int stance)
@@ -360,7 +452,8 @@ namespace WhiskeyRealism.Patches
         {
             return Plugin.Instance != null &&
                 Plugin.Instance.Enabled.Value &&
-                Plugin.Instance.EnableTacticalGroupSectorStance.Value;
+                (Plugin.Instance.EnableTacticalGroupSectorStance.Value ||
+                    Plugin.Instance.TacticalOperationsLedgerAllowsWrites);
         }
 
         private static bool AllowsVanillaWrites()
