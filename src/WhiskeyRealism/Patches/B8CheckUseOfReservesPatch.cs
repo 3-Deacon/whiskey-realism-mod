@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
-using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
@@ -25,22 +24,8 @@ namespace WhiskeyRealism.Patches
 
         internal sealed class ReserveMovementState
         {
-            public UnitState[] Units;
+            public BattleReserveCommitGatePatch.UnitState[] Units;
             public DoctrineReserveDecision DoctrineDecision;
-        }
-
-        internal readonly struct UnitState
-        {
-            public UnitState(Regiment unit, int paths, int queueCount)
-            {
-                Unit = unit;
-                Paths = paths;
-                QueueCount = queueCount;
-            }
-
-            public Regiment Unit { get; }
-            public int Paths { get; }
-            public int QueueCount { get; }
         }
 
         [HarmonyPrefix]
@@ -193,25 +178,26 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static UnitState[] SnapshotUnits(Regiment group)
+        private static BattleReserveCommitGatePatch.UnitState[] SnapshotUnits(Regiment group)
         {
             try
             {
                 if (group == null || group.allattachedunits == null)
-                    return System.Array.Empty<UnitState>();
+                    return System.Array.Empty<BattleReserveCommitGatePatch.UnitState>();
 
-                UnitState[] units = new UnitState[group.allattachedunits.Length];
+                BattleReserveCommitGatePatch.UnitState[] units =
+                    new BattleReserveCommitGatePatch.UnitState[group.allattachedunits.Length];
                 for (int i = 0; i < group.allattachedunits.Length; i++)
                 {
                     Regiment unit = group.allattachedunits[i];
-                    units[i] = new UnitState(unit, SafePathCount(unit), SafeQueueCount(unit));
+                    units[i] = BattleReserveCommitGatePatch.SnapshotUnit(unit);
                 }
 
                 return units;
             }
             catch
             {
-                return System.Array.Empty<UnitState>();
+                return System.Array.Empty<BattleReserveCommitGatePatch.UnitState>();
             }
         }
 
@@ -223,7 +209,7 @@ namespace WhiskeyRealism.Patches
 
                 for (int i = 0; i < state.Units.Length; i++)
                 {
-                    UnitState before = state.Units[i];
+                    BattleReserveCommitGatePatch.UnitState before = state.Units[i];
                     Regiment unit = before.Unit;
                     if (unit == null) continue;
 
@@ -240,7 +226,8 @@ namespace WhiskeyRealism.Patches
                         continue;
                     }
 
-                    RemoveAddedPaths(unit, before.Paths, afterPaths);
+                    BattleReserveCommitGatePatch.RemoveAddedPaths(unit, before.Paths, afterPaths);
+                    BattleReserveCommitGatePatch.RestoreMovementState(unit, before);
                     OnceLog.Info(
                         "b8-check-reserves:doctrine-remove:" + SafeInstanceId(unit),
                         "[B8] reserve doctrine removed vanilla direct path reason=" +
@@ -581,27 +568,6 @@ namespace WhiskeyRealism.Patches
         {
             try { return Time.realtimeSinceStartup; }
             catch { return 0f; }
-        }
-
-        private static void RemoveAddedPaths(Regiment unit, int before, int after)
-        {
-            int safeBefore = System.Math.Max(0, before);
-            int safeAfter = System.Math.Max(safeBefore, after);
-            if (unit.regimentpath != null)
-            {
-                int max = System.Math.Min(safeAfter, unit.regimentpath.Length);
-                for (int i = safeBefore; i < max; i++)
-                    unit.regimentpath[i] = new NavMeshPath();
-            }
-
-            if (unit.pathstatus != null)
-            {
-                int max = System.Math.Min(safeAfter, unit.pathstatus.Length);
-                for (int i = safeBefore; i < max; i++)
-                    unit.pathstatus[i] = 0;
-            }
-
-            unit.regimentpaths = safeBefore;
         }
 
         private static int SafePathCount(Regiment unit)

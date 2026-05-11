@@ -420,7 +420,7 @@ namespace WhiskeyRealism.Patches
             return new ReserveCommitState { Units = units };
         }
 
-        private static UnitState SnapshotUnit(Regiment unit)
+        internal static UnitState SnapshotUnit(Regiment unit)
         {
             if (unit == null)
                 return default(UnitState);
@@ -515,7 +515,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void RestoreMovementState(Regiment unit, UnitState before)
+        internal static void RestoreMovementState(Regiment unit, UnitState before)
         {
             try { unit.regimentpathsbeforerotation = before.PathsBeforeRotation; } catch { }
             try { unit.unitwhogavelastmovingorder = before.UnitWhoGaveLastMovingOrder; } catch { }
@@ -942,7 +942,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void RemoveAddedPaths(Regiment unit, int before, int after)
+        internal static void RemoveAddedPaths(Regiment unit, int before, int after)
         {
             int safeBefore = Math.Max(0, before);
             int safeAfter = Math.Max(safeBefore, after);

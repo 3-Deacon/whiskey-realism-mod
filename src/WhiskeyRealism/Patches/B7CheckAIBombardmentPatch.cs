@@ -192,6 +192,8 @@ namespace WhiskeyRealism.Patches
                 if (unit == null || unit.unitrange == null || unit.unitrange.temp_owninrangeregs == null)
                     return false;
 
+                // Conservative: runtime data gives nearby friendly troops around
+                // the battery, not a precise target beaten zone.
                 float closeRange = Math.Max(80f, fireRange * 0.20f);
                 for (int i = 0; i < unit.unitrange.temp_owninrangeregs.Count; i++)
                 {

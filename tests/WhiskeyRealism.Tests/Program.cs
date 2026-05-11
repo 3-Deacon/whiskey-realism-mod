@@ -220,6 +220,8 @@ static class Program
             ("tactical artillery doctrine defensive fallback when shaken and unsupported", TacticalArtilleryDoctrineDefensiveFallbackWhenShakenAndUnsupported),
             ("tactical artillery doctrine cancel bombard on low ammo", TacticalArtilleryDoctrineCancelBombardOnLowAmmo),
             ("tactical artillery doctrine W&L gate blocks", TacticalArtilleryDoctrineWlGateBlocks),
+            ("tactical artillery doctrine friendly close deny cancels bombard", TacticalArtilleryDoctrineFriendlyCloseDenyCancelsBombard),
+            ("tactical artillery doctrine support main effort suppresses strongpoint", TacticalArtilleryDoctrineSupportMainEffortSuppressesStrongpoint),
             ("tactical artillery input adapter reads scalar fields", TacticalArtilleryInputAdapterReadsScalarFields),
             ("tactical artillery input adapter rejects non-artillery", TacticalArtilleryInputAdapterRejectsNonArtillery),
             ("tactical artillery input adapter rejects routed", TacticalArtilleryInputAdapterRejectsRouted),
@@ -5830,6 +5832,46 @@ static class Program
         };
         AssertEqual(TacticalArtilleryDoctrine.Decision.PreserveFire,
             TacticalArtilleryDoctrine.Score(input), "W&L gate -> safe default PreserveFire");
+    }
+
+    private static void TacticalArtilleryDoctrineFriendlyCloseDenyCancelsBombard()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.6f,
+            ClosestEnemyDistance = 600f,
+            UnitFireRange = 800f,
+            EnemyArtilleryVisible = true,
+            CombatBehaviorOrdered = 9,
+            AiFeudStance = -1,
+            DoctrineDecision = new DoctrineArtilleryDecision(
+                DoctrineConsumerAction.Deny,
+                "friendly-close-range"),
+        };
+
+        AssertEqual(TacticalArtilleryDoctrine.Decision.CancelBombard,
+            TacticalArtilleryDoctrine.Score(input), "friendly close doctrine deny cancels bombard");
+    }
+
+    private static void TacticalArtilleryDoctrineSupportMainEffortSuppressesStrongpoint()
+    {
+        var input = new TacticalArtilleryDoctrine.Input
+        {
+            ScreenResult = TacticalSupportScreen.Result.Screened,
+            AmmoTotalRatio = 0.6f,
+            ClosestEnemyDistance = 900f,
+            UnitFireRange = 800f,
+            EnemyArtilleryVisible = true,
+            CombatBehaviorOrdered = 7,
+            AiFeudStance = -1,
+            DoctrineDecision = new DoctrineArtilleryDecision(
+                DoctrineConsumerAction.Allow,
+                "support-main-effort"),
+        };
+
+        AssertEqual(TacticalArtilleryDoctrine.Decision.SuppressStrongpoint,
+            TacticalArtilleryDoctrine.Score(input), "support main effort remains telemetry-only suppress strongpoint");
     }
 
     private static void TacticalArtilleryInputAdapterReadsScalarFields()
