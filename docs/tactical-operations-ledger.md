@@ -31,6 +31,8 @@ Eligibility is ledger-first. #61 does not prefilter command nodes out solely bec
 
 Ledger resolution is tolerant but still ledger-bound. #61 first looks for an exact `CurrentCommandOperations` node id using the command node's GameObject instance id, then the `Regiment` component instance id as compatibility fallback. If that tick snapshot is missing the group, it resolves the command intent through `ArmyOrchestrator.ResolveCommandIntentForGroup(...)` and builds a single operational state from the current operation/objective ledger. If both paths fail, it writes nothing.
 
+Fallback target resolution is bounded and threat-aware. When a `FallBackToLine` task has a current or primary objective point, #61 steps away from that objective by the configured fallback standoff. If the objective anchor is unavailable but a closest visible enemy unit is available, #61 derives the fallback waypoint by stepping away from that enemy bearing instead of failing with `target-unresolved`. If neither objective nor visible threat can be resolved, the movement write still fails closed.
+
 ## Config Contract
 
 Existing BepInEx config files override C# defaults. The release/default contract is:

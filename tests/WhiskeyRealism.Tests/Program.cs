@@ -102,6 +102,7 @@ static class Program
             ("tactical command posture close engagement limits movement writes", TacticalCommandPostureCloseEngagementLimitsMovementWrites),
             ("tactical command posture reserve wait distinguishes reserve area", TacticalCommandPostureReserveWaitDistinguishesReserveArea),
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
+            ("command fallback target resolver uses visible threat without objective", CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective),
             ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
             ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
             ("command formation correction bounds repeated facing refreshes", CommandFormationCorrectionBoundsRepeatedFacingRefreshes),
@@ -2410,6 +2411,24 @@ static class Program
         AssertPostureDecision(PostureExecutionAction.RecoverInterruptedOrder, "recover-stuck-order", DecidePosture(CommandTaskType.RecoverStuckOrder));
         AssertPostureTarget(PostureExecutionTarget.RecoveryPath, true, DecidePosture(CommandTaskType.RecoverStuckOrder));
         AssertPostureDecision(PostureExecutionAction.NoWrite, "missing-ledger-assignment", DecidePosture(CommandTaskType.None));
+    }
+
+    private static void CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective()
+    {
+        bool resolved = CommandFallbackTargetResolver.TryResolve(
+            current: new TacticalMapPoint(100f, 100f),
+            objective: null,
+            threat: new TacticalMapPoint(100f, 0f),
+            standOff: 250f,
+            minDistance: 15f,
+            maxDistance: 2500f,
+            target: out TacticalMapPoint target,
+            source: out string source);
+
+        AssertTrue(resolved, "visible threat should resolve fallback without an objective anchor");
+        AssertEqual("visible-threat", source, "source");
+        AssertEqual(100f, target.X, "fallback x");
+        AssertEqual(350f, target.Z, "fallback z");
     }
 
     private static void CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation()

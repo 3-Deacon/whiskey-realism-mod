@@ -354,21 +354,50 @@ namespace WhiskeyRealism.Patches
             out Vector3 target)
         {
             target = default(Vector3);
-            if (!TryPrimaryObjectivePoint(group, orchestrator, out Vector3 objective)) return false;
-
             Vector3 current = SafePosition(group);
             if (IsDefaultVector(current)) return false;
 
-            float dx = current.x - objective.x;
-            float dz = current.z - objective.z;
-            float length = (float)Math.Sqrt(dx * dx + dz * dz);
-            if (length < 0.01f) return false;
+            TacticalMapPoint? objectivePoint = TryPrimaryObjectivePoint(group, orchestrator, out Vector3 objective)
+                ? new TacticalMapPoint(objective.x, objective.z)
+                : (TacticalMapPoint?)null;
+            TacticalMapPoint? threatPoint = TryClosestEnemyPoint(group, out Vector3 threat)
+                ? new TacticalMapPoint(threat.x, threat.z)
+                : (TacticalMapPoint?)null;
 
-            target = new Vector3(
-                current.x + (dx / length * FallbackStandOff),
-                SafeBattleY(),
-                current.z + (dz / length * FallbackStandOff));
+            if (!CommandFallbackTargetResolver.TryResolve(
+                    new TacticalMapPoint(current.x, current.z),
+                    objectivePoint,
+                    threatPoint,
+                    FallbackStandOff,
+                    MinWaypointDistance,
+                    MaxConservativeWaypointDistance,
+                    out TacticalMapPoint fallback,
+                    out _))
+                return false;
+
+            target = new Vector3(fallback.X, SafeBattleY(), fallback.Z);
             return IsSafeWaypoint(group, target);
+        }
+
+        private static bool TryClosestEnemyPoint(Regiment group, out Vector3 target)
+        {
+            target = default(Vector3);
+            try
+            {
+                Regiment enemy = group != null && group.unitrange != null
+                    ? group.unitrange.closestenemyunitfarreg
+                    : null;
+                if (enemy == null) return false;
+
+                Vector3 position = SafePosition(enemy);
+                if (IsDefaultVector(position)) return false;
+                target = position;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool TryRecoveryPath(
