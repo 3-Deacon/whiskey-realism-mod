@@ -4,11 +4,11 @@ Living reference for the tactical operations-ledger command system, active comma
 
 ## Current State
 
-- **Implementation state:** active on `implement/tactical-ops-ledger`; release/default config is `Tactical Commander Mode = Active`.
+- **Implementation state:** merged to `main`; release/default config is `Tactical Commander Mode = Active`.
 - **Patch ordinal:** #61 `BattleCommandPostureExecutorPatch`.
 - **Config contract:** `Active` is the release/default mode; `MonitorOnly` is for smoke and diagnostics; rollback is `Off`.
-- **Build/deploy proof:** Task 11 console harness `756 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `38a39fece3b970b4542beb702177a171709ae790a550a3ec62f0d82496df5414` (886272 bytes).
-- **Runtime smoke:** pending. Current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the Task 11 deployed plugin timestamp `2026-05-10 18:58:28 -0500`, so it cannot prove Active operations-ledger runtime behavior.
+- **Build/deploy proof:** Task 11 console harness `756 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `25f3e4168d6303c9d75377def4f6eb7dd730486469fae4f3e497fb593f2de474` (886272 bytes).
+- **Runtime smoke:** pending. Current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the Task 11 deployed plugin timestamp `2026-05-10 19:12:03 -0500`, so it cannot prove Active operations-ledger runtime behavior.
 
 The system turns the tactical orchestrator's command tree into a per-side operations ledger. The ledger classifies the current battle operation, assigns command-node tasks, monitors whether assigned commands are validly idle or illegally stuck, and lets #61 issue bounded vanilla commands only when the mode is `Active`.
 
