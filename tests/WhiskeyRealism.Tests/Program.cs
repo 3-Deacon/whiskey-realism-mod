@@ -91,6 +91,7 @@ static class Program
             ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
             ("operation director picks parallel attack only with advantage", OperationDirectorParallelRequiresAdvantage),
             ("operation director preserves committed push through noise", OperationDirectorPreservesCommittedPush),
+            ("operation director low reserve continues high odds committed attack", OperationDirectorLowReserveContinuesHighOddsCommittedAttack),
             ("operation director soft aborts before catastrophic loss", OperationDirectorSoftAbortsBeforeCatastrophe),
             ("operation director aborts catastrophic collapse inside commit window", OperationDirectorAbortsCatastrophicCollapseInsideCommitWindow),
             ("operation director preserves active operation when picture is missing", OperationDirectorPreservesActiveOperationWhenPictureMissing),
@@ -114,6 +115,7 @@ static class Program
             ("tactical battle orchestrator forwards operations ledger update", TacticalBattleOrchestratorForwardsOperationsLedgerUpdate),
             ("tactical battle coordinator side gate blocks player side unless ai vs ai", TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi),
             ("tactical command posture monitor-only suppresses active task writes", TacticalCommandPostureMonitorOnlySuppressesActiveTaskWrites),
+            ("tactical command posture active mode does not report monitor-only", TacticalCommandPostureActiveModeDoesNotReportMonitorOnly),
             ("tactical command posture eligibility precedence", TacticalCommandPostureEligibilityPrecedence),
             ("tactical command posture physical protection fails closed", TacticalCommandPosturePhysicalProtectionFailsClosed),
             ("tactical command posture interrupted illegal idle recovery", TacticalCommandPostureInterruptedIllegalIdleRecovery),
@@ -1914,6 +1916,28 @@ static class Program
         AssertEqual("commit-window", decision.Reason, "reason");
     }
 
+    private static void OperationDirectorLowReserveContinuesHighOddsCommittedAttack()
+    {
+        OperationRecord current = OperationRecord.CreateCommittedForTest(TacticalOperationShape.SingleMainEffort, "ridge-a", minCommitUntilSeconds: 300f);
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            current,
+            currentTimeSeconds: 500f,
+            ownStrength: 6000f,
+            reserveFraction: 0.02f,
+            aggression01: 0.6f,
+            caution01: 0.2f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 900f, 0.9f, true, 0.8f, 100f, 100f, 0.2f, 0.2f)
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+
+        AssertEqual(TacticalOperationPhase.Committed, decision.Operation.Phase, "high odds low reserve phase");
+        AssertEqual("ridge-a", decision.Operation.PrimaryObjectiveId, "high odds low reserve primary");
+        AssertTrue(decision.Reason != "odds-collapse", "high odds low reserve does not soft abort");
+    }
+
     private static void OperationDirectorSoftAbortsBeforeCatastrophe()
     {
         OperationRecord current = OperationRecord.CreateCommittedForTest(TacticalOperationShape.SingleMainEffort, "ridge-a", minCommitUntilSeconds: 300f);
@@ -2580,6 +2604,22 @@ static class Program
                 recentOrder: false));
 
         AssertPostureDecision(PostureExecutionAction.NoWrite, "mode-monitor-only", decision);
+    }
+
+    private static void TacticalCommandPostureActiveModeDoesNotReportMonitorOnly()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            CommandState(CommandTaskType.AttackObjective),
+            PhysicalState(),
+            new WriteEligibilitySnapshot(
+                modeAllowsWrites: TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderMode.Active),
+                playerProtected: false,
+                routed: false,
+                orderPending: false,
+                recentOrder: false));
+
+        AssertTrue(decision.Action != PostureExecutionAction.NoWrite, "active mode can write posture");
+        AssertTrue(decision.Reason != "mode-monitor-only", "active mode does not report monitor-only");
     }
 
     private static void TacticalCommandPostureEligibilityPrecedence()

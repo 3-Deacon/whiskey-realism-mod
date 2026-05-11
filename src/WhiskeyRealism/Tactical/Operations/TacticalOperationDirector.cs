@@ -143,17 +143,18 @@ namespace WhiskeyRealism.Tactical.Operations
 
         private static bool ShouldSoftAbortCommitted(TacticalOperationDirectorInput input)
         {
-            if (input.ReserveFraction < 0.05f)
-            {
-                return true;
-            }
-
             if (!TryFindObjective(input.Objectives, input.Current.PrimaryObjectiveId, out BattlefieldObjectiveEstimate primary))
             {
                 return false;
             }
 
-            return Odds(input.OwnStrength, primary.EnemyStrength) < 0.75f;
+            float odds = Odds(input.OwnStrength, primary.EnemyStrength);
+            if (odds < 0.75f)
+            {
+                return true;
+            }
+
+            return input.ReserveFraction < 0.05f && odds < 1.10f;
         }
 
         private static TacticalOperationDirectorDecision SoftAbort(

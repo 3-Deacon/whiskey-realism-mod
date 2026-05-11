@@ -771,7 +771,7 @@ namespace WhiskeyRealism.Patches
                     state,
                     physical,
                     new WriteEligibilitySnapshot(
-                        modeAllowsWrites: false,
+                        modeAllowsWrites: TacticalCommanderModePolicy.AllowsWrites(army.CommanderMode),
                         playerProtected: physical.PlayerProtected,
                         routed: physical.Routed,
                         orderPending: group != null && (SafeOrderQueueCount(group) > 0 || SafeOrderState(group) > 0),
