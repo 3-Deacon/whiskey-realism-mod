@@ -84,6 +84,7 @@ static class Program
             ("tactical operations soft abort before collapse", TacticalOperationsSoftAbortBeforeCollapse),
             ("strategic battle intent snapshot sanitizes nonfinite pressure", StrategicBattleIntentSnapshotSanitizesNonfinitePressure),
             ("tactical vision runtime adapter builds reports and objectives", TacticalVisionRuntimeAdapterBuildsReportsAndObjectives),
+            ("tactical vision runtime adapter fallback objective uses visible enemy point", TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint),
             ("tactical operations ledger runtime active selects operation", TacticalOperationsLedgerRuntimeActiveSelectsOperation),
             ("tactical operations ledger runtime off does not run ledger", TacticalOperationsLedgerRuntimeOffDoesNotRunLedger),
             ("tactical operations telemetry formats bounded monitor rows", TacticalOperationsTelemetryFormatsBoundedMonitorRows),
@@ -1785,6 +1786,29 @@ static class Program
 
         var empty = TacticalVisionRuntimeAdapter.BuildContactReports(null, 300f);
         AssertEqual(0, empty.Length, "null contacts");
+    }
+
+    private static void TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint()
+    {
+        var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsWithFallback(
+            Array.Empty<ObjectiveObservationInput>(),
+            Array.Empty<TacticalObjectiveStatus>(),
+            Array.Empty<float>(),
+            Array.Empty<float>(),
+            new TacticalMapPoint(250f, 400f),
+            visibleEnemyStrength: 1200f,
+            visibleFriendlyStrength: 3000f,
+            allianceId: 1);
+
+        AssertEqual(1, objectives.Length, "fallback objective count");
+        AssertEqual("enemy-line-1", objectives[0].Observation.ObjectiveId, "fallback objective id");
+        AssertEqual(TacticalObjectiveType.EnemyLine, objectives[0].Observation.Type, "fallback objective type");
+        AssertEqual(TacticalObjectiveSource.VisibleEnemyLine, objectives[0].Observation.Source, "fallback source");
+        AssertEqual(250f, objectives[0].Observation.Location.X, "fallback x");
+        AssertEqual(400f, objectives[0].Observation.Location.Z, "fallback z");
+        AssertEqual(1200f, objectives[0].EnemyStrength, "fallback enemy strength");
+        AssertEqual(3000f, objectives[0].FriendlyAssignedStrength, "fallback friendly strength");
+        AssertTrue(objectives[0].HasUsableStrengthEvidence, "fallback strength evidence");
     }
 
     private static void TacticalOperationsLedgerRuntimeActiveSelectsOperation()
