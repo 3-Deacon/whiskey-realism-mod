@@ -149,7 +149,7 @@ namespace WhiskeyRealism.Patches
             }
 
             bool hasTarget = TryResolveTarget(group, orchestrator, state, decision.Target, out Vector3 target);
-            bool wrote = ApplyDecision(bunits, group, state, decision, targetFormation, hasTarget, target);
+            bool wrote = ApplyDecision(bunits, group, state, decision, targetFormation, eligibility.CloseEngaged, hasTarget, target);
 
             if (wrote)
             {
@@ -168,16 +168,17 @@ namespace WhiskeyRealism.Patches
             CommandNodeOperationalState state,
             PostureExecutionDecision decision,
             int targetFormation,
+            bool closeEngaged,
             bool hasTarget,
             Vector3 target)
         {
             switch (decision.Action)
             {
                 case PostureExecutionAction.SetFormation:
-                    return SetFormation(bunits, group, state.Task, targetFormation);
+                    return SetFormation(bunits, group, state.Task, targetFormation, closeEngaged);
                 case PostureExecutionAction.SetFormationAndWaypoint:
                     if (!hasTarget) return false;
-                    bool formed = SetFormation(bunits, group, state.Task, targetFormation);
+                    bool formed = SetFormation(bunits, group, state.Task, targetFormation, closeEngaged);
                     return SetWaypoint(bunits, group, target) || formed;
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
@@ -195,7 +196,8 @@ namespace WhiskeyRealism.Patches
             BattleUnits bunits,
             Regiment group,
             CommandTaskType task,
-            int targetFormation)
+            int targetFormation,
+            bool closeEngaged)
         {
             if (!CanUseGroupFormation(group)) return false;
             if (targetFormation < 0 || targetFormation > 4) return false;
@@ -212,6 +214,9 @@ namespace WhiskeyRealism.Patches
                     manualFinalRotation,
                     FacingRefreshToleranceDegrees);
             if (!needsFormation && !needsFacing) return false;
+            bool useNewPath = CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
+                closeEngaged,
+                needsFormation);
 
             bunits.SetGroupFormation(
                 group,
@@ -219,8 +224,8 @@ namespace WhiskeyRealism.Patches
                 manualfinalrotation: hasThreatFacing ? manualFinalRotation : -1f,
                 targetpos: default(Vector3),
                 immediateplacement: false,
-                newpath: needsFormation,
-                modifylastwaypoint: !needsFormation && needsFacing,
+                newpath: useNewPath,
+                modifylastwaypoint: !useNewPath && needsFacing,
                 newstate: 2,
                 refuseflank: -1,
                 ignoredeplyomentzone: false,

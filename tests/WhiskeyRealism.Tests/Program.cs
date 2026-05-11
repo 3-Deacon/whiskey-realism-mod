@@ -107,7 +107,8 @@ static class Program
             ("command formation correction bounds repeated facing refreshes", CommandFormationCorrectionBoundsRepeatedFacingRefreshes),
             ("command formation correction shortens retry when close engaged and still wrong", CommandFormationCorrectionShortensRetryWhenCloseEngagedAndStillWrong),
             ("command formation correction overrides attack posture under flank emergency", CommandFormationCorrectionOverridesAttackPostureUnderFlankEmergency),
-            ("command formation correction allows pending order bypass only for local flank formation", CommandFormationCorrectionAllowsPendingOrderBypassOnlyForLocalFlankFormation),
+            ("command formation correction allows pending order bypass for close defensive formation", CommandFormationCorrectionAllowsPendingOrderBypassForCloseDefensiveFormation),
+            ("command formation correction avoids new path when close engaged", CommandFormationCorrectionAvoidsNewPathWhenCloseEngaged),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
             ("tactical command monitor interrupted hold is illegal", TacticalCommandMonitorInterruptedHoldIsIllegal),
@@ -2479,7 +2480,7 @@ static class Program
             "fallback task is already defensive");
     }
 
-    private static void CommandFormationCorrectionAllowsPendingOrderBypassOnlyForLocalFlankFormation()
+    private static void CommandFormationCorrectionAllowsPendingOrderBypassForCloseDefensiveFormation()
     {
         AssertTrue(
             CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
@@ -2488,6 +2489,22 @@ static class Program
                 visibleFormationMismatch: true,
                 task: CommandTaskType.GuardFlank),
             "local flank formation emergency can bypass a pending courier");
+
+        AssertTrue(
+            CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
+                closeEngaged: true,
+                flankRisk: false,
+                visibleFormationMismatch: true,
+                task: CommandTaskType.FallBackToLine),
+            "close fallback formation correction can bypass a pending courier");
+
+        AssertTrue(
+            CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
+                closeEngaged: true,
+                flankRisk: false,
+                visibleFormationMismatch: true,
+                task: CommandTaskType.HoldObjective),
+            "close hold formation correction can bypass a pending courier");
 
         AssertTrue(
             !CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
@@ -2504,6 +2521,27 @@ static class Program
                 visibleFormationMismatch: false,
                 task: CommandTaskType.GuardFlank),
             "already-formed unit cannot bypass pending order");
+    }
+
+    private static void CommandFormationCorrectionAvoidsNewPathWhenCloseEngaged()
+    {
+        AssertTrue(
+            !CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
+                closeEngaged: true,
+                needsFormation: true),
+            "close formation correction should reform in place");
+
+        AssertTrue(
+            CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
+                closeEngaged: false,
+                needsFormation: true),
+            "unengaged formation correction can use vanilla formation path");
+
+        AssertTrue(
+            !CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
+                closeEngaged: false,
+                needsFormation: false),
+            "no formation mismatch should not create a path");
     }
 
     private static PostureExecutionDecision DecidePosture(CommandTaskType task)

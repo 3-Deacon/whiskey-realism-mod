@@ -112,10 +112,16 @@ namespace WhiskeyRealism.Tactical.Operations
             bool visibleFormationMismatch,
             CommandTaskType task)
         {
-            return closeEngaged &&
-                flankRisk &&
-                visibleFormationMismatch &&
-                task == CommandTaskType.GuardFlank;
+            if (!closeEngaged || !visibleFormationMismatch) return false;
+            if (task == CommandTaskType.GuardFlank) return flankRisk;
+            return ShouldFaceThreat(task);
+        }
+
+        public static bool ShouldUseNewPathForFormationCorrection(
+            bool closeEngaged,
+            bool needsFormation)
+        {
+            return needsFormation && !closeEngaged;
         }
 
         private static float NormalizeDelta(float value)
