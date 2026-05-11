@@ -5,9 +5,9 @@ Living status for the Grand Tactician tactical orchestrator workstream. This fil
 ## Current State
 
 - **Released game-facing version:** `v0.2.2` is still the latest public release.
-- **Current `main` tactical orchestrator state:** O0/O1/O2/O3, #58 deployment observer, Slice 0 command-node tree, Slice 1 reserve commitment gate, Slice 3 #41 charge gate, and #60 deployment terrain/facing discipline are on `main`.
-- **Current `main` verification:** console harness `717 PASS`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8` (841216 bytes).
-- **Runtime smoke boundary:** the current `LogOutput.log` predates the merged `main` deploy, so focused battle smoke is still pending for Slice 1, Slice 3, and #60. Do not release these as smoke-verified until a fresh battle log proves them.
+- **Current branch tactical orchestrator state:** O0/O1/O2/O3, #58 deployment observer, Slice 0 command-node tree, Slice 1 reserve commitment gate, Slice 3 #41 charge gate, #60 deployment terrain/facing discipline, and #61 operations-ledger posture executor are present on `implement/tactical-ops-ledger`.
+- **Current Task 11 verification:** console harness `756 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `38a39fece3b970b4542beb702177a171709ae790a550a3ec62f0d82496df5414` (886272 bytes).
+- **Runtime smoke boundary:** Active operations-ledger smoke is pending because current `LogOutput.log` mtime `2026-05-10 13:48:24 -0500` predates the Task 11 deployed plugin timestamp `2026-05-10 18:58:28 -0500`. A fresh battle log must prove `[TacticalOpsLedger]`, `[TacticalCommandAssignment]`, `[TacticalCommandPosture]`, and `[TacticalPostureSummary]` without repeated errors before #61 is release-smoke-verified.
 
 ## Architecture
 
@@ -34,6 +34,7 @@ The hierarchy is Scourge-inspired but Grand Tactician-native: runtime command no
 | Slice 1 reserve commitment gate | Shipped on `main` | Build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending |
 | Slice 3 charge gate | Shipped on `main` | Build/deploy/hash verified; focused gate-OFF/gate-ON battle smoke pending |
 | #60 terrain/facing discipline | Shipped on `main` | Build/deploy/hash verified; focused enabled terrain-correction smoke pending |
+| #61 operations-ledger posture executor | Implemented/deployed on `implement/tactical-ops-ledger` | Harness/build/deploy/hash verified at `38a39fece3b970b4542beb702177a171709ae790a550a3ec62f0d82496df5414`; Active smoke pending fresh battle log |
 
 ## Patch Consumers
 
@@ -46,9 +47,18 @@ The hierarchy is Scourge-inspired but Grand Tactician-native: runtime command no
 | Reserve-list bias | #57 `BattleReserveDoctrinePatch` | B6c reserve intent plus Slice 1 command-role skip | `Enable Tactical Reserve List Mutation` |
 | Charge initiation | #41 `BattleChargeGatePatch` | W&L guard, B6c charge denial, Slice 3 command-role gate | `Enable W&L Tactical Charge Guard`, `Enable Tactical Charge Denial`, `Enable Tactical Orchestrator Charge Gate` |
 | Deployment terrain/facing correction | #60 `TacticalDeploymentTerrainDisciplinePatch` | Deployment terrain/facing discipline | `Enable Tactical Deployment Terrain Discipline` |
+| Operations-ledger posture execution | #61 `BattleCommandPostureExecutorPatch` | Active command assignments and stuck/idle recovery | `Tactical Commander Mode = Active` |
 | Brigade stance under contact | #45 `BattleGroupStancePatch` | Existing B5 scorer writer; not yet retargeted to command-node roles | `Enable Tactical Group Sector Stance` |
 | Line fallback | B8 fallback/withdrawal patches | Existing doctrine wiring; not yet retargeted to command-node roles | `Enable Tactical Withdrawal Doctrine` |
 | Artillery priority | B7 bombardment patch | Existing doctrine wiring; not yet retargeted to command-node roles | `Enable Tactical Artillery Doctrine` |
+
+## Operations Ledger Contract
+
+#61 is the first active operations-ledger writer. `Tactical Commander Mode = Active` is the release/default mode; `MonitorOnly` runs operation selection, command assignments, idle/stuck monitoring, and telemetry without vanilla writes; `Off` is rollback.
+
+#61 runs after vanilla `AIBattle.AdjustGroupFormations` and writes only through vanilla `BattleUnits.ChangeStance`, `BattleUnits.SetWaypoint`, and `BattleUnits.SetGroupFormation`. It must stay behind player/W&L/rout/order-pending/recent-order/close-engagement gates, and patches must not mutate operations-ledger state directly.
+
+Living reference: [`docs/tactical-operations-ledger.md`](tactical-operations-ledger.md).
 
 ## Slice 3 Charge Gate Contract
 
@@ -103,11 +113,10 @@ Expected:
 
 ## Remaining Work
 
-1. Run Slice 1, Slice 3, and #60 focused battle smoke on the deployed merged `main` DLL `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8`.
-2. If smoke passes, archive the Slice 3 plan and update this file plus `docs/handoff.md`, `docs/patch-catalog.md`, and `MEMORY.md` with runtime proof.
-3. Implement Slice 2 brigade stance under contact by retargeting #45 to command-node roles.
-4. Implement Slice 4 line fallback gate.
-5. Implement Slice 5 artillery target priority.
+1. Run Active operations-ledger battle smoke on deployed DLL `38a39fece3b970b4542beb702177a171709ae790a550a3ec62f0d82496df5414` and prove `[TacticalOpsLedger]`, `[TacticalCommandAssignment]`, `[TacticalCommandPosture]`, `[TacticalPostureSummary]`, no repeated errors, and no player-subordinate retasking.
+2. Run Slice 1, Slice 3, and #60 focused battle smoke on the latest deployed tactical DLL.
+3. If smoke passes, archive the operations-ledger plan and update this file plus `docs/handoff.md`, `docs/patch-catalog.md`, and `MEMORY.md` with runtime proof.
+4. Implement remaining retargeted consumers only after #61 Active smoke: line fallback, artillery priority, and any surviving brigade-stance handoff.
 
 ## Source Files
 
@@ -116,5 +125,6 @@ Expected:
 - Harness: `tests/WhiskeyRealism.Tests/`
 - Patch catalog: `docs/patch-catalog.md`
 - Master handoff: `docs/handoff.md`
+- Operations-ledger living reference: `docs/tactical-operations-ledger.md`
 - Active remaining-slices design: `docs/superpowers/specs/2026-05-09-tactical-orchestrator-remaining-patches-design.md`
-- Current Slice 3 execution plan: `docs/superpowers/plans/2026-05-10-tactical-orchestrator-slice-3-charge-gate.md`
+- Current operations-ledger execution plan: `docs/superpowers/plans/2026-05-10-tactical-operations-ledger-command-system-implementation-plan.md`
