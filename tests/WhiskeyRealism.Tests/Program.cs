@@ -202,6 +202,7 @@ static class Program
             ("tactical b6b reserve exploit weak point picks exploit", TacticalB6bReserveExploitWeakPointPicksExploit),
             ("tactical b6b reserve wl ownership unsafe holds reserve", TacticalB6bReserveWlOwnershipUnsafeHoldsReserve),
             ("tactical b6b reserve stale order prepares without mutation", TacticalB6bReserveStaleOrderPreparesWithoutMutation),
+            ("tactical reserve doctrine deny removal ignores order delays", TacticalReserveDoctrineDenyRemovalIgnoresOrderDelays),
             ("tactical b6c reaction context returns last decision per group", TacticalB6cReactionContextReturnsLastDecisionPerGroup),
             ("tactical b6c reaction context clear discards all entries", TacticalB6cReactionContextClearDiscardsAllEntries),
             ("tactical b6c reaction context missing key returns default maintain", TacticalB6cReactionContextMissingKeyReturnsDefaultMaintain),
@@ -5587,6 +5588,46 @@ static class Program
         AssertEqual(TacticalReserveIntent.PrepareRelief, d.Intent, "intent");
         AssertTrue(!d.AllowsRuntimeMutation, "stale order should prepare without mutation");
         AssertEqual("stale-order", d.Reason, "reason");
+    }
+
+    private static void TacticalReserveDoctrineDenyRemovalIgnoresOrderDelays()
+    {
+        AssertTrue(
+            TacticalReservePolicyLedger.ShouldRemoveDeniedReserveMovement(
+                doctrineDeny: true,
+                beforePaths: 0,
+                afterPaths: 1,
+                beforeQueueCount: 0,
+                afterQueueCount: 0,
+                useOrderDelays: false),
+            "direct path added under doctrine deny should be removed even without order delays");
+        AssertTrue(
+            TacticalReservePolicyLedger.ShouldRemoveDeniedReserveMovement(
+                doctrineDeny: true,
+                beforePaths: 2,
+                afterPaths: 3,
+                beforeQueueCount: 1,
+                afterQueueCount: 1,
+                useOrderDelays: true),
+            "direct path added under doctrine deny should be removed with order delays");
+        AssertFalse(
+            TacticalReservePolicyLedger.ShouldRemoveDeniedReserveMovement(
+                doctrineDeny: false,
+                beforePaths: 0,
+                afterPaths: 1,
+                beforeQueueCount: 0,
+                afterQueueCount: 0,
+                useOrderDelays: false),
+            "allow/observe should not remove vanilla reserve support");
+        AssertFalse(
+            TacticalReservePolicyLedger.ShouldRemoveDeniedReserveMovement(
+                doctrineDeny: true,
+                beforePaths: 0,
+                afterPaths: 1,
+                beforeQueueCount: 0,
+                afterQueueCount: 1,
+                useOrderDelays: false),
+            "queued delayed order is not the direct vanilla path shape");
     }
 
     private static void TacticalGateHelpersWlOwnership()

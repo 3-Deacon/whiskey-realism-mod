@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
@@ -22,8 +23,59 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _isPlayerAiOrFeudField;
         private static MethodInfo _performAiActionDlcWlMethod;
 
+        internal sealed class ReserveMovementState
+        {
+            public UnitState[] Units;
+            public DoctrineReserveDecision DoctrineDecision;
+        }
+
+        internal readonly struct UnitState
+        {
+            public UnitState(Regiment unit, int paths, int queueCount)
+            {
+                Unit = unit;
+                Paths = paths;
+                QueueCount = queueCount;
+            }
+
+            public Regiment Unit { get; }
+            public int Paths { get; }
+            public int QueueCount { get; }
+        }
+
+        [HarmonyPrefix]
+        internal static void Prefix(Regiment aigroup, out ReserveMovementState __state)
+        {
+            __state = null;
+
+            if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
+            if (aigroup == null) return;
+
+            try
+            {
+                if (!TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder doctrineOrder)) return;
+
+                DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
+                    doctrineOrder,
+                    LocalOdds(aigroup),
+                    ReserveFraction(aigroup),
+                    SafeCurrentTimeSeconds());
+                if (doctrineDecision.Action != DoctrineConsumerAction.Deny) return;
+
+                __state = new ReserveMovementState
+                {
+                    DoctrineDecision = doctrineDecision,
+                    Units = SnapshotUnits(aigroup)
+                };
+            }
+            catch
+            {
+                __state = null;
+            }
+        }
+
         [HarmonyPostfix]
-        public static void Postfix(AIBattle __instance, Regiment aigroup)
+        internal static void Postfix(AIBattle __instance, Regiment aigroup, ReserveMovementState __state)
         {
             if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
             if (aigroup == null) return;
@@ -38,6 +90,18 @@ namespace WhiskeyRealism.Patches
                 if (!isPlayerAiOrFeud.HasValue) return;
                 if (!HasPerformAiActionDlcWl()) return;
 
+                if (__state != null && __state.DoctrineDecision.Action == DoctrineConsumerAction.Deny)
+                {
+                    RemoveDeniedReserveMovement(aigroup, __state);
+                    EmitHelpRequest(aigroup, TacticalWithdrawalDoctrine.Decision.HoldLine);
+                    OnceLog.Info(
+                        "b8-check-reserves:doctrine-deny:" + SafeInstanceId(aigroup),
+                        "[B8] reserve doctrine denied reserve mutation reason=" + __state.DoctrineDecision.Reason +
+                        " task=" + __state.DoctrineDecision.Task +
+                        " group=" + SafeName(aigroup));
+                    return;
+                }
+
                 if (TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder doctrineOrder))
                 {
                     DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
@@ -47,6 +111,7 @@ namespace WhiskeyRealism.Patches
                         SafeCurrentTimeSeconds());
                     if (doctrineDecision.Action == DoctrineConsumerAction.Deny)
                     {
+                        RemoveDeniedReserveMovement(aigroup, __state);
                         EmitHelpRequest(aigroup, TacticalWithdrawalDoctrine.Decision.HoldLine);
                         OnceLog.Info(
                             "b8-check-reserves:doctrine-deny:" + SafeInstanceId(aigroup),
@@ -125,6 +190,72 @@ namespace WhiskeyRealism.Patches
             catch (System.Exception ex)
             {
                 OnceLog.Warning("b8-check-reserves-error", "[B8] CheckUseOfReserves Postfix error: " + ex.Message);
+            }
+        }
+
+        private static UnitState[] SnapshotUnits(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.allattachedunits == null)
+                    return System.Array.Empty<UnitState>();
+
+                UnitState[] units = new UnitState[group.allattachedunits.Length];
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    units[i] = new UnitState(unit, SafePathCount(unit), SafeQueueCount(unit));
+                }
+
+                return units;
+            }
+            catch
+            {
+                return System.Array.Empty<UnitState>();
+            }
+        }
+
+        private static void RemoveDeniedReserveMovement(Regiment aigroup, ReserveMovementState state)
+        {
+            try
+            {
+                if (state == null || state.Units == null) return;
+
+                for (int i = 0; i < state.Units.Length; i++)
+                {
+                    UnitState before = state.Units[i];
+                    Regiment unit = before.Unit;
+                    if (unit == null) continue;
+
+                    int afterPaths = SafePathCount(unit);
+                    int afterQueue = SafeQueueCount(unit);
+                    if (!TacticalReservePolicyLedger.ShouldRemoveDeniedReserveMovement(
+                        doctrineDeny: true,
+                        beforePaths: before.Paths,
+                        afterPaths: afterPaths,
+                        beforeQueueCount: before.QueueCount,
+                        afterQueueCount: afterQueue,
+                        useOrderDelays: SafeUseOrderDelays()))
+                    {
+                        continue;
+                    }
+
+                    RemoveAddedPaths(unit, before.Paths, afterPaths);
+                    OnceLog.Info(
+                        "b8-check-reserves:doctrine-remove:" + SafeInstanceId(unit),
+                        "[B8] reserve doctrine removed vanilla direct path reason=" +
+                        state.DoctrineDecision.Reason +
+                        " unit=" + SafeName(unit) +
+                        " group=" + SafeName(aigroup) +
+                        " paths=" + before.Paths + "->" + afterPaths +
+                        " queue=" + before.QueueCount + "->" + afterQueue);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                OnceLog.Warning(
+                    "b8-check-reserves-doctrine-remove-error",
+                    "[B8] reserve doctrine path removal skipped: " + ex.Message);
             }
         }
 
@@ -450,6 +581,45 @@ namespace WhiskeyRealism.Patches
         {
             try { return Time.realtimeSinceStartup; }
             catch { return 0f; }
+        }
+
+        private static void RemoveAddedPaths(Regiment unit, int before, int after)
+        {
+            int safeBefore = System.Math.Max(0, before);
+            int safeAfter = System.Math.Max(safeBefore, after);
+            if (unit.regimentpath != null)
+            {
+                int max = System.Math.Min(safeAfter, unit.regimentpath.Length);
+                for (int i = safeBefore; i < max; i++)
+                    unit.regimentpath[i] = new NavMeshPath();
+            }
+
+            if (unit.pathstatus != null)
+            {
+                int max = System.Math.Min(safeAfter, unit.pathstatus.Length);
+                for (int i = safeBefore; i < max; i++)
+                    unit.pathstatus[i] = 0;
+            }
+
+            unit.regimentpaths = safeBefore;
+        }
+
+        private static int SafePathCount(Regiment unit)
+        {
+            try { return unit != null ? System.Math.Max(0, unit.regimentpaths) : 0; }
+            catch { return 0; }
+        }
+
+        private static int SafeQueueCount(Regiment unit)
+        {
+            try { return unit != null && unit.orderqueue != null ? unit.orderqueue.Count : 0; }
+            catch { return 0; }
+        }
+
+        private static bool SafeUseOrderDelays()
+        {
+            try { return GameVars.useorderdelays; }
+            catch { return false; }
         }
 
         private static float Sanitize(float value)
