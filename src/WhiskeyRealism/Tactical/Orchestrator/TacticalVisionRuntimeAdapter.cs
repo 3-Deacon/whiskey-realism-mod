@@ -60,7 +60,37 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             if (observations != null && observations.Count > 0)
             {
-                return BuildObjectiveRecords(observations, statuses, enemyStrengths, friendlyAssignedStrengths);
+                if (!visibleEnemyLine.HasValue ||
+                    !IsUsableMapPoint(visibleEnemyLine.Value) ||
+                    HasVisibleEnemyLineObservation(observations, allianceId))
+                {
+                    return BuildObjectiveRecords(observations, statuses, enemyStrengths, friendlyAssignedStrengths);
+                }
+
+                var mergedObservations = new List<ObjectiveObservationInput>(observations.Count + 1);
+                var mergedStatuses = new List<TacticalObjectiveStatus>(observations.Count + 1);
+                var mergedEnemyStrengths = new List<float>(observations.Count + 1);
+                var mergedFriendlyStrengths = new List<float>(observations.Count + 1);
+
+                for (int i = 0; i < observations.Count; i++)
+                {
+                    mergedObservations.Add(observations[i]);
+                    mergedStatuses.Add(GetOrDefault(statuses, i, TacticalObjectiveStatus.Unknown));
+                    mergedEnemyStrengths.Add(GetOrDefault(enemyStrengths, i, 0f));
+                    mergedFriendlyStrengths.Add(GetOrDefault(friendlyAssignedStrengths, i, 0f));
+                }
+
+                AddVisibleEnemyLineFallback(
+                    mergedObservations,
+                    mergedStatuses,
+                    mergedEnemyStrengths,
+                    mergedFriendlyStrengths,
+                    visibleEnemyLine.Value,
+                    visibleEnemyStrength,
+                    visibleFriendlyStrength,
+                    allianceId);
+
+                return BuildObjectiveRecords(mergedObservations, mergedStatuses, mergedEnemyStrengths, mergedFriendlyStrengths);
             }
 
             if (!visibleEnemyLine.HasValue || !IsUsableMapPoint(visibleEnemyLine.Value))
@@ -68,25 +98,66 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return Array.Empty<ObjectiveRecord>();
             }
 
+            var fallbackObservations = new List<ObjectiveObservationInput>(1);
+            var fallbackStatuses = new List<TacticalObjectiveStatus>(1);
+            var fallbackEnemyStrengths = new List<float>(1);
+            var fallbackFriendlyStrengths = new List<float>(1);
+            AddVisibleEnemyLineFallback(
+                fallbackObservations,
+                fallbackStatuses,
+                fallbackEnemyStrengths,
+                fallbackFriendlyStrengths,
+                visibleEnemyLine.Value,
+                visibleEnemyStrength,
+                visibleFriendlyStrength,
+                allianceId);
+
+            return BuildObjectiveRecords(fallbackObservations, fallbackStatuses, fallbackEnemyStrengths, fallbackFriendlyStrengths);
+        }
+
+        private static void AddVisibleEnemyLineFallback(
+            List<ObjectiveObservationInput> observations,
+            List<TacticalObjectiveStatus> statuses,
+            List<float> enemyStrengths,
+            List<float> friendlyStrengths,
+            TacticalMapPoint visibleEnemyLine,
+            float visibleEnemyStrength,
+            float visibleFriendlyStrength,
+            int allianceId)
+        {
             float fallbackConfidence = visibleEnemyStrength > 0f && !float.IsNaN(visibleEnemyStrength) && !float.IsInfinity(visibleEnemyStrength)
                 ? 0.70f
                 : 0.55f;
 
-            return BuildObjectiveRecords(
-                new[]
+            observations.Add(new ObjectiveObservationInput(
+                "enemy-line-" + allianceId,
+                TacticalObjectiveType.EnemyLine,
+                TacticalObjectiveSource.VisibleEnemyLine,
+                visibleEnemyLine,
+                sourceConfidence: fallbackConfidence,
+                value: 0.4f,
+                typeAnchorVerified: true));
+            statuses.Add(TacticalObjectiveStatus.Contested);
+            enemyStrengths.Add(visibleEnemyStrength);
+            friendlyStrengths.Add(visibleFriendlyStrength);
+        }
+
+        private static bool HasVisibleEnemyLineObservation(
+            IReadOnlyList<ObjectiveObservationInput> observations,
+            int allianceId)
+        {
+            string fallbackId = "enemy-line-" + allianceId;
+            for (int i = 0; i < observations.Count; i++)
+            {
+                ObjectiveObservationInput observation = observations[i];
+                if (observation.Source == TacticalObjectiveSource.VisibleEnemyLine ||
+                    string.Equals(observation.ObjectiveId, fallbackId, StringComparison.Ordinal))
                 {
-                    new ObjectiveObservationInput(
-                        "enemy-line-" + allianceId,
-                        TacticalObjectiveType.EnemyLine,
-                        TacticalObjectiveSource.VisibleEnemyLine,
-                        visibleEnemyLine.Value,
-                        sourceConfidence: fallbackConfidence,
-                        value: 0.4f,
-                        typeAnchorVerified: true)
-                },
-                new[] { TacticalObjectiveStatus.Contested },
-                new[] { visibleEnemyStrength },
-                new[] { visibleFriendlyStrength });
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         internal static EnemyContactReport[] BuildContactReportsFromBattle(

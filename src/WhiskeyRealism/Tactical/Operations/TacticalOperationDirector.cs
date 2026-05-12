@@ -227,10 +227,7 @@ namespace WhiskeyRealism.Tactical.Operations
                     continue;
                 }
 
-                float score = objective.Value +
-                    objective.Confidence01 -
-                    objective.TerrainStrength -
-                    objective.ApproachDifficulty;
+                float score = ObjectiveSelectionScore(objective);
                 if (!found || score > bestScore)
                 {
                     best = objective;
@@ -240,6 +237,33 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             return found;
+        }
+
+        private static float ObjectiveSelectionScore(BattlefieldObjectiveEstimate objective)
+        {
+            float score = objective.Value +
+                objective.Confidence01 -
+                objective.TerrainStrength -
+                objective.ApproachDifficulty;
+
+            if (objective.MainLineExposed)
+            {
+                score += 0.35f;
+            }
+
+            if (objective.Type == TacticalObjectiveType.EnemyLine)
+            {
+                score += 0.20f;
+            }
+
+            if (objective.Type == TacticalObjectiveType.UnknownVanillaObjective &&
+                !objective.MainLineExposed &&
+                objective.EnemyStrength <= 0f)
+            {
+                score -= 0.25f;
+            }
+
+            return score;
         }
 
         private static bool TryFindObjective(

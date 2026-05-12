@@ -95,10 +95,12 @@ static class Program
             ("operation director soft aborts before catastrophic loss", OperationDirectorSoftAbortsBeforeCatastrophe),
             ("operation director aborts catastrophic collapse inside commit window", OperationDirectorAbortsCatastrophicCollapseInsideCommitWindow),
             ("operation director preserves active operation when picture is missing", OperationDirectorPreservesActiveOperationWhenPictureMissing),
+            ("operation director prefers exposed enemy line over generic objective chain", OperationDirectorPrefersExposedEnemyLineOverGenericObjectiveChain),
             ("operation macro ai maps soft abort to defend", OperationMacroAiMapsSoftAbortToDefend),
             ("strategic battle intent snapshot sanitizes nonfinite pressure", StrategicBattleIntentSnapshotSanitizesNonfinitePressure),
             ("tactical vision runtime adapter builds reports and objectives", TacticalVisionRuntimeAdapterBuildsReportsAndObjectives),
             ("tactical vision runtime adapter fallback objective uses visible enemy point", TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint),
+            ("tactical vision appends visible enemy line to objective chain picture", TacticalVisionAppendsVisibleEnemyLineToObjectiveChainPicture),
             ("tactical vision fallback objective carries committed attack confidence", TacticalVisionFallbackObjectiveCarriesCommittedAttackConfidence),
             ("tactical operations ledger runtime active selects operation", TacticalOperationsLedgerRuntimeActiveSelectsOperation),
             ("tactical operations ledger runtime off does not run ledger", TacticalOperationsLedgerRuntimeOffDoesNotRunLedger),
@@ -2024,6 +2026,28 @@ static class Program
         AssertEqual("objective-picture-missing", missingDecision.Reason, "missing primary reason");
     }
 
+    private static void OperationDirectorPrefersExposedEnemyLineOverGenericObjectiveChain()
+    {
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            OperationRecord.Noop,
+            currentTimeSeconds: 120f,
+            ownStrength: 1800f,
+            reserveFraction: 0.25f,
+            aggression01: 0.6f,
+            caution01: 0.2f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("vanilla-chain-0", TacticalObjectiveType.UnknownVanillaObjective, 0f, 0.75f, false, 0.65f, 100f, 100f, 0f, 0f),
+                new BattlefieldObjectiveEstimate("enemy-line-1", TacticalObjectiveType.EnemyLine, 900f, 0.70f, true, 0.40f, 300f, 400f, 0f, 0f),
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+
+        AssertEqual("enemy-line-1", decision.Operation.PrimaryObjectiveId, "primary objective");
+        AssertEqual(TacticalOperationShape.SingleMainEffort, decision.Operation.Shape, "shape");
+        AssertEqual(TacticalOperationPhase.Committed, decision.Operation.Phase, "phase");
+    }
+
     private static void OperationMacroAiMapsSoftAbortToDefend()
     {
         OperationRecord softAbort = new OperationRecord(
@@ -2131,6 +2155,38 @@ static class Program
         AssertEqual(1200f, objectives[0].EnemyStrength, "fallback enemy strength");
         AssertEqual(3000f, objectives[0].FriendlyAssignedStrength, "fallback friendly strength");
         AssertTrue(objectives[0].HasUsableStrengthEvidence, "fallback strength evidence");
+    }
+
+    private static void TacticalVisionAppendsVisibleEnemyLineToObjectiveChainPicture()
+    {
+        var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsWithFallback(
+            new[]
+            {
+                new ObjectiveObservationInput(
+                    "vanilla-chain-0",
+                    TacticalObjectiveType.UnknownVanillaObjective,
+                    TacticalObjectiveSource.ObjectiveChain,
+                    new TacticalMapPoint(100f, 200f),
+                    sourceConfidence: 0.75f,
+                    value: 0.65f,
+                    typeAnchorVerified: false),
+            },
+            new[] { TacticalObjectiveStatus.Scouting },
+            new[] { 0f },
+            new[] { 1400f },
+            new TacticalMapPoint(300f, 400f),
+            visibleEnemyStrength: 900f,
+            visibleFriendlyStrength: 1600f,
+            allianceId: 1);
+
+        AssertEqual(2, objectives.Length, "objective count");
+        AssertEqual("vanilla-chain-0", objectives[0].Observation.ObjectiveId, "chain id");
+        AssertEqual(TacticalObjectiveType.EnemyLine, objectives[1].Observation.Type, "visible enemy type");
+        AssertEqual(TacticalObjectiveSource.VisibleEnemyLine, objectives[1].Observation.Source, "visible enemy source");
+        AssertEqual(TacticalObjectiveStatus.Contested, objectives[1].Status, "visible enemy status");
+        AssertEqual(900f, objectives[1].EnemyStrength, "visible enemy strength");
+        AssertEqual(1600f, objectives[1].FriendlyAssignedStrength, "visible friendly strength");
+        AssertTrue(objectives[1].Observation.TypeAnchorVerified, "visible enemy type verified");
     }
 
     private static void TacticalVisionFallbackObjectiveCarriesCommittedAttackConfidence()
