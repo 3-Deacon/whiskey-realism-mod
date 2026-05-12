@@ -21,6 +21,9 @@ namespace WhiskeyRealism.Patches
         private static readonly FieldInfo DiaryCardinalPointsField = AccessTools.Field(typeof(Diary), "cardinalpoints");
         private static readonly FieldInfo DiaryUpdateCycleField = AccessTools.Field(typeof(Diary), "updatecycle");
         private static readonly FieldInfo DiaryWeatherField = AccessTools.Field(typeof(Diary), "weather");
+        private static readonly FieldInfo AifactionField = AccessTools.Field(typeof(AICampaign), "aifaction");
+        private static FieldInfo _aiFactionAllianceIdField;
+        private static FieldInfo _aiFactionCapitalDefendersField;
         private static int _vanillaThresholdDepth;
         private static string _lastCorrectionSignature;
         private static string _lastModifierSignature;
@@ -256,8 +259,7 @@ namespace WhiskeyRealism.Patches
                     case 6:
                         return CommanderIndexReady(DLC_WL.dlc_chosencommander);
                     case 7:
-                        if (UnityAlive(campaignGroup)) AICampaign.IsUnitPartOfDefendingCapital(campaignGroup);
-                        return MarkDiaryCycleReady(updateCycle);
+                        return DiaryCapitalDefenseCycleReady(campaignGroup);
                     case 8:
                         return DiaryFriendlyOperationCycleReady(campaignGroup, defensive: false);
                     case 9:
@@ -272,6 +274,141 @@ namespace WhiskeyRealism.Patches
             {
                 return MarkDiaryCycleUnsafe(updateCycle, "exception=" + ex.GetType().Name + ":" + ex.Message);
             }
+        }
+
+        private static bool DiaryCapitalDefenseCycleReady(Regiment campaignGroup)
+        {
+            bool campaignGroupPresent = UnityAlive(campaignGroup);
+            if (!campaignGroupPresent)
+            {
+                return MarkDiaryCycleReady(7);
+            }
+
+            bool aiFactionStateReady = TryResolveAiFaction(campaignGroup.alliance, out var faction, out var aiFactionReason);
+            string capitalListReason = "capital-defenders-unchecked";
+            bool capitalDefenseListReady = aiFactionStateReady && TryReadCapitalDefenders(faction, out capitalListReason);
+            bool campaignGroupLookupReady = NestedCampaignGroupLookupReady(campaignGroup, out var lookupReason);
+
+            bool allow = WlCareerStartGate.ShouldAllowCapitalDefenseDiaryCycle(
+                campaignGroupPresent,
+                aiFactionStateReady,
+                capitalDefenseListReady,
+                campaignGroupLookupReady);
+
+            if (allow)
+            {
+                return MarkDiaryCycleReady(7);
+            }
+
+            string reason = !aiFactionStateReady
+                ? aiFactionReason
+                : !capitalDefenseListReady
+                    ? capitalListReason
+                    : lookupReason;
+            return MarkDiaryCycleUnsafe(7, reason);
+        }
+
+        private static bool TryResolveAiFaction(int alliance, out object faction, out string reason)
+        {
+            faction = null;
+            reason = "aifaction-unready";
+
+            try
+            {
+                var factions = AifactionField == null ? null : AifactionField.GetValue(null) as IList;
+                if (factions == null || factions.Count == 0)
+                {
+                    reason = "aifaction-unready";
+                    return false;
+                }
+
+                for (int i = 0; i < factions.Count; i++)
+                {
+                    var candidate = factions[i];
+                    if (candidate == null) continue;
+                    if (!TryReadAiFactionAlliance(candidate, out int candidateAlliance)) continue;
+                    if (candidateAlliance == alliance)
+                    {
+                        faction = candidate;
+                        reason = "aifaction-ready";
+                        return true;
+                    }
+                }
+
+                reason = "aifaction-missing-alliance:" + alliance;
+                return false;
+            }
+            catch (Exception ex)
+            {
+                reason = "aifaction-read-exception=" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool TryReadAiFactionAlliance(object faction, out int alliance)
+        {
+            alliance = -1;
+            var field = GetAiFactionField(faction, "allianceid", ref _aiFactionAllianceIdField);
+            if (field == null) return false;
+            object value = field.GetValue(faction);
+            if (value is int id)
+            {
+                alliance = id;
+                return true;
+            }
+            return false;
+        }
+
+        private static bool TryReadCapitalDefenders(object faction, out string reason)
+        {
+            reason = "capital-defenders-unready";
+            try
+            {
+                var field = GetAiFactionField(faction, "groupstodefendcapital", ref _aiFactionCapitalDefendersField);
+                if (field == null)
+                {
+                    reason = "capital-defenders-field-missing";
+                    return false;
+                }
+
+                var defenders = field.GetValue(faction) as IList;
+                if (defenders == null)
+                {
+                    reason = "capital-defenders-unready";
+                    return false;
+                }
+
+                reason = "capital-defenders-ready";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = "capital-defenders-read-exception=" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool NestedCampaignGroupLookupReady(Regiment campaignGroup, out string reason)
+        {
+            reason = "nested-campaign-group-ready";
+            try
+            {
+                BattleUnits.GetCampaignGroup(campaignGroup);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = "nested-campaign-group-exception=" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static FieldInfo GetAiFactionField(object faction, string fieldName, ref FieldInfo cache)
+        {
+            if (faction == null) return null;
+            if (cache != null) return cache;
+            cache = AccessTools.Field(faction.GetType(), fieldName);
+            return cache;
         }
 
         private static bool DiaryCycleZeroReady(Regiment campaignGroup)

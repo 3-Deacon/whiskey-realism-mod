@@ -295,6 +295,7 @@ static class Program
             ("wl diary startup gate defers until diary dependencies are ready", WlDiaryStartupGateDefersUntilReady),
             ("wl diary startup gate defers until campaign group lookup is safe", WlDiaryStartupGateDefersUntilCampaignGroupLookupReady),
             ("wl diary startup gate defers until current update cycle is safe", WlDiaryStartupGateDefersUntilCurrentCycleReady),
+            ("wl diary capital defense cycle waits for ai faction state", WlDiaryCapitalDefenseCycleWaitsForAiFactionState),
             ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
             ("wl start selection retry waits for panel before consuming attempt", WlStartSelectionRetryWaitsForPanel),
             ("wl start selection retry waits for vanilla ready frame", WlStartSelectionRetryWaitsForReadyFrame),
@@ -7143,6 +7144,54 @@ static class Program
                 campaignGroupLookupReady: true,
                 updateCycleReady: false),
             "W&L diary updates should defer when the active vanilla update cycle would dereference unsafe campaign data");
+    }
+
+    private static void WlDiaryCapitalDefenseCycleWaitsForAiFactionState()
+    {
+        AssertEqual(
+            true,
+            WlCareerStartGate.ShouldAllowCapitalDefenseDiaryCycle(
+                campaignGroupPresent: false,
+                aiFactionStateReady: false,
+                capitalDefenseListReady: false,
+                campaignGroupLookupReady: false),
+            "vanilla cycle 7 can clear the diary event when the player has no campaign group");
+
+        AssertEqual(
+            false,
+            WlCareerStartGate.ShouldAllowCapitalDefenseDiaryCycle(
+                campaignGroupPresent: true,
+                aiFactionStateReady: false,
+                capitalDefenseListReady: false,
+                campaignGroupLookupReady: true),
+            "cycle 7 should wait until AICampaign.aifaction is built");
+
+        AssertEqual(
+            false,
+            WlCareerStartGate.ShouldAllowCapitalDefenseDiaryCycle(
+                campaignGroupPresent: true,
+                aiFactionStateReady: true,
+                capitalDefenseListReady: false,
+                campaignGroupLookupReady: true),
+            "cycle 7 should wait until AIFaction.groupstodefendcapital is built");
+
+        AssertEqual(
+            false,
+            WlCareerStartGate.ShouldAllowCapitalDefenseDiaryCycle(
+                campaignGroupPresent: true,
+                aiFactionStateReady: true,
+                capitalDefenseListReady: true,
+                campaignGroupLookupReady: false),
+            "cycle 7 should wait until vanilla's nested campaign-group lookup is safe");
+
+        AssertEqual(
+            true,
+            WlCareerStartGate.ShouldAllowCapitalDefenseDiaryCycle(
+                campaignGroupPresent: true,
+                aiFactionStateReady: true,
+                capitalDefenseListReady: true,
+                campaignGroupLookupReady: true),
+            "cycle 7 can run once the vanilla capital-defense membership inputs are ready");
     }
 
     private static void WlStartSelectionRetryDoesNotDependOnCampaignFrame()

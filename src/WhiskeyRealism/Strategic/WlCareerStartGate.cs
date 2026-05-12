@@ -29,5 +29,15 @@ namespace WhiskeyRealism.Strategic
             if (!updateCycleReady) return true;
             return updateCycle == 1 && !weatherReady;
         }
+
+        public static bool ShouldAllowCapitalDefenseDiaryCycle(
+            bool campaignGroupPresent,
+            bool aiFactionStateReady,
+            bool capitalDefenseListReady,
+            bool campaignGroupLookupReady)
+        {
+            if (!campaignGroupPresent) return true;
+            return aiFactionStateReady && capitalDefenseListReady && campaignGroupLookupReady;
+        }
     }
 }
