@@ -99,6 +99,7 @@ static class Program
             ("strategic battle intent snapshot sanitizes nonfinite pressure", StrategicBattleIntentSnapshotSanitizesNonfinitePressure),
             ("tactical vision runtime adapter builds reports and objectives", TacticalVisionRuntimeAdapterBuildsReportsAndObjectives),
             ("tactical vision runtime adapter fallback objective uses visible enemy point", TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint),
+            ("tactical vision fallback objective carries committed attack confidence", TacticalVisionFallbackObjectiveCarriesCommittedAttackConfidence),
             ("tactical operations ledger runtime active selects operation", TacticalOperationsLedgerRuntimeActiveSelectsOperation),
             ("tactical operations ledger runtime off does not run ledger", TacticalOperationsLedgerRuntimeOffDoesNotRunLedger),
             ("operations ledger stores picture and doctrine orders", OperationsLedgerStoresPictureAndDoctrineOrders),
@@ -127,11 +128,13 @@ static class Program
             ("posture executor clears interrupted inactive order", PostureExecutorClearsInterruptedInactiveOrder),
             ("posture executor fallback doctrine overrides interrupted stale path", PostureExecutorFallbackDoctrineOverridesInterruptedStalePath),
             ("posture executor preserves legal reserve idle", PostureExecutorPreservesLegalReserveIdle),
+            ("posture executor duplicate waypoint policy suppresses same target", PostureExecutorDuplicateWaypointPolicySuppressesSameTarget),
             ("doctrine order sanitizes ids and exposes purpose", DoctrineOrderSanitizesIdsAndPurpose),
             ("doctrine order distinguishes no assignment from form up", DoctrineOrderDistinguishesNoAssignmentFromFormUp),
             ("doctrine order requires target for movement tasks", DoctrineOrderRequiresTargetForMovementTasks),
             ("doctrine order classifies legal idle reasons", DoctrineOrderClassifiesLegalIdleReasons),
             ("doctrine assignment high odds attack weak point attacks", DoctrineAssignmentHighOddsAttackWeakPointAttacks),
+            ("doctrine assignment committed visible enemy line attacks at fallback confidence", DoctrineAssignmentCommittedVisibleEnemyLineAttacksAtFallbackConfidence),
             ("doctrine assignment reserve gets legal idle", DoctrineAssignmentReserveGetsLegalIdle),
             ("doctrine assignment fallback guard pulls toward fallback line", DoctrineAssignmentFallbackGuardPullsBack),
             ("doctrine assignment stale objective fails closed", DoctrineAssignmentStaleObjectiveFailsClosed),
@@ -188,6 +191,7 @@ static class Program
             ("tactical sector tiny angle contact is not weak point", TacticalSectorTinyAngleContactIsNotWeakPoint),
             ("tactical sector substantial contact remains weak point", TacticalSectorSubstantialContactRemainsWeakPoint),
             ("tactical group visible line contact drives weak point", TacticalGroupVisibleLineContactDrivesWeakPoint),
+            ("tactical group named detachment line contact drives weak point", TacticalGroupNamedDetachmentLineContactDrivesWeakPoint),
             ("tactical group screen contact does not drive weak point", TacticalGroupScreenContactDoesNotDriveWeakPoint),
             ("tactical macro dynamic is not attack", TacticalMacroDynamicIsNotAttack),
             ("tactical macro debug override skips", TacticalMacroDebugOverrideSkips),
@@ -2124,6 +2128,24 @@ static class Program
         AssertTrue(objectives[0].HasUsableStrengthEvidence, "fallback strength evidence");
     }
 
+    private static void TacticalVisionFallbackObjectiveCarriesCommittedAttackConfidence()
+    {
+        var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsWithFallback(
+            Array.Empty<ObjectiveObservationInput>(),
+            Array.Empty<TacticalObjectiveStatus>(),
+            Array.Empty<float>(),
+            Array.Empty<float>(),
+            new TacticalMapPoint(250f, 400f),
+            visibleEnemyStrength: 1200f,
+            visibleFriendlyStrength: 3000f,
+            allianceId: 1);
+
+        AssertEqual(1, objectives.Length, "fallback objective count");
+        AssertTrue(
+            objectives[0].Observation.SourceConfidence >= 0.65f,
+            "visible enemy line fallback should clear committed attack threshold");
+    }
+
     private static void TacticalOperationsLedgerRuntimeActiveSelectsOperation()
     {
         var runtime = new TacticalOperationsLedgerRuntime();
@@ -2954,6 +2976,29 @@ static class Program
         AssertPostureTarget(PostureExecutionTarget.None, false, decision);
     }
 
+    private static void PostureExecutorDuplicateWaypointPolicySuppressesSameTarget()
+    {
+        AssertTrue(
+            CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
+                currentWaypointX: 1880.5f,
+                currentWaypointZ: -708.5f,
+                targetX: 1880.9f,
+                targetZ: -708.2f,
+                tolerance: 5f,
+                pathInterrupted: false),
+            "same assembly target should not enqueue another waypoint");
+
+        AssertFalse(
+            CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
+                currentWaypointX: 1880.5f,
+                currentWaypointZ: -708.5f,
+                targetX: 1880.9f,
+                targetZ: -708.2f,
+                tolerance: 5f,
+                pathInterrupted: true),
+            "interrupted paths still need recovery writes");
+    }
+
     private static void DoctrineOrderSanitizesIdsAndPurpose()
     {
         CommandDoctrineOrder order = CommandDoctrineOrder.Create(
@@ -3089,6 +3134,25 @@ static class Program
         AssertEqual("ridge-a", orders[0].ObjectiveId, "objective");
         AssertTrue(orders[0].PrimaryTarget.HasValue, "target");
         AssertTrue(!orders[0].AllowsIdle, "attacker should not idle");
+    }
+
+    private static void DoctrineAssignmentCommittedVisibleEnemyLineAttacksAtFallbackConfidence()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("brigade-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "enemy-line-1", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("enemy-line-1", TacticalObjectiveType.EnemyLine, 1200f, 0.55f, true, 0.4f, 250f, 400f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 3000f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandTaskType.AttackObjective, orders[0].Task, "committed visible enemy line should attack despite fallback confidence");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "target");
     }
 
     private static void DoctrineAssignmentReserveGetsLegalIdle()
@@ -4048,6 +4112,27 @@ static class Program
         AssertEqual(TacticalSectorMission.AttackWeakPoint, sector.Mission, "visible line contact should drive weak point");
         AssertTrue(sector.Confidence >= 0.75f, "visible line contact should raise confidence");
         AssertNear(914f, sector.EnemyStrength, 0.01f, "closest visible line strength feeds sector enemy");
+    }
+
+    private static void TacticalGroupNamedDetachmentLineContactDrivesWeakPoint()
+    {
+        var sector = TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
+            sectorId: 4,
+            ownStrength: 17651f,
+            enemiesInRangeStrength: 0f,
+            angleEnemyStrength: 0f,
+            closestEnemyStrength: 914f,
+            closestEnemyUnitType: TacticalUnitType.Infantry,
+            closestEnemyName: "Whiting's Detachment",
+            closestEnemyRouted: false,
+            closestEnemyPermanentlyDetached: false,
+            flankRisk: false,
+            strongPoint: false));
+
+        AssertEqual(TacticalSectorSource.VisibleLineContact, sector.Source, "source");
+        AssertEqual(TacticalSectorMission.AttackWeakPoint, sector.Mission, "named detachment with formed infantry strength should drive weak point");
+        AssertTrue(sector.Confidence >= 0.75f, "named detachment line contact should raise confidence");
+        AssertNear(914f, sector.EnemyStrength, 0.01f, "detachment line strength feeds sector enemy");
     }
 
     private static void TacticalGroupScreenContactDoesNotDriveWeakPoint()

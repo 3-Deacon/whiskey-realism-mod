@@ -82,6 +82,33 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool CloseEngaged { get; }
     }
 
+    public static class CommandWaypointWritePolicy
+    {
+        public static bool ShouldSkipDuplicateWaypoint(
+            float currentWaypointX,
+            float currentWaypointZ,
+            float targetX,
+            float targetZ,
+            float tolerance,
+            bool pathInterrupted)
+        {
+            if (pathInterrupted) return false;
+            if (!IsFinite(currentWaypointX) || !IsFinite(currentWaypointZ)) return false;
+            if (!IsFinite(targetX) || !IsFinite(targetZ)) return false;
+            if (currentWaypointX == 0f && currentWaypointZ == 0f) return false;
+
+            float safeTolerance = IsFinite(tolerance) && tolerance > 0f ? tolerance : 1f;
+            float dx = currentWaypointX - targetX;
+            float dz = currentWaypointZ - targetZ;
+            return (dx * dx) + (dz * dz) <= safeTolerance * safeTolerance;
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+    }
+
     public static class CommandPostureExecutor
     {
         public static PostureExecutionDecision Decide(

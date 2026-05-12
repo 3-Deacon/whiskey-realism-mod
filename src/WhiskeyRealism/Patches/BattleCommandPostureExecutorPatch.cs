@@ -284,6 +284,7 @@ namespace WhiskeyRealism.Patches
         private static bool SetWaypoint(BattleUnits bunits, Regiment group, Vector3 target)
         {
             if (!IsSafeWaypoint(group, target)) return false;
+            if (ShouldSkipDuplicateWaypoint(group, target)) return false;
 
             bunits.SetWaypoint(
                 group,
@@ -302,6 +303,26 @@ namespace WhiskeyRealism.Patches
                 checkforreadiness: true,
                 clearinterruptionpaths: true);
             return true;
+        }
+
+        private static bool ShouldSkipDuplicateWaypoint(Regiment group, Vector3 target)
+        {
+            try
+            {
+                if (group == null) return false;
+                Vector3 currentWaypoint = group.lastsetwaypointposition;
+                return CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
+                    currentWaypoint.x,
+                    currentWaypoint.z,
+                    target.x,
+                    target.z,
+                    MinWaypointDistance,
+                    group.pathinterrupted);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool ChangeStance(BattleUnits bunits, Regiment group, int stance)

@@ -68,6 +68,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return Array.Empty<ObjectiveRecord>();
             }
 
+            float fallbackConfidence = visibleEnemyStrength > 0f && !float.IsNaN(visibleEnemyStrength) && !float.IsInfinity(visibleEnemyStrength)
+                ? 0.70f
+                : 0.55f;
+
             return BuildObjectiveRecords(
                 new[]
                 {
@@ -76,7 +80,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         TacticalObjectiveType.EnemyLine,
                         TacticalObjectiveSource.VisibleEnemyLine,
                         visibleEnemyLine.Value,
-                        sourceConfidence: 0.55f,
+                        sourceConfidence: fallbackConfidence,
                         value: 0.4f,
                         typeAnchorVerified: true)
                 },

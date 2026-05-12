@@ -92,7 +92,6 @@ namespace WhiskeyRealism.Tactical
 
             string name = input.ClosestEnemyName ?? string.Empty;
             if (name.IndexOf("skirm", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-            if (name.IndexOf("detachment", StringComparison.OrdinalIgnoreCase) >= 0) return false;
 
             return true;
         }

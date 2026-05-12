@@ -71,7 +71,7 @@ namespace WhiskeyRealism.Tactical.Operations
 
             if (role == CommandNodeRole.MainEffort &&
                 objective.MainLineExposed &&
-                objective.Confidence01 >= 0.65f &&
+                MainEffortConfidenceAllowsAttack(operation, objective) &&
                 odds >= 1.25f)
             {
                 return CommandTaskType.AttackObjective;
@@ -92,6 +92,16 @@ namespace WhiskeyRealism.Tactical.Operations
             if (role == CommandNodeRole.ScreeningForce) return CommandTaskType.Screen;
 
             return CommandTaskType.FormUp;
+        }
+
+        private static bool MainEffortConfidenceAllowsAttack(
+            OperationRecord operation,
+            BattlefieldObjectiveEstimate objective)
+        {
+            if (objective.Confidence01 >= 0.65f) return true;
+            return operation.Phase == TacticalOperationPhase.Committed &&
+                objective.Type == TacticalObjectiveType.EnemyLine &&
+                objective.Confidence01 >= 0.50f;
         }
 
         private static DoctrineAllowedIdleReason ResolveIdle(
