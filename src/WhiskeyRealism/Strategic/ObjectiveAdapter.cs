@@ -83,14 +83,17 @@ namespace WhiskeyRealism.Strategic
             try
             {
                 var obj = FindCampaignObjective(objectiveId);
-                if (obj == null) return null;
-                var objList = AccessTools.Field(obj.GetType(), "objectives")?.GetValue(obj) as IList;
-                if (objList == null || objList.Count == 0) return null;
-
-                foreach (var target in objList)
+                if (obj != null)
                 {
-                    var pos = TryGetWorldPosition(target);
-                    if (pos.HasValue) return pos;
+                    var objList = AccessTools.Field(obj.GetType(), "objectives")?.GetValue(obj) as IList;
+                    if (objList != null && objList.Count > 0)
+                    {
+                        foreach (var target in objList)
+                        {
+                            var pos = TryGetWorldPosition(target);
+                            if (pos.HasValue) return pos;
+                        }
+                    }
                 }
             }
             catch (Exception ex)

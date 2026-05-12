@@ -99,7 +99,8 @@ namespace WhiskeyRealism.Patches
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("wl-diary-startup:check", "[W&LCamp] diary readiness check failed open: " + ex.Message);
+                    OnceLog.Warning("wl-diary-startup:check", "[W&LCamp] diary readiness check failed closed: " + ex.Message);
+                    return false;
                 }
 
                 _vanillaThresholdDepth++;
@@ -119,7 +120,8 @@ namespace WhiskeyRealism.Patches
         {
             int chosenCommanderId = DLC_WL.dlc_chosencommander;
             bool commanderReady = IsChosenCommanderRecordReady(chosenCommanderId);
-            bool commanderHasCommand = commanderReady && UnityAlive(GameVars.commander[chosenCommanderId].currentcommand);
+            Regiment currentCommand = commanderReady ? GameVars.commander[chosenCommanderId].currentcommand : null;
+            bool commanderHasCommand = commanderReady && UnityAlive(currentCommand);
             int updateCycle = ReadStaticInt(DiaryUpdateCycleField, -1);
 
             return WlCareerStartGate.ShouldSkipDiaryEventUpdate(
@@ -132,18 +134,21 @@ namespace WhiskeyRealism.Patches
                 FoodReady(),
                 CardinalPointsReady(),
                 updateCycle != 1 || WeatherReady(),
-                updateCycle);
+                updateCycle,
+                CampaignGroupLookupReady(currentCommand));
         }
 
         private static string BuildDiaryReadinessDiagnostic()
         {
             int chosenCommanderId = DLC_WL.dlc_chosencommander;
             bool commanderReady = IsChosenCommanderRecordReady(chosenCommanderId);
-            bool commanderHasCommand = commanderReady && UnityAlive(GameVars.commander[chosenCommanderId].currentcommand);
+            Regiment currentCommand = commanderReady ? GameVars.commander[chosenCommanderId].currentcommand : null;
+            bool commanderHasCommand = commanderReady && UnityAlive(currentCommand);
             return "frame=" + GameVars.frame +
                 " commander=" + chosenCommanderId +
                 " commanderReady=" + commanderReady +
                 " hasCommand=" + commanderHasCommand +
+                " campaignGroupLookup=" + CampaignGroupLookupReady(currentCommand) +
                 " diaryEvents=" + DiaryEventsReady() +
                 " food=" + FoodReady() +
                 " cardinalPoints=" + CardinalPointsReady() +
@@ -195,6 +200,23 @@ namespace WhiskeyRealism.Patches
 
             var weatherObject = UnityEngine.GameObject.Find("WeatherObj");
             return UnityAlive(weatherObject) && UnityAlive(weatherObject.GetComponent<Weather>());
+        }
+
+        private static bool CampaignGroupLookupReady(Regiment currentCommand)
+        {
+            if (!UnityAlive(currentCommand)) return false;
+            try
+            {
+                BattleUnits.GetCampaignGroup(currentCommand);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "wl-diary-startup:campaign-group",
+                    "[W&LCamp] skipped Diary.UpdateEvents until BattleUnits.GetCampaignGroup is safe: " + ex.Message);
+                return false;
+            }
         }
 
         private static int ReadStaticInt(FieldInfo field, int fallback)

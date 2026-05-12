@@ -291,6 +291,7 @@ static class Program
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl diary startup gate defers until diary dependencies are ready", WlDiaryStartupGateDefersUntilReady),
+            ("wl diary startup gate defers until campaign group lookup is safe", WlDiaryStartupGateDefersUntilCampaignGroupLookupReady),
             ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
             ("wl start selection retry waits for panel before consuming attempt", WlStartSelectionRetryWaitsForPanel),
             ("wl start selection retry waits for vanilla ready frame", WlStartSelectionRetryWaitsForReadyFrame),
@@ -351,6 +352,7 @@ static class Program
             ("asset role scorer score town flags capital approach by distance", AssetRoleScorerScoreTownFlagsCapitalApproach),
             ("asset role catalog overrides scorer for named anchor", AssetRoleCatalogOverridesScorer),
             ("asset role catalog returns none for unknown name", AssetRoleCatalogReturnsNoneForUnknown),
+            ("asset role catalog distinguishes known neutral anchors from unknown names", AssetRoleCatalogDistinguishesKnownNeutralAnchors),
             ("asset role catalog resolves real gtcw names", AssetRoleCatalogResolvesRealGtcwNames),
             ("csa early profile favors capital defense and foreign recognition", CsaEarlyProfileFavorsDefenseAndForeignRecognition),
             ("grand strategy tags affect objective score", GrandStrategyTagsAffectObjectiveScore),
@@ -366,6 +368,7 @@ static class Program
             ("defense force sizer accepts large force for large threat", DefenseForceSizerAcceptsLargeForceForLargeThreat),
             ("objective catalog maps known wl objectives", ObjectiveCatalogMapsKnownWlObjectives),
             ("objective catalog exposes known objective positions", ObjectiveCatalogExposesKnownObjectivePositions),
+            ("objective adapter falls back to catalog positions when vanilla objectives are unavailable", ObjectiveAdapterFallsBackToCatalogWhenVanillaUnavailable),
             ("objective catalog keeps unknown ids unresolved", ObjectiveCatalogKeepsUnknownIdsUnresolved),
             ("historical operation catalog exact objective match", HistoricalOperationCatalogExactObjectiveMatch),
             ("historical operation catalog no profile for unmatched objective", HistoricalOperationCatalogNoProfileForUnmatchedObjective),
@@ -7046,6 +7049,25 @@ static class Program
             "non-weather cycles should not require WeatherObj once core dependencies are ready");
     }
 
+    private static void WlDiaryStartupGateDefersUntilCampaignGroupLookupReady()
+    {
+        AssertEqual(
+            true,
+            WlCareerStartGate.ShouldSkipDiaryEventUpdate(
+                dlcScenarioActive: true,
+                frame: 50,
+                chosenCommanderId: 12,
+                chosenCommanderRecordReady: true,
+                chosenCommanderHasCommand: true,
+                diaryEventsReady: true,
+                foodReady: true,
+                cardinalPointsReady: true,
+                weatherReady: true,
+                updateCycle: 0,
+                campaignGroupLookupReady: false),
+            "W&L diary updates should wait until BattleUnits.GetCampaignGroup(currentcommand) can run safely");
+    }
+
     private static void WlStartSelectionRetryDoesNotDependOnCampaignFrame()
     {
         var gate = new WlStartSelectionRetryGate(maxAttempts: 3, retryEveryUnityFrames: 15);
@@ -7723,6 +7745,15 @@ static class Program
             "objective 4 should expose a catalog position");
         AssertNear(720f, washingtonX, 0.01f, "objective 4 catalog x");
         AssertNear(160f, washingtonZ, 0.01f, "objective 4 catalog z");
+    }
+
+    private static void ObjectiveAdapterFallsBackToCatalogWhenVanillaUnavailable()
+    {
+        var position = ObjectiveAdapter.ResolveObjectivePosition(3);
+
+        AssertTrue(position.HasValue, "objective adapter should use catalog position when CampaignObjective runtime state is unavailable");
+        AssertNear(760f, position.Value.x, 0.01f, "objective adapter catalog fallback x");
+        AssertNear(60f, position.Value.z, 0.01f, "objective adapter catalog fallback z");
     }
 
     private static void TheaterClassifierMapsWlCapitalsToEast()
@@ -11434,6 +11465,16 @@ static class Program
         AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup("unmapped-port"));
         AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup(null));
         AssertEqual(AssetStrategicRole.None, AssetRoleCatalog.Lookup(""));
+    }
+
+    private static void AssetRoleCatalogDistinguishesKnownNeutralAnchors()
+    {
+        AssertTrue(AssetRoleCatalog.TryLookup("Port Tobacco", out var knownNeutral),
+            "Port Tobacco should be a known neutral low-priority anchor");
+        AssertEqual(AssetStrategicRole.None, knownNeutral);
+
+        AssertEqual(false, AssetRoleCatalog.TryLookup("unmapped-port", out _),
+            "unmapped names should remain distinguishable from explicit neutral anchors");
     }
 
     private static void AssetRoleCatalogResolvesRealGtcwNames()

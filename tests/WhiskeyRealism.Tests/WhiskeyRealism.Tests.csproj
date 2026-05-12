@@ -69,6 +69,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\GrandStrategyPolicyScorer.cs" Link="GrandStrategyPolicyScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveMetadata.cs" Link="ObjectiveMetadata.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveCatalog.cs" Link="ObjectiveCatalog.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveAdapter.cs" Link="ObjectiveAdapter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveStrategyTagger.cs" Link="ObjectiveStrategyTagger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveScoring.cs" Link="ObjectiveScoring.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationModels.cs" Link="HistoricalOperationModels.cs" />
@@ -230,5 +231,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\BurnsideForcedAssaultPlaybook.cs" Link="Orchestrator\Playbooks\BurnsideForcedAssaultPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\BraggIndecisiveCommitPlaybook.cs" Link="Orchestrator\Playbooks\BraggIndecisiveCommitPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\BuiltInPlaybooks.cs" Link="Orchestrator\BuiltInPlaybooks.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Util\OnceLog.cs" Link="Util\OnceLog.cs" />
   </ItemGroup>
 </Project>

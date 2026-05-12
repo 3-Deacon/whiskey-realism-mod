@@ -126,8 +126,18 @@ namespace WhiskeyRealism.Strategic
 
         public static AssetStrategicRole Lookup(string name)
         {
-            if (string.IsNullOrEmpty(name)) return AssetStrategicRole.None;
-            return _entries.TryGetValue(name, out var role) ? role : AssetStrategicRole.None;
+            return TryLookup(name, out var role) ? role : AssetStrategicRole.None;
+        }
+
+        public static bool TryLookup(string name, out AssetStrategicRole role)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                role = AssetStrategicRole.None;
+                return false;
+            }
+
+            return _entries.TryGetValue(name, out role);
         }
     }
 }

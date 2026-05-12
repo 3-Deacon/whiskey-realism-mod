@@ -134,6 +134,7 @@ namespace WhiskeyRealism.Strategic
             {
                 if (asset == null || string.IsNullOrEmpty(asset.Name)) continue;
                 if (asset.StrategicRole != AssetStrategicRole.None) continue;
+                if (AssetRoleCatalog.TryLookup(asset.Name, out _)) continue;
                 OnceLog.Info("defense-intent:asset-no-role:" + asset.Name,
                     $"[DefenseIntent:asset] missing-role asset={asset.Name} kind={asset.Kind}");
             }
