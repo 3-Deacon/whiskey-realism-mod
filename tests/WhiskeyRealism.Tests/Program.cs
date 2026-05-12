@@ -294,6 +294,7 @@ static class Program
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl diary startup gate defers until diary dependencies are ready", WlDiaryStartupGateDefersUntilReady),
             ("wl diary startup gate defers until campaign group lookup is safe", WlDiaryStartupGateDefersUntilCampaignGroupLookupReady),
+            ("wl diary startup gate defers until current update cycle is safe", WlDiaryStartupGateDefersUntilCurrentCycleReady),
             ("wl start selection retry does not depend on campaign frame", WlStartSelectionRetryDoesNotDependOnCampaignFrame),
             ("wl start selection retry waits for panel before consuming attempt", WlStartSelectionRetryWaitsForPanel),
             ("wl start selection retry waits for vanilla ready frame", WlStartSelectionRetryWaitsForReadyFrame),
@@ -7122,6 +7123,26 @@ static class Program
                 updateCycle: 0,
                 campaignGroupLookupReady: false),
             "W&L diary updates should wait until BattleUnits.GetCampaignGroup(currentcommand) can run safely");
+    }
+
+    private static void WlDiaryStartupGateDefersUntilCurrentCycleReady()
+    {
+        AssertEqual(
+            true,
+            WlCareerStartGate.ShouldSkipDiaryEventUpdate(
+                dlcScenarioActive: true,
+                frame: 50,
+                chosenCommanderId: 12,
+                chosenCommanderRecordReady: true,
+                chosenCommanderHasCommand: true,
+                diaryEventsReady: true,
+                foodReady: true,
+                cardinalPointsReady: true,
+                weatherReady: true,
+                updateCycle: 0,
+                campaignGroupLookupReady: true,
+                updateCycleReady: false),
+            "W&L diary updates should defer when the active vanilla update cycle would dereference unsafe campaign data");
     }
 
     private static void WlStartSelectionRetryDoesNotDependOnCampaignFrame()

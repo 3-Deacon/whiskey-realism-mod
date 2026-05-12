@@ -18,13 +18,15 @@ namespace WhiskeyRealism.Strategic
             bool cardinalPointsReady,
             bool weatherReady,
             int updateCycle,
-            bool campaignGroupLookupReady = true)
+            bool campaignGroupLookupReady = true,
+            bool updateCycleReady = true)
         {
             if (!dlcScenarioActive) return false;
             if (frame < 50) return true;
             if (chosenCommanderId < 0 || !chosenCommanderRecordReady || !chosenCommanderHasCommand) return true;
             if (!campaignGroupLookupReady) return true;
             if (!diaryEventsReady || !foodReady || !cardinalPointsReady) return true;
+            if (!updateCycleReady) return true;
             return updateCycle == 1 && !weatherReady;
         }
     }

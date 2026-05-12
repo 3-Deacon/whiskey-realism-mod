@@ -25,6 +25,7 @@ namespace WhiskeyRealism.Patches
         private static string _lastCorrectionSignature;
         private static string _lastModifierSignature;
         private static string _lastBonusSignature;
+        private static string _lastDiaryCycleDiagnostic = "not-checked";
 
         [HarmonyPatch(typeof(Camp), "EvaluateCampTime")]
         internal static class EvaluateCampTimePatch
@@ -112,6 +113,16 @@ namespace WhiskeyRealism.Patches
             internal static Exception Finalizer(Exception __exception, bool __state)
             {
                 if (__state && _vanillaThresholdDepth > 0) _vanillaThresholdDepth--;
+                if (__exception is NullReferenceException && DLC_WL.dlc_scenarioactive)
+                {
+                    OnceLog.Warning(
+                        "wl-diary-startup:vanilla-nre",
+                        "[W&LCamp] suppressed W&L Diary.UpdateEvents NullReferenceException after cycle preflight missed a vanilla null; updateCycle=" +
+                        ReadStaticInt(DiaryUpdateCycleField, -1) +
+                        " diagnostic=" + _lastDiaryCycleDiagnostic +
+                        " message=" + __exception.Message);
+                    return null;
+                }
                 return __exception;
             }
         }
@@ -123,6 +134,7 @@ namespace WhiskeyRealism.Patches
             Regiment currentCommand = commanderReady ? GameVars.commander[chosenCommanderId].currentcommand : null;
             bool commanderHasCommand = commanderReady && UnityAlive(currentCommand);
             int updateCycle = ReadStaticInt(DiaryUpdateCycleField, -1);
+            bool updateCycleReady = DiaryUpdateCycleReady(updateCycle, currentCommand);
 
             return WlCareerStartGate.ShouldSkipDiaryEventUpdate(
                 DLC_WL.dlc_scenarioactive,
@@ -135,7 +147,8 @@ namespace WhiskeyRealism.Patches
                 CardinalPointsReady(),
                 updateCycle != 1 || WeatherReady(),
                 updateCycle,
-                CampaignGroupLookupReady(currentCommand));
+                CampaignGroupLookupReady(currentCommand),
+                updateCycleReady);
         }
 
         private static string BuildDiaryReadinessDiagnostic()
@@ -153,7 +166,8 @@ namespace WhiskeyRealism.Patches
                 " food=" + FoodReady() +
                 " cardinalPoints=" + CardinalPointsReady() +
                 " weather=" + WeatherReady() +
-                " updateCycle=" + ReadStaticInt(DiaryUpdateCycleField, -1);
+                " updateCycle=" + ReadStaticInt(DiaryUpdateCycleField, -1) +
+                " cycleReady=" + _lastDiaryCycleDiagnostic;
         }
 
         private static bool IsChosenCommanderRecordReady(int chosenCommanderId)
@@ -217,6 +231,190 @@ namespace WhiskeyRealism.Patches
                     "[W&LCamp] skipped Diary.UpdateEvents until BattleUnits.GetCampaignGroup is safe: " + ex.Message);
                 return false;
             }
+        }
+
+        private static bool DiaryUpdateCycleReady(int updateCycle, Regiment currentCommand)
+        {
+            try
+            {
+                Regiment campaignGroup = null;
+                if (UnityAlive(currentCommand))
+                {
+                    campaignGroup = BattleUnits.GetCampaignGroup(currentCommand);
+                }
+
+                switch (updateCycle)
+                {
+                    case 0:
+                        return DiaryCycleZeroReady(campaignGroup);
+                    case 1:
+                        return DiaryWeatherCycleReady(campaignGroup);
+                    case 4:
+                        return DiarySupplyCycleReady(campaignGroup);
+                    case 5:
+                        return DiaryEnemyContactCycleReady(campaignGroup);
+                    case 6:
+                        return CommanderIndexReady(DLC_WL.dlc_chosencommander);
+                    case 7:
+                        if (UnityAlive(campaignGroup)) AICampaign.IsUnitPartOfDefendingCapital(campaignGroup);
+                        return MarkDiaryCycleReady(updateCycle);
+                    case 8:
+                        return DiaryFriendlyOperationCycleReady(campaignGroup, defensive: false);
+                    case 9:
+                        return DiaryFriendlyOperationCycleReady(campaignGroup, defensive: true);
+                    case 10:
+                        return DiaryCampStationCycleReady();
+                    default:
+                        return MarkDiaryCycleReady(updateCycle);
+                }
+            }
+            catch (Exception ex)
+            {
+                return MarkDiaryCycleUnsafe(updateCycle, "exception=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private static bool DiaryCycleZeroReady(Regiment campaignGroup)
+        {
+            if (!UnityAlive(campaignGroup)) return MarkDiaryCycleReady(0);
+
+            if (campaignGroup.HasMovedRecently(0.002739726f, usecampaigngroup: true))
+            {
+                int state = BattlefieldSetup.GetStateOfField(campaignGroup.GetPosition(), usecloseststate: true);
+                int lastState = BattlefieldSetup.GetStateOfField(campaignGroup.GetLastWaypointPos(), usecloseststate: true);
+                if (state != lastState && !NationIndexReady(lastState))
+                {
+                    return MarkDiaryCycleUnsafe(0, "nation-index-unready:" + lastState);
+                }
+
+                Regiment parentUnit = BattleUnits.GetParentUnit(campaignGroup);
+                if (UnityAlive(parentUnit) && !ReferenceEquals(parentUnit, campaignGroup) && !CommanderIndexReady(parentUnit.commander))
+                {
+                    return MarkDiaryCycleUnsafe(0, "parent-commander-unready:" + parentUnit.commander);
+                }
+
+                if (!CardinalPointsReady()) return MarkDiaryCycleUnsafe(0, "cardinal-points-unready");
+                Diary.GetDirection(campaignGroup.GetPosition(), campaignGroup.GetLastWaypointPos(), GetCardinalPoints());
+                return MarkDiaryCycleReady(0);
+            }
+
+            Town closestTown = BattleUnits.GetClosestTown(campaignGroup.GetPosition());
+            if (!UnityAlive(closestTown)) return MarkDiaryCycleUnsafe(0, "closest-town-unready");
+            return MarkDiaryCycleReady(0);
+        }
+
+        private static bool DiaryWeatherCycleReady(Regiment campaignGroup)
+        {
+            if (!UnityAlive(campaignGroup)) return MarkDiaryCycleReady(1);
+            Weather weather = GetWeatherInstance();
+            if (!UnityAlive(weather)) return MarkDiaryCycleUnsafe(1, "weather-unready");
+            weather.GetClimateData(campaignGroup.GetPosition(), 100);
+            campaignGroup.GetWeatherID();
+            return MarkDiaryCycleReady(1);
+        }
+
+        private static bool DiarySupplyCycleReady(Regiment campaignGroup)
+        {
+            if (!UnityAlive(campaignGroup)) return MarkDiaryCycleReady(4);
+            if (campaignGroup.unittyp > 13 && (campaignGroup.groupsupplystate == null || campaignGroup.groupsupplystate.Length <= 2))
+            {
+                return MarkDiaryCycleUnsafe(4, "group-supplystate-unready");
+            }
+            return MarkDiaryCycleReady(4);
+        }
+
+        private static bool DiaryEnemyContactCycleReady(Regiment campaignGroup)
+        {
+            if (!UnityAlive(campaignGroup)) return MarkDiaryCycleReady(5);
+            if (!campaignGroup.inbattle)
+            {
+                Regiment closestEnemy = campaignGroup.GetClosestEnemyUnitReg(campaignGroup.commanderrange);
+                if (UnityAlive(closestEnemy)) closestEnemy.GetCommanderNameAndUnit();
+                return MarkDiaryCycleReady(5);
+            }
+
+            Autocalc siege = campaignGroup.GetSiegeAutocalc();
+            if (UnityAlive(siege) && !UnityAlive(campaignGroup.garrisonreference) && siege.type == 2)
+            {
+                siege.GetSiegeUnitName();
+            }
+            return MarkDiaryCycleReady(5);
+        }
+
+        private static bool DiaryFriendlyOperationCycleReady(Regiment campaignGroup, bool defensive)
+        {
+            int cycle = defensive ? 9 : 8;
+            if (!UnityAlive(campaignGroup)) return MarkDiaryCycleReady(cycle);
+
+            var position = ((UnityEngine.Component)campaignGroup).transform.position;
+            Regiment operation = defensive
+                ? AICampaign.GetClosestDefensiveOperation(position, campaignGroup.alliance, friendly: true, campaignGroup)
+                : AICampaign.GetClosestOffensiveOperation(position, campaignGroup.alliance, friendly: true, campaignGroup);
+
+            if (!UnityAlive(operation)) return MarkDiaryCycleReady(cycle);
+            operation.GetCommanderNameAndUnit();
+
+            if (defensive)
+            {
+                Town closestTown = BattleUnits.GetClosestTown(((UnityEngine.Component)operation).transform.position);
+                if (!UnityAlive(closestTown)) return MarkDiaryCycleUnsafe(cycle, "operation-town-unready");
+            }
+
+            return MarkDiaryCycleReady(cycle);
+        }
+
+        private static bool DiaryCampStationCycleReady()
+        {
+            if (Camp.stations == null) return MarkDiaryCycleReady(10);
+            if (Diary.DiaryEvent.campstationbonusbelow == null || Diary.DiaryEvent.campstationbonusabove == null)
+            {
+                return MarkDiaryCycleUnsafe(10, "camp-station-event-arrays-unready");
+            }
+            if (Camp.stations.Count > Diary.DiaryEvent.campstationbonusbelow.Length ||
+                Camp.stations.Count > Diary.DiaryEvent.campstationbonusabove.Length)
+            {
+                return MarkDiaryCycleUnsafe(10, "camp-station-event-array-short");
+            }
+            return MarkDiaryCycleReady(10);
+        }
+
+        private static List<string> GetCardinalPoints()
+        {
+            return DiaryCardinalPointsField == null ? null : DiaryCardinalPointsField.GetValue(null) as List<string>;
+        }
+
+        private static Weather GetWeatherInstance()
+        {
+            var cachedWeather = DiaryWeatherField == null ? null : DiaryWeatherField.GetValue(null) as Weather;
+            if (UnityAlive(cachedWeather)) return cachedWeather;
+
+            var weatherObject = UnityEngine.GameObject.Find("WeatherObj");
+            return UnityAlive(weatherObject) ? weatherObject.GetComponent<Weather>() : null;
+        }
+
+        private static bool NationIndexReady(int stateId)
+        {
+            return stateId >= 0 && GameVars.nation != null && stateId < GameVars.nation.Length && GameVars.nation[stateId] != null;
+        }
+
+        private static bool CommanderIndexReady(int commanderId)
+        {
+            return commanderId >= 0 && GameVars.commander != null && commanderId < GameVars.commander.Count && GameVars.commander[commanderId] != null;
+        }
+
+        private static bool MarkDiaryCycleReady(int updateCycle)
+        {
+            _lastDiaryCycleDiagnostic = "cycle=" + updateCycle + ":ready";
+            return true;
+        }
+
+        private static bool MarkDiaryCycleUnsafe(int updateCycle, string reason)
+        {
+            _lastDiaryCycleDiagnostic = "cycle=" + updateCycle + ":" + reason;
+            OnceLog.Warning(
+                "wl-diary-startup:cycle:" + updateCycle,
+                "[W&LCamp] skipped Diary.UpdateEvents until vanilla diary update cycle is safe: " + _lastDiaryCycleDiagnostic);
+            return false;
         }
 
         private static int ReadStaticInt(FieldInfo field, int fallback)
