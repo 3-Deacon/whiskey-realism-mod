@@ -86,14 +86,22 @@ namespace WhiskeyRealism.Tactical
             if (input.ClosestEnemyRouted) return false;
             if (input.ClosestEnemyPermanentlyDetached) return false;
             if (input.ClosestEnemyStrength <= 0f) return false;
-            if (input.ClosestEnemyUnitType != TacticalUnitType.Infantry &&
-                input.ClosestEnemyUnitType != TacticalUnitType.Cavalry)
+            if (!IsFormedLineUnitType(input.ClosestEnemyUnitType))
                 return false;
 
             string name = input.ClosestEnemyName ?? string.Empty;
             if (name.IndexOf("skirm", StringComparison.OrdinalIgnoreCase) >= 0) return false;
 
             return true;
+        }
+
+        private static bool IsFormedLineUnitType(int unitType)
+        {
+            return unitType == TacticalUnitType.Infantry ||
+                unitType == TacticalUnitType.Cavalry ||
+                unitType == TacticalUnitType.BattleGroupBrigade ||
+                unitType == TacticalUnitType.BattleGroupDivision ||
+                unitType == TacticalUnitType.BattleGroupArmy;
         }
     }
 }

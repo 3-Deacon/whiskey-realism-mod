@@ -196,6 +196,7 @@ static class Program
             ("tactical sector substantial contact remains weak point", TacticalSectorSubstantialContactRemainsWeakPoint),
             ("tactical group visible line contact drives weak point", TacticalGroupVisibleLineContactDrivesWeakPoint),
             ("tactical group named detachment line contact drives weak point", TacticalGroupNamedDetachmentLineContactDrivesWeakPoint),
+            ("tactical group battle command contact drives weak point", TacticalGroupBattleCommandContactDrivesWeakPoint),
             ("tactical group screen contact does not drive weak point", TacticalGroupScreenContactDoesNotDriveWeakPoint),
             ("tactical macro dynamic is not attack", TacticalMacroDynamicIsNotAttack),
             ("tactical macro debug override skips", TacticalMacroDebugOverrideSkips),
@@ -4216,6 +4217,27 @@ static class Program
         AssertEqual(TacticalSectorMission.AttackWeakPoint, sector.Mission, "named detachment with formed infantry strength should drive weak point");
         AssertTrue(sector.Confidence >= 0.75f, "named detachment line contact should raise confidence");
         AssertNear(914f, sector.EnemyStrength, 0.01f, "detachment line strength feeds sector enemy");
+    }
+
+    private static void TacticalGroupBattleCommandContactDrivesWeakPoint()
+    {
+        var sector = TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
+            sectorId: 4,
+            ownStrength: 17651f,
+            enemiesInRangeStrength: 0f,
+            angleEnemyStrength: 0f,
+            closestEnemyStrength: 914f,
+            closestEnemyUnitType: TacticalUnitType.BattleGroupBrigade,
+            closestEnemyName: "Whiting's Detachment",
+            closestEnemyRouted: false,
+            closestEnemyPermanentlyDetached: false,
+            flankRisk: false,
+            strongPoint: false));
+
+        AssertEqual(TacticalSectorSource.VisibleLineContact, sector.Source, "source");
+        AssertEqual(TacticalSectorMission.AttackWeakPoint, sector.Mission, "battle command contact should drive weak point");
+        AssertTrue(sector.Confidence >= 0.75f, "battle command contact should raise confidence");
+        AssertNear(914f, sector.EnemyStrength, 0.01f, "battle command line strength feeds sector enemy");
     }
 
     private static void TacticalGroupScreenContactDoesNotDriveWeakPoint()
