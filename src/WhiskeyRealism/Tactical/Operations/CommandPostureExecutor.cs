@@ -147,6 +147,28 @@ namespace WhiskeyRealism.Tactical.Operations
                 return NoWrite("legal-idle");
             }
 
+            if (eligibility.CloseEngaged)
+            {
+                if (order.Task == CommandTaskType.FallBackToLine)
+                {
+                    return new PostureExecutionDecision(
+                        PostureExecutionAction.SetFormationAndWaypoint,
+                        "close-engaged-fallback-line",
+                        PostureExecutionTarget.DoctrineFallbackTarget);
+                }
+
+                return Formation("close-engaged-" + TaskReason(order.Task));
+            }
+
+            if (order.Task == CommandTaskType.FallBackToLine && physical.PathInterrupted && !physical.ActiveMove)
+            {
+                return new PostureExecutionDecision(
+                    PostureExecutionAction.FallbackToLine,
+                    "fallback-line",
+                    PostureExecutionTarget.DoctrineFallbackTarget,
+                    clearInterruptedPaths: true);
+            }
+
             if (physical.PathInterrupted && !physical.ActiveMove)
             {
                 return new PostureExecutionDecision(
@@ -159,19 +181,6 @@ namespace WhiskeyRealism.Tactical.Operations
             if (physical.ActiveMove)
             {
                 return NoWrite("movement-in-progress");
-            }
-
-            if (eligibility.CloseEngaged)
-            {
-                if (order.Task == CommandTaskType.FallBackToLine)
-                {
-                    return new PostureExecutionDecision(
-                        PostureExecutionAction.SetFormationAndWaypoint,
-                        "close-engaged-fallback-line",
-                        PostureExecutionTarget.DoctrineFallbackTarget);
-                }
-
-                return Formation("close-engaged-" + TaskReason(order.Task));
             }
 
             switch (order.Task)

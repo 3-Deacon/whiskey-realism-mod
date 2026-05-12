@@ -7,8 +7,8 @@ Living reference for the tactical operations-ledger command system, active comma
 - **Implementation state:** full-spectrum tactical command doctrine is implemented and intended for `main`; release/default config is `Tactical Commander Mode = Active`.
 - **Patch ordinal:** #61 `BattleCommandPostureExecutorPatch`.
 - **Config contract:** `Active` is the release/default mode; `MonitorOnly` is for smoke and diagnostics; rollback is `Off`.
-- **Build/deploy proof:** console harness `827 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `bd83ff0bf26385c2f0dbd313010fdc7d0261bfd87e8ed15398e9c7ec2303bb9d` (930304 bytes).
-- **Runtime smoke:** pending. Current `LogOutput.log` mtime is `2026-05-11 17:49:26 -0500`, which predates the deployed plugin timestamp `2026-05-11 17:54:15 -0500`, so it cannot prove Active operations-ledger runtime behavior for this build.
+- **Build/deploy proof:** console harness `830 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `27a723b14f81ab5f77579a08105ff131642a21ca5bd1416074e86b7c1b5febbb` (930816 bytes).
+- **Runtime smoke:** pending. Current `LogOutput.log` mtime is `2026-05-11 19:56:59 -0500`, which predates the deployed plugin timestamp `2026-05-11 20:01:30 -0500`, so it cannot prove Active operations-ledger runtime behavior for this build.
 
 The system turns the tactical orchestrator's command tree into a per-side operations ledger. The ledger classifies the current battle operation, assigns command-node tasks, monitors whether assigned commands are validly idle or illegally stuck, and lets #61 issue bounded vanilla commands only when the mode is `Active`.
 
@@ -17,6 +17,8 @@ The 2026-05-10 log review first found `1st_Brigade#-27662` repeatedly in `MarchC
 The 2026-05-11 full-spectrum doctrine implementation extends the ledger from posture recovery into battle command. `TacticalBattlefieldPicture` raises objective confidence from visible formed infantry/cavalry contact and keeps skirmisher, detachment, permanently-detached, and cavalry-screen evidence from being treated as an exposed main line. `TacticalOperationDirector` selects and commits battle operations, `CommandDoctrineOrder` and `CommandDoctrineAssignment` publish primary/support/fallback targets, and `DoctrineConsumerDecisions` retargets #45 stance, #41 charge, B8 reserve/fallback, and B7 artillery consumers to that ledger. Known objective-id misses fail closed; coordinate fallback is allowed only for unknown-objective doctrine targets. A doctrine charge allow cannot override W&L/player gates, the orchestrator charge gate, or B6c explicit denial. Reserve deny now owns a full #59-style movement-state rollback in B8, while #56 order-delay conversion deliberately skips doctrine-denied movement so rollback ownership is deterministic. Artillery support-main-effort currently emits bounded `SuppressStrongpoint` telemetry without inventing a new bombardment write, while friendly-close doctrine remains conservative and cancels active bombardment.
 
 The 2026-05-11 post-deploy log review found two additional defects in the Active smoke surface. `TacticalObserverPatch` was still simulating posture telemetry with `modeAllowsWrites=false`, causing Active ledger rows to report `reason=mode-monitor-only`; the observer now uses the side ledger's actual `CommanderMode`. `TacticalOperationDirector` also soft-aborted committed operations solely when `ReserveFraction < 0.05`, even if the primary objective had decisive odds; low reserves now trigger a soft abort only when odds are no longer favorable, while true odds collapse still aborts immediately.
+
+The later Hampton's Legion live-log review found 8th Brigade repeatedly reporting `pathInterrupted=True`, `activeMove=False`, `orderState=1`, stale path segments, and waypoint `x=1617,z=-1481` while #61 kept replaying `RecoverInterruptedOrder target=RecoveryPath`. That made Hampton's command crawl along the old path instead of replacing it with the current fallback/formation task. `TacticalOrderSettlementGate` now treats stalled interrupted orders as retaskable even when vanilla still reports stale path segments, and doctrine `FallBackToLine` overrides interrupted stale recovery with the doctrine fallback target instead of replaying the last safe waypoint.
 
 ## System Overview
 
@@ -156,7 +158,7 @@ Pass criteria:
 - `[TacticalPostureSummary]` shows illegal idle trending down or staying explainably bounded during the run.
 - `[TacticalReserveDrift]` has no repeated drift-failure warning.
 - No player-side or player-subordinate retasking is observed.
-- No repeated non-reserve command nodes remain in `MarchColumn + pathInterrupted=True + paths=0 + activeMove=False` without a valid ledger reason.
+- No repeated non-reserve command nodes remain in `MarchColumn + pathInterrupted=True + activeMove=False` with empty or stale paths without a valid ledger reason.
 - Visible enemy-line contact near Hampton-style fights raises sector/objective confidence; high-odds `AttackWeakPoint` / main-effort orders should not resolve to defensive hold just because the strategic macro is defensive.
 - Formed regiments commit only when the enemy line is exposed and outnumbered; skirmisher/screen-only contact must not pull the main line into a false assault.
 - Doctrine reserve deny removes direct reserve paths and restores movement/order/cover/formation/target state rather than leaving a stale active path behind.
@@ -164,7 +166,7 @@ Pass criteria:
 
 If the active smoke fails, set `Tactical Commander Mode = Off` for rollback. If evidence is needed before a fix, set `MonitorOnly` to keep ledger telemetry while suppressing writes.
 
-Current Active smoke boundary: not passed. The only current log is stale for this build: `LogOutput.log` mtime `2026-05-11 17:49:26 -0500` predates the deployed plugin timestamp `2026-05-11 17:54:15 -0500`, so fresh operations-ledger and doctrine-consumer markers are still required.
+Current Active smoke boundary: not passed. The only current log is stale for this build: `LogOutput.log` mtime `2026-05-11 19:56:59 -0500` predates the deployed plugin timestamp `2026-05-11 20:01:30 -0500`, so fresh operations-ledger and doctrine-consumer markers are still required.
 
 ## Risks
 

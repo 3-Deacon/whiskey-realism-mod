@@ -34,7 +34,6 @@ namespace WhiskeyRealism.Tactical
 
             if (input.OrderState == 1 &&
                 input.PathInterrupted &&
-                input.RegimentPaths <= 0 &&
                 input.MovementMode <= 0 &&
                 !input.ActiveMove)
                 return new Decision(true, "stalled-interrupted-order");

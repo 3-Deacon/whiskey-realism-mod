@@ -125,6 +125,7 @@ static class Program
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
             ("posture executor uses doctrine attack target", PostureExecutorUsesDoctrineAttackTarget),
             ("posture executor clears interrupted inactive order", PostureExecutorClearsInterruptedInactiveOrder),
+            ("posture executor fallback doctrine overrides interrupted stale path", PostureExecutorFallbackDoctrineOverridesInterruptedStalePath),
             ("posture executor preserves legal reserve idle", PostureExecutorPreservesLegalReserveIdle),
             ("doctrine order sanitizes ids and exposes purpose", DoctrineOrderSanitizesIdsAndPurpose),
             ("doctrine order distinguishes no assignment from form up", DoctrineOrderDistinguishesNoAssignmentFromFormUp),
@@ -171,6 +172,7 @@ static class Program
             ("tactical order settlement blocks queued stance retask", TacticalOrderSettlementBlocksQueuedStanceRetask),
             ("tactical order settlement blocks delivered pending stance retask", TacticalOrderSettlementBlocksDeliveredPendingStanceRetask),
             ("tactical order settlement allows stalled interrupted pending retask", TacticalOrderSettlementAllowsStalledInterruptedPendingRetask),
+            ("tactical order settlement allows stalled interrupted pending retask with stale path", TacticalOrderSettlementAllowsStalledInterruptedPendingRetaskWithStalePath),
             ("tactical order settlement stalled interrupted does not block posture write", TacticalOrderSettlementStalledInterruptedDoesNotBlockPostureWrite),
             ("tactical order settlement blocks unknown order state", TacticalOrderSettlementBlocksUnknownOrderState),
             ("tactical command army and corps intent does not retask regiments directly", TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly),
@@ -2914,6 +2916,25 @@ static class Program
         AssertPostureTarget(PostureExecutionTarget.RecoveryPath, true, decision);
     }
 
+    private static void PostureExecutorFallbackDoctrineOverridesInterruptedStalePath()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            DoctrineOrder(
+                CommandTaskType.FallBackToLine,
+                fallback: DoctrineTargetPoint.From(90f, 120f)),
+            new CommandPhysicalState(
+                routed: false,
+                playerProtected: false,
+                pathInterrupted: true,
+                paths: 2,
+                activeMove: false,
+                formation: 3),
+            nowSeconds: 100f);
+
+        AssertPostureDecision(PostureExecutionAction.FallbackToLine, "fallback-line", decision);
+        AssertPostureTarget(PostureExecutionTarget.DoctrineFallbackTarget, true, decision);
+    }
+
     private static void PostureExecutorPreservesLegalReserveIdle()
     {
         var decision = CommandPostureExecutor.Decide(
@@ -4396,6 +4417,27 @@ static class Program
 
         AssertTrue(decision.AllowChange, "stalled interrupted pending order should allow recovery retask");
         AssertEqual("stalled-interrupted-order", decision.Reason, "reason");
+    }
+
+    private static void TacticalOrderSettlementAllowsStalledInterruptedPendingRetaskWithStalePath()
+    {
+        var input = new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 0,
+            OrderState = 1,
+            RegimentPaths = 2,
+            PathInterrupted = true,
+            MovementMode = 0,
+            ActiveMove = false
+        };
+
+        var decision = TacticalOrderSettlementGate.Evaluate(input);
+
+        AssertTrue(decision.AllowChange, "stalled interrupted order with stale paths should allow recovery retask");
+        AssertEqual("stalled-interrupted-order", decision.Reason, "reason");
+        AssertFalse(
+            TacticalOrderSettlementGate.HasBlockingPendingOrder(input),
+            "stalled interrupted order with stale paths should not block posture writes");
     }
 
     private static void TacticalOrderSettlementStalledInterruptedDoesNotBlockPostureWrite()
