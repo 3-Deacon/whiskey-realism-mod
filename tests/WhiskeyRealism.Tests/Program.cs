@@ -3061,6 +3061,20 @@ static class Program
                 tolerance: 5f,
                 pathInterrupted: true),
             "interrupted paths still need recovery writes");
+
+        AssertFalse(
+            CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
+                currentWaypointX: 1880.5f,
+                currentWaypointZ: -708.5f,
+                targetX: 1880.9f,
+                targetZ: -708.2f,
+                tolerance: 5f,
+                pathInterrupted: false,
+                regimentPaths: 0,
+                activeMove: false,
+                currentX: 650.5f,
+                currentZ: -1347.5f),
+            "stale duplicate waypoint with no active path should be reissued");
     }
 
     private static void DoctrineOrderSanitizesIdsAndPurpose()

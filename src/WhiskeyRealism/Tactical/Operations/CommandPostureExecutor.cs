@@ -92,6 +92,31 @@ namespace WhiskeyRealism.Tactical.Operations
             float tolerance,
             bool pathInterrupted)
         {
+            return ShouldSkipDuplicateWaypoint(
+                currentWaypointX,
+                currentWaypointZ,
+                targetX,
+                targetZ,
+                tolerance,
+                pathInterrupted,
+                regimentPaths: 1,
+                activeMove: true,
+                currentX: targetX,
+                currentZ: targetZ);
+        }
+
+        public static bool ShouldSkipDuplicateWaypoint(
+            float currentWaypointX,
+            float currentWaypointZ,
+            float targetX,
+            float targetZ,
+            float tolerance,
+            bool pathInterrupted,
+            int regimentPaths,
+            bool activeMove,
+            float currentX,
+            float currentZ)
+        {
             if (pathInterrupted) return false;
             if (!IsFinite(currentWaypointX) || !IsFinite(currentWaypointZ)) return false;
             if (!IsFinite(targetX) || !IsFinite(targetZ)) return false;
@@ -100,7 +125,17 @@ namespace WhiskeyRealism.Tactical.Operations
             float safeTolerance = IsFinite(tolerance) && tolerance > 0f ? tolerance : 1f;
             float dx = currentWaypointX - targetX;
             float dz = currentWaypointZ - targetZ;
-            return (dx * dx) + (dz * dz) <= safeTolerance * safeTolerance;
+            if ((dx * dx) + (dz * dz) > safeTolerance * safeTolerance) return false;
+
+            if (!activeMove && regimentPaths <= 0 && IsFinite(currentX) && IsFinite(currentZ))
+            {
+                float currentDx = currentX - targetX;
+                float currentDz = currentZ - targetZ;
+                if ((currentDx * currentDx) + (currentDz * currentDz) > safeTolerance * safeTolerance)
+                    return false;
+            }
+
+            return true;
         }
 
         private static bool IsFinite(float value)

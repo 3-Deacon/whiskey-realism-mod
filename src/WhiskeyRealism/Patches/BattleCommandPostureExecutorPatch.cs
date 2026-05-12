@@ -311,13 +311,18 @@ namespace WhiskeyRealism.Patches
             {
                 if (group == null) return false;
                 Vector3 currentWaypoint = group.lastsetwaypointposition;
+                Vector3 currentPosition = SafePosition(group);
                 return CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
                     currentWaypoint.x,
                     currentWaypoint.z,
                     target.x,
                     target.z,
                     MinWaypointDistance,
-                    group.pathinterrupted);
+                    group.pathinterrupted,
+                    SafeRegimentPaths(group),
+                    HasActiveMoveMakingProgress(group),
+                    currentPosition.x,
+                    currentPosition.z);
             }
             catch
             {
