@@ -16,7 +16,7 @@ namespace WhiskeyRealism.Tactical.Operations
 
             bool objectiveMatched;
             BattlefieldObjectiveEstimate objective = ResolveObjective(
-                operation.PrimaryObjectiveId,
+                operation,
                 picture.Objectives,
                 out objectiveMatched);
             float odds = ResolveOdds(ownStrength, objective.EnemyStrength);
@@ -68,6 +68,18 @@ namespace WhiskeyRealism.Tactical.Operations
 
             if (role == CommandNodeRole.Reserve) return CommandTaskType.ReserveWait;
             if (!objectiveMatched) return CommandTaskType.FormUp;
+
+            if (role == CommandNodeRole.MainEffort &&
+                IsCommittedFallbackEnemyLine(operation))
+            {
+                return CommandTaskType.AttackObjective;
+            }
+
+            if (role == CommandNodeRole.SupportingAttack &&
+                IsCommittedFallbackEnemyLine(operation))
+            {
+                return CommandTaskType.SupportAttack;
+            }
 
             if (role == CommandNodeRole.MainEffort &&
                 objective.MainLineExposed &&
@@ -171,12 +183,13 @@ namespace WhiskeyRealism.Tactical.Operations
         }
 
         private static BattlefieldObjectiveEstimate ResolveObjective(
-            string objectiveId,
+            OperationRecord operation,
             BattlefieldObjectiveEstimate[] objectives,
             out bool objectiveMatched)
         {
             objectiveMatched = false;
             objectives = objectives ?? Array.Empty<BattlefieldObjectiveEstimate>();
+            string objectiveId = operation.PrimaryObjectiveId;
             for (int i = 0; i < objectives.Length; i++)
             {
                 if (string.Equals(objectives[i].ObjectiveId, objectiveId, StringComparison.Ordinal))
@@ -189,7 +202,15 @@ namespace WhiskeyRealism.Tactical.Operations
                 }
             }
 
-            if (objectives.Length > 0) return objectives[0];
+            if (objectives.Length > 0)
+            {
+                if (IsCommittedFallbackEnemyLine(operation))
+                {
+                    objectiveMatched = true;
+                }
+
+                return objectives[0];
+            }
 
             return new BattlefieldObjectiveEstimate(
                 "objective-unknown",
@@ -202,6 +223,13 @@ namespace WhiskeyRealism.Tactical.Operations
                 0f,
                 0f,
                 0f);
+        }
+
+        private static bool IsCommittedFallbackEnemyLine(OperationRecord operation)
+        {
+            return operation.Phase == TacticalOperationPhase.Committed &&
+                !string.IsNullOrWhiteSpace(operation.PrimaryObjectiveId) &&
+                operation.PrimaryObjectiveId.StartsWith("enemy-line-", StringComparison.Ordinal);
         }
 
         private static float ResolveOdds(float ownStrength, float enemyStrength)

@@ -23,6 +23,8 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _sideOfAiField;
         private static FieldInfo _objectiveChainField;
         private static FieldInfo _chainCenterField;
+        private static FieldInfo _chainLeftUnitsField;
+        private static FieldInfo _chainRightUnitsField;
         private static FieldInfo _flankAnchoredField;
         private static FieldInfo _reserveGroupsField;
         private static FieldInfo _unitsUsedField;
@@ -148,13 +150,22 @@ namespace WhiskeyRealism.Patches
             {
                 object entry = chain[i];
                 Regiment center = SafeRegimentField(entry, ref _chainCenterField, "linegroup_centerunit");
-                if (center == null) continue;
+                float own = 0f;
+                float enemy = 0f;
+                bool flank = false;
+                bool strong = false;
+                float shareTotal = 0f;
+                int shareCount = 0;
+                int unitCount = 0;
 
-                float own = Math.Max(0f, center.groupowninrange);
-                float enemy = Math.Max(0f, center.groupenemiesinrange);
-                bool flank = center.flanksthreated > 0f || center.outflanked > 0;
-                bool strong = center.covervalue > 0.5f || center.fortinrange;
-                float share = AttachedSubordinateShare(center);
+                AccumulatePlaybookSectorUnit(center, ref own, ref enemy, ref flank, ref strong, ref shareTotal, ref shareCount, ref unitCount);
+                AccumulatePlaybookSectorUnits(SafeList(entry, ref _chainLeftUnitsField, "linegroup_leftunits"), ref own, ref enemy, ref flank, ref strong, ref shareTotal, ref shareCount, ref unitCount);
+                AccumulatePlaybookSectorUnits(SafeList(entry, ref _chainRightUnitsField, "linegroup_rightunits"), ref own, ref enemy, ref flank, ref strong, ref shareTotal, ref shareCount, ref unitCount);
+
+                float confidence = enemy > 0f
+                    ? 0.6f
+                    : (unitCount > 0 ? 0.4f : 0.3f);
+                float share = shareCount > 0 ? shareTotal / shareCount : 0f;
 
                 list.Add(new TacticalPlaybookSectorView(
                     sectorId: i,
@@ -164,12 +175,58 @@ namespace WhiskeyRealism.Patches
                               TacticalSectorPosition.Center,
                     ownStrength: own,
                     enemyStrength: enemy,
-                    confidence: enemy > 0f ? 0.6f : 0.3f,
+                    confidence: confidence,
                     strongPoint: strong,
                     flankRisk: flank,
                     ownerSubordinateShare01: share));
             }
             return list.ToArray();
+        }
+
+        private static void AccumulatePlaybookSectorUnits(
+            IList units,
+            ref float own,
+            ref float enemy,
+            ref bool flank,
+            ref bool strong,
+            ref float shareTotal,
+            ref int shareCount,
+            ref int unitCount)
+        {
+            if (units == null) return;
+            for (int i = 0; i < units.Count; i++)
+            {
+                AccumulatePlaybookSectorUnit(
+                    units[i] as Regiment,
+                    ref own,
+                    ref enemy,
+                    ref flank,
+                    ref strong,
+                    ref shareTotal,
+                    ref shareCount,
+                    ref unitCount);
+            }
+        }
+
+        private static void AccumulatePlaybookSectorUnit(
+            Regiment unit,
+            ref float own,
+            ref float enemy,
+            ref bool flank,
+            ref bool strong,
+            ref float shareTotal,
+            ref int shareCount,
+            ref int unitCount)
+        {
+            if (unit == null) return;
+
+            unitCount++;
+            own += Math.Max(0f, Math.Max(unit.groupowninrange, unit.groupstrengthaigroup));
+            enemy += Math.Max(0f, unit.groupenemiesinrange);
+            flank = flank || unit.flanksthreated > 0f || unit.outflanked > 0;
+            strong = strong || unit.covervalue > 0.5f || unit.fortinrange;
+            shareTotal += AttachedSubordinateShare(unit);
+            shareCount++;
         }
 
         private static int ChooseDecisiveSector(TacticalPlaybookSectorView[] sectors)

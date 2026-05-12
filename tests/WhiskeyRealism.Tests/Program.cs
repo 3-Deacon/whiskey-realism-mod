@@ -135,6 +135,7 @@ static class Program
             ("doctrine order classifies legal idle reasons", DoctrineOrderClassifiesLegalIdleReasons),
             ("doctrine assignment high odds attack weak point attacks", DoctrineAssignmentHighOddsAttackWeakPointAttacks),
             ("doctrine assignment committed visible enemy line attacks at fallback confidence", DoctrineAssignmentCommittedVisibleEnemyLineAttacksAtFallbackConfidence),
+            ("doctrine assignment committed fallback enemy line keeps attack when chain replaces objective", DoctrineAssignmentCommittedFallbackEnemyLineKeepsAttackWhenChainReplacesObjective),
             ("doctrine assignment reserve gets legal idle", DoctrineAssignmentReserveGetsLegalIdle),
             ("doctrine assignment fallback guard pulls toward fallback line", DoctrineAssignmentFallbackGuardPullsBack),
             ("doctrine assignment stale objective fails closed", DoctrineAssignmentStaleObjectiveFailsClosed),
@@ -177,6 +178,7 @@ static class Program
             ("tactical order settlement allows stalled interrupted pending retask", TacticalOrderSettlementAllowsStalledInterruptedPendingRetask),
             ("tactical order settlement allows stalled interrupted pending retask with stale path", TacticalOrderSettlementAllowsStalledInterruptedPendingRetaskWithStalePath),
             ("tactical order settlement stalled interrupted does not block posture write", TacticalOrderSettlementStalledInterruptedDoesNotBlockPostureWrite),
+            ("tactical order settlement stalled pending without path does not block posture write", TacticalOrderSettlementStalledPendingWithoutPathDoesNotBlockPostureWrite),
             ("tactical order settlement blocks unknown order state", TacticalOrderSettlementBlocksUnknownOrderState),
             ("tactical command army and corps intent does not retask regiments directly", TacticalCommandArmyCorpsDoesNotRetaskRegimentsDirectly),
             ("tactical command maps vanilla battle unit tiers", TacticalCommandMapsVanillaBattleUnitTiers),
@@ -3155,6 +3157,26 @@ static class Program
         AssertTrue(orders[0].PrimaryTarget.HasValue, "target");
     }
 
+    private static void DoctrineAssignmentCommittedFallbackEnemyLineKeepsAttackWhenChainReplacesObjective()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("brigade-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "enemy-line-1", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("vanilla-chain-0", TacticalObjectiveType.UnknownVanillaObjective, 0f, 0.75f, false, 0.65f, 250f, 400f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 3000f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandTaskType.AttackObjective, orders[0].Task, "committed fallback enemy-line operation should keep attacking live vanilla chain objective");
+        AssertEqual("vanilla-chain-0", orders[0].ObjectiveId, "doctrine objective should retarget to live chain");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "target");
+    }
+
     private static void DoctrineAssignmentReserveGetsLegalIdle()
     {
         CommandNodeOperationalState[] nodes =
@@ -4549,6 +4571,27 @@ static class Program
 
         AssertFalse(stalledBlocks, "stalled interrupted orderstate should not block recovery posture write");
         AssertTrue(queuedBlocks, "queued courier order should still block posture write");
+    }
+
+    private static void TacticalOrderSettlementStalledPendingWithoutPathDoesNotBlockPostureWrite()
+    {
+        var input = new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 0,
+            OrderState = 1,
+            RegimentPaths = 0,
+            PathInterrupted = false,
+            MovementMode = 0,
+            ActiveMove = false
+        };
+
+        var decision = TacticalOrderSettlementGate.Evaluate(input);
+
+        AssertTrue(decision.AllowChange, "pending order with no path and no active movement should allow recovery retask");
+        AssertEqual("stalled-pending-order", decision.Reason, "reason");
+        AssertFalse(
+            TacticalOrderSettlementGate.HasBlockingPendingOrder(input),
+            "stalled pending order with no active path should not block posture writes");
     }
 
     private static void TacticalOrderSettlementBlocksUnknownOrderState()

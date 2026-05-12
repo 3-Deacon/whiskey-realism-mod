@@ -38,6 +38,12 @@ namespace WhiskeyRealism.Tactical
                 !input.ActiveMove)
                 return new Decision(true, "stalled-interrupted-order");
 
+            if (input.OrderState == 1 &&
+                input.RegimentPaths <= 0 &&
+                input.MovementMode <= 0 &&
+                !input.ActiveMove)
+                return new Decision(true, "stalled-pending-order");
+
             if (input.OrderState > 0)
                 return new Decision(false, "pending-orderstate");
 
