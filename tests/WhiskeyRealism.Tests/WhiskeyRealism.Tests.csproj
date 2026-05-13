@@ -180,6 +180,11 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalChargeViability.cs" Link="TacticalChargeViability.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalRefuseFlankIntent.cs" Link="TacticalRefuseFlankIntent.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalFatigueState.cs" Link="TacticalFatigueState.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderContracts.cs" Link="PlayerOrders\PlayerOrderContracts.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderPriority.cs" Link="PlayerOrders\PlayerOrderPriority.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderVanillaMapper.cs" Link="PlayerOrders\PlayerOrderVanillaMapper.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderDedupe.cs" Link="PlayerOrders\PlayerOrderDedupe.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderDiagnostics.cs" Link="PlayerOrders\PlayerOrderDiagnostics.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPosture.cs" Link="DirectorPosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />
