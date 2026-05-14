@@ -124,6 +124,38 @@ namespace WhiskeyRealism.Tactical.Operations
             return needsFormation && !closeEngaged;
         }
 
+        public static int TargetFormationForTask(CommandTaskType task, int currentGroupFormation)
+        {
+            int current = currentGroupFormation >= 0 && currentGroupFormation <= 4
+                ? currentGroupFormation
+                : 0;
+
+            switch (task)
+            {
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FormUp:
+                case CommandTaskType.AdvanceToAssembly:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.HoldObjective:
+                case CommandTaskType.HoldChoke:
+                case CommandTaskType.GuardFlank:
+                case CommandTaskType.FallBackToLine:
+                case CommandTaskType.Delay:
+                case CommandTaskType.Consolidate:
+                case CommandTaskType.ReserveWait:
+                case CommandTaskType.ReleaseReserve:
+                case CommandTaskType.RecoverStuckOrder:
+                    return 0;
+                case CommandTaskType.Screen:
+                case CommandTaskType.Probe:
+                case CommandTaskType.Scout:
+                    return current == 4 ? 0 : current;
+                default:
+                    return current;
+            }
+        }
+
         private static float NormalizeDelta(float value)
         {
             float delta = value % 360f;

@@ -46,7 +46,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var roles = new DirectChildRole[snapshots.Count];
             for (int i = 0; i < roles.Length; i++) roles[i] = DirectChildRole.Unknown;
 
-            int mainIdx = PickMainEffort(plan.MainEffortSector, snapshots, evidence);
+            int mainIdx = PickMainEffort(plan, snapshots, evidence);
             if (mainIdx >= 0 && !ShouldFallbackUnderSevereOvermatch(evidence[mainIdx], perChildEnemyIntent[mainIdx]))
                 roles[mainIdx] = DirectChildRole.Main;
 
@@ -130,14 +130,47 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return intents;
         }
 
-        private static int PickMainEffort(int mainSector, IReadOnlyList<DirectChildSnapshot> snaps, IReadOnlyList<DirectChildEvidence> ev)
+        private static int PickMainEffort(TacticalBattlePlan plan, IReadOnlyList<DirectChildSnapshot> snaps, IReadOnlyList<DirectChildEvidence> ev)
         {
             int best = -1;
             int bestScore = -1;
             for (int i = 0; i < snaps.Count; i++)
             {
-                if (ev[i].PrimarySector != mainSector) continue;
+                if (ev[i].PrimarySector != plan.MainEffortSector) continue;
                 int score = ev[i].OwnStrengthBucket * Math.Max(1, 4 - ev[i].FlankExposureBucket);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = i;
+                }
+            }
+            if (best >= 0) return best;
+
+            return PickFallbackMainEffort(plan, snaps, ev);
+        }
+
+        private static int PickFallbackMainEffort(
+            TacticalBattlePlan plan,
+            IReadOnlyList<DirectChildSnapshot> snaps,
+            IReadOnlyList<DirectChildEvidence> ev)
+        {
+            int best = -1;
+            int bestScore = -1;
+            for (int i = 0; i < snaps.Count; i++)
+            {
+                if (!snaps[i].Active) continue;
+                if (Contains(plan.FixingSectors, ev[i].PrimarySector)) continue;
+                if (Contains(plan.ScreeningSectors, ev[i].PrimarySector)) continue;
+                if (!ev[i].ContactFlag && ev[i].Confidence01 < 0.6f) continue;
+                if (ev[i].EnemyStrengthBucket > ev[i].OwnStrengthBucket) continue;
+
+                int contactScore = ev[i].ContactFlag ? 10 : 0;
+                int confidenceScore = (int)Math.Round(ev[i].Confidence01 * 4f);
+                int score = ev[i].OwnStrengthBucket * 8
+                    - ev[i].EnemyStrengthBucket * 2
+                    - ev[i].FlankExposureBucket * 2
+                    + contactScore
+                    + confidenceScore;
                 if (score > bestScore)
                 {
                     bestScore = score;

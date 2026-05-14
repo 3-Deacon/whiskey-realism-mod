@@ -247,6 +247,8 @@ namespace WhiskeyRealism.Tactical.Operations
 
             switch (order.Task)
             {
+                case CommandTaskType.Scout:
+                case CommandTaskType.Probe:
                 case CommandTaskType.AttackObjective:
                 case CommandTaskType.SupportAttack:
                 case CommandTaskType.FixEnemy:
@@ -341,7 +343,7 @@ namespace WhiskeyRealism.Tactical.Operations
             switch (state.Task)
             {
                 case CommandTaskType.Scout:
-                    return Formation("scout");
+                    return FormationAndWaypoint("scout", PostureExecutionTarget.ObjectiveApproach);
                 case CommandTaskType.FormUp:
                     return FormationAndWaypoint("form-up", PostureExecutionTarget.AssemblyArea);
                 case CommandTaskType.AdvanceToAssembly:
@@ -351,13 +353,13 @@ namespace WhiskeyRealism.Tactical.Operations
                 case CommandTaskType.HoldObjective:
                     return Formation("hold-objective");
                 case CommandTaskType.FixEnemy:
-                    return Formation("fix-enemy");
+                    return FormationAndWaypoint("fix-enemy", PostureExecutionTarget.ObjectiveApproach);
                 case CommandTaskType.Screen:
-                    return Formation("screen");
+                    return FormationAndWaypoint("screen", PostureExecutionTarget.ObjectiveApproach);
                 case CommandTaskType.Probe:
-                    return Formation("probe");
+                    return FormationAndWaypoint("probe", PostureExecutionTarget.ObjectiveApproach);
                 case CommandTaskType.SupportAttack:
-                    return Formation("support-attack");
+                    return FormationAndWaypoint("support-attack", PostureExecutionTarget.ObjectiveApproach);
                 case CommandTaskType.HoldChoke:
                     return Formation("hold-choke");
                 case CommandTaskType.GuardFlank:
