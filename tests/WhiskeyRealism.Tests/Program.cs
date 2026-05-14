@@ -127,6 +127,7 @@ static class Program
             ("tactical command posture reserve wait distinguishes reserve area", TacticalCommandPostureReserveWaitDistinguishesReserveArea),
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
             ("posture executor uses doctrine attack target", PostureExecutorUsesDoctrineAttackTarget),
+            ("posture executor moves scout probe and screen to doctrine target", PostureExecutorMovesScoutProbeAndScreenToDoctrineTarget),
             ("posture executor clears interrupted inactive order", PostureExecutorClearsInterruptedInactiveOrder),
             ("posture executor fallback doctrine overrides interrupted stale path", PostureExecutorFallbackDoctrineOverridesInterruptedStalePath),
             ("posture executor preserves legal reserve idle", PostureExecutorPreservesLegalReserveIdle),
@@ -138,6 +139,7 @@ static class Program
             ("doctrine assignment high odds attack weak point attacks", DoctrineAssignmentHighOddsAttackWeakPointAttacks),
             ("doctrine assignment committed visible enemy line attacks at fallback confidence", DoctrineAssignmentCommittedVisibleEnemyLineAttacksAtFallbackConfidence),
             ("doctrine assignment committed fallback enemy line keeps attack when chain replaces objective", DoctrineAssignmentCommittedFallbackEnemyLineKeepsAttackWhenChainReplacesObjective),
+            ("doctrine assignment probe and screen receive movement targets", DoctrineAssignmentProbeAndScreenReceiveMovementTargets),
             ("doctrine assignment reserve gets legal idle", DoctrineAssignmentReserveGetsLegalIdle),
             ("doctrine assignment fallback guard pulls toward fallback line", DoctrineAssignmentFallbackGuardPullsBack),
             ("doctrine assignment stale objective fails closed", DoctrineAssignmentStaleObjectiveFailsClosed),
@@ -162,6 +164,7 @@ static class Program
             ("command formation correction overrides attack posture under flank emergency", CommandFormationCorrectionOverridesAttackPostureUnderFlankEmergency),
             ("command formation correction allows pending order bypass for close defensive formation", CommandFormationCorrectionAllowsPendingOrderBypassForCloseDefensiveFormation),
             ("command formation correction avoids new path when close engaged", CommandFormationCorrectionAvoidsNewPathWhenCloseEngaged),
+            ("command formation correction targets line for committed attack", CommandFormationCorrectionTargetsLineForCommittedAttack),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
             ("tactical command monitor interrupted hold is illegal", TacticalCommandMonitorInterruptedHoldIsIllegal),
@@ -760,6 +763,7 @@ static class Program
             ("direct child allocator assigns fallback on adverse odds and attack", DirectChildAllocatorAssignsFallbackOnAdverseOddsAndAttack),
             ("direct child allocator allocates refuse to flank with exposure", DirectChildAllocatorAllocatesRefuseToFlankWithExposure),
             ("direct child allocator deterministic on registration order tie", DirectChildAllocatorDeterministicOnRegistrationOrderTie),
+            ("direct child allocator falls back to strongest main when plan sector is empty", DirectChildAllocatorFallsBackToStrongestMainWhenPlanSectorEmpty),
             ("direct child allocator unknown when no plan main effort match", DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch),
             ("direct child allocator assigns screen on screening sector with low strengths", DirectChildAllocatorAssignsScreenOnScreeningSectorWithLowStrengths),
             ("direct child allocator handles mismatched per child intent length", DirectChildAllocatorHandlesMismatchedPerChildIntentLength),
@@ -2955,12 +2959,12 @@ static class Program
         AssertPostureTarget(PostureExecutionTarget.ObjectiveApproach, false, DecidePosture(CommandTaskType.AttackObjective));
 
         AssertPostureDecision(PostureExecutionAction.SetFormation, "hold-objective", DecidePosture(CommandTaskType.HoldObjective));
-        AssertPostureDecision(PostureExecutionAction.SetFormation, "fix-enemy", DecidePosture(CommandTaskType.FixEnemy));
-        AssertPostureDecision(PostureExecutionAction.SetFormation, "screen", DecidePosture(CommandTaskType.Screen));
-        AssertPostureDecision(PostureExecutionAction.SetFormation, "probe", DecidePosture(CommandTaskType.Probe));
-        AssertPostureDecision(PostureExecutionAction.SetFormation, "support-attack", DecidePosture(CommandTaskType.SupportAttack));
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "fix-enemy", DecidePosture(CommandTaskType.FixEnemy));
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "screen", DecidePosture(CommandTaskType.Screen));
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "probe", DecidePosture(CommandTaskType.Probe));
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "support-attack", DecidePosture(CommandTaskType.SupportAttack));
         AssertPostureDecision(PostureExecutionAction.SetFormation, "guard-flank", DecidePosture(CommandTaskType.GuardFlank));
-        AssertPostureDecision(PostureExecutionAction.SetFormation, "scout", DecidePosture(CommandTaskType.Scout));
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "scout", DecidePosture(CommandTaskType.Scout));
         AssertPostureDecision(PostureExecutionAction.SetFormation, "hold-choke", DecidePosture(CommandTaskType.HoldChoke));
         AssertPostureDecision(PostureExecutionAction.SetFormation, "delay", DecidePosture(CommandTaskType.Delay));
         AssertPostureDecision(PostureExecutionAction.SetFormation, "consolidate", DecidePosture(CommandTaskType.Consolidate));
@@ -2983,6 +2987,29 @@ static class Program
 
         AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "attack-objective", decision);
         AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, decision);
+    }
+
+    private static void PostureExecutorMovesScoutProbeAndScreenToDoctrineTarget()
+    {
+        var scout = CommandPostureExecutor.Decide(
+            DoctrineOrder(CommandTaskType.Scout, primary: DoctrineTargetPoint.From(125f, 250f)),
+            PhysicalState(),
+            nowSeconds: 100f);
+        var probe = CommandPostureExecutor.Decide(
+            DoctrineOrder(CommandTaskType.Probe, primary: DoctrineTargetPoint.From(140f, 260f)),
+            PhysicalState(),
+            nowSeconds: 100f);
+        var screen = CommandPostureExecutor.Decide(
+            DoctrineOrder(CommandTaskType.Screen, primary: DoctrineTargetPoint.From(160f, 280f)),
+            PhysicalState(),
+            nowSeconds: 100f);
+
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "scout", scout);
+        AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, scout);
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "probe", probe);
+        AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, probe);
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "screen", screen);
+        AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, screen);
     }
 
     private static void PostureExecutorClearsInterruptedInactiveOrder()
@@ -3251,6 +3278,28 @@ static class Program
         AssertEqual(CommandTaskType.AttackObjective, orders[0].Task, "committed fallback enemy-line operation should keep attacking live vanilla chain objective");
         AssertEqual("vanilla-chain-0", orders[0].ObjectiveId, "doctrine objective should retarget to live chain");
         AssertTrue(orders[0].PrimaryTarget.HasValue, "target");
+    }
+
+    private static void DoctrineAssignmentProbeAndScreenReceiveMovementTargets()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("probe-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.Probe, CommandTaskType.FormUp, 0f, 0f, 0f),
+            CommandNodeOperationalState.Create("screen-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.ScreeningForce, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Scouting, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 400f, 0.8f, true, 0.7f, 125f, 250f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1200f, nowSeconds: 100f);
+
+        AssertEqual(2, orders.Length, "order count");
+        AssertEqual(CommandTaskType.Probe, orders[0].Task, "probe task");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "probe target");
+        AssertEqual(CommandTaskType.Screen, orders[1].Task, "screen task");
+        AssertTrue(orders[1].PrimaryTarget.HasValue, "screen target");
     }
 
     private static void DoctrineAssignmentReserveGetsLegalIdle()
@@ -3720,6 +3769,26 @@ static class Program
                 closeEngaged: false,
                 needsFormation: false),
             "no formation mismatch should not create a path");
+    }
+
+    private static void CommandFormationCorrectionTargetsLineForCommittedAttack()
+    {
+        AssertEqual(
+            0,
+            CommandFormationCorrection.TargetFormationForTask(CommandTaskType.AttackObjective, currentGroupFormation: 3),
+            "attack objective should form line, not march column");
+        AssertEqual(
+            0,
+            CommandFormationCorrection.TargetFormationForTask(CommandTaskType.SupportAttack, currentGroupFormation: 3),
+            "supporting attack should form line, not march column");
+        AssertEqual(
+            2,
+            CommandFormationCorrection.TargetFormationForTask(CommandTaskType.Probe, currentGroupFormation: 2),
+            "probe can preserve a deployed non-column formation");
+        AssertEqual(
+            0,
+            CommandFormationCorrection.TargetFormationForTask(CommandTaskType.Scout, currentGroupFormation: 4),
+            "scout should not preserve square as the movement formation");
     }
 
     private static PostureExecutionDecision DecidePosture(CommandTaskType task)
@@ -15051,6 +15120,32 @@ static class Program
         var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
         AssertEqual(DirectChildRole.Main, intents[0].Role, "first registered wins ties");
         AssertTrue(intents[1].Role != DirectChildRole.Main, "second registered did not also become Main");
+    }
+
+    private static void DirectChildAllocatorFallsBackToStrongestMainWhenPlanSectorEmpty()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            99, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "Skirmish Contact", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Strong Contact", true),
+            new DirectChildSnapshot("c2", "a", 15, 0, "Nearby Support", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 2, true, 1, 0, 0.6f),
+            new DirectChildEvidence(3, 1, true, 4, 0, 0.75f),
+            new DirectChildEvidence(2, 1, false, 5, 0, 0.55f),
+        };
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+
+        AssertEqual(DirectChildRole.Main, intents[1].Role, "strongest contact becomes fallback main effort");
+        AssertEqual(4, intents[1].AxisSector, "fallback main effort sector");
+        AssertEqual(DirectChildRole.SupportMain, intents[2].Role, "adjacent force masses on fallback main effort");
     }
 
     private static void DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch()

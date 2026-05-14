@@ -841,32 +841,7 @@ namespace WhiskeyRealism.Patches
         private static int TargetFormationForTask(CommandTaskType task, Regiment group)
         {
             if (!CanUseGroupFormation(group)) return -1;
-
-            switch (task)
-            {
-                case CommandTaskType.AttackObjective:
-                case CommandTaskType.SupportAttack:
-                    return 3;
-                case CommandTaskType.FormUp:
-                case CommandTaskType.AdvanceToAssembly:
-                case CommandTaskType.FixEnemy:
-                case CommandTaskType.HoldObjective:
-                case CommandTaskType.HoldChoke:
-                case CommandTaskType.GuardFlank:
-                case CommandTaskType.FallBackToLine:
-                case CommandTaskType.Delay:
-                case CommandTaskType.Consolidate:
-                case CommandTaskType.ReserveWait:
-                case CommandTaskType.ReleaseReserve:
-                case CommandTaskType.RecoverStuckOrder:
-                    return 0;
-                case CommandTaskType.Screen:
-                case CommandTaskType.Probe:
-                case CommandTaskType.Scout:
-                    return SafeGroupFormation(group) == 4 ? 0 : SafeGroupFormation(group);
-                default:
-                    return SafeGroupFormation(group);
-            }
+            return CommandFormationCorrection.TargetFormationForTask(task, SafeGroupFormation(group));
         }
 
         private static bool CanUseGroupFormation(Regiment group)

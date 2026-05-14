@@ -69,6 +69,8 @@ namespace WhiskeyRealism.Tactical.Operations
             if (role == CommandNodeRole.Reserve) return CommandTaskType.ReserveWait;
             if (!objectiveMatched) return CommandTaskType.FormUp;
 
+            if (role == CommandNodeRole.Probe) return CommandTaskType.Probe;
+
             if (role == CommandNodeRole.MainEffort &&
                 IsCommittedFallbackEnemyLine(operation))
             {
@@ -146,6 +148,8 @@ namespace WhiskeyRealism.Tactical.Operations
             if (task == CommandTaskType.AttackObjective ||
                 task == CommandTaskType.SupportAttack ||
                 task == CommandTaskType.FixEnemy ||
+                task == CommandTaskType.Probe ||
+                task == CommandTaskType.Scout ||
                 task == CommandTaskType.Screen)
             {
                 return DoctrineTargetPoint.From(objective.X, objective.Z);
