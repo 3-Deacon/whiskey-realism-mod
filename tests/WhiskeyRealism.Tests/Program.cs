@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
@@ -15,6 +16,10 @@ static class Program
     {
         var tests = new (string name, Action run)[]
         {
+            ("telemetry json writes required fields", TelemetryJsonWritesRequiredFields),
+            ("telemetry json escapes strings safely", TelemetryJsonEscapesStringsSafely),
+            ("telemetry fields sanitize nulls and nonfinite numbers", TelemetryFieldsSanitizeNullsAndNonfiniteNumbers),
+            ("telemetry decision requires input signature", TelemetryDecisionRequiresInputSignature),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -15148,6 +15153,67 @@ static class Program
         var negativeTopN = DefenseThreatSignature.ForAsset(
             CampaignMapAssetKind.SeaHarbor, "norfolk-harbor", new[] { 7, 3, 5 }, topN: -2);
         AssertEqual("asset:SeaHarbor:norfolk-harbor:3", negativeTopN);
+    }
+
+    private static void TelemetryJsonWritesRequiredFields()
+    {
+        var ev = TelemetryEvent.Create(
+            "session-1", TelemetryProfile.TacticalTuning, TelemetryLayer.Tactical,
+            TelemetryCategory.Decision, "CommandAssignment", TelemetrySeverity.Info)
+            .WithCampaignDate("1861-06-01")
+            .WithBattleId("battle-1")
+            .WithSide(0)
+            .WithAlliance(1)
+            .WithDecision("Probe", "support-required", "sig-123");
+        string json = TelemetryJson.ToJsonLine(ev);
+        AssertContains(json, "\"schema\":\"wr.telemetry.v1\"", "schema");
+        AssertContains(json, "\"sessionId\":\"session-1\"", "session");
+        AssertContains(json, "\"layer\":\"Tactical\"", "layer");
+        AssertContains(json, "\"inputSignature\":\"sig-123\"", "input signature");
+    }
+
+    private static void TelemetryJsonEscapesStringsSafely()
+    {
+        var ev = TelemetryEvent.Create(
+            "s", TelemetryProfile.CampaignTuning, TelemetryLayer.Campaign,
+            TelemetryCategory.Failure, "Serializer", TelemetrySeverity.Warning)
+            .WithField("message", "quote=\" slash=\\ newline=\n tab=\t");
+        string json = TelemetryJson.ToJsonLine(ev);
+        AssertContains(json, "quote=\\\"", "quote escaped");
+        AssertContains(json, "slash=\\\\", "slash escaped");
+        AssertContains(json, "newline=\\n", "newline escaped");
+        AssertContains(json, "tab=\\t", "tab escaped");
+    }
+
+    private static void TelemetryFieldsSanitizeNullsAndNonfiniteNumbers()
+    {
+        var fields = new TelemetryFields()
+            .Add("missing", (string)null)
+            .Add("nan", float.NaN)
+            .Add("inf", float.PositiveInfinity)
+            .Add("ok", 1.25f);
+        AssertEqual("-", fields.GetString("missing"), "null string");
+        AssertEqual(0.0, fields.GetDouble("nan"), "nan");
+        AssertEqual(0.0, fields.GetDouble("inf"), "inf");
+        AssertEqual(1.25, fields.GetDouble("ok"), "finite");
+        AssertTrue(fields.GetBool("invalidFloat"), "invalid float marker");
+    }
+
+    private static void TelemetryDecisionRequiresInputSignature()
+    {
+        bool threw = false;
+        try
+        {
+            TelemetryEvent.Create(
+                "s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical,
+                TelemetryCategory.Decision, "DecisionWithoutSignature", TelemetrySeverity.Info)
+                .WithDecision("Attack", "test", "");
+        }
+        catch (ArgumentException)
+        {
+            threw = true;
+        }
+        AssertTrue(threw, "decision rows must reject blank input signatures");
     }
 
     private static void AssertEqual<T>(T expected, T actual)
