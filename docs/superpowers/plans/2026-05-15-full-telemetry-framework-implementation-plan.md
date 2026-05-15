@@ -24,9 +24,9 @@
 - Campaign operation runtime logging: `src/WhiskeyRealism/Strategic/CoordinatedOperationRuntime.cs`, `src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs`, `src/WhiskeyRealism/Strategic/CIC.cs`
 - Current local runtime proof from spec: stale `LogOutput.log` had `251020` lines, about `133 MB`, more than `134000` `[TacticalDecisionMatrix]` rows, more than `26000` `[TacticalPlayerOrder]` rows, and more than `15000` `[TacticalFormationChange]` rows.
 
-## Handoff Checkpoint - 2026-05-15 After Task 5
+## Handoff Checkpoint - 2026-05-15 After Task 6
 
-Resume from worktree branch `telemetry-framework-plan` at commit `bbe02c1559a617f6f4a342eee433bef73663d46e` or later.
+Resume from worktree branch `telemetry-framework-plan` at commit `e617d2eaac70fcd54a0702d1362b50499456ef2b` or later.
 
 Completed and reviewed:
 
@@ -35,29 +35,32 @@ Completed and reviewed:
 - Task 3, profile config/router/writer lifecycle: complete and approved at `48be43d`.
 - Task 4, performance telemetry scopes/failure isolation: complete and approved at `357c3c9`.
 - Task 5, legacy tag policy/parser and production deployment-routing safeguards: complete and approved at `bbe02c1`.
+- Task 6, tactical migration: complete and approved at `e617d2e`.
 
-Task 5 closeout facts:
+Task 6 closeout facts:
 
-- `TelemetryTagPolicy` and `TelemetryLegacyParser` now route known tactical/campaign legacy tags into sidecars and assign coarse signatures.
-- `OnceLog` is locked, no-throw, retryable when the main logger is unavailable, and routes through `TelemetryRouter.LegacyInfo` / `LegacyWarning`.
-- Default-on deployment observer/advice rows (`TacDeployObs`, `TacDeployObsMove`, `TacDeployTerrain`, `TacDeployTerrainAdvice`) are sidecar-only through production call sites unless serious/failure handling requires main-log visibility.
-- `TelemetryRouter.Legacy` falls back to main-log visibility for protected/failure/warning/error rows when sidecar emission is unavailable or fails, while non-failure sidecar-only rows stay suppressed under `Logging Profile = Off`.
-- Latest high spec review and xhigh code review both approved Task 5 at `bbe02c1`.
+- Tactical firehose rows now route through typed `TelemetryRouter.Emit(...)` where Task 6 required typed decision paths, or through legacy sidecar routing for remaining diagnostic rows.
+- Typed Task 6 paths exist for command assignment, posture execution, reserve commit gate, charge gate, W&L/player order, and decision matrix rows. They include stable `inputSignature` values and the minimum decision-analysis fields required by the design (`confidence`, `score`, `selectedTarget`, `gateResult`, `gateReason`, `writeAction`, `writeResult`) where applicable.
+- Hot gate telemetry remains bounded: charge-gate typed denial rows are once-per-unit bounded, and reserve commit-gate rows are once-per-key bounded.
+- `TacticalDecisionMatrix` typed rows remain `TelemetryCategory.State`, and command-assignment rows preserve the legacy operations-ledger analysis fields.
+- The legacy `missingParents` command-tree field name is preserved. `TelemetryTagPolicy.IsSeriousLine` no longer treats all `missing` substrings as serious, so benign rows like `missingParents=0` remain sidecar-only.
+- The closure command still lists existing `OnceLog.Info(...)` sites and campaign/strategic `Plugin.Log.LogInfo(...)` sites. `OnceLog` routes through telemetry from Task 5, and the remaining campaign/strategic migration is Task 7. Focused direct tactical high-volume `Plugin.Log.LogInfo` search for `Tactical`, `TacDeploy`, and `PlayerOrderIntent` returned no matches.
+- Latest high spec review and xhigh code review both approved Task 6 at `e617d2e`.
 
 Verification evidence at the checkpoint:
 
-- `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` passed in both Task 5 final reviews.
-- `./build.sh` passed in both Task 5 final reviews with `0 Warning(s)` and `0 Error(s)`.
+- `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` passed after Task 6 changes. Existing CS0649 DTO warnings remain.
+- `./build.sh` passed after Task 6 changes with `0 Warning(s)` and `0 Error(s)`.
 - `git diff --check` passed.
 - No deploy or in-game runtime smoke has been performed for this telemetry branch; Task 10 owns deploy, hash verification, and runtime smoke.
 
-Next context starts at Task 6:
+Next context starts at Task 7:
 
-- Do not restart Tasks 1-5. Re-run `git status --short --branch`, `git rev-parse HEAD`, the harness, and build before editing.
-- Use high-effort implementer, high-effort spec review, and xhigh code review for Task 6, matching the current session's review standard.
-- Task 6 should migrate tactical firehose call sites to typed `TelemetryRouter.Emit(...)` where signatures exist, or legacy routing where they do not.
+- Do not restart Tasks 1-6. Re-run `git status --short --branch`, `git rev-parse HEAD`, the harness, and build before editing.
+- Use high-effort implementation and review for Task 7, matching the current session's standard.
+- Task 7 should migrate campaign, W&L, and strategic tuning logs to typed `TelemetryRouter.Emit(...)` where signatures exist, or legacy routing where they do not.
 - For direct production log sites that still need compatibility main-log fallback, prefer the established `TelemetryRouter.LegacyInfoToMainLogIfAllowed(...)` pattern instead of direct `Plugin.Log.LogInfo(...)`.
-- Watch item from xhigh review: `TelemetryTagPolicy.IsSeriousLine` currently uses broad substring checks such as `missing` and `error`. Future broad migrations should avoid promoting benign high-volume fields like `missingParents=0` to the main log.
+- Watch item: `TelemetryTagPolicy.IsSeriousLine` still treats broad `error` and failure words as serious. Future broad migrations should avoid promoting benign high-volume field names to the main log.
 
 ## Worktree Gate
 
