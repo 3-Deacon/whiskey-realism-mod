@@ -54,7 +54,7 @@ namespace WhiskeyRealism.Patches
                 if (!_projectSelectionWiredLogged)
                 {
                     _projectSelectionWiredLogged = true;
-                    TelemetryRouter.LegacyInfo("[ProjectDoctrine] observer=project-selection", TelemetryLayer.Campaign);
+                    EmitProjectDoctrineObserver("project-selection", alliance);
                 }
 
                 int lanes = nextProjects.Length;
@@ -70,7 +70,7 @@ namespace WhiskeyRealism.Patches
                 if (!_catalogLogged)
                 {
                     _catalogLogged = true;
-                    TelemetryRouter.LegacyInfo($"[ProjectDoctrine] catalogEntries={ProjectDoctrineCatalog.AllActive.Count}", TelemetryLayer.Campaign);
+                    EmitProjectDoctrineCatalog(ProjectDoctrineCatalog.AllActive.Count);
                 }
 
                 for (int subsidyType = 0; subsidyType < lanes; subsidyType++)
@@ -108,14 +108,9 @@ namespace WhiskeyRealism.Patches
                             if (!_starvedLaneObserverLogged)
                             {
                                 _starvedLaneObserverLogged = true;
-                                TelemetryRouter.LegacyInfo("[ProjectDoctrine] observer=starved-lane", TelemetryLayer.Campaign);
+                                EmitProjectDoctrineObserver("starved-lane", alliance);
                             }
-                            TelemetryRouter.LegacyInfo(
-                                $"[ProjectDoctrine] alliance={alliance} lane={subsidyType} queued={decision.LaneIntent.QueuedProjectId} " +
-                                $"funding={decision.LaneIntent.FundingAvailable:F0}/{decision.LaneIntent.FundingNeeded:F0} " +
-                                $"rate={(decision.LaneIntent.NetFundingPerDay > 0f ? decision.LaneIntent.NetFundingPerDay.ToString("F0") : "unknown")} " +
-                                $"constructionWins={decision.LaneIntent.ConstructionCurrentlyWins} reason=starved-critical-project",
-                                TelemetryLayer.Campaign);
+                            EmitProjectDoctrineStarvedLane(decision.LaneIntent, starvedSignature);
                         }
                     }
 
@@ -130,7 +125,7 @@ namespace WhiskeyRealism.Patches
                         if (!_selectionObserverLogged)
                         {
                             _selectionObserverLogged = true;
-                            TelemetryRouter.LegacyInfo("[ProjectDoctrine] observer=selection", TelemetryLayer.Campaign);
+                            EmitProjectDoctrineObserver("selection", alliance);
                         }
                         TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "ProjectDoctrine", TelemetrySeverity.Info, ev => ev
                             .WithAlliance(alliance)
@@ -199,6 +194,41 @@ namespace WhiskeyRealism.Patches
                 + intent.QueuedProjectId + "|"
                 + intent.ConstructionCurrentlyWins + "|"
                 + intent.CriticalDoctrineProject;
+        }
+
+        private static void EmitProjectDoctrineObserver(string observer, int alliance)
+        {
+            string signature = "observer=" + observer + "|alliance=" + alliance;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.State, "ProjectDoctrine", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithDecision("observer", observer, signature)
+                .WithField("observer", observer));
+        }
+
+        private static void EmitProjectDoctrineCatalog(int catalogEntries)
+        {
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.State, "ProjectDoctrine", TelemetrySeverity.Info, ev => ev
+                .WithDecision("catalog", "active-entries", "catalogEntries=" + catalogEntries)
+                .WithField("catalogEntries", catalogEntries));
+        }
+
+        private static void EmitProjectDoctrineStarvedLane(ProjectLaneIntent intent, string signature)
+        {
+            if (intent == null) return;
+            string inputSignature = string.IsNullOrWhiteSpace(signature)
+                ? ProjectDoctrineLogGate.StarvedLaneSignature(intent)
+                : signature;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Gate, "ProjectDoctrine", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(intent.Alliance)
+                .WithDecision("starved-lane", "starved-critical-project", inputSignature)
+                .WithField("lane", intent.SubsidyLane)
+                .WithField("queued", intent.QueuedProjectId)
+                .WithField("fundingAvailable", intent.FundingAvailable)
+                .WithField("fundingNeeded", intent.FundingNeeded)
+                .WithField("netFundingPerDay", intent.NetFundingPerDay)
+                .WithField("timeToFundDays", intent.TimeToFundEstimateDays)
+                .WithField("constructionWins", intent.ConstructionCurrentlyWins)
+                .WithField("criticalDoctrineProject", intent.CriticalDoctrineProject));
         }
 
         private static ProjectRuntimeFacts BuildRuntimeFacts(int projectId, int subsidyType, int alliance)

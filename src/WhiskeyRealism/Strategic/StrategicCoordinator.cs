@@ -415,7 +415,7 @@ namespace WhiskeyRealism.Strategic
                 }
                 if (Plugin.Instance.DirectorVerboseTrace.Value)
                 {
-                    EmitCampaignInfo($"[Director:trace] alliance={alliance} signature={newPosture.SourceSignature} stale={newPosture.Stale}");
+                    EmitDirectorTrace(alliance, day, month, year, newPosture);
                 }
             }
             else
@@ -568,20 +568,14 @@ namespace WhiskeyRealism.Strategic
                     ConfigValue(plugin.ConstructionVerboseLogging) ||
                     _constructionSignatures[alliance] != output.Signature)
                 {
-                    EmitCampaignInfo(
-                        $"[ConstructionIntent] alliance={alliance} posture={output.Posture} " +
-                        $"theater={output.TopConstructionTheater ?? ""} " +
-                        $"private={output.TopPrivateBuilding.Name} depot={output.TopSupplyDepot.Name} " +
-                        $"fort={output.TopFort.Name} rail={output.TopRailroad.Name}");
+                    EmitConstructionIntent(alliance, era, output);
                     _constructionSignatures[alliance] = output.Signature;
                 }
 
                 if (logHeartbeat && ConfigValue(plugin.ConstructionTelemetryEnabled, defaultValue: true))
                 {
                     var telemetry = ConstructionTelemetry ?? (ConstructionTelemetry = new ConstructionTelemetry());
-                    EmitCampaignInfo(
-                        $"[ConstructionTelemetry] alliance={alliance} posture={output.Posture} " +
-                        $"{telemetry.Summary(alliance)}");
+                    EmitConstructionTelemetry(alliance, output, telemetry.Summary(alliance));
                 }
 
                 if (ConfigValue(plugin.EnableTelegraphAI))
@@ -643,19 +637,14 @@ namespace WhiskeyRealism.Strategic
                     {
                         foreach (var r in output.Responses)
                         {
-                            EmitCampaignInfo(
-                                $"[DefenseIntent] alliance={alliance} posture={r.Threat.Posture} " +
-                                $"threat={r.Threat.Signature} enemy={r.Threat.EnemyStrength:F0} " +
-                                $"desired={r.Threat.DesiredStrength:F0} selected={r.SelectedPackage.Count} " +
-                                $"reason={r.Threat.EscalationReason ?? ""} sig={r.TelemetrySignature ?? ""}");
+                            EmitDefenseIntentDetail(alliance, day, month, year, r);
                         }
                     }
                     _defenseIntentSignatures[alliance] = output.Signature;
                 }
                 else if (_defenseIntentSignatures[alliance] != output.Signature)
                 {
-                    EmitCampaignInfo(
-                        $"[DefenseIntent] alliance={alliance} {DefenseIntentTelemetry.Summary(output)}");
+                    EmitDefenseIntentSummary(alliance, day, month, year, output);
                     _defenseIntentSignatures[alliance] = output.Signature;
                 }
 
@@ -775,13 +764,13 @@ namespace WhiskeyRealism.Strategic
 
             if (Plugin.Instance.VerboseLogging.Value || Plugin.Instance.FiscalTrace.Value || _fiscalSignatures[alliance] != output.Signature)
             {
-                EmitCampaignInfo($"[FiscalIntent] alliance={alliance} posture={output.Posture} gate={output.DefendedGate} supply={output.SupplyProtection} forceCap={output.ForceCapWarning}");
+                EmitFiscalIntent(alliance, day, month, year, output);
                 _fiscalSignatures[alliance] = output.Signature;
             }
 
             if (logHeartbeat)
             {
-                EmitCampaignInfo($"[FiscalTelemetry] alliance={alliance} posture={output.Posture} gate={output.DefendedGate} supply={output.SupplyProtection} theater={output.TheaterSupplyPriority}");
+                EmitFiscalTelemetry(alliance, day, month, year, output);
             }
         }
 
@@ -930,10 +919,7 @@ namespace WhiskeyRealism.Strategic
                 bool changed = StrategicCadencePolicy.SourceChanged(signature, _operationalProbeSignatures[alliance]);
                 if (Plugin.Instance.VerboseLogging.Value || changed)
                 {
-                    EmitCampaignInfo(
-                        $"[OperationalProbe] alliance={alliance} decision={output.Decision} " +
-                        $"unit={output.SelectedUnitKey ?? "<none>"} target={output.TargetAreaKey ?? "<none>"} " +
-                        $"reason={output.Reason ?? ""} mass={output.RequiresMassCommitment}");
+                    EmitOperationalProbe(alliance, day, month, year, output, signature);
                     _operationalProbeSignatures[alliance] = signature;
                 }
 
@@ -1122,6 +1108,146 @@ namespace WhiskeyRealism.Strategic
                      ConfigValue(plugin.ConstructionVerboseLogging));
             }
             catch { return false; }
+        }
+
+        private static void EmitDirectorTrace(int alliance, int day, int month, int year, DirectorPosture posture)
+        {
+            if (posture == null) return;
+            string signature = "alliance=" + alliance + "|source=" + (posture.SourceSignature ?? "-") + "|stale=" + posture.Stale;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Trace, "Director:trace", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithCampaignDate(CampaignDate(year, month, day))
+                .WithDecision("trace", posture.Reason ?? "-", signature)
+                .WithField("sourceSignature", posture.SourceSignature ?? "-")
+                .WithField("stale", posture.Stale)
+                .WithField("pace", posture.Pace.ToString())
+                .WithField("intent", posture.Intent.ToString())
+                .WithField("risk", posture.Risk.ToString()));
+        }
+
+        private static void EmitConstructionIntent(int alliance, EraStage era, ConstructionOutput output)
+        {
+            if (output == null) return;
+            string signature = string.IsNullOrWhiteSpace(output.Signature)
+                ? "alliance=" + alliance + "|posture=" + output.Posture
+                : output.Signature;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "ConstructionIntent", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithDecision("compute", output.Posture.ToString(), signature)
+                .WithField("era", era.ToString())
+                .WithField("posture", output.Posture.ToString())
+                .WithField("theater", output.TopConstructionTheater ?? "-")
+                .WithField("private", output.TopPrivateBuilding.Name ?? "-")
+                .WithField("depot", output.TopSupplyDepot.Name ?? "-")
+                .WithField("fort", output.TopFort.Name ?? "-")
+                .WithField("telegraph", output.TopTelegraph.Name ?? "-")
+                .WithField("rail", output.TopRailroad.Name ?? "-")
+                .WithField("suppressionCount", output.Suppressions != null ? output.Suppressions.Length : 0));
+        }
+
+        private static void EmitConstructionTelemetry(int alliance, ConstructionOutput output, string summary)
+        {
+            string posture = output != null ? output.Posture.ToString() : "-";
+            string safeSummary = string.IsNullOrWhiteSpace(summary) ? "-" : summary;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.State, "ConstructionTelemetry", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithDecision("heartbeat", posture, "alliance=" + alliance + "|posture=" + posture + "|summary=" + safeSummary)
+                .WithField("posture", posture)
+                .WithField("summary", safeSummary));
+        }
+
+        private static void EmitDefenseIntentDetail(int alliance, int day, int month, int year, DefenseResponse response)
+        {
+            var threat = response?.Threat;
+            string threatSignature = threat?.Signature ?? "-";
+            string responseSignature = response?.TelemetrySignature ?? "-";
+            string reason = threat?.EscalationReason ?? "-";
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "DefenseIntent", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithCampaignDate(CampaignDate(year, month, day))
+                .WithDecision("select-package", reason, "alliance=" + alliance + "|threat=" + threatSignature + "|response=" + responseSignature)
+                .WithField("posture", threat != null ? threat.Posture.ToString() : "-")
+                .WithField("sourceKind", threat != null ? threat.SourceKind.ToString() : "-")
+                .WithField("threat", threatSignature)
+                .WithField("enemy", threat != null ? threat.EnemyStrength : 0.0)
+                .WithField("desired", threat != null ? threat.DesiredStrength : 0.0)
+                .WithField("selected", response?.SelectedPackage != null ? response.SelectedPackage.Count : 0)
+                .WithField("adequate", response != null && response.Adequate)
+                .WithField("understrength", response != null && response.Understrength)
+                .WithField("responseSignature", responseSignature));
+        }
+
+        private static void EmitDefenseIntentSummary(int alliance, int day, int month, int year, DefenseIntentLedgerOutput output)
+        {
+            if (output == null) return;
+            string summary = DefenseIntentTelemetry.Summary(output);
+            string signature = string.IsNullOrWhiteSpace(output.Signature)
+                ? "alliance=" + alliance + "|summary=" + summary
+                : output.Signature;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.State, "DefenseIntent", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithCampaignDate(CampaignDate(year, month, day))
+                .WithDecision("summary", summary, signature)
+                .WithField("summary", summary)
+                .WithField("responseCount", output.Responses != null ? output.Responses.Count : 0));
+        }
+
+        private static void EmitFiscalIntent(int alliance, int day, int month, int year, FiscalOutput output)
+        {
+            if (output == null) return;
+            string signature = string.IsNullOrWhiteSpace(output.Signature)
+                ? "alliance=" + alliance + "|posture=" + output.Posture
+                : output.Signature;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "FiscalIntent", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithCampaignDate(CampaignDate(year, month, day))
+                .WithDecision("compute", output.Posture.ToString(), signature)
+                .WithField("posture", output.Posture.ToString())
+                .WithField("gate", output.DefendedGate.ToString())
+                .WithField("supply", output.SupplyProtection)
+                .WithField("forceCap", output.ForceCapWarning)
+                .WithField("minimumRating", output.MinimumAcceptableRating)
+                .WithField("theater", output.TheaterSupplyPriority ?? "-"));
+        }
+
+        private static void EmitFiscalTelemetry(int alliance, int day, int month, int year, FiscalOutput output)
+        {
+            if (output == null) return;
+            string signature = "alliance=" + alliance + "|posture=" + output.Posture + "|gate=" + output.DefendedGate + "|theater=" + (output.TheaterSupplyPriority ?? "-");
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.State, "FiscalTelemetry", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithCampaignDate(CampaignDate(year, month, day))
+                .WithDecision("heartbeat", output.Posture.ToString(), signature)
+                .WithField("posture", output.Posture.ToString())
+                .WithField("gate", output.DefendedGate.ToString())
+                .WithField("supply", output.SupplyProtection)
+                .WithField("forceCap", output.ForceCapWarning)
+                .WithField("theater", output.TheaterSupplyPriority ?? "-"));
+        }
+
+        private static void EmitOperationalProbe(int alliance, int day, int month, int year, OperationalProbeOutput output, string signature)
+        {
+            if (output == null) return;
+            string inputSignature = string.IsNullOrWhiteSpace(signature)
+                ? output.Signature()
+                : signature;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "OperationalProbe", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithCampaignDate(CampaignDate(year, month, day))
+                .WithUnit(output.SelectedUnitKey ?? "-")
+                .WithDecision(output.Decision.ToString(), output.Reason ?? "-", inputSignature)
+                .WithField("objective", output.ObjectiveId)
+                .WithField("probeId", output.ProbeId ?? "-")
+                .WithField("unit", output.SelectedUnitKey ?? "-")
+                .WithField("target", output.TargetAreaKey ?? "-")
+                .WithField("sourceSector", output.SourceSectorKey ?? "-")
+                .WithField("mass", output.RequiresMassCommitment)
+                .WithField("packageSignature", output.Package != null ? output.Package.Signature() : "-"));
+        }
+
+        private static string CampaignDate(int year, int month, int day)
+        {
+            return year + "-" + month.ToString("D2") + "-" + day.ToString("D2");
         }
 
         private static void EmitCampaignInfo(string line)

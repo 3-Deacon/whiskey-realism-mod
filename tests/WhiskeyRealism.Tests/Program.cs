@@ -90,6 +90,7 @@ static class Program
             ("telemetry tag policy routes deployment diagnostics sidecar only", TelemetryTagPolicyRoutesDeploymentDiagnosticsSidecarOnly),
             ("telemetry tag policy does not promote missing parents count", TelemetryTagPolicyDoesNotPromoteMissingParentsCount),
             ("telemetry tag policy routes campaign plan and succession sidecar only", TelemetryTagPolicyRoutesCampaignPlanAndSuccessionSidecarOnly),
+            ("task7 explicit campaign groups use typed telemetry", Task7ExplicitCampaignGroupsUseTypedTelemetry),
             ("telemetry legacy off suppresses sidecar only but allows serious", TelemetryLegacyOffSuppressesSidecarOnlyButAllowsSerious),
             ("telemetry typed off suppression warns once", TelemetryTypedOffSuppressionWarnsOnce),
             ("telemetry legacy unavailable runtime keeps protected failures visible", TelemetryLegacyUnavailableRuntimeKeepsProtectedFailuresVisible),
@@ -1921,6 +1922,27 @@ static class Program
         AssertEqual(TelemetryCategory.Decision, succession.Category, "succession category");
         AssertTrue(succession.RouteToSidecar, "succession sidecar route");
         AssertFalse(succession.AllowMainLog, "succession main log");
+    }
+
+    private static void Task7ExplicitCampaignGroupsUseTypedTelemetry()
+    {
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        AssertFalse(coordinator.Contains("EmitCampaignInfo(\n                        $\"[ConstructionIntent]"), "construction intent typed");
+        AssertFalse(coordinator.Contains("EmitCampaignInfo(\n                        $\"[ConstructionTelemetry]"), "construction telemetry typed");
+        AssertFalse(coordinator.Contains("EmitCampaignInfo(\n                                $\"[DefenseIntent]"), "defense detail typed");
+        AssertFalse(coordinator.Contains("EmitCampaignInfo(\n                        $\"[DefenseIntent]"), "defense summary typed");
+        AssertFalse(coordinator.Contains("EmitCampaignInfo($\"[FiscalIntent]"), "fiscal intent typed");
+        AssertFalse(coordinator.Contains("EmitCampaignInfo($\"[FiscalTelemetry]"), "fiscal telemetry typed");
+        AssertFalse(coordinator.Contains("EmitCampaignInfo($\"[Director:trace]"), "director trace typed");
+        AssertFalse(coordinator.Contains("EmitCampaignInfo(\n                        $\"[OperationalProbe]"), "operational probe typed");
+
+        string objectivePatch = ReadRepoFile("src/WhiskeyRealism/Patches/PickCampaignObjectivePatch.cs");
+        AssertFalse(objectivePatch.Contains("TelemetryRouter.LegacyInfo(\n                            $\"[HistoricalOperation]"), "historical operation patch typed");
+        AssertFalse(objectivePatch.Contains("TelemetryRouter.LegacyInfo($\"[Plan]"), "campaign objective plan patch typed");
+
+        string projectPatch = ReadRepoFile("src/WhiskeyRealism/Patches/ProjectSelectionPatch.cs");
+        AssertFalse(projectPatch.Contains("TelemetryRouter.LegacyInfo(\"[ProjectDoctrine]"), "project doctrine observer rows typed");
+        AssertFalse(projectPatch.Contains("TelemetryRouter.LegacyInfo(\n                                $\"[ProjectDoctrine]"), "project doctrine starved lane typed");
     }
 
     private static void AssertDeploymentRoute(string line, string expectedTag, TelemetryCategory expectedCategory)
@@ -17235,6 +17257,23 @@ static class Program
         string path = Path.Combine(Path.GetTempPath(), "wr-tests-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private static string ReadRepoFile(string relativePath)
+    {
+        string current = Directory.GetCurrentDirectory();
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            string candidate = Path.Combine(current, relativePath);
+            if (File.Exists(candidate))
+                return File.ReadAllText(candidate);
+
+            var parent = Directory.GetParent(current);
+            if (parent == null) break;
+            current = parent.FullName;
+        }
+
+        throw new FileNotFoundException("repo file not found", relativePath);
     }
 
     private static string CreateTelemetrySessionDirectory(string gameRoot, string sessionId, string startUtc)

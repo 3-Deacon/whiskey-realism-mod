@@ -30,9 +30,7 @@ namespace WhiskeyRealism.Patches
                 {
                     if (HistoricalDoctrineEnabled())
                     {
-                        TelemetryRouter.LegacyInfo(
-                            $"[HistoricalOperation] alliance={allianceId} action=skip-vanilla-random reason=no-historical-operation-plan",
-                            TelemetryLayer.Campaign);
+                        EmitHistoricalOperationSkip(allianceId, "no-historical-operation-plan");
                         return false;
                     }
                     return true;
@@ -43,9 +41,7 @@ namespace WhiskeyRealism.Patches
                 {
                     if (HistoricalDoctrineEnabled())
                     {
-                        TelemetryRouter.LegacyInfo(
-                            $"[HistoricalOperation] alliance={allianceId} action=skip-vanilla-random reason=invalid-historical-operation-phase",
-                            TelemetryLayer.Campaign);
+                        EmitHistoricalOperationSkip(allianceId, "invalid-historical-operation-phase");
                         return false;
                     }
                     return true;
@@ -53,7 +49,7 @@ namespace WhiskeyRealism.Patches
 
                 SetFollowedCampaignObjective(_aifaction, phase.TargetObjectiveId);
                 if (Plugin.Instance.VerboseLogging.Value)
-                    TelemetryRouter.LegacyInfo($"[Plan] alliance={allianceId} action=pick-campaign-objective objective={phase.TargetObjectiveId}", TelemetryLayer.Campaign);
+                    EmitPlanObjective(allianceId, phase.TargetObjectiveId, cic.ActivePlan.OperationId, phase.PhaseId);
                 return false;
             }
             catch (Exception ex)
@@ -82,6 +78,26 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance == null ||
                 Plugin.Instance.EnableHistoricalOperationDoctrine == null ||
                 Plugin.Instance.EnableHistoricalOperationDoctrine.Value;
+        }
+
+        private static void EmitHistoricalOperationSkip(int allianceId, string reason)
+        {
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "HistoricalOperation", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(allianceId)
+                .WithDecision("skip-vanilla-random", reason, "alliance=" + allianceId + "|action=skip-vanilla-random|reason=" + reason)
+                .WithField("reason", reason));
+        }
+
+        private static void EmitPlanObjective(int allianceId, int objectiveId, string operationId, string phaseId)
+        {
+            string safeOperation = string.IsNullOrWhiteSpace(operationId) ? "-" : operationId;
+            string safePhase = string.IsNullOrWhiteSpace(phaseId) ? "-" : phaseId;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Plan", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(allianceId)
+                .WithPhase(safePhase)
+                .WithDecision("pick-campaign-objective", "active-plan", "alliance=" + allianceId + "|objective=" + objectiveId + "|operation=" + safeOperation + "|phase=" + safePhase)
+                .WithField("objective", objectiveId)
+                .WithField("operation", safeOperation));
         }
 
         private static void SetFollowedCampaignObjective(int aifactionIndex, int objectiveId)
