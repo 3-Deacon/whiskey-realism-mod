@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
@@ -32,6 +33,7 @@ namespace WhiskeyRealism.Strategic
         private static readonly Dictionary<int, Dictionary<string, HashSet<int>>> _assignedByThreat =
             new Dictionary<int, Dictionary<string, HashSet<int>>>();
         private static readonly HashSet<string> _wlCurrentOrderAttempts = new HashSet<string>();
+        private static readonly HashSet<string> _logOnceKeys = new HashSet<string>();
 
         internal static void Run(int allianceId, DefenseIntentLedgerOutput output)
         {
@@ -100,17 +102,17 @@ namespace WhiskeyRealism.Strategic
                         {
                             AddThisTick(thisTick, sig, candidate.UnitInstanceId);
                             _wlCurrentOrderAttempts.Add(wlCurrentOrderKey);
-                            Plugin.Log.LogInfo(
-                                $"[CoastalDefense] alliance={allianceId} action=wl-current-order unit={SafeName(unit, candidate.UnitInstanceId)} reason={bridgeDecision.Reason}");
+                            TelemetryRouter.LegacyInfo(
+                                $"[DefenseIntent] source=CoastalDefense alliance={allianceId} action=wl-current-order unit={SafeName(unit, candidate.UnitInstanceId)} reason={bridgeDecision.Reason}");
                             continue;
                         }
                         else if (bridgeDecision.MayDirectMove)
                         {
                             if (!SafeMoveUnitTo(unit, anchor))
                             {
-                                OnceLog.Info(
+                                EmitCampaignInfoOnce(
                                     $"defense-intent:custom-order:move-skip:{allianceId}:{sig}:{candidate.UnitInstanceId}",
-                                    $"[CoastalDefense] alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} reason=moveunitto-failed");
+                                    $"[DefenseIntent] source=CoastalDefense alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} reason=moveunitto-failed");
                                 continue;
                             }
 
@@ -118,9 +120,9 @@ namespace WhiskeyRealism.Strategic
                         }
                         else
                         {
-                            OnceLog.Info(
+                            EmitCampaignInfoOnce(
                                 $"defense-intent:custom-order:wl-skip:{allianceId}:{sig}:{candidate.UnitInstanceId}:{bridgeDecision.Result}",
-                                $"[CoastalDefense] alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
+                                $"[DefenseIntent] source=CoastalDefense alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
                             continue;
                         }
 
@@ -131,11 +133,12 @@ namespace WhiskeyRealism.Strategic
                         if (firstAssignment || verbose)
                         {
                             string unitName = SafeName(unit, candidate.UnitInstanceId);
-                            Plugin.Log.LogInfo(
+                            TelemetryRouter.LegacyInfo(
                                 $"[DefenseIntent] custom-order alliance={allianceId} " +
                                 $"threat={sig} " +
                                 $"unit={unitName} " +
-                                $"posture={response.Threat.Posture}");
+                                $"posture={response.Threat.Posture}",
+                                TelemetryLayer.Campaign);
                         }
                     }
                 }
@@ -165,10 +168,11 @@ namespace WhiskeyRealism.Strategic
                             if (unit == null) continue;
                             if (!defOps.Contains(unit)) continue;
                             defOps.Remove(unit);
-                            Plugin.Log.LogInfo(
+                            TelemetryRouter.LegacyInfo(
                                 $"[DefenseIntent] released alliance={allianceId} " +
                                 $"threat={kv.Key} " +
-                                $"unit={SafeName(unit, unitId)}");
+                                $"unit={SafeName(unit, unitId)}",
+                                TelemetryLayer.Campaign);
                         }
                     }
                 }
@@ -255,6 +259,12 @@ namespace WhiskeyRealism.Strategic
             }
             catch { }
             return -1;
+        }
+
+        private static void EmitCampaignInfoOnce(string key, string line)
+        {
+            if (!_logOnceKeys.Add(key ?? string.Empty)) return;
+            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
         }
 
     }

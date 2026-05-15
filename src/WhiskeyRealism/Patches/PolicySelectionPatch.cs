@@ -3,6 +3,7 @@ using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -104,9 +105,10 @@ namespace WhiskeyRealism.Patches
                         OnceLog.Info("policy-selection", "PolicySelectionPatch wired");
                         if (Plugin.Instance.VerboseLogging.Value)
                         {
-                            Plugin.Log.LogInfo(
-                                $"[Patch:PolicySelection] alliance={alliance} blocked={firstVanillaPolicy} " +
-                                $"posture={intent.Posture} vanillaScore={firstVanillaScore:F2} reason={reason}");
+                            TelemetryRouter.LegacyInfo(
+                                $"[FiscalIntent] source=PolicySelection alliance={alliance} blocked={firstVanillaPolicy} " +
+                                $"posture={intent.Posture} vanillaScore={firstVanillaScore:F2} reason={reason}",
+                                TelemetryLayer.Campaign);
                         }
                         return false;
                     }
@@ -126,11 +128,12 @@ namespace WhiskeyRealism.Patches
 
                 OnceLog.Info("policy-selection", "PolicySelectionPatch wired");
                 Policies.AddResearch(alliance, selected);
-                Plugin.Log.LogInfo(
-                    $"[Patch:PolicySelection] alliance={alliance} policy={selectedPolicyId} " +
+                TelemetryRouter.LegacyInfo(
+                    $"[FiscalIntent] source=PolicySelection alliance={alliance} policy={selectedPolicyId} " +
                     $"posture={intent.Posture} vanilla={firstVanillaPolicy} " +
                     $"vanillaScore={firstVanillaScore:F2} selectedScore={selectedScore:F2} " +
-                    $"fiscalScore={selectedFiscalScore:F2} strategyScore={selectedStrategyScore:F2} reason={reason}");
+                    $"fiscalScore={selectedFiscalScore:F2} strategyScore={selectedStrategyScore:F2} reason={reason}",
+                    TelemetryLayer.Campaign);
                 return false;
             }
             catch (Exception ex)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic.Construction
@@ -14,6 +15,7 @@ namespace WhiskeyRealism.Strategic.Construction
         private const float PlacementOriginOffset = 0.12f;
         private const float PlacementSearchEpsilon = 0.5f;
         private static readonly Dictionary<CBuilding, PendingTelegraph> PendingTelegraphs = new Dictionary<CBuilding, PendingTelegraph>();
+        private static readonly HashSet<string> InfoLogOnceKeys = new HashSet<string>();
 
         public static bool TryStartTelegraph(int alliance, ConstructionOutput construction)
         {
@@ -98,9 +100,9 @@ namespace WhiskeyRealism.Strategic.Construction
                     EffectiveSupportRange = candidate.EffectiveSupportRange
                 };
 
-                OnceLog.Info(
+                EmitConstructionTelemetryOnce(
                     "telegraph-ai:start:" + alliance,
-                    "[TelegraphAI] alliance=" + alliance +
+                    "[ConstructionTelemetry] source=TelegraphAI alliance=" + alliance +
                     " action=start site=" + candidate.Site.x.ToString("0") + "," + candidate.Site.z.ToString("0") +
                     " unit=" + SafeName(candidate.Unit) +
                     " margin=" + candidate.PlacementMargin.ToString("F1") +
@@ -961,7 +963,7 @@ namespace WhiskeyRealism.Strategic.Construction
                         PendingTelegraphs.Remove(placeholder);
 
                         Vector3 finalPosition = ((Component)__result).transform.position;
-                        string message = "[TelegraphAI] alliance=" + pending.Alliance +
+                        string message = "[ConstructionTelemetry] source=TelegraphAI alliance=" + pending.Alliance +
                             " action=placed requested=" + FormatPosition(pending.RequestedSite) +
                             " final=" + FormatPosition(finalPosition) +
                             " requestedFinalDist=" + distances.RequestedToFinal.ToString("F1") +
@@ -976,7 +978,7 @@ namespace WhiskeyRealism.Strategic.Construction
                                 " supportRange=" + pending.EffectiveSupportRange.ToString("F1");
                         }
 
-                        OnceLog.Info("telegraph-ai:placed:" + pending.Alliance, message);
+                        EmitConstructionTelemetryOnce("telegraph-ai:placed:" + pending.Alliance, message);
                         return;
                     }
 
@@ -1123,18 +1125,18 @@ namespace WhiskeyRealism.Strategic.Construction
 
         private static void LogNoStart(int alliance, string reason, string details)
         {
-            string message = "[TelegraphAI] alliance=" + alliance + " action=no-start reason=" + reason;
+            string message = "[ConstructionTelemetry] source=TelegraphAI alliance=" + alliance + " action=no-start reason=" + reason;
             if (ConstructionVerboseLoggingEnabled() && !string.IsNullOrEmpty(details))
                 message += " " + details;
-            OnceLog.Info("telegraph-ai:no-start:" + alliance + ":" + reason, message);
+            EmitConstructionTelemetryOnce("telegraph-ai:no-start:" + alliance + ":" + reason, message);
         }
 
         private static void LogRejection(int alliance, string reason, string details)
         {
             if (!ConstructionVerboseLoggingEnabled()) return;
-            OnceLog.Info(
+            EmitConstructionTelemetryOnce(
                 "telegraph-ai:reject:" + alliance + ":" + reason,
-                "[TelegraphAI] alliance=" + alliance + " action=reject reason=" + reason + " " + details);
+                "[ConstructionTelemetry] source=TelegraphAI alliance=" + alliance + " action=reject reason=" + reason + " " + details);
         }
 
         private static bool ConstructionVerboseLoggingEnabled()
@@ -1149,6 +1151,12 @@ namespace WhiskeyRealism.Strategic.Construction
             {
                 return false;
             }
+        }
+
+        private static void EmitConstructionTelemetryOnce(string key, string message)
+        {
+            if (!InfoLogOnceKeys.Add(key ?? string.Empty)) return;
+            TelemetryRouter.LegacyInfo(message, TelemetryLayer.Campaign);
         }
 
         private static float XzDistance(Vector3 a, Vector3 b)

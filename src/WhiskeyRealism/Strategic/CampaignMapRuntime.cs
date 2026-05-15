@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
 {
     internal static class CampaignMapRuntime
     {
+        private static readonly HashSet<string> MissingRoleLogged = new HashSet<string>();
+
         internal static CampaignMapLedger Build()
         {
             var towns = new List<CampaignMapTown>();
@@ -135,8 +138,8 @@ namespace WhiskeyRealism.Strategic
                 if (asset == null || string.IsNullOrEmpty(asset.Name)) continue;
                 if (asset.StrategicRole != AssetStrategicRole.None) continue;
                 if (AssetRoleCatalog.TryLookup(asset.Name, out _)) continue;
-                OnceLog.Info("defense-intent:asset-no-role:" + asset.Name,
-                    $"[DefenseIntent:asset] missing-role asset={asset.Name} kind={asset.Kind}");
+                if (MissingRoleLogged.Add(asset.Name))
+                    TelemetryRouter.LegacyInfo($"[DefenseIntent:asset] missing-role asset={asset.Name} kind={asset.Kind}", TelemetryLayer.Campaign);
             }
         }
 

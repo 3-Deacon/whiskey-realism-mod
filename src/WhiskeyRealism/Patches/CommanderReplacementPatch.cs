@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -26,6 +27,9 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "CheckAICommanderReplacements")]
     internal static class CommanderReplacementPatch
     {
+        private static readonly System.Collections.Generic.HashSet<string> LogOnceKeys =
+            new System.Collections.Generic.HashSet<string>();
+
         [HarmonyPrefix]
         internal static bool Prefix(int _aifaction)
         {
@@ -58,8 +62,8 @@ namespace WhiskeyRealism.Patches
                     {
                         // Couldn't apply (no replacement / no displaceable commander).
                         // Don't mark applied — retry next tick. But avoid spam: log once per event id.
-                        OnceLog.Info("replace:retry:" + e.Id,
-                            $"[Succession:{e.Id}] application deferred — preconditions unmet (will retry)");
+                        EmitSuccessionInfoOnce("replace:retry:" + e.Id,
+                            $"[Succession:{e.Id}] action=defer alliance={allianceId} reason=preconditions-unmet");
                     }
                 }
 
@@ -90,8 +94,8 @@ namespace WhiskeyRealism.Patches
                 int replacementId = FindCommanderIdByLastName(commanders, e.ReplacementName, allianceId);
                 if (replacementId < 0)
                 {
-                    OnceLog.Info($"replace:noreplacement:{e.Id}",
-                        $"[Succession:{e.Id}] no commander matching '{e.ReplacementName}' in alliance {allianceId} — historical figure not on roster yet");
+                    EmitSuccessionInfoOnce($"replace:noreplacement:{e.Id}",
+                        $"[Succession:{e.Id}] action=defer alliance={allianceId} reason=no-replacement replacement={e.ReplacementName}");
                     return false;
                 }
 
@@ -105,13 +109,13 @@ namespace WhiskeyRealism.Patches
                     // in normal play.
                     displaceId = FindAnyDisplaceableCommanderId(commanders, allianceId, replacementId);
                     if (displaceId >= 0)
-                        Plugin.Log.LogInfo($"[TestMode] [Succession:{e.Id}] no AGC available; falling back to any commander with a currentcommand (id={displaceId})");
+                        TelemetryRouter.LegacyInfo($"[Succession:{e.Id}] action=test-fallback alliance={allianceId} reason=no-agc displaceId={displaceId}", TelemetryLayer.Campaign);
                 }
                 if (displaceId < 0)
                 {
                     // Common in early campaign. OnceLog'd to prevent per-tick spam.
-                    OnceLog.Info($"replace:noagc:{e.Id}",
-                        $"[Succession:{e.Id}] no army-group commander to displace in alliance {allianceId} — armygroups not yet populated");
+                    EmitSuccessionInfoOnce($"replace:noagc:{e.Id}",
+                        $"[Succession:{e.Id}] action=defer alliance={allianceId} reason=no-agc");
                     return false;
                 }
 
@@ -139,9 +143,14 @@ namespace WhiskeyRealism.Patches
                 // Vanilla also sets refreshcommand = true post-swap — match the pattern.
                 AccessTools.Field(cmdType, "refreshcommand")?.SetValue(replacement, true);
 
-                Plugin.Log.LogInfo(
-                    $"[Succession:{e.Id}] APPLIED — commander '{e.ReplacementName}' (id={replacementId}) " +
-                    $"now commands what id={displaceId} previously held (role={e.ReplacedRole})");
+                TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Succession", TelemetrySeverity.Info, ev => ev
+                    .WithAlliance(allianceId)
+                    .WithDecision("applied", e.ReplacedRole, "alliance=" + allianceId + "|event=" + e.Id + "|replacement=" + replacementId + "|displaced=" + displaceId)
+                    .WithField("eventId", e.Id)
+                    .WithField("replacement", e.ReplacementName)
+                    .WithField("replacementId", replacementId)
+                    .WithField("displacedId", displaceId)
+                    .WithField("role", e.ReplacedRole));
                 return true;
             }
             catch (Exception ex)
@@ -149,6 +158,12 @@ namespace WhiskeyRealism.Patches
                 Plugin.Log.LogWarning($"[Succession:{e.Id}] swap failed: {ex.Message}");
                 return false;
             }
+        }
+
+        private static void EmitSuccessionInfoOnce(string key, string line)
+        {
+            if (!LogOnceKeys.Add(key ?? string.Empty)) return;
+            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
         }
 
         private static int FindCommanderIdByLastName(IList commanders, string lastNameLower, int allianceId)

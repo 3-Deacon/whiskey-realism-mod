@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Util;
 
@@ -575,7 +576,7 @@ namespace WhiskeyRealism.Patches
                 if (DLC_WL.dlc_chosencommander < 0 || DLC_WL.dlc_chosencommander >= GameVars.commander.Count) return;
                 if (BattlefieldSetupRefField == null || BattlefieldSetupRefField.GetValue(null) == null) return;
                 Camp.currentstatus = Camp.PlayerUnitStatus();
-                OnceLog.Info("wl-camp-realism", "[W&LCamp] camp realism patch active");
+                EmitWlCampState("active", "accounting", ev => ev.WithField("message", "camp realism patch active"));
             }
             catch (Exception ex)
             {
@@ -758,9 +759,11 @@ namespace WhiskeyRealism.Patches
             string sig = stationId + ":" + actual.ToString("0.00") + ":" + oldCredit.ToString("0.00") + ":" + newCredit.ToString("0.00");
             if (_lastCorrectionSignature == sig) return;
             _lastCorrectionSignature = sig;
-            Plugin.Log.LogInfo("[W&LCamp] station=" + stationId + " actual=" + actual.ToString("F2") +
-                " minimumTotal=" + minimumTotal.ToString("F2") + " vanillaCredit=" + oldCredit.ToString("F2") +
-                " correctedCredit=" + newCredit.ToString("F2"));
+            EmitWlCampTrace("short-camp-correction", stationId, sig, ev => ev
+                .WithField("actual", actual)
+                .WithField("minimumTotal", minimumTotal)
+                .WithField("vanillaCredit", oldCredit)
+                .WithField("correctedCredit", newCredit));
         }
 
         private static void TraceBonus(int stationId, float oldBonus, float newBonus, string label)
@@ -770,8 +773,9 @@ namespace WhiskeyRealism.Patches
             string sig = label + ":" + stationId + ":" + oldBonus.ToString("0.00") + ":" + newBonus.ToString("0.00");
             if (_lastBonusSignature == sig) return;
             _lastBonusSignature = sig;
-            Plugin.Log.LogInfo("[W&LCamp] station=" + stationId + " vanillaBonus=" + oldBonus.ToString("F2") +
-                " " + label + "=" + newBonus.ToString("F2"));
+            EmitWlCampTrace(label, stationId, sig, ev => ev
+                .WithField("vanillaBonus", oldBonus)
+                .WithField(label, newBonus));
         }
 
         private static void TraceModifier(int stationId, int commanded, float oldModifier, float newModifier)
@@ -781,8 +785,10 @@ namespace WhiskeyRealism.Patches
             string sig = stationId + ":" + commanded + ":" + oldModifier.ToString("0.00") + ":" + newModifier.ToString("0.00");
             if (_lastModifierSignature == sig) return;
             _lastModifierSignature = sig;
-            Plugin.Log.LogInfo("[W&LCamp] station=" + stationId + " commanded=" + commanded +
-                " vanillaModifier=" + oldModifier.ToString("F2") + " tunedModifier=" + newModifier.ToString("F2"));
+            EmitWlCampTrace("unit-payoff-modifier", stationId, sig, ev => ev
+                .WithField("commanded", commanded)
+                .WithField("vanillaModifier", oldModifier)
+                .WithField("tunedModifier", newModifier));
         }
 
         private static bool VerboseTrace()
@@ -790,6 +796,25 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null &&
                 Plugin.Instance.EnableWlCampVerboseTrace != null &&
                 Plugin.Instance.EnableWlCampVerboseTrace.Value;
+        }
+
+        private static void EmitWlCampState(string decision, string reason, System.Action<TelemetryEvent> configure)
+        {
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Trace, "W&LCamp", TelemetrySeverity.Info, ev =>
+            {
+                ev.WithDecision(decision, reason, "decision=" + decision + "|reason=" + reason);
+                configure?.Invoke(ev);
+            });
+        }
+
+        private static void EmitWlCampTrace(string decision, int stationId, string signature, System.Action<TelemetryEvent> configure)
+        {
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Trace, "W&LCamp", TelemetrySeverity.Info, ev =>
+            {
+                ev.WithDecision(decision, "verbose-trace", "station=" + stationId + "|" + signature)
+                    .WithField("station", stationId);
+                configure?.Invoke(ev);
+            });
         }
     }
 }

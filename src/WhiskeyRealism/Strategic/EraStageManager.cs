@@ -1,3 +1,5 @@
+using WhiskeyRealism.Telemetry;
+
 namespace WhiskeyRealism.Strategic
 {
     public class EraStageManager
@@ -37,7 +39,7 @@ namespace WhiskeyRealism.Strategic
             {
                 var prev = Stage;
                 Stage = target;
-                Plugin.Log.LogInfo($"[Era] advanced {prev} → {Stage} ({currentYear}-{currentMonth:D2})");
+                TelemetryRouter.LegacyInfo($"[CampaignPace] action=era-advanced previous={prev} current={Stage} date={currentYear}-{currentMonth:D2}", TelemetryLayer.Campaign);
             }
         }
     }

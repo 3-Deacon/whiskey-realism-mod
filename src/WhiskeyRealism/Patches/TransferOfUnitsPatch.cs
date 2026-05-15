@@ -1,8 +1,10 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -16,6 +18,7 @@ namespace WhiskeyRealism.Patches
     internal static class TransferOfUnitsPatch
     {
         private const float FallbackSearchRadius = 650f;
+        private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
 
         internal sealed class TransferSteerState
         {
@@ -102,17 +105,19 @@ namespace WhiskeyRealism.Patches
                         budgetAction = decision.Action;
                         if (!decision.Allowed)
                         {
-                            OnceLog.Info(
+                            EmitCampaignInfoOnce(
                                 $"transfer-budget:{allianceId}:{sourceSector}:{destinationSector}:{decision.Action}:{decision.Reason}",
-                                $"[Patch:TransferBudget] alliance={allianceId} from={sourceSector} to={destinationSector} action=blocked reason={decision.Reason}");
+                                $"[FormationDirective] alliance={allianceId} from={sourceSector} to={destinationSector} action=blocked reason={decision.Reason}",
+                                TelemetryLayer.Campaign);
                             return;
                         }
 
                         if (decision.Action == TransferBudgetAction.Concession)
                         {
-                            OnceLog.Info(
+                            EmitCampaignInfoOnce(
                                 $"transfer-budget:{allianceId}:{sourceSector}:{destinationSector}:{decision.Action}:{decision.Reason}",
-                                $"[Patch:TransferBudget] alliance={allianceId} from={sourceSector} to={destinationSector} action=concession reason={decision.Reason}");
+                                $"[FormationDirective] alliance={allianceId} from={sourceSector} to={destinationSector} action=concession reason={decision.Reason}",
+                                TelemetryLayer.Campaign);
                         }
                     }
                 }
@@ -143,7 +148,7 @@ namespace WhiskeyRealism.Patches
                 deficitField.SetValue(faction, transferData);
 
                 if (Plugin.Instance.VerboseLogging.Value)
-                    Plugin.Log.LogInfo($"[Patch:Transfer] steering alliance={allianceId} obj={phase.TargetObjectiveId} ownNear={ownNear:F0} required={requiredAtTarget:F0} enemyNear={enemyNear:F0}");
+                    TelemetryRouter.LegacyInfo($"[Plan] alliance={allianceId} action=transfer-steer objective={phase.TargetObjectiveId} ownNear={ownNear:F0} required={requiredAtTarget:F0} enemyNear={enemyNear:F0}", TelemetryLayer.Campaign);
             }
             catch (Exception ex)
             {
@@ -161,9 +166,10 @@ namespace WhiskeyRealism.Patches
                 int afterTransferCount = TransferCount(__state.Faction);
                 if (afterTransferCount > __state.BeforeTransferCount)
                 {
-                    Plugin.Log.LogInfo(
-                        $"[Patch:Transfer] alliance={__state.AllianceId} obj={__state.ObjectiveId} " +
-                        $"queued={afterTransferCount - __state.BeforeTransferCount}");
+                    TelemetryRouter.LegacyInfo(
+                        $"[Plan] alliance={__state.AllianceId} action=transfer-queued objective={__state.ObjectiveId} " +
+                        $"queued={afterTransferCount - __state.BeforeTransferCount}",
+                        TelemetryLayer.Campaign);
                 }
             }
             catch (Exception ex)
@@ -295,6 +301,12 @@ namespace WhiskeyRealism.Patches
             if (value < min) return min;
             if (value > max) return max;
             return value;
+        }
+
+        private static void EmitCampaignInfoOnce(string key, string line, TelemetryLayer layer)
+        {
+            if (!LogOnceKeys.Add(key ?? string.Empty)) return;
+            TelemetryRouter.LegacyInfo(line, layer);
         }
     }
 }

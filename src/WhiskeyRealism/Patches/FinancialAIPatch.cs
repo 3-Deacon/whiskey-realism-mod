@@ -2,6 +2,7 @@ using System;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -114,8 +115,9 @@ namespace WhiskeyRealism.Patches
             if (!_logGate.ShouldLog(signature)) return;
 
             string label = laneType == "tax" ? "taxLane" : "subsidyLane";
-            Plugin.Log.LogInfo(
-                $"[Patch:FinancialAI] alliance={alliance} {label}={lane} old={oldValue:F2} new={newValue:F2} posture={posture}");
+            TelemetryRouter.LegacyInfo(
+                $"[FiscalTelemetry] alliance={alliance} {label}={lane} old={oldValue:F2} new={newValue:F2} posture={posture}",
+                TelemetryLayer.Campaign);
         }
 
         private static bool NearlyEqual(float left, float right)

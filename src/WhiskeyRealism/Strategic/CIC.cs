@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
@@ -13,6 +14,7 @@ namespace WhiskeyRealism.Strategic
         public string OfficerName;
         public PersonalityVector OfficerPersonality;
         public OperationalPlan ActivePlan;
+        private static readonly HashSet<string> ObjectivesDiagnosticLogged = new HashSet<string>();
 
         public PersonalityVector Effective(EraStageManager era)
         {
@@ -130,7 +132,7 @@ namespace WhiskeyRealism.Strategic
             if (ActivePlan.CurrentPhaseIndex + 1 < ActivePlan.Phases.Count)
             {
                 ActivePlan.CurrentPhaseIndex++;
-                Plugin.Log.LogInfo($"[CIC:{OfficerName}] phase advanced to {ActivePlan.CurrentPhaseIndex}");
+                EmitCampaignInfo($"[Plan:{OfficerName}] action=phase-advanced phase={ActivePlan.CurrentPhaseIndex}");
                 return true;
             }
             ActivePlan.IsDirty = true;
@@ -165,7 +167,7 @@ namespace WhiskeyRealism.Strategic
             {
                 // -1 = reflection failure (warning was already logged); 0 = vanilla
                 // genuinely returned empty (likely pre-war chapter, no objectives published yet).
-                Plugin.Log.LogInfo($"[CIC:{OfficerName}] Replan — no available objectives (count={objCount}), plan cleared.");
+                EmitPlanDecision("clear", "no-available-objectives", "objectiveCount=" + objCount, ev => ev.WithField("objectiveCount", objCount));
                 ActivePlan = null;
                 return;
             }
@@ -229,9 +231,12 @@ namespace WhiskeyRealism.Strategic
 
             if (ActivePlan != null && Plugin.Instance.PlanTrace.Value)
             {
-                Plugin.Log.LogInfo($"[Plan:{OfficerName}] {ActivePlan.Rationale} — phases={ActivePlan.Phases.Count} deadline={ActivePlan.PlanDeadlineYear}-{ActivePlan.PlanDeadlineMonth:D2}");
+                EmitPlanDecision("select", ActivePlan.Rationale, "alliance=" + AllianceId + "|officer=" + OfficerName + "|phases=" + ActivePlan.Phases.Count + "|deadline=" + ActivePlan.PlanDeadlineYear + "-" + ActivePlan.PlanDeadlineMonth.ToString("D2"), ev => ev
+                    .WithField("phases", ActivePlan.Phases.Count)
+                    .WithField("deadlineYear", ActivePlan.PlanDeadlineYear)
+                    .WithField("deadlineMonth", ActivePlan.PlanDeadlineMonth));
                 for (int i = 0; i < scored.Count && i < 5; i++)
-                    Plugin.Log.LogInfo($"  [Plan:scores] obj_id={GetObjectiveId(scored[i].obj)} score={scored[i].score:F2} theater={scored[i].meta.Theater} category={scored[i].meta.Category}");
+                    EmitCampaignInfo($"[Plan:scores] alliance={AllianceId} obj_id={GetObjectiveId(scored[i].obj)} score={scored[i].score:F2} theater={scored[i].meta.Theater} category={scored[i].meta.Category}");
             }
         }
 
@@ -246,8 +251,7 @@ namespace WhiskeyRealism.Strategic
         {
             if (!HistoricalOperationCatalog.TryGetById(operationId, out var profile))
             {
-                Plugin.Log.LogInfo(
-                    $"[HistoricalOperation] alliance={AllianceId} action=no-profile operation={operationId} reason=alternate-not-found");
+                EmitHistoricalOperation("no-profile", operationId, -1, null, "alternate-not-found", null);
                 return null;
             }
 
@@ -274,18 +278,15 @@ namespace WhiskeyRealism.Strategic
                     daySerial);
                 if (plan == null)
                 {
-                    Plugin.Log.LogInfo(
-                        $"[HistoricalOperation] alliance={AllianceId} action=no-profile operation={operationId} reason=requested-plan-invalid");
+                    EmitHistoricalOperation("no-profile", operationId, objectiveId, null, "requested-plan-invalid", null);
                     return null;
                 }
 
-                Plugin.Log.LogInfo(
-                    $"[HistoricalOperation] alliance={AllianceId} action=pivot operation={operationId} objective={objectiveId} phase={plan.CurrentPhase?.PhaseId} reason=requested-pivot score={scored[i].score:F2}");
+                EmitHistoricalOperation("pivot", operationId, objectiveId, plan.CurrentPhase?.PhaseId, "requested-pivot", scored[i].score);
                 return plan;
             }
 
-            Plugin.Log.LogInfo(
-                $"[HistoricalOperation] alliance={AllianceId} action=no-profile operation={operationId} reason=alternate-objective-unavailable");
+            EmitHistoricalOperation("no-profile", operationId, -1, null, "alternate-objective-unavailable", null);
             return null;
         }
 
@@ -352,8 +353,7 @@ namespace WhiskeyRealism.Strategic
                     context);
                 if (match.Kind != HistoricalOperationMatchKind.Matched)
                 {
-                    Plugin.Log.LogInfo(
-                        $"[HistoricalOperation] alliance={AllianceId} action=no-profile-candidate objective={objId} reason={match.Reason}");
+                    EmitHistoricalOperation("no-profile-candidate", null, objId, null, match.Reason, null);
                     continue;
                 }
 
@@ -369,8 +369,7 @@ namespace WhiskeyRealism.Strategic
             if (bestMatch == null)
             {
                 int topObjective = scored.Count > 0 ? GetObjectiveId(scored[0].obj) : -1;
-                Plugin.Log.LogInfo(
-                    $"[HistoricalOperation] alliance={AllianceId} action=no-profile objective={topObjective} reason=no-explicit-profile");
+                EmitHistoricalOperation("no-profile", null, topObjective, null, "no-explicit-profile", null);
                 return null;
             }
 
@@ -384,12 +383,10 @@ namespace WhiskeyRealism.Strategic
                 daySerial);
             if (plan == null)
             {
-                Plugin.Log.LogInfo(
-                    $"[HistoricalOperation] alliance={AllianceId} action=no-profile operation={bestMatch.Profile.OperationId} objective={GetObjectiveId(bestCandidate.obj)} reason=plan-invalid");
+                EmitHistoricalOperation("no-profile", bestMatch.Profile.OperationId, GetObjectiveId(bestCandidate.obj), null, "plan-invalid", null);
                 return null;
             }
-            Plugin.Log.LogInfo(
-                $"[HistoricalOperation] alliance={AllianceId} action=select operation={bestMatch.Profile.OperationId} objective={GetObjectiveId(bestCandidate.obj)} phase={plan.CurrentPhase?.PhaseId} reason={bestMatch.Reason} score={bestMatch.Score:F2}");
+            EmitHistoricalOperation("select", bestMatch.Profile.OperationId, GetObjectiveId(bestCandidate.obj), plan.CurrentPhase?.PhaseId, bestMatch.Reason, bestMatch.Score);
             return plan;
         }
 
@@ -538,6 +535,59 @@ namespace WhiskeyRealism.Strategic
             return f != null ? (int)f.GetValue(campaignObjective) : -1;
         }
 
+        private void EmitHistoricalOperation(
+            string action,
+            string operationId,
+            int objectiveId,
+            string phaseId,
+            string reason,
+            float? score)
+        {
+            string safeOperation = string.IsNullOrWhiteSpace(operationId) ? "-" : operationId;
+            string safePhase = string.IsNullOrWhiteSpace(phaseId) ? "-" : phaseId;
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "-" : reason;
+            string signature = "alliance=" + AllianceId +
+                "|action=" + action +
+                "|operation=" + safeOperation +
+                "|objective=" + objectiveId +
+                "|phase=" + safePhase;
+            if (score.HasValue)
+                signature += "|score=" + (Math.Round(score.Value * 2.0f) / 2.0f).ToString("0.0");
+
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "HistoricalOperation", TelemetrySeverity.Info, ev =>
+            {
+                ev.WithAlliance(AllianceId)
+                    .WithPhase(safePhase)
+                    .WithDecision(action, safeReason, signature)
+                    .WithField("operation", safeOperation)
+                    .WithField("objective", objectiveId);
+                if (score.HasValue)
+                    ev.WithField("score", score.Value);
+            });
+        }
+
+        private void EmitPlanDecision(string decision, string reason, string signature, Action<TelemetryEvent> configure = null)
+        {
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Plan", TelemetrySeverity.Info, ev =>
+            {
+                ev.WithAlliance(AllianceId)
+                    .WithUnit(OfficerName)
+                    .WithDecision(decision, reason, string.IsNullOrWhiteSpace(signature) ? "alliance=" + AllianceId + "|decision=" + decision : signature)
+                    .WithField("officer", OfficerName);
+                if (ActivePlan != null)
+                {
+                    ev.WithField("operation", ActivePlan.OperationId ?? "-")
+                        .WithField("currentPhase", ActivePlan.CurrentPhaseIndex);
+                }
+                configure?.Invoke(ev);
+            });
+        }
+
+        private static void EmitCampaignInfo(string line)
+        {
+            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
+        }
+
         private static int ResolveCurrentChapter()
         {
             try
@@ -639,10 +689,13 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 string chapterStr = (firstObjChapters != null) ? string.Join(",", firstObjChapters) : "<null>";
-                WhiskeyRealism.Util.OnceLog.Info(key,
-                    $"[CIC:diag] alliance={allianceId} leveltoload='{leveltoload}' total={total} " +
-                    $"alliance-pass={passAlliance} scenario-pass={passScenario} not-deact={passDeact} not-accomp={passAccomp} " +
-                    $"| first-obj-id={firstObjId} firstObjChapters=[{chapterStr}] Policy.CurrentChapter={currentChapter} GameVars.nation==null:{nationNull}");
+                if (ObjectivesDiagnosticLogged.Add(key))
+                {
+                    EmitCampaignInfo(
+                        $"[CIC:diag] alliance={allianceId} leveltoload='{leveltoload}' total={total} " +
+                        $"alliance-pass={passAlliance} scenario-pass={passScenario} not-deact={passDeact} not-accomp={passAccomp} " +
+                        $"| first-obj-id={firstObjId} firstObjChapters=[{chapterStr}] Policy.CurrentChapter={currentChapter} GameVars.nation==null:{nationNull}");
+                }
             }
             catch (Exception ex)
             {

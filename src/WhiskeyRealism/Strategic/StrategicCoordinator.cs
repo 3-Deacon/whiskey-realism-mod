@@ -68,6 +68,8 @@ namespace WhiskeyRealism.Strategic
         private readonly DailyCadence _operationalCadence = new DailyCadence();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
+        private bool _dailyOpsAnnounced;
+        private readonly bool[] _playerCicAnnounced = new bool[2];
 
         public int LastSeenMonth = -1;
         public int LastSeenYear  = -1;
@@ -80,7 +82,7 @@ namespace WhiskeyRealism.Strategic
             var go = new GameObject("WhiskeyRealismStrategicCoordinator");
             Instance = go.AddComponent<StrategicCoordinator>();
             DontDestroyOnLoad(go);
-            Plugin.Log.LogInfo("[Coordinator] bootstrapped");
+            EmitCampaignInfoToMainLogIfAllowed("[Coordinator] bootstrapped");
         }
 
         public void InitializeFromGameState()
@@ -102,7 +104,7 @@ namespace WhiskeyRealism.Strategic
                         CICs[alliance] = BuildCICForAlliance(alliance);
                 }
                 Initialized = true;
-                Plugin.Log.LogInfo($"[Coordinator] initialized (playerAlliance={playerAlliance})");
+                EmitCampaignInfoToMainLogIfAllowed($"[Coordinator] initialized (playerAlliance={playerAlliance})");
             }
             catch (Exception ex)
             {
@@ -161,7 +163,11 @@ namespace WhiskeyRealism.Strategic
         {
             try
             {
-                OnceLog.Info("dailyops", "Daily operational analysis active");
+                if (!_dailyOpsAnnounced)
+                {
+                    _dailyOpsAnnounced = true;
+                    EmitCampaignInfo("[DailyOps] active=true");
+                }
 
                 RunStrategicReview(day, month, year, logHeartbeat: false);
             }
@@ -242,7 +248,7 @@ namespace WhiskeyRealism.Strategic
                 if (!_wlCareerStartDeferredLogged)
                 {
                     _wlCareerStartDeferredLogged = true;
-                    Plugin.Log.LogInfo("[Coordinator] W&L career start selection pending; strategic review deferred until player has a command");
+                    EmitCampaignInfoToMainLogIfAllowed("[Coordinator] W&L career start selection pending; strategic review deferred until player has a command");
                 }
                 return;
             }
@@ -253,7 +259,7 @@ namespace WhiskeyRealism.Strategic
             if (!operationalRuntimeReady && !_operationalRuntimeDeferredLogged)
             {
                 _operationalRuntimeDeferredLogged = true;
-                Plugin.Log.LogInfo("[Coordinator] operational ledgers deferred until AICampaign factions initialize");
+                EmitCampaignInfoToMainLogIfAllowed("[Coordinator] operational ledgers deferred until AICampaign factions initialize");
             }
 
             if (operationalRuntimeReady)
@@ -263,8 +269,12 @@ namespace WhiskeyRealism.Strategic
             {
                 if (IsPlayerCICOf(alliance, playerAlliance))
                 {
-                    OnceLog.Info("playerciconly:" + alliance,
-                        $"player is CIC of alliance {alliance} ({(alliance == 1 ? "CSA" : "Union")}) — mod stands down for that faction");
+                    if (!_playerCicAnnounced[alliance])
+                    {
+                        _playerCicAnnounced[alliance] = true;
+                        EmitCampaignInfoToMainLogIfAllowed(
+                            $"player is CIC of alliance {alliance} ({(alliance == 1 ? "CSA" : "Union")}) — mod stands down for that faction");
+                    }
                     CICs[alliance] = null;
                     continue;
                 }
@@ -348,11 +358,11 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 if (Plugin.Instance.VerboseLogging.Value && !logHeartbeat)
-                    Plugin.Log.LogInfo($"[DailyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
+                    EmitCampaignInfo($"[DailyOps] {year}-{month:D2}-{day:D2} alliance={alliance}");
 
                 if (logHeartbeat)
                 {
-                    Plugin.Log.LogInfo(
+                    EmitCampaignInfo(
                         $"[Heartbeat] {year}-{month:D2} alliance={alliance} " +
                         $"era={era.Stage} cic={cic.OfficerName ?? "<none>"} " +
                         $"plan={(cic.ActivePlan == null ? "<none>" : $"phase{cic.ActivePlan.CurrentPhaseIndex + 1}/{cic.ActivePlan.Phases.Count} obj={cic.ActivePlan.CurrentPhase?.TargetObjectiveId}")} " +
@@ -363,7 +373,7 @@ namespace WhiskeyRealism.Strategic
             totalWatch.Stop();
             if (ShouldLogStrategicPerf(totalWatch.Elapsed.TotalMilliseconds))
             {
-                Plugin.Log.LogInfo(
+                EmitCampaignInfo(
                     $"[DailyOps:Perf] {year}-{month:D2}-{day:D2} " +
                     $"totalMs={totalWatch.Elapsed.TotalMilliseconds:F2} " +
                     $"mapMs={mapMs:F2} frontMs={frontMs:F2} armyAreaMs={armyAreaMs:F2} " +
@@ -391,7 +401,7 @@ namespace WhiskeyRealism.Strategic
                 string newSig      = newPosture.Pace + "/" + newPosture.Intent + "/" + newPosture.Risk;
                 if (newSig != previousSig)
                 {
-                    Plugin.Log.LogInfo(
+                    EmitCampaignInfo(
                         $"[CampaignPace] alliance={alliance} pace={newPosture.Pace}" +
                         $" intent={newPosture.Intent} risk={newPosture.Risk}" +
                         $" reason={newPosture.Reason}");
@@ -400,12 +410,12 @@ namespace WhiskeyRealism.Strategic
                 var prevRisk = _directorRiskLevels[alliance];
                 if (newPosture.Risk != prevRisk)
                 {
-                    Plugin.Log.LogInfo($"[CollapseRisk] alliance={alliance} risk={newPosture.Risk} pace={newPosture.Pace}");
+                    EmitCampaignInfo($"[CollapseRisk] alliance={alliance} risk={newPosture.Risk} pace={newPosture.Pace}");
                     _directorRiskLevels[alliance] = newPosture.Risk;
                 }
                 if (Plugin.Instance.DirectorVerboseTrace.Value)
                 {
-                    Plugin.Log.LogInfo($"[Director:trace] alliance={alliance} signature={newPosture.SourceSignature} stale={newPosture.Stale}");
+                    EmitCampaignInfo($"[Director:trace] alliance={alliance} signature={newPosture.SourceSignature} stale={newPosture.Stale}");
                 }
             }
             else
@@ -517,12 +527,12 @@ namespace WhiskeyRealism.Strategic
                 _campaignMapDynamicSignature = dynamicSignature;
                 if (ledger.Signature != _campaignMapSignature)
                 {
-                    Plugin.Log.LogInfo("[CampaignMap] " + ledger.Summary());
+                    EmitCampaignInfo("[CampaignMap] " + ledger.Summary());
                     _campaignMapSignature = ledger.Signature;
                 }
                 else if (logHeartbeat && Plugin.Instance != null && Plugin.Instance.VerboseLogging.Value)
                 {
-                    Plugin.Log.LogInfo("[CampaignMap] " + ledger.Summary());
+                    EmitCampaignInfo("[CampaignMap] " + ledger.Summary());
                 }
             }
             catch (Exception ex)
@@ -558,7 +568,7 @@ namespace WhiskeyRealism.Strategic
                     ConfigValue(plugin.ConstructionVerboseLogging) ||
                     _constructionSignatures[alliance] != output.Signature)
                 {
-                    Plugin.Log.LogInfo(
+                    EmitCampaignInfo(
                         $"[ConstructionIntent] alliance={alliance} posture={output.Posture} " +
                         $"theater={output.TopConstructionTheater ?? ""} " +
                         $"private={output.TopPrivateBuilding.Name} depot={output.TopSupplyDepot.Name} " +
@@ -569,7 +579,7 @@ namespace WhiskeyRealism.Strategic
                 if (logHeartbeat && ConfigValue(plugin.ConstructionTelemetryEnabled, defaultValue: true))
                 {
                     var telemetry = ConstructionTelemetry ?? (ConstructionTelemetry = new ConstructionTelemetry());
-                    Plugin.Log.LogInfo(
+                    EmitCampaignInfo(
                         $"[ConstructionTelemetry] alliance={alliance} posture={output.Posture} " +
                         $"{telemetry.Summary(alliance)}");
                 }
@@ -633,7 +643,7 @@ namespace WhiskeyRealism.Strategic
                     {
                         foreach (var r in output.Responses)
                         {
-                            Plugin.Log.LogInfo(
+                            EmitCampaignInfo(
                                 $"[DefenseIntent] alliance={alliance} posture={r.Threat.Posture} " +
                                 $"threat={r.Threat.Signature} enemy={r.Threat.EnemyStrength:F0} " +
                                 $"desired={r.Threat.DesiredStrength:F0} selected={r.SelectedPackage.Count} " +
@@ -644,7 +654,7 @@ namespace WhiskeyRealism.Strategic
                 }
                 else if (_defenseIntentSignatures[alliance] != output.Signature)
                 {
-                    Plugin.Log.LogInfo(
+                    EmitCampaignInfo(
                         $"[DefenseIntent] alliance={alliance} {DefenseIntentTelemetry.Summary(output)}");
                     _defenseIntentSignatures[alliance] = output.Signature;
                 }
@@ -765,13 +775,13 @@ namespace WhiskeyRealism.Strategic
 
             if (Plugin.Instance.VerboseLogging.Value || Plugin.Instance.FiscalTrace.Value || _fiscalSignatures[alliance] != output.Signature)
             {
-                Plugin.Log.LogInfo($"[FiscalIntent] alliance={alliance} posture={output.Posture} gate={output.DefendedGate} supply={output.SupplyProtection} forceCap={output.ForceCapWarning}");
+                EmitCampaignInfo($"[FiscalIntent] alliance={alliance} posture={output.Posture} gate={output.DefendedGate} supply={output.SupplyProtection} forceCap={output.ForceCapWarning}");
                 _fiscalSignatures[alliance] = output.Signature;
             }
 
             if (logHeartbeat)
             {
-                Plugin.Log.LogInfo($"[FiscalTelemetry] alliance={alliance} posture={output.Posture} gate={output.DefendedGate} supply={output.SupplyProtection} theater={output.TheaterSupplyPriority}");
+                EmitCampaignInfo($"[FiscalTelemetry] alliance={alliance} posture={output.Posture} gate={output.DefendedGate} supply={output.SupplyProtection} theater={output.TheaterSupplyPriority}");
             }
         }
 
@@ -803,7 +813,7 @@ namespace WhiskeyRealism.Strategic
             bool changed = StrategicCadencePolicy.SourceChanged(signature, _frontSignatures[alliance]);
             if (Plugin.Instance.VerboseLogging.Value || _frontSignatures[alliance] != signature)
             {
-                Plugin.Log.LogInfo($"[FrontLedger] alliance={alliance} {FrontSectorRuntime.Summary(ledger)}");
+                EmitCampaignInfo($"[FrontLedger] alliance={alliance} {FrontSectorRuntime.Summary(ledger)}");
                 _frontSignatures[alliance] = signature;
             }
             return changed;
@@ -830,7 +840,7 @@ namespace WhiskeyRealism.Strategic
             string signature = ledger.Summary();
             if (Plugin.Instance.VerboseLogging.Value || _armyAreaSignatures[alliance] != signature)
             {
-                Plugin.Log.LogInfo($"[ArmyArea] alliance={alliance} {signature}");
+                EmitCampaignInfo($"[ArmyArea] alliance={alliance} {signature}");
                 _armyAreaSignatures[alliance] = signature;
             }
         }
@@ -857,7 +867,7 @@ namespace WhiskeyRealism.Strategic
             bool changed = StrategicCadencePolicy.SourceChanged(signature, _formationDirectiveSignatures[alliance]);
             if (Plugin.Instance.VerboseLogging.Value || _formationDirectiveSignatures[alliance] != signature)
             {
-                Plugin.Log.LogInfo(
+                EmitCampaignInfo(
                     $"[FormationDirective] alliance={alliance} summary={signature} " +
                     $"lowSupply={ledger.Pressure.LowSupplyCount} lowAmmo={ledger.Pressure.LowAmmoCount} " +
                     $"recover={ledger.Pressure.RecoverCount} mass={ledger.Pressure.MassCount} " +
@@ -920,7 +930,7 @@ namespace WhiskeyRealism.Strategic
                 bool changed = StrategicCadencePolicy.SourceChanged(signature, _operationalProbeSignatures[alliance]);
                 if (Plugin.Instance.VerboseLogging.Value || changed)
                 {
-                    Plugin.Log.LogInfo(
+                    EmitCampaignInfo(
                         $"[OperationalProbe] alliance={alliance} decision={output.Decision} " +
                         $"unit={output.SelectedUnitKey ?? "<none>"} target={output.TargetAreaKey ?? "<none>"} " +
                         $"reason={output.Reason ?? ""} mass={output.RequiresMassCommitment}");
@@ -931,7 +941,7 @@ namespace WhiskeyRealism.Strategic
                 {
                     string formationSignature = formation.Summary();
                     _formationDirectiveSignatures[alliance] = formationSignature;
-                    Plugin.Log.LogInfo($"[FormationDirective] alliance={alliance} operationalProbe={formationSignature}");
+                    EmitCampaignInfo($"[FormationDirective] alliance={alliance} operationalProbe={formationSignature}");
                 }
 
                 OperationalProbeRuntime.Run(alliance, output, targetPosition);
@@ -1066,7 +1076,7 @@ namespace WhiskeyRealism.Strategic
             if (cic?.ActivePlan == null) return;
 
             cic.ActivePlan.IsDirty = true;
-            Plugin.Log.LogInfo($"[Coordinator] event '{eventType}' for alliance {allianceId} — plan marked dirty");
+            EmitCampaignInfoToMainLogIfAllowed($"[Coordinator] event '{eventType}' for alliance {allianceId} — plan marked dirty");
         }
 
         internal void RecordBattleOutcome(BattleHistoryRecord record)
@@ -1080,7 +1090,7 @@ namespace WhiskeyRealism.Strategic
             while (BattleHistory.Count > 64) BattleHistory.RemoveAt(0);
 
             string scale = record.IsMajorResult ? "major" : "minor";
-            Plugin.Log.LogInfo(
+            EmitCampaignInfoToMainLogIfAllowed(
                 $"[BattleHistory] {record.Year}-{record.Month:D2}-{record.Day:D2} " +
                 $"{record.BattleName} winner={record.AllianceWon} loser={record.LosingAlliance} " +
                 $"result={scale} theater={record.Theater}");
@@ -1096,7 +1106,7 @@ namespace WhiskeyRealism.Strategic
 
             if (ConstructionVerboseLoggingEnabled())
             {
-                Plugin.Log.LogInfo(
+                EmitCampaignInfo(
                     $"[ConstructionStart] alliance={start.AllianceId} kind={start.Kind} " +
                     $"name={start.Name ?? "<unnamed>"} theater={start.Theater} site={start.SiteKey ?? "<none>"}");
             }
@@ -1112,6 +1122,16 @@ namespace WhiskeyRealism.Strategic
                      ConfigValue(plugin.ConstructionVerboseLogging));
             }
             catch { return false; }
+        }
+
+        private static void EmitCampaignInfo(string line)
+        {
+            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
+        }
+
+        private static void EmitCampaignInfoToMainLogIfAllowed(string line)
+        {
+            TelemetryRouter.LegacyInfoToMainLogIfAllowed(line, TelemetryLayer.Campaign);
         }
 
         private static bool ConfigValue(ConfigEntry<bool> entry, bool defaultValue = false)
@@ -1238,9 +1258,9 @@ namespace WhiskeyRealism.Strategic
 
             // Log only when state changes month-over-month — non-spammy.
             // Helps smoke-testers see WHEN towns fall.
-            if (snap.VicksburgFallen   && !_loggedVicksburg)   { Plugin.Log.LogInfo($"[WarState] Vicksburg fell ({year}-{month:D2})");   _loggedVicksburg = true; }
-            if (snap.ChattanoogaFallen && !_loggedChattanooga) { Plugin.Log.LogInfo($"[WarState] Chattanooga fell ({year}-{month:D2})"); _loggedChattanooga = true; }
-            if (snap.AtlantaThreatened && !_loggedAtlanta)     { Plugin.Log.LogInfo($"[WarState] Atlanta fell ({year}-{month:D2})");     _loggedAtlanta = true; }
+            if (snap.VicksburgFallen   && !_loggedVicksburg)   { EmitCampaignInfoToMainLogIfAllowed($"[WarState] Vicksburg fell ({year}-{month:D2})");   _loggedVicksburg = true; }
+            if (snap.ChattanoogaFallen && !_loggedChattanooga) { EmitCampaignInfoToMainLogIfAllowed($"[WarState] Chattanooga fell ({year}-{month:D2})"); _loggedChattanooga = true; }
+            if (snap.AtlantaThreatened && !_loggedAtlanta)     { EmitCampaignInfoToMainLogIfAllowed($"[WarState] Atlanta fell ({year}-{month:D2})");     _loggedAtlanta = true; }
 
             return snap;
         }
@@ -1275,7 +1295,13 @@ namespace WhiskeyRealism.Strategic
 
         private void SwapOfficer(int alliance, SuccessionScheduler.Event e)
         {
-            Plugin.Log.LogInfo($"[Succession:{e.Id}] FIRED — {e.Name}, replacing role={e.ReplacedRole} with={e.ReplacementName}");
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Succession", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithDecision("fired", e.Name, "alliance=" + alliance + "|event=" + e.Id + "|replacement=" + e.ReplacementName)
+                .WithField("eventId", e.Id)
+                .WithField("name", e.Name)
+                .WithField("replacedRole", e.ReplacedRole)
+                .WithField("replacement", e.ReplacementName));
         }
 
         public void SaveSidecar(string fullPath)
@@ -1288,7 +1314,7 @@ namespace WhiskeyRealism.Strategic
                     json = Newtonsoft.Json.JsonConvert.SerializeObject(dto, Newtonsoft.Json.Formatting.Indented);
                 using (TelemetryPerf.Scope("campaign.sidecar-file-write", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
                     System.IO.File.WriteAllText(fullPath, json);
-                Plugin.Log.LogInfo("[Coordinator] sidecar written: " + fullPath);
+                EmitCampaignInfoToMainLogIfAllowed("[Coordinator] sidecar written: " + fullPath);
             }
             catch (Exception ex) { Plugin.Log.LogError("[Coordinator] sidecar save failed: " + ex); }
         }
@@ -1302,7 +1328,7 @@ namespace WhiskeyRealism.Strategic
                 if (dto == null) { InitializeFromGameState(); return; }
                 ApplyDto(dto);
                 Initialized = true;
-                Plugin.Log.LogInfo("[Coordinator] sidecar loaded: " + fullPath);
+                EmitCampaignInfoToMainLogIfAllowed("[Coordinator] sidecar loaded: " + fullPath);
                 OnceLog.Reset();
             }
             catch (Exception ex)

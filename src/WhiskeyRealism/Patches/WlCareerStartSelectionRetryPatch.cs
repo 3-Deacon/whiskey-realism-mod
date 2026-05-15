@@ -4,6 +4,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -29,6 +30,8 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _unitSelectionListContentObjectField;
         private static FieldInfo _unitLineAppointCommandField;
         private static MethodInfo _showStartUnitSelectionListMethod;
+        private static readonly System.Collections.Generic.HashSet<string> LogOnceKeys =
+            new System.Collections.Generic.HashSet<string>();
 
         [HarmonyPostfix]
         internal static void Postfix()
@@ -47,7 +50,7 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
-                OnceLog.Info("wl-start-selection", "[W&LStartSelection] retry patch active while command selection is pending");
+                EmitCampaignInfoOnce("wl-start-selection", "[W&LStartSelection] retry patch active while command selection is pending");
                 int frame = ReadFrame();
                 int unityFrame = Time.frameCount;
 
@@ -63,7 +66,7 @@ namespace WhiskeyRealism.Patches
                 bool listUsable = listVisible && lineCount > 0;
                 if (listUsable)
                 {
-                    OnceLog.Info("wl-start-selection:visible-pending", $"[W&LStartSelection] command-selection list is usable; waiting for player command source={source} gameFrame={frame} unityFrame={unityFrame} lines={lineCount} {DescribeWlStatus()}");
+                    EmitCampaignInfoOnce("wl-start-selection:visible-pending", $"[W&LStartSelection] command-selection list is usable; waiting for player command source={source} gameFrame={frame} unityFrame={unityFrame} lines={lineCount} {DescribeWlStatus()}");
                     return;
                 }
                 if (_showStartUnitSelectionListMethod == null)
@@ -72,15 +75,15 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
                 if (frame < MinReadyCampaignFrame)
-                    OnceLog.Info("wl-start-selection:waiting-ready", $"[W&LStartSelection] retry waiting for vanilla frame {MinReadyCampaignFrame} source={source} gameFrame={frame} unityFrame={unityFrame} {DescribeWlStatus()}");
+                    EmitCampaignInfoOnce("wl-start-selection:waiting-ready", $"[W&LStartSelection] retry waiting for vanilla frame {MinReadyCampaignFrame} source={source} gameFrame={frame} unityFrame={unityFrame} {DescribeWlStatus()}");
                 else if (listVisible)
-                    OnceLog.Info("wl-start-selection:visible-empty", $"[W&LStartSelection] command-selection panel is visible but has no selectable rows; retrying source={source} gameFrame={frame} unityFrame={unityFrame} contentActive={UnitSelectionContentActive(panel)} lines={lineCount} {DescribeWlStatus()}");
+                    EmitCampaignInfoOnce("wl-start-selection:visible-empty", $"[W&LStartSelection] command-selection panel is visible but has no selectable rows; retrying source={source} gameFrame={frame} unityFrame={unityFrame} contentActive={UnitSelectionContentActive(panel)} lines={lineCount} {DescribeWlStatus()}");
                 if (!RetryGate.ShouldAttempt(pending: true, listVisible: listUsable, panelAvailable: true, campaignFrame: frame, startupDataReady: false, unityFrame: unityFrame)) return;
 
                 _showStartUnitSelectionListMethod.Invoke(panel, new object[] { true });
 
                 if (RetryGate.Attempts == 1 || Plugin.Instance.VerboseLogging.Value)
-                    Plugin.Log.LogInfo($"[W&LStartSelection] retried command-selection popup source={source} gameFrame={frame} unityFrame={unityFrame} attempt={RetryGate.Attempts} linesBefore={lineCount} linesAfter={UnitSelectionLineCount(panel)} {DescribeWlStatus()}");
+                    TelemetryRouter.LegacyInfo($"[W&LStartSelection] retried command-selection popup source={source} gameFrame={frame} unityFrame={unityFrame} attempt={RetryGate.Attempts} linesBefore={lineCount} linesAfter={UnitSelectionLineCount(panel)} {DescribeWlStatus()}", TelemetryLayer.Campaign);
                 if (RetryGate.Exhausted && !UnitSelectionListVisible(panel))
                     OnceLog.Warning("wl-start-selection:max-attempts", $"[W&LStartSelection] command-selection popup still hidden after {RetryGate.Attempts} retries; {DescribeWlStatus()}");
             }
@@ -99,6 +102,12 @@ namespace WhiskeyRealism.Patches
             }
 
             return _gameFrameField != null ? Convert.ToInt32(_gameFrameField.GetValue(null)) : -1;
+        }
+
+        private static void EmitCampaignInfoOnce(string key, string line)
+        {
+            if (!LogOnceKeys.Add(key ?? string.Empty)) return;
+            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
         }
 
         private static object ResolveCareerPanel()

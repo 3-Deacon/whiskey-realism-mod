@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic.Projects;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -11,6 +12,8 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(Projects), "CheckProjectUnlocks")]
     internal static class ProjectUnlockObserverPatch
     {
+        private static bool _observerLogged;
+
         [HarmonyPrefix]
         internal static void Prefix(int alliance, out HashSet<int> __state)
         {
@@ -25,7 +28,11 @@ namespace WhiskeyRealism.Patches
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
                 if (alliance < 0 || alliance >= 2) return;
 
-                OnceLog.Info("project-unlock-observer", "Project unlock observer wired");
+                if (!_observerLogged)
+                {
+                    _observerLogged = true;
+                    TelemetryRouter.LegacyInfo("[ProjectUnlock] observer=unlock", TelemetryLayer.Campaign);
+                }
 
                 var after = Snapshot(alliance);
                 foreach (int projectId in after)
@@ -38,8 +45,14 @@ namespace WhiskeyRealism.Patches
                     string bucket = entry != null ? entry.Bucket.ToString() : "Unknown";
                     string name = project != null ? project.projectname : "unknown";
 
-                    Plugin.Log.LogInfo(
-                        $"[ProjectUnlock] alliance={alliance} project={projectId} name=\"{name}\" lane={lane} bucket={bucket} source=CheckProjectUnlocks");
+                    TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.State, "ProjectUnlock", TelemetrySeverity.Info, ev => ev
+                        .WithAlliance(alliance)
+                        .WithField("project", projectId)
+                        .WithField("name", name)
+                        .WithField("lane", lane)
+                        .WithField("bucket", bucket)
+                        .WithField("source", "CheckProjectUnlocks")
+                        .WithField("inputSignature", "alliance=" + alliance + "|project=" + projectId));
                 }
             }
             catch (Exception ex)

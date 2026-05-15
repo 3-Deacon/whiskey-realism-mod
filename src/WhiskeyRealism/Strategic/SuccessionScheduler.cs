@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Telemetry;
 
 namespace WhiskeyRealism.Strategic
 {
@@ -99,7 +100,15 @@ namespace WhiskeyRealism.Strategic
                 bool warStateOk = e.WarStateGate(w);
 
                 if (Plugin.Instance.SuccessionTrace.Value)
-                    Plugin.Log.LogInfo($"[Succession:{e.Id}] {e.Name} dateOk={dateOk} warStateOk={warStateOk}");
+                {
+                    TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Succession", TelemetrySeverity.Info, ev => ev
+                        .WithAlliance(e.AllianceId)
+                        .WithDecision("check", dateOk && warStateOk ? "ready" : "gated", "event=" + e.Id + "|dateOk=" + dateOk + "|warStateOk=" + warStateOk)
+                        .WithField("eventId", e.Id)
+                        .WithField("name", e.Name)
+                        .WithField("dateOk", dateOk)
+                        .WithField("warStateOk", warStateOk));
+                }
 
                 if (dateOk && warStateOk)
                 {

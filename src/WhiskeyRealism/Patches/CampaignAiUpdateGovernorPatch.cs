@@ -4,6 +4,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -162,10 +163,11 @@ namespace WhiskeyRealism.Patches
             string signature = ((int)Math.Round(gameSpeed)) + "x:" + desiredPasses + ":" + executedPasses + ":" + (budget ? "budget" : "cap");
             if (!capped && !budget) return;
             if (!_logGate.ShouldLog(signature)) return;
-            Plugin.Log.LogInfo(
-                $"[Patch:CampaignAIGovernor] speed={gameSpeed:F0} vanilla={desiredPasses} " +
+            TelemetryRouter.LegacyInfo(
+                $"[DailyOps:Perf] source=CampaignAIGovernor speed={gameSpeed:F0} vanilla={desiredPasses} " +
                 $"executed={executedPasses} budgetMs={options.FrameBudgetMs:F2} elapsedMs={elapsedMs:F2} " +
-                $"limit={(budget ? "budget" : "cap")}");
+                $"limit={(budget ? "budget" : "cap")}",
+                TelemetryLayer.Campaign);
         }
     }
 }

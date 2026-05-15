@@ -89,6 +89,7 @@ static class Program
             ("telemetry tag policy keeps startup allowlisted", TelemetryTagPolicyKeepsStartupAllowlisted),
             ("telemetry tag policy routes deployment diagnostics sidecar only", TelemetryTagPolicyRoutesDeploymentDiagnosticsSidecarOnly),
             ("telemetry tag policy does not promote missing parents count", TelemetryTagPolicyDoesNotPromoteMissingParentsCount),
+            ("telemetry tag policy routes campaign plan and succession sidecar only", TelemetryTagPolicyRoutesCampaignPlanAndSuccessionSidecarOnly),
             ("telemetry legacy off suppresses sidecar only but allows serious", TelemetryLegacyOffSuppressesSidecarOnlyButAllowsSerious),
             ("telemetry typed off suppression warns once", TelemetryTypedOffSuppressionWarnsOnce),
             ("telemetry legacy unavailable runtime keeps protected failures visible", TelemetryLegacyUnavailableRuntimeKeepsProtectedFailuresVisible),
@@ -1905,6 +1906,21 @@ static class Program
         AssertEqual(TelemetryCategory.State, route.Category, "category");
         AssertTrue(route.RouteToSidecar, "command tree sidecar route");
         AssertFalse(route.AllowMainLog, "benign missingParents count should not hit main log");
+    }
+
+    private static void TelemetryTagPolicyRoutesCampaignPlanAndSuccessionSidecarOnly()
+    {
+        var plan = TelemetryTagPolicy.Route("[Plan:Davis] strategy=Western obj=12 reason=score");
+        AssertEqual(TelemetryLayer.Campaign, plan.Layer, "plan layer");
+        AssertEqual(TelemetryCategory.Decision, plan.Category, "plan category");
+        AssertTrue(plan.RouteToSidecar, "plan sidecar route");
+        AssertFalse(plan.AllowMainLog, "plan main log");
+
+        var succession = TelemetryTagPolicy.Route("[Succession:10] Hood replaces Johnston dateOk=True warStateOk=False");
+        AssertEqual(TelemetryLayer.Campaign, succession.Layer, "succession layer");
+        AssertEqual(TelemetryCategory.Decision, succession.Category, "succession category");
+        AssertTrue(succession.RouteToSidecar, "succession sidecar route");
+        AssertFalse(succession.AllowMainLog, "succession main log");
     }
 
     private static void AssertDeploymentRoute(string line, string expectedTag, TelemetryCategory expectedCategory)

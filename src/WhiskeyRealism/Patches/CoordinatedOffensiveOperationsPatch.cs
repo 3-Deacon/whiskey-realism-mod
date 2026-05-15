@@ -7,6 +7,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -54,12 +55,16 @@ namespace WhiskeyRealism.Patches
             new Dictionary<Type, FieldInfo>();
         private static readonly Dictionary<Type, FieldInfo> _depotFields =
             new Dictionary<Type, FieldInfo>();
+        private static bool _wiredLogged;
 
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction, Regiment unit, float timediff)
         {
-            OnceLog.Info("coordinated-ops:offensive:wired",
-                "CoordinatedOffensiveOperationsPatch wired (#38)");
+            if (!_wiredLogged)
+            {
+                _wiredLogged = true;
+                TelemetryRouter.LegacyInfo("[CoordinatedOps] observer=offensive patch=38", TelemetryLayer.Campaign);
+            }
 
             IList ownUnits = null;
             bool snapshotRegistered = false;
@@ -105,10 +110,11 @@ namespace WhiskeyRealism.Patches
                 if (committed)
                 {
                     SetBool(faction, "recruitingzonesupdated", false);
-                    Plugin.Log.LogInfo(
+                    TelemetryRouter.LegacyInfo(
                         $"[CoordinatedOps] alliance={allianceId} intent=VanillaOffensive decision={decision.Output.Decision} " +
                         $"target={decision.TargetName} ratio={decision.Output.Ratio:0.00} " +
-                        $"lead={decision.Output.LeadDisplayUnitKey} support={decision.Output.SupportStableUnitIds.Count} reason={decision.Output.Reason}");
+                        $"lead={decision.Output.LeadDisplayUnitKey} support={decision.Output.SupportStableUnitIds.Count} reason={decision.Output.Reason}",
+                        TelemetryLayer.Campaign);
                 }
                 else
                 {
@@ -171,7 +177,7 @@ namespace WhiskeyRealism.Patches
                 snapshot.Watch?.Stop();
                 if (snapshot.Watch != null && snapshot.Watch.ElapsedMilliseconds > 5L)
                 {
-                    Plugin.Log.LogInfo(
+                    TelemetryRouter.LegacyInfo(
                         $"[CoordinatedOps:Perf] offensiveFilterMs={snapshot.Watch.ElapsedMilliseconds} sig={snapshot.Signature}");
                 }
             }

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -222,7 +223,9 @@ namespace WhiskeyRealism.Patches
         {
             string signature = $"{kind}:{alliance}:{role}:{perk}";
             if (!_loggedChoices.Add(signature)) return;
-            Plugin.Log.LogInfo($"[Patch:Perks] alliance={alliance} kind={kind} role={role} perk={perk}");
+            TelemetryRouter.LegacyInfo(
+                $"[FormationDirective] source=PerkSelection alliance={alliance} kind={kind} role={role} perk={perk}",
+                TelemetryLayer.Campaign);
         }
     }
 }

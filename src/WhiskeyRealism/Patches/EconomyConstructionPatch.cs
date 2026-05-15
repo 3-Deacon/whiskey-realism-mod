@@ -4,6 +4,7 @@ using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -136,10 +137,11 @@ namespace WhiskeyRealism.Patches
 
                     if (Plugin.Instance.VerboseLogging.Value)
                     {
-                        Plugin.Log.LogInfo(
-                            $"[Patch:EconomyConstruction] alliance={alliance} building={type.name} " +
+                        TelemetryRouter.LegacyInfo(
+                            $"[ConstructionTelemetry] alliance={alliance} building={type.name} " +
                             $"oldProb={oldProb:F3} originalProb={originalProb:F3} " +
-                            $"newProb={newProb:F3} posture={intent.Posture} constructionReason={constructionReason}");
+                            $"newProb={newProb:F3} posture={intent.Posture} constructionReason={constructionReason}",
+                            TelemetryLayer.Campaign);
                     }
                 }
             }

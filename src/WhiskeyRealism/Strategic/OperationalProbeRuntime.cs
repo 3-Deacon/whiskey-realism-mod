@@ -4,12 +4,15 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
 {
     internal static class OperationalProbeRuntime
     {
+        private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
+
         internal static OperationalProbeInput BuildInput(
             int allianceId,
             CIC cic,
@@ -149,7 +152,7 @@ namespace WhiskeyRealism.Strategic
                     if (offensive.Contains(pausedUnit))
                     {
                         offensive.Remove(pausedUnit);
-                        Plugin.Log.LogInfo(
+                        EmitCampaignInfo(
                             $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
                             $"unit={SafeName(pausedUnit)} reason={output.Reason}");
                     }
@@ -185,7 +188,7 @@ namespace WhiskeyRealism.Strategic
                         "OperationalProbe");
                     if (committed)
                     {
-                        Plugin.Log.LogInfo(
+                        EmitCampaignInfo(
                             $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
                             $"target={targetName} ratio={output.Package.Ratio:0.00} " +
                             $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
@@ -204,7 +207,8 @@ namespace WhiskeyRealism.Strategic
                 if (unit == null) return;
                 if (!OffensiveAvailabilityWrapper.IsAvailable(aifactionIndex, unit, target.Value))
                 {
-                    OnceLog.Info("operational-probe:gate-blocked:" + allianceId,
+                    EmitCampaignInfoOnce(
+                        "operational-probe:gate-blocked:" + allianceId,
                         $"[OperationalProbe] alliance={allianceId} unit={SafeName(unit)} blocked-by-availability");
                     return;
                 }
@@ -228,7 +232,7 @@ namespace WhiskeyRealism.Strategic
 
                 if (bridgeDecision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
                 {
-                    Plugin.Log.LogInfo(
+                    EmitCampaignInfo(
                         $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
                         $"unit={SafeName(unit)} action=wl-current-order type={bridgeDecision.WlOrderType} reason={output.Reason}");
                     return;
@@ -236,7 +240,7 @@ namespace WhiskeyRealism.Strategic
 
                 if (!bridgeDecision.MayDirectMove)
                 {
-                    OnceLog.Info(
+                    EmitCampaignInfoOnce(
                         $"operational-probe:wl-skip:{allianceId}:{UnitKey(unit)}:{bridgeDecision.Result}",
                         $"[OperationalProbe] alliance={allianceId} unit={SafeName(unit)} action=skip-direct-move wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
                     return;
@@ -245,7 +249,7 @@ namespace WhiskeyRealism.Strategic
                 if (AICampaign.MoveUnitTo(unit, target.Value, true) && !offensive.Contains(unit))
                 {
                     offensive.Add(unit);
-                    Plugin.Log.LogInfo(
+                    EmitCampaignInfo(
                         $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
                         $"unit={SafeName(unit)} target={targetName} reason={output.Reason}");
                 }
@@ -265,6 +269,17 @@ namespace WhiskeyRealism.Strategic
                 if (AICampaignReflect.GetAllianceId(i) == allianceId) return i;
             }
             return -1;
+        }
+
+        private static void EmitCampaignInfo(string line)
+        {
+            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
+        }
+
+        private static void EmitCampaignInfoOnce(string key, string line)
+        {
+            if (!LogOnceKeys.Add(key ?? string.Empty)) return;
+            EmitCampaignInfo(line);
         }
 
         private static Regiment FindUnit(IList ownUnits, string unitKey)

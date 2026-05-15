@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -15,6 +16,8 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AICampaign), "CheckArmyGroupManagement")]
     internal static class ArmyGroupManagementPatch
     {
+        private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
+
         [HarmonyPostfix]
         internal static void Postfix(AICampaign __instance, int _aifaction)
         {
@@ -80,9 +83,10 @@ namespace WhiskeyRealism.Patches
 
                 if (attached > 0)
                 {
-                    OnceLog.Info(
+                    EmitCampaignInfoOnce(
                         $"armygroup:{allianceId}:{plan.AreaKey}:attach:{UnitSignature(units)}",
-                        $"[Patch:ArmyGroup] alliance={allianceId} area={plan.AreaKey} action=attach units={attached}");
+                        $"[ArmyArea] alliance={allianceId} area={plan.AreaKey} action=armygroup-attach units={attached}",
+                        TelemetryLayer.Campaign);
                 }
 
                 AppointPreferredCommander(allianceId, plan.AreaKey, group, units);
@@ -107,9 +111,10 @@ namespace WhiskeyRealism.Patches
             group = ArmyGroup.CreateNewArmyGroup(prefab, "", -1, unassigned);
             if ((UnityEngine.Object)(object)group == (UnityEngine.Object)null) return;
 
-            OnceLog.Info(
+            EmitCampaignInfoOnce(
                 $"armygroup:{allianceId}:{plan.AreaKey}:create:{UnitSignature(unassigned)}",
-                $"[Patch:ArmyGroup] alliance={allianceId} area={plan.AreaKey} action=create units={unassigned.Count}");
+                $"[ArmyArea] alliance={allianceId} area={plan.AreaKey} action=armygroup-create units={unassigned.Count}",
+                TelemetryLayer.Campaign);
 
             AppointPreferredCommander(allianceId, plan.AreaKey, group, units);
         }
@@ -190,8 +195,9 @@ namespace WhiskeyRealism.Patches
             if (commanderId < 0 || commanderId == currentId) return;
 
             ArmyGroup.AppointCommander(group, commanderId, usefeudmechanism: false, resetcoordinationtime: true, ignoreprestige: true);
-            Plugin.Log.LogInfo(
-                $"[Patch:ArmyGroup] alliance={allianceId} area={areaKey} action=appoint commander={CommanderName(commanderId)}");
+            TelemetryRouter.LegacyInfo(
+                $"[ArmyArea] alliance={allianceId} area={areaKey} action=armygroup-appoint commander={CommanderName(commanderId)}",
+                TelemetryLayer.Campaign);
         }
 
         private static int FindPreferredCommander(int allianceId, List<string> preferredLastNames, List<Regiment> units)
@@ -324,6 +330,12 @@ namespace WhiskeyRealism.Patches
                 return field != null ? Convert.ToSingle(field.GetValue(null)) : fallback;
             }
             catch { return fallback; }
+        }
+
+        private static void EmitCampaignInfoOnce(string key, string line, TelemetryLayer layer)
+        {
+            if (!LogOnceKeys.Add(key ?? string.Empty)) return;
+            TelemetryRouter.LegacyInfo(line, layer);
         }
     }
 }

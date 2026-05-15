@@ -3,6 +3,7 @@ using System.Collections;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -56,7 +57,7 @@ namespace WhiskeyRealism.Patches
                 {
                     arr.SetValue(targetArea, aifaction);
                     if (Plugin.Instance.VerboseLogging.Value)
-                        Plugin.Log.LogInfo($"[Patch:Importance] alliance={allianceId} biased to plan-target obj={phase.TargetObjectiveId}");
+                        TelemetryRouter.LegacyInfo($"[Plan] alliance={allianceId} action=importance-target objective={phase.TargetObjectiveId}", TelemetryLayer.Campaign);
                 }
             }
             catch (Exception ex)

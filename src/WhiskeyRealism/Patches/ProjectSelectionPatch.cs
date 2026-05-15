@@ -4,6 +4,7 @@ using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Strategic.Projects;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -16,6 +17,10 @@ namespace WhiskeyRealism.Patches
     {
         private static readonly ProjectDoctrineLogGate SelectionLogGate = new ProjectDoctrineLogGate();
         private static readonly ProjectDoctrineLogGate StarvedLaneLogGate = new ProjectDoctrineLogGate();
+        private static bool _starvedLaneObserverLogged;
+        private static bool _selectionObserverLogged;
+        private static bool _projectSelectionWiredLogged;
+        private static bool _catalogLogged;
 
         [HarmonyPrefix]
         internal static void Prefix(int alliance)
@@ -46,7 +51,11 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
-                OnceLog.Info("project-selection", "ProjectSelectionPatch wired (grand-strategy project steering)");
+                if (!_projectSelectionWiredLogged)
+                {
+                    _projectSelectionWiredLogged = true;
+                    TelemetryRouter.LegacyInfo("[ProjectDoctrine] observer=project-selection", TelemetryLayer.Campaign);
+                }
 
                 int lanes = nextProjects.Length;
                 if (allianceState.subsidyfunding != null)
@@ -58,7 +67,11 @@ namespace WhiskeyRealism.Patches
                     ? StrategicCoordinator.Instance.FiscalIntents[alliance]
                     : null;
 
-                OnceLog.Info("project-doctrine-catalog", $"Project doctrine catalog active entries={ProjectDoctrineCatalog.AllActive.Count}");
+                if (!_catalogLogged)
+                {
+                    _catalogLogged = true;
+                    TelemetryRouter.LegacyInfo($"[ProjectDoctrine] catalogEntries={ProjectDoctrineCatalog.AllActive.Count}", TelemetryLayer.Campaign);
+                }
 
                 for (int subsidyType = 0; subsidyType < lanes; subsidyType++)
                 {
@@ -92,12 +105,17 @@ namespace WhiskeyRealism.Patches
                         string starvedSignature = StableStarvedLaneSignature(decision.LaneIntent);
                         if (StarvedLaneLogGate.ShouldLog(starvedSignature))
                         {
-                            OnceLog.Info("project-doctrine-starved-lane", "Project doctrine starved-lane observer wired");
-                            Plugin.Log.LogInfo(
+                            if (!_starvedLaneObserverLogged)
+                            {
+                                _starvedLaneObserverLogged = true;
+                                TelemetryRouter.LegacyInfo("[ProjectDoctrine] observer=starved-lane", TelemetryLayer.Campaign);
+                            }
+                            TelemetryRouter.LegacyInfo(
                                 $"[ProjectDoctrine] alliance={alliance} lane={subsidyType} queued={decision.LaneIntent.QueuedProjectId} " +
                                 $"funding={decision.LaneIntent.FundingAvailable:F0}/{decision.LaneIntent.FundingNeeded:F0} " +
                                 $"rate={(decision.LaneIntent.NetFundingPerDay > 0f ? decision.LaneIntent.NetFundingPerDay.ToString("F0") : "unknown")} " +
-                                $"constructionWins={decision.LaneIntent.ConstructionCurrentlyWins} reason=starved-critical-project");
+                                $"constructionWins={decision.LaneIntent.ConstructionCurrentlyWins} reason=starved-critical-project",
+                                TelemetryLayer.Campaign);
                         }
                     }
 
@@ -109,11 +127,21 @@ namespace WhiskeyRealism.Patches
                     string signature = ProjectDoctrineLogGate.SelectionSignature(alliance, subsidyType, vanillaProjectId, decision.ProjectId, decision.Reason);
                     if (SelectionLogGate.ShouldLog(signature))
                     {
-                        OnceLog.Info("project-doctrine-selection", "Project doctrine selection observer wired");
-                        Plugin.Log.LogInfo(
-                            $"[ProjectDoctrine] alliance={alliance} lane={subsidyType} old={vanillaProjectId} new={decision.ProjectId} " +
-                            $"era={era} funding={fundingAvailable:F0} vanillaScore={decision.VanillaScore:F2} " +
-                            $"bestScore={decision.BestScore:F2} reason={decision.Reason}");
+                        if (!_selectionObserverLogged)
+                        {
+                            _selectionObserverLogged = true;
+                            TelemetryRouter.LegacyInfo("[ProjectDoctrine] observer=selection", TelemetryLayer.Campaign);
+                        }
+                        TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "ProjectDoctrine", TelemetrySeverity.Info, ev => ev
+                            .WithAlliance(alliance)
+                            .WithDecision("select", decision.Reason, signature)
+                            .WithField("lane", subsidyType)
+                            .WithField("oldProject", vanillaProjectId)
+                            .WithField("newProject", decision.ProjectId)
+                            .WithField("era", era.ToString())
+                            .WithField("funding", fundingAvailable)
+                            .WithField("vanillaScore", decision.VanillaScore)
+                            .WithField("bestScore", decision.BestScore));
                     }
                 }
             }

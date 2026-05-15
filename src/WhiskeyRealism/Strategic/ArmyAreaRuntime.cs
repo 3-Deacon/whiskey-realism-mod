@@ -3,12 +3,15 @@ using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
 {
     internal static class ArmyAreaRuntime
     {
+        private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
+
         private static readonly Dictionary<string, Vector3> Anchors = new Dictionary<string, Vector3>
         {
             { "VirginiaCapitalCorridor", new Vector3(1263f, 0f, -1010f) },
@@ -115,9 +118,9 @@ namespace WhiskeyRealism.Strategic
                 if (assignment == null || !assignment.OutOfArea) continue;
                 if (!FormationDirectiveRuntime.ShouldAllowAreaMovement(allianceId, UnitKey(unit)))
                 {
-                    OnceLog.Info(
+                    EmitCampaignInfoOnce(
                         $"army-area:{allianceId}:{UnitKey(unit)}:directive-block",
-                        $"[Patch:ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=skip-return-area reason=formation-directive");
+                        $"[ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=skip-return-area reason=formation-directive");
                     continue;
                 }
                 if (!TryGetAnchor(assignment.AssignedAreaKey, out var anchor)) continue;
@@ -135,9 +138,9 @@ namespace WhiskeyRealism.Strategic
                     var budget = StrategicMovementBudget.EvaluateAreaMovement(front, sourceSector, destinationSector, strength);
                     if (budget != null && !budget.Allowed)
                     {
-                        OnceLog.Info(
+                        EmitCampaignInfoOnce(
                             $"army-area:{allianceId}:{UnitKey(unit)}:budget-block",
-                            $"[Patch:ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=skip-return-area reason={budget.Reason}");
+                            $"[ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=skip-return-area reason={budget.Reason}");
                         continue;
                     }
                 }
@@ -160,17 +163,17 @@ namespace WhiskeyRealism.Strategic
                 if (bridgeDecision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
                 {
                     issued++;
-                    OnceLog.Info(
+                    EmitCampaignInfoOnce(
                         $"army-area:{allianceId}:{UnitKey(unit)}:{assignment.AssignedAreaKey}:wl-order",
-                        $"[Patch:ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=wl-current-order area={assignment.AssignedAreaKey} type={bridgeDecision.WlOrderType} reason={assignment.Reason}");
+                        $"[ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=wl-current-order area={assignment.AssignedAreaKey} type={bridgeDecision.WlOrderType} reason={assignment.Reason}");
                     continue;
                 }
 
                 if (!bridgeDecision.MayDirectMove)
                 {
-                    OnceLog.Info(
+                    EmitCampaignInfoOnce(
                         $"army-area:{allianceId}:{UnitKey(unit)}:{assignment.AssignedAreaKey}:wl-skip:{bridgeDecision.Result}",
-                        $"[Patch:ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=skip-return-area wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
+                        $"[ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=skip-return-area wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
                     continue;
                 }
 
@@ -178,9 +181,9 @@ namespace WhiskeyRealism.Strategic
                 {
                     SetTheaterPosition(unit, anchor);
                     issued++;
-                    OnceLog.Info(
+                    EmitCampaignInfoOnce(
                         $"army-area:{allianceId}:{UnitKey(unit)}:{assignment.AssignedAreaKey}",
-                        $"[Patch:ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=return-area area={assignment.AssignedAreaKey} reason={assignment.Reason}");
+                        $"[ArmyArea] alliance={allianceId} unit={ObjectName(unit)} action=return-area area={assignment.AssignedAreaKey} reason={assignment.Reason}");
                 }
             }
 
@@ -324,6 +327,12 @@ namespace WhiskeyRealism.Strategic
                 catch { return fallback; }
             }
             return fallback;
+        }
+
+        private static void EmitCampaignInfoOnce(string key, string line)
+        {
+            if (!LogOnceKeys.Add(key ?? string.Empty)) return;
+            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
         }
     }
 }

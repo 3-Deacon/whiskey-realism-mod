@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -96,9 +97,10 @@ namespace WhiskeyRealism.Patches
                     string signature = RecruitmentLogGate.Signature(alliance, old, __result, strengthneeded, intent.PreferredTheater, decision.Reason);
                     if (_logGate.ShouldLog(signature))
                     {
-                        Plugin.Log.LogInfo(
-                            $"[Patch:Recruitment] alliance={alliance} oldState={old} newState={__result} " +
-                            $"needed={strengthneeded} theater={intent.PreferredTheater} reason={decision.Reason}");
+                        TelemetryRouter.LegacyInfo(
+                            $"[FormationDirective] alliance={alliance} oldState={old} newState={__result} " +
+                            $"needed={strengthneeded} theater={intent.PreferredTheater} reason={decision.Reason}",
+                            TelemetryLayer.Campaign);
                     }
                 }
                 catch (Exception ex)

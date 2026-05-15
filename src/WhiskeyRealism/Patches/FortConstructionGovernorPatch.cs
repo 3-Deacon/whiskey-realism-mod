@@ -5,6 +5,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic.Construction;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -231,11 +232,12 @@ namespace WhiskeyRealism.Patches
                 Mathf.RoundToInt(site.z / 5f);
             if (!_loggedSuppressions.Add(key)) return;
 
-            Plugin.Log.LogInfo(
-                $"[Patch:FortGovernor] alliance={alliance} reason={decision.Reason} " +
+            TelemetryRouter.LegacyInfo(
+                $"[ConstructionTelemetry] alliance={alliance} reason={decision.Reason} " +
                 $"forts={context.ExistingFortCount} orders={context.ActiveOrderCount} " +
                 $"soft={decision.SoftCap} hard={decision.HardCap} " +
-                $"threat={context.ThreatRatio:F2} nearCapital={context.NearCapital}");
+                $"threat={context.ThreatRatio:F2} nearCapital={context.NearCapital}",
+                TelemetryLayer.Campaign);
         }
 
         private static FieldInfo FortSitesField()

@@ -466,7 +466,7 @@ namespace WhiskeyRealism.Strategic
             {
             }
 #else
-            Plugin.Log.LogInfo(message);
+            TelemetryRouter.LegacyInfo(message, TelemetryLayer.Campaign);
 #endif
         }
 

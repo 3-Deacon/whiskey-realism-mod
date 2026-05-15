@@ -5,6 +5,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -53,12 +54,16 @@ namespace WhiskeyRealism.Patches
         private static readonly Dictionary<Type, FieldInfo> _defensiveOpsFields =
             new Dictionary<Type, FieldInfo>();
         private static MethodInfo _removeDefensiveOperationMethod;
+        private static bool _wiredLogged;
 
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction)
         {
-            OnceLog.Info("defense-intent:filter:wired",
-                "CheckForDefensiveOperationsCandidateFilterPatch wired (#25)");
+            if (!_wiredLogged)
+            {
+                _wiredLogged = true;
+                TelemetryRouter.LegacyInfo("[DefenseIntent] observer=candidate-filter patch=25", TelemetryLayer.Campaign);
+            }
 
             try
             {
@@ -142,7 +147,7 @@ namespace WhiskeyRealism.Patches
 
                 if (removed > 0 && Plugin.Instance.DefenseIntentVerboseLogging.Value)
                 {
-                    Plugin.Log.LogInfo(
+                    TelemetryRouter.LegacyInfo(
                         $"[DefenseIntent] filtered alliance={allianceId} removed={removed} forbidden={forbidden.Count}");
                 }
             }
@@ -229,9 +234,9 @@ namespace WhiskeyRealism.Patches
                                         {
                                             if (ShouldAvoidDirectWlRevert(unit, allianceId))
                                             {
-                                                OnceLog.Info(
-                                                    $"defense-intent:filter:wl-revert-skip:{allianceId}:{id}",
-                                                    $"[DefenseIntent] skipped direct W&L revert alliance={allianceId} candidate={SafeUnitName(unit, id)} reason=player-chain");
+                                                TelemetryRouter.LegacyInfo(
+                                                    $"[DefenseIntent] skipped direct W&L revert alliance={allianceId} candidate={SafeUnitName(unit, id)} reason=player-chain",
+                                                    TelemetryLayer.Campaign);
                                             }
                                             else
                                             {
@@ -250,10 +255,11 @@ namespace WhiskeyRealism.Patches
                                         bool firstRevert = _revertLogged.Add(revertKey);
                                         if (firstRevert || verbose)
                                         {
-                                            Plugin.Log.LogInfo(
+                                            TelemetryRouter.LegacyInfo(
                                                 $"[DefenseIntent] reverted alliance={allianceId} " +
                                                 $"candidate={candidateName} " +
-                                                $"reason={reason}");
+                                                $"reason={reason}",
+                                                TelemetryLayer.Campaign);
                                         }
                                     }
                                 }

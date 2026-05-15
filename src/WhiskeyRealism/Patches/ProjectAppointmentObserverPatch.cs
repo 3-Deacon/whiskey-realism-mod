@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using WhiskeyRealism.Strategic.Projects;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -10,6 +11,8 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(Projects), "AppointProject")]
     internal static class ProjectAppointmentObserverPatch
     {
+        private static bool _observerLogged;
+
         internal struct AppointmentSnapshot
         {
             public bool Valid;
@@ -76,7 +79,11 @@ namespace WhiskeyRealism.Patches
                 if (alliance < 0 || alliance >= 2) return;
                 if (!__state.Valid) return;
 
-                OnceLog.Info("project-appoint-observer", "Project appointment observer wired");
+                if (!_observerLogged)
+                {
+                    _observerLogged = true;
+                    TelemetryRouter.LegacyInfo("[ProjectAppointed] observer=appoint", TelemetryLayer.Campaign);
+                }
 
                 var entry = ProjectDoctrineCatalog.Get(project.projectid);
                 string bucket = entry != null ? entry.Bucket.ToString() : "Unknown";
@@ -85,10 +92,18 @@ namespace WhiskeyRealism.Patches
                 if (!TryReadProjectLevel(project.projectid, alliance, out float newLevel)) return;
                 if (newLevel <= __state.OldLevel) return;
 
-                Plugin.Log.LogInfo(
-                    $"[ProjectAppointed] alliance={alliance} project={project.projectid} name=\"{project.projectname}\" " +
-                    $"lane={lane} side={side} bucket={bucket} level={__state.OldLevel:F0}->{newLevel:F0} " +
-                    $"payment={PaymentLabel(manualappointment, __state)} {CostLabel(__state)}");
+                TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.State, "ProjectAppointed", TelemetrySeverity.Info, ev => ev
+                    .WithAlliance(alliance)
+                    .WithField("project", project.projectid)
+                    .WithField("name", project.projectname)
+                    .WithField("lane", lane)
+                    .WithField("side", side)
+                    .WithField("bucket", bucket)
+                    .WithField("oldLevel", __state.OldLevel)
+                    .WithField("newLevel", newLevel)
+                    .WithField("payment", PaymentLabel(manualappointment, __state))
+                    .WithField("cost", CostLabel(__state))
+                    .WithField("inputSignature", "alliance=" + alliance + "|project=" + project.projectid + "|level=" + newLevel));
             }
             catch (Exception ex)
             {

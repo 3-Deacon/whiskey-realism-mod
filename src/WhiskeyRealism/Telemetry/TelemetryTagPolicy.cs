@@ -131,6 +131,8 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("ProjectUnlock", TelemetryCategory.State);
             AddCampaign("W&LStartSelection", TelemetryCategory.Decision);
             AddCampaign("W&LCamp", TelemetryCategory.Trace);
+            AddCampaign("Succession", TelemetryCategory.Decision);
+            AddCampaign("Plan", TelemetryCategory.Decision);
         }
 
         internal static TelemetryTagRoute Route(string line)
@@ -147,6 +149,12 @@ namespace WhiskeyRealism.Telemetry
                 return IsSeriousLine(line)
                     ? Serious(Sidecar(tag, TelemetryLayer.Tactical, TelemetryCategory.Trace, TelemetrySeverity.Info))
                     : Sidecar(tag, TelemetryLayer.Tactical, TelemetryCategory.Trace, TelemetrySeverity.Info);
+
+            if (tag.StartsWith("Succession", StringComparison.OrdinalIgnoreCase)
+                || tag.StartsWith("Plan", StringComparison.OrdinalIgnoreCase))
+                return IsSeriousLine(line)
+                    ? Serious(Sidecar(tag, TelemetryLayer.Campaign, TelemetryCategory.Decision, TelemetrySeverity.Info))
+                    : Sidecar(tag, TelemetryLayer.Campaign, TelemetryCategory.Decision, TelemetrySeverity.Info);
 
             if (IsCampaignDefault(tag))
                 return IsSeriousLine(line)
@@ -199,6 +207,8 @@ namespace WhiskeyRealism.Telemetry
                 || tag.StartsWith("Director", StringComparison.OrdinalIgnoreCase)
                 || tag.StartsWith("W&L", StringComparison.OrdinalIgnoreCase)
                 || tag.StartsWith("Project", StringComparison.OrdinalIgnoreCase)
+                || tag.StartsWith("Succession", StringComparison.OrdinalIgnoreCase)
+                || tag.StartsWith("Plan", StringComparison.OrdinalIgnoreCase)
                 || tag.StartsWith("Campaign", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(tag, "FrontLedger", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(tag, "ArmyArea", StringComparison.OrdinalIgnoreCase)

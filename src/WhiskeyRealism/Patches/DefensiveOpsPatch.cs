@@ -4,6 +4,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -102,9 +103,10 @@ namespace WhiskeyRealism.Patches
                 RemoveFromList(faction, "unitsinoffensiveoperations", candidate);
                 RemoveFromList(faction, "unitsconstructingsupplydepots", candidate);
 
-                Plugin.Log.LogInfo(
-                    $"[Patch:DefensiveOps] alliance={allianceId} capital={capitalName} " +
-                    $"assigned=1 need={required:F0} caution={personality.Caution:F2}");
+                TelemetryRouter.LegacyInfo(
+                    $"[DefenseIntent] alliance={allianceId} capital={capitalName} " +
+                    $"assigned=1 need={required:F0} caution={personality.Caution:F2}",
+                    TelemetryLayer.Campaign);
             }
             catch (Exception ex)
             {

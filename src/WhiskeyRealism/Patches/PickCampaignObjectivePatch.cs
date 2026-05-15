@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -29,9 +30,9 @@ namespace WhiskeyRealism.Patches
                 {
                     if (HistoricalDoctrineEnabled())
                     {
-                        OnceLog.Info(
-                            "pickcampobj:no-profile:" + allianceId,
-                            $"[Patch:PickCampObj] alliance={allianceId} action=skip-vanilla-random reason=no-historical-operation-plan");
+                        TelemetryRouter.LegacyInfo(
+                            $"[HistoricalOperation] alliance={allianceId} action=skip-vanilla-random reason=no-historical-operation-plan",
+                            TelemetryLayer.Campaign);
                         return false;
                     }
                     return true;
@@ -42,9 +43,9 @@ namespace WhiskeyRealism.Patches
                 {
                     if (HistoricalDoctrineEnabled())
                     {
-                        OnceLog.Info(
-                            "pickcampobj:invalid-plan:" + allianceId,
-                            $"[Patch:PickCampObj] alliance={allianceId} action=skip-vanilla-random reason=invalid-historical-operation-phase");
+                        TelemetryRouter.LegacyInfo(
+                            $"[HistoricalOperation] alliance={allianceId} action=skip-vanilla-random reason=invalid-historical-operation-phase",
+                            TelemetryLayer.Campaign);
                         return false;
                     }
                     return true;
@@ -52,7 +53,7 @@ namespace WhiskeyRealism.Patches
 
                 SetFollowedCampaignObjective(_aifaction, phase.TargetObjectiveId);
                 if (Plugin.Instance.VerboseLogging.Value)
-                    Plugin.Log.LogInfo($"[Patch:PickCampObj] alliance={allianceId} obj={phase.TargetObjectiveId} (plan-driven)");
+                    TelemetryRouter.LegacyInfo($"[Plan] alliance={allianceId} action=pick-campaign-objective objective={phase.TargetObjectiveId}", TelemetryLayer.Campaign);
                 return false;
             }
             catch (Exception ex)

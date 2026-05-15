@@ -3,6 +3,7 @@ using System.Diagnostics;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -81,11 +82,12 @@ namespace WhiskeyRealism.Patches
                     string signature = FastForwardAiScheduler.LogSignature(gameSpeed, vanillaPasses, extra, maxExtra, budgetExhausted);
                     if (_logGate.ShouldLog(signature))
                     {
-                        Plugin.Log.LogInfo(
-                            $"[Patch:FastForwardAI] speed={gameSpeed:F0} vanilla={vanillaPasses} " +
+                        TelemetryRouter.LegacyInfo(
+                            $"[DailyOps:Perf] source=FastForwardAI speed={gameSpeed:F0} vanilla={vanillaPasses} " +
                             $"extra={extra}/{maxExtra} vanillaMs={vanillaElapsedMs:F2} " +
                             $"extraMs={sw.Elapsed.TotalMilliseconds:F2} slowestExtraMs={slowestExtraMs:F2} " +
-                            $"limit={(budgetExhausted ? "budget" : "cap")}");
+                            $"limit={(budgetExhausted ? "budget" : "cap")}",
+                            TelemetryLayer.Campaign);
                     }
 
                     if (FastForwardAiScheduler.InCooldown(frame, _cooldownUntilFrame))
@@ -162,11 +164,12 @@ namespace WhiskeyRealism.Patches
             int frame)
         {
             if (!ShouldLogPerf(gameSpeed, frame)) return;
-            Plugin.Log.LogInfo(
-                $"[Patch:FastForwardAI:Perf] speed={gameSpeed:F0} reason={reason} " +
+            TelemetryRouter.LegacyInfo(
+                $"[DailyOps:Perf] source=FastForwardAI speed={gameSpeed:F0} reason={reason} " +
                 $"vanilla={vanillaPasses} extra={extra}/{maxExtra} " +
                 $"vanillaMs={vanillaMs:F2} extraMs={extraMs:F2} slowestExtraMs={slowestExtraMs:F2} " +
-                $"cooldownUntilFrame={_cooldownUntilFrame}");
+                $"cooldownUntilFrame={_cooldownUntilFrame}",
+                TelemetryLayer.Campaign);
         }
 
         private static bool ShouldLogPerf(float gameSpeed, int frame)
