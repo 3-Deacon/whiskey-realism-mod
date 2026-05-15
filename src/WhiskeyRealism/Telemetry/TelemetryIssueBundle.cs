@@ -24,6 +24,18 @@ namespace WhiskeyRealism.Telemetry
         internal string SessionId { get; private set; }
         internal List<string> Files { get; private set; }
         internal string Note { get; private set; }
+
+        internal string ToJson()
+        {
+            return JsonConvert.SerializeObject(
+                new
+                {
+                    sessionId = SessionId,
+                    files = Files,
+                    note = Note
+                },
+                Formatting.None);
+        }
     }
 
     internal static class TelemetryIssueBundle
@@ -77,6 +89,11 @@ namespace WhiskeyRealism.Telemetry
             if (TryRedactJson(value, out jsonRedacted))
                 return jsonRedacted;
 
+            return RedactFreeText(value);
+        }
+
+        private static string RedactFreeText(string value)
+        {
             string redacted = WindowsUserPath.Replace(value, "$1<redacted>");
             redacted = WindowsForwardUserPath.Replace(redacted, "$1<redacted>");
             redacted = MntWindowsUserPath.Replace(redacted, "$1<redacted>");
@@ -100,7 +117,7 @@ namespace WhiskeyRealism.Telemetry
             try
             {
                 JToken token = JToken.Parse(value);
-                RedactJsonToken(token);
+                token = RedactJsonToken(token, null);
                 redacted = token.ToString(Formatting.None);
                 return true;
             }
@@ -110,28 +127,36 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
-        private static void RedactJsonToken(JToken token)
+        private static JToken RedactJsonToken(JToken token, string key)
         {
             var obj = token as JObject;
             if (obj != null)
             {
                 foreach (var property in obj.Properties())
-                {
-                    if (IsSecretKey(property.Name) && property.Value.Type != JTokenType.Object && property.Value.Type != JTokenType.Array)
-                        property.Value = "<redacted>";
-                    else
-                        RedactJsonToken(property.Value);
-                }
+                    property.Value = RedactJsonToken(property.Value, property.Name);
 
-                return;
+                return obj;
             }
 
             var array = token as JArray;
             if (array != null)
             {
-                foreach (JToken item in array)
-                    RedactJsonToken(item);
+                for (int i = 0; i < array.Count; i++)
+                    array[i] = RedactJsonToken(array[i], null);
+
+                return array;
             }
+
+            if (IsSecretKey(key) && token.Type != JTokenType.Object && token.Type != JTokenType.Array)
+                return new JValue("<redacted>");
+
+            if (IsAuthorizationKey(key) && token.Type != JTokenType.Object && token.Type != JTokenType.Array)
+                return new JValue(RedactAuthorizationScalar(token.Type == JTokenType.String ? (string)token : token.ToString(Formatting.None)));
+
+            if (token.Type == JTokenType.String)
+                return new JValue(RedactFreeText((string)token));
+
+            return token;
         }
 
         private static bool IsSecretKey(string key)
@@ -151,6 +176,29 @@ namespace WhiskeyRealism.Telemetry
                 || normalized.EndsWith("_SECRET", StringComparison.Ordinal)
                 || normalized.EndsWith("_PASSWORD", StringComparison.Ordinal)
                 || normalized.EndsWith("_API_KEY", StringComparison.Ordinal);
+        }
+
+        private static bool IsAuthorizationKey(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+                return false;
+
+            string normalized = key.Replace("-", "_").ToUpperInvariant();
+            return normalized == "AUTHORIZATION" || normalized == "AUTHORIZATION_HEADER";
+        }
+
+        private static string RedactAuthorizationScalar(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "<redacted>";
+
+            if (value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                return "Bearer <redacted>";
+
+            if (value.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+                return "Basic <redacted>";
+
+            return "<redacted>";
         }
 
         internal static TelemetryIssueBundleManifest CreateManifest(string sessionId, IEnumerable<string> files, string note)

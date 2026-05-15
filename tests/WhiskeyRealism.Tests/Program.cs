@@ -50,6 +50,9 @@ static class Program
             ("telemetry queue reports coalesced protected overflow", TelemetryQueueReportsCoalescedProtectedOverflow),
             ("telemetry issue bundle redacts auth bypass forms", TelemetryIssueBundleRedactsAuthBypassForms),
             ("telemetry issue bundle preserves json redaction validity", TelemetryIssueBundlePreservesJsonRedactionValidity),
+            ("telemetry issue bundle redacts nested json strings", TelemetryIssueBundleRedactsNestedJsonStrings),
+            ("telemetry budget caps raw performance but allows summaries", TelemetryBudgetCapsRawPerformanceButAllowsSummaries),
+            ("telemetry issue bundle manifest has explicit json", TelemetryIssueBundleManifestHasExplicitJson),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1415,6 +1418,45 @@ static class Program
         AssertEqual("<redacted>", (string)parsed["password"], "json password value redacted");
         AssertFalse(redacted.Contains("abc"), "json raw token removed");
         AssertFalse(redacted.Contains("hunter2"), "json raw password removed");
+    }
+
+    private static void TelemetryIssueBundleRedactsNestedJsonStrings()
+    {
+        string redacted = TelemetryIssueBundle.Redact("{\"path\":\"C:\\\\Users\\\\Kyle\\\\AppData\",\"headers\":{\"Authorization\":\"Bearer abc\"}}");
+        var parsed = JObject.Parse(redacted);
+
+        AssertFalse(redacted.Contains("Kyle"), "json path username removed");
+        AssertFalse(redacted.Contains("abc"), "json authorization value removed");
+        AssertContains((string)parsed["path"], @"C:\Users\<redacted>\AppData", "json path redacted");
+        string authorization = (string)parsed["headers"]["Authorization"];
+        AssertTrue(authorization == "<redacted>" || authorization == "Bearer <redacted>", "json authorization redacted");
+    }
+
+    private static void TelemetryBudgetCapsRawPerformanceButAllowsSummaries()
+    {
+        var budget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        budget.RecordBytes(TelemetryCategory.Write, 1000);
+        AssertFalse(budget.Allow(TelemetryCategory.Performance, 1), "raw performance detail capped by total bytes");
+        AssertFalse(budget.Allow(TelemetryCategory.Performance, 1, lowPriority: false, protectedSummary: false), "high priority raw performance detail capped by total bytes");
+        AssertTrue(budget.Allow(TelemetryCategory.Performance, 1, lowPriority: true, protectedSummary: true), "performance summary allowed past cap");
+    }
+
+    private static void TelemetryIssueBundleManifestHasExplicitJson()
+    {
+        TelemetryIssueBundleManifest manifest = TelemetryIssueBundle.CreateManifest(
+            "session-1",
+            new[] { @"C:\Users\Kyle\AppData\log.txt" },
+            "Authorization=Bearer abc token=secret");
+
+        string json = manifest.ToJson();
+        var parsed = JObject.Parse(json);
+
+        AssertEqual("session-1", (string)parsed["sessionId"], "manifest session id");
+        AssertContains((string)parsed["files"][0], @"C:\Users\<redacted>\AppData", "manifest file redacted");
+        AssertContains((string)parsed["note"], "<redacted>", "manifest note redacted");
+        AssertFalse(json.Contains("Kyle"), "manifest username removed");
+        AssertFalse(json.Contains("abc"), "manifest authorization value removed");
+        AssertFalse(json.Contains("secret"), "manifest token value removed");
     }
 
     private static FrontSectorLedger BuildLedger()

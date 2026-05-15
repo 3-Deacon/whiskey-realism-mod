@@ -43,11 +43,11 @@ namespace WhiskeyRealism.Telemetry
             lock (_gate)
             {
                 long safeBytes = Math.Max(0L, estimatedBytes);
+                if (protectedSummary && IsCapSurvivingSummary(category))
+                    return true;
+
                 if (IsProtected(category))
                 {
-                    if (protectedSummary)
-                        return true;
-
                     bool protectedAllowed = WithinTotalCap(safeBytes);
                     if (!protectedAllowed)
                         RecordDroppedLocked(category);
@@ -126,6 +126,13 @@ namespace WhiskeyRealism.Telemetry
         private static bool IsProtected(TelemetryCategory category)
         {
             return category == TelemetryCategory.Failure || category == TelemetryCategory.Health;
+        }
+
+        private static bool IsCapSurvivingSummary(TelemetryCategory category)
+        {
+            return category == TelemetryCategory.Failure
+                || category == TelemetryCategory.Health
+                || category == TelemetryCategory.Performance;
         }
 
         private bool WithinCategoryCut(TelemetryCategory category, long estimatedBytes)
