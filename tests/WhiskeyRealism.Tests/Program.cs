@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using WhiskeyRealism;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
@@ -13,6 +15,7 @@ using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Tactical.PlayerOrders;
+using WhiskeyRealism.Util;
 
 static class Program
 {
@@ -84,6 +87,10 @@ static class Program
             ("telemetry behavior gates are independent from profile", TelemetryBehaviorGatesAreIndependentFromProfile),
             ("telemetry tag policy routes tactical matrix to state", TelemetryTagPolicyRoutesTacticalMatrixToState),
             ("telemetry tag policy keeps startup allowlisted", TelemetryTagPolicyKeepsStartupAllowlisted),
+            ("telemetry tag policy routes deployment diagnostics sidecar only", TelemetryTagPolicyRoutesDeploymentDiagnosticsSidecarOnly),
+            ("telemetry legacy off suppresses sidecar only but allows serious", TelemetryLegacyOffSuppressesSidecarOnlyButAllowsSerious),
+            ("once log retries when logger unavailable", OnceLogRetriesWhenLoggerUnavailable),
+            ("once log concurrent calls keep one time semantics", OnceLogConcurrentCallsKeepOneTimeSemantics),
             ("telemetry legacy parser extracts key values", TelemetryLegacyParserExtractsKeyValues),
             ("telemetry legacy parser creates coarse signature", TelemetryLegacyParserCreatesCoarseSignature),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
@@ -1870,6 +1877,86 @@ static class Program
         AssertEqual(TelemetryCategory.Health, route.Category, "category");
         AssertFalse(route.RouteToSidecar, "startup does not require sidecar");
         AssertTrue(route.AllowMainLog, "startup remains main log allowlisted");
+    }
+
+    private static void TelemetryTagPolicyRoutesDeploymentDiagnosticsSidecarOnly()
+    {
+        AssertDeploymentRoute("[TacDeployObs] surface=DoPlacement phase=initial alliance=1", "TacDeployObs", TelemetryCategory.State);
+        AssertDeploymentRoute("[TacDeployObsMove] unit=brigade-1 distance=145.0", "TacDeployObsMove", TelemetryCategory.Write);
+        AssertDeploymentRoute("[TacDeployTerrain] unit=brigade-2 decision=accepted", "TacDeployTerrain", TelemetryCategory.State);
+        AssertDeploymentRoute("[TacDeployTerrainAdvice] unit=brigade-3 decision=reject-water", "TacDeployTerrainAdvice", TelemetryCategory.Gate);
+
+        var serious = TelemetryTagPolicy.Route("[TacDeployTerrain] unit=brigade-4 failed missing terrain probe");
+        AssertEqual(TelemetryLayer.Tactical, serious.Layer, "serious layer");
+        AssertEqual(TelemetryCategory.Failure, serious.Category, "serious category");
+        AssertTrue(serious.RouteToSidecar, "serious deployment row still routes sidecar");
+        AssertTrue(serious.AllowMainLog, "serious deployment row escalates to main log");
+    }
+
+    private static void AssertDeploymentRoute(string line, string expectedTag, TelemetryCategory expectedCategory)
+    {
+        var route = TelemetryTagPolicy.Route(line);
+        AssertEqual(expectedTag, route.Tag, expectedTag + " tag");
+        AssertEqual(TelemetryLayer.Tactical, route.Layer, expectedTag + " layer");
+        AssertEqual(expectedCategory, route.Category, expectedTag + " category");
+        AssertEqual(expectedTag, route.EventName, expectedTag + " event");
+        AssertTrue(route.RouteToSidecar, expectedTag + " sidecar");
+        AssertFalse(route.AllowMainLog, expectedTag + " main log");
+    }
+
+    private static void TelemetryLegacyOffSuppressesSidecarOnlyButAllowsSerious()
+    {
+        TelemetryRouter.AttachRuntime(null);
+        Plugin.Log = new TestLog();
+
+        AssertFalse(TelemetryRouter.LegacyInfo("[TacDeployObs] surface=DoPlacement phase=initial alliance=1"),
+            "off profile suppresses sidecar-only deployment row from main log");
+        AssertTrue(TelemetryRouter.LegacyWarning("[TacDeployTerrain] unit=brigade-4 failed missing terrain probe"),
+            "serious deployment row is still allowed to main log");
+    }
+
+    private static void OnceLogRetriesWhenLoggerUnavailable()
+    {
+        TelemetryRouter.AttachRuntime(null);
+        OnceLog.Reset();
+        Plugin.Log = null;
+
+        OnceLog.Warning("once-retry-main-log", "[WhiskeyRealism] startup warning");
+
+        var log = new TestLog();
+        Plugin.Log = log;
+        OnceLog.Warning("once-retry-main-log", "[WhiskeyRealism] startup warning");
+        OnceLog.Warning("once-retry-main-log", "[WhiskeyRealism] startup warning");
+
+        AssertEqual(1, log.WarningCount, "retry after null logger should log once");
+
+        log.ThrowOnInfo = true;
+        OnceLog.Info("once-retry-throw", "[WhiskeyRealism] startup info");
+        log.ThrowOnInfo = false;
+        OnceLog.Info("once-retry-throw", "[WhiskeyRealism] startup info");
+        OnceLog.Info("once-retry-throw", "[WhiskeyRealism] startup info");
+
+        AssertEqual(1, log.InfoCount, "retry after thrown logger should log once");
+    }
+
+    private static void OnceLogConcurrentCallsKeepOneTimeSemantics()
+    {
+        TelemetryRouter.AttachRuntime(null);
+        OnceLog.Reset();
+        var log = new TestLog();
+        Plugin.Log = log;
+
+        var tasks = new Task[32];
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            tasks[i] = Task.Run(() => OnceLog.Info("once-concurrent-main-log", "[WhiskeyRealism] concurrent startup"));
+        }
+
+        Task.WaitAll(tasks);
+
+        AssertEqual(1, log.InfoCount, "concurrent once-log calls should log once");
+
+        OnceLog.Reset();
     }
 
     private static void TelemetryLegacyParserExtractsKeyValues()

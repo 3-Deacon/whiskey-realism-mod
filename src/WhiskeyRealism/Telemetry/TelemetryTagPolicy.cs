@@ -100,6 +100,10 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalPathfinderDiscipline", TelemetryCategory.Gate);
             AddTactical("TacticalHqLinkGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDiagnostic", TelemetryCategory.Trace);
+            AddTactical("TacDeployObs", TelemetryCategory.State);
+            AddTactical("TacDeployObsMove", TelemetryCategory.Write);
+            AddTactical("TacDeployTerrain", TelemetryCategory.State);
+            AddTactical("TacDeployTerrainAdvice", TelemetryCategory.Gate);
 
             AddCampaign("Heartbeat", TelemetryCategory.Health);
             AddCampaign("DailyOps", TelemetryCategory.State);
