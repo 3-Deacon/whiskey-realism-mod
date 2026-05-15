@@ -31,10 +31,14 @@ static class Program
             ("telemetry session id sorts by utc milliseconds", TelemetrySessionIdSortsByUtcMilliseconds),
             ("telemetry manifest redacts user paths", TelemetryManifestRedactsUserPaths),
             ("telemetry session creates directory under tuning logs", TelemetrySessionCreatesDirectoryUnderTuningLogs),
+            ("telemetry session sanitizes hostile directory ids under tuning logs", TelemetrySessionSanitizesHostileDirectoryIdsUnderTuningLogs),
+            ("telemetry session creates unique directory on collision", TelemetrySessionCreatesUniqueDirectoryOnCollision),
             ("telemetry queue never drops health for lower priority rows", TelemetryQueueNeverDropsHealthForLowerPriorityRows),
             ("telemetry retention keeps newest two by manifest dir and mtime", TelemetryRetentionKeepsNewestTwoByManifestDirAndMtime),
             ("telemetry retention deletes old dirs and pins current", TelemetryRetentionDeletesOldDirsAndPinsCurrent),
+            ("telemetry retention refuses deletes outside tuning root", TelemetryRetentionRefusesDeletesOutsideTuningRoot),
             ("telemetry budget applies staged category cuts", TelemetryBudgetAppliesStagedCategoryCuts),
+            ("telemetry budget reserve is atomic under total cap", TelemetryBudgetReserveIsAtomicUnderTotalCap),
             ("telemetry queue evicts decision before gate write", TelemetryQueueEvictsDecisionBeforeGateWrite),
             ("telemetry issue bundle redacts spaced windows usernames", TelemetryIssueBundleRedactsSpacedWindowsUsernames),
             ("telemetry queue preserves protected incoming when protected full", TelemetryQueuePreservesProtectedIncomingWhenProtectedFull),
@@ -58,6 +62,7 @@ static class Program
             ("telemetry issue bundle manifest redacts unsafe session id", TelemetryIssueBundleManifestRedactsUnsafeSessionId),
             ("telemetry issue bundle manifest filters non telemetry files", TelemetryIssueBundleManifestFiltersNonTelemetryFiles),
             ("telemetry issue bundle manifest scopes files to active session", TelemetryIssueBundleManifestScopesFilesToActiveSession),
+            ("telemetry issue bundle scopes equivalent windows and wsl paths", TelemetryIssueBundleScopesEquivalentWindowsAndWslPaths),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1115,6 +1120,63 @@ static class Program
         }
     }
 
+    private static void TelemetrySessionSanitizesHostileDirectoryIdsUnderTuningLogs()
+    {
+        string gameRoot = CreateTempDirectory();
+        string outsideRoot = CreateTempDirectory();
+        try
+        {
+            string[] hostileIds =
+            {
+                "../escape",
+                "..\\escape",
+                "/tmp/wr-escape",
+                @"C:\Windows\Temp\wr-escape",
+                "C:/Windows/Temp/wr-escape",
+                Path.Combine(outsideRoot, "absolute"),
+                ".",
+                ".."
+            };
+
+            string root = Path.GetFullPath(TelemetrySession.TuningLogRoot(gameRoot)).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            foreach (string hostileId in hostileIds)
+            {
+                string sessionDirectory = TelemetrySession.CreateSessionDirectory(gameRoot, hostileId);
+                string fullPath = Path.GetFullPath(sessionDirectory);
+                AssertTrue(IsUnderDirectory(fullPath, root), "hostile id remains under tuning root: " + hostileId);
+                AssertFalse(fullPath.Contains(".."), "hostile id does not retain traversal: " + hostileId);
+            }
+
+            AssertFalse(Directory.Exists(Path.Combine(outsideRoot, "absolute")), "absolute hostile path not created");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+            DeleteDirectoryQuietly(outsideRoot);
+        }
+    }
+
+    private static void TelemetrySessionCreatesUniqueDirectoryOnCollision()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            string baseSessionId = "20260515-120000-000-p12-abcdef123456";
+            TelemetrySessionDirectory first = TelemetrySession.CreateUniqueSessionDirectory(gameRoot, baseSessionId);
+            TelemetrySessionDirectory second = TelemetrySession.CreateUniqueSessionDirectory(gameRoot, baseSessionId);
+
+            AssertTrue(Directory.Exists(first.DirectoryPath), "first unique session directory exists");
+            AssertTrue(Directory.Exists(second.DirectoryPath), "second unique session directory exists");
+            AssertFalse(string.Equals(first.DirectoryPath, second.DirectoryPath, StringComparison.OrdinalIgnoreCase), "second unique session directory is distinct");
+            AssertEqual(baseSessionId, first.SessionId, "first session id uses base");
+            AssertEqual(baseSessionId + "-r001", second.SessionId, "second session id uses deterministic restart suffix");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
     private static void TelemetryQueueNeverDropsHealthForLowerPriorityRows()
     {
         var queue = new TelemetryQueue(capacity: 2);
@@ -1181,6 +1243,35 @@ static class Program
         }
     }
 
+    private static void TelemetryRetentionRefusesDeletesOutsideTuningRoot()
+    {
+        string gameRoot = CreateTempDirectory();
+        string outsideRoot = CreateTempDirectory();
+        try
+        {
+            string insideDir = CreateTelemetrySessionDirectory(gameRoot, "20260515-090000-000-p1-inside0000", null);
+            string outsideDir = Path.Combine(outsideRoot, "20260515-080000-000-p1-outside000");
+            Directory.CreateDirectory(outsideDir);
+
+            var candidates = new[]
+            {
+                new TelemetryRetentionCandidate(insideDir, Path.GetFileName(insideDir), null, new DateTime(2026, 5, 15, 9, 0, 0, DateTimeKind.Utc)),
+                new TelemetryRetentionCandidate(outsideDir, Path.GetFileName(outsideDir), null, new DateTime(2026, 5, 15, 8, 0, 0, DateTimeKind.Utc))
+            };
+
+            var deleted = TelemetrySession.DeleteRetentionCandidates(gameRoot, candidates);
+
+            AssertEqual(1, deleted.Count, "only in-root candidate deleted");
+            AssertFalse(Directory.Exists(insideDir), "inside candidate deleted");
+            AssertTrue(Directory.Exists(outsideDir), "outside candidate retained");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+            DeleteDirectoryQuietly(outsideRoot);
+        }
+    }
+
     private static void TelemetryBudgetAppliesStagedCategoryCuts()
     {
         var traceBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
@@ -1205,6 +1296,17 @@ static class Program
         AssertFalse(gateBudget.Allow(TelemetryCategory.Write, 20), "write cuts above total cap");
         AssertTrue(gateBudget.Allow(TelemetryCategory.Failure, 20, lowPriority: true, protectedSummary: true), "failure summary protected above total cap");
         AssertTrue(gateBudget.Allow(TelemetryCategory.Health, 20, lowPriority: true, protectedSummary: true), "health summary protected above total cap");
+    }
+
+    private static void TelemetryBudgetReserveIsAtomicUnderTotalCap()
+    {
+        var budget = new TelemetryBudget(totalBytes: 100, rotateBytes: 250);
+
+        AssertTrue(budget.TryReserve(TelemetryCategory.Write, 60, lowPriority: false), "first reserve allowed");
+        AssertFalse(budget.TryReserve(TelemetryCategory.Write, 60, lowPriority: false), "second reserve denied by projected total cap");
+        AssertEqual(60L, budget.EmittedBytes, "only allowed reserve recorded emitted bytes");
+        AssertEqual(60L, budget.CurrentFileBytes, "only allowed reserve recorded file bytes");
+        AssertEqual(1L, budget.DroppedCountFor(TelemetryCategory.Write), "denied reserve counted dropped write");
     }
 
     private static void TelemetryQueueEvictsDecisionBeforeGateWrite()
@@ -1605,6 +1707,40 @@ static class Program
         AssertFalse(json.Contains("LogOutput.log"), "bepinex log excluded");
         AssertFalse(json.Contains("Kyle"), "user document username redacted or excluded");
         AssertFalse(json.Contains("tokens"), "user token path excluded");
+    }
+
+    private static void TelemetryIssueBundleScopesEquivalentWindowsAndWslPaths()
+    {
+        string windowsSession = @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\session-a";
+        string wslSession = "/mnt/c/Games/Grand Tactician/BepInEx/WhiskeyRealism/tuning-logs/session-a";
+
+        TelemetryIssueBundleManifest windowsManifest = TelemetryIssueBundle.CreateManifest(
+            "session-a",
+            windowsSession,
+            new[]
+            {
+                wslSession + "/manifest.json",
+                "/mnt/c/Games/Grand Tactician/BepInEx/WhiskeyRealism/tuning-logs/session-b/manifest.json"
+            },
+            null);
+
+        TelemetryIssueBundleManifest wslManifest = TelemetryIssueBundle.CreateManifest(
+            "session-a",
+            wslSession,
+            new[]
+            {
+                windowsSession + @"\summary.md",
+                @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\session-b\summary.md"
+            },
+            null);
+
+        JArray windowsFiles = (JArray)JObject.Parse(windowsManifest.ToJson())["files"];
+        JArray wslFiles = (JArray)JObject.Parse(wslManifest.ToJson())["files"];
+
+        AssertEqual(1, windowsFiles.Count, "windows session accepts equivalent wsl active-session file only");
+        AssertContains((string)windowsFiles[0], "manifest.json", "equivalent wsl manifest included");
+        AssertEqual(1, wslFiles.Count, "wsl session accepts equivalent windows active-session file only");
+        AssertContains((string)wslFiles[0], "summary.md", "equivalent windows summary included");
     }
 
     private static FrontSectorLedger BuildLedger()
@@ -15909,6 +16045,15 @@ static class Program
         if (startUtc != null)
             File.WriteAllText(Path.Combine(directory, "manifest.json"), "{\"startUtc\":\"" + startUtc + "\"}");
         return directory;
+    }
+
+    private static bool IsUnderDirectory(string path, string root)
+    {
+        string fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(fullPath, fullRoot, StringComparison.OrdinalIgnoreCase)
+            || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || fullPath.StartsWith(fullRoot + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void DeleteDirectoryQuietly(string path)

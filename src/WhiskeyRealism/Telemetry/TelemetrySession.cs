@@ -8,6 +8,18 @@ using Newtonsoft.Json.Linq;
 
 namespace WhiskeyRealism.Telemetry
 {
+    internal sealed class TelemetrySessionDirectory
+    {
+        internal TelemetrySessionDirectory(string sessionId, string directoryPath)
+        {
+            SessionId = string.IsNullOrWhiteSpace(sessionId) ? "session" : sessionId;
+            DirectoryPath = string.IsNullOrWhiteSpace(directoryPath) ? "." : directoryPath;
+        }
+
+        internal string SessionId { get; private set; }
+        internal string DirectoryPath { get; private set; }
+    }
+
     internal sealed class TelemetryRetentionCandidate
     {
         internal TelemetryRetentionCandidate(string directoryName, DateTime? manifestStartUtc, DateTime lastWriteUtc)
@@ -47,9 +59,44 @@ namespace WhiskeyRealism.Telemetry
 
         internal static string SessionDirectory(string gameRoot, string sessionId)
         {
-            return Path.Combine(
-                TuningLogRoot(gameRoot),
-                TelemetryEvent.Safe(sessionId));
+            return ContainedSessionDirectory(gameRoot, SafeSessionDirectoryName(sessionId));
+        }
+
+        internal static string SafeSessionDirectoryName(string sessionId)
+        {
+            string raw = string.IsNullOrWhiteSpace(sessionId) ? "session" : sessionId.Trim();
+            if (raw == "." || raw == "..")
+                return "session";
+
+            var builder = new StringBuilder(raw.Length);
+            bool lastWasDash = false;
+            for (int i = 0; i < raw.Length; i++)
+            {
+                char c = raw[i];
+                bool safe =
+                    (c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'z')
+                    || (c >= 'A' && c <= 'Z')
+                    || c == '-'
+                    || c == '_';
+
+                if (safe)
+                {
+                    builder.Append(c);
+                    lastWasDash = c == '-';
+                }
+                else if (!lastWasDash)
+                {
+                    builder.Append('-');
+                    lastWasDash = true;
+                }
+            }
+
+            string safeName = builder.ToString().Trim('-', '_');
+            if (string.IsNullOrWhiteSpace(safeName) || safeName == "." || safeName == "..")
+                return "session";
+
+            return safeName;
         }
 
         internal static string TuningLogRoot(string gameRoot)
@@ -66,6 +113,25 @@ namespace WhiskeyRealism.Telemetry
             string directory = SessionDirectory(gameRoot, sessionId);
             Directory.CreateDirectory(directory);
             return directory;
+        }
+
+        internal static TelemetrySessionDirectory CreateUniqueSessionDirectory(string gameRoot, string baseSessionId)
+        {
+            string safeBase = SafeSessionDirectoryName(baseSessionId);
+            for (int attempt = 0; attempt < 1000; attempt++)
+            {
+                string sessionId = attempt == 0
+                    ? safeBase
+                    : safeBase + "-r" + attempt.ToString("000", CultureInfo.InvariantCulture);
+                string directory = ContainedSessionDirectory(gameRoot, sessionId);
+                if (Directory.Exists(directory))
+                    continue;
+
+                Directory.CreateDirectory(directory);
+                return new TelemetrySessionDirectory(sessionId, directory);
+            }
+
+            throw new IOException("Unable to allocate a unique telemetry session directory.");
         }
 
         internal static List<TelemetryRetentionCandidate> ScanRetentionCandidates(string gameRoot)
@@ -103,7 +169,7 @@ namespace WhiskeyRealism.Telemetry
 
         internal static List<TelemetryRetentionCandidate> ApplyRetention(string gameRoot, string currentSessionId, int keepNewest)
         {
-            return DeleteRetentionCandidates(SelectRetentionDeletes(
+            return DeleteRetentionCandidates(gameRoot, SelectRetentionDeletes(
                 ScanRetentionCandidates(gameRoot),
                 keepNewest,
                 currentSessionId));
@@ -111,18 +177,38 @@ namespace WhiskeyRealism.Telemetry
 
         internal static List<TelemetryRetentionCandidate> DeleteRetentionCandidates(IEnumerable<TelemetryRetentionCandidate> candidates)
         {
+            // Rootless deletion cannot prove tuning-log containment; callers must use the root-scoped overload.
+            return new List<TelemetryRetentionCandidate>();
+        }
+
+        internal static List<TelemetryRetentionCandidate> DeleteRetentionCandidates(string gameRoot, IEnumerable<TelemetryRetentionCandidate> candidates)
+        {
             var deleted = new List<TelemetryRetentionCandidate>();
             if (candidates == null)
                 return deleted;
 
+            string root = CanonicalTuningLogRoot(gameRoot);
             foreach (var candidate in candidates)
             {
                 if (candidate == null || string.IsNullOrWhiteSpace(candidate.DirectoryPath) || !Directory.Exists(candidate.DirectoryPath))
                     continue;
 
+                string candidatePath;
                 try
                 {
-                    Directory.Delete(candidate.DirectoryPath, true);
+                    candidatePath = Path.GetFullPath(candidate.DirectoryPath);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!IsUnderDirectory(candidatePath, root) || string.Equals(NormalizeDirectory(candidatePath), NormalizeDirectory(root), StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                try
+                {
+                    Directory.Delete(candidatePath, true);
                     deleted.Add(candidate);
                 }
                 catch
@@ -162,7 +248,7 @@ namespace WhiskeyRealism.Telemetry
         internal static List<TelemetryRetentionCandidate> SelectRetentionDeletes(IEnumerable<TelemetryRetentionCandidate> candidates, int keepNewest, string currentSessionId)
         {
             var ordered = OrderRetentionCandidates(candidates);
-            string currentName = TelemetryEvent.Safe(currentSessionId);
+            string currentName = SafeSessionDirectoryName(currentSessionId);
             var retained = new HashSet<TelemetryRetentionCandidate>();
             int keep = Math.Max(string.IsNullOrWhiteSpace(currentName) ? 0 : 1, keepNewest);
 
@@ -210,6 +296,35 @@ namespace WhiskeyRealism.Telemetry
                 return byName;
 
             return right.LastWriteUtc.CompareTo(left.LastWriteUtc);
+        }
+
+        private static string ContainedSessionDirectory(string gameRoot, string safeSessionName)
+        {
+            string root = CanonicalTuningLogRoot(gameRoot);
+            string directory = Path.GetFullPath(Path.Combine(root, safeSessionName));
+            if (!IsUnderDirectory(directory, root) || string.Equals(NormalizeDirectory(directory), NormalizeDirectory(root), StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Telemetry session directory escaped the tuning log root.");
+
+            return directory;
+        }
+
+        private static string CanonicalTuningLogRoot(string gameRoot)
+        {
+            return Path.GetFullPath(TuningLogRoot(gameRoot));
+        }
+
+        private static bool IsUnderDirectory(string path, string root)
+        {
+            string fullPath = NormalizeDirectory(path);
+            string fullRoot = NormalizeDirectory(root);
+            return string.Equals(fullPath, fullRoot, StringComparison.OrdinalIgnoreCase)
+                || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || fullPath.StartsWith(fullRoot + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeDirectory(string path)
+        {
+            return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
 
         private static DateTime SafeDirectoryLastWriteUtc(string directory)

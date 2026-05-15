@@ -43,21 +43,37 @@ namespace WhiskeyRealism.Telemetry
             lock (_gate)
             {
                 long safeBytes = Math.Max(0L, estimatedBytes);
-                if (protectedSummary && IsCapSurvivingSummary(category))
-                    return true;
-
-                if (IsProtected(category))
-                {
-                    bool protectedAllowed = WithinTotalCap(safeBytes);
-                    if (!protectedAllowed)
-                        RecordDroppedLocked(category);
-                    return protectedAllowed;
-                }
-
-                bool allowed = lowPriority ? WithinCategoryCut(category, safeBytes) : WithinTotalCap(safeBytes);
+                bool allowed = CanEmitLocked(category, safeBytes, lowPriority, protectedSummary);
                 if (!allowed)
                     RecordDroppedLocked(category);
                 return allowed;
+            }
+        }
+
+        internal bool TryReserve(TelemetryCategory category, long estimatedBytes)
+        {
+            return TryReserve(category, estimatedBytes, lowPriority: true, protectedSummary: false);
+        }
+
+        internal bool TryReserve(TelemetryCategory category, long estimatedBytes, bool lowPriority)
+        {
+            return TryReserve(category, estimatedBytes, lowPriority, protectedSummary: false);
+        }
+
+        internal bool TryReserve(TelemetryCategory category, long estimatedBytes, bool lowPriority, bool protectedSummary)
+        {
+            lock (_gate)
+            {
+                long safeBytes = Math.Max(0L, estimatedBytes);
+                if (!CanEmitLocked(category, safeBytes, lowPriority, protectedSummary))
+                {
+                    RecordDroppedLocked(category);
+                    return false;
+                }
+
+                _emittedBytes += safeBytes;
+                _currentFileBytes += safeBytes;
+                return true;
             }
         }
 
@@ -121,6 +137,17 @@ namespace WhiskeyRealism.Telemetry
             long count;
             _droppedByCategory.TryGetValue(category, out count);
             _droppedByCategory[category] = count + 1L;
+        }
+
+        private bool CanEmitLocked(TelemetryCategory category, long estimatedBytes, bool lowPriority, bool protectedSummary)
+        {
+            if (protectedSummary && IsCapSurvivingSummary(category))
+                return true;
+
+            if (IsProtected(category))
+                return WithinTotalCap(estimatedBytes);
+
+            return lowPriority ? WithinCategoryCut(category, estimatedBytes) : WithinTotalCap(estimatedBytes);
         }
 
         private static bool IsProtected(TelemetryCategory category)

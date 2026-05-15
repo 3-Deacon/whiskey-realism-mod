@@ -235,7 +235,7 @@ namespace WhiskeyRealism.Telemetry
             if (string.IsNullOrWhiteSpace(file))
                 return false;
 
-            string normalized = file.Trim().Replace('\\', '/');
+            string normalized = NormalizeSessionDirectory(file);
             string sessionRoot = NormalizeSessionDirectory(sessionDirectory);
             if (string.IsNullOrWhiteSpace(sessionRoot))
                 return false;
@@ -258,7 +258,18 @@ namespace WhiskeyRealism.Telemetry
             if (string.IsNullOrWhiteSpace(sessionDirectory))
                 return string.Empty;
 
-            return sessionDirectory.Trim().Replace('\\', '/').TrimEnd('/');
+            string normalized = sessionDirectory.Trim().Replace('\\', '/');
+            if (normalized.Length >= 3 && normalized[1] == ':' && normalized[2] == '/')
+            {
+                char drive = char.ToLowerInvariant(normalized[0]);
+                if (drive >= 'a' && drive <= 'z')
+                    normalized = "/mnt/" + drive + normalized.Substring(2);
+            }
+
+            while (normalized.IndexOf("//", StringComparison.Ordinal) >= 0)
+                normalized = normalized.Replace("//", "/");
+
+            return normalized.TrimEnd('/');
         }
 
         internal static TelemetryIssueBundleManifest CreateManifest(string sessionId, IEnumerable<string> files, string note)
