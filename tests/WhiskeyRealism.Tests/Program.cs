@@ -73,6 +73,9 @@ static class Program
             ("telemetry writer sink failure rows use active identity", TelemetryWriterSinkFailureRowsUseActiveIdentity),
             ("telemetry runtime final manifest ignores late non final writes", TelemetryRuntimeFinalManifestIgnoresLateNonFinalWrites),
             ("telemetry runtime writes scoped issue bundle on shutdown", TelemetryRuntimeWritesScopedIssueBundleOnShutdown),
+            ("telemetry runtime final manifest reports issue bundle failure", TelemetryRuntimeFinalManifestReportsIssueBundleFailure),
+            ("telemetry writer bounds repeated sink failures", TelemetryWriterBoundsRepeatedSinkFailures),
+            ("telemetry router double shutdown is idempotent", TelemetryRouterDoubleShutdownIsIdempotent),
             ("telemetry profile parses unknown as off", TelemetryProfileParsesUnknownAsOff),
             ("telemetry behavior gates are independent from profile", TelemetryBehaviorGatesAreIndependentFromProfile),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
@@ -1461,6 +1464,130 @@ static class Program
         }
         finally
         {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryRuntimeFinalManifestReportsIssueBundleFailure()
+    {
+        string gameRoot = CreateTempDirectory();
+        var warnings = new List<string>();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: true,
+                warningCallback: warnings.Add);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            Directory.CreateDirectory(Path.Combine(sessionDirectory, "issue-bundle.json"));
+
+            runtime.Shutdown("bundle-failure");
+
+            string failuresPath = Path.Combine(sessionDirectory, "failures.jsonl");
+            AssertTrue(File.Exists(failuresPath), "issue bundle failure writes failures sidecar");
+            AssertContains(File.ReadAllText(failuresPath), "issue-bundle-write", "failure row records issue bundle reason");
+            JObject manifest = JObject.Parse(File.ReadAllText(Path.Combine(sessionDirectory, "manifest.json")));
+            AssertTrue(manifest["endUtc"].Type != JTokenType.Null, "final manifest keeps endUtc");
+            AssertTrue((long)manifest["droppedCounters"]["sinkFailures"] >= 1L, "final manifest records issue bundle sink failure");
+            AssertTrue(JsonArrayContainsSubstring((JArray)manifest["outputFiles"], "failures.jsonl"), "final manifest includes failure sidecar");
+            AssertTrue(warnings.Count >= 1, "issue bundle failure emits bounded warning callback");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryWriterBoundsRepeatedSinkFailures()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        var warnings = new List<string>();
+        try
+        {
+            Directory.Delete(sessionDirectory, true);
+            var queue = new TelemetryQueue(capacity: 16);
+            var budget = new TelemetryBudget(totalBytes: 4096, rotateBytes: 1024);
+            var writer = new TelemetryWriter(
+                queue,
+                budget,
+                sessionDirectory,
+                delegate { },
+                "missing-session",
+                TelemetryProfile.FullTuning,
+                warnings.Add);
+
+            writer.Start();
+            for (int i = 0; i < 5; i++)
+            {
+                queue.Enqueue(TelemetryEvent.Create(
+                    "missing-session",
+                    TelemetryProfile.FullTuning,
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Decision,
+                    "MissingSinkDecision",
+                    TelemetrySeverity.Info).WithDecision("hold", "missing-sink", "sig-" + i.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            writer.Signal();
+            AssertTrue(writer.StopAndFlush(1000), "writer stops with missing session directory");
+
+            AssertTrue(writer.SinkFailureCount >= 5L, "writer counts each failed row");
+            AssertTrue(warnings.Count <= 2, "sink warnings are bounded by failure mode");
+            AssertTrue(warnings.Count >= 1, "sink failure emits warning callback");
+            AssertFalse(Directory.Exists(sessionDirectory), "writer does not recreate missing session directory while failing");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryRouterDoubleShutdownIsIdempotent()
+    {
+        string gameRoot = CreateTempDirectory();
+        var warnings = new List<string>();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: true,
+                warningCallback: warnings.Add);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            TelemetryRouter.AttachRuntime(runtime);
+            AssertTrue(TelemetryRouter.Emit(TelemetryLayer.System, TelemetryCategory.Health, "RouterHealth", TelemetrySeverity.Info), "router emits before shutdown");
+
+            TelemetryRouter.Shutdown("plugin-destroy");
+            TelemetryRouter.Shutdown("application-quit");
+
+            AssertFalse(runtime.IsRunning, "runtime stopped after first router shutdown");
+            JObject manifest = JObject.Parse(File.ReadAllText(Path.Combine(sessionDirectory, "manifest.json")));
+            AssertTrue(manifest["endUtc"].Type != JTokenType.Null, "double shutdown manifest is parseable and final");
+            AssertEqual(0L, (long)manifest["droppedCounters"]["sinkFailures"], "double shutdown does not duplicate sink failures");
+            AssertEqual(0, warnings.Count, "double shutdown does not duplicate warnings");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
             DeleteDirectoryQuietly(gameRoot);
         }
     }

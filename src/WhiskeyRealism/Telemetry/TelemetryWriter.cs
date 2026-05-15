@@ -20,10 +20,14 @@ namespace WhiskeyRealism.Telemetry
         private readonly AutoResetEvent _signal = new AutoResetEvent(false);
         private readonly object _gate = new object();
         private readonly HashSet<string> _outputFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _warnedSinkFailureModes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _failureRowsAttempted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> _fileBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private readonly Thread _thread;
         private volatile bool _stopRequested;
         private long _sinkFailureCount;
+        private bool _fileSinkDisabled;
+        private bool _selfFailureFileWriteDisabled;
         private bool _shutdownTimeoutWarningEmitted;
 
         internal TelemetryWriter(
@@ -155,18 +159,30 @@ namespace WhiskeyRealism.Telemetry
 
         private void WriteRow(TelemetryEvent ev)
         {
-            WriteRow(ev, reportSinkFailure: true);
+            WriteRow(ev, reportSinkFailure: true, bypassSinkDisabled: false);
         }
 
-        private void WriteRow(TelemetryEvent ev, bool reportSinkFailure)
+        private RowWriteResult WriteRow(TelemetryEvent ev, bool reportSinkFailure)
+        {
+            return WriteRow(ev, reportSinkFailure, bypassSinkDisabled: false);
+        }
+
+        private RowWriteResult WriteRow(TelemetryEvent ev, bool reportSinkFailure, bool bypassSinkDisabled)
         {
             try
             {
+                if (!bypassSinkDisabled && IsFileSinkDisabled())
+                {
+                    if (reportSinkFailure)
+                        RecordSinkFailure("write-row-disabled", null);
+                    return RowWriteResult.SinkDisabled;
+                }
+
                 string json = TelemetryJson.ToJsonLine(ev);
                 long bytes = System.Text.Encoding.UTF8.GetByteCount(json);
                 string fileName = FileNameForNextWrite(ev, bytes);
                 if (!_budget.TryReserve(ev.Category, bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(ev)))
-                    return;
+                    return RowWriteResult.Dropped;
 
                 string path = Path.Combine(_sessionDirectory, fileName);
                 File.AppendAllText(path, json);
@@ -177,11 +193,18 @@ namespace WhiskeyRealism.Telemetry
                     _fileBytes.TryGetValue(fileName, out existing);
                     _fileBytes[fileName] = existing + bytes;
                 }
+
+                return RowWriteResult.Written;
             }
             catch (Exception ex)
             {
                 if (reportSinkFailure)
+                {
+                    DisableFileSink();
                     RecordSinkFailure("write-row", ex);
+                }
+
+                return RowWriteResult.SinkFailed;
             }
         }
 
@@ -204,12 +227,24 @@ namespace WhiskeyRealism.Telemetry
 
         private void RecordSinkFailure(string reason, Exception ex)
         {
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+            bool shouldAttemptFailureRow = false;
             lock (_gate)
+            {
                 _sinkFailureCount++;
+                if (!_selfFailureFileWriteDisabled && _failureRowsAttempted.Add(safeReason))
+                    shouldAttemptFailureRow = true;
+            }
+
+            if (!string.Equals(safeReason, "writer-shutdown-timeout", StringComparison.OrdinalIgnoreCase))
+                WarnSinkFailureOnce(safeReason, ex);
+
+            if (!shouldAttemptFailureRow)
+                return;
 
             try
             {
-                string message = ex == null ? reason : reason + ": " + ex.GetType().Name;
+                string message = ex == null ? safeReason : safeReason + ": " + ex.GetType().Name;
                 var failure = TelemetryEvent.Create(
                     _sessionId,
                     _profile,
@@ -219,7 +254,53 @@ namespace WhiskeyRealism.Telemetry
                     TelemetrySeverity.Warning)
                     .WithField("protectedSummary", true)
                     .WithField("reason", message);
-                WriteRow(failure, reportSinkFailure: false);
+                RowWriteResult result = WriteRow(failure, reportSinkFailure: false, bypassSinkDisabled: true);
+                if (result == RowWriteResult.SinkFailed || result == RowWriteResult.SinkDisabled)
+                    DisableSelfFailureWrites();
+            }
+            catch
+            {
+                DisableSelfFailureWrites();
+            }
+        }
+
+        private bool IsFileSinkDisabled()
+        {
+            lock (_gate)
+                return _fileSinkDisabled;
+        }
+
+        private void DisableFileSink()
+        {
+            lock (_gate)
+                _fileSinkDisabled = true;
+        }
+
+        private void DisableSelfFailureWrites()
+        {
+            lock (_gate)
+                _selfFailureFileWriteDisabled = true;
+        }
+
+        private void WarnSinkFailureOnce(string reason, Exception ex)
+        {
+            try
+            {
+                Action<string> callback = _warningCallback;
+                if (callback == null)
+                    return;
+
+                string safeReason = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+                lock (_gate)
+                {
+                    if (!_warnedSinkFailureModes.Add(safeReason))
+                        return;
+                }
+
+                string message = ex == null
+                    ? safeReason
+                    : safeReason + ": " + ex.GetType().Name;
+                callback("Telemetry sink failure (" + message + "); telemetry rows may be truncated.");
             }
             catch
             {
@@ -304,6 +385,14 @@ namespace WhiskeyRealism.Telemetry
             return category == TelemetryCategory.Failure
                 || category == TelemetryCategory.Health
                 || category == TelemetryCategory.Performance;
+        }
+
+        private enum RowWriteResult
+        {
+            Written,
+            Dropped,
+            SinkFailed,
+            SinkDisabled
         }
     }
 }

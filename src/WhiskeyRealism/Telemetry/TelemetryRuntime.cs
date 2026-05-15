@@ -204,15 +204,6 @@ namespace WhiskeyRealism.Telemetry
 
             try
             {
-                WriteManifest(DateTime.UtcNow);
-            }
-            catch (Exception ex)
-            {
-                Warn(_config, "Telemetry shutdown manifest failed closed: " + ex.GetType().Name);
-            }
-
-            try
-            {
                 WriteIssueBundleOnShutdown();
             }
             catch (Exception ex)
@@ -220,6 +211,15 @@ namespace WhiskeyRealism.Telemetry
                 if (_writer != null)
                     _writer.RecordRuntimeSinkFailure("issue-bundle-write", ex);
                 Warn(_config, "Telemetry issue bundle failed closed: " + ex.GetType().Name);
+            }
+
+            try
+            {
+                WriteManifest(DateTime.UtcNow);
+            }
+            catch (Exception ex)
+            {
+                Warn(_config, "Telemetry shutdown manifest failed closed: " + ex.GetType().Name);
             }
         }
 
