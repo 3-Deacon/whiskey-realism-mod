@@ -12,13 +12,14 @@ namespace WhiskeyRealism.Telemetry
             if (ev == null)
             {
                 ev = TelemetryEvent.Create(
-                    "-", TelemetryProfile.Unknown, TelemetryLayer.Unknown,
-                    TelemetryCategory.Event, "-", TelemetrySeverity.Info);
+                    "-", TelemetryProfile.Off, TelemetryLayer.System,
+                    TelemetryCategory.Health, "-", TelemetrySeverity.Debug);
             }
 
             var builder = new StringBuilder(384);
             builder.Append('{');
             AppendString(builder, "schema", TelemetryEvent.Schema, first: true);
+            AppendString(builder, "ts", ev.Utc.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture));
             AppendString(builder, "sessionId", ev.SessionId);
             AppendString(builder, "profile", ev.Profile.ToString());
             AppendString(builder, "layer", ev.Layer.ToString());

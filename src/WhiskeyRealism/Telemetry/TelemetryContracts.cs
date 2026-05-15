@@ -4,33 +4,37 @@ namespace WhiskeyRealism.Telemetry
 {
     internal enum TelemetryProfile
     {
-        Unknown = 0,
-        CampaignTuning = 1,
-        TacticalTuning = 2,
+        Off = 0,
+        TacticalTuning = 1,
+        CampaignTuning = 2,
         FullTuning = 3
     }
 
     internal enum TelemetryLayer
     {
-        Unknown = 0,
-        Campaign = 1,
-        Tactical = 2,
-        Strategic = 3
+        System = 0,
+        Tactical = 1,
+        Campaign = 2
     }
 
     internal enum TelemetryCategory
     {
-        Event = 0,
-        Decision = 1,
-        Failure = 2,
-        Performance = 3
+        Health = 0,
+        Failure = 1,
+        Performance = 2,
+        Decision = 3,
+        Gate = 4,
+        Write = 5,
+        State = 6,
+        Trace = 7
     }
 
     internal enum TelemetrySeverity
     {
-        Info = 0,
-        Warning = 1,
-        Error = 2
+        Debug = 0,
+        Info = 1,
+        Warning = 2,
+        Error = 3
     }
 
     internal sealed class TelemetryEvent
@@ -45,6 +49,7 @@ namespace WhiskeyRealism.Telemetry
             string eventName,
             TelemetrySeverity severity)
         {
+            Utc = DateTime.UtcNow;
             SessionId = Safe(sessionId);
             Profile = profile;
             Layer = layer;
@@ -65,6 +70,7 @@ namespace WhiskeyRealism.Telemetry
         }
 
         internal string SessionId { get; private set; }
+        internal DateTime Utc { get; private set; }
         internal TelemetryProfile Profile { get; private set; }
         internal TelemetryLayer Layer { get; private set; }
         internal TelemetryCategory Category { get; private set; }
@@ -131,7 +137,10 @@ namespace WhiskeyRealism.Telemetry
 
         internal TelemetryEvent WithDurationMs(double durationMs)
         {
-            DurationMs = TelemetryFields.SanitizeNumber(durationMs);
+            bool invalid = double.IsNaN(durationMs) || double.IsInfinity(durationMs);
+            DurationMs = invalid ? 0.0 : durationMs;
+            if (invalid)
+                Fields.Add("invalidFloat", true);
             return this;
         }
 

@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Reflection;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
@@ -16,9 +20,11 @@ static class Program
     {
         var tests = new (string name, Action run)[]
         {
+            ("telemetry enum contracts match plan", TelemetryEnumContractsMatchPlan),
             ("telemetry json writes required fields", TelemetryJsonWritesRequiredFields),
             ("telemetry json escapes strings safely", TelemetryJsonEscapesStringsSafely),
             ("telemetry fields sanitize nulls and nonfinite numbers", TelemetryFieldsSanitizeNullsAndNonfiniteNumbers),
+            ("telemetry duration marks invalid float", TelemetryDurationMarksInvalidFloat),
             ("telemetry decision requires input signature", TelemetryDecisionRequiresInputSignature),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
@@ -15155,6 +15161,33 @@ static class Program
         AssertEqual("asset:SeaHarbor:norfolk-harbor:3", negativeTopN);
     }
 
+    private static void TelemetryEnumContractsMatchPlan()
+    {
+        AssertEnumContract(typeof(TelemetryProfile),
+            ("Off", 0),
+            ("TacticalTuning", 1),
+            ("CampaignTuning", 2),
+            ("FullTuning", 3));
+        AssertEnumContract(typeof(TelemetryLayer),
+            ("System", 0),
+            ("Tactical", 1),
+            ("Campaign", 2));
+        AssertEnumContract(typeof(TelemetryCategory),
+            ("Health", 0),
+            ("Failure", 1),
+            ("Performance", 2),
+            ("Decision", 3),
+            ("Gate", 4),
+            ("Write", 5),
+            ("State", 6),
+            ("Trace", 7));
+        AssertEnumContract(typeof(TelemetrySeverity),
+            ("Debug", 0),
+            ("Info", 1),
+            ("Warning", 2),
+            ("Error", 3));
+    }
+
     private static void TelemetryJsonWritesRequiredFields()
     {
         var ev = TelemetryEvent.Create(
@@ -15167,9 +15200,35 @@ static class Program
             .WithDecision("Probe", "support-required", "sig-123");
         string json = TelemetryJson.ToJsonLine(ev);
         AssertContains(json, "\"schema\":\"wr.telemetry.v1\"", "schema");
+        AssertContains(json, "\"schema\":\"wr.telemetry.v1\",\"ts\":\"", "ts immediately after schema");
         AssertContains(json, "\"sessionId\":\"session-1\"", "session");
         AssertContains(json, "\"layer\":\"Tactical\"", "layer");
         AssertContains(json, "\"inputSignature\":\"sig-123\"", "input signature");
+        AssertTrue(json.EndsWith("\n"), "json line should end with newline");
+
+        var parsed = ParseJsonLine(json);
+        foreach (string required in new[]
+        {
+            "schema", "ts", "sessionId", "profile", "layer", "category", "event", "severity",
+            "campaignDate", "battleId", "side", "alliance", "unit", "phase", "durationMs",
+            "decision", "reason", "inputSignature", "fields"
+        })
+        {
+            AssertTrue(parsed.Property(required) != null, "missing required telemetry field " + required);
+        }
+
+        AssertEqual("wr.telemetry.v1", parsed.Value<string>("schema"), "schema json");
+        AssertEqual("session-1", parsed.Value<string>("sessionId"), "session json");
+        AssertEqual("TacticalTuning", parsed.Value<string>("profile"), "profile json");
+        AssertEqual("Tactical", parsed.Value<string>("layer"), "layer json");
+        AssertEqual("Decision", parsed.Value<string>("category"), "category json");
+        AssertEqual("CommandAssignment", parsed.Value<string>("event"), "event json");
+        AssertEqual("Info", parsed.Value<string>("severity"), "severity json");
+        AssertEqual("sig-123", parsed.Value<string>("inputSignature"), "input signature json");
+
+        string ts = parsed.Value<string>("ts");
+        var parsedTs = DateTime.ParseExact(ts, "o", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+        AssertEqual(DateTimeKind.Utc, parsedTs.Kind, "ts utc kind");
     }
 
     private static void TelemetryJsonEscapesStringsSafely()
@@ -15199,6 +15258,21 @@ static class Program
         AssertTrue(fields.GetBool("invalidFloat"), "invalid float marker");
     }
 
+    private static void TelemetryDurationMarksInvalidFloat()
+    {
+        var ev = TelemetryEvent.Create(
+            "s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical,
+            TelemetryCategory.Performance, "Duration", TelemetrySeverity.Warning)
+            .WithDurationMs(double.PositiveInfinity);
+
+        AssertEqual(0.0, ev.DurationMs, "duration sanitizes infinity");
+        AssertTrue(ev.Fields.GetBool("invalidFloat"), "duration invalid float marker");
+
+        var parsed = ParseJsonLine(TelemetryJson.ToJsonLine(ev));
+        AssertEqual(0.0, parsed.Value<double>("durationMs"), "json duration sanitizes infinity");
+        AssertTrue(parsed["fields"].Value<bool>("invalidFloat"), "json duration invalid float marker");
+    }
+
     private static void TelemetryDecisionRequiresInputSignature()
     {
         bool threw = false;
@@ -15214,6 +15288,27 @@ static class Program
             threw = true;
         }
         AssertTrue(threw, "decision rows must reject blank input signatures");
+    }
+
+    private static void AssertEnumContract(Type enumType, params (string name, int value)[] expected)
+    {
+        string[] names = Enum.GetNames(enumType);
+        AssertEqual(expected.Length, names.Length, enumType.Name + " enum member count");
+        for (int i = 0; i < expected.Length; i++)
+        {
+            AssertEqual(expected[i].name, names[i], enumType.Name + " enum member name " + i);
+            int actualValue = (int)Enum.Parse(enumType, expected[i].name);
+            AssertEqual(expected[i].value, actualValue, enumType.Name + "." + expected[i].name + " value");
+        }
+    }
+
+    private static JObject ParseJsonLine(string json)
+    {
+        using (var textReader = new StringReader(json))
+        using (var jsonReader = new JsonTextReader(textReader) { DateParseHandling = DateParseHandling.None })
+        {
+            return JObject.Load(jsonReader);
+        }
     }
 
     private static void AssertEqual<T>(T expected, T actual)
