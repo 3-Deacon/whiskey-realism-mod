@@ -10,6 +10,8 @@ namespace WhiskeyRealism.Telemetry
     {
         internal const int FlushIntervalMs = 250;
         internal const int FlushBatchSize = 256;
+        private const int FileWritePerfWindowMs = 1000;
+        private const int FileWritePerfWindowMinEvents = 2;
 
         private readonly TelemetryQueue _queue;
         private readonly TelemetryBudget _budget;
@@ -24,6 +26,7 @@ namespace WhiskeyRealism.Telemetry
         private readonly HashSet<string> _warnedSinkFailureModes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _failureRowsAttempted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> _fileBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        private readonly FileWritePerfAccumulator _fileWritePerf = new FileWritePerfAccumulator();
         private readonly Thread _thread;
         private volatile bool _stopRequested;
         private long _sinkFailureCount;
@@ -133,6 +136,10 @@ namespace WhiskeyRealism.Telemetry
             while (_queue.Count > 0 && DateTime.UtcNow < deadline)
                 FlushBatch(FlushBatchSize);
 
+            EmitPendingFileWritePerf(force: true);
+            while (_queue.Count > 0 && DateTime.UtcNow < deadline)
+                FlushBatch(FlushBatchSize);
+
             SafeWriteManifest();
         }
 
@@ -153,23 +160,36 @@ namespace WhiskeyRealism.Telemetry
                 return;
 
             bool hasNonPerformanceRow = HasNonPerformanceRow(rows);
-            var fileWritePerf = hasNonPerformanceRow ? new FileWritePerfAccumulator() : null;
             using (hasNonPerformanceRow
                 ? TelemetryPerf.Scope("telemetry.flush", TelemetryLayer.System, TelemetryCategory.Performance, 10.0)
                 : NoopDisposable.Instance)
             {
                 for (int i = 0; i < rows.Count; i++)
                 {
-                    RowWriteResult result = WriteRow(rows[i], fileWritePerf);
-                    if (fileWritePerf != null && IsFileWritePerfRow(rows[i]) && result != RowWriteResult.Written)
-                        fileWritePerf.RecordDropped();
+                    RowWriteResult result = WriteRow(rows[i], _fileWritePerf);
+                    if (IsFileWritePerfRow(rows[i]) && result != RowWriteResult.Written)
+                        _fileWritePerf.RecordDropped();
                 }
             }
 
-            if (fileWritePerf != null)
-                fileWritePerf.Emit();
+            if (hasNonPerformanceRow)
+                EmitPendingFileWritePerf(force: false);
 
             SafeWriteManifest();
+        }
+
+        private void EmitPendingFileWritePerf(bool force)
+        {
+            if (!_fileWritePerf.ShouldEmit(
+                force,
+                DateTime.UtcNow,
+                FlushBatchSize,
+                FileWritePerfWindowMs,
+                FileWritePerfWindowMinEvents))
+                return;
+
+            _fileWritePerf.Emit();
+            _fileWritePerf.Reset();
         }
 
         private void WriteRow(TelemetryEvent ev)
@@ -459,9 +479,11 @@ namespace WhiskeyRealism.Telemetry
             private long _eventsDropped;
             private long _bytesWritten;
             private double _durationMs;
+            private DateTime _firstRecordedUtc;
 
             internal void RecordWritten(double durationMs, long bytesWritten)
             {
+                MarkStarted();
                 _eventsEmitted++;
                 _bytesWritten += Math.Max(0L, bytesWritten);
                 _durationMs += TelemetryFields.SanitizedNumber(durationMs);
@@ -469,7 +491,25 @@ namespace WhiskeyRealism.Telemetry
 
             internal void RecordDropped()
             {
+                MarkStarted();
                 _eventsDropped++;
+            }
+
+            internal bool ShouldEmit(bool force, DateTime utcNow, int batchSize, int windowMs, int minWindowEvents)
+            {
+                long events = TotalEvents;
+                if (events <= 0L)
+                    return false;
+                if (force)
+                    return true;
+                if (events >= Math.Max(1, batchSize))
+                    return true;
+
+                int safeWindowMs = Math.Max(1, windowMs);
+                int safeMinWindowEvents = Math.Max(1, minWindowEvents);
+                return events >= safeMinWindowEvents
+                    && _firstRecordedUtc != default(DateTime)
+                    && (utcNow - _firstRecordedUtc).TotalMilliseconds >= safeWindowMs;
             }
 
             internal void Emit()
@@ -486,6 +526,26 @@ namespace WhiskeyRealism.Telemetry
                     _eventsEmitted,
                     _eventsDropped,
                     _bytesWritten);
+            }
+
+            internal void Reset()
+            {
+                _eventsEmitted = 0L;
+                _eventsDropped = 0L;
+                _bytesWritten = 0L;
+                _durationMs = 0.0;
+                _firstRecordedUtc = default(DateTime);
+            }
+
+            private long TotalEvents
+            {
+                get { return _eventsEmitted + _eventsDropped; }
+            }
+
+            private void MarkStarted()
+            {
+                if (_firstRecordedUtc == default(DateTime))
+                    _firstRecordedUtc = DateTime.UtcNow;
             }
         }
     }

@@ -72,6 +72,7 @@ static class Program
             ("telemetry writer reports shutdown timeout", TelemetryWriterReportsShutdownTimeout),
             ("telemetry writer sink failure rows use active identity", TelemetryWriterSinkFailureRowsUseActiveIdentity),
             ("telemetry writer aggregates file write performance", TelemetryWriterAggregatesFileWritePerformance),
+            ("telemetry runtime aggregates file write performance across small drains", TelemetryRuntimeAggregatesFileWritePerformanceAcrossSmallDrains),
             ("telemetry runtime final manifest ignores late non final writes", TelemetryRuntimeFinalManifestIgnoresLateNonFinalWrites),
             ("telemetry runtime writes scoped issue bundle on shutdown", TelemetryRuntimeWritesScopedIssueBundleOnShutdown),
             ("telemetry runtime final manifest reports issue bundle failure", TelemetryRuntimeFinalManifestReportsIssueBundleFailure),
@@ -1452,6 +1453,60 @@ static class Program
             TelemetryRouter.Shutdown("cleanup");
             DeleteDirectoryQuietly(gameRoot);
             DeleteDirectoryQuietly(writerSessionDirectory);
+        }
+    }
+
+    private static void TelemetryRuntimeAggregatesFileWritePerformanceAcrossSmallDrains()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            TelemetryRouter.AttachRuntime(runtime);
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            const int normalRows = 6;
+
+            for (int i = 0; i < normalRows; i++)
+            {
+                AssertTrue(runtime.TryEmit(TelemetryEvent.Create(
+                    runtime.SessionId,
+                    runtime.Profile,
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Decision,
+                    "SmallDrainDecision",
+                    TelemetrySeverity.Info).WithDecision("hold", "small-drain", "sig-" + i.ToString(CultureInfo.InvariantCulture))), "small drain row accepted");
+                WaitForUnflushedCount(runtime, 0, 1000);
+            }
+
+            TelemetryRouter.Shutdown("small-drain-performance-test");
+
+            string tactical = File.ReadAllText(Path.Combine(sessionDirectory, "tactical.jsonl"));
+            AssertEqual(normalRows, CountJsonLines(tactical), "small drain normal writer row count");
+
+            string performance = File.ReadAllText(Path.Combine(sessionDirectory, "performance.jsonl"));
+            int fileWriteScopes = CountPerformanceScope(performance, "telemetry.file-write");
+            AssertTrue(fileWriteScopes > 0, "small drain writer emits file write performance");
+            AssertTrue(fileWriteScopes < normalRows, "small drain file write performance is aggregated, not one row per normal row");
+            AssertEqual((double)normalRows + 1.0, SumPerformanceScopeNumber(performance, "telemetry.file-write", "eventsEmitted"), "small drain aggregate accounts for normal and shutdown rows");
+            AssertTrue(AnyPerformanceScopeWithNumberAtLeast(performance, "telemetry.file-write", "bytesWritten", 1.0), "small drain aggregate records bytes written");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteDirectoryQuietly(gameRoot);
         }
     }
 
@@ -16839,6 +16894,32 @@ static class Program
         }
 
         return false;
+    }
+
+    private static double SumPerformanceScopeNumber(string jsonl, string scope, string fieldName)
+    {
+        double sum = 0.0;
+        foreach (JObject fields in PerformanceScopeFields(jsonl, scope))
+        {
+            JToken value = fields[fieldName];
+            if (value != null)
+                sum += (double)value;
+        }
+
+        return sum;
+    }
+
+    private static void WaitForUnflushedCount(TelemetryRuntime runtime, int expected, int timeoutMs)
+    {
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (runtime.UnflushedCount == expected)
+                return;
+            System.Threading.Thread.Sleep(10);
+        }
+
+        AssertEqual(expected, runtime.UnflushedCount, "runtime unflushed count");
     }
 
     private static IEnumerable<JObject> PerformanceScopeFields(string jsonl, string scope)

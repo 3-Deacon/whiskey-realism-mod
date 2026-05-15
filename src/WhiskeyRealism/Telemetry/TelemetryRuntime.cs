@@ -251,13 +251,13 @@ namespace WhiskeyRealism.Telemetry
                         Warn(_config, "Telemetry summary failed closed: " + ex.GetType().Name);
                     }
                     _writer.Signal();
-                    lock (_gate)
-                        _shutdown = true;
                     if (!_writer.StopAndFlush(2500))
                     {
                         lock (_manifestGate)
                             _writerShutdownTimedOut = true;
                     }
+                    lock (_gate)
+                        _shutdown = true;
                 }
                 else
                 {
