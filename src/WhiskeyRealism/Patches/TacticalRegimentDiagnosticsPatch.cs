@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Telemetry;
 
 namespace WhiskeyRealism.Patches
 {
@@ -243,7 +244,7 @@ namespace WhiskeyRealism.Patches
                 }
             }
 
-            Plugin.Log.LogInfo(sb.ToString());
+            TelemetryRouter.LegacyInfo(sb.ToString(), TelemetryLayer.Tactical);
 
             if (_logCount + 1 >= MaxLinesPerBattle)
             {

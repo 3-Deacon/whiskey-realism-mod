@@ -682,7 +682,7 @@ namespace WhiskeyRealism.Patches
                         message += " delta=" + TacticalTelemetry.Delta(before, after);
                     }
 
-                    Plugin.Log.LogInfo(message);
+                    TelemetryRouter.LegacyInfo(message, TelemetryLayer.Tactical);
                 }
                 catch (Exception ex)
                 {
@@ -734,12 +734,12 @@ namespace WhiskeyRealism.Patches
                 OperationsDetailTelemetrySeconds,
                 verbose: false))
             {
-                Plugin.Log.LogInfo(TacticalOperationsTelemetry.OpsLedger(
+                TelemetryRouter.LegacyInfo(TacticalOperationsTelemetry.OpsLedger(
                     side,
                     army.CommanderMode,
                     operation,
                     strategic,
-                    commandOperations.Count));
+                    commandOperations.Count), TelemetryLayer.Tactical);
             }
 
             int validIdle = 0;
@@ -767,7 +767,7 @@ namespace WhiskeyRealism.Patches
                     OperationsDetailTelemetrySeconds,
                     verbose: false))
                 {
-                    Plugin.Log.LogInfo(TacticalOperationsTelemetry.CommandAssignment(side, state, operation, doctrineOrder));
+                    EmitCommandAssignmentTelemetry(side, state, operation, doctrineOrder, assignmentSignature);
                 }
 
                 Regiment group = FindCommandNodeGroup(state.NodeId);
@@ -809,7 +809,7 @@ namespace WhiskeyRealism.Patches
                     continue;
                 }
 
-                Plugin.Log.LogInfo(TacticalOperationsTelemetry.CommandPosture(side, state, decision, idle));
+                EmitCommandPostureTelemetry(side, state, decision, idle, postureSignature);
             }
 
             if (TacticalOperationsTelemetry.ShouldEmitInterval(
@@ -819,14 +819,89 @@ namespace WhiskeyRealism.Patches
                 OperationsSummaryTelemetrySeconds,
                 verbose: false))
             {
-                Plugin.Log.LogInfo(TacticalOperationsTelemetry.PostureSummary(
+                TelemetryRouter.LegacyInfo(TacticalOperationsTelemetry.PostureSummary(
                     side,
                     validIdle,
                     illegalIdle,
                     recoveringStuck,
                     activeAttacks,
-                    reservesWaiting));
+                    reservesWaiting), TelemetryLayer.Tactical);
             }
+        }
+
+        private static void EmitCommandAssignmentTelemetry(
+            int side,
+            CommandNodeOperationalState state,
+            OperationRecord operation,
+            CommandDoctrineOrder order,
+            string inputSignature)
+        {
+            TelemetryRouter.Emit(
+                TelemetryLayer.Tactical,
+                TelemetryCategory.Decision,
+                "TacticalCommandAssignment",
+                TelemetrySeverity.Info,
+                ev => ev
+                    .WithSide(side)
+                    .WithPhase(operation.Phase.ToString())
+                    .WithDecision(order.HasPurpose ? order.Task.ToString() : state.Task.ToString(),
+                        order.HasPurpose ? order.Reason : "doctrine-none",
+                        inputSignature)
+                    .WithField("node", TacticalOperationsTelemetry.SafeToken(state.NodeId))
+                    .WithField("echelon", state.Echelon.ToString())
+                    .WithField("role", state.Role.ToString())
+                    .WithField("task", state.Task.ToString())
+                    .WithField("taskState", state.TaskState.ToString())
+                    .WithField("objective", TacticalOperationsTelemetry.SafeToken(operation.PrimaryObjectiveId))
+                    .WithField("shape", operation.Shape.ToString())
+                    .WithField("doctrine", order.HasPurpose ? "present" : "none")
+                    .WithField("confidence", order.HasPurpose ? order.Confidence01 : 0f)
+                    .WithField("score", order.HasPurpose ? order.Confidence01 : 0f)
+                    .WithField("selectedTarget", order.HasPurpose ? TargetSignature(order.PrimaryTarget) : TacticalOperationsTelemetry.SafeToken(operation.PrimaryObjectiveId))
+                    .WithField("gateResult", "observe")
+                    .WithField("gateReason", order.HasPurpose ? order.Reason : "doctrine-none")
+                    .WithField("writeAction", "none")
+                    .WithField("writeResult", "not-attempted")
+                    .WithField("doctrineTask", order.HasPurpose ? order.Task.ToString() : "none")
+                    .WithField("sop", order.HasPurpose ? order.Sop.Authority.ToString() : "None")
+                    .WithField("risk", order.HasPurpose ? order.Sop.RiskBudget01 : 0f)
+                    .WithField("reacquire", order.HasPurpose ? order.Sop.ReacquireSeconds : 0f)
+                    .WithField("supportReq", order.HasPurpose && order.Sop.RequiresSupportBeforeMajorAttack)
+                    .WithField("fallbackReq", order.HasPurpose && order.Sop.RequiresFallbackIfPressed)
+                    .WithField("doctrineReason", order.HasPurpose ? order.Reason : "doctrine-none")
+                    .WithField("primary", order.HasPurpose ? TargetSignature(order.PrimaryTarget) : "none")
+                    .WithField("support", order.HasPurpose ? TargetSignature(order.SupportTarget) : "none")
+                    .WithField("fallback", order.HasPurpose ? TargetSignature(order.FallbackTarget) : "none")
+                    .WithField("idle", order.HasPurpose ? order.AllowedIdle.ToString() : "None"));
+        }
+
+        private static void EmitCommandPostureTelemetry(
+            int side,
+            CommandNodeOperationalState state,
+            PostureExecutionDecision decision,
+            TacticalIdleClassification idle,
+            string inputSignature)
+        {
+            TelemetryRouter.Emit(
+                TelemetryLayer.Tactical,
+                TelemetryCategory.Decision,
+                "TacticalCommandPosture",
+                TelemetrySeverity.Info,
+                ev => ev
+                    .WithSide(side)
+                    .WithDecision(decision.Action.ToString(), decision.Reason, inputSignature)
+                    .WithField("node", TacticalOperationsTelemetry.SafeToken(state.NodeId))
+                    .WithField("task", state.Task.ToString())
+                    .WithField("confidence", 1.0)
+                    .WithField("score", 1.0)
+                    .WithField("selectedTarget", decision.Target.ToString())
+                    .WithField("gateResult", decision.Action == PostureExecutionAction.NoWrite ? "observe" : "write")
+                    .WithField("gateReason", decision.Reason)
+                    .WithField("writeAction", decision.Action.ToString())
+                    .WithField("writeResult", "not-attempted")
+                    .WithField("target", decision.Target.ToString())
+                    .WithField("clearInterruptedPaths", decision.ClearInterruptedPaths)
+                    .WithField("idle", idle.ToString()));
         }
 
         private static void CountPosture(
@@ -1446,7 +1521,7 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, key, signature, Time.realtimeSinceStartup, minSeconds, verbose))
                 return;
 
-            Plugin.Log.LogInfo(message);
+            TelemetryRouter.LegacyInfo(message, TelemetryLayer.Tactical);
         }
 
         private static void EmitDecisionMatrix(
@@ -1477,26 +1552,7 @@ namespace WhiskeyRealism.Patches
                 if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "DecisionMatrixSummary", baseSignature, Time.realtimeSinceStartup, minSeconds, verbose))
                     return;
 
-                Plugin.Log.LogInfo("[TacticalDecisionMatrix] event=" + eventType +
-                    " row=battle side=" + context.Side +
-                    " alliance=" + context.Alliance +
-                    " macro=" + TacticalTelemetry.MacroName(context.MacroAi) +
-                    " groups=" + context.GroupCount +
-                    " charging=" + context.ChargingCount +
-                    " feud=" + context.FeudGroupCount +
-                    " reserves=" + context.ReserveGroupCount +
-                    " artillery=" + context.ArtilleryGroupCount +
-                    " fallback=" + context.FallbackCount +
-                    " retreating=" + context.RetreatingCount +
-                    " visibleEnemy=" + context.VisibleEnemyCount +
-                    " chains=" + context.ObjectiveChainCount +
-                    " forceBalance=" + BucketForObserver(context.ForceBalance) +
-                    " currentOdds=" + BucketForObserver(context.CurrentGlobalOdds) +
-                    " projectedOdds=" + BucketForObserver(context.ProjectedGlobalOdds) +
-                    " decisive=" + context.DecisiveSectorId +
-                    " odds=" + TacticalCurrentOrderSignature.Safe(context.OddsSummary) +
-                    " cap=" + maxRows +
-                    " dlcWl=" + SafeDlcWlActive());
+                EmitDecisionMatrixBattle(eventType, context, maxRows);
 
                 if (focusGroup != null)
                 {
@@ -1517,10 +1573,10 @@ namespace WhiskeyRealism.Patches
 
                 if (units.Count > maxRows)
                 {
-                    Plugin.Log.LogInfo("[TacticalDecisionMatrix] event=" + eventType +
+                    TelemetryRouter.LegacyInfo("[TacticalDecisionMatrix] event=" + eventType +
                         " row=truncated totalCandidates=" + units.Count +
                         " emitted=" + emitted +
-                        " cap=" + maxRows);
+                        " cap=" + maxRows, TelemetryLayer.Tactical);
                 }
             }
             catch (Exception ex)
@@ -1557,49 +1613,155 @@ namespace WhiskeyRealism.Patches
                     wlGuard.Allow))
                 : new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, vanillaStance, "command-scope");
 
-            Plugin.Log.LogInfo("[TacticalDecisionMatrix] event=" + eventType +
-                " row=group index=" + index +
-                " focus=" + focus +
-                " side=" + context.Side +
-                " macro=" + TacticalTelemetry.MacroName(context.MacroAi) +
-                " unit=" + SafeUnitName(group) +
-                " type=" + group.unittyp +
-                " top=" + group.istopunit +
-                " underCommander=" + group.dlcw_isundercommander +
-                " attachedUnderCommander=" + CountAttachedUnderCommander(group) +
-                " parent=" + SafeParentId(group) +
-                " aiStance=" + group.ai_stance +
-                " orderedStance=" + vanillaStance +
-                " whiskeyStanceKind=" + stanceDecision.Kind +
-                " whiskeyStance=" + stanceDecision.GroupStance +
-                " whiskeyReason=" + stanceDecision.Reason +
-                " wlGuard=" + (wlGuard.Allow ? "allow" : "deny") + ":" + wlGuard.Reason +
-                " orderFrictionAllows=" + orderFrictionAllows +
-                " sector=" + sector.SectorId +
-                " mission=" + sector.Mission +
-                " sectorOdds=" + BucketForObserver(sector.Odds) +
-                " own=" + BucketForObserver(sector.OwnStrength) +
-                " enemy=" + BucketForObserver(sector.EnemyStrength) +
-                " confidence=" + BucketForObserver(sector.Confidence) +
-                " movement=" + SafeMovementMode(group) +
-                " formation=" + FormatFormation(SafeFormation(group)) +
-                " orderedFormation=" + FormatFormation(SafeFormationOrdered(group)) +
-                " paths=" + SafeRegimentPaths(group) +
-                " pathInterrupted=" + group.pathinterrupted +
-                " queue=" + SafeOrderQueueCount(group) +
-                " activeMove=" + HasActiveMoveOrder(group) +
-                " receivedFire=" + MatrixReceivedFire(group) +
-                " visibleEnemy=" + MatrixClosestEnemy(group) +
-                " angleEnemy=" + BucketForObserver(MatrixEnemyAngleStrength(group)) +
-                " flankThreat=" + BucketForObserver(group.flanksthreated) +
-                " outflanked=" + group.outflanked +
-                " cover=" + BucketForObserver(group.covervalue) +
-                " fort=" + (group.fortinrange ? "1" : "0") +
-                " feud=" + group.ai_feudstance +
-                " objective=" + SafeCurrentObjectiveId(group) +
-                " position=" + PointSignature(SafePositionX(group), SafePositionZ(group)) +
-                " waypoint=" + PointSignature(SafeLastWaypointX(group), SafeLastWaypointZ(group)) +
-                " orderState=" + SafeOrderState(group));
+            EmitDecisionMatrixGroup(eventType, context, group, index, focus, sector, wlGuard, orderFrictionAllows, vanillaStance, stanceDecision);
+        }
+
+        private static void EmitDecisionMatrixBattle(
+            TacticalObservedEvent eventType,
+            TacticalBattleContext context,
+            int maxRows)
+        {
+            string inputSignature = TacticalTelemetry.DecisionInputSignature(
+                "TacticalDecisionMatrix:battle",
+                eventType,
+                context.Side,
+                context.Alliance,
+                context.MacroAi,
+                context.GroupCount,
+                context.ChargingCount,
+                context.FeudGroupCount,
+                context.ReserveGroupCount,
+                context.ArtilleryGroupCount,
+                context.FallbackCount,
+                context.RetreatingCount,
+                context.VisibleEnemyCount,
+                context.ObjectiveChainCount,
+                context.ForceBalance,
+                context.CurrentGlobalOdds,
+                context.ProjectedGlobalOdds,
+                context.DecisiveSectorId,
+                context.OddsSignature);
+
+            TelemetryRouter.Emit(
+                TelemetryLayer.Tactical,
+                TelemetryCategory.State,
+                "TacticalDecisionMatrix",
+                TelemetrySeverity.Info,
+                ev => ev
+                    .WithSide(context.Side)
+                    .WithAlliance(context.Alliance)
+                    .WithDecision("battle", eventType.ToString(), inputSignature)
+                    .WithField("confidence", 1.0)
+                    .WithField("score", context.CurrentGlobalOdds)
+                    .WithField("selectedTarget", context.DecisiveSectorId)
+                    .WithField("gateResult", "observe")
+                    .WithField("gateReason", eventType.ToString())
+                    .WithField("writeAction", "none")
+                    .WithField("writeResult", "not-attempted")
+                    .WithField("row", "battle")
+                    .WithField("macro", TacticalTelemetry.MacroName(context.MacroAi))
+                    .WithField("groups", context.GroupCount)
+                    .WithField("charging", context.ChargingCount)
+                    .WithField("feud", context.FeudGroupCount)
+                    .WithField("reserves", context.ReserveGroupCount)
+                    .WithField("artillery", context.ArtilleryGroupCount)
+                    .WithField("fallback", context.FallbackCount)
+                    .WithField("retreating", context.RetreatingCount)
+                    .WithField("visibleEnemy", context.VisibleEnemyCount)
+                    .WithField("chains", context.ObjectiveChainCount)
+                    .WithField("forceBalance", context.ForceBalance)
+                    .WithField("currentOdds", context.CurrentGlobalOdds)
+                    .WithField("projectedOdds", context.ProjectedGlobalOdds)
+                    .WithField("decisive", context.DecisiveSectorId)
+                    .WithField("odds", TacticalCurrentOrderSignature.Safe(context.OddsSummary))
+                    .WithField("cap", maxRows)
+                    .WithField("dlcWl", SafeDlcWlActive()));
+        }
+
+        private static void EmitDecisionMatrixGroup(
+            TacticalObservedEvent eventType,
+            TacticalBattleContext context,
+            Regiment group,
+            int index,
+            bool focus,
+            TacticalSectorAssessment sector,
+            TacticalWlGuardDecision wlGuard,
+            bool orderFrictionAllows,
+            int vanillaStance,
+            TacticalGroupStanceDecision stanceDecision)
+        {
+            string inputSignature = TacticalTelemetry.DecisionInputSignature(
+                "TacticalDecisionMatrix:group",
+                eventType,
+                context.Side,
+                context.MacroAi,
+                SafeInstanceId(group),
+                group.unittyp,
+                group.ai_stance,
+                vanillaStance,
+                sector.SectorId,
+                sector.Mission,
+                sector.Odds,
+                sector.Confidence,
+                wlGuard.Allow,
+                orderFrictionAllows,
+                SafeOrderState(group));
+
+            TelemetryRouter.Emit(
+                TelemetryLayer.Tactical,
+                TelemetryCategory.State,
+                "TacticalDecisionMatrix",
+                TelemetrySeverity.Info,
+                ev => ev
+                    .WithSide(context.Side)
+                    .WithUnit(SafeUnitName(group))
+                    .WithDecision(stanceDecision.Kind.ToString(), stanceDecision.Reason, inputSignature)
+                    .WithField("confidence", sector.Confidence)
+                    .WithField("score", sector.Odds)
+                    .WithField("selectedTarget", sector.SectorId)
+                    .WithField("gateResult", (wlGuard.Allow && orderFrictionAllows) ? "allow" : "deny")
+                    .WithField("gateReason", (wlGuard.Allow ? "wl-allow" : wlGuard.Reason) + "|" + (orderFrictionAllows ? "order-friction-allow" : "order-friction-deny"))
+                    .WithField("writeAction", "none")
+                    .WithField("writeResult", "not-attempted")
+                    .WithField("row", "group")
+                    .WithField("index", index)
+                    .WithField("focus", focus)
+                    .WithField("macro", TacticalTelemetry.MacroName(context.MacroAi))
+                    .WithField("type", group.unittyp)
+                    .WithField("top", group.istopunit)
+                    .WithField("underCommander", group.dlcw_isundercommander)
+                    .WithField("attachedUnderCommander", CountAttachedUnderCommander(group))
+                    .WithField("parent", SafeParentId(group))
+                    .WithField("aiStance", group.ai_stance)
+                    .WithField("orderedStance", vanillaStance)
+                    .WithField("whiskeyStance", stanceDecision.GroupStance)
+                    .WithField("wlGuard", (wlGuard.Allow ? "allow" : "deny") + ":" + wlGuard.Reason)
+                    .WithField("orderFrictionAllows", orderFrictionAllows)
+                    .WithField("sector", sector.SectorId)
+                    .WithField("mission", sector.Mission.ToString())
+                    .WithField("sectorOdds", sector.Odds)
+                    .WithField("own", sector.OwnStrength)
+                    .WithField("enemy", sector.EnemyStrength)
+                    .WithField("confidence", sector.Confidence)
+                    .WithField("movement", SafeMovementMode(group))
+                    .WithField("formation", FormatFormation(SafeFormation(group)))
+                    .WithField("orderedFormation", FormatFormation(SafeFormationOrdered(group)))
+                    .WithField("paths", SafeRegimentPaths(group))
+                    .WithField("pathInterrupted", group.pathinterrupted)
+                    .WithField("queue", SafeOrderQueueCount(group))
+                    .WithField("activeMove", HasActiveMoveOrder(group))
+                    .WithField("receivedFire", MatrixReceivedFire(group))
+                    .WithField("visibleEnemy", MatrixClosestEnemy(group))
+                    .WithField("angleEnemy", MatrixEnemyAngleStrength(group))
+                    .WithField("flankThreat", group.flanksthreated)
+                    .WithField("outflanked", group.outflanked)
+                    .WithField("cover", group.covervalue)
+                    .WithField("fort", group.fortinrange)
+                    .WithField("feud", group.ai_feudstance)
+                    .WithField("objective", SafeCurrentObjectiveId(group))
+                    .WithField("position", PointSignature(SafePositionX(group), SafePositionZ(group)))
+                    .WithField("waypoint", PointSignature(SafeLastWaypointX(group), SafeLastWaypointZ(group)))
+                    .WithField("orderState", SafeOrderState(group)));
         }
 
         private static TacticalSectorAssessment BuildMatrixSector(Regiment group, int index)
@@ -2678,6 +2840,11 @@ namespace WhiskeyRealism.Patches
         private static string PointSignature(float x, float z)
         {
             return "x=" + BucketForObserver(x) + ",z=" + BucketForObserver(z);
+        }
+
+        private static string TargetSignature(DoctrineTargetPoint target)
+        {
+            return target.HasValue ? PointSignature(target.X, target.Z) : "none";
         }
 
         private static float XzDistance(float ax, float az, float bx, float bz)

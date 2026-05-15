@@ -135,7 +135,10 @@ namespace WhiskeyRealism.Telemetry
                 }
 
                 if (!ShouldEmit(profile, layer, category))
+                {
+                    NoteTuningSuppressedByProfile(profile, category);
                     return false;
+                }
                 if (runtime == null || !runtime.IsRunning)
                     return false;
 
@@ -161,8 +164,14 @@ namespace WhiskeyRealism.Telemetry
         {
             try
             {
-                if (ev == null || !ShouldEmit(ev.Profile, ev.Layer, ev.Category))
+                if (ev == null)
                     return false;
+
+                if (!ShouldEmit(ev.Profile, ev.Layer, ev.Category))
+                {
+                    NoteTuningSuppressedByProfile(ev.Profile, ev.Category);
+                    return false;
+                }
 
                 TelemetryRuntime runtime;
                 lock (Gate)
@@ -267,7 +276,7 @@ namespace WhiskeyRealism.Telemetry
                 bool protectMainLog = !emitted && ShouldProtectLegacyMainLog(route, severity);
 
                 if (profile == TelemetryProfile.Off && !route.AllowMainLog && !protectMainLog)
-                    NoteLegacySuppressedByProfile();
+                    NoteTuningSuppressedByProfile(profile, route.Category);
 
                 return route.AllowMainLog || protectMainLog;
             }
@@ -284,8 +293,11 @@ namespace WhiskeyRealism.Telemetry
                 || severity >= TelemetrySeverity.Warning;
         }
 
-        private static void NoteLegacySuppressedByProfile()
+        private static void NoteTuningSuppressedByProfile(TelemetryProfile profile, TelemetryCategory category)
         {
+            if (profile != TelemetryProfile.Off || IsProtected(category))
+                return;
+
             bool shouldWarn = false;
             lock (Gate)
             {
@@ -305,7 +317,7 @@ namespace WhiskeyRealism.Telemetry
                 if (Plugin.Log != null)
                 {
                     Plugin.Log.LogWarning(
-                        "[Telemetry] tuning telemetry disabled by profile; suppressing sidecar-only legacy tuning log lines");
+                        "[Telemetry] tuning telemetry disabled by profile; suppressing sidecar-only tuning telemetry rows");
                 }
             }
             catch

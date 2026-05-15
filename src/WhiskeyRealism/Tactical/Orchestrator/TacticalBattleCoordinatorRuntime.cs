@@ -74,18 +74,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 int suppressed = (suppressedAllianceId == 0 || suppressedAllianceId == 1) ? 1 : 0;
                 int activated = 2 - suppressed;
-                Plugin.Log.LogInfo("[TacticalCommanderRoster] alliance=0 total=" + roster.GetSide(0).Count
-                    + " matched=" + MatchedCount(roster, 0) + " unknown=" + UnknownCount(roster, 0));
-                Plugin.Log.LogInfo("[TacticalCommanderRoster] alliance=1 total=" + roster.GetSide(1).Count
-                    + " matched=" + MatchedCount(roster, 1) + " unknown=" + UnknownCount(roster, 1));
+                TelemetryRouter.LegacyInfo("[TacticalCommanderRoster] alliance=0 total=" + roster.GetSide(0).Count
+                    + " matched=" + MatchedCount(roster, 0) + " unknown=" + UnknownCount(roster, 0), TelemetryLayer.Tactical);
+                TelemetryRouter.LegacyInfo("[TacticalCommanderRoster] alliance=1 total=" + roster.GetSide(1).Count
+                    + " matched=" + MatchedCount(roster, 1) + " unknown=" + UnknownCount(roster, 1), TelemetryLayer.Tactical);
                 foreach (var entry in roster.GetSide(0))
                     if (!entry.MatchedHistoricalRegistry)
-                        Plugin.Log.LogInfo("[TacticalCommanderUnknown] echelon=" + entry.Echelon
-                            + " name=" + (string.IsNullOrEmpty(entry.Name) ? "<null>" : entry.Name));
+                        TelemetryRouter.LegacyInfoToMainLogIfAllowed("[TacticalCommanderUnknown] echelon=" + entry.Echelon
+                            + " name=" + (string.IsNullOrEmpty(entry.Name) ? "<null>" : entry.Name), TelemetryLayer.Tactical);
                 foreach (var entry in roster.GetSide(1))
                     if (!entry.MatchedHistoricalRegistry)
-                        Plugin.Log.LogInfo("[TacticalCommanderUnknown] echelon=" + entry.Echelon
-                            + " name=" + (string.IsNullOrEmpty(entry.Name) ? "<null>" : entry.Name));
+                        TelemetryRouter.LegacyInfoToMainLogIfAllowed("[TacticalCommanderUnknown] echelon=" + entry.Echelon
+                            + " name=" + (string.IsNullOrEmpty(entry.Name) ? "<null>" : entry.Name), TelemetryLayer.Tactical);
                 OnceLog.Info("orch-bootstrap", "[TacticalOrchestrator] bootstrap sidesActive=" + activated
                     + " sidesSuppressed=" + suppressed);
             }
@@ -388,7 +388,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (allianceId < 0 || allianceId >= 2)
                     {
                         if (allianceId >= 2)
-                            Plugin.Log.LogInfo("[TacticalOrchestrator] skipping side=" + side + " alliance=" + allianceId + " (Europe/non-belligerent)");
+                            TelemetryRouter.LegacyInfo("[TacticalOrchestrator] skipping side=" + side + " alliance=" + allianceId + " (Europe/non-belligerent)", TelemetryLayer.Tactical);
                         continue;
                     }
                     int commanderId = SafeCommanderId(bunits, side);
@@ -486,10 +486,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             army.PickInitialPlan(evidence);
             if (army.HasPlan)
             {
-                Plugin.Log.LogInfo("[TacticalPlan] " + SideLogContext(side.AllianceId)
+                TelemetryRouter.LegacyInfo("[TacticalPlan] " + SideLogContext(side.AllianceId)
                     + " plan=" + army.CurrentPlan.PlanId
                     + " phase=" + army.CurrentPlan.Phase
-                    + " mainEffort=" + army.CurrentPlan.MainEffortSector);
+                    + " mainEffort=" + army.CurrentPlan.MainEffortSector, TelemetryLayer.Tactical);
             }
         }
 
@@ -515,11 +515,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 string parentCommandId = snapshots.Count > 0 ? snapshots[0].ParentArmyId : string.Empty;
                 var parentCommand = ResolveCommandLabelById(parentCommandId, "army-");
-                Plugin.Log.LogInfo("[TacticalDirectChildDiscovery] " + SideLogContext(side.AllianceId, parentCommand, default(CommandLogLabel))
+                TelemetryRouter.LegacyInfo("[TacticalDirectChildDiscovery] " + SideLogContext(side.AllianceId, parentCommand, default(CommandLogLabel))
                     + " parentCommandId=" + SafeLog(parentCommandId)
                     + " shift=" + (snapshots.Count > 0 ? snapshots[0].CommandHierarchyShift : 0)
                     + " children=" + snapshots.Count
-                    + " synthetic=" + IsSynthetic(snapshots));
+                    + " synthetic=" + IsSynthetic(snapshots), TelemetryLayer.Tactical);
             }
             catch (Exception e)
             {
@@ -626,11 +626,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 _commandTreeTelemetrySignatures[key] = signature;
                 var root = ResolveRootCommandLabel(tree);
-                Plugin.Log.LogInfo("[TacticalCommandTree] " + SideLogContext(allianceId, root, root)
+                TelemetryRouter.LegacyInfo("[TacticalCommandTree] " + SideLogContext(allianceId, root, root)
                     + " nodes=" + tree.Nodes.Count
                     + " maxDepth=" + tree.MaxDepth
                     + " unittyps=" + tree.RawUnitTypDistribution
-                    + " missingParents=" + tree.MissingParentCount);
+                    + " missingParents=" + tree.MissingParentCount, TelemetryLayer.Tactical);
             }
             catch { }
         }

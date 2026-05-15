@@ -215,7 +215,8 @@ namespace WhiskeyRealism.Telemetry
             return line.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0
                 || line.IndexOf("failure", StringComparison.OrdinalIgnoreCase) >= 0
                 || line.IndexOf("exception", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("missing", StringComparison.OrdinalIgnoreCase) >= 0
+                || line.IndexOf("missing-anchor", StringComparison.OrdinalIgnoreCase) >= 0
+                || line.IndexOf("missing required", StringComparison.OrdinalIgnoreCase) >= 0
                 || line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0
                 || line.IndexOf("fatal", StringComparison.OrdinalIgnoreCase) >= 0;
         }

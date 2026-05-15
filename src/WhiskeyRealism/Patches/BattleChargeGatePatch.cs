@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -16,6 +18,8 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "MicroAICheckForCharges")]
     internal static class BattleChargeGatePatch
     {
+        private static readonly object TelemetryGate = new object();
+        private static readonly HashSet<string> _typedDenyTelemetryKeys = new HashSet<string>();
         private static FieldInfo _bunitsField;
         private static FieldInfo _isPlayerAiOrFeudField;
         private static bool _missingRequiredAnchorLogged;
@@ -861,18 +865,61 @@ namespace WhiskeyRealism.Patches
             bool screenRoutedTargetVisible)
         {
             OnceLog.Info("tactical-orchestrator-charge-gate", "BattleChargeGatePatch orchestrator branch wired");
-            OnceLog.Info(
-                "tactical-orchestrator-charge-gate:deny:" + SafeName(unit),
-                "[TacticalOrchestratorChargeGate] action=deny" +
-                " role=" + decision.Role +
-                " reason=" + decision.Reason +
-                " resolutionReason=" + context.Resolution.Reason +
-                " primarySector=" + SafePrimarySector(context.Resolution) +
-                " localOdds=" + context.LocalOdds +
-                " mainEffortSupportAvailable=" + context.MainEffortSupportAvailable +
-                " screenRoutedTargetVisible=" + screenRoutedTargetVisible +
-                " unit=" + SafeName(unit) + "#" + SafeInstanceId(unit) +
-                " group=" + SafeName(group) + "#" + SafeInstanceId(group));
+            string inputSignature = TacticalTelemetry.DecisionInputSignature(
+                "TacticalOrchestratorChargeGate",
+                SafeInstanceId(unit),
+                SafeInstanceId(group),
+                decision.Role,
+                context.Resolution.Reason,
+                SafePrimarySector(context.Resolution),
+                context.LocalOdds,
+                context.MainEffortSupportAvailable,
+                screenRoutedTargetVisible);
+            if (!MarkTypedDenyTelemetryOnce("orchestrator:" + SafeInstanceId(unit)))
+                return;
+
+            TelemetryRouter.Emit(
+                TelemetryLayer.Tactical,
+                TelemetryCategory.Gate,
+                "TacticalOrchestratorChargeGate",
+                TelemetrySeverity.Info,
+                ev => ev
+                    .WithUnit(SafeName(unit))
+                    .WithDecision("deny", decision.Reason, inputSignature)
+                    .WithField("confidence", 1.0)
+                    .WithField("score", context.LocalOdds)
+                    .WithField("selectedTarget", "primarySector=" + SafePrimarySector(context.Resolution))
+                    .WithField("gateResult", "deny")
+                    .WithField("gateReason", decision.Reason)
+                    .WithField("writeAction", "MicroAICheckForCharges")
+                    .WithField("writeResult", "suppressed")
+                    .WithField("role", decision.Role.ToString())
+                    .WithField("resolutionReason", context.Resolution.Reason)
+                    .WithField("primarySector", SafePrimarySector(context.Resolution))
+                    .WithField("localOdds", context.LocalOdds)
+                    .WithField("mainEffortSupportAvailable", context.MainEffortSupportAvailable)
+                    .WithField("screenRoutedTargetVisible", screenRoutedTargetVisible)
+                    .WithField("unit", SafeName(unit) + "#" + SafeInstanceId(unit))
+                    .WithField("group", SafeName(group) + "#" + SafeInstanceId(group)));
+        }
+
+        private static bool MarkTypedDenyTelemetryOnce(string key)
+        {
+            try
+            {
+                lock (TelemetryGate)
+                {
+                    if (_typedDenyTelemetryKeys.Contains(key))
+                        return false;
+
+                    _typedDenyTelemetryKeys.Add(key);
+                    return true;
+                }
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static int SafePrimarySector(CommandIntentResolution resolution)

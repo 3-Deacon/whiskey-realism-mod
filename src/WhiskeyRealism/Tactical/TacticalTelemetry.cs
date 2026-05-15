@@ -102,6 +102,19 @@ namespace WhiskeyRealism.Tactical
                    "|" + Safe(context.OddsSignature);
         }
 
+        public static string DecisionInputSignature(string eventName, params object[] inputs)
+        {
+            var parts = new List<string>();
+            parts.Add(Safe(eventName));
+            if (inputs == null || inputs.Length == 0)
+                return string.Join("|", parts.ToArray());
+
+            for (int i = 0; i < inputs.Length; i++)
+                parts.Add(FormatSignatureValue(inputs[i]));
+
+            return string.Join("|", parts.ToArray());
+        }
+
         public static bool ShouldEmit(
             IDictionary<string, float> lastEmittedAt,
             string key,
@@ -163,6 +176,20 @@ namespace WhiskeyRealism.Tactical
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return "0.0";
             return (Math.Round(value * 2f) / 2f).ToString("0.0");
+        }
+
+        private static string Bucket(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value)) return "0.0";
+            return (Math.Round(value * 2.0) / 2.0).ToString("0.0");
+        }
+
+        private static string FormatSignatureValue(object value)
+        {
+            if (value == null) return "-";
+            if (value is float f) return Bucket(f);
+            if (value is double d) return Bucket(d);
+            return Safe(value.ToString());
         }
 
         private static string Safe(string value)

@@ -7,6 +7,7 @@ using UnityEngine;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -499,13 +500,13 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "b6a-intent", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalIntent] side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalIntent] side=" + side +
                 " intent=" + intent.Intent +
                 " posture=" + input.OperationPosture +
                 " commanderInit=" + input.CommanderInitiative01.ToString("0.00") +
                 " macro=" + macro +
                 " reason=" + intent.Reason +
-                " confidence=" + input.OddsConfidence.ToString("0.00"));
+                " confidence=" + input.OddsConfidence.ToString("0.00"), TelemetryLayer.Tactical);
         }
 
         private static void EmitPlaybook(int side, TacticalPlaybookDecision decision)
@@ -514,7 +515,7 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "b6a-playbook", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalPlaybook] side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalPlaybook] side=" + side +
                 " playbook=" + decision.Playbook +
                 " main=" + decision.MainEffortSectorId +
                 " refuse=" + decision.RefusedFlank +
@@ -522,7 +523,7 @@ namespace WhiskeyRealism.Patches
                 " fix=" + Join(decision.FixSectorIds) +
                 " hold=" + Join(decision.HoldSectorIds) +
                 " reserve=" + decision.ReservePolicy +
-                " reason=" + decision.Reason);
+                " reason=" + decision.Reason, TelemetryLayer.Tactical);
         }
 
         private static void EmitReaction(int side, Regiment group, TacticalLocalReactionDecision decision)
@@ -532,12 +533,12 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "b6c-reaction", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalLocalReaction] side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalLocalReaction] side=" + side +
                 " group=" + SafeName(group) + "#" + id +
                 " reaction=" + decision.Reaction +
                 " reliefRequested=" + (decision.ReliefRequested ? 1 : 0) +
                 " reason=" + decision.Reason +
-                " confidence=" + decision.Confidence.ToString("0.00"));
+                " confidence=" + decision.Confidence.ToString("0.00"), TelemetryLayer.Tactical);
         }
 
         private static void EmitReserveIntent(int side, TacticalReserveIntentDecision decision)
@@ -546,11 +547,11 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "b6c-reserve-intent", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalReserveIntent] side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalReserveIntent] side=" + side +
                 " intent=" + decision.Intent +
                 " allowsMutation=" + (decision.AllowsRuntimeMutation ? 1 : 0) +
                 " reason=" + decision.Reason +
-                " confidence=" + decision.Confidence.ToString("0.00"));
+                " confidence=" + decision.Confidence.ToString("0.00"), TelemetryLayer.Tactical);
         }
 
         private static string Join(int[] values)

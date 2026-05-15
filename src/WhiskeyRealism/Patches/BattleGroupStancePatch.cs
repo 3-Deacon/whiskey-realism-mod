@@ -7,6 +7,7 @@ using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -271,12 +272,12 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "group-doctrine-consumer", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalGroupDecision] side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalGroupDecision] side=" + side +
                 " group=" + SafeInstanceId(group) +
                 " stance=" + stance +
                 " doctrineTask=" + order.Task +
                 " action=" + decision.Action +
-                " reason=" + decision.Reason);
+                " reason=" + decision.Reason, TelemetryLayer.Tactical);
         }
 
         private static void LogLedgerTaskDecision(int side, Regiment group, CommandNodeOperationalState state, int stance)
@@ -285,12 +286,12 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "group-ledger-task", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalGroupDecision] side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalGroupDecision] side=" + side +
                 " group=" + SafeInstanceId(group) +
                 " stance=" + stance +
                 " ledgerTask=" + state.Task +
                 " ledgerRole=" + state.Role +
-                " reason=operations-ledger-task");
+                " reason=operations-ledger-task", TelemetryLayer.Tactical);
         }
 
         private static bool IsExplicitChargeDenial(TacticalLocalReactionDecision reaction)
@@ -317,10 +318,10 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "b6c-charge-deny-stance", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalChargeDeny] surface=stance side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalChargeDeny] surface=stance side=" + side +
                 " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
                 " reaction=" + reaction.Reaction +
-                " reason=" + reaction.Reason);
+                " reason=" + reaction.Reason, TelemetryLayer.Tactical);
         }
 
         private static void LogChargePreserved(int side, Regiment group, string reason)
@@ -329,9 +330,9 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "b6c-charge-preserved", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalChargePreserved] surface=stance side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalChargePreserved] surface=stance side=" + side +
                 " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
-                " reason=" + reason);
+                " reason=" + reason, TelemetryLayer.Tactical);
         }
 
         private static TacticalSectorAssessment BuildGroupSector(Regiment group, int index)
@@ -441,14 +442,14 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "group-decision", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalGroupDecision] side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalGroupDecision] side=" + side +
                 " group=" + SafeInstanceId(group) +
                 " sector=" + sector.SectorId +
                 " stance=" + decision.GroupStance +
                 " mission=" + sector.Mission +
                 " reason=" + decision.Reason +
                 " odds=" + sector.Odds.ToString("0.00") +
-                " confidence=" + sector.Confidence.ToString("0.00"));
+                " confidence=" + sector.Confidence.ToString("0.00"), TelemetryLayer.Tactical);
         }
 
         private static bool Enabled()

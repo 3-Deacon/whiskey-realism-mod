@@ -2405,19 +2405,32 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastTelemetryAt, key, signature, Time.realtimeSinceStartup, TelemetrySeconds, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalCommandPosture] side=" + side +
-                " node=" + TacticalOperationsTelemetry.SafeToken(state.NodeId) +
-                " group=" + SafeName(group) + "#" + SafeInstanceId(group) +
-                " task=" + state.Task +
-                " decision=" + decision.Action +
-                " target=" + decision.Target +
-                " applied=" + applied +
-                " reason=" + TacticalOperationsTelemetry.SafeToken(reason) +
-                " currentFormation=" + SafeGroupFormation(group) +
-                " paths=" + SafeRegimentPaths(group) +
-                " movingFlag=" + SafeGroupMovingFlag(group) +
-                " pathInterrupted=" + (group != null && group.pathinterrupted) +
-                " activeMove=" + HasActiveMoveMakingProgress(group));
+            TelemetryRouter.Emit(
+                TelemetryLayer.Tactical,
+                TelemetryCategory.Decision,
+                "TacticalCommandPosture",
+                TelemetrySeverity.Info,
+                ev => ev
+                    .WithSide(side)
+                    .WithUnit(SafeName(group))
+                    .WithDecision(decision.Action.ToString(), reason, signature)
+                    .WithField("node", TacticalOperationsTelemetry.SafeToken(state.NodeId))
+                    .WithField("group", SafeName(group) + "#" + SafeInstanceId(group))
+                    .WithField("task", state.Task.ToString())
+                    .WithField("confidence", 1.0)
+                    .WithField("score", applied ? 1.0 : 0.0)
+                    .WithField("selectedTarget", decision.Target.ToString())
+                    .WithField("gateResult", applied ? "allow" : "deny")
+                    .WithField("gateReason", TacticalOperationsTelemetry.SafeToken(reason))
+                    .WithField("writeAction", decision.Action.ToString())
+                    .WithField("writeResult", applied ? "applied" : "not-applied")
+                    .WithField("target", decision.Target.ToString())
+                    .WithField("applied", applied)
+                    .WithField("currentFormation", SafeGroupFormation(group))
+                    .WithField("paths", SafeRegimentPaths(group))
+                    .WithField("movingFlag", SafeGroupMovingFlag(group))
+                    .WithField("pathInterrupted", group != null && group.pathinterrupted)
+                    .WithField("activeMove", HasActiveMoveMakingProgress(group)));
         }
 
         private static string SafeGroupMovingFlag(Regiment group)

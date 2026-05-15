@@ -88,7 +88,9 @@ static class Program
             ("telemetry tag policy routes tactical matrix to state", TelemetryTagPolicyRoutesTacticalMatrixToState),
             ("telemetry tag policy keeps startup allowlisted", TelemetryTagPolicyKeepsStartupAllowlisted),
             ("telemetry tag policy routes deployment diagnostics sidecar only", TelemetryTagPolicyRoutesDeploymentDiagnosticsSidecarOnly),
+            ("telemetry tag policy does not promote missing parents count", TelemetryTagPolicyDoesNotPromoteMissingParentsCount),
             ("telemetry legacy off suppresses sidecar only but allows serious", TelemetryLegacyOffSuppressesSidecarOnlyButAllowsSerious),
+            ("telemetry typed off suppression warns once", TelemetryTypedOffSuppressionWarnsOnce),
             ("telemetry legacy unavailable runtime keeps protected failures visible", TelemetryLegacyUnavailableRuntimeKeepsProtectedFailuresVisible),
             ("deployment legacy helper suppresses off profile tuning rows", DeploymentLegacyHelperSuppressesOffProfileTuningRows),
             ("once log retries when logger unavailable", OnceLogRetriesWhenLoggerUnavailable),
@@ -124,6 +126,7 @@ static class Program
             ("tactical telemetry maps odds prefix", TacticalTelemetryMapsOddsPrefix),
             ("tactical telemetry signature changes on material fields", TacticalTelemetrySignatureChangesOnMaterialFields),
             ("tactical telemetry signature changes on command signature", TacticalTelemetrySignatureChangesOnCommandSignature),
+            ("tactical telemetry decision input signature is stable", TacticalTelemetryDecisionInputSignatureIsStable),
             ("tactical telemetry throttle suppresses repeated signature", TacticalTelemetryThrottleSuppressesRepeatedSignature),
             ("tactical telemetry delta formats before after counts", TacticalTelemetryDeltaFormatsBeforeAfterCounts),
             ("tactical deployment telemetry summarizes large moves", TacticalDeploymentTelemetrySummarizesLargeMoves),
@@ -1895,6 +1898,15 @@ static class Program
         AssertTrue(serious.AllowMainLog, "serious deployment row escalates to main log");
     }
 
+    private static void TelemetryTagPolicyDoesNotPromoteMissingParentsCount()
+    {
+        var route = TelemetryTagPolicy.Route("[TacticalCommandTree] alliance=1 nodes=9 missingParents=0");
+        AssertEqual(TelemetryLayer.Tactical, route.Layer, "layer");
+        AssertEqual(TelemetryCategory.State, route.Category, "category");
+        AssertTrue(route.RouteToSidecar, "command tree sidecar route");
+        AssertFalse(route.AllowMainLog, "benign missingParents count should not hit main log");
+    }
+
     private static void AssertDeploymentRoute(string line, string expectedTag, TelemetryCategory expectedCategory)
     {
         var route = TelemetryTagPolicy.Route(line);
@@ -1915,6 +1927,31 @@ static class Program
             "off profile suppresses sidecar-only deployment row from main log");
         AssertTrue(TelemetryRouter.LegacyWarning("[TacDeployTerrain] unit=brigade-4 failed missing terrain probe"),
             "serious deployment row is still allowed to main log");
+    }
+
+    private static void TelemetryTypedOffSuppressionWarnsOnce()
+    {
+        TelemetryRouter.AttachRuntime(null);
+        var log = new TestLog();
+        Plugin.Log = log;
+
+        AssertFalse(TelemetryRouter.Emit(
+            TelemetryLayer.Tactical,
+            TelemetryCategory.Decision,
+            "TacticalDecisionMatrix",
+            TelemetrySeverity.Info,
+            ev => ev.WithDecision("battle", "test", "sig")),
+            "off profile suppresses typed tactical decision row");
+        AssertEqual(1, log.WarningCount, "first typed suppression should warn once");
+
+        AssertFalse(TelemetryRouter.Emit(
+            TelemetryLayer.Tactical,
+            TelemetryCategory.Decision,
+            "TacticalCommandAssignment",
+            TelemetrySeverity.Info,
+            ev => ev.WithDecision("probe", "test", "sig2")),
+            "off profile suppresses second typed tactical decision row");
+        AssertEqual(1, log.WarningCount, "second typed suppression should not repeat warning");
     }
 
     private static void TelemetryLegacyUnavailableRuntimeKeepsProtectedFailuresVisible()
@@ -2953,6 +2990,17 @@ static class Program
         string a = TacticalTelemetry.Signature(TacticalObservedEvent.Command, first);
         string b = TacticalTelemetry.Signature(TacticalObservedEvent.Command, second);
         if (a == b) throw new Exception("expected tactical signature to change when command signature changes");
+    }
+
+    private static void TacticalTelemetryDecisionInputSignatureIsStable()
+    {
+        string first = TacticalTelemetry.DecisionInputSignature("ChargeGate", 1, "unit-7", 1.21f, null, true);
+        string second = TacticalTelemetry.DecisionInputSignature("ChargeGate", 1, "unit-7", 1.24f, string.Empty, true);
+        string changed = TacticalTelemetry.DecisionInputSignature("ChargeGate", 1, "unit-7", 1.76f, null, true);
+
+        AssertEqual("ChargeGate|1|unit-7|1.0|-|True", first, "stable signature text");
+        AssertEqual(first, second, "bucketed float and empty/null match");
+        if (first == changed) throw new Exception("expected material float bucket to change signature");
     }
 
     private static void TacticalTelemetryThrottleSuppressesRepeatedSignature()

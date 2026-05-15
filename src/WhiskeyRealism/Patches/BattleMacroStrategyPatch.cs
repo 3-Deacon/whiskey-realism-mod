@@ -7,6 +7,7 @@ using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -160,13 +161,13 @@ namespace WhiskeyRealism.Patches
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "macro-decision", signature, Time.realtimeSinceStartup, 30f, false))
                 return;
 
-            Plugin.Log.LogInfo("[TacticalMacroDecision] side=" + side +
+            TelemetryRouter.LegacyInfo("[TacticalMacroDecision] side=" + side +
                 " old=" + TacticalTelemetry.MacroName(vanillaMacro) +
                 " whiskey=" + TacticalTelemetry.MacroName(decision.MacroAi) +
                 " reason=" + decision.Reason +
                 " current=" + odds.CurrentGlobalOdds.ToString("0.00") +
                 " projected=" + odds.ProjectedGlobalOdds.ToString("0.00") +
-                " confidence=" + odds.Confidence.ToString("0.00"));
+                " confidence=" + odds.Confidence.ToString("0.00"), TelemetryLayer.Tactical);
         }
 
         private static bool Enabled()

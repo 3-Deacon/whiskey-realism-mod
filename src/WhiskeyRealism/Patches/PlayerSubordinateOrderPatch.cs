@@ -4,6 +4,7 @@ using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.PlayerOrders;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -185,19 +186,31 @@ namespace WhiskeyRealism.Patches
             try
             {
                 string unit = candidate.HasCandidate ? candidate.UnitKey : active.UnitKey;
-                string signature = action + "|" + reason + "|" +
+                string signature = action + "|" + reason + "|" + unit + "|" +
                     (candidate.HasCandidate ? candidate.VanillaType : active.VanillaType).ToString() + "|" +
                     (candidate.HasCandidate ? candidate.Intent.ToString() : "none");
                 if (!Diagnostics.ShouldLog(unit, signature)) return;
 
-                Plugin.Log.LogInfo(
-                    "[PlayerOrderIntent] action=" + action +
-                    " scope=tactical type=" + (candidate.HasCandidate ? candidate.VanillaType : active.VanillaType) +
-                    " intent=" + (candidate.HasCandidate ? candidate.Intent.ToString() : "None") +
-                    " priority=" + (candidate.HasCandidate ? candidate.Priority : active.Priority) +
-                    " unit=" + (string.IsNullOrEmpty(unit) ? "unknown" : unit) +
-                    " target=" + Target(candidate) +
-                    " reason=" + reason);
+                TelemetryRouter.Emit(
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Decision,
+                    "TacticalPlayerOrder",
+                    TelemetrySeverity.Info,
+                    ev => ev
+                        .WithUnit(string.IsNullOrEmpty(unit) ? "unknown" : unit)
+                        .WithDecision(action, reason, signature)
+                        .WithField("scope", "tactical")
+                        .WithField("confidence", 1.0)
+                        .WithField("score", candidate.HasCandidate ? candidate.Priority : active.Priority)
+                        .WithField("selectedTarget", Target(candidate))
+                        .WithField("gateResult", action)
+                        .WithField("gateReason", reason)
+                        .WithField("writeAction", "CheckCurrentOrderUpdate")
+                        .WithField("writeResult", action)
+                        .WithField("type", (candidate.HasCandidate ? candidate.VanillaType : active.VanillaType).ToString())
+                        .WithField("intent", candidate.HasCandidate ? candidate.Intent.ToString() : "None")
+                        .WithField("priority", candidate.HasCandidate ? candidate.Priority : active.Priority)
+                        .WithField("target", Target(candidate)));
             }
             catch { }
         }

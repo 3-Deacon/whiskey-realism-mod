@@ -7,6 +7,7 @@ using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -19,6 +20,8 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
     internal static class BattleReserveCommitGatePatch
     {
+        private static readonly object TelemetryGate = new object();
+        private static readonly HashSet<string> _loggedGateKeys = new HashSet<string>();
         private static FieldInfo _lastDrawnPathCornerField;
         private static FieldInfo _firstWpAdjustmentMadeField;
         private static bool _lastDrawnPathCornerFieldMissing;
@@ -1290,15 +1293,48 @@ namespace WhiskeyRealism.Patches
                     + ":" + role
                     + ":" + safeReason
                     + ":" + Math.Max(0, changedUnits);
-                OnceLog.Info(
-                    key,
-                    "[TacticalReserveCommitGate] group=" + groupName
-                    + " action=" + action
-                    + " role=" + role
-                    + " reason=" + safeReason
-                    + " changedUnits=" + Math.Max(0, changedUnits));
+                if (!MarkGateTelemetryOnce(key))
+                    return;
+
+                TelemetryRouter.Emit(
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Gate,
+                    "TacticalReserveCommitGate",
+                    TelemetrySeverity.Info,
+                    ev => ev
+                        .WithUnit(groupName)
+                        .WithDecision(action.ToString(), safeReason, key)
+                        .WithField("confidence", 1.0)
+                        .WithField("score", Math.Max(0, changedUnits))
+                        .WithField("selectedTarget", groupName)
+                        .WithField("gateResult", action == TacticalReserveCommitGate.Action.Deny ? "deny" : "observe")
+                        .WithField("gateReason", safeReason)
+                        .WithField("writeAction", "CheckUseOfReserves")
+                        .WithField("writeResult", action == TacticalReserveCommitGate.Action.Deny ? "restored" : "observed")
+                        .WithField("group", groupName)
+                        .WithField("role", role.ToString())
+                        .WithField("changedUnits", Math.Max(0, changedUnits)));
             }
             catch { }
+        }
+
+        private static bool MarkGateTelemetryOnce(string key)
+        {
+            try
+            {
+                lock (TelemetryGate)
+                {
+                    if (_loggedGateKeys.Contains(key))
+                        return false;
+
+                    _loggedGateKeys.Add(key);
+                    return true;
+                }
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static void LogProtectedReserveDrift(
