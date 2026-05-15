@@ -29,15 +29,28 @@ namespace WhiskeyRealism.Telemetry
 
         internal bool TryEnqueue(TelemetryEvent ev)
         {
-            if (ev == null)
-            {
-                RecordDropped(TelemetryCategory.Trace);
-                return false;
-            }
-
             lock (_gate)
             {
-                if (_events.Count < _capacity)
+                if (ev == null)
+                {
+                    RecordDropped(TelemetryCategory.Trace);
+                    return false;
+                }
+
+                if (IsProtected(ev.Category))
+                {
+                    int protectedEvictIndex = FindLowestPriorityIndex();
+                    if (protectedEvictIndex >= 0)
+                    {
+                        RecordDropped(_events[protectedEvictIndex].Category);
+                        _events.RemoveAt(protectedEvictIndex);
+                    }
+
+                    _events.Add(ev);
+                    return true;
+                }
+
+                if (DetailCount() < _capacity)
                 {
                     _events.Add(ev);
                     return true;
@@ -95,6 +108,18 @@ namespace WhiskeyRealism.Telemetry
             }
 
             return index;
+        }
+
+        private int DetailCount()
+        {
+            int count = 0;
+            for (int i = 0; i < _events.Count; i++)
+            {
+                if (!IsProtected(_events[i].Category))
+                    count++;
+            }
+
+            return count;
         }
 
         private void RecordDropped(TelemetryCategory category)

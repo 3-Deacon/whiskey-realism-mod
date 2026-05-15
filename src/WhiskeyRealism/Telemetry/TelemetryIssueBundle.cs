@@ -30,8 +30,20 @@ namespace WhiskeyRealism.Telemetry
             @"(?i)\b([A-Z]:\\Users\\)[^\\]+",
             RegexOptions.CultureInvariant);
 
+        private static readonly Regex MntWindowsUserPath = new Regex(
+            @"(?i)(/mnt/[a-z]/Users/)[^/]+",
+            RegexOptions.CultureInvariant);
+
+        private static readonly Regex HomeUserPath = new Regex(
+            @"(?i)(/home/)[^/\s]+",
+            RegexOptions.CultureInvariant);
+
         private static readonly Regex SecretAssignment = new Regex(
-            @"(?i)\b(token|secret|api_key)\s*=\s*(?:""[^""]*""|'[^']*'|[^&\s;,""']+)",
+            @"(?i)\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)|api_key|access_token|token|secret|password)\s*=\s*(?:""[^""]*""|'[^']*'|[^&\s;,""']+)",
+            RegexOptions.CultureInvariant);
+
+        private static readonly Regex BearerAuthorization = new Regex(
+            @"(?i)\b(Authorization\s*:\s*Bearer)\s+[^&\s;,""']+",
             RegexOptions.CultureInvariant);
 
         internal static string Redact(string value)
@@ -40,7 +52,10 @@ namespace WhiskeyRealism.Telemetry
                 return string.Empty;
 
             string redacted = WindowsUserPath.Replace(value, "$1<redacted>");
+            redacted = MntWindowsUserPath.Replace(redacted, "$1<redacted>");
+            redacted = HomeUserPath.Replace(redacted, "$1<redacted>");
             redacted = SecretAssignment.Replace(redacted, m => m.Groups[1].Value + "=<redacted>");
+            redacted = BearerAuthorization.Replace(redacted, "$1 <redacted>");
             return redacted;
         }
 

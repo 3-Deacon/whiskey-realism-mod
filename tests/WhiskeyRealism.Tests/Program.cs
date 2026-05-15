@@ -35,8 +35,11 @@ static class Program
             ("telemetry budget applies staged category cuts", TelemetryBudgetAppliesStagedCategoryCuts),
             ("telemetry queue evicts decision before gate write", TelemetryQueueEvictsDecisionBeforeGateWrite),
             ("telemetry issue bundle redacts spaced windows usernames", TelemetryIssueBundleRedactsSpacedWindowsUsernames),
-            ("telemetry queue drops protected incoming when protected full", TelemetryQueueDropsProtectedIncomingWhenProtectedFull),
+            ("telemetry queue preserves protected incoming when protected full", TelemetryQueuePreservesProtectedIncomingWhenProtectedFull),
             ("telemetry issue bundle redacts quoted secrets", TelemetryIssueBundleRedactsQuotedSecrets),
+            ("telemetry issue bundle redacts public bundle secrets and user paths", TelemetryIssueBundleRedactsPublicBundleSecretsAndUserPaths),
+            ("telemetry budget low priority cuts before high priority", TelemetryBudgetLowPriorityCutsBeforeHighPriority),
+            ("telemetry retention no manifest orders by directory before mtime", TelemetryRetentionNoManifestOrdersByDirectoryBeforeMtime),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1156,31 +1159,21 @@ static class Program
         AssertFalse(redacted.Contains("Kyle Davis"), "spaced username removed");
     }
 
-    private static void TelemetryQueueDropsProtectedIncomingWhenProtectedFull()
+    private static void TelemetryQueuePreservesProtectedIncomingWhenProtectedFull()
     {
         var queue = new TelemetryQueue(capacity: 2);
         AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-a")), "initial health accepted");
         AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-a")), "initial failure accepted");
-        AssertFalse(queue.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-b")), "protected incoming dropped when only protected rows exist");
+        AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-b")), "protected health bypasses detail capacity");
+        AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-b")), "protected failure bypasses detail capacity");
 
         var drained = queue.Drain(10);
-        AssertEqual(2, drained.Count, "queue count");
+        AssertEqual(4, drained.Count, "queue count includes protected overflow");
         AssertTrue(drained.Exists(e => e.EventName == "health-a"), "existing health retained");
         AssertTrue(drained.Exists(e => e.EventName == "failure-a"), "existing failure retained");
-        AssertFalse(drained.Exists(e => e.EventName == "health-b"), "incoming health dropped");
-        AssertTrue(queue.DroppedCount > 0, "dropped counted");
-        AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.Health), "incoming health drop counted");
-
-        var secondQueue = new TelemetryQueue(capacity: 2);
-        secondQueue.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-c"));
-        secondQueue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-c"));
-        AssertFalse(secondQueue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-d")), "protected failure incoming dropped when only protected rows exist");
-
-        var secondDrained = secondQueue.Drain(10);
-        AssertTrue(secondDrained.Exists(e => e.EventName == "health-c"), "second existing health retained");
-        AssertTrue(secondDrained.Exists(e => e.EventName == "failure-c"), "second existing failure retained");
-        AssertFalse(secondDrained.Exists(e => e.EventName == "failure-d"), "incoming failure dropped");
-        AssertEqual(1L, secondQueue.DroppedCountFor(TelemetryCategory.Failure), "incoming failure drop counted");
+        AssertTrue(drained.Exists(e => e.EventName == "health-b"), "incoming health retained");
+        AssertTrue(drained.Exists(e => e.EventName == "failure-b"), "incoming failure retained");
+        AssertEqual(0L, queue.DroppedCount, "protected rows not dropped");
     }
 
     private static void TelemetryIssueBundleRedactsQuotedSecrets()
@@ -1192,6 +1185,60 @@ static class Program
         AssertContains(redacted, "token=<redacted>", "token redacted");
         AssertContains(redacted, "secret=<redacted>", "secret redacted");
         AssertContains(redacted, "api_key=<redacted>", "api key redacted");
+    }
+
+    private static void TelemetryIssueBundleRedactsPublicBundleSecretsAndUserPaths()
+    {
+        string redacted = TelemetryIssueBundle.Redact(
+            "OPENAI_API_KEY=sk-test GH_TOKEN=\"ghp_secret\" access_token='abc def' password=hunter2 Authorization: Bearer abc123 /home/onebodyamerica/project /mnt/c/Users/Kyle Davis/AppData");
+
+        AssertFalse(redacted.Contains("sk-test"), "openai key removed");
+        AssertFalse(redacted.Contains("ghp_secret"), "github token removed");
+        AssertFalse(redacted.Contains("abc def"), "access token removed");
+        AssertFalse(redacted.Contains("hunter2"), "password removed");
+        AssertFalse(redacted.Contains("abc123"), "bearer removed");
+        AssertFalse(redacted.Contains("onebodyamerica"), "linux user path removed");
+        AssertFalse(redacted.Contains("Kyle Davis"), "mnt windows user path removed");
+        AssertContains(redacted, "OPENAI_API_KEY=<redacted>", "openai key context");
+        AssertContains(redacted, "GH_TOKEN=<redacted>", "github token context");
+        AssertContains(redacted, "access_token=<redacted>", "access token context");
+        AssertContains(redacted, "password=<redacted>", "password context");
+        AssertContains(redacted, "Authorization: Bearer <redacted>", "bearer context");
+        AssertContains(redacted, "/home/<redacted>/project", "linux path context");
+        AssertContains(redacted, "/mnt/c/Users/<redacted>/AppData", "mnt path context");
+    }
+
+    private static void TelemetryBudgetLowPriorityCutsBeforeHighPriority()
+    {
+        var decisionBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        decisionBudget.RecordBytes(TelemetryCategory.Decision, 970);
+        var overload = typeof(TelemetryBudget).GetMethod(
+            "Allow",
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            new[] { typeof(TelemetryCategory), typeof(long), typeof(bool) },
+            null);
+        AssertTrue(overload != null, "priority overload exists");
+        AssertFalse((bool)overload.Invoke(decisionBudget, new object[] { TelemetryCategory.Decision, 20L, true }), "low priority decision cuts at staged threshold");
+        AssertTrue((bool)overload.Invoke(decisionBudget, new object[] { TelemetryCategory.Decision, 20L, false }), "high priority decision continues until total cap");
+
+        var writeBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        writeBudget.RecordBytes(TelemetryCategory.Write, 970);
+        AssertTrue((bool)overload.Invoke(writeBudget, new object[] { TelemetryCategory.Write, 20L, false }), "high priority write continues under total cap");
+        AssertFalse((bool)overload.Invoke(writeBudget, new object[] { TelemetryCategory.Write, 40L, false }), "high priority write cuts over total cap");
+    }
+
+    private static void TelemetryRetentionNoManifestOrdersByDirectoryBeforeMtime()
+    {
+        var candidates = new[]
+        {
+            new TelemetryRetentionCandidate("20260515-120001-newer-dir", null, new DateTime(2026, 5, 15, 9, 0, 0, DateTimeKind.Utc)),
+            new TelemetryRetentionCandidate("20260515-120000-older-dir", null, new DateTime(2026, 5, 15, 10, 0, 0, DateTimeKind.Utc))
+        };
+
+        var ordered = TelemetrySession.OrderRetentionCandidates(candidates);
+        AssertEqual("20260515-120001-newer-dir", ordered[0].DirectoryName, "newer directory name wins before mtime");
+        AssertEqual("20260515-120000-older-dir", ordered[1].DirectoryName, "older directory name loses despite newer mtime");
     }
 
     private static FrontSectorLedger BuildLedger()

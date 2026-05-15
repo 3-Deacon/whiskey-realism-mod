@@ -23,11 +23,16 @@ namespace WhiskeyRealism.Telemetry
 
         internal bool Allow(TelemetryCategory category, long estimatedBytes)
         {
+            return Allow(category, estimatedBytes, lowPriority: true);
+        }
+
+        internal bool Allow(TelemetryCategory category, long estimatedBytes, bool lowPriority)
+        {
             long safeBytes = Math.Max(0L, estimatedBytes);
             if (IsProtected(category))
                 return true;
 
-            bool allowed = WithinCategoryCut(category, safeBytes);
+            bool allowed = lowPriority ? WithinCategoryCut(category, safeBytes) : WithinTotalCap(safeBytes);
             if (!allowed)
                 RecordDropped(category);
             return allowed;
@@ -83,6 +88,11 @@ namespace WhiskeyRealism.Telemetry
         {
             decimal projected = (decimal)EmittedBytes + estimatedBytes;
             return projected * 100m <= (decimal)TotalBytes * CutPercent(category);
+        }
+
+        private bool WithinTotalCap(long estimatedBytes)
+        {
+            return EmittedBytes + estimatedBytes <= TotalBytes;
         }
 
         private static int CutPercent(TelemetryCategory category)
