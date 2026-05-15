@@ -82,6 +82,10 @@ static class Program
             ("telemetry perf scope swallows sink failure", TelemetryPerfScopeSwallowsSinkFailure),
             ("telemetry profile parses unknown as off", TelemetryProfileParsesUnknownAsOff),
             ("telemetry behavior gates are independent from profile", TelemetryBehaviorGatesAreIndependentFromProfile),
+            ("telemetry tag policy routes tactical matrix to state", TelemetryTagPolicyRoutesTacticalMatrixToState),
+            ("telemetry tag policy keeps startup allowlisted", TelemetryTagPolicyKeepsStartupAllowlisted),
+            ("telemetry legacy parser extracts key values", TelemetryLegacyParserExtractsKeyValues),
+            ("telemetry legacy parser creates coarse signature", TelemetryLegacyParserCreatesCoarseSignature),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1845,6 +1849,72 @@ static class Program
         AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.System, TelemetryCategory.Performance), "off excludes performance");
         AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.System, TelemetryCategory.Health), "off allows bounded health");
         AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Tactical, TelemetryCategory.Failure), "off allows bounded failure");
+    }
+
+    private static void TelemetryTagPolicyRoutesTacticalMatrixToState()
+    {
+        var route = TelemetryTagPolicy.Route("[once:tactical-matrix] [TacticalDecisionMatrix] battle=alpha side=1 decision=Probe reason=odds");
+        AssertEqual("TacticalDecisionMatrix", route.Tag, "tag");
+        AssertEqual(TelemetryLayer.Tactical, route.Layer, "layer");
+        AssertEqual(TelemetryCategory.State, route.Category, "category");
+        AssertEqual("TacticalDecisionMatrix", route.EventName, "event");
+        AssertTrue(route.RouteToSidecar, "matrix sidecar route");
+        AssertFalse(route.AllowMainLog, "matrix main log");
+    }
+
+    private static void TelemetryTagPolicyKeepsStartupAllowlisted()
+    {
+        var route = TelemetryTagPolicy.Route("[WhiskeyRealism] plugin loaded profile=Off");
+        AssertEqual("WhiskeyRealism", route.Tag, "tag");
+        AssertEqual(TelemetryLayer.System, route.Layer, "layer");
+        AssertEqual(TelemetryCategory.Health, route.Category, "category");
+        AssertFalse(route.RouteToSidecar, "startup does not require sidecar");
+        AssertTrue(route.AllowMainLog, "startup remains main log allowlisted");
+    }
+
+    private static void TelemetryLegacyParserExtractsKeyValues()
+    {
+        TelemetryEvent ev;
+        bool parsed = TelemetryLegacyParser.TryParse(
+            "[TacticalPlayerOrder] battle=Gettysburg side=1 alliance=0 unit=brigade-2 phase=advance decision=Hold reason=player-order objective=\"Cemetery Hill\" active=true score=1.25",
+            TelemetryProfile.TacticalTuning,
+            "session-a",
+            out ev);
+
+        AssertTrue(parsed, "legacy row parsed");
+        AssertEqual("session-a", ev.SessionId, "session");
+        AssertEqual(TelemetryLayer.Tactical, ev.Layer, "layer");
+        AssertEqual(TelemetryCategory.Decision, ev.Category, "category");
+        AssertEqual("TacticalPlayerOrder", ev.EventName, "event");
+        AssertEqual("Gettysburg", ev.BattleId, "battle");
+        AssertEqual(1, ev.Side, "side");
+        AssertEqual(0, ev.Alliance, "alliance");
+        AssertEqual("brigade-2", ev.Unit, "unit");
+        AssertEqual("advance", ev.Phase, "phase");
+        AssertEqual("Hold", ev.Decision, "decision");
+        AssertEqual("player-order", ev.DecisionReason, "reason");
+        AssertEqual("Cemetery Hill", ev.Fields.GetString("objective"), "quoted key value");
+        AssertTrue(ev.Fields.GetBool("active"), "bool key value");
+        AssertEqual(1.25, ev.Fields.GetDouble("score"), "numeric key value");
+    }
+
+    private static void TelemetryLegacyParserCreatesCoarseSignature()
+    {
+        TelemetryEvent ev;
+        bool parsed = TelemetryLegacyParser.TryParse(
+            "[DefenseIntent] asset=nashville threat=raid posture=hold ratio=0.75",
+            TelemetryProfile.CampaignTuning,
+            "session-b",
+            out ev);
+
+        AssertTrue(parsed, "legacy row parsed");
+        AssertEqual(TelemetryLayer.Campaign, ev.Layer, "layer");
+        AssertEqual(TelemetryCategory.State, ev.Category, "category");
+        AssertEqual("DefenseIntent", ev.EventName, "event");
+        AssertEqual("coarse", ev.Fields.GetString("inputSignatureSource"), "signature source");
+        AssertContains(ev.Fields.GetString("inputSignature"), "DefenseIntent", "signature event");
+        AssertContains(ev.Fields.GetString("inputSignature"), "asset=nashville", "signature key");
+        AssertContains(ev.Fields.GetString("inputSignature"), "posture=hold", "signature sorted key");
     }
 
     private static void TelemetrySessionIdSortsByUtcMilliseconds()

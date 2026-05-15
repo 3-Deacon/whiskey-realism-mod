@@ -8,6 +8,8 @@ namespace WhiskeyRealism.Telemetry
         private static TelemetryRuntime _runtime;
         private static TelemetryRuntime _shutdownRuntime;
         private static TelemetryProfile _profile = TelemetryProfile.Off;
+        private static bool _legacySuppressionWarned;
+        private static long _legacySuppressedCount;
 
         internal static TelemetryProfile CurrentProfile
         {
@@ -75,7 +77,29 @@ namespace WhiskeyRealism.Telemetry
                 _runtime = runtime;
                 _shutdownRuntime = null;
                 _profile = runtime != null ? runtime.Profile : TelemetryProfile.Off;
+                _legacySuppressionWarned = false;
+                _legacySuppressedCount = 0L;
             }
+        }
+
+        internal static bool LegacyInfo(string line)
+        {
+            return Legacy(line, TelemetrySeverity.Info);
+        }
+
+        internal static bool LegacyInfo(string line, TelemetryLayer fallbackLayer)
+        {
+            return Legacy(line, TelemetrySeverity.Info);
+        }
+
+        internal static bool LegacyWarning(string line)
+        {
+            return Legacy(line, TelemetrySeverity.Warning);
+        }
+
+        internal static bool LegacyWarning(string line, TelemetryLayer fallbackLayer)
+        {
+            return Legacy(line, TelemetrySeverity.Warning);
         }
 
         internal static bool Emit(
@@ -195,6 +219,73 @@ namespace WhiskeyRealism.Telemetry
         private static bool IsProtected(TelemetryCategory category)
         {
             return category == TelemetryCategory.Health || category == TelemetryCategory.Failure;
+        }
+
+        private static bool Legacy(string line, TelemetrySeverity severity)
+        {
+            try
+            {
+                var route = TelemetryTagPolicy.Route(line);
+                if (!route.RouteToSidecar)
+                    return route.AllowMainLog;
+
+                TelemetryRuntime runtime;
+                TelemetryProfile profile;
+                lock (Gate)
+                {
+                    runtime = _runtime ?? _shutdownRuntime;
+                    profile = _profile;
+                }
+
+                TelemetryEvent ev;
+                if (TelemetryLegacyParser.TryParse(
+                    line,
+                    profile,
+                    runtime != null ? runtime.SessionId : "legacy-runtime-unavailable",
+                    severity,
+                    out ev))
+                {
+                    Emit(ev);
+                }
+
+                if (profile == TelemetryProfile.Off && !route.AllowMainLog)
+                    NoteLegacySuppressedByProfile();
+
+                return route.AllowMainLog;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static void NoteLegacySuppressedByProfile()
+        {
+            bool shouldWarn = false;
+            lock (Gate)
+            {
+                _legacySuppressedCount++;
+                if (!_legacySuppressionWarned)
+                {
+                    _legacySuppressionWarned = true;
+                    shouldWarn = true;
+                }
+            }
+
+            if (!shouldWarn)
+                return;
+
+            try
+            {
+                if (Plugin.Log != null)
+                {
+                    Plugin.Log.LogWarning(
+                        "[Telemetry] tuning telemetry disabled by profile; suppressing sidecar-only legacy tuning log lines");
+                }
+            }
+            catch
+            {
+            }
         }
 
         private static bool IsSystemTuningCategory(TelemetryCategory category)

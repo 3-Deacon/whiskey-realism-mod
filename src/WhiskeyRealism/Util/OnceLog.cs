@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using WhiskeyRealism.Telemetry;
 
 namespace WhiskeyRealism.Util
 {
@@ -10,14 +11,18 @@ namespace WhiskeyRealism.Util
         {
             if (_fired.Contains(key)) return;
             _fired.Add(key);
-            Plugin.Log.LogInfo("[once:" + key + "] " + message);
+            string line = "[once:" + key + "] " + message;
+            if (TelemetryRouter.LegacyInfo(line))
+                Plugin.Log.LogInfo(line);
         }
 
         internal static void Warning(string key, string message)
         {
             if (_fired.Contains(key)) return;
             _fired.Add(key);
-            Plugin.Log.LogWarning("[once:" + key + "] " + message);
+            string line = "[once:" + key + "] " + message;
+            if (TelemetryRouter.LegacyWarning(line))
+                Plugin.Log.LogWarning(line);
         }
 
         internal static void Reset()
