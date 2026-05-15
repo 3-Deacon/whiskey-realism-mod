@@ -45,7 +45,7 @@ namespace WhiskeyRealism.Telemetry
             RegexOptions.CultureInvariant);
 
         private static readonly Regex SecretAssignment = new Regex(
-            @"(?i)\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)|api_key|access_token|token|secret|password)\s*=\s*(?:""[^""]*""|'[^']*'|[^&\s;,""']+)",
+            @"(?i)\b([A-Z0-9_-]*(?:API-KEY|API_KEY|TOKEN|SECRET|PASSWORD)|api_key|access_token|token|secret|password|client-secret|x-api-key)\s*=\s*(?:""[^""]*""|'[^']*'|[^&\s;,""']+)",
             RegexOptions.CultureInvariant);
 
         private static readonly Regex SecretColon = new Regex(
@@ -62,6 +62,10 @@ namespace WhiskeyRealism.Telemetry
 
         private static readonly Regex BasicAuthorization = new Regex(
             @"(?i)\b(Authorization\s*:\s*Basic)\s+[^&\s;,""']+",
+            RegexOptions.CultureInvariant);
+
+        private static readonly Regex BasicAuthorizationEquals = new Regex(
+            @"(?i)\b(Authorization\s*=\s*Basic)\s+[^&\s;,""']+",
             RegexOptions.CultureInvariant);
 
         internal static string Redact(string value)
@@ -82,6 +86,7 @@ namespace WhiskeyRealism.Telemetry
             redacted = BearerAuthorization.Replace(redacted, "$1 <redacted>");
             redacted = BearerAuthorizationEquals.Replace(redacted, "$1 <redacted>");
             redacted = BasicAuthorization.Replace(redacted, "$1 <redacted>");
+            redacted = BasicAuthorizationEquals.Replace(redacted, "$1 <redacted>");
             return redacted;
         }
 

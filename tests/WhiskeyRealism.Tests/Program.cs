@@ -1390,17 +1390,21 @@ static class Program
 
     private static void TelemetryIssueBundleRedactsAuthBypassForms()
     {
-        string redacted = TelemetryIssueBundle.Redact("C:/Users/Kyle/AppData Authorization: Basic abc123 Authorization=Bearer def456 X-Api-Key: ghi789 client-secret: jkl012");
+        string redacted = TelemetryIssueBundle.Redact("C:/Users/Kyle/AppData Authorization: Basic abc123 Authorization=Bearer def456 X-Api-Key: ghi789 client-secret: jkl012 Authorization=Basic mno345 X-Api-Key=pqr678");
         AssertFalse(redacted.Contains("Kyle"), "forward slash windows username removed");
         AssertFalse(redacted.Contains("abc123"), "basic auth removed");
         AssertFalse(redacted.Contains("def456"), "bearer equals removed");
         AssertFalse(redacted.Contains("ghi789"), "x api key removed");
         AssertFalse(redacted.Contains("jkl012"), "client secret removed");
+        AssertFalse(redacted.Contains("mno345"), "basic equals removed");
+        AssertFalse(redacted.Contains("pqr678"), "x api key equals removed");
         AssertContains(redacted, "C:/Users/<redacted>/AppData", "forward slash windows path context");
         AssertContains(redacted, "Authorization: Basic <redacted>", "basic auth context");
         AssertContains(redacted, "Authorization=Bearer <redacted>", "bearer equals context");
         AssertContains(redacted, "X-Api-Key:<redacted>", "x api key context");
         AssertContains(redacted, "client-secret:<redacted>", "client secret context");
+        AssertContains(redacted, "Authorization=Basic <redacted>", "basic equals context");
+        AssertContains(redacted, "X-Api-Key=<redacted>", "x api key equals context");
     }
 
     private static void TelemetryIssueBundlePreservesJsonRedactionValidity()
