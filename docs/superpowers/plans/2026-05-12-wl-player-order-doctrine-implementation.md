@@ -13,6 +13,8 @@
 
 **Goal:** Implement the W&L player-order doctrine as one cohesive, default-off feature that lets Whiskey translate existing campaign and tactical doctrine into player-facing vanilla W&L orders without spamming, overriding vanilla transition orders, or crossing campaign/tactical scopes unsafely.
 
+**Status (2026-05-15):** implemented and merged to `main`, console harness `986 PASS / 0 FAIL`, `./build.sh` clean, local and deployed DLLs hash-match SHA-256 `ec00120fb8f8e08d729ec6f99418910d76356edd8e5b642f50e903d9d468c526` (1121792 bytes). Fresh W&L player-subordinate runtime smoke is still pending, so this plan remains active and is not archived. Current behavior, config, smoke checklist, and rollback live in `docs/wl-player-order-doctrine.md`.
+
 **Architecture:** Add a pure `Tactical/PlayerOrders/` doctrine layer for intent, priority, mapping, dedupe, provenance, and diagnostics decisions; add one runtime adapter that reads vanilla objects through safe reflection; add one `PlayerSubordinateOrderPatch` around `AIBattle.UpdateDLCPlayerOrders()`; and extend `WlStrategicOrderBridge` with the same signature/provenance discipline for campaign calls already routed through the bridge.
 
 **Tech Stack:** C# netstandard2.1, BepInEx 5.4.x, HarmonyX, existing console harness under `tests/WhiskeyRealism.Tests`, vanilla anchors from `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, no new packages.
@@ -71,6 +73,7 @@ Create:
 - `src/WhiskeyRealism/Tactical/PlayerOrders/PlayerOrderComposer.cs`
 - `src/WhiskeyRealism/Tactical/PlayerOrders/PlayerOrderDiagnostics.cs`
 - `src/WhiskeyRealism/Tactical/PlayerOrders/PlayerOrderRuntimeAdapter.cs`
+- `src/WhiskeyRealism/Tactical/PlayerOrders/PlayerOrderVanillaScene.cs`
 - `src/WhiskeyRealism/Patches/PlayerSubordinateOrderPatch.cs`
 
 Modify:
@@ -83,7 +86,7 @@ Modify:
 - `docs/handoff.md`
 - `MEMORY.md`
 
-Only include pure files in the test project. Exclude `PlayerOrderRuntimeAdapter.cs` and `PlayerSubordinateOrderPatch.cs` from the console harness because they touch Unity, Harmony, or vanilla runtime objects.
+Only include pure files in the test project. Exclude `PlayerOrderRuntimeAdapter.cs` and `PlayerSubordinateOrderPatch.cs` from the console harness because they touch Unity, Harmony, or vanilla runtime objects. `PlayerOrderVanillaScene.cs` is the pure scene-active/classification helper and is included in the console harness.
 
 ## Task 0: Baseline And Campaign Caller Audit
 

@@ -57,7 +57,7 @@ This spec was verified against:
 
 The 2026-05-12 verification pass included independent read-only reviews of vanilla decompile anchors and mod/repo anchors, then a local integration pass before this spec was corrected.
 
-Confirmed-current mod behavior is kept separate from proposed implementation below. `PlayerSubordinateOrderPatch`, `PlayerOrderIntent`, `PlayerOrderComposer`, `PlayerOrderPriority`, `PlayerOrderDedupe`, `PlayerOrderVanillaMapper`, and `PlayerOrderDiagnostics` are proposed surfaces, not shipped source.
+This spec keeps the original proposed design separate from shipped behavior. `PlayerSubordinateOrderPatch`, `PlayerOrderIntent`, `PlayerOrderComposer`, `PlayerOrderPriority`, `PlayerOrderDedupe`, `PlayerOrderVanillaMapper`, and `PlayerOrderDiagnostics` are now shipped on `main`; current runtime truth lives in the living docs above.
 
 ## Confirmed Vanilla Anchors
 

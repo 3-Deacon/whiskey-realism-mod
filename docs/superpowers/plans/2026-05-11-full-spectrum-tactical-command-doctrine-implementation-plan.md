@@ -1952,7 +1952,7 @@ Expected smoke markers:
 [TacticalOperations]
 ```
 
-Reject smoke if any repeated exception appears, if the log grows with unchanged per-node lines every tick, or if player-subordinate retasking appears while `GameVars.ai_vs_ai` is false.
+Reject smoke if any repeated exception appears, if the log grows with unchanged per-node lines every tick, or if unintended player-chain battle-state retasking appears while `GameVars.ai_vs_ai` is false. Player-facing W&L current-order popups are owned by #62.
 
 - [ ] **Step 4: Smoke the Hampton-style case**
 
@@ -2034,7 +2034,7 @@ All harness tests pass.
 Build succeeds.
 Deployed DLL hash matches dist DLL hash.
 No repeated exceptions in BepInEx LogOutput.log.
-No player-subordinate retasking while ai_vs_ai is false.
+No unintended player-chain battle-state retasking while ai_vs_ai is false.
 Doctrine logs are throttled.
 Active mode is documented as user-approved default.
 ```

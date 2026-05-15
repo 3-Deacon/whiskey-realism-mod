@@ -27,6 +27,7 @@ namespace WhiskeyRealism.Patches
         private const float FallbackStandOff = 250f;
         private const float MaxConservativeWaypointDistance = 2500f;
         private const float MinWaypointDistance = 15f;
+        private const float VanillaBlockedMoveDistance = 150f;
         private const float FacingRefreshToleranceDegrees = 15f;
         private const float OutboundCourierIntervalSeconds = 900f;
         private const float FireControlOrderCooldownSeconds = 45f;
@@ -43,6 +44,7 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _sideOfAiField;
         private static FieldInfo _bunitsField;
         private static FieldInfo _unitsUsedField;
+        private static FieldInfo _blockedCrossingsField;
 
         [HarmonyPostfix]
         [HarmonyPriority(Priority.Last)]
@@ -80,11 +82,12 @@ namespace WhiskeyRealism.Patches
             {
                 var group = units[i] as Regiment;
                 if (!IsEligibleCommandGroup(group)) continue;
-                TryApplyGroup(bunits, side, group, runtimePlayOrders);
+                TryApplyGroup(battle, bunits, side, group, runtimePlayOrders);
             }
         }
 
         private static void TryApplyGroup(
+            AIBattle battle,
             BattleUnits bunits,
             int side,
             Regiment group,
@@ -192,7 +195,10 @@ namespace WhiskeyRealism.Patches
                 state.Task,
                 RecentOrderSeconds,
                 UrgentFormationRetrySeconds);
-            bool recentOrder = HasRecentExecutorOrder(instanceId, recentOrderSeconds);
+            bool recentOrder = CommandPostureExecutor.ShouldBlockForRecentOrder(
+                state.Task,
+                physical,
+                HasRecentExecutorOrder(instanceId, recentOrderSeconds));
             bool alreadyCorrect = IsAlreadyDoingCorrectTask(group, state, physical, targetFormation, idle);
             bool pendingOrderOnChild = HasPendingOrder(group);
 
@@ -227,7 +233,7 @@ namespace WhiskeyRealism.Patches
                 : CommandPostureExecutor.Decide(state, physical, eligibility);
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
-                if (CanWrite(group, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass) &&
+                if (CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass) &&
                     TryApplyFireControl(bunits, group, state, out TacticalFireControlDecision fireDecision))
                 {
                     _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
@@ -239,7 +245,7 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            if (!CanWrite(group, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass))
+            if (!CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass))
             {
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "write-gate-denied");
                 return;
@@ -268,6 +274,7 @@ namespace WhiskeyRealism.Patches
             }
 
             bool wrote = ApplyDecision(
+                battle,
                 bunits,
                 group,
                 state,
@@ -288,7 +295,7 @@ namespace WhiskeyRealism.Patches
             }
             else
             {
-                EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "target-unresolved");
+                EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: hasTarget ? "movement-unmaterialized" : "target-unresolved");
             }
         }
 
@@ -584,6 +591,7 @@ namespace WhiskeyRealism.Patches
         }
 
         private static bool ApplyDecision(
+            AIBattle battle,
             BattleUnits bunits,
             Regiment group,
             CommandNodeOperationalState state,
@@ -601,12 +609,12 @@ namespace WhiskeyRealism.Patches
                 case PostureExecutionAction.SetFormationAndWaypoint:
                     if (!hasTarget) return false;
                     bool formed = SetFormation(bunits, group, state.Task, targetFormation, closeEngaged, refusedFlank);
-                    return SetWaypoint(bunits, group, target) || formed;
+                    return SetWaypoint(battle, bunits, group, state.Task, target) || formed;
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
                 case PostureExecutionAction.FallbackToLine:
                 case PostureExecutionAction.RecoverInterruptedOrder:
-                    return hasTarget && SetWaypoint(bunits, group, target);
+                    return hasTarget && SetWaypoint(battle, bunits, group, state.Task, target);
                 case PostureExecutionAction.ChangeStance:
                     return ChangeStance(bunits, group, StanceForTask(state.Task));
                 default:
@@ -694,10 +702,19 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool SetWaypoint(BattleUnits bunits, Regiment group, Vector3 target)
+        private static bool SetWaypoint(AIBattle battle, BattleUnits bunits, Regiment group, CommandTaskType task, Vector3 target)
         {
             if (!IsSafeWaypoint(group, target)) return false;
             if (ShouldSkipDuplicateWaypoint(group, target)) return false;
+
+            if (TryQueueBlockedMovingOrder(battle, group, task, target))
+            {
+                MarkGroupMovementStarted(group, task);
+                return true;
+            }
+
+            int beforeMovingPaths = CountMovingPaths(group);
+            bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true);
 
             bunits.SetWaypoint(
                 group,
@@ -706,7 +723,7 @@ namespace WhiskeyRealism.Patches
                 doublequick: false,
                 manualfinalrotation: -1f,
                 modifylastwaypoint: false,
-                useorderdelay: true,
+                useorderdelay: useOrderDelay,
                 timetomove: -1f,
                 direction: -1,
                 showmovementoptions: false,
@@ -715,7 +732,87 @@ namespace WhiskeyRealism.Patches
                 ignoredisabledships: false,
                 checkforreadiness: true,
                 clearinterruptionpaths: true);
+
+            if (!MovementMaterialized(group, beforeMovingPaths))
+                return false;
+
+            MarkGroupMovementStarted(group, task);
             return true;
+        }
+
+        private static bool TryQueueBlockedMovingOrder(AIBattle battle, Regiment group, CommandTaskType task, Vector3 target)
+        {
+            try
+            {
+                if (battle == null || group == null) return false;
+                List<Vector3> blockedCrossings = SafeField<List<Vector3>>(battle, ref _blockedCrossingsField, "blockedcrossings");
+                float distance = SafeDistance(SafePosition(group), target);
+                if (!CommandWaypointWritePolicy.ShouldUseBlockedMovingOrderForExecutorWaypoint(
+                        task,
+                        distance,
+                        VanillaBlockedMoveDistance,
+                        blockedCrossings != null,
+                        battleActive: true))
+                    return false;
+
+                if (AIBattle.BlockedMovingOrder.OrderRunning(group))
+                    return true;
+
+                new AIBattle.BlockedMovingOrder(group, blockedCrossings, VanillaBlockedMoveDistance, target);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-command-posture:blocked-move-failed",
+                    "BattleCommandPostureExecutorPatch blocked movement queue failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static void MarkGroupMovementStarted(Regiment group, CommandTaskType task)
+        {
+            try
+            {
+                if (group == null) return;
+                if (!CommandWaypointWritePolicy.ShouldStampGroupMovementForExecutorWaypoint(task)) return;
+                group.groupsubordinatesmoving = 1f;
+                group.groupsubordinatesmovingnotfar = 1f;
+            }
+            catch { }
+        }
+
+        private static bool MovementMaterialized(Regiment group, int beforeMovingPaths)
+        {
+            try
+            {
+                if (group == null) return false;
+                if (group.regimentpaths > 0) return true;
+                return CountMovingPaths(group) > beforeMovingPaths;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static int CountMovingPaths(Regiment group)
+        {
+            int moving = 0;
+            try
+            {
+                if (group == null) return 0;
+                if (group.regimentpaths > 0) moving++;
+                if (group.allattachedunits == null) return moving;
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit != null && unit.regimentpaths > 0) moving++;
+                }
+            }
+            catch { }
+
+            return moving;
         }
 
         private static bool ShouldSkipDuplicateWaypoint(Regiment group, Vector3 target)
@@ -1403,6 +1500,7 @@ namespace WhiskeyRealism.Patches
 
         private static bool CanWrite(
             Regiment group,
+            CommandTaskType task,
             WriteEligibilitySnapshot eligibility,
             CommandPhysicalState physical,
             float recentOrderSeconds,
@@ -1416,7 +1514,11 @@ namespace WhiskeyRealism.Patches
             if (eligibility.RecentOrder) return false;
             if (physical.ActiveMove) return false;
             if (!allowPendingLocalFormation && HasPendingOrder(group, allowStaleQueuedBypass)) return false;
-            if (HasRecentExecutorOrder(SafeInstanceId(group), recentOrderSeconds)) return false;
+            if (CommandPostureExecutor.ShouldBlockForRecentOrder(
+                    task,
+                    physical,
+                    HasRecentExecutorOrder(SafeInstanceId(group), recentOrderSeconds)))
+                return false;
             return true;
         }
 
@@ -1696,11 +1798,18 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (group == null) return false;
-                if (group.pathinterrupted) return false;
-                if (group.regimentpaths <= 0) return false;
-                if (group.groupsubordinatesmoving > 0.05f || group.groupsubordinatesmovingnonai > 0.05f) return true;
-                if (group.movementmode > 0) return true;
-                return false;
+                Vector3 lastWaypoint = group.lastsetwaypointposition;
+                bool hasLastWaypoint = !IsDefaultVector(lastWaypoint);
+                float distance = hasLastWaypoint ? SafeDistance(SafePosition(group), lastWaypoint) : 0f;
+                return CommandWaypointWritePolicy.IsExecutorMovementActive(
+                    group.pathinterrupted,
+                    group.regimentpaths,
+                    group.movementmode,
+                    group.groupsubordinatesmoving,
+                    group.groupsubordinatesmovingnonai,
+                    hasLastWaypoint,
+                    distance,
+                    MinWaypointDistance);
             }
             catch
             {
@@ -2301,8 +2410,23 @@ namespace WhiskeyRealism.Patches
                 " reason=" + TacticalOperationsTelemetry.SafeToken(reason) +
                 " currentFormation=" + SafeGroupFormation(group) +
                 " paths=" + SafeRegimentPaths(group) +
+                " movingFlag=" + SafeGroupMovingFlag(group) +
                 " pathInterrupted=" + (group != null && group.pathinterrupted) +
                 " activeMove=" + HasActiveMoveMakingProgress(group));
+        }
+
+        private static string SafeGroupMovingFlag(Regiment group)
+        {
+            try
+            {
+                if (group == null) return "0/0";
+                return group.groupsubordinatesmoving.ToString("0.##") + "/" +
+                    group.groupsubordinatesmovingnotfar.ToString("0.##");
+            }
+            catch
+            {
+                return "?/?";
+            }
         }
 
         private static bool EnabledForWrites()

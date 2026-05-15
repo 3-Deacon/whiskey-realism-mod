@@ -84,6 +84,65 @@ namespace WhiskeyRealism.Tactical.Operations
 
     public static class CommandWaypointWritePolicy
     {
+        private const float MovementFlagThreshold = 0.05f;
+
+        public static bool ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType task, bool battleActive)
+        {
+            if (!battleActive) return true;
+            if (IsExecutorMovementTask(task)) return false;
+            return true;
+        }
+
+        public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(
+            CommandTaskType task,
+            float distance,
+            float threshold,
+            bool hasBlockedCrossingData,
+            bool battleActive)
+        {
+            if (!battleActive) return false;
+            if (!hasBlockedCrossingData) return false;
+            if (!IsFinite(distance) || !IsFinite(threshold)) return false;
+            if (threshold <= 0f || distance <= threshold) return false;
+
+            switch (task)
+            {
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.AdvanceToAssembly:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        public static bool ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType task)
+        {
+            return IsExecutorMovementTask(task);
+        }
+
+        public static bool IsExecutorMovementActive(
+            bool pathInterrupted,
+            int regimentPaths,
+            int movementMode,
+            float groupSubordinatesMoving,
+            float groupSubordinatesMovingNonAi,
+            bool hasLastWaypoint,
+            float distanceToLastWaypoint,
+            float minWaypointDistance)
+        {
+            if (pathInterrupted) return false;
+            if (groupSubordinatesMoving > MovementFlagThreshold ||
+                groupSubordinatesMovingNonAi > MovementFlagThreshold)
+                return true;
+            if (regimentPaths <= 0) return false;
+            if (movementMode > 0) return true;
+            if (!hasLastWaypoint) return false;
+            if (!IsFinite(distanceToLastWaypoint) || !IsFinite(minWaypointDistance)) return false;
+            return distanceToLastWaypoint > minWaypointDistance;
+        }
+
         public static bool ShouldSkipDuplicateWaypoint(
             float currentWaypointX,
             float currentWaypointZ,
@@ -142,6 +201,25 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             return !float.IsNaN(value) && !float.IsInfinity(value);
         }
+
+        private static bool IsExecutorMovementTask(CommandTaskType task)
+        {
+            switch (task)
+            {
+                case CommandTaskType.FormUp:
+                case CommandTaskType.AdvanceToAssembly:
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.Screen:
+                case CommandTaskType.FallBackToLine:
+                case CommandTaskType.ReleaseReserve:
+                case CommandTaskType.RecoverStuckOrder:
+                    return true;
+                default:
+                    return false;
+            }
+        }
     }
 
     public static class CommandPostureExecutor
@@ -189,7 +267,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return NoWrite("order-pending");
             }
 
-            if (eligibility.RecentOrder)
+            if (ShouldBlockForRecentOrder(order.Task, physical, eligibility.RecentOrder))
             {
                 return NoWrite("recent-order");
             }
@@ -321,7 +399,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return NoWrite("order-pending");
             }
 
-            if (eligibility.RecentOrder)
+            if (ShouldBlockForRecentOrder(state.Task, physical, eligibility.RecentOrder))
             {
                 return NoWrite("recent-order");
             }
@@ -422,6 +500,35 @@ namespace WhiskeyRealism.Tactical.Operations
         private static PostureExecutionDecision NoWrite(string reason)
         {
             return new PostureExecutionDecision(PostureExecutionAction.NoWrite, reason);
+        }
+
+        public static bool ShouldBlockForRecentOrder(
+            CommandTaskType task,
+            CommandPhysicalState physical,
+            bool recentOrder)
+        {
+            if (!recentOrder) return false;
+            if (!IsMovementTask(task)) return true;
+            return physical.ActiveMove || physical.Paths > 0;
+        }
+
+        private static bool IsMovementTask(CommandTaskType task)
+        {
+            switch (task)
+            {
+                case CommandTaskType.FormUp:
+                case CommandTaskType.AdvanceToAssembly:
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.Screen:
+                case CommandTaskType.FallBackToLine:
+                case CommandTaskType.ReleaseReserve:
+                case CommandTaskType.RecoverStuckOrder:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static PostureExecutionDecision Formation(string reason)

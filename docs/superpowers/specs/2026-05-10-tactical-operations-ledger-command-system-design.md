@@ -1197,7 +1197,7 @@ implementable without violating repo policy.
    executor writes are logged as `NoWrite`.
 4. **Active release smoke.** Enable `Active` in local config for focused battle
    smoke and prove bounded logs, stable anchors, no repeated exceptions, no
-   player-subordinate retasking, and no unintended side effects.
+   unintended player-chain battle-state retasking, and no unintended side effects. Player-facing W&L current-order popups are owned by #62.
 5. **Default publication.** After smoke passes, publish the tactical commander
    mode with `Active` as the default.
 

@@ -49,7 +49,7 @@ The implementation is complete only when all of these are true:
 - `./build.sh` succeeds.
 - `dist/WhiskeyRealism.dll` is deployed to the BepInEx plugin folder and the deployed SHA-256 matches `dist/WhiskeyRealism.dll`.
 - MonitorOnly smoke proves the full vision/ledger/task/monitor loop without vanilla writes.
-- Active smoke proves bounded writes, no repeated exceptions, no player-subordinate retasking, and no illegal idle commands left without a ledger reason.
+- Active smoke proves bounded writes, no repeated exceptions, no unintended player-chain battle-state retasking, and no illegal idle commands left without a ledger reason. Player-facing W&L current-order popups are owned by #62 and tracked in `docs/wl-player-order-doctrine.md`.
 - config release/default is `Tactical Commander Mode = Active`.
 
 ## File Map
@@ -1382,7 +1382,7 @@ Start a battle and confirm:
 - `[TacticalCommandPosture]` writes are bounded.
 - `[TacticalPostureSummary]` shows illegal idle trending down.
 - no repeated `Exception`, `ERROR`, `missing-anchor`, or Harmony patch failure.
-- no player-subordinate retasking.
+- no unintended player-chain battle-state retasking.
 - no repeated non-reserve command nodes remain in `MarchColumn + pathInterrupted=True + paths=0 + activeMove=False` without a valid ledger reason.
 
 - [ ] **Step 6: Commit docs and closeout**
