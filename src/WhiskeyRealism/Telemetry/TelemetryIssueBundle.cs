@@ -10,12 +10,15 @@ namespace WhiskeyRealism.Telemetry
     {
         internal TelemetryIssueBundleManifest(string sessionId, IEnumerable<string> files, string note)
         {
-            SessionId = TelemetryEvent.Safe(sessionId);
+            SessionId = TelemetryIssueBundle.Redact(TelemetryEvent.Safe(sessionId));
             Files = new List<string>();
             if (files != null)
             {
                 foreach (string file in files)
-                    Files.Add(TelemetryIssueBundle.Redact(file));
+                {
+                    if (TelemetryIssueBundle.IsTelemetryOwnedFile(file))
+                        Files.Add(TelemetryIssueBundle.Redact(file));
+                }
             }
 
             Note = TelemetryIssueBundle.Redact(note);
@@ -79,6 +82,22 @@ namespace WhiskeyRealism.Telemetry
         private static readonly Regex BasicAuthorizationEquals = new Regex(
             @"(?i)\b(Authorization\s*=\s*Basic)\s+[^&\s;,""']+",
             RegexOptions.CultureInvariant);
+
+        private static readonly Regex RotatedTelemetryFile = new Regex(
+            @"(?i)^(?:health|failures|performance|tactical|campaign)\.[0-9]{3}\.jsonl$",
+            RegexOptions.CultureInvariant);
+
+        private static readonly HashSet<string> TelemetryBundleFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "manifest.json",
+            "summary.md",
+            "issue-bundle.json",
+            "health.jsonl",
+            "failures.jsonl",
+            "performance.jsonl",
+            "tactical.jsonl",
+            "campaign.jsonl"
+        };
 
         internal static string Redact(string value)
         {
@@ -199,6 +218,42 @@ namespace WhiskeyRealism.Telemetry
                 return "Basic <redacted>";
 
             return "<redacted>";
+        }
+
+        internal static bool IsTelemetryOwnedFile(string file)
+        {
+            if (string.IsNullOrWhiteSpace(file))
+                return false;
+
+            string normalized = file.Trim().Replace('\\', '/');
+            string fileName = FileNameFromNormalizedPath(normalized);
+            if (!(TelemetryBundleFiles.Contains(fileName) || RotatedTelemetryFile.IsMatch(fileName)))
+                return false;
+
+            if (fileName.Length == normalized.Length)
+                return true;
+
+            return IsTelemetrySessionPath(normalized);
+        }
+
+        private static string FileNameFromNormalizedPath(string normalized)
+        {
+            int slash = normalized.LastIndexOf('/');
+            return slash >= 0 && slash < normalized.Length - 1
+                ? normalized.Substring(slash + 1)
+                : normalized;
+        }
+
+        private static bool IsTelemetrySessionPath(string normalized)
+        {
+            const string Marker = "BepInEx/WhiskeyRealism/tuning-logs/";
+            int marker = normalized.IndexOf(Marker, StringComparison.OrdinalIgnoreCase);
+            if (marker < 0)
+                return false;
+
+            string remainder = normalized.Substring(marker + Marker.Length).Trim('/');
+            int slash = remainder.IndexOf('/');
+            return slash > 0 && slash < remainder.Length - 1;
         }
 
         internal static TelemetryIssueBundleManifest CreateManifest(string sessionId, IEnumerable<string> files, string note)

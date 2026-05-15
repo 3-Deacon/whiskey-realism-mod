@@ -53,6 +53,8 @@ static class Program
             ("telemetry issue bundle redacts nested json strings", TelemetryIssueBundleRedactsNestedJsonStrings),
             ("telemetry budget caps raw performance but allows summaries", TelemetryBudgetCapsRawPerformanceButAllowsSummaries),
             ("telemetry issue bundle manifest has explicit json", TelemetryIssueBundleManifestHasExplicitJson),
+            ("telemetry issue bundle manifest redacts unsafe session id", TelemetryIssueBundleManifestRedactsUnsafeSessionId),
+            ("telemetry issue bundle manifest filters non telemetry files", TelemetryIssueBundleManifestFiltersNonTelemetryFiles),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1445,7 +1447,7 @@ static class Program
     {
         TelemetryIssueBundleManifest manifest = TelemetryIssueBundle.CreateManifest(
             "session-1",
-            new[] { @"C:\Users\Kyle\AppData\log.txt" },
+            new[] { @"C:\Users\Kyle\AppData\BepInEx\WhiskeyRealism\tuning-logs\session-1\manifest.json" },
             "Authorization=Bearer abc token=secret");
 
         string json = manifest.ToJson();
@@ -1457,6 +1459,54 @@ static class Program
         AssertFalse(json.Contains("Kyle"), "manifest username removed");
         AssertFalse(json.Contains("abc"), "manifest authorization value removed");
         AssertFalse(json.Contains("secret"), "manifest token value removed");
+    }
+
+    private static void TelemetryIssueBundleManifestRedactsUnsafeSessionId()
+    {
+        TelemetryIssueBundleManifest manifest = TelemetryIssueBundle.CreateManifest(
+            @"C:\Users\Kyle\AppData Authorization=Bearer abc token=secret",
+            new[] { "manifest.json" },
+            "safe note");
+
+        string json = manifest.ToJson();
+        var parsed = JObject.Parse(json);
+
+        AssertTrue(!string.IsNullOrWhiteSpace((string)parsed["sessionId"]), "manifest session id retained");
+        AssertFalse(json.Contains("Kyle"), "manifest session username removed");
+        AssertFalse(json.Contains("abc"), "manifest session bearer removed");
+        AssertFalse(json.Contains("secret"), "manifest session token removed");
+    }
+
+    private static void TelemetryIssueBundleManifestFiltersNonTelemetryFiles()
+    {
+        TelemetryIssueBundleManifest manifest = TelemetryIssueBundle.CreateManifest(
+            "session-1",
+            new[]
+            {
+                @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\20260515-120000-p1-abcdef123456\manifest.json",
+                @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\20260515-120000-p1-abcdef123456\summary.md",
+                @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\20260515-120000-p1-abcdef123456\campaign.001.jsonl",
+                @"C:\Games\Grand Tactician\BepInEx\plugins\WhiskeyRealism.dll",
+                @"C:\Games\Grand Tactician\Campaigns\001\save.dat",
+                @"C:\Games\Grand Tactician\BepInEx\LogOutput.log",
+                @"C:\Games\Grand Tactician\BepInEx\plugins\OtherPlugin.log",
+                @"C:\Users\Kyle\Documents\summary.md"
+            },
+            null);
+
+        string json = manifest.ToJson();
+        var parsed = JObject.Parse(json);
+        var files = (JArray)parsed["files"];
+
+        AssertEqual(3, files.Count, "only telemetry-owned files included");
+        AssertContains((string)files[0], "manifest.json", "manifest included");
+        AssertContains((string)files[1], "summary.md", "summary included");
+        AssertContains((string)files[2], "campaign.001.jsonl", "rotated campaign included");
+        AssertFalse(json.Contains("WhiskeyRealism.dll"), "dll excluded");
+        AssertFalse(json.Contains("save.dat"), "save excluded");
+        AssertFalse(json.Contains("LogOutput.log"), "bepinex log excluded");
+        AssertFalse(json.Contains("OtherPlugin.log"), "other plugin log excluded");
+        AssertFalse(json.Contains("Kyle"), "user document path excluded");
     }
 
     private static FrontSectorLedger BuildLedger()
