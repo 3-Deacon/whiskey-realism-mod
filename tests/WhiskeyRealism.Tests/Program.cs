@@ -63,6 +63,9 @@ static class Program
             ("telemetry issue bundle manifest filters non telemetry files", TelemetryIssueBundleManifestFiltersNonTelemetryFiles),
             ("telemetry issue bundle manifest scopes files to active session", TelemetryIssueBundleManifestScopesFilesToActiveSession),
             ("telemetry issue bundle scopes equivalent windows and wsl paths", TelemetryIssueBundleScopesEquivalentWindowsAndWslPaths),
+            ("telemetry profile off does not allocate session", TelemetryProfileOffDoesNotAllocateSession),
+            ("telemetry profile parses unknown as off", TelemetryProfileParsesUnknownAsOff),
+            ("telemetry behavior gates are independent from profile", TelemetryBehaviorGatesAreIndependentFromProfile),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1084,6 +1087,70 @@ static class Program
     private static TelemetryEvent EventForQueue(TelemetryCategory category, string name)
     {
         return TelemetryEvent.Create("s", TelemetryProfile.FullTuning, TelemetryLayer.System, category, name, TelemetrySeverity.Info);
+    }
+
+    private static void TelemetryProfileOffDoesNotAllocateSession()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.Off,
+                maxTuningLogMb: 250,
+                fileRotateMb: 25,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            AssertFalse(runtime.IsRunning, "off profile runtime should not start writer");
+            AssertEqual("-", runtime.SessionId, "off profile has no session id");
+            AssertFalse(Directory.Exists(TelemetrySession.TuningLogRoot(gameRoot)), "off profile should not create tuning log root");
+            runtime.Shutdown("test-off");
+            AssertFalse(Directory.Exists(TelemetrySession.TuningLogRoot(gameRoot)), "off shutdown should not create tuning log root");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryProfileParsesUnknownAsOff()
+    {
+        AssertEqual(TelemetryProfile.Off, TelemetryRouter.ParseProfile(null), "null profile");
+        AssertEqual(TelemetryProfile.Off, TelemetryRouter.ParseProfile(""), "blank profile");
+        AssertEqual(TelemetryProfile.Off, TelemetryRouter.ParseProfile("noisy"), "unknown profile");
+        AssertEqual(TelemetryProfile.TacticalTuning, TelemetryRouter.ParseProfile(" Tactical Tuning "), "tactical spaced profile");
+        AssertEqual(TelemetryProfile.CampaignTuning, TelemetryRouter.ParseProfile("campaign-tuning"), "campaign dashed profile");
+        AssertEqual(TelemetryProfile.FullTuning, TelemetryRouter.ParseProfile("full_tuning"), "full underscored profile");
+    }
+
+    private static void TelemetryBehaviorGatesAreIndependentFromProfile()
+    {
+        AssertTrue(TelemetryRouter.ShouldBehaviorRun(TelemetryProfile.Off, behaviorEnabled: true), "off profile does not disable enabled behavior");
+        AssertTrue(TelemetryRouter.ShouldBehaviorRun(TelemetryProfile.TacticalTuning, behaviorEnabled: true), "tactical profile leaves behavior enabled");
+        AssertFalse(TelemetryRouter.ShouldBehaviorRun(TelemetryProfile.FullTuning, behaviorEnabled: false), "logging profile does not enable disabled behavior");
+
+        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.Campaign, TelemetryCategory.Decision), "tactical tuning excludes campaign decisions");
+        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.Tactical, TelemetryCategory.Decision), "tactical tuning includes tactical decisions");
+        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.Tactical, TelemetryCategory.State), "campaign tuning excludes tactical state");
+        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.Campaign, TelemetryCategory.State), "campaign tuning includes campaign state");
+        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.System, TelemetryCategory.Performance), "tactical tuning includes system performance");
+        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.System, TelemetryCategory.Failure), "campaign tuning includes system failure");
+        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.FullTuning, TelemetryLayer.Tactical, TelemetryCategory.Trace), "full tuning includes trace");
+        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Tactical, TelemetryCategory.Decision), "off excludes decision");
+        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Campaign, TelemetryCategory.State), "off excludes state");
+        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Tactical, TelemetryCategory.Trace), "off excludes trace");
+        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Campaign, TelemetryCategory.Write), "off excludes write");
+        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Tactical, TelemetryCategory.Gate), "off excludes gate");
+        AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.System, TelemetryCategory.Performance), "off excludes performance");
+        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.System, TelemetryCategory.Health), "off allows bounded health");
+        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.Off, TelemetryLayer.Tactical, TelemetryCategory.Failure), "off allows bounded failure");
     }
 
     private static void TelemetrySessionIdSortsByUtcMilliseconds()

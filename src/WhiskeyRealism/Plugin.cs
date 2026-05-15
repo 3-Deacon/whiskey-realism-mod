@@ -1,4 +1,7 @@
 using System;
+using System.IO;
+using System.Reflection;
+using System.Security.Cryptography;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -6,6 +9,7 @@ using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Telemetry;
 
 namespace WhiskeyRealism
 {
@@ -27,6 +31,13 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> FiscalTrace;
         internal ConfigEntry<bool> FiscalTelemetryCsv;
         internal ConfigEntry<bool> DirectorVerboseTrace;
+        internal ConfigEntry<string> TelemetryLoggingProfileRaw;
+        internal ConfigEntry<int> TelemetryMaxTuningLogMb;
+        internal ConfigEntry<int> TelemetryFileRotateMb;
+        internal ConfigEntry<int> TelemetryRetainedSessions;
+        internal ConfigEntry<bool> TelemetryEmitHumanSummary;
+        internal ConfigEntry<bool> TelemetryPerformanceWarnings;
+        internal ConfigEntry<bool> TelemetryCreateIssueBundleOnShutdown;
         internal ConfigEntry<bool> EnableTacticalObserver;
         internal ConfigEntry<bool> TacticalObserverVerboseLogging;
         internal ConfigEntry<int> TacticalObserverMinSecondsBetweenSummaries;
@@ -120,6 +131,7 @@ namespace WhiskeyRealism
 
         private Harmony _harmony;
         private bool _loggedTacticalCommanderMode;
+        private TelemetryRuntime _telemetryRuntime;
 
         internal TacticalCommanderMode TacticalCommanderModeValue =>
             ResolveTacticalCommanderMode();
@@ -176,6 +188,41 @@ namespace WhiskeyRealism
                 "Director Verbose Trace",
                 false,
                 "When true, logs detailed Director slice traces every advanced game day. Default off — only [CampaignPace] and [CollapseRisk] level-change lines emit.");
+            TelemetryLoggingProfileRaw = Config.Bind(
+                "Telemetry",
+                "Logging Profile",
+                "Off",
+                "Off, TacticalTuning, CampaignTuning, or FullTuning. Controls structured tuning sidecars only; it does not enable or disable tactical/campaign behavior gates.");
+            TelemetryMaxTuningLogMb = Config.Bind(
+                "Telemetry",
+                "Max Tuning Log Mb",
+                250,
+                "Total per-session structured telemetry cap in megabytes.");
+            TelemetryFileRotateMb = Config.Bind(
+                "Telemetry",
+                "File Rotate Mb",
+                25,
+                "Approximate JSONL file rotation size in megabytes.");
+            TelemetryRetainedSessions = Config.Bind(
+                "Telemetry",
+                "Retained Sessions",
+                2,
+                "Number of newest telemetry sessions to retain under BepInEx/WhiskeyRealism/tuning-logs.");
+            TelemetryEmitHumanSummary = Config.Bind(
+                "Telemetry",
+                "Emit Human Summary",
+                true,
+                "Reserved for human-readable summary output at shutdown.");
+            TelemetryPerformanceWarnings = Config.Bind(
+                "Telemetry",
+                "Performance Warnings",
+                true,
+                "Emit bounded telemetry performance warning rows when the writer detects pressure.");
+            TelemetryCreateIssueBundleOnShutdown = Config.Bind(
+                "Telemetry",
+                "Create Issue Bundle On Shutdown",
+                false,
+                "When true, future telemetry closeout may create a redacted issue bundle on shutdown.");
             EnableTacticalObserver = Config.Bind(
                 "Tactical",
                 "Enable Tactical Observer",
@@ -574,12 +621,64 @@ namespace WhiskeyRealism
 
             MoraleSnapshotLedger = new TacticalMoraleSnapshotLedger(capacity: TacticalMoraleSnapshotLedgerCapacity);
 
+            StartTelemetryRuntime();
+
             // PatchAll(assembly) reflects all [HarmonyPatch] attributed classes
             // (including nested types like AICampaignSaveLoadPatch.SavePatch /
             // .LoadPatch). Cleaner than enumerating each class explicitly.
             _harmony.PatchAll(typeof(Plugin).Assembly);
 
             Log.LogInfo($"{GUID} v0.2.2 loaded — strategic-brain patches registered.");
+        }
+
+        private void OnDestroy()
+        {
+            TelemetryRouter.Shutdown("plugin-destroy");
+            _telemetryRuntime = null;
+        }
+
+        private void OnApplicationQuit()
+        {
+            TelemetryRouter.Shutdown("application-quit");
+            _telemetryRuntime = null;
+        }
+
+        private void StartTelemetryRuntime()
+        {
+            var profile = TelemetryRouter.ParseProfile(TelemetryLoggingProfileRaw?.Value);
+            var config = TelemetryRuntimeConfig.Create(
+                Paths.GameRootPath,
+                "0.2.2",
+                ComputeAssemblySha256(),
+                profile,
+                TelemetryMaxTuningLogMb?.Value ?? 250,
+                TelemetryFileRotateMb?.Value ?? 25,
+                TelemetryRetainedSessions?.Value ?? 2,
+                TelemetryEmitHumanSummary?.Value ?? true,
+                TelemetryPerformanceWarnings?.Value ?? true,
+                TelemetryCreateIssueBundleOnShutdown?.Value ?? false,
+                message => Log?.LogWarning("[Telemetry] " + message));
+
+            _telemetryRuntime = TelemetryRuntime.Start(config);
+            TelemetryRouter.AttachRuntime(_telemetryRuntime);
+        }
+
+        private static string ComputeAssemblySha256()
+        {
+            try
+            {
+                string location = Assembly.GetExecutingAssembly().Location;
+                if (string.IsNullOrWhiteSpace(location) || !File.Exists(location))
+                    return "-";
+
+                using (var sha = SHA256.Create())
+                using (var stream = File.OpenRead(location))
+                    return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", string.Empty).ToLowerInvariant();
+            }
+            catch
+            {
+                return "-";
+            }
         }
     }
 }
