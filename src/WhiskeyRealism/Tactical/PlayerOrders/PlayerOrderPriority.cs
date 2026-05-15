@@ -15,8 +15,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 case PlayerOrderIntent.SupportMainEffort:
                     return 70;
                 case PlayerOrderIntent.AttackObjective:
-                case PlayerOrderIntent.AdvanceToAssemblyArea:
                     return 60;
+                case PlayerOrderIntent.AdvanceToAssemblyArea:
                 case PlayerOrderIntent.ProbeObjective:
                     return 50;
                 case PlayerOrderIntent.BuildSupplyDepot:
@@ -41,24 +41,28 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     return 80;
                 case 7:
                     return scope == PlayerOrderScope.Campaign ? 90 : 80;
+                case 11:
+                    return 70;
                 case 13:
-                case 14:
                     return provenance == PlayerOrderProvenance.WhiskeyTactical ||
                         provenance == PlayerOrderProvenance.WhiskeyCampaign
                         ? 20
                         : 100;
+                case 14:
+                    return 20;
                 case 0:
+                case 4:
+                case 16:
+                    return 60;
                 case 1:
                 case 2:
                 case 3:
-                case 4:
                 case 5:
-                    return 60;
                 case 6:
+                    return 50;
                 case 8:
                 case 9:
                 case 10:
-                case 16:
                     return 30;
                 default:
                     return int.MaxValue;

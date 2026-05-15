@@ -1,8 +1,10 @@
 # W&L Player Order Doctrine Design
 
-Status: active design spec; implementation plan not written.
+Status: active design spec; implementation completed in current player-order worktree; build/deploy/hash verified; runtime smoke pending. Do not archive until focused W&L player-order smoke passes.
 Date: 2026-05-12.
 Owner: Whiskey Realism W&L / tactical command workstream.
+
+Living behavior reference: `docs/wl-player-order-doctrine.md`. Implementation plan: `docs/superpowers/plans/2026-05-12-wl-player-order-doctrine-implementation.md`.
 
 ## Goal
 
@@ -52,7 +54,7 @@ This spec was verified against:
 
 The 2026-05-12 verification pass included independent read-only reviews of vanilla decompile anchors and mod/repo anchors, then a local integration pass before this spec was corrected.
 
-Confirmed-current mod behavior is kept separate from proposed implementation below. `PlayerSubordinateOrderPatch`, `PlayerOrderIntent`, `PlayerOrderComposer`, `PlayerOrderPriority`, `PlayerOrderDedupe`, `PlayerOrderVanillaMapper`, and `PlayerOrderDiagnostics` are proposed surfaces, not shipped source.
+Confirmed-current mod behavior is kept separate from the original proposed design below. `PlayerSubordinateOrderPatch` and the `Tactical/PlayerOrders/` doctrine layer are now implemented in the current player-order worktree, with behavior summarized in `docs/wl-player-order-doctrine.md`. This spec remains active only because runtime smoke has not passed yet.
 
 ## Confirmed Vanilla Anchors
 
@@ -111,9 +113,9 @@ Nuance for campaign callers: vanilla often skips direct `MoveUnitTo(...)` for W&
 ### Existing Whiskey Boundaries
 
 - `docs/patch-catalog.md` records `AIBattle.CheckCurrentOrderUpdate` as W&L-only current-order/message machinery, not regular campaign movement.
-- `WlStrategicOrderBridge` is the existing central campaign W&L bridge. Current source fails closed for null requests, player-CIC, player-controlled, player-unit, ineligible chain, and failed vanilla-bridge cases. It calls `AIBattle.CheckCurrentOrderUpdate(... calledfromcampaign:true)` only through `TryIssue(...)`, and detects bridge failure by comparing `givenorderssession`/`givenorder` before and after the vanilla call. It does not yet have campaign signature cache, material-change detection, refresh cooldown, active-order priority comparison, or full suppressed/issued diagnostics.
+- `WlStrategicOrderBridge` is the existing central campaign W&L bridge. Current source fails closed for null requests, player-CIC, player-controlled, player-unit, ineligible chain, and failed vanilla-bridge cases. It calls `AIBattle.CheckCurrentOrderUpdate(... calledfromcampaign:true)` only through `TryIssue(...)`, and detects bridge failure by comparing `givenorderssession`/`givenorder` before and after the vanilla call. In the current player-order worktree it also has campaign signature cache, failed-attempt cooldown, provenance shadowing, active-order priority comparison, and suppressed/issued diagnostics shared with #62.
 - `TacticalObserverPatch` already observes `AIBattle.CheckCurrentOrderUpdate` and can emit `[TacticalCurrentOrder]` / `[TacticalPlayerOrder]` telemetry when enabled. It is read-only telemetry, not the doctrine owner.
-- The tactical orchestrator workstream already identified `PlayerSubordinateOrderPatch` as the intended O6 player-order surface. That patch is planned, not shipped. The original O6 surface was described as Postfix-only, but this spec requires a Prefix/Postfix snapshot pair on the same method so Whiskey can detect vanilla self-issued orders before deciding whether to compose or write.
+- The tactical orchestrator workstream already identified `PlayerSubordinateOrderPatch` as the intended O6 player-order surface. The current implementation uses the required Prefix/Postfix snapshot pair on `AIBattle.UpdateDLCPlayerOrders()` so Whiskey can detect vanilla self-issued orders before deciding whether to compose or write.
 - `ArmyOrchestrator.ResolveCommandIntentForGroup(...)` currently returns `CommandIntentResolution` with `Found`, `Intent`, and `Reason`. The consumed `CommandNodeIntent` fields are `NodeId`, `SourceNodeId`, `Role`, `Axis`, `PrimarySector`, `SupportPriority`, `AggressionBias01`, and `Depth`. `PlayerOrderComposer` may consume those fields only; changing that contract requires an implementation-plan update.
 
 ## Doctrine Design

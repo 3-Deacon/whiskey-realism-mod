@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using UnityEngine;
+using WhiskeyRealism.Tactical.PlayerOrders;
 
 namespace WhiskeyRealism.Strategic
 {
@@ -106,6 +107,9 @@ namespace WhiskeyRealism.Strategic
     {
         internal const float DefaultOrderWidth = 20f;
         internal const float DefaultOrderDepth = 20f;
+        private const long CampaignThrottleTicks = 720;
+        private static readonly PlayerOrderDedupeState CampaignDedupeState = new PlayerOrderDedupeState();
+        private static string _campaignContextKey = string.Empty;
 
         internal static WlStrategicOrderDecision TryIssue(WlStrategicOrderRequest request)
         {
@@ -124,8 +128,21 @@ namespace WhiskeyRealism.Strategic
             if (decision.Result != WlStrategicOrderResult.IssuedWlCurrentOrder)
                 return decision;
 
+            string campaignContextKey = CampaignContextKey(request);
+            ClearCampaignCacheIfContextChanged(CampaignDedupeState, ref _campaignContextKey, campaignContextKey);
             int beforeSession = ReadGivenOrdersSession();
             object beforeOrder = ReadGivenOrder();
+            var candidate = BuildCampaignCandidate(
+                request.Intent,
+                UnitKey(request.Unit),
+                campaignContextKey,
+                beforeSession,
+                new PlayerOrderPoint(request.TargetPosition.x, request.TargetPosition.z),
+                string.IsNullOrEmpty(request.TargetName) ? "Objective" : request.TargetName);
+            var active = ReadActiveOrderSnapshot(campaignContextKey);
+            var dedupe = DecideCampaignOrder(candidate, active, CampaignDedupeState, Tick());
+            if (!dedupe.ShouldIssue)
+                return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, decision.WlOrderType, "campaign-dedupe:" + dedupe.Reason);
 
             try
             {
@@ -149,6 +166,15 @@ namespace WhiskeyRealism.Strategic
             object afterOrder = ReadGivenOrder();
             if (beforeSession == afterSession && ReferenceEquals(beforeOrder, afterOrder))
                 return Classify(request.Intent, facts, vanillaBridgeSucceeded: false);
+
+            var accepted = ReadActiveOrderSnapshot(campaignContextKey);
+            if (ActiveMatchesCampaignCandidate(candidate, accepted, beforeSession))
+            {
+                CampaignDedupeState.RecordAccepted(
+                    WithSession(candidate, accepted.GivenOrderSession),
+                    WithAcceptedOrder(candidate, accepted),
+                    Tick());
+            }
 
             return decision;
         }
@@ -241,6 +267,55 @@ namespace WhiskeyRealism.Strategic
             return requestedDepth > 0f ? requestedDepth : DefaultOrderDepth;
         }
 
+        internal static PlayerOrderCandidate BuildCampaignCandidate(
+            WlStrategicIntent intent,
+            string unitKey,
+            string campaignContextKey,
+            int givenOrderSession,
+            PlayerOrderPoint target,
+            string targetName)
+        {
+            return new PlayerOrderCandidate(
+                scope: PlayerOrderScope.Campaign,
+                intent: CampaignPlayerOrderIntent(intent),
+                vanillaType: WlOrderTypeForIntent(intent),
+                priority: CampaignPriorityForIntent(intent),
+                unitKey: unitKey,
+                battleIdentity: campaignContextKey,
+                givenOrderSession: givenOrderSession,
+                targetPoint: target,
+                rotation: -1f,
+                objectiveKey: string.IsNullOrWhiteSpace(targetName) ? "Objective" : targetName.Trim(),
+                reason: "wl-strategic:" + intent,
+                activeCampaignActionable: true,
+                campaignGroupFlag: true);
+        }
+
+        internal static PlayerOrderDedupeDecision DecideCampaignOrder(
+            PlayerOrderCandidate candidate,
+            PlayerOrderActiveSnapshot active,
+            PlayerOrderDedupeState state,
+            long tick)
+        {
+            return PlayerOrderDedupe.Decide(
+                candidate,
+                active,
+                state,
+                new PlayerOrderDedupeOptions(writesEnabled: true, throttleTicks: CampaignThrottleTicks),
+                tick);
+        }
+
+        internal static void ClearCampaignCacheIfContextChanged(
+            PlayerOrderDedupeState state,
+            ref string currentContextKey,
+            string nextContextKey)
+        {
+            nextContextKey = nextContextKey ?? string.Empty;
+            if (string.Equals(currentContextKey ?? string.Empty, nextContextKey, StringComparison.Ordinal)) return;
+            state?.ClearForPlayerCommandChange();
+            currentContextKey = nextContextKey;
+        }
+
         private static WlStrategicOrderDecision Allowed(WlStrategicOrderResult result, int orderType, string reason)
         {
             return new WlStrategicOrderDecision(result, orderType, mayDirectMove: true, mayMutateOperationList: true, reason);
@@ -249,6 +324,236 @@ namespace WhiskeyRealism.Strategic
         private static WlStrategicOrderDecision Blocked(WlStrategicOrderResult result, int orderType, string reason)
         {
             return new WlStrategicOrderDecision(result, orderType, mayDirectMove: false, mayMutateOperationList: false, reason);
+        }
+
+        private static PlayerOrderIntent CampaignPlayerOrderIntent(WlStrategicIntent intent)
+        {
+            switch (intent)
+            {
+                case WlStrategicIntent.Probe:
+                    return PlayerOrderIntent.ProbeObjective;
+                case WlStrategicIntent.Offensive:
+                case WlStrategicIntent.EngageEnemy:
+                    return PlayerOrderIntent.AttackObjective;
+                case WlStrategicIntent.DefendCapital:
+                    return PlayerOrderIntent.DefendCapital;
+                case WlStrategicIntent.ConstructFort:
+                    return PlayerOrderIntent.BuildFort;
+                case WlStrategicIntent.ConstructSupplyDepot:
+                    return PlayerOrderIntent.BuildSupplyDepot;
+                case WlStrategicIntent.Redeploy:
+                case WlStrategicIntent.Reinforce:
+                case WlStrategicIntent.OffensiveContinuation:
+                    return PlayerOrderIntent.AdvanceToAssemblyArea;
+                default:
+                    return PlayerOrderIntent.None;
+            }
+        }
+
+        private static int CampaignPriorityForIntent(WlStrategicIntent intent)
+        {
+            switch (intent)
+            {
+                case WlStrategicIntent.DefendCapital:
+                case WlStrategicIntent.ConstructFort:
+                case WlStrategicIntent.ConstructSupplyDepot:
+                    return 30;
+                case WlStrategicIntent.Offensive:
+                    return 60;
+                case WlStrategicIntent.EngageEnemy:
+                    return 80;
+                case WlStrategicIntent.Redeploy:
+                case WlStrategicIntent.Probe:
+                case WlStrategicIntent.Reinforce:
+                case WlStrategicIntent.OffensiveContinuation:
+                    return 50;
+                default:
+                    return 0;
+            }
+        }
+
+        private static PlayerOrderActiveSnapshot ReadActiveOrderSnapshot(string campaignContextKey)
+        {
+            try
+            {
+                var order = DLC_WL.givenorder;
+                int session = ReadGivenOrdersSession();
+                if (order == null)
+                    return new PlayerOrderActiveSnapshot(
+                        PlayerOrderScope.Campaign,
+                        PlayerOrderIntent.None,
+                        -1,
+                        0,
+                        string.Empty,
+                        campaignContextKey,
+                        session,
+                        default(PlayerOrderPoint),
+                        0f,
+                        string.Empty,
+                        "no-active-order",
+                        false,
+                        true,
+                        PlayerOrderProvenance.Unknown);
+
+                string unitKey = UnitKey(order.groupunit);
+                int currentOperation = SafeCurrentOperation();
+                bool inBattle = currentOperation == 1 || currentOperation == 3 || currentOperation == 8;
+                bool activeForScene = PlayerOrderVanillaScene.IsGivenOrderActiveForScene(order.type, currentOperation);
+                PlayerOrderScope scope = inBattle ? PlayerOrderScope.Tactical : PlayerOrderScope.Campaign;
+                var point = new PlayerOrderPoint(order.position.x, order.position.z);
+                var active = new PlayerOrderActiveSnapshot(
+                    scope,
+                    PlayerOrderIntent.None,
+                    order.type,
+                    PlayerOrderPriority.ForActiveVanillaType(order.type, scope, PlayerOrderProvenance.Unknown),
+                    unitKey,
+                    campaignContextKey,
+                    session,
+                    point,
+                    order.arearotation,
+                    order.destinationname,
+                    activeForScene ? "active-order" : "inactive-for-scene",
+                    scope == PlayerOrderScope.Campaign && activeForScene,
+                    scope == PlayerOrderScope.Campaign,
+                    PlayerOrderProvenance.Unknown,
+                    battleEnded: !activeForScene,
+                    stale: !activeForScene);
+                var provenance = ClassifyCampaignProvenance(active, unitKey);
+                return new PlayerOrderActiveSnapshot(
+                    scope,
+                    PlayerOrderIntent.None,
+                    order.type,
+                    PlayerOrderPriority.ForActiveVanillaType(order.type, scope, provenance),
+                    unitKey,
+                    campaignContextKey,
+                    session,
+                    point,
+                    order.arearotation,
+                    order.destinationname,
+                    active.Reason,
+                    active.ActiveCampaignActionable,
+                    active.CampaignGroupFlag,
+                    provenance,
+                    active.BattleEnded,
+                    active.Stale);
+            }
+            catch
+            {
+                return default(PlayerOrderActiveSnapshot);
+            }
+        }
+
+        private static PlayerOrderProvenance ClassifyCampaignProvenance(PlayerOrderActiveSnapshot active, string unitKey)
+        {
+            try
+            {
+                if (CampaignDedupeState.TryGetShadow(unitKey, out var shadow) &&
+                    shadow.ActiveSignature.MatchesActiveOrder(active))
+                    return PlayerOrderProvenance.WhiskeyCampaign;
+            }
+            catch { }
+
+            return PlayerOrderProvenance.Unknown;
+        }
+
+        private static bool ActiveMatchesCampaignCandidate(
+            PlayerOrderCandidate candidate,
+            PlayerOrderActiveSnapshot active,
+            int beforeSession)
+        {
+            if (!candidate.HasCandidate || !active.HasActiveOrder) return false;
+            if (active.GivenOrderSession <= beforeSession) return false;
+            if (active.VanillaType != candidate.VanillaType) return false;
+            if (Math.Abs(active.TargetPoint.X - candidate.TargetPoint.X) > 10f) return false;
+            if (Math.Abs(active.TargetPoint.Z - candidate.TargetPoint.Z) > 10f) return false;
+            return string.Equals(active.ObjectiveKey, candidate.ObjectiveKey, StringComparison.Ordinal);
+        }
+
+        private static PlayerOrderCandidate WithSession(PlayerOrderCandidate candidate, int session)
+        {
+            return new PlayerOrderCandidate(
+                candidate.Scope,
+                candidate.Intent,
+                candidate.VanillaType,
+                candidate.Priority,
+                candidate.UnitKey,
+                candidate.BattleIdentity,
+                session,
+                candidate.TargetPoint,
+                candidate.Rotation,
+                candidate.ObjectiveKey,
+                candidate.Reason,
+                candidate.ActiveCampaignActionable,
+                candidate.CampaignGroupFlag,
+                candidate.ValidExitPoint);
+        }
+
+        private static PlayerOrderCandidate WithAcceptedOrder(PlayerOrderCandidate candidate, PlayerOrderActiveSnapshot active)
+        {
+            return new PlayerOrderCandidate(
+                active.Scope,
+                candidate.Intent,
+                active.VanillaType,
+                candidate.Priority,
+                active.UnitKey,
+                active.BattleIdentity,
+                active.GivenOrderSession,
+                active.TargetPoint,
+                active.Rotation,
+                active.ObjectiveKey,
+                candidate.Reason,
+                active.ActiveCampaignActionable,
+                active.CampaignGroupFlag,
+                active.TargetPoint.ValidExitPoint);
+        }
+
+        private static string CampaignContextKey(WlStrategicOrderRequest request)
+        {
+            return "campaign:" + request.AllianceId + ":" + request.AifactionIndex + ":" +
+                SafeStaticField(typeof(SceneManagement), "currentcampaign") + ":" +
+                SafeStaticField(typeof(SceneManagement), "currentsave");
+        }
+
+        private static string UnitKey(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return string.Empty;
+                var component = unit as Component;
+                if (component != null && component.gameObject != null)
+                    return "unit-" + component.gameObject.GetInstanceID();
+                return "unit-" + unit.GetInstanceID();
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static int SafeCurrentOperation()
+        {
+            try { return SceneManagement.currentoperation; }
+            catch { return 0; }
+        }
+
+        private static long Tick()
+        {
+            try { return GameVars.frame; }
+            catch { return Environment.TickCount; }
+        }
+
+        private static string SafeStaticField(Type type, string name)
+        {
+            try
+            {
+                FieldInfo field = type.GetField(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                object value = field?.GetValue(null);
+                return value == null ? string.Empty : value.ToString();
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private static WlStrategicRoleFacts BuildFacts(WlStrategicOrderRequest request)

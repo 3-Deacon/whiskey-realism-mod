@@ -242,7 +242,7 @@ Output: `ConvergentOperation { OperationId, Phase, Arms[FixingArm, ConvergingArm
 
 Consumers: `CoordinatedOperationRuntime.AddCommitPlan(...)` (line 245 in `CoordinatedOperationRuntime.cs`) gains a new operation type that routes through `ConvergentOperationLedger` instead of the standard single-arm package. CIC reads the active phase to decide whether to allow new commitments.
 
-Configuration: convergent operations are default-off behind `EnableConvergentOperations` config until in-game smoke verifies bounded telemetry, no repeated exceptions, no player-subordinate retasking, and no infinite-loop in the phase advance. The default-off boundary mirrors B7/B8's default-off discipline.
+Configuration: convergent operations are default-off behind `EnableConvergentOperations` config until in-game smoke verifies bounded telemetry, no repeated exceptions, no unintended player-chain battle-state retasking, and no infinite-loop in the phase advance. The default-off boundary mirrors B7/B8's default-off discipline.
 
 Persistence: active convergent operations persist in the JSON sidecar via the existing `PersistenceDto` pattern. Phase plus arm references plus next-eval day are sufficient to re-hydrate.
 
@@ -343,7 +343,7 @@ Pure harness coverage expected when Slice C is implemented:
 - All scorers respect the W&L gate and alliance bounds;
 - Player-subordinate units are never written to.
 
-Runtime smoke expectations (post-build): default-off configuration for `ConvergentOperationLedger`; bounded telemetry; no repeated exceptions; no player-subordinate retasking; deployed DLL hash matches `dist/WhiskeyRealism.dll`.
+Runtime smoke expectations (post-build): default-off configuration for `ConvergentOperationLedger`; bounded telemetry; no repeated exceptions; no unintended player-chain battle-state retasking; deployed DLL hash matches `dist/WhiskeyRealism.dll`.
 
 ## Non-Goals
 

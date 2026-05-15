@@ -273,13 +273,25 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     internal readonly struct PlayerOrderShadow
     {
         public PlayerOrderShadow(PlayerOrderSignature signature, long tick, string battleIdentity)
+            : this(signature, signature, tick, battleIdentity)
         {
-            Signature = signature;
+        }
+
+        public PlayerOrderShadow(
+            PlayerOrderSignature requestSignature,
+            PlayerOrderSignature activeSignature,
+            long tick,
+            string battleIdentity)
+        {
+            RequestSignature = requestSignature;
+            ActiveSignature = activeSignature;
             Tick = tick;
             BattleIdentity = battleIdentity ?? string.Empty;
         }
 
-        public PlayerOrderSignature Signature { get; }
+        public PlayerOrderSignature Signature => RequestSignature;
+        public PlayerOrderSignature RequestSignature { get; }
+        public PlayerOrderSignature ActiveSignature { get; }
         public long Tick { get; }
         public string BattleIdentity { get; }
     }

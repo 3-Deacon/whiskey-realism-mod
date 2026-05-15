@@ -1925,9 +1925,9 @@ namespace WhiskeyRealism.Patches
             {
                 var unit = units[i] as Regiment;
                 if (unit == null) continue;
-                if (unit.regimentpaths > 0) moving++;
+                if (HasActiveMoveSignal(unit)) moving++;
                 if (unit.pathinterrupted) interrupted++;
-                if (unit.regimentpaths <= 0 && unit.movementmode == 0) waiting++;
+                if (!HasActiveMoveSignal(unit) && unit.movementmode == 0) waiting++;
             }
 
             return "moving=" + moving + ",waiting=" + waiting + ",interrupted=" + interrupted;
@@ -1944,12 +1944,41 @@ namespace WhiskeyRealism.Patches
             {
                 var unit = group.allattachedunits[i];
                 if (unit == null) continue;
-                if (unit.regimentpaths > 0) moving++;
+                if (HasActiveMoveSignal(unit)) moving++;
                 if (unit.pathinterrupted) interrupted++;
-                if (unit.regimentpaths <= 0 && unit.movementmode == 0) waiting++;
+                if (!HasActiveMoveSignal(unit) && unit.movementmode == 0) waiting++;
             }
 
             return "group=" + SafeInstanceId(group) + ",moving=" + moving + ",waiting=" + waiting + ",interrupted=" + interrupted;
+        }
+
+        private static bool HasActiveMoveSignal(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return false;
+                Vector3 lastWaypoint = unit.lastsetwaypointposition;
+                bool hasLastWaypoint = !IsZeroVector(lastWaypoint);
+                float distance = hasLastWaypoint ? Vector3.Distance(unit.transform.position, lastWaypoint) : 0f;
+                return CommandWaypointWritePolicy.IsExecutorMovementActive(
+                    unit.pathinterrupted,
+                    unit.regimentpaths,
+                    unit.movementmode,
+                    unit.groupsubordinatesmoving,
+                    unit.groupsubordinatesmovingnonai,
+                    hasLastWaypoint,
+                    distance,
+                    15f);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsZeroVector(Vector3 value)
+        {
+            return value.x == 0f && value.y == 0f && value.z == 0f;
         }
 
         private static TacticalCurrentOrderSignature ReadGivenOrderSignature()

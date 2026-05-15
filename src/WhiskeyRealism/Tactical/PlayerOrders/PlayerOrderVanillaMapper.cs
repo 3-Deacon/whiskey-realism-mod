@@ -14,13 +14,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 case PlayerOrderIntent.HoldObjective:
                     return new PlayerOrderVanillaMapping(12, intent);
                 case PlayerOrderIntent.SupportMainEffort:
-                    return new PlayerOrderVanillaMapping(scope == PlayerOrderScope.Campaign ? 7 : 4, intent);
+                    return new PlayerOrderVanillaMapping(11, intent);
                 case PlayerOrderIntent.AttackObjective:
-                    return new PlayerOrderVanillaMapping(1, intent);
+                    return new PlayerOrderVanillaMapping(0, intent);
                 case PlayerOrderIntent.ProbeObjective:
                     return new PlayerOrderVanillaMapping(5, intent);
                 case PlayerOrderIntent.AdvanceToAssemblyArea:
-                    return new PlayerOrderVanillaMapping(4, intent);
+                    return new PlayerOrderVanillaMapping(1, intent);
                 case PlayerOrderIntent.DefendCapital:
                     return new PlayerOrderVanillaMapping(8, intent);
                 case PlayerOrderIntent.BuildFort:

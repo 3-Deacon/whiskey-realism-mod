@@ -193,7 +193,7 @@ Each slice below is independently shippable. Slice 0 and Slice 1 have shipped to
 
 **Smoke expectations:**
 - Charges by `Main` brigades supported, charges by `Reserve`/`Fallback` denied with role-keyed reason strings.
-- No player-subordinate retasking.
+- No unintended player-chain battle-state retasking. Player-facing W&L current-order popups are owned by #62.
 
 ### Slice 4 — Line fallback
 

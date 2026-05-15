@@ -47,6 +47,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalChargeDenial;
         internal ConfigEntry<bool> EnableTacticalReserveIntentTelemetry;
         internal ConfigEntry<bool> EnableTacticalReserveListMutation;
+        internal static ConfigEntry<bool> EnablePlayerOrderDoctrine { get; private set; }
+        internal static ConfigEntry<bool> EnablePlayerOrderDoctrineDiagnostics { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
         public static ConfigEntry<bool> EnableTacticalBattleOrchestrator;
@@ -241,6 +243,16 @@ namespace WhiskeyRealism
                 "Enable Operation Null Guard",
                 true,
                 "Default ON. Suppresses the vanilla Operation.UpdateOperation null-before-transform cleanup crash and finishes the missing operation instead.");
+            EnablePlayerOrderDoctrine = Config.Bind(
+                "W&L",
+                "Enable Player Order Doctrine",
+                false,
+                "Default-off write valve for Whiskey-authored player-facing W&L orders. Diagnostics can run while this is disabled.");
+            EnablePlayerOrderDoctrineDiagnostics = Config.Bind(
+                "W&L",
+                "Enable Player Order Doctrine Diagnostics",
+                true,
+                "Logs bounded classify/dedupe/issue decisions for the player-order doctrine.");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",

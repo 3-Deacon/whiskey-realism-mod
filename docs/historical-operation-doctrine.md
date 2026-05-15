@@ -81,12 +81,12 @@ The sidecar carries:
 
 ## Runtime Evidence
 
-Historical-operation implementation build/deploy/hash was verified in DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes). Current deployed `main` DLL:
+Historical-operation implementation build/deploy/hash was verified in DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes). Current player-order worktree DLL:
 
-- `dist/WhiskeyRealism.dll`: `9e76ce41c4a85cb25fd3ca00536a782eeb49d4922459de3579c25ab31fcb62b8`
-- deployed BepInEx plugin: `9e76ce41c4a85cb25fd3ca00536a782eeb49d4922459de3579c25ab31fcb62b8`
-- size: 888320 bytes
-- console harness `760 PASS / 0 FAIL`
+- `dist/WhiskeyRealism.dll`: `5398831614e855f90b156c734fee50348d0bb6b10c8f0390b7a3d2499ba57740`
+- deployed BepInEx plugin: `5398831614e855f90b156c734fee50348d0bb6b10c8f0390b7a3d2499ba57740`
+- size: 977920 bytes
+- console harness `898 PASS / 0 FAIL`
 - `./build.sh` passed with 0 warnings / 0 errors
 
 Fresh runtime smoke is still pending on the current deployed DLL. Required markers:

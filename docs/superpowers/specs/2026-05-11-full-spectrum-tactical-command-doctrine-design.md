@@ -730,7 +730,7 @@ Fresh battle smoke must prove:
 - skirmisher-only contact does not force main-body charge;
 - reserves hold until release, then move when release trigger fires;
 - fallback has resolvable target or explicit no-write reason;
-- no player-side or W&L player-subordinate retasking;
+- no unintended player-side or W&L player-subordinate battle-state retasking; player-facing W&L current-order popups are owned by #62;
 - no repeated `Exception`, `ERROR`, `missing-anchor`, Harmony failure, or #61
   failure marker.
 
