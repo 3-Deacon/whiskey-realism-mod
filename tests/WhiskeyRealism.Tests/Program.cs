@@ -1985,9 +1985,23 @@ static class Program
                     segment.Contains("\"[" + tag + ":") ||
                     segment.Contains("$\"[" + tag + ":"),
                     relativePath + " legacy " + tag + " row");
+                if (marker == "Plugin.Log.LogInfo(" || marker == "Plugin.Log.LogWarning(")
+                {
+                    string plainName = RequiredTask7PlainName(tag);
+                    AssertFalse(!string.IsNullOrEmpty(plainName) &&
+                        segment.IndexOf(plainName, StringComparison.OrdinalIgnoreCase) >= 0,
+                        relativePath + " direct plugin log " + plainName + " row");
+                }
                 index += marker.Length;
             }
         }
+    }
+
+    private static string RequiredTask7PlainName(string tag)
+    {
+        if (tag == "HistoricalOperation") return "Historical operation";
+        if (tag == "CoordinatedOps") return "Coordinated operation";
+        return null;
     }
 
     private static void AssertDeploymentRoute(string line, string expectedTag, TelemetryCategory expectedCategory)

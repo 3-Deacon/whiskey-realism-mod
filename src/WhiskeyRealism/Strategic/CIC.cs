@@ -403,8 +403,9 @@ namespace WhiskeyRealism.Strategic
             if (!HistoricalOperationCatalog.ValidateProfile(profile, out var reason))
             {
                 EmitHistoricalOperation("no-profile", profile?.OperationId, GetObjectiveId(pickedObjective), null, reason, null);
-                Plugin.Log.LogWarning(
-                    $"[CIC] Historical operation profile invalid alliance={AllianceId} operation={profile?.OperationId ?? "<null>"} reason={reason}");
+                OnceLog.Warning(
+                    "historical-operation:no-profile:" + AllianceId + ":" + (profile?.OperationId ?? "<null>"),
+                    $"CIC historical operation profile invalid alliance={AllianceId} operation={profile?.OperationId ?? "<null>"} reason={reason}");
                 return null;
             }
 
