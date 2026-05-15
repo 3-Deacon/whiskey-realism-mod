@@ -18,6 +18,7 @@
 > - **Master handoff:** [`docs/handoff.md`](docs/handoff.md) — read first at session start
 > - **Repository memory:** [`MEMORY.md`](MEMORY.md) — short durable state/index; read after `AGENTS.md` when resuming or updating project context
 > - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
+> - **Scourge of War Remastered reference install:** Windows `C:\Program Files (x86)\Steam\steamapps\common\Scourge Of War - Remastered`; WSL `/mnt/c/Program Files (x86)/Steam/steamapps/common/Scourge Of War - Remastered/`. Use this for Scourge-of-War reference/anchor work; do not confuse it with the GTCW vanilla decompile above.
 > - **Parallel sessions are normal.** Another agent may be working concurrently — run `git log --oneline -10` and `git status` before committing to detect parallel work.
 
 > **Current state:** see `docs/handoff.md` for the deployed DLL hash, post-release deltas, and active workstream. AGENTS.md intentionally does not duplicate volatile state — it churns every commit and went stale repeatedly when carried inline here.

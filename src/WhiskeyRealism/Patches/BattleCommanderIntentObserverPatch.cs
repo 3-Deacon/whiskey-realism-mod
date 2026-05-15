@@ -6,6 +6,7 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -330,7 +331,7 @@ namespace WhiskeyRealism.Patches
             float odds = enemy <= 0f ? 0f : own / Math.Max(1f, enemy);
             bool flank = group.flanksthreated > 0f || group.outflanked > 0;
 
-            Regiment target = group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+            Regiment target = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
             bool targetVisible = target != null;
             bool targetBroken = target != null && (target.morale < 0.45f || target.markedforrout);
             bool targetStrongPoint = target != null && (target.covervalue > 0.5f || target.fortinrange != null);

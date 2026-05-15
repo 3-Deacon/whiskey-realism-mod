@@ -113,6 +113,7 @@ namespace WhiskeyRealism.Tactical.Operations
         public float Z { get; }
         public float TerrainStrength { get; }
         public float ApproachDifficulty { get; }
+        public TacticalApproachAvenueEstimate ApproachAvenue { get; }
 
         public BattlefieldObjectiveEstimate(
             string objectiveId,
@@ -125,6 +126,33 @@ namespace WhiskeyRealism.Tactical.Operations
             float z,
             float terrainStrength,
             float approachDifficulty)
+            : this(
+                objectiveId,
+                type,
+                enemyStrength,
+                confidence01,
+                mainLineExposed,
+                value,
+                x,
+                z,
+                terrainStrength,
+                approachDifficulty,
+                TacticalApproachAvenueEstimate.None)
+        {
+        }
+
+        public BattlefieldObjectiveEstimate(
+            string objectiveId,
+            TacticalObjectiveType type,
+            float enemyStrength,
+            float confidence01,
+            bool mainLineExposed,
+            float value,
+            float x,
+            float z,
+            float terrainStrength,
+            float approachDifficulty,
+            TacticalApproachAvenueEstimate approachAvenue)
         {
             ObjectiveId = string.IsNullOrWhiteSpace(objectiveId) ? "objective-unknown" : objectiveId;
             Type = type;
@@ -136,6 +164,7 @@ namespace WhiskeyRealism.Tactical.Operations
             Z = SanitizeFinite(z);
             TerrainStrength = Clamp01(terrainStrength);
             ApproachDifficulty = Clamp01(approachDifficulty);
+            ApproachAvenue = approachAvenue.HasAvenue ? approachAvenue : TacticalApproachAvenueEstimate.None;
         }
 
         private static float SanitizeFloorZero(float value)
@@ -223,7 +252,8 @@ namespace WhiskeyRealism.Tactical.Operations
                     objective.X,
                     objective.Z,
                     objective.TerrainStrength,
-                    objective.ApproachDifficulty);
+                    objective.ApproachDifficulty,
+                    TacticalApproachAvenueEstimate.None);
             }
 
             return new BattlefieldPictureSnapshot(estimates);

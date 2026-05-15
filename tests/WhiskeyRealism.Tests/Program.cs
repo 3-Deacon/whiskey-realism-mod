@@ -96,10 +96,60 @@ static class Program
             ("operation director aborts catastrophic collapse inside commit window", OperationDirectorAbortsCatastrophicCollapseInsideCommitWindow),
             ("operation director preserves active operation when picture is missing", OperationDirectorPreservesActiveOperationWhenPictureMissing),
             ("operation director prefers exposed enemy line over generic objective chain", OperationDirectorPrefersExposedEnemyLineOverGenericObjectiveChain),
+            ("tactical decision doctrine classifies contact gates", TacticalDecisionDoctrineClassifiesContactGates),
+            ("tactical decision doctrine gates soft abort", TacticalDecisionDoctrineGatesSoftAbort),
+            ("tactical SOP probe forbids major attack", TacticalSopProbeForbidsMajorAttack),
+            ("tactical SOP attack can require support before charge", TacticalSopAttackRequiresSupportBeforeCharge),
+            ("doctrine assignment stamps SOP authority", DoctrineAssignmentStampsSopAuthority),
+            ("doctrine assignment waits for massing support", DoctrineAssignmentWaitsForMassingSupport),
+            ("tactical battlefront geometry detects wide unsupported gap", TacticalBattlefrontGeometryDetectsWideUnsupportedGap),
+            ("tactical battle line planner uses frontage terrain and artillery line", TacticalBattleLinePlannerUsesFrontageTerrainAndArtilleryLine),
+            ("tactical battle line planner spreads forming commands across frontage", TacticalBattleLinePlannerSpreadsFormingCommandsAcrossFrontage),
+            ("doctrine assignment wide formation preserves flank guard and depth slots", DoctrineAssignmentWideFormationPreservesFlankGuardAndDepthSlots),
+            ("doctrine assignment unknown roles receive fallback doctrine", DoctrineAssignmentUnknownRolesReceiveFallbackDoctrine),
+            ("tactical approach avenue planner prefers enemy entry route", TacticalApproachAvenuePlannerPrefersEnemyEntryRoute),
+            ("tactical battle line planner uses predicted avenue axis", TacticalBattleLinePlannerUsesPredictedAvenueAxis),
+            ("tactical defensive line anchor shifts road corridor forward", TacticalDefensiveLineAnchorShiftsRoadCorridorForward),
+            ("tactical battle line planner defends corridor with reserve and artillery depth", TacticalBattleLinePlannerDefendsCorridorWithReserveAndArtilleryDepth),
+            ("tactical scouting avenue sends screen forward and reserve rear", TacticalScoutingAvenueSendsScreenForwardAndReserveRear),
+            ("tactical massing cycle waits for support before commit", TacticalMassingCycleWaitsForSupportBeforeCommit),
+            ("tactical massing cycle blocks commit when endurance needs relief", TacticalMassingCycleBlocksCommitWhenEnduranceNeedsRelief),
+            ("operational reserve doctrine seals threatened flank before exploit", OperationalReserveDoctrineSealsThreatenedFlankBeforeExploit),
+            ("operational reserve doctrine protects final reserve and partial commits", OperationalReserveDoctrineProtectsFinalReserveAndPartialCommits),
+            ("tactical fallback ladder separates fallback from retreat", TacticalFallbackLadderSeparatesFallbackFromRetreat),
+            ("doctrine fallback ladder maps live orders", DoctrineFallbackLadderMapsLiveOrders),
+            ("tactical artillery mission planner gates support by ammo range and danger", TacticalArtilleryMissionPlannerGatesSupportByAmmoRangeAndDanger),
+            ("tactical artillery command assigns weak point ammo and reposition", TacticalArtilleryCommandAssignsWeakPointAmmoAndReposition),
+            ("scourge division play anchors on best engaged subordinate", ScourgeDivisionPlayAnchorsOnBestEngagedSubordinate),
+            ("scourge division play skips ordered non anchor subordinates", ScourgeDivisionPlaySkipsOrderedNonAnchorSubordinates),
+            ("scourge courier cadence waits for open timer and idle child", ScourgeCourierCadenceWaitsForOpenTimerAndIdleChild),
+            ("scourge outbound order ledger suppresses duplicate pending writes", ScourgeOutboundOrderLedgerSuppressesDuplicatePendingWrites),
+            ("scourge cavalry follow doctrine filters raid and screens away", ScourgeCavalryFollowDoctrineFiltersRaidAndScreensAway),
+            ("grand tactician recon doctrine uses cavalry scout and infantry probe", GrandTacticianReconDoctrineUsesCavalryScoutAndInfantryProbe),
+            ("grand tactician recon doctrine prevents no contact blind assault", GrandTacticianReconDoctrinePreventsNoContactBlindAssault),
+            ("scourge artillery micro doctrine limbers retreats and wheels", ScourgeArtilleryMicroDoctrineLimbersRetreatsAndWheels),
+            ("scourge melee fear doctrine gates charge by pressure not just headcount", ScourgeMeleeFearDoctrineGatesChargeByPressure),
+            ("doctrine charge gate consumes melee fear and fire discipline", DoctrineChargeGateConsumesMeleeFearAndFireDiscipline),
+            ("scourge skirmisher doctrine recalls tired distant screens", ScourgeSkirmisherDoctrineRecallsTiredDistantScreens),
+            ("scourge infantry fire discipline holds bad shots and blocks premature charge", ScourgeInfantryFireDisciplineHoldsBadShots),
+            ("infantry fire control prefers historical close medium bands", InfantryFireControlPrefersHistoricalCloseMediumBands),
+            ("cavalry fire control maps to vanilla cavalry behaviors", CavalryFireControlMapsToVanillaBehaviors),
+            ("scourge attribute matrix adjusts fallback fire and melee thresholds", ScourgeAttributeMatrixAdjustsFallbackFireAndMelee),
+            ("tactical endurance gate blocks assault but permits fallback", TacticalEnduranceGateBlocksAssaultButPermitsFallback),
+            ("tactical support request ledger dedupes and prioritizes", TacticalSupportRequestLedgerDedupesAndPrioritizes),
+            ("player subordinate order doctrine maps without direct movement", PlayerSubordinateOrderDoctrineMapsWithoutDirectMovement),
+            ("operation director scouts screen contact before committing", OperationDirectorScoutsScreenContactBeforeCommitting),
+            ("operation director keeps high confidence screen in scouting", OperationDirectorKeepsHighConfidenceScreenInScouting),
+            ("operation director downgrades committed attack when contact becomes screen", OperationDirectorDowngradesCommittedAttackWhenContactBecomesScreen),
+            ("operation director cancels committed attack when contact is lost", OperationDirectorCancelsCommittedAttackWhenContactIsLost),
+            ("operation director fix and flank exposed weak point with reserve", OperationDirectorFixAndFlankExposedWeakPointWithReserve),
             ("operation macro ai maps soft abort to defend", OperationMacroAiMapsSoftAbortToDefend),
             ("strategic battle intent snapshot sanitizes nonfinite pressure", StrategicBattleIntentSnapshotSanitizesNonfinitePressure),
             ("tactical vision runtime adapter builds reports and objectives", TacticalVisionRuntimeAdapterBuildsReportsAndObjectives),
+            ("tactical FOW contact rejects broad closest enemy leak", TacticalFowContactRejectsBroadClosestEnemyLeak),
             ("tactical vision runtime adapter fallback objective uses visible enemy point", TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint),
+            ("tactical vision fallback objective uses vanilla movement waypoint", TacticalVisionFallbackObjectiveUsesVanillaMovementWaypoint),
+            ("tactical vision scene objectives beat movement fallback", TacticalVisionSceneObjectivesBeatMovementFallback),
             ("tactical vision appends visible enemy line to objective chain picture", TacticalVisionAppendsVisibleEnemyLineToObjectiveChainPicture),
             ("tactical vision fallback objective carries committed attack confidence", TacticalVisionFallbackObjectiveCarriesCommittedAttackConfidence),
             ("tactical operations ledger runtime active selects operation", TacticalOperationsLedgerRuntimeActiveSelectsOperation),
@@ -117,6 +167,7 @@ static class Program
             ("army orchestrator clears doctrine orders when off", ArmyOrchestratorClearsDoctrineOrdersWhenOff),
             ("tactical battle orchestrator forwards operations ledger update", TacticalBattleOrchestratorForwardsOperationsLedgerUpdate),
             ("tactical battle coordinator side gate blocks player side unless ai vs ai", TacticalBattleCoordinatorSideGateBlocksPlayerSideUnlessAiVsAi),
+            ("tactical side log context marks player command without faction inference", TacticalSideLogContextMarksPlayerCommandWithoutFactionInference),
             ("tactical command posture monitor-only suppresses active task writes", TacticalCommandPostureMonitorOnlySuppressesActiveTaskWrites),
             ("tactical command posture active mode does not report monitor-only", TacticalCommandPostureActiveModeDoesNotReportMonitorOnly),
             ("tactical command posture eligibility precedence", TacticalCommandPostureEligibilityPrecedence),
@@ -127,11 +178,22 @@ static class Program
             ("tactical command posture reserve wait distinguishes reserve area", TacticalCommandPostureReserveWaitDistinguishesReserveArea),
             ("tactical command posture maps task families", TacticalCommandPostureMapsTaskFamilies),
             ("posture executor uses doctrine attack target", PostureExecutorUsesDoctrineAttackTarget),
+            ("posture executor uses doctrine assembly target", PostureExecutorUsesDoctrineAssemblyTarget),
             ("posture executor moves scout probe and screen to doctrine target", PostureExecutorMovesScoutProbeAndScreenToDoctrineTarget),
+            ("posture executor close screen breaks off to doctrine fallback", PostureExecutorCloseScreenBreaksOffToDoctrineFallback),
+            ("posture executor moves reserve to doctrine rally target", PostureExecutorMovesReserveToDoctrineRallyTarget),
             ("posture executor clears interrupted inactive order", PostureExecutorClearsInterruptedInactiveOrder),
             ("posture executor fallback doctrine overrides interrupted stale path", PostureExecutorFallbackDoctrineOverridesInterruptedStalePath),
             ("posture executor preserves legal reserve idle", PostureExecutorPreservesLegalReserveIdle),
             ("posture executor duplicate waypoint policy suppresses same target", PostureExecutorDuplicateWaypointPolicySuppressesSameTarget),
+            ("tactical nav planner probes to standoff bound", TacticalNavPlannerProbesToStandoffBound),
+            ("tactical nav planner breaks off close screen", TacticalNavPlannerBreaksOffCloseScreen),
+            ("tactical nav planner offsets covered attack approach", TacticalNavPlannerOffsetsCoveredAttackApproach),
+            ("tactical nav planner prefers road cover and avoids choke congestion", TacticalNavPlannerPrefersRoadCoverAndAvoidsChokeCongestion),
+            ("tactical nav planner penalizes friendly front blockers", TacticalNavPlannerPenalizesFriendlyFrontBlockers),
+            ("tactical nav planner preserves corridor continuity", TacticalNavPlannerPreservesCorridorContinuity),
+            ("tactical nav planner avoids reserved bridge choke", TacticalNavPlannerAvoidsReservedBridgeChoke),
+            ("tactical nav planner fallback avoids contested attack lane", TacticalNavPlannerFallbackAvoidsContestedAttackLane),
             ("doctrine order sanitizes ids and exposes purpose", DoctrineOrderSanitizesIdsAndPurpose),
             ("doctrine order distinguishes no assignment from form up", DoctrineOrderDistinguishesNoAssignmentFromFormUp),
             ("doctrine order requires target for movement tasks", DoctrineOrderRequiresTargetForMovementTasks),
@@ -139,7 +201,14 @@ static class Program
             ("doctrine assignment high odds attack weak point attacks", DoctrineAssignmentHighOddsAttackWeakPointAttacks),
             ("doctrine assignment committed visible enemy line attacks at fallback confidence", DoctrineAssignmentCommittedVisibleEnemyLineAttacksAtFallbackConfidence),
             ("doctrine assignment committed fallback enemy line keeps attack when chain replaces objective", DoctrineAssignmentCommittedFallbackEnemyLineKeepsAttackWhenChainReplacesObjective),
+            ("doctrine assignment committed map objective advances without visible enemy", DoctrineAssignmentCommittedMapObjectiveAdvancesWithoutVisibleEnemy),
             ("doctrine assignment probe and screen receive movement targets", DoctrineAssignmentProbeAndScreenReceiveMovementTargets),
+            ("doctrine assignment scouting screen orders probe and breakoff targets", DoctrineAssignmentScoutingScreenOrdersProbeAndBreakoffTargets),
+            ("doctrine assignment battle line separates command targets", DoctrineAssignmentBattleLineSeparatesCommandTargets),
+            ("doctrine assignment reserve gets battle line rally target", DoctrineAssignmentReserveGetsBattleLineRallyTarget),
+            ("doctrine assignment unknown primary uses vanilla chain assembly target", DoctrineAssignmentUnknownPrimaryUsesVanillaChainAssemblyTarget),
+            ("reserve assembly planner rejects threatened and crowded candidates", ReserveAssemblyPlannerRejectsThreatenedAndCrowdedCandidates),
+            ("reserve assembly planner generated candidates stay behind objective", ReserveAssemblyPlannerGeneratedCandidatesStayBehindObjective),
             ("doctrine assignment reserve gets legal idle", DoctrineAssignmentReserveGetsLegalIdle),
             ("doctrine assignment fallback guard pulls toward fallback line", DoctrineAssignmentFallbackGuardPullsBack),
             ("doctrine assignment stale objective fails closed", DoctrineAssignmentStaleObjectiveFailsClosed),
@@ -152,10 +221,15 @@ static class Program
             ("doctrine consumer known objective miss does not coordinate match", DoctrineConsumerKnownObjectiveMissDoesNotCoordinateMatch),
             ("doctrine consumer allow cannot override charge denial", DoctrineConsumerAllowCannotOverrideChargeDenial),
             ("doctrine reserve releases to support endangered main effort", DoctrineReserveReleasesToSupportEndangeredMainEffort),
+            ("doctrine reserve seals threatened flank from operational mission", DoctrineReserveSealsThreatenedFlankFromOperationalMission),
+            ("doctrine reserve conserves exhausted reserve", DoctrineReserveConservesExhaustedReserve),
             ("doctrine fallback relief beats stale held order", DoctrineFallbackReliefBeatsStaleHeldOrder),
             ("doctrine reserve nonfinite reserve fraction fails closed", DoctrineReserveNonfiniteReserveFractionFailsClosed),
             ("doctrine artillery supports committed main effort", DoctrineArtillerySupportsCommittedMainEffort),
             ("doctrine artillery no exposed main line does not allow support", DoctrineArtilleryNoExposedMainLineDoesNotAllowSupport),
+            ("doctrine artillery mission conserves low ammo", DoctrineArtilleryMissionConservesLowAmmo),
+            ("doctrine artillery mission counterbattery outranks support", DoctrineArtilleryMissionCounterbatteryOutranksSupport),
+            ("doctrine charge endurance gate blocks assault", DoctrineChargeEnduranceGateBlocksAssault),
             ("command fallback target resolver uses visible threat without objective", CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective),
             ("command formation correction sees visible march column despite line groupformation", CommandFormationCorrectionSeesVisibleMarchColumnDespiteLineGroupFormation),
             ("command formation correction computes vanilla threat facing", CommandFormationCorrectionComputesVanillaThreatFacing),
@@ -165,6 +239,7 @@ static class Program
             ("command formation correction allows pending order bypass for close defensive formation", CommandFormationCorrectionAllowsPendingOrderBypassForCloseDefensiveFormation),
             ("command formation correction avoids new path when close engaged", CommandFormationCorrectionAvoidsNewPathWhenCloseEngaged),
             ("command formation correction targets line for committed attack", CommandFormationCorrectionTargetsLineForCommittedAttack),
+            ("command formation correction maps flank refusal to vanilla parameter", CommandFormationCorrectionMapsRefuseFlankParameter),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
             ("tactical command monitor interrupted hold is illegal", TacticalCommandMonitorInterruptedHoldIsIllegal),
@@ -179,6 +254,7 @@ static class Program
             ("tactical order high initiative reduces delay pressure without instant delivery", TacticalOrderHighInitiativeReducesDelayPressureWithoutInstant),
             ("tactical order settlement allows idle stance retask", TacticalOrderSettlementAllowsIdleStanceRetask),
             ("tactical order settlement blocks queued stance retask", TacticalOrderSettlementBlocksQueuedStanceRetask),
+            ("tactical order settlement allows stale queued posture bypass", TacticalOrderSettlementAllowsStaleQueuedPostureBypass),
             ("tactical order settlement blocks delivered pending stance retask", TacticalOrderSettlementBlocksDeliveredPendingStanceRetask),
             ("tactical order settlement allows stalled interrupted pending retask", TacticalOrderSettlementAllowsStalledInterruptedPendingRetask),
             ("tactical order settlement allows stalled interrupted pending retask with stale path", TacticalOrderSettlementAllowsStalledInterruptedPendingRetaskWithStalePath),
@@ -764,6 +840,7 @@ static class Program
             ("direct child allocator allocates refuse to flank with exposure", DirectChildAllocatorAllocatesRefuseToFlankWithExposure),
             ("direct child allocator deterministic on registration order tie", DirectChildAllocatorDeterministicOnRegistrationOrderTie),
             ("direct child allocator falls back to strongest main when plan sector is empty", DirectChildAllocatorFallsBackToStrongestMainWhenPlanSectorEmpty),
+            ("direct child allocator keeps aggressive probe moving when planned sector is empty", DirectChildAllocatorKeepsAggressiveProbeMovingWhenPlannedSectorEmpty),
             ("direct child allocator unknown when no plan main effort match", DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch),
             ("direct child allocator assigns screen on screening sector with low strengths", DirectChildAllocatorAssignsScreenOnScreeningSectorWithLowStrengths),
             ("direct child allocator handles mismatched per child intent length", DirectChildAllocatorHandlesMismatchedPerChildIntentLength),
@@ -776,6 +853,7 @@ static class Program
             ("command tree builder counts missing command parents", TestCommandTreeBuilderCountsMissingParents),
             ("command tree builder honors command hierarchy shift", TestCommandTreeBuilderHonorsCommandHierarchyShift),
             ("command tree distribution is deterministic", TestCommandTreeDistributionDeterministic),
+            ("nested division play expands single division into brigade flank depth slots", NestedDivisionPlayExpandsSingleDivisionIntoBrigadeFlankDepthSlots),
             ("command intent allocator maps direct child role onto command node", TestCommandIntentAllocatorMapsDirectChildRole),
             ("command intent allocator inherits nearest ancestor role", TestCommandIntentAllocatorInheritsNearestAncestorRole),
             ("command intent allocator assigns bounded reserve for root fallback", TestCommandIntentAllocatorRootFallbackReserve),
@@ -817,6 +895,7 @@ static class Program
             ("army orchestrator observe evidence is idempotent on equal signature", ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature),
             ("army orchestrator emit army intent includes direct children", ArmyOrchestratorEmitArmyIntentIncludesDirectChildren),
             ("army orchestrator get direct child role unknown when unregistered", ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered),
+            ("army orchestrator refreshes expanded direct child snapshots", ArmyOrchestratorRefreshesExpandedDirectChildSnapshots),
             ("army orchestrator returns role for synth army child id", ArmyOrchestratorReturnsRoleForSynthArmyChildId),
             ("army orchestrator registers command tree snapshot", TestArmyOrchestratorRegistersCommandTree),
             ("army orchestrator preserves O3 direct child role after command tree allocation", TestArmyOrchestratorPreservesDirectChildRoleWithCommandTree),
@@ -2051,8 +2130,906 @@ static class Program
         TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
 
         AssertEqual("enemy-line-1", decision.Operation.PrimaryObjectiveId, "primary objective");
-        AssertEqual(TacticalOperationShape.SingleMainEffort, decision.Operation.Shape, "shape");
+        AssertEqual(TacticalOperationShape.FixAndFlank, decision.Operation.Shape, "shape");
         AssertEqual(TacticalOperationPhase.Committed, decision.Operation.Phase, "phase");
+    }
+
+    private static void TacticalDecisionDoctrineClassifiesContactGates()
+    {
+        var screen = new BattlefieldObjectiveEstimate("screen-contact", TacticalObjectiveType.EnemyLine, 180f, 0.45f, false, 0.55f, 300f, 400f, 0.1f, 0.1f);
+        var highConfidenceScreen = new BattlefieldObjectiveEstimate("high-screen", TacticalObjectiveType.EnemyLine, 180f, 0.80f, false, 0.55f, 300f, 400f, 0.1f, 0.1f);
+        var formedLine = new BattlefieldObjectiveEstimate("formed-line", TacticalObjectiveType.EnemyLine, 1100f, 0.80f, true, 0.65f, 300f, 400f, 0.1f, 0.1f);
+        var stale = new BattlefieldObjectiveEstimate("stale", TacticalObjectiveType.EnemyLine, 0f, 0.30f, false, 0.65f, 300f, 400f, 0.1f, 0.1f);
+
+        AssertEqual(
+            TacticalObjectiveGate.ReconnaissanceContact,
+            TacticalDecisionDoctrine.ClassifyObjective(screen, ownStrength: 5000f, reserveFraction: 0.30f),
+            "screen contact");
+        AssertEqual(
+            TacticalObjectiveGate.ReconnaissanceContact,
+            TacticalDecisionDoctrine.ClassifyObjective(highConfidenceScreen, ownStrength: 5000f, reserveFraction: 0.30f),
+            "high confidence screen still lacks formed line");
+        AssertEqual(
+            TacticalObjectiveGate.ExposedWeakPoint,
+            TacticalDecisionDoctrine.ClassifyObjective(formedLine, ownStrength: 2200f, reserveFraction: 0.25f),
+            "formed weak point");
+        AssertEqual(
+            TacticalObjectiveGate.UnreliableContact,
+            TacticalDecisionDoctrine.ClassifyObjective(stale, ownStrength: 5000f, reserveFraction: 0.30f),
+            "stale contact");
+        AssertFalse(
+            TacticalDecisionDoctrine.ShouldCommitFixAndFlank(formedLine, ownStrength: 2200f, reserveFraction: 0.05f),
+            "reserve floor blocks fix and flank");
+    }
+
+    private static void TacticalDecisionDoctrineGatesSoftAbort()
+    {
+        var objective = new BattlefieldObjectiveEstimate("enemy-line", TacticalObjectiveType.EnemyLine, 2000f, 0.80f, true, 0.65f, 300f, 400f, 0.1f, 0.1f);
+
+        AssertTrue(
+            TacticalDecisionDoctrine.ShouldSoftAbortCommitted(objective, ownStrength: 1300f, reserveFraction: 0.30f),
+            "odds collapse");
+        AssertTrue(
+            TacticalDecisionDoctrine.ShouldSoftAbortCommitted(objective, ownStrength: 2100f, reserveFraction: 0.03f),
+            "reserve depleted with marginal odds");
+        AssertFalse(
+            TacticalDecisionDoctrine.ShouldSoftAbortCommitted(objective, ownStrength: 2600f, reserveFraction: 0.18f),
+            "enough odds and reserve");
+    }
+
+    private static void TacticalSopProbeForbidsMajorAttack()
+    {
+        var screen = new BattlefieldObjectiveEstimate("screen-contact", TacticalObjectiveType.EnemyLine, 220f, 0.5f, false, 0.45f, 300f, 450f, 0.1f, 0.1f);
+
+        TacticalSopDecision sop = TacticalSopDoctrine.Resolve(
+            CommandNodeRole.Probe,
+            CommandTaskType.Probe,
+            TacticalOperationPhase.Scouting,
+            screen,
+            ownStrength: 1500f,
+            reserveFraction: 0.2f);
+
+        AssertEqual(TacticalSopAuthority.Probe, sop.Authority, "authority");
+        AssertFalse(sop.AllowsMajorAttack, "probe cannot authorize a major attack");
+        AssertTrue(sop.RequiresFallbackIfPressed, "probe should have a breakoff/fallback requirement");
+        AssertTrue(sop.ReacquireSeconds <= 45f, "probe should reacquire quickly");
+    }
+
+    private static void TacticalSopAttackRequiresSupportBeforeCharge()
+    {
+        var enemyLine = new BattlefieldObjectiveEstimate("enemy-line", TacticalObjectiveType.EnemyLine, 1000f, 0.85f, true, 0.75f, 300f, 450f, 0.1f, 0.1f);
+
+        TacticalSopDecision sop = TacticalSopDoctrine.Resolve(
+            CommandNodeRole.MainEffort,
+            CommandTaskType.AttackObjective,
+            TacticalOperationPhase.Committed,
+            enemyLine,
+            ownStrength: 1300f,
+            reserveFraction: 0.05f);
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.AttackObjective,
+            primary: DoctrineTargetPoint.From(300f, 450f)).WithSop(sop);
+
+        DoctrineChargeDecision charge = DoctrineConsumerDecisions.DecideCharge(
+            order,
+            enemyMainLineExposed: true,
+            localOdds: 1.55f,
+            targetRouted: false);
+
+        AssertEqual(TacticalSopAuthority.Attack, sop.Authority, "authority");
+        AssertTrue(sop.RequiresSupportBeforeMajorAttack, "thin attack should require support");
+        AssertEqual(DoctrineConsumerAction.Deny, charge.Action, "charge action");
+        AssertEqual("support-required", charge.Reason, "charge reason");
+    }
+
+    private static void DoctrineAssignmentStampsSopAuthority()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("brigade-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 400f, 0.9f, true, 0.8f, 100f, 250f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(
+            nodes,
+            operation,
+            picture,
+            ownStrength: 1600f,
+            nowSeconds: 100f,
+            reserveFraction: 0.2f);
+
+        AssertEqual(TacticalSopAuthority.Assault, orders[0].Sop.Authority, "authority");
+        AssertTrue(orders[0].Sop.AllowsMajorAttack, "assault should allow major attack");
+        AssertTrue(orders[0].Sop.ReacquireSeconds <= 30f, "decisive assault should reacquire quickly");
+    }
+
+    private static void DoctrineAssignmentWaitsForMassingSupport()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("brigade-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 1000f, 0.85f, true, 0.8f, 100f, 250f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(
+            nodes,
+            operation,
+            picture,
+            ownStrength: 1500f,
+            nowSeconds: 100f,
+            reserveFraction: 0.2f);
+
+        AssertEqual(TacticalSopAuthority.Attack, orders[0].Sop.Authority, "authority");
+        AssertFalse(orders[0].Sop.AllowsMajorAttack, "attack should wait for support");
+        AssertTrue(orders[0].Sop.RequiresSupportBeforeMajorAttack, "support gate");
+        AssertContains(orders[0].Sop.Reason, "massing-support", "reason");
+    }
+
+    private static void TacticalBattlefrontGeometryDetectsWideUnsupportedGap()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("left", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, -450f, 0f, 0f),
+            CommandNodeOperationalState.Create("right", CommandEchelonKind.BrigadeLike, CommandNodeRole.SupportingAttack, CommandTaskType.FormUp, 450f, 0f, 0f)
+        };
+        var objective = new BattlefieldObjectiveEstimate("ridge", TacticalObjectiveType.Ridge, 900f, 0.9f, true, 0.8f, 0f, 800f, 0.2f, 0.2f);
+
+        TacticalBattlefrontSnapshot front = TacticalBattlefrontGeometry.Build(nodes, objective);
+
+        AssertTrue(front.HasFrontage, "frontage");
+        AssertTrue(front.FrontageWidth >= 850f, "wide frontage");
+        AssertEqual(TacticalBattlefrontGap.WideUnsupportedGap, front.Gap, "gap");
+        AssertTrue(front.LeftFlankTarget.HasValue, "left flank target");
+        AssertTrue(front.RightFlankTarget.HasValue, "right flank target");
+    }
+
+    private static void TacticalBattleLinePlannerUsesFrontageTerrainAndArtilleryLine()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("left", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, -500f, 0f, 0f),
+            CommandNodeOperationalState.Create("center", CommandEchelonKind.BrigadeLike, CommandNodeRole.SupportingAttack, CommandTaskType.FormUp, 0f, 0f, 0f),
+            CommandNodeOperationalState.Create("right", CommandEchelonKind.BrigadeLike, CommandNodeRole.FixingForce, CommandTaskType.FormUp, 500f, 0f, 0f)
+        };
+        var objective = new BattlefieldObjectiveEstimate("ridge", TacticalObjectiveType.Ridge, 900f, 0.9f, true, 0.8f, 0f, 1000f, 0.85f, 0.2f);
+        TacticalBattlefrontSnapshot frontage = TacticalBattlefrontGeometry.Build(nodes, objective);
+
+        TacticalBattleLinePlan support = TacticalBattleLinePlanner.PlanNode(
+            nodes[1],
+            CommandTaskType.SupportAttack,
+            objective,
+            objectiveMatched: true,
+            commandIndex: 1,
+            frontage,
+            nodeCount: nodes.Length);
+        TacticalBattleLinePlan fix = TacticalBattleLinePlanner.PlanNode(
+            nodes[2],
+            CommandTaskType.FixEnemy,
+            objective,
+            objectiveMatched: true,
+            commandIndex: 2,
+            frontage,
+            nodeCount: nodes.Length);
+
+        AssertTrue(support.LeftFrontageTarget.HasValue, "left frontage");
+        AssertTrue(support.RightFrontageTarget.HasValue, "right frontage");
+        AssertTrue(support.ArtilleryLineTarget.HasValue, "artillery line");
+        AssertTrue(Math.Abs(support.PrimaryTarget.X) > 150f, "support should use a real frontage lane");
+        AssertTrue(Math.Abs(fix.PrimaryTarget.X) > 150f, "fix should use a real frontage lane");
+        AssertTrue(Math.Sign(support.PrimaryTarget.X) != Math.Sign(fix.PrimaryTarget.X), "support and fix should anchor opposite flanks");
+        AssertTrue(support.EchelonDepth > 100f, "support echelon depth");
+        AssertTrue(support.ArtilleryLineTarget.Z < support.PrimaryTarget.Z, "artillery line should sit behind the assault frontage");
+        AssertContains(support.Reason, "terrain-anchor", "ridge terrain reason");
+        AssertContains(support.Reason, "frontage", "frontage reason");
+    }
+
+    private static void TacticalBattleLinePlannerSpreadsFormingCommandsAcrossFrontage()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("division-1", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, -30f, 0f, 0f),
+            CommandNodeOperationalState.Create("division-2", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, -10f, 0f, 0f),
+            CommandNodeOperationalState.Create("division-3", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 10f, 0f, 0f),
+            CommandNodeOperationalState.Create("division-4", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 30f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 500f, 0.7f, false, 0.8f, 1000f, 0f, 0.7f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 900f, nowSeconds: 100f);
+
+        AssertEqual(4, orders.Length, "order count");
+        for (int i = 0; i < orders.Length; i++)
+        {
+            AssertEqual(CommandTaskType.FormUp, orders[i].Task, "forming task " + i);
+            AssertTrue(orders[i].PrimaryTarget.HasValue, "forming target " + i);
+        }
+
+        AssertTrue(
+            DistanceSquared(orders[0].PrimaryTarget.X, orders[0].PrimaryTarget.Z, orders[1].PrimaryTarget.X, orders[1].PrimaryTarget.Z) > 6400f,
+            "first two forming commands should not share an assembly lane");
+        AssertTrue(
+            DistanceSquared(orders[1].PrimaryTarget.X, orders[1].PrimaryTarget.Z, orders[2].PrimaryTarget.X, orders[2].PrimaryTarget.Z) > 6400f,
+            "middle forming commands should not share an assembly lane");
+        AssertTrue(
+            DistanceSquared(orders[2].PrimaryTarget.X, orders[2].PrimaryTarget.Z, orders[3].PrimaryTarget.X, orders[3].PrimaryTarget.Z) > 6400f,
+            "last two forming commands should not share an assembly lane");
+        AssertTrue(
+            DistanceSquared(orders[0].PrimaryTarget.X, orders[0].PrimaryTarget.Z, orders[2].PrimaryTarget.X, orders[2].PrimaryTarget.Z) > 6400f,
+            "forming commands should not repeat the left assembly lane");
+        AssertTrue(
+            DistanceSquared(orders[1].PrimaryTarget.X, orders[1].PrimaryTarget.Z, orders[3].PrimaryTarget.X, orders[3].PrimaryTarget.Z) > 6400f,
+            "forming commands should not repeat the right assembly lane");
+    }
+
+    private static void DoctrineAssignmentWideFormationPreservesFlankGuardAndDepthSlots()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("division-1", CommandEchelonKind.DivisionLike, CommandNodeRole.Defender, CommandTaskType.FormUp, 900f, 1300f, 180f),
+            CommandNodeOperationalState.Create("division-2", CommandEchelonKind.DivisionLike, CommandNodeRole.Defender, CommandTaskType.FormUp, 925f, 1325f, 180f),
+            CommandNodeOperationalState.Create("division-3", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 950f, 1350f, 180f),
+            CommandNodeOperationalState.Create("division-4", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 975f, 1375f, 180f),
+            CommandNodeOperationalState.Create("division-5", CommandEchelonKind.DivisionLike, CommandNodeRole.SupportingAttack, CommandTaskType.FormUp, 1000f, 1400f, 180f),
+            CommandNodeOperationalState.Create("division-6", CommandEchelonKind.DivisionLike, CommandNodeRole.FixingForce, CommandTaskType.FormUp, 1025f, 1425f, 180f),
+            CommandNodeOperationalState.Create("division-7", CommandEchelonKind.DivisionLike, CommandNodeRole.Defender, CommandTaskType.FormUp, 1050f, 1450f, 180f),
+            CommandNodeOperationalState.Create("division-8", CommandEchelonKind.DivisionLike, CommandNodeRole.Defender, CommandTaskType.FormUp, 1075f, 1475f, 180f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate(
+                "ridge-a",
+                TacticalObjectiveType.Ridge,
+                0f,
+                0.80f,
+                false,
+                0.8f,
+                1000f,
+                1000f,
+                0.70f,
+                0.2f,
+                TacticalApproachAvenueEstimate.Create(
+                    new TacticalMapPoint(1000f, 0f),
+                    new TacticalMapPoint(1000f, 1000f),
+                    TacticalApproachAvenueSource.EntryPoint,
+                    0.90f,
+                    roadAnchored: true,
+                    crossingAnchored: false,
+                    "entrypoint-axis"))
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 9000f, nowSeconds: 100f);
+
+        AssertEqual(8, orders.Length, "order count");
+        AssertEqual(CommandTaskType.GuardFlank, orders[0].Task, "left wing guard task");
+        AssertEqual(CommandTaskType.GuardFlank, orders[7].Task, "right wing guard task");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "left guard target");
+        AssertTrue(orders[7].PrimaryTarget.HasValue, "right guard target");
+        AssertTrue(Math.Abs(orders[0].PrimaryTarget.X - orders[7].PrimaryTarget.X) > 900f, "guard slots should cover opposite flanks");
+        AssertTrue(orders[1].PrimaryTarget.Z > picture.Objectives[0].Z, "near wing depth slot should sit behind objective");
+        AssertTrue(orders[6].PrimaryTarget.Z > picture.Objectives[0].Z, "far wing depth slot should sit behind objective");
+        AssertContains(orders[0].Reason, "scourge-slot-flank-guard", "guard reason");
+        AssertContains(orders[1].Reason, "scourge-slot-depth", "depth reason");
+    }
+
+    private static void DoctrineAssignmentUnknownRolesReceiveFallbackDoctrine()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("unknown-1", CommandEchelonKind.DivisionLike, CommandNodeRole.Unknown, CommandTaskType.FormUp, 900f, 1400f, 180f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 0f, 0.75f, false, 0.8f, 1000f, 1000f, 0.6f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 3000f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandNodeRole.Unknown, orders[0].Role, "role preserved for telemetry");
+        AssertEqual(CommandTaskType.FormUp, orders[0].Task, "unknown role fallback task");
+        AssertTrue(orders[0].HasPurpose, "fallback doctrine should be purposeful");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "fallback doctrine target");
+        AssertEqual(TacticalSopAuthority.Defend, orders[0].Sop.Authority, "unknown role task SOP");
+        AssertContains(orders[0].Reason, "battle-line", "fallback reason");
+    }
+
+    private static void TacticalApproachAvenuePlannerPrefersEnemyEntryRoute()
+    {
+        var objective = new BattlefieldObjectiveEstimate(
+            "ridge-a",
+            TacticalObjectiveType.Ridge,
+            0f,
+            0.75f,
+            false,
+            0.8f,
+            1000f,
+            1000f,
+            0.4f,
+            0.2f);
+
+        TacticalApproachAvenueEstimate avenue = TacticalApproachAvenuePlanner.SelectBest(
+            objective,
+            ownAllianceId: 0,
+            enemyAllianceId: 1,
+            observations: new[]
+            {
+                new TacticalApproachAvenueObservation(
+                    TacticalApproachAvenueSource.EntryPoint,
+                    ownerAllianceId: 0,
+                    originX: 1000f,
+                    originZ: 2000f,
+                    targetX: 1000f,
+                    targetZ: 1600f,
+                    confidence01: 0.70f,
+                    roadAnchored: true,
+                    crossingAnchored: false,
+                    "friendly-entry"),
+                new TacticalApproachAvenueObservation(
+                    TacticalApproachAvenueSource.ScheduledArrival,
+                    ownerAllianceId: 1,
+                    originX: 1000f,
+                    originZ: 0f,
+                    targetX: 1000f,
+                    targetZ: 250f,
+                    confidence01: 0.85f,
+                    roadAnchored: true,
+                    crossingAnchored: true,
+                    "enemy-arrival")
+            });
+
+        AssertTrue(avenue.HasAvenue, "avenue");
+        AssertNear(1000f, avenue.Origin.X, 0.001f, "origin x");
+        AssertNear(0f, avenue.Origin.Z, 0.001f, "origin z");
+        AssertTrue(avenue.AxisZ > 0.90f, "axis should point from enemy origin toward objective");
+        AssertTrue(avenue.Confidence01 >= 0.85f, "confidence should preserve strong vanilla evidence");
+        AssertContains(avenue.Reason, "enemy-arrival", "reason");
+    }
+
+    private static void TacticalBattleLinePlannerUsesPredictedAvenueAxis()
+    {
+        var objective = new BattlefieldObjectiveEstimate(
+            "ridge-a",
+            TacticalObjectiveType.Ridge,
+            900f,
+            0.9f,
+            true,
+            0.8f,
+            1000f,
+            1000f,
+            0.6f,
+            0.2f,
+            TacticalApproachAvenueEstimate.Create(
+                new TacticalMapPoint(1000f, 0f),
+                new TacticalMapPoint(1000f, 1000f),
+                TacticalApproachAvenueSource.EntryPoint,
+                0.90f,
+                roadAnchored: true,
+                crossingAnchored: false,
+                "entrypoint-axis"));
+        CommandNodeOperationalState node = CommandNodeOperationalState.Create(
+            "main",
+            CommandEchelonKind.DivisionLike,
+            CommandNodeRole.MainEffort,
+            CommandTaskType.FormUp,
+            0f,
+            1000f,
+            90f);
+
+        TacticalBattleLinePlan plan = TacticalBattleLinePlanner.PlanNode(
+            node,
+            CommandTaskType.AttackObjective,
+            objective,
+            objectiveMatched: true,
+            commandIndex: 0,
+            default(TacticalBattlefrontSnapshot),
+            nodeCount: 1);
+
+        AssertTrue(plan.PrimaryTarget.HasValue, "target");
+        AssertNear(1000f, plan.PrimaryTarget.X, 0.001f, "avenue target x");
+        AssertTrue(plan.PrimaryTarget.Z < objective.Z, "line should form toward predicted enemy route");
+        AssertTrue(plan.FallbackTarget.HasValue, "fallback");
+        AssertTrue(plan.FallbackTarget.Z > objective.Z, "fallback should sit behind objective away from predicted route");
+        AssertContains(plan.Reason, "approach-avenue", "reason");
+    }
+
+    private static void TacticalDefensiveLineAnchorShiftsRoadCorridorForward()
+    {
+        var objective = new BattlefieldObjectiveEstimate(
+            "stafford-road",
+            TacticalObjectiveType.VictoryPoint,
+            0f,
+            0.82f,
+            false,
+            0.8f,
+            1000f,
+            1000f,
+            0.25f,
+            0.4f,
+            TacticalApproachAvenueEstimate.Create(
+                new TacticalMapPoint(1000f, 0f),
+                new TacticalMapPoint(1000f, 1000f),
+                TacticalApproachAvenueSource.ScheduledArrival,
+                0.92f,
+                roadAnchored: true,
+                crossingAnchored: true,
+                "road-between-rivers"));
+
+        TacticalDefensiveLineAnchor anchor = TacticalDefensiveLineAnchorPlanner.Plan(
+            objective,
+            default(TacticalBattlefrontSnapshot),
+            nodeCount: 8);
+
+        AssertTrue(anchor.HasAnchor, "anchor");
+        AssertTrue(anchor.Center.HasValue, "center");
+        AssertTrue(anchor.Center.Z < objective.Z - 250f, "line should shift toward likely enemy road approach");
+        AssertTrue(anchor.FrontageWidth <= 575f, "crossing corridor should narrow frontage");
+        AssertTrue(anchor.DefensiveArtilleryDepth > 0f, "artillery depth");
+        AssertContains(anchor.Reason, "approach-intercept", "intercept reason");
+        AssertContains(anchor.Reason, "crossing", "crossing reason");
+    }
+
+    private static void TacticalBattleLinePlannerDefendsCorridorWithReserveAndArtilleryDepth()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("main", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 900f, 1300f, 180f),
+            CommandNodeOperationalState.Create("support", CommandEchelonKind.DivisionLike, CommandNodeRole.SupportingAttack, CommandTaskType.FormUp, 950f, 1320f, 180f),
+            CommandNodeOperationalState.Create("fix", CommandEchelonKind.DivisionLike, CommandNodeRole.FixingForce, CommandTaskType.FormUp, 1025f, 1340f, 180f),
+            CommandNodeOperationalState.Create("reserve", CommandEchelonKind.DivisionLike, CommandNodeRole.Reserve, CommandTaskType.FormUp, 1100f, 1360f, 180f)
+        };
+        var objective = new BattlefieldObjectiveEstimate(
+            "stafford-road",
+            TacticalObjectiveType.VictoryPoint,
+            0f,
+            0.82f,
+            false,
+            0.8f,
+            1000f,
+            1000f,
+            0.25f,
+            0.4f,
+            TacticalApproachAvenueEstimate.Create(
+                new TacticalMapPoint(1000f, 0f),
+                new TacticalMapPoint(1000f, 1000f),
+                TacticalApproachAvenueSource.ScheduledArrival,
+                0.92f,
+                roadAnchored: true,
+                crossingAnchored: true,
+                "road-between-rivers"));
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "stafford-road", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[] { objective });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 5000f, nowSeconds: 100f, reserveFraction: 0.25f);
+
+        CommandDoctrineOrder main = orders[0];
+        CommandDoctrineOrder reserve = orders[3];
+
+        AssertEqual(CommandTaskType.AttackObjective, main.Task, "main task");
+        AssertTrue(main.PrimaryTarget.HasValue, "main target");
+        AssertTrue(main.PrimaryTarget.Z < objective.Z - 250f, "main line should block the approach before the objective");
+        AssertTrue(reserve.PrimaryTarget.HasValue, "reserve target");
+        AssertTrue(reserve.PrimaryTarget.Z > main.PrimaryTarget.Z, "reserve should sit behind the defended corridor");
+        AssertContains(main.Reason, "approach-intercept", "main reason");
+        AssertContains(main.Reason, "objective-lane", "choke width reason");
+    }
+
+    private static void TacticalScoutingAvenueSendsScreenForwardAndReserveRear()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("screen", CommandEchelonKind.BrigadeLike, CommandNodeRole.ScreeningForce, CommandTaskType.FormUp, 980f, 1300f, 180f),
+            CommandNodeOperationalState.Create("reserve", CommandEchelonKind.BrigadeLike, CommandNodeRole.Reserve, CommandTaskType.FormUp, 1020f, 1400f, 180f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Scouting, "ridge-a", 600f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate(
+                "ridge-a",
+                TacticalObjectiveType.Ridge,
+                0f,
+                0.8f,
+                false,
+                0.8f,
+                1000f,
+                1000f,
+                0.4f,
+                0.2f,
+                TacticalApproachAvenueEstimate.Create(
+                    new TacticalMapPoint(1000f, 0f),
+                    new TacticalMapPoint(1000f, 1000f),
+                    TacticalApproachAvenueSource.EntryPoint,
+                    0.85f,
+                    roadAnchored: true,
+                    crossingAnchored: false,
+                    "entrypoint-axis"))
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1500f, nowSeconds: 100f);
+
+        AssertEqual(CommandTaskType.Screen, orders[0].Task, "screen task");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "screen target");
+        AssertTrue(orders[0].PrimaryTarget.Z < picture.Objectives[0].Z, "screen should delay forward on predicted route");
+        AssertEqual(CommandTaskType.ReserveWait, orders[1].Task, "reserve task");
+        AssertTrue(orders[1].PrimaryTarget.HasValue, "reserve target");
+        AssertTrue(orders[1].PrimaryTarget.Z > picture.Objectives[0].Z, "reserve should wait behind objective");
+    }
+
+    private static void TacticalMassingCycleWaitsForSupportBeforeCommit()
+    {
+        TacticalMassingDecision decision = TacticalMassingCycle.Evaluate(new TacticalMassingInput(
+            operationPhase: TacticalOperationPhase.Committed,
+            mainEffortCount: 1,
+            supportCount: 0,
+            reserveCount: 1,
+            artilleryReady: false,
+            objectiveExposed: true,
+            objectiveConfidence01: 0.85f,
+            ownStrength: 1500f,
+            enemyStrength: 1000f,
+            reserveFraction: 0.20f));
+
+        AssertEqual(TacticalMassingPhase.MassSupport, decision.Phase, "phase");
+        AssertFalse(decision.MayCommitAssault, "commit gate");
+        AssertContains(decision.Reason, "support", "reason");
+    }
+
+    private static void TacticalMassingCycleBlocksCommitWhenEnduranceNeedsRelief()
+    {
+        TacticalMassingDecision decision = TacticalMassingCycle.Evaluate(new TacticalMassingInput(
+            operationPhase: TacticalOperationPhase.Committed,
+            mainEffortCount: 1,
+            supportCount: 1,
+            reserveCount: 1,
+            artilleryReady: true,
+            objectiveExposed: true,
+            objectiveConfidence01: 0.9f,
+            ownStrength: 2200f,
+            enemyStrength: 1000f,
+            reserveFraction: 0.22f,
+            endurance: new TacticalEnduranceDecision(
+                canAssault: false,
+                canHold: true,
+                canFallback: true,
+                needsRelief: true,
+                reason: "relief-needed")));
+
+        AssertEqual(TacticalMassingPhase.MassSupport, decision.Phase, "phase");
+        AssertFalse(decision.MayCommitAssault, "commit gate");
+        AssertContains(decision.Reason, "endurance", "reason");
+    }
+
+    private static void OperationalReserveDoctrineSealsThreatenedFlankBeforeExploit()
+    {
+        OperationalReserveDecision decision = OperationalReserveDoctrine.Decide(new OperationalReserveInput(
+            reserveFraction: 0.25f,
+            mainEffortOdds: 1.7f,
+            flankThreat01: 0.85f,
+            reserveEndurance01: 0.8f,
+            assaultAuthorized: true,
+            fallbackPressure: false));
+
+        AssertEqual(OperationalReserveMission.SealFlank, decision.Mission, "mission");
+        AssertTrue(decision.ShouldMove, "should move");
+        AssertEqual("flank-threat", decision.Reason, "reason");
+    }
+
+    private static void OperationalReserveDoctrineProtectsFinalReserveAndPartialCommits()
+    {
+        OperationalReserveDecision finalReserve = OperationalReserveDoctrine.Decide(new OperationalReserveInput(
+            reserveFraction: 0.08f,
+            mainEffortOdds: 1.9f,
+            flankThreat01: 0.1f,
+            reserveEndurance01: 0.9f,
+            assaultAuthorized: true,
+            fallbackPressure: false,
+            minimumHeldFraction: 0.10f,
+            lineReliefPressure01: 0.0f,
+            exploitOpportunity01: 0.9f));
+        OperationalReserveDecision partialCommit = OperationalReserveDoctrine.Decide(new OperationalReserveInput(
+            reserveFraction: 0.32f,
+            mainEffortOdds: 1.9f,
+            flankThreat01: 0.1f,
+            reserveEndurance01: 0.9f,
+            assaultAuthorized: true,
+            fallbackPressure: false,
+            minimumHeldFraction: 0.10f,
+            lineReliefPressure01: 0.0f,
+            exploitOpportunity01: 0.9f));
+
+        AssertEqual(OperationalReserveMission.FinalReserve, finalReserve.Mission, "final reserve mission");
+        AssertFalse(finalReserve.ShouldMove, "final reserve should not move");
+        AssertTrue(finalReserve.ProtectsFinalReserve, "final reserve protected");
+        AssertEqual(OperationalReserveMission.ExploitReserve, partialCommit.Mission, "exploit reserve mission");
+        AssertTrue(partialCommit.ShouldMove, "partial reserve should move");
+        AssertTrue(partialCommit.CommitFraction01 > 0.05f && partialCommit.CommitFraction01 < 0.32f, "partial commit fraction");
+    }
+
+    private static void TacticalFallbackLadderSeparatesFallbackFromRetreat()
+    {
+        TacticalFallbackDecision fallback = TacticalFallbackLadder.Decide(new TacticalFallbackInput(
+            odds: 0.8f,
+            morale01: 0.45f,
+            fatigue01: 0.55f,
+            flankThreat01: 0.65f,
+            rearThreat: false,
+            hasFallbackTarget: true,
+            reserveReliefAvailable: true,
+            wlGateAllows: true));
+        TacticalFallbackDecision retreat = TacticalFallbackLadder.Decide(new TacticalFallbackInput(
+            odds: 0.35f,
+            morale01: 0.15f,
+            fatigue01: 0.9f,
+            flankThreat01: 0.9f,
+            rearThreat: true,
+            hasFallbackTarget: true,
+            reserveReliefAvailable: false,
+            wlGateAllows: true));
+
+        AssertEqual(TacticalFallbackStep.FallbackByBounds, fallback.Step, "fallback step");
+        AssertEqual(TacticalFallbackStep.FullRetreat, retreat.Step, "retreat step");
+        AssertTrue(fallback.RequiresOrderedFallback, "fallback order");
+        AssertTrue(retreat.PreservesForce, "retreat preserves force");
+    }
+
+    private static void DoctrineFallbackLadderMapsLiveOrders()
+    {
+        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideFallback(
+            DoctrineOrder(
+                CommandTaskType.AttackObjective,
+                role: CommandNodeRole.MainEffort,
+                primary: DoctrineTargetPoint.From(100f, 200f)),
+            new TacticalFallbackInput(
+                odds: 0.65f,
+                morale01: 0.45f,
+                fatigue01: 0.50f,
+                flankThreat01: 0.80f,
+                rearThreat: false,
+                hasFallbackTarget: true,
+                reserveReliefAvailable: false,
+                wlGateAllows: true));
+
+        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "fallback action");
+        AssertEqual(CommandTaskType.FallBackToLine, decision.Task, "fallback task");
+        AssertContains(decision.Reason, "fallback-by-bounds", "reason");
+    }
+
+    private static void TacticalArtilleryMissionPlannerGatesSupportByAmmoRangeAndDanger()
+    {
+        TacticalArtilleryMissionDecision support = TacticalArtilleryMissionPlanner.Decide(new TacticalArtilleryMissionInput(
+            requestedSupport: true,
+            enemyArtilleryVisible: false,
+            ammoRatio01: 0.7f,
+            targetDistance: 700f,
+            optimalRange: 800f,
+            maxRange: 1200f,
+            friendlyDangerClose: false,
+            threatenedByCloseEnemy: false,
+            canDisplace: true));
+        TacticalArtilleryMissionDecision danger = TacticalArtilleryMissionPlanner.Decide(new TacticalArtilleryMissionInput(
+            requestedSupport: true,
+            enemyArtilleryVisible: false,
+            ammoRatio01: 0.7f,
+            targetDistance: 700f,
+            optimalRange: 800f,
+            maxRange: 1200f,
+            friendlyDangerClose: true,
+            threatenedByCloseEnemy: false,
+            canDisplace: true));
+
+        AssertEqual(TacticalArtilleryMission.SupportMainEffort, support.Mission, "support mission");
+        AssertEqual(TacticalArtilleryMission.HoldFireDangerClose, danger.Mission, "danger mission");
+        AssertFalse(danger.AllowsFire, "danger close fire gate");
+    }
+
+    private static void TacticalArtilleryCommandAssignsWeakPointAmmoAndReposition()
+    {
+        TacticalArtilleryMissionDecision support = TacticalArtilleryMissionPlanner.Decide(new TacticalArtilleryMissionInput(
+            requestedSupport: true,
+            enemyArtilleryVisible: false,
+            ammoRatio01: 0.7f,
+            targetDistance: 900f,
+            optimalRange: 750f,
+            maxRange: 1300f,
+            friendlyDangerClose: false,
+            threatenedByCloseEnemy: false,
+            canDisplace: true,
+            fieldOfFireClear: true,
+            hasWeakPointTarget: true,
+            weakPointX: 400f,
+            weakPointZ: 900f,
+            hasSafeRepositionTarget: false,
+            safeRepositionX: 0f,
+            safeRepositionZ: 0f));
+        TacticalArtilleryMissionDecision displace = TacticalArtilleryMissionPlanner.Decide(new TacticalArtilleryMissionInput(
+            requestedSupport: true,
+            enemyArtilleryVisible: false,
+            ammoRatio01: 0.7f,
+            targetDistance: 900f,
+            optimalRange: 750f,
+            maxRange: 1300f,
+            friendlyDangerClose: false,
+            threatenedByCloseEnemy: false,
+            canDisplace: true,
+            fieldOfFireClear: false,
+            hasWeakPointTarget: true,
+            weakPointX: 400f,
+            weakPointZ: 900f,
+            hasSafeRepositionTarget: true,
+            safeRepositionX: 100f,
+            safeRepositionZ: 250f));
+
+        AssertEqual(TacticalArtilleryMission.SupportMainEffort, support.Mission, "support mission");
+        AssertEqual(TacticalArtilleryAmmoMission.Shell, support.AmmoMission, "support ammo");
+        AssertTrue(support.AssignmentTarget.HasValue, "support target");
+        AssertNear(400f, support.AssignmentTarget.X, 0.01f, "weak point x");
+        AssertEqual(TacticalArtilleryMission.Displace, displace.Mission, "reposition mission");
+        AssertTrue(displace.ShouldReposition, "should reposition");
+        AssertTrue(displace.RepositionTarget.HasValue, "reposition target");
+        AssertEqual(TacticalArtilleryAmmoMission.Preserve, displace.AmmoMission, "displace ammo");
+    }
+
+    private static void TacticalEnduranceGateBlocksAssaultButPermitsFallback()
+    {
+        TacticalEnduranceDecision decision = TacticalEnduranceGate.Evaluate(new TacticalEnduranceInput(
+            infantryAmmo01: 0.12f,
+            artilleryAmmo01: 0.7f,
+            fatigue01: 0.85f,
+            morale01: 0.42f,
+            casualtyPressure01: 0.65f));
+
+        AssertFalse(decision.CanAssault, "assault gate");
+        AssertTrue(decision.CanFallback, "fallback gate");
+        AssertTrue(decision.NeedsRelief, "relief");
+    }
+
+    private static void TacticalSupportRequestLedgerDedupesAndPrioritizes()
+    {
+        var ledger = new TacticalSupportRequestLedger();
+        ledger.AddOrUpdate(new TacticalSupportRequest("main", TacticalSupportRequestType.LineRelief, "ridge", 0.70f, 100f, 300f));
+        ledger.AddOrUpdate(new TacticalSupportRequest("main", TacticalSupportRequestType.LineRelief, "ridge", 0.90f, 120f, 300f));
+        ledger.AddOrUpdate(new TacticalSupportRequest("screen", TacticalSupportRequestType.ArtillerySupport, "ridge", 0.60f, 110f, 300f));
+
+        TacticalSupportRequest next = ledger.PeekHighestPriority(nowSeconds: 130f);
+
+        AssertEqual(2, ledger.Count, "dedupe count");
+        AssertEqual("main", next.SourceNodeId, "source");
+        AssertNear(0.90f, next.Priority01, 0.001f, "priority");
+    }
+
+    private static void PlayerSubordinateOrderDoctrineMapsWithoutDirectMovement()
+    {
+        PlayerSubordinateOrderDecision decision = PlayerSubordinateOrderDoctrine.Decide(new PlayerSubordinateOrderInput(
+            wlScenarioActive: true,
+            playerIsCommander: false,
+            playerUnderCommander: true,
+            existingOrderFresh: false,
+            order: DoctrineOrder(
+                CommandTaskType.FallBackToLine,
+                role: CommandNodeRole.FallbackGuard,
+                fallback: DoctrineTargetPoint.From(100f, 200f))));
+
+        AssertEqual(PlayerSubordinateOrderIntent.Fallback, decision.Intent, "intent");
+        AssertTrue(decision.ShouldIssueWlOrder, "issue");
+        AssertFalse(decision.AllowsDirectMovementWrite, "direct movement");
+    }
+
+    private static void OperationDirectorScoutsScreenContactBeforeCommitting()
+    {
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            OperationRecord.Noop,
+            currentTimeSeconds: 120f,
+            ownStrength: 5000f,
+            reserveFraction: 0.30f,
+            aggression01: 0.7f,
+            caution01: 0.2f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("screen-contact", TacticalObjectiveType.EnemyLine, 180f, 0.45f, false, 0.55f, 300f, 400f, 0.1f, 0.1f),
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+
+        AssertEqual(TacticalOperationPhase.Scouting, decision.Operation.Phase, "screen contact should scout");
+        AssertEqual(TacticalOperationShape.FixAndFlank, decision.Operation.Shape, "screen contact shape");
+        AssertEqual("screen-contact", decision.Operation.PrimaryObjectiveId, "primary objective");
+        AssertEqual("recon-contact", decision.Reason, "reason");
+    }
+
+    private static void OperationDirectorKeepsHighConfidenceScreenInScouting()
+    {
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            OperationRecord.Noop,
+            currentTimeSeconds: 120f,
+            ownStrength: 5000f,
+            reserveFraction: 0.30f,
+            aggression01: 0.7f,
+            caution01: 0.2f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("high-screen-contact", TacticalObjectiveType.EnemyLine, 180f, 0.80f, false, 0.55f, 300f, 400f, 0.1f, 0.1f),
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+
+        AssertEqual(TacticalOperationPhase.Scouting, decision.Operation.Phase, "high confidence screen should still scout");
+        AssertEqual("recon-contact", decision.Reason, "reason");
+    }
+
+    private static void OperationDirectorDowngradesCommittedAttackWhenContactBecomesScreen()
+    {
+        OperationRecord current = OperationRecord.CreateCommittedForTest(TacticalOperationShape.FixAndFlank, "enemy-line", minCommitUntilSeconds: 1800f);
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            current,
+            currentTimeSeconds: 600f,
+            ownStrength: 5000f,
+            reserveFraction: 0.30f,
+            aggression01: 0.7f,
+            caution01: 0.2f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("enemy-line", TacticalObjectiveType.EnemyLine, 260f, 0.80f, false, 0.65f, 300f, 400f, 0.1f, 0.1f),
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+
+        AssertEqual(TacticalOperationPhase.Scouting, decision.Operation.Phase, "screen downgrade should break commitment");
+        AssertEqual("contact-downgraded", decision.Reason, "reason");
+    }
+
+    private static void OperationDirectorCancelsCommittedAttackWhenContactIsLost()
+    {
+        OperationRecord current = OperationRecord.CreateCommittedForTest(TacticalOperationShape.FixAndFlank, "enemy-line", minCommitUntilSeconds: 1800f);
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            current,
+            currentTimeSeconds: 600f,
+            ownStrength: 5000f,
+            reserveFraction: 0.30f,
+            aggression01: 0.7f,
+            caution01: 0.2f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("enemy-line", TacticalObjectiveType.EnemyLine, 0f, 0.30f, false, 0.65f, 300f, 400f, 0.1f, 0.1f),
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+
+        AssertEqual(TacticalOperationPhase.SoftAbort, decision.Operation.Phase, "lost contact should cancel committed attack");
+        AssertEqual("contact-lost", decision.Reason, "reason");
+    }
+
+    private static void OperationDirectorFixAndFlankExposedWeakPointWithReserve()
+    {
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            OperationRecord.Noop,
+            currentTimeSeconds: 120f,
+            ownStrength: 2200f,
+            reserveFraction: 0.25f,
+            aggression01: 0.6f,
+            caution01: 0.2f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("enemy-line-weak", TacticalObjectiveType.EnemyLine, 1100f, 0.80f, true, 0.65f, 300f, 400f, 0.1f, 0.1f),
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+
+        AssertEqual(TacticalOperationPhase.Committed, decision.Operation.Phase, "exposed weak point should commit");
+        AssertEqual(TacticalOperationShape.FixAndFlank, decision.Operation.Shape, "exposed weak point shape");
+        AssertEqual("enemy-line-weak", decision.Operation.PrimaryObjectiveId, "primary objective");
+        AssertEqual("fix-and-flank", decision.Reason, "reason");
     }
 
     private static void OperationMacroAiMapsSoftAbortToDefend()
@@ -2141,6 +3118,33 @@ static class Program
         AssertEqual(0, empty.Length, "null contacts");
     }
 
+    private static void TacticalFowContactRejectsBroadClosestEnemyLeak()
+    {
+        AssertFalse(TacticalFogOfWarContact.AcceptContactEvidence(
+                inVanillaVisibleRange: false,
+                inVanillaFireRange: false,
+                receivedFire: false),
+            "broad closest-enemy evidence is not visual contact");
+
+        AssertTrue(TacticalFogOfWarContact.AcceptContactEvidence(
+                inVanillaVisibleRange: true,
+                inVanillaFireRange: false,
+                receivedFire: false),
+            "vanilla FOW-visible range is contact");
+
+        AssertTrue(TacticalFogOfWarContact.AcceptContactEvidence(
+                inVanillaVisibleRange: false,
+                inVanillaFireRange: true,
+                receivedFire: false),
+            "vanilla FOW fire range is contact");
+
+        AssertTrue(TacticalFogOfWarContact.AcceptContactEvidence(
+                inVanillaVisibleRange: false,
+                inVanillaFireRange: false,
+                receivedFire: true),
+            "recent fire remains contact");
+    }
+
     private static void TacticalVisionRuntimeAdapterFallbackObjectiveUsesVisibleEnemyPoint()
     {
         var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsWithFallback(
@@ -2162,6 +3166,61 @@ static class Program
         AssertEqual(1200f, objectives[0].EnemyStrength, "fallback enemy strength");
         AssertEqual(3000f, objectives[0].FriendlyAssignedStrength, "fallback friendly strength");
         AssertTrue(objectives[0].HasUsableStrengthEvidence, "fallback strength evidence");
+    }
+
+    private static void TacticalVisionFallbackObjectiveUsesVanillaMovementWaypoint()
+    {
+        var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsWithMovementFallback(
+            Array.Empty<ObjectiveObservationInput>(),
+            Array.Empty<TacticalObjectiveStatus>(),
+            Array.Empty<float>(),
+            Array.Empty<float>(),
+            visibleEnemyLine: null,
+            visibleEnemyStrength: 0f,
+            visibleFriendlyStrength: 0f,
+            movementAnchor: new TacticalMapPoint(1886f, -619f),
+            movementAnchorFriendlyStrength: 2400f,
+            allianceId: 0);
+
+        AssertEqual(1, objectives.Length, "movement fallback objective count");
+        AssertEqual("movement-anchor-0", objectives[0].Observation.ObjectiveId, "movement fallback id");
+        AssertEqual(TacticalObjectiveSource.FriendlyLineShape, objectives[0].Observation.Source, "movement fallback source");
+        AssertEqual(1886f, objectives[0].Observation.Location.X, "movement fallback x");
+        AssertEqual(-619f, objectives[0].Observation.Location.Z, "movement fallback z");
+        AssertEqual(2400f, objectives[0].FriendlyAssignedStrength, "movement fallback friendly strength");
+    }
+
+    private static void TacticalVisionSceneObjectivesBeatMovementFallback()
+    {
+        var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsWithSceneObjectivesAndMovementFallback(
+            Array.Empty<ObjectiveObservationInput>(),
+            Array.Empty<TacticalObjectiveStatus>(),
+            Array.Empty<float>(),
+            Array.Empty<float>(),
+            new[]
+            {
+                new ObjectiveObservationInput(
+                    "map-objective-crossroads",
+                    TacticalObjectiveType.VictoryPoint,
+                    TacticalObjectiveSource.VerifiedSceneObject,
+                    new TacticalMapPoint(720f, -1580f),
+                    sourceConfidence: 0.90f,
+                    value: 0.80f,
+                    typeAnchorVerified: true),
+            },
+            new[] { TacticalObjectiveStatus.Scouting },
+            visibleEnemyLine: null,
+            visibleEnemyStrength: 0f,
+            visibleFriendlyStrength: 0f,
+            movementAnchor: new TacticalMapPoint(1886f, -619f),
+            movementAnchorFriendlyStrength: 2400f,
+            allianceId: 1);
+
+        AssertEqual(1, objectives.Length, "objective count");
+        AssertEqual("map-objective-crossroads", objectives[0].Observation.ObjectiveId, "scene objective id");
+        AssertEqual(TacticalObjectiveSource.VerifiedSceneObject, objectives[0].Observation.Source, "scene objective source");
+        AssertEqual(720f, objectives[0].Observation.Location.X, "scene objective x");
+        AssertEqual(-1580f, objectives[0].Observation.Location.Z, "scene objective z");
     }
 
     private static void TacticalVisionAppendsVisibleEnemyLineToObjectiveChainPicture()
@@ -2245,7 +3304,7 @@ static class Program
 
         runtime.Replace(
             TacticalCommanderMode.Off,
-            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f) },
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.WeaklyHeld) },
             new StrategicBattleIntentSnapshot(0.4f, 0.6f, "hold", "push"),
             new ForceAvailabilitySnapshot(8000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
@@ -2288,7 +3347,7 @@ static class Program
         ledger.SetRuntimeClock(0f);
         ledger.Replace(
             TacticalCommanderMode.Active,
-            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 1000f, friendlyAssignedStrength: 100f) },
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 1000f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.WeaklyHeld) },
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
             new ForceAvailabilitySnapshot(3000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
@@ -2322,7 +3381,7 @@ static class Program
         ledger.SetRuntimeClock(0f);
         ledger.Replace(
             TacticalCommanderMode.Active,
-            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 5000f, friendlyAssignedStrength: 100f) },
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 5000f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.StronglyHeld) },
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
             new ForceAvailabilitySnapshot(3000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
@@ -2334,7 +3393,7 @@ static class Program
         ledger.SetRuntimeClock(100f);
         ledger.Replace(
             TacticalCommanderMode.Active,
-            new[] { ObjectiveRecordFor("ridge-b", enemyStrength: 1000f, friendlyAssignedStrength: 100f) },
+            new[] { ObjectiveRecordFor("ridge-b", enemyStrength: 1000f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.WeaklyHeld) },
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
             new ForceAvailabilitySnapshot(3000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
@@ -2454,7 +3513,7 @@ static class Program
         var first = new TacticalOperationsLedgerRuntime();
         first.Replace(
             TacticalCommanderMode.MonitorOnly,
-            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f) },
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.WeaklyHeld) },
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "first", "first-campaign"),
             new ForceAvailabilitySnapshot(8000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
@@ -2526,7 +3585,7 @@ static class Program
 
         side.TickOperationsLedger(
             TacticalCommanderMode.Active,
-            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f) },
+            new[] { ObjectiveRecordFor("ridge-a", enemyStrength: 70f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.WeaklyHeld) },
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
             new ForceAvailabilitySnapshot(8000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
@@ -2668,7 +3727,11 @@ static class Program
         AssertFalse(TacticalBattleCoordinator.ShouldRunTacticalCommanderForSide(1, -1, aiVsAi: false), "unknown player alliance fails closed");
     }
 
-    private static ObjectiveRecord ObjectiveRecordFor(string objectiveId, float enemyStrength, float friendlyAssignedStrength)
+    private static ObjectiveRecord ObjectiveRecordFor(
+        string objectiveId,
+        float enemyStrength,
+        float friendlyAssignedStrength,
+        TacticalObjectiveStatus status = TacticalObjectiveStatus.Scouting)
     {
         return new ObjectiveRecord(
             new ObjectiveObservationInput(
@@ -2679,7 +3742,7 @@ static class Program
                 0.9f,
                 1.0f,
                 typeAnchorVerified: true),
-            TacticalObjectiveStatus.Scouting,
+            status,
             enemyStrength,
             friendlyAssignedStrength);
     }
@@ -2989,6 +4052,23 @@ static class Program
         AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, decision);
     }
 
+    private static void PostureExecutorUsesDoctrineAssemblyTarget()
+    {
+        var formUp = CommandPostureExecutor.Decide(
+            DoctrineOrder(CommandTaskType.FormUp, primary: DoctrineTargetPoint.From(220f, 360f)),
+            PhysicalState(),
+            nowSeconds: 100f);
+        var advance = CommandPostureExecutor.Decide(
+            DoctrineOrder(CommandTaskType.AdvanceToAssembly, primary: DoctrineTargetPoint.From(260f, 390f)),
+            PhysicalState(),
+            nowSeconds: 100f);
+
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "form-up", formUp);
+        AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, formUp);
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "advance-to-assembly", advance);
+        AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, advance);
+    }
+
     private static void PostureExecutorMovesScoutProbeAndScreenToDoctrineTarget()
     {
         var scout = CommandPostureExecutor.Decide(
@@ -3010,6 +4090,50 @@ static class Program
         AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, probe);
         AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "screen", screen);
         AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, screen);
+    }
+
+    private static void PostureExecutorCloseScreenBreaksOffToDoctrineFallback()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            DoctrineOrder(
+                CommandTaskType.Screen,
+                primary: DoctrineTargetPoint.From(125f, 250f),
+                fallback: DoctrineTargetPoint.From(80f, 200f),
+                role: CommandNodeRole.ScreeningForce),
+            PhysicalState(),
+            new WriteEligibilitySnapshot(
+                modeAllowsWrites: true,
+                playerProtected: false,
+                routed: false,
+                orderPending: false,
+                recentOrder: false,
+                closeEngaged: true),
+            nowSeconds: 100f);
+
+        AssertPostureDecision(PostureExecutionAction.SetFormationAndWaypoint, "close-engaged-screen-breakoff", decision);
+        AssertPostureTarget(PostureExecutionTarget.DoctrineFallbackTarget, false, decision);
+    }
+
+    private static void PostureExecutorMovesReserveToDoctrineRallyTarget()
+    {
+        var decision = CommandPostureExecutor.Decide(
+            DoctrineOrder(
+                CommandTaskType.ReserveWait,
+                primary: DoctrineTargetPoint.From(700f, 50f),
+                role: CommandNodeRole.Reserve,
+                allowedIdle: DoctrineAllowedIdleReason.HeldReserve),
+            PhysicalState(),
+            new WriteEligibilitySnapshot(
+                modeAllowsWrites: true,
+                playerProtected: false,
+                routed: false,
+                orderPending: false,
+                recentOrder: false,
+                atAssignedLocation: false),
+            nowSeconds: 100f);
+
+        AssertPostureDecision(PostureExecutionAction.SetWaypoint, "reserve-area", decision);
+        AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, decision);
     }
 
     private static void PostureExecutorClearsInterruptedInactiveOrder()
@@ -3102,6 +4226,226 @@ static class Program
                 currentX: 650.5f,
                 currentZ: -1347.5f),
             "stale duplicate waypoint with no active path should be reissued");
+    }
+
+    private static void TacticalNavPlannerProbesToStandoffBound()
+    {
+        var plan = TacticalNavMeshPlanner.Plan(new TacticalNavPlanInput(
+            CommandTaskType.Probe,
+            ownX: 0f,
+            ownZ: 0f,
+            primaryTarget: DoctrineTargetPoint.From(1000f, 0f),
+            fallbackTarget: default(DoctrineTargetPoint),
+            hasThreat: false,
+            threatX: 0f,
+            threatZ: 0f,
+            hasCurrentWaypoint: false,
+            currentWaypointX: 0f,
+            currentWaypointZ: 0f,
+            closeEngaged: false,
+            minWaypointDistance: 15f,
+            maxWaypointDistance: 2500f));
+
+        AssertTrue(plan.HasTarget, "probe should produce target");
+        AssertEqual("recon-bound", plan.Reason, "reason");
+        AssertNear(780f, plan.Target.X, 0.1f, "probe x");
+        AssertNear(0f, plan.Target.Z, 0.1f, "probe z");
+    }
+
+    private static void TacticalNavPlannerBreaksOffCloseScreen()
+    {
+        var plan = TacticalNavMeshPlanner.Plan(new TacticalNavPlanInput(
+            CommandTaskType.Screen,
+            ownX: 850f,
+            ownZ: 0f,
+            primaryTarget: DoctrineTargetPoint.From(1000f, 0f),
+            fallbackTarget: DoctrineTargetPoint.From(650f, 0f),
+            hasThreat: true,
+            threatX: 1000f,
+            threatZ: 0f,
+            hasCurrentWaypoint: false,
+            currentWaypointX: 0f,
+            currentWaypointZ: 0f,
+            closeEngaged: true,
+            minWaypointDistance: 15f,
+            maxWaypointDistance: 2500f));
+
+        AssertTrue(plan.HasTarget, "close screen should break off");
+        AssertEqual("recon-breakoff", plan.Reason, "reason");
+        AssertNear(650f, plan.Target.X, 0.1f, "fallback x");
+        AssertNear(0f, plan.Target.Z, 0.1f, "fallback z");
+    }
+
+    private static void TacticalNavPlannerOffsetsCoveredAttackApproach()
+    {
+        var plan = TacticalNavMeshPlanner.Plan(new TacticalNavPlanInput(
+            CommandTaskType.AttackObjective,
+            ownX: 0f,
+            ownZ: 0f,
+            primaryTarget: DoctrineTargetPoint.From(1000f, 0f),
+            fallbackTarget: default(DoctrineTargetPoint),
+            hasThreat: true,
+            threatX: 850f,
+            threatZ: 0f,
+            hasCurrentWaypoint: false,
+            currentWaypointX: 0f,
+            currentWaypointZ: 0f,
+            closeEngaged: false,
+            minWaypointDistance: 15f,
+            maxWaypointDistance: 2500f));
+
+        AssertTrue(plan.HasTarget, "covered attack should produce target");
+        AssertEqual("attack-approach-offset", plan.Reason, "reason");
+        AssertTrue(plan.Target.X < 1000f, "attack approach should stop short of the objective");
+        AssertTrue(Math.Abs(plan.Target.Z) > 50f, "attack approach should use a lateral offset");
+        AssertTrue(
+            DistanceSquared(plan.Target.X, plan.Target.Z, 850f, 0f) > DistanceSquared(925f, 0f, 850f, 0f),
+            "offset approach should open distance from covered lane");
+    }
+
+    private static void TacticalNavPlannerPrefersRoadCoverAndAvoidsChokeCongestion()
+    {
+        var plan = TacticalNavMeshPlanner.Plan(new TacticalNavPlanInput(
+            CommandTaskType.AttackObjective,
+            ownX: 0f,
+            ownZ: 0f,
+            primaryTarget: DoctrineTargetPoint.From(1000f, 0f),
+            fallbackTarget: default(DoctrineTargetPoint),
+            hasThreat: true,
+            threatX: 850f,
+            threatZ: 0f,
+            hasCurrentWaypoint: false,
+            currentWaypointX: 0f,
+            currentWaypointZ: 0f,
+            closeEngaged: false,
+            minWaypointDistance: 15f,
+            maxWaypointDistance: 2500f,
+            pathSamples: new[]
+            {
+                new TacticalPathQualitySample(925f, 0f, roadPreference01: 0.0f, slopeCost01: 0.75f, congestion01: 0.85f, chokeRisk01: 0.90f, bridgeRisk01: 0.70f, deadGround01: 0.05f),
+                new TacticalPathQualitySample(850f, 180f, roadPreference01: 0.85f, slopeCost01: 0.10f, congestion01: 0.10f, chokeRisk01: 0.05f, bridgeRisk01: 0.0f, deadGround01: 0.65f)
+            }));
+
+        AssertTrue(plan.HasTarget, "path quality should produce target");
+        AssertContains(plan.Reason, "path-quality", "reason");
+        AssertNear(850f, plan.Target.X, 0.1f, "road x");
+        AssertNear(180f, plan.Target.Z, 0.1f, "road z");
+    }
+
+    private static void TacticalNavPlannerPenalizesFriendlyFrontBlockers()
+    {
+        var plan = TacticalNavMeshPlanner.Plan(new TacticalNavPlanInput(
+            CommandTaskType.SupportAttack,
+            ownX: 0f,
+            ownZ: 0f,
+            primaryTarget: DoctrineTargetPoint.From(1000f, 0f),
+            fallbackTarget: default(DoctrineTargetPoint),
+            hasThreat: true,
+            threatX: 850f,
+            threatZ: 0f,
+            hasCurrentWaypoint: false,
+            currentWaypointX: 0f,
+            currentWaypointZ: 0f,
+            closeEngaged: false,
+            minWaypointDistance: 15f,
+            maxWaypointDistance: 2500f,
+            pathSamples: new[]
+            {
+                new TacticalPathQualitySample(820f, 80f, roadPreference01: 0.90f, slopeCost01: 0.05f, congestion01: 0.05f, chokeRisk01: 0.0f, bridgeRisk01: 0.0f, deadGround01: 0.55f, friendlyBlocker01: 0.95f),
+                new TacticalPathQualitySample(780f, -180f, roadPreference01: 0.60f, slopeCost01: 0.10f, congestion01: 0.08f, chokeRisk01: 0.0f, bridgeRisk01: 0.0f, deadGround01: 0.45f, friendlyBlocker01: 0.0f)
+            }));
+
+        AssertTrue(plan.HasTarget, "friendly blocker scoring should produce target");
+        AssertContains(plan.Reason, "path-quality", "reason");
+        AssertNear(780f, plan.Target.X, 0.1f, "unblocked x");
+        AssertNear(-180f, plan.Target.Z, 0.1f, "unblocked z");
+    }
+
+    private static void TacticalNavPlannerPreservesCorridorContinuity()
+    {
+        var plan = TacticalNavMeshPlanner.Plan(new TacticalNavPlanInput(
+            CommandTaskType.SupportAttack,
+            ownX: 0f,
+            ownZ: 0f,
+            primaryTarget: DoctrineTargetPoint.From(1000f, 0f),
+            fallbackTarget: default(DoctrineTargetPoint),
+            hasThreat: true,
+            threatX: 900f,
+            threatZ: 0f,
+            hasCurrentWaypoint: true,
+            currentWaypointX: 760f,
+            currentWaypointZ: -120f,
+            closeEngaged: false,
+            minWaypointDistance: 15f,
+            maxWaypointDistance: 2500f,
+            pathSamples: new[]
+            {
+                new TacticalPathQualitySample(830f, 170f, roadPreference01: 0.95f, slopeCost01: 0.05f, congestion01: 0.05f, chokeRisk01: 0.0f, bridgeRisk01: 0.0f, deadGround01: 0.60f, routeContinuity01: 0.0f),
+                new TacticalPathQualitySample(760f, -120f, roadPreference01: 0.65f, slopeCost01: 0.08f, congestion01: 0.08f, chokeRisk01: 0.0f, bridgeRisk01: 0.0f, deadGround01: 0.50f, routeContinuity01: 1.0f)
+            }));
+
+        AssertTrue(plan.HasTarget, "corridor continuity should produce target");
+        AssertContains(plan.Reason, "path-quality", "reason");
+        AssertNear(760f, plan.Target.X, 0.1f, "corridor x");
+        AssertNear(-120f, plan.Target.Z, 0.1f, "corridor z");
+    }
+
+    private static void TacticalNavPlannerAvoidsReservedBridgeChoke()
+    {
+        var plan = TacticalNavMeshPlanner.Plan(new TacticalNavPlanInput(
+            CommandTaskType.AttackObjective,
+            ownX: 0f,
+            ownZ: 0f,
+            primaryTarget: DoctrineTargetPoint.From(1100f, 0f),
+            fallbackTarget: default(DoctrineTargetPoint),
+            hasThreat: true,
+            threatX: 950f,
+            threatZ: 0f,
+            hasCurrentWaypoint: false,
+            currentWaypointX: 0f,
+            currentWaypointZ: 0f,
+            closeEngaged: false,
+            minWaypointDistance: 15f,
+            maxWaypointDistance: 2500f,
+            pathSamples: new[]
+            {
+                new TacticalPathQualitySample(900f, 0f, roadPreference01: 0.95f, slopeCost01: 0.05f, congestion01: 0.30f, chokeRisk01: 0.80f, bridgeRisk01: 0.95f, deadGround01: 0.40f, reservationPressure01: 0.95f),
+                new TacticalPathQualitySample(780f, -220f, roadPreference01: 0.55f, slopeCost01: 0.12f, congestion01: 0.10f, chokeRisk01: 0.05f, bridgeRisk01: 0.0f, deadGround01: 0.55f, reservationPressure01: 0.05f)
+            }));
+
+        AssertTrue(plan.HasTarget, "reservation pressure should produce target");
+        AssertContains(plan.Reason, "path-quality", "reason");
+        AssertNear(780f, plan.Target.X, 0.1f, "alternate x");
+        AssertNear(-220f, plan.Target.Z, 0.1f, "alternate z");
+    }
+
+    private static void TacticalNavPlannerFallbackAvoidsContestedAttackLane()
+    {
+        var plan = TacticalNavMeshPlanner.Plan(new TacticalNavPlanInput(
+            CommandTaskType.FallBackToLine,
+            ownX: 800f,
+            ownZ: 0f,
+            primaryTarget: DoctrineTargetPoint.From(1000f, 0f),
+            fallbackTarget: DoctrineTargetPoint.From(300f, 0f),
+            hasThreat: true,
+            threatX: 950f,
+            threatZ: 0f,
+            hasCurrentWaypoint: false,
+            currentWaypointX: 0f,
+            currentWaypointZ: 0f,
+            closeEngaged: true,
+            minWaypointDistance: 15f,
+            maxWaypointDistance: 2500f,
+            pathSamples: new[]
+            {
+                new TacticalPathQualitySample(450f, 0f, roadPreference01: 0.90f, slopeCost01: 0.05f, congestion01: 0.10f, chokeRisk01: 0.05f, bridgeRisk01: 0.0f, deadGround01: 0.20f, fallbackLaneConflict01: 0.95f),
+                new TacticalPathQualitySample(420f, -180f, roadPreference01: 0.45f, slopeCost01: 0.12f, congestion01: 0.12f, chokeRisk01: 0.10f, bridgeRisk01: 0.0f, deadGround01: 0.55f, fallbackLaneConflict01: 0.05f)
+            }));
+
+        AssertTrue(plan.HasTarget, "fallback route should produce target");
+        AssertContains(plan.Reason, "path-quality", "reason");
+        AssertNear(420f, plan.Target.X, 0.1f, "fallback lane x");
+        AssertNear(-180f, plan.Target.Z, 0.1f, "fallback lane z");
     }
 
     private static void DoctrineOrderSanitizesIdsAndPurpose()
@@ -3280,6 +4624,64 @@ static class Program
         AssertTrue(orders[0].PrimaryTarget.HasValue, "target");
     }
 
+    private static void DoctrineAssignmentUnknownPrimaryUsesVanillaChainAssemblyTarget()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("brigade-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, -800f, 0f)
+        };
+        OperationRecord operation = OperationRecord.Noop;
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("vanilla-chain-0", TacticalObjectiveType.UnknownVanillaObjective, 0f, 0.75f, false, 0.65f, 250f, 400f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 3000f, nowSeconds: 100f);
+
+        AssertEqual(1, orders.Length, "order count");
+        AssertEqual(CommandTaskType.FormUp, orders[0].Task, "no-contact chain should form up, not blind assault");
+        AssertEqual("vanilla-chain-0", orders[0].ObjectiveId, "objective");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "assembly target");
+        AssertTrue(orders[0].PrimaryTarget.Z > -800f, "assembly target should move toward chain objective");
+    }
+
+    private static void DoctrineAssignmentCommittedMapObjectiveAdvancesWithoutVisibleEnemy()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("main", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 800f, -1600f, 0f),
+            CommandNodeOperationalState.Create("support", CommandEchelonKind.BrigadeLike, CommandNodeRole.SupportingAttack, CommandTaskType.FormUp, 780f, -1650f, 0f),
+            CommandNodeOperationalState.Create("fix", CommandEchelonKind.BrigadeLike, CommandNodeRole.FixingForce, CommandTaskType.FormUp, 760f, -1700f, 0f),
+            CommandNodeOperationalState.Create("reserve", CommandEchelonKind.BrigadeLike, CommandNodeRole.Reserve, CommandTaskType.FormUp, 700f, -1800f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "telegraph-road", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate(
+                "telegraph-road",
+                TacticalObjectiveType.RoadJunction,
+                0f,
+                0.8f,
+                false,
+                0.7f,
+                1000f,
+                -1400f,
+                0.4f,
+                0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 6000f, nowSeconds: 100f);
+
+        AssertEqual(CommandTaskType.AttackObjective, orders[0].Task, "committed main should keep advancing to the map objective");
+        AssertEqual(CommandTaskType.SupportAttack, orders[1].Task, "committed support should keep advancing to the map objective");
+        AssertEqual(CommandTaskType.FixEnemy, orders[2].Task, "committed fix should keep pressure on the objective approach");
+        AssertEqual(CommandTaskType.ReserveWait, orders[3].Task, "reserve still holds");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "main objective approach target");
+        AssertTrue(orders[1].PrimaryTarget.HasValue, "support objective approach target");
+        AssertTrue(orders[2].PrimaryTarget.HasValue, "fix objective approach target");
+        AssertTrue(orders[0].PrimaryTarget.Z > -1600f, "main target should advance from start line toward objective");
+    }
+
     private static void DoctrineAssignmentProbeAndScreenReceiveMovementTargets()
     {
         CommandNodeOperationalState[] nodes =
@@ -3300,6 +4702,128 @@ static class Program
         AssertTrue(orders[0].PrimaryTarget.HasValue, "probe target");
         AssertEqual(CommandTaskType.Screen, orders[1].Task, "screen task");
         AssertTrue(orders[1].PrimaryTarget.HasValue, "screen target");
+    }
+
+    private static void DoctrineAssignmentScoutingScreenOrdersProbeAndBreakoffTargets()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("main-1", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 50f, 75f, 0f),
+            CommandNodeOperationalState.Create("screen-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.ScreeningForce, CommandTaskType.FormUp, 60f, 80f, 0f),
+            CommandNodeOperationalState.Create("reserve-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.Reserve, CommandTaskType.FormUp, 0f, 0f, 0f),
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.FixAndFlank, TacticalOperationPhase.Scouting, "screen-contact", 420f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("screen-contact", TacticalObjectiveType.EnemyLine, 180f, 0.45f, false, 0.55f, 300f, 400f, 0.1f, 0.1f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 5000f, nowSeconds: 100f);
+
+        AssertEqual(3, orders.Length, "order count");
+        AssertEqual(CommandTaskType.Probe, orders[0].Task, "main should probe screen contact");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "probe target");
+        AssertTrue(orders[0].FallbackTarget.HasValue, "probe breakoff target");
+        AssertEqual(CommandTaskType.Screen, orders[1].Task, "screen should screen");
+        AssertTrue(orders[1].PrimaryTarget.HasValue, "screen target");
+        AssertTrue(orders[1].FallbackTarget.HasValue, "screen breakoff target");
+        AssertEqual(CommandTaskType.ReserveWait, orders[2].Task, "reserve remains held");
+    }
+
+    private static void DoctrineAssignmentBattleLineSeparatesCommandTargets()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("main-1", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f),
+            CommandNodeOperationalState.Create("support-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.SupportingAttack, CommandTaskType.FormUp, 0f, -100f, 0f),
+            CommandNodeOperationalState.Create("fix-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.FixingForce, CommandTaskType.FormUp, 0f, 100f, 0f),
+            CommandNodeOperationalState.Create("screen-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.ScreeningForce, CommandTaskType.FormUp, 0f, 200f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.FixAndFlank, TacticalOperationPhase.Committed, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 400f, 0.9f, true, 0.8f, 1000f, 0f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1800f, nowSeconds: 100f);
+
+        AssertEqual(CommandTaskType.AttackObjective, orders[0].Task, "main attacks");
+        AssertEqual(CommandTaskType.SupportAttack, orders[1].Task, "support attacks");
+        AssertEqual(CommandTaskType.FixEnemy, orders[2].Task, "fix holds enemy");
+        AssertEqual(CommandTaskType.Screen, orders[3].Task, "screen covers");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "main target");
+        AssertTrue(orders[1].PrimaryTarget.HasValue, "support target");
+        AssertTrue(orders[2].PrimaryTarget.HasValue, "fix target");
+        AssertTrue(orders[3].PrimaryTarget.HasValue, "screen target");
+        AssertTrue(
+            DistanceSquared(orders[0].PrimaryTarget.X, orders[0].PrimaryTarget.Z, orders[1].PrimaryTarget.X, orders[1].PrimaryTarget.Z) > 10000f,
+            "support should not stack on main target");
+        AssertTrue(
+            DistanceSquared(orders[0].PrimaryTarget.X, orders[0].PrimaryTarget.Z, orders[2].PrimaryTarget.X, orders[2].PrimaryTarget.Z) > 10000f,
+            "fix should not stack on main target");
+        AssertContains(orders[0].Reason, "battle-line", "main reason");
+    }
+
+    private static void DoctrineAssignmentReserveGetsBattleLineRallyTarget()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("reserve-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.Reserve, CommandTaskType.FormUp, 0f, 0f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "ridge-a", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 400f, 0.9f, true, 0.8f, 1000f, 0f, 0.2f, 0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 1800f, nowSeconds: 100f);
+
+        AssertEqual(CommandTaskType.ReserveWait, orders[0].Task, "reserve task");
+        AssertEqual(DoctrineAllowedIdleReason.HeldReserve, orders[0].AllowedIdle, "idle reason remains bounded");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "reserve rally target");
+        AssertTrue(orders[0].PrimaryTarget.X < 1000f, "reserve rallies behind objective");
+        AssertContains(orders[0].Reason, "battle-line", "reserve reason");
+    }
+
+    private static void ReserveAssemblyPlannerRejectsThreatenedAndCrowdedCandidates()
+    {
+        var input = new TacticalReserveAssemblyInput(
+            ownX: 0f,
+            ownZ: 0f,
+            objectiveX: 1000f,
+            objectiveZ: 0f,
+            hasThreat: true,
+            threatX: 1000f,
+            threatZ: 0f,
+            candidates: new[]
+            {
+                new TacticalReserveAssemblyCandidate(DoctrineTargetPoint.From(860f, 0f), cover01: 1.0f, congestion01: 0.0f, pathReachable: true, "too-close"),
+                new TacticalReserveAssemblyCandidate(DoctrineTargetPoint.From(575f, 180f), cover01: 0.7f, congestion01: 0.85f, pathReachable: true, "crowded"),
+                new TacticalReserveAssemblyCandidate(DoctrineTargetPoint.From(575f, -180f), cover01: 0.6f, congestion01: 0.1f, pathReachable: true, "clean-covered")
+            });
+
+        TacticalReserveAssemblyDecision decision = TacticalReserveAssemblyPlanner.Choose(input);
+
+        AssertTrue(decision.HasTarget, "reserve assembly target");
+        AssertNear(575f, decision.Target.X, 0.001f, "x");
+        AssertNear(-180f, decision.Target.Z, 0.001f, "z");
+        AssertEqual("clean-covered", decision.Reason, "reason");
+    }
+
+    private static void ReserveAssemblyPlannerGeneratedCandidatesStayBehindObjective()
+    {
+        TacticalReserveAssemblyDecision decision = TacticalReserveAssemblyPlanner.ChooseGenerated(
+            ownX: 0f,
+            ownZ: 0f,
+            facingDegrees: 0f,
+            objectiveX: 1000f,
+            objectiveZ: 0f,
+            commandIndex: 1);
+
+        AssertTrue(decision.HasTarget, "generated target");
+        AssertTrue(decision.Target.X < 725f, "generated reserve should be behind the objective, not on the line");
+        AssertTrue(Math.Abs(decision.Target.Z) <= 260f, "generated reserve lateral spread bounded");
+        AssertContains(decision.Reason, "reserve", "reason");
     }
 
     private static void DoctrineAssignmentReserveGetsLegalIdle()
@@ -3382,7 +4906,9 @@ static class Program
 
         AssertEqual(1, orders.Length, "order count");
         AssertEqual(CommandNodeRole.Unknown, orders[0].Role, "role");
-        AssertEqual(CommandTaskType.None, orders[0].Task, "unknown role should not get purposeful task");
+        AssertEqual(CommandTaskType.FormUp, orders[0].Task, "unknown role should fall back to defensive form-up");
+        AssertTrue(orders[0].HasPurpose, "unknown role should still get bounded doctrine");
+        AssertTrue(orders[0].PrimaryTarget.HasValue, "unknown role should get a conservative target");
         AssertTrue(!orders[0].AllowsIdle, "unknown role should not get legal idle");
     }
 
@@ -3525,6 +5051,52 @@ static class Program
         AssertEqual("main-effort-under-pressure", decision.Reason, "reason");
     }
 
+    private static void DoctrineReserveSealsThreatenedFlankFromOperationalMission()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.ReserveWait,
+            role: CommandNodeRole.Reserve,
+            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
+
+        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
+            order,
+            new OperationalReserveInput(
+                reserveFraction: 0.28f,
+                mainEffortOdds: 1.75f,
+                flankThreat01: 0.85f,
+                reserveEndurance01: 0.80f,
+                assaultAuthorized: true,
+                fallbackPressure: false),
+            currentTimeSeconds: 100f);
+
+        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
+        AssertEqual(CommandTaskType.GuardFlank, decision.Task, "task");
+        AssertEqual("flank-threat", decision.Reason, "reason");
+    }
+
+    private static void DoctrineReserveConservesExhaustedReserve()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.ReserveWait,
+            role: CommandNodeRole.Reserve,
+            allowedIdle: DoctrineAllowedIdleReason.HeldReserve);
+
+        DoctrineReserveDecision decision = DoctrineConsumerDecisions.DecideReserve(
+            order,
+            new OperationalReserveInput(
+                reserveFraction: 0.20f,
+                mainEffortOdds: 1.65f,
+                flankThreat01: 0.10f,
+                reserveEndurance01: 0.15f,
+                assaultAuthorized: true,
+                fallbackPressure: false),
+            currentTimeSeconds: 100f);
+
+        AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
+        AssertEqual(CommandTaskType.ReserveWait, decision.Task, "task");
+        AssertEqual("reserve-spent", decision.Reason, "reason");
+    }
+
     private static void DoctrineFallbackReliefBeatsStaleHeldOrder()
     {
         CommandDoctrineOrder order = DoctrineOrder(
@@ -3590,6 +5162,74 @@ static class Program
 
         AssertEqual(DoctrineConsumerAction.Observe, decision.Action, "action");
         AssertEqual("no-doctrine-opinion", decision.Reason, "reason");
+    }
+
+    private static void DoctrineArtilleryMissionConservesLowAmmo()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.SupportAttack,
+            role: CommandNodeRole.SupportingAttack);
+
+        DoctrineArtilleryDecision decision = DoctrineConsumerDecisions.DecideArtillery(
+            order,
+            new TacticalArtilleryMissionInput(
+                requestedSupport: true,
+                enemyArtilleryVisible: false,
+                ammoRatio01: 0.05f,
+                targetDistance: 700f,
+                optimalRange: 800f,
+                maxRange: 1200f,
+                friendlyDangerClose: false,
+                threatenedByCloseEnemy: false,
+                canDisplace: true));
+
+        AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
+        AssertEqual("low-ammo", decision.Reason, "reason");
+    }
+
+    private static void DoctrineArtilleryMissionCounterbatteryOutranksSupport()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.SupportAttack,
+            role: CommandNodeRole.SupportingAttack);
+
+        DoctrineArtilleryDecision decision = DoctrineConsumerDecisions.DecideArtillery(
+            order,
+            new TacticalArtilleryMissionInput(
+                requestedSupport: true,
+                enemyArtilleryVisible: true,
+                ammoRatio01: 0.65f,
+                targetDistance: 700f,
+                optimalRange: 800f,
+                maxRange: 1200f,
+                friendlyDangerClose: false,
+                threatenedByCloseEnemy: false,
+                canDisplace: true));
+
+        AssertEqual(DoctrineConsumerAction.Allow, decision.Action, "action");
+        AssertEqual("counterbattery", decision.Reason, "reason");
+    }
+
+    private static void DoctrineChargeEnduranceGateBlocksAssault()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.AttackObjective,
+            primary: DoctrineTargetPoint.From(100f, 200f));
+
+        DoctrineChargeDecision decision = DoctrineConsumerDecisions.DecideCharge(
+            order,
+            enemyMainLineExposed: true,
+            localOdds: 2.0f,
+            targetRouted: false,
+            endurance: TacticalEnduranceGate.Evaluate(new TacticalEnduranceInput(
+                infantryAmmo01: 0.10f,
+                artilleryAmmo01: 0.60f,
+                fatigue01: 0.86f,
+                morale01: 0.42f,
+                casualtyPressure01: 0.64f)));
+
+        AssertEqual(DoctrineConsumerAction.Deny, decision.Action, "action");
+        AssertEqual("endurance-relief-needed", decision.Reason, "reason");
     }
 
     private static void CommandFallbackTargetResolverUsesVisibleThreatWithoutObjective()
@@ -3789,6 +5429,31 @@ static class Program
             0,
             CommandFormationCorrection.TargetFormationForTask(CommandTaskType.Scout, currentGroupFormation: 4),
             "scout should not preserve square as the movement formation");
+    }
+
+    private static void CommandFormationCorrectionMapsRefuseFlankParameter()
+    {
+        AssertEqual(
+            0,
+            CommandFormationCorrection.RefuseFlankParameter(
+                TacticalRefuseFlankIntent.Decision.RefuseLeft,
+                CommandTaskType.GuardFlank,
+                closeEngaged: true),
+            "vanilla direction 0 refuses the left flank");
+        AssertEqual(
+            1,
+            CommandFormationCorrection.RefuseFlankParameter(
+                TacticalRefuseFlankIntent.Decision.RefuseRight,
+                CommandTaskType.GuardFlank,
+                closeEngaged: true),
+            "vanilla direction 1 refuses the right flank");
+        AssertEqual(
+            -1,
+            CommandFormationCorrection.RefuseFlankParameter(
+                TacticalRefuseFlankIntent.Decision.RefuseLeft,
+                CommandTaskType.AttackObjective,
+                closeEngaged: true),
+            "attack movement does not skew formation");
     }
 
     private static PostureExecutionDecision DecidePosture(CommandTaskType task)
@@ -4659,6 +6324,28 @@ static class Program
 
         AssertFalse(decision.AllowChange, "queued vanilla orders must block stance retask");
         AssertEqual("queued-order", decision.Reason, "reason");
+    }
+
+    private static void TacticalOrderSettlementAllowsStaleQueuedPostureBypass()
+    {
+        var input = new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 2,
+            OrderState = 1,
+            RegimentPaths = 1,
+            PathInterrupted = false,
+            MovementMode = 0,
+            ActiveMove = false,
+            AllowStaleQueuedBypass = true
+        };
+
+        var decision = TacticalOrderSettlementGate.Evaluate(input);
+
+        AssertTrue(decision.AllowChange, "stale queued non-moving posture order should allow command recovery");
+        AssertEqual("stalled-queued-order", decision.Reason, "reason");
+        AssertFalse(
+            TacticalOrderSettlementGate.HasBlockingPendingOrder(input),
+            "stale queued non-moving order should not block posture writes when bypass is explicit");
     }
 
     private static void TacticalOrderSettlementBlocksDeliveredPendingStanceRetask()
@@ -6228,6 +7915,595 @@ static class Program
         };
         AssertEqual(TacticalArtilleryDoctrine.Decision.CounterBattery,
             TacticalArtilleryDoctrine.Score(input), "enemy art visible -> CB");
+    }
+
+    private static void ScourgeDivisionPlayAnchorsOnBestEngagedSubordinate()
+    {
+        var decision = TacticalDivisionPlayExecutor.Decide(new TacticalDivisionPlayInput(
+            "parent-1",
+            nowSeconds: 1800f,
+            subordinates: new[]
+            {
+                new TacticalDivisionPlaySubordinate("line-left", CommandNodeRole.SupportingAttack, true, true, false, false, false, 520f, true),
+                new TacticalDivisionPlaySubordinate("line-center", CommandNodeRole.MainEffort, true, true, true, false, false, 260f, true),
+                new TacticalDivisionPlaySubordinate("line-right", CommandNodeRole.SupportingAttack, false, false, false, false, false, 0f, false),
+                new TacticalDivisionPlaySubordinate("reserve", CommandNodeRole.Reserve, false, false, false, false, false, 0f, false),
+            }));
+
+        AssertTrue(decision.HasAnchor, "play should anchor on engaged child");
+        AssertEqual("line-center", decision.AnchorNodeId, "nearest engaged child anchors play");
+        AssertFalse(decision.HelpRequested, "no trouble means no help request");
+        AssertEqual(CommandTaskType.AttackObjective, decision.OrderFor("line-center").Task, "anchor attacks");
+        AssertEqual(CommandTaskType.SupportAttack, decision.OrderFor("line-right").Task, "idle sibling supports");
+        AssertEqual(CommandTaskType.ReserveWait, decision.OrderFor("reserve").Task, "reserve remains held");
+        AssertEqual(TacticalOrderDelivery.Courier, decision.OrderFor("line-right").Delivery, "idle sibling gets courier delivery");
+    }
+
+    private static void ScourgeCourierCadenceWaitsForOpenTimerAndIdleChild()
+    {
+        var blockedByChild = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
+            parentNodeId: "parent",
+            childNodeId: "child",
+            nowSeconds: 1000f,
+            lastCourierAtSeconds: 0f,
+            childHasOrders: true,
+            commanderHasOrder: true,
+            commanderHasPlay: true,
+            childIsPlayerControlled: false,
+            courierIntervalSeconds: 900f));
+        AssertFalse(blockedByChild.AllowIssue, "child with orders blocks courier issue");
+        AssertEqual(TacticalOutboundCourierState.ChildAlreadyOrdered, blockedByChild.State, "child order state");
+
+        var blockedByTimer = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
+            "parent", "child", 1200f, 800f, false, true, true, false, 900f));
+        AssertFalse(blockedByTimer.AllowIssue, "closed timer blocks courier issue");
+        AssertEqual(TacticalOutboundCourierState.Cooldown, blockedByTimer.State, "cooldown state");
+
+        var allowed = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
+            "parent", "child", 1800f, 800f, false, true, true, false, 900f));
+        AssertTrue(allowed.AllowIssue, "open timer and idle child allow courier");
+        AssertEqual(TacticalOutboundCourierState.IssueCourier, allowed.State, "issue state");
+    }
+
+    private static void ScourgeDivisionPlaySkipsOrderedNonAnchorSubordinates()
+    {
+        var subs = new[]
+        {
+            new TacticalDivisionPlaySubordinate(
+                "anchor", CommandNodeRole.MainEffort,
+                hasTargets: true, engagingEnemy: true, underCloseFire: true,
+                inTrouble: false, isArtillery: false, enemyDistance: 80f, hasOrders: false),
+            new TacticalDivisionPlaySubordinate(
+                "ordered-support", CommandNodeRole.SupportingAttack,
+                hasTargets: false, engagingEnemy: false, underCloseFire: false,
+                inTrouble: false, isArtillery: false, enemyDistance: 0f, hasOrders: true),
+            new TacticalDivisionPlaySubordinate(
+                "idle-support", CommandNodeRole.SupportingAttack,
+                hasTargets: false, engagingEnemy: false, underCloseFire: false,
+                inTrouble: false, isArtillery: false, enemyDistance: 0f, hasOrders: false),
+        };
+
+        var decision = TacticalDivisionPlayExecutor.Decide(
+            new TacticalDivisionPlayInput("division", 1000f, subs));
+
+        AssertTrue(decision.HasAnchor, "engaged child anchors play");
+        AssertEqual("anchor", decision.AnchorNodeId, "anchor id");
+        AssertTrue(decision.OrderFor("anchor").HasOrder, "anchor gets play order");
+        AssertFalse(decision.OrderFor("ordered-support").HasOrder, "ordered non-anchor should not receive another play order");
+        AssertEqual(CommandTaskType.SupportAttack, decision.OrderFor("idle-support").Task, "idle support receives play slot");
+    }
+
+    private static void ScourgeOutboundOrderLedgerSuppressesDuplicatePendingWrites()
+    {
+        var duplicate = TacticalOutboundOrderLedger.Decide(new TacticalOutboundOrderLedgerInput(
+            childHasOrders: true,
+            duplicatePendingSignature: true,
+            activeMove: false,
+            commandChanged: false));
+        var changed = TacticalOutboundOrderLedger.Decide(new TacticalOutboundOrderLedgerInput(
+            childHasOrders: true,
+            duplicatePendingSignature: true,
+            activeMove: false,
+            commandChanged: true));
+        var idle = TacticalOutboundOrderLedger.Decide(new TacticalOutboundOrderLedgerInput(
+            childHasOrders: false,
+            duplicatePendingSignature: false,
+            activeMove: false,
+            commandChanged: false));
+
+        AssertFalse(duplicate.AllowIssue, "duplicate pending command should not be stacked");
+        AssertEqual(TacticalOutboundOrderLedgerState.DuplicatePendingOrder, duplicate.State, "duplicate state");
+        AssertTrue(changed.AllowIssue, "material command change can recover stale pending order");
+        AssertEqual(TacticalOutboundOrderLedgerState.CommandChanged, changed.State, "changed state");
+        AssertTrue(idle.AllowIssue, "idle child can receive order");
+        AssertEqual(TacticalOutboundOrderLedgerState.Issue, idle.State, "idle state");
+    }
+
+    private static void ScourgeCavalryFollowDoctrineFiltersRaidAndScreensAway()
+    {
+        var hiddenScout = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
+            TacticalCavalryFollowMode.Scout,
+            hasFollowTarget: true,
+            targetHidden: true,
+            targetIsOfficer: false,
+            targetInFort: false,
+            targetInSquare: false,
+            targetHasInfantryOrArtillerySupport: false,
+            canChargeTarget: false,
+            leaderAllowsCharge: false,
+            fearAdvantage01: 0f,
+            enemyClose: false,
+            enemyDistance: 0f,
+            longRange: 300f,
+            atFollowLocation: false));
+        AssertEqual(TacticalCavalryFollowAction.ClearFollowTarget, hiddenScout.Action, "hidden scout target clears");
+
+        var invalidRaid = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
+            TacticalCavalryFollowMode.Raid,
+            hasFollowTarget: true,
+            targetHidden: false,
+            targetIsOfficer: false,
+            targetInFort: false,
+            targetInSquare: true,
+            targetHasInfantryOrArtillerySupport: false,
+            canChargeTarget: true,
+            leaderAllowsCharge: true,
+            fearAdvantage01: 1f,
+            enemyClose: false,
+            enemyDistance: 0f,
+            longRange: 300f,
+            atFollowLocation: false));
+        AssertEqual(TacticalCavalryFollowAction.ClearFollowTarget, invalidRaid.Action, "raid clears square target");
+
+        var validRaid = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
+            TacticalCavalryFollowMode.Raid,
+            hasFollowTarget: true,
+            targetHidden: false,
+            targetIsOfficer: false,
+            targetInFort: false,
+            targetInSquare: false,
+            targetHasInfantryOrArtillerySupport: false,
+            canChargeTarget: true,
+            leaderAllowsCharge: true,
+            fearAdvantage01: 0.8f,
+            enemyClose: false,
+            enemyDistance: 120f,
+            longRange: 300f,
+            atFollowLocation: false));
+        AssertEqual(TacticalCavalryFollowAction.ChargeRaidTarget, validRaid.Action, "valid raid charges");
+
+        var screen = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
+            TacticalCavalryFollowMode.Screen,
+            hasFollowTarget: false,
+            targetHidden: false,
+            targetIsOfficer: false,
+            targetInFort: false,
+            targetInSquare: false,
+            targetHasInfantryOrArtillerySupport: false,
+            canChargeTarget: false,
+            leaderAllowsCharge: false,
+            fearAdvantage01: 0f,
+            enemyClose: true,
+            enemyDistance: 150f,
+            longRange: 300f,
+            atFollowLocation: false));
+        AssertEqual(TacticalCavalryFollowAction.GetAway, screen.Action, "screen falls back from close enemy");
+    }
+
+    private static void GrandTacticianReconDoctrineUsesCavalryScoutAndInfantryProbe()
+    {
+        var cavalry = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+            CommandNodeRole.Probe,
+            CommandTaskType.Probe,
+            hasCavalryCapability: true,
+            hasFowVisibleEnemy: false,
+            underRecentFire: false));
+        var infantry = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+            CommandNodeRole.Probe,
+            CommandTaskType.Probe,
+            hasCavalryCapability: false,
+            hasFowVisibleEnemy: false,
+            underRecentFire: false));
+        var cavalryScreen = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+            CommandNodeRole.ScreeningForce,
+            CommandTaskType.Screen,
+            hasCavalryCapability: true,
+            hasFowVisibleEnemy: false,
+            underRecentFire: false));
+
+        AssertEqual(CommandTaskType.Scout, cavalry.Task, "cavalry probe scouts");
+        AssertEqual("cavalry-scout-fow", cavalry.Reason, "cavalry reason");
+        AssertEqual(CommandTaskType.Probe, infantry.Task, "infantry probes by bounds");
+        AssertEqual("infantry-probe-by-bounds", infantry.Reason, "infantry reason");
+        AssertEqual(CommandTaskType.Screen, cavalryScreen.Task, "cavalry screen screens");
+    }
+
+    private static void GrandTacticianReconDoctrinePreventsNoContactBlindAssault()
+    {
+        var infantryMain = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+            CommandNodeRole.MainEffort,
+            CommandTaskType.AttackObjective,
+            hasCavalryCapability: false,
+            hasFowVisibleEnemy: false,
+            underRecentFire: false));
+        var cavalryMain = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+            CommandNodeRole.MainEffort,
+            CommandTaskType.AttackObjective,
+            hasCavalryCapability: true,
+            hasFowVisibleEnemy: false,
+            underRecentFire: false));
+        var visibleMain = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+            CommandNodeRole.MainEffort,
+            CommandTaskType.AttackObjective,
+            hasCavalryCapability: false,
+            hasFowVisibleEnemy: true,
+            underRecentFire: false));
+
+        AssertEqual(CommandTaskType.Probe, infantryMain.Task, "infantry blind assault becomes probe");
+        AssertEqual(CommandTaskType.Scout, cavalryMain.Task, "cavalry blind assault becomes scout");
+        AssertEqual(CommandTaskType.AttackObjective, visibleMain.Task, "visible contact preserves attack");
+    }
+
+    private static void ScourgeArtilleryMicroDoctrineLimbersRetreatsAndWheels()
+    {
+        var unlimberedThreat = TacticalArtilleryMicroDoctrine.Decide(new TacticalArtilleryMicroInput(
+            hasEnemy: true,
+            enemyCloseDistance: 90f,
+            panicDistance: 140f,
+            supportCount: 0,
+            moraleBonus: false,
+            enemyRoutedOrRetreating: false,
+            limberState: TacticalArtilleryLimberState.Unlimbered,
+            ammoRatio01: 0.7f,
+            targetDistance: 300f,
+            maxRange: 700f,
+            currentQuadrantThreat: 10f,
+            bestQuadrantThreat: 12f,
+            canWheel: true,
+            frontalTargetInRange: true));
+        AssertEqual(TacticalArtilleryMicroAction.Limber, unlimberedThreat.Action, "unsupported close threat limbers first");
+
+        var limberedThreat = TacticalArtilleryMicroDoctrine.Decide(new TacticalArtilleryMicroInput(
+            hasEnemy: true,
+            enemyCloseDistance: 90f,
+            panicDistance: 140f,
+            supportCount: 0,
+            moraleBonus: false,
+            enemyRoutedOrRetreating: false,
+            limberState: TacticalArtilleryLimberState.Limbered,
+            ammoRatio01: 0.7f,
+            targetDistance: 300f,
+            maxRange: 700f,
+            currentQuadrantThreat: 10f,
+            bestQuadrantThreat: 12f,
+            canWheel: true,
+            frontalTargetInRange: true));
+        AssertEqual(TacticalArtilleryMicroAction.Retreat, limberedThreat.Action, "limbered unsupported close threat retreats");
+
+        var wheel = TacticalArtilleryMicroDoctrine.Decide(new TacticalArtilleryMicroInput(
+            hasEnemy: true,
+            enemyCloseDistance: 500f,
+            panicDistance: 140f,
+            supportCount: 2,
+            moraleBonus: true,
+            enemyRoutedOrRetreating: false,
+            limberState: TacticalArtilleryLimberState.Unlimbered,
+            ammoRatio01: 0.7f,
+            targetDistance: 500f,
+            maxRange: 900f,
+            currentQuadrantThreat: 5f,
+            bestQuadrantThreat: 5000f,
+            canWheel: true,
+            frontalTargetInRange: false));
+        AssertEqual(TacticalArtilleryMicroAction.WheelToBestThreat, wheel.Action, "large flank threat wheels battery");
+        AssertEqual(TacticalArtilleryAmmoMission.SolidShot, wheel.AmmoMission, "long target selects solid shot");
+    }
+
+    private static void ScourgeMeleeFearDoctrineGatesChargeByPressure()
+    {
+        TacticalMeleeFearDecision flankAttack = TacticalMeleeFearDoctrine.Decide(new TacticalMeleeFearInput(
+            ownKind: TacticalCloseCombatKind.Infantry,
+            enemyKind: TacticalCloseCombatKind.Infantry,
+            ownMen: 900f,
+            enemyMen: 750f,
+            ownMorale01: 0.78f,
+            enemyMorale01: 0.45f,
+            leaderAggression01: 0.70f,
+            flanking01: 0.80f,
+            rearThreat01: 0.20f,
+            ownHighGround01: 0.30f,
+            enemyHighGround01: 0.0f,
+            enemyDefensiveTerrain01: 0.0f,
+            ownUnderFire01: 0.10f,
+            enemyUnderFire01: 0.60f,
+            ownChargingOrRunning: true,
+            targetRouted: false));
+
+        TacticalMeleeFearDecision badAttack = TacticalMeleeFearDoctrine.Decide(new TacticalMeleeFearInput(
+            ownKind: TacticalCloseCombatKind.Infantry,
+            enemyKind: TacticalCloseCombatKind.Infantry,
+            ownMen: 900f,
+            enemyMen: 750f,
+            ownMorale01: 0.42f,
+            enemyMorale01: 0.80f,
+            leaderAggression01: 0.20f,
+            flanking01: 0f,
+            rearThreat01: 0f,
+            ownHighGround01: 0f,
+            enemyHighGround01: 0.65f,
+            enemyDefensiveTerrain01: 0.85f,
+            ownUnderFire01: 0.70f,
+            enemyUnderFire01: 0f,
+            ownChargingOrRunning: false,
+            targetRouted: false));
+
+        AssertTrue(flankAttack.AllowsCharge, "flank pressure should allow charge");
+        AssertTrue(flankAttack.EncouragesCharge, "large fear advantage encourages charge");
+        AssertFalse(flankAttack.RequiresFallbackPressure, "winning pressure does not fallback");
+        AssertFalse(badAttack.AllowsCharge, "defensive terrain and fire should block charge");
+        AssertTrue(badAttack.RequiresFallbackPressure, "bad fear ratio should request fallback pressure");
+        AssertEqual(TacticalMeleeFearPosture.FallbackPressure, badAttack.Posture, "bad posture");
+    }
+
+    private static void DoctrineChargeGateConsumesMeleeFearAndFireDiscipline()
+    {
+        CommandDoctrineOrder order = DoctrineOrder(
+            CommandTaskType.AttackObjective,
+            role: CommandNodeRole.MainEffort,
+            primary: DoctrineTargetPoint.From(100f, 200f));
+
+        var badFear = new TacticalMeleeFearDecision(
+            TacticalMeleeFearPosture.FallbackPressure,
+            advantageRatio: 0.62f,
+            allowsCharge: false,
+            encouragesCharge: false,
+            requiresFallbackPressure: true,
+            reason: "fear-disadvantage");
+        var readyFire = new TacticalInfantryFireDecision(
+            TacticalInfantryFireAction.FireVolley,
+            blocksCharge: true,
+            reason: "volley-ready");
+        DoctrineChargeDecision fearDenied = DoctrineConsumerDecisions.DecideCharge(
+            order,
+            enemyMainLineExposed: true,
+            localOdds: 2.0f,
+            targetRouted: false,
+            new TacticalEnduranceDecision(true, true, true, false, "endurance-ready"),
+            badFear,
+            TacticalInfantryFireDecision.NoOpinion);
+        DoctrineChargeDecision volleyDenied = DoctrineConsumerDecisions.DecideCharge(
+            order,
+            enemyMainLineExposed: true,
+            localOdds: 2.0f,
+            targetRouted: false,
+            new TacticalEnduranceDecision(true, true, true, false, "endurance-ready"),
+            TacticalMeleeFearDecision.NoOpinion,
+            readyFire);
+
+        AssertEqual(DoctrineConsumerAction.Deny, fearDenied.Action, "fear gate denies");
+        AssertContains(fearDenied.Reason, "melee-fear", "fear reason");
+        AssertEqual(DoctrineConsumerAction.Deny, volleyDenied.Action, "fire gate denies");
+        AssertContains(volleyDenied.Reason, "fire-discipline", "fire reason");
+    }
+
+    private static void ScourgeSkirmisherDoctrineRecallsTiredDistantScreens()
+    {
+        TacticalSkirmisherDecision recall = TacticalSkirmisherDoctrine.Decide(new TacticalSkirmisherInput(
+            hasParent: true,
+            parentMoving: true,
+            hasEnemyTarget: false,
+            enemyDistance: 0f,
+            parentDistance: 520f,
+            maxParentDistance: 300f,
+            ammo01: 0.18f,
+            fatigue01: 0.82f,
+            morale01: 0.52f,
+            underCloseThreat: false));
+        TacticalSkirmisherDecision hold = TacticalSkirmisherDoctrine.Decide(new TacticalSkirmisherInput(
+            hasParent: true,
+            parentMoving: false,
+            hasEnemyTarget: true,
+            enemyDistance: 450f,
+            parentDistance: 140f,
+            maxParentDistance: 300f,
+            ammo01: 0.70f,
+            fatigue01: 0.20f,
+            morale01: 0.72f,
+            underCloseThreat: false));
+
+        AssertEqual(TacticalSkirmisherAction.RecallToParent, recall.Action, "tired distant skirmishers recall");
+        AssertContains(recall.Reason, "parent", "recall reason");
+        AssertEqual(TacticalSkirmisherAction.HoldScreen, hold.Action, "healthy skirmishers hold");
+    }
+
+    private static void ScourgeInfantryFireDisciplineHoldsBadShots()
+    {
+        TacticalInfantryFireDecision badShot = TacticalInfantryFireDoctrine.Decide(new TacticalInfantryFireInput(
+            hasTarget: true,
+            targetDistance: 240f,
+            volleyRange: 320f,
+            canFire: true,
+            loadedVolley: true,
+            alignedToTarget: false,
+            targetInFort: false,
+            targetLateralExposure01: 0.10f,
+            enemyMarchingToward: false,
+            friendlyBlockedAhead: false,
+            morale01: 0.70f,
+            imminentChargePressure01: 0.20f));
+        TacticalInfantryFireDecision volley = TacticalInfantryFireDoctrine.Decide(new TacticalInfantryFireInput(
+            hasTarget: true,
+            targetDistance: 250f,
+            volleyRange: 320f,
+            canFire: true,
+            loadedVolley: true,
+            alignedToTarget: true,
+            targetInFort: false,
+            targetLateralExposure01: 0.80f,
+            enemyMarchingToward: true,
+            friendlyBlockedAhead: false,
+            morale01: 0.78f,
+            imminentChargePressure01: 0.75f));
+
+        AssertEqual(TacticalInfantryFireAction.ReacquireTarget, badShot.Action, "bad lateral shot reacquires");
+        AssertTrue(badShot.BlocksCharge, "bad shot should block charge while aligning");
+        AssertEqual(TacticalInfantryFireAction.FireVolley, volley.Action, "ready volley fires");
+        AssertTrue(volley.BlocksCharge, "ready volley blocks premature charge");
+    }
+
+    private static void InfantryFireControlPrefersHistoricalCloseMediumBands()
+    {
+        TacticalFireControlDecision longMusket = TacticalFireControlDoctrine.Decide(new TacticalFireControlInput(
+            unitType: TacticalUnitType.Infantry,
+            mounted: false,
+            task: CommandTaskType.HoldObjective,
+            role: CommandNodeRole.MainEffort,
+            hasTarget: true,
+            targetDistance: 450f,
+            effectiveFireRange: 550f,
+            ammoRatio01: 0.75f,
+            morale01: 0.70f,
+            fatigue01: 0.20f,
+            inCover: false,
+            enemyAdvancing: false,
+            friendlyBlockedAhead: false,
+            alignedToTarget: true,
+            loadedVolley: true,
+            currentChargeOrdered: false,
+            currentCombatBehaviorOrdered: TacticalFireControlDoctrine.InfantryLong));
+
+        TacticalFireControlDecision decisiveVolley = TacticalFireControlDoctrine.Decide(new TacticalFireControlInput(
+            unitType: TacticalUnitType.Infantry,
+            mounted: false,
+            task: CommandTaskType.AttackObjective,
+            role: CommandNodeRole.MainEffort,
+            hasTarget: true,
+            targetDistance: 85f,
+            effectiveFireRange: 550f,
+            ammoRatio01: 0.65f,
+            morale01: 0.72f,
+            fatigue01: 0.20f,
+            inCover: false,
+            enemyAdvancing: true,
+            friendlyBlockedAhead: false,
+            alignedToTarget: true,
+            loadedVolley: true,
+            currentChargeOrdered: false,
+            currentCombatBehaviorOrdered: TacticalFireControlDoctrine.InfantryMedium));
+
+        TacticalFireControlDecision coveredSkirmishers = TacticalFireControlDoctrine.Decide(new TacticalFireControlInput(
+            unitType: TacticalUnitType.Skirmisher,
+            mounted: false,
+            task: CommandTaskType.Screen,
+            role: CommandNodeRole.ScreeningForce,
+            hasTarget: true,
+            targetDistance: 260f,
+            effectiveFireRange: 550f,
+            ammoRatio01: 0.80f,
+            morale01: 0.70f,
+            fatigue01: 0.20f,
+            inCover: true,
+            enemyAdvancing: false,
+            friendlyBlockedAhead: false,
+            alignedToTarget: true,
+            loadedVolley: true,
+            currentChargeOrdered: false,
+            currentCombatBehaviorOrdered: TacticalFireControlDoctrine.InfantryMedium));
+
+        TacticalFireControlDecision probingInfantry = TacticalFireControlDoctrine.Decide(new TacticalFireControlInput(
+            unitType: TacticalUnitType.Infantry,
+            mounted: false,
+            task: CommandTaskType.Probe,
+            role: CommandNodeRole.Probe,
+            hasTarget: true,
+            targetDistance: 320f,
+            effectiveFireRange: 550f,
+            ammoRatio01: 0.80f,
+            morale01: 0.70f,
+            fatigue01: 0.20f,
+            inCover: false,
+            enemyAdvancing: false,
+            friendlyBlockedAhead: false,
+            alignedToTarget: true,
+            loadedVolley: true,
+            currentChargeOrdered: false,
+            currentCombatBehaviorOrdered: TacticalFireControlDoctrine.InfantryMedium));
+
+        AssertTrue(longMusket.ShouldWrite, "formed line should leave long-range fire");
+        AssertEqual(TacticalFireControlDoctrine.InfantryMedium, longMusket.RecommendedCombatBehavior, "formed line medium");
+        AssertEqual("historical-medium-band", longMusket.Reason, "medium reason");
+        AssertTrue(decisiveVolley.ShouldWrite, "close attack should change to short");
+        AssertEqual(TacticalFireControlDoctrine.InfantryShort, decisiveVolley.RecommendedCombatBehavior, "decisive volley short");
+        AssertEqual(TacticalFireControlDoctrine.InfantryLong, coveredSkirmishers.RecommendedCombatBehavior, "skirmishers may use long");
+        AssertEqual(TacticalFireControlDoctrine.InfantryLong, probingInfantry.RecommendedCombatBehavior, "probe infantry may use long");
+    }
+
+    private static void CavalryFireControlMapsToVanillaBehaviors()
+    {
+        TacticalFireControlDecision screen = TacticalFireControlDoctrine.Decide(new TacticalFireControlInput(
+            unitType: TacticalUnitType.Cavalry,
+            mounted: true,
+            task: CommandTaskType.Screen,
+            role: CommandNodeRole.ScreeningForce,
+            hasTarget: true,
+            targetDistance: 180f,
+            effectiveFireRange: 300f,
+            ammoRatio01: 0.70f,
+            morale01: 0.70f,
+            fatigue01: 0.30f,
+            inCover: false,
+            enemyAdvancing: true,
+            friendlyBlockedAhead: false,
+            alignedToTarget: true,
+            loadedVolley: false,
+            currentChargeOrdered: false,
+            currentCombatBehaviorOrdered: TacticalFireControlDoctrine.CavalryNeutral));
+
+        TacticalFireControlDecision attack = TacticalFireControlDoctrine.Decide(new TacticalFireControlInput(
+            unitType: TacticalUnitType.Cavalry,
+            mounted: true,
+            task: CommandTaskType.AttackObjective,
+            role: CommandNodeRole.MainEffort,
+            hasTarget: true,
+            targetDistance: 70f,
+            effectiveFireRange: 300f,
+            ammoRatio01: 0.70f,
+            morale01: 0.72f,
+            fatigue01: 0.20f,
+            inCover: false,
+            enemyAdvancing: false,
+            friendlyBlockedAhead: false,
+            alignedToTarget: true,
+            loadedVolley: false,
+            currentChargeOrdered: false,
+            currentCombatBehaviorOrdered: TacticalFireControlDoctrine.CavalryNeutral));
+
+        AssertEqual(TacticalFireControlDoctrine.CavalryEvade, screen.RecommendedCombatBehavior, "screen evade");
+        AssertEqual("cavalry-screen-evade", screen.Reason, "screen reason");
+        AssertEqual(TacticalFireControlDoctrine.CavalryCharge, attack.RecommendedCombatBehavior, "close attack charge");
+    }
+
+    private static void ScourgeAttributeMatrixAdjustsFallbackFireAndMelee()
+    {
+        TacticalBattlefieldAttributeDecision elite = TacticalBattlefieldAttributeMatrix.Evaluate(
+            new TacticalBattlefieldAttributeInput(
+                experience01: 0.90f,
+                morale01: 0.88f,
+                fatigue01: 0.12f,
+                commanderAggression01: 0.65f));
+        TacticalBattlefieldAttributeDecision broken = TacticalBattlefieldAttributeMatrix.Evaluate(
+            new TacticalBattlefieldAttributeInput(
+                experience01: 0.10f,
+                morale01: 0.18f,
+                fatigue01: 0.92f,
+                commanderAggression01: 0.15f));
+
+        AssertTrue(elite.FallbackChance01 < 0.10f, "elite steady units resist fallback");
+        AssertTrue(elite.FireModifier01 > 0.65f, "elite steady units shoot better");
+        AssertTrue(elite.MeleeModifier01 > 0.55f, "elite steady units melee better");
+        AssertTrue(broken.FallbackChance01 > 0.80f, "broken exhausted units are fallback prone");
+        AssertTrue(broken.RetreatChance01 > 0.65f, "broken exhausted units are retreat prone");
+        AssertTrue(broken.FireModifier01 < elite.FireModifier01, "broken fire worse than elite");
     }
 
     private static void TacticalArtilleryDoctrineCancelBombardWhenUnsupported()
@@ -14249,6 +16525,27 @@ static class Program
             "side1 reference should be unchanged on double start");
     }
 
+    private static void TacticalSideLogContextMarksPlayerCommandWithoutFactionInference()
+    {
+        string line = TacticalSideLogFormatter.Format(
+            allianceId: 0,
+            playerAllianceId: 0,
+            aiVsAi: false,
+            topCommandId: "node--225370",
+            topCommandName: "Army_of_the_Potomac",
+            topCommandLevel: "army",
+            rootCommandId: "node--225374",
+            rootCommandName: "3rd_Division");
+
+        AssertContains(line, "side=0", "side");
+        AssertContains(line, "playerAlliance=0", "player alliance");
+        AssertContains(line, "relation=player", "player relation");
+        AssertContains(line, "topCommandName=Army_of_the_Potomac", "top command name");
+        AssertContains(line, "topCommandLevel=army", "top command level");
+        AssertContains(line, "rootCommandName=3rd_Division", "root command name");
+        AssertTrue(!line.Contains("Union") && !line.Contains("CSA"), "formatter must not infer faction from army name");
+    }
+
     // ---- TacticalBattleLifecycleDetector tests ----
 
     private static void TacticalBattleLifecycleDetectorReturnsNoneWhenNoUnitsAcrossTicks()
@@ -15148,6 +17445,30 @@ static class Program
         AssertEqual(DirectChildRole.SupportMain, intents[2].Role, "adjacent force masses on fallback main effort");
     }
 
+    private static void DirectChildAllocatorKeepsAggressiveProbeMovingWhenPlannedSectorEmpty()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.HoodFrontalAssault, BattlePhase.Probe,
+            0, new int[0], new int[0], 1.0f, 0f, 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 14, -1, "Left Wing", true),
+            new DirectChildSnapshot("c1", "a", 14, -1, "Right Wing", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 1, false, 1, 2, 0.05f),
+            new DirectChildEvidence(2, 1, false, 3, 2, 0.05f),
+        };
+        var personality = new PersonalityVector(0.8f, -0.6f, 0.5f, 0f, 0f);
+
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+
+        AssertEqual(DirectChildRole.Main, intents[0].Role, "first aggressive wing becomes provisional main");
+        AssertEqual(1, intents[0].AxisSector, "provisional main axis follows observed child sector");
+        AssertEqual(DirectChildRole.RefuseRight, intents[1].Role, "opposite exposed wing still guards the flank");
+    }
+
     private static void DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch()
     {
         var plan = new TacticalBattlePlan(
@@ -15363,6 +17684,86 @@ static class Program
         AssertEqual("node-200", tree.Nodes[1].NodeId);
         AssertEqual("node-300", tree.Nodes[2].NodeId);
         AssertEqual("node-400", tree.Nodes[3].NodeId);
+    }
+
+    private static void NestedDivisionPlayExpandsSingleDivisionIntoBrigadeFlankDepthSlots()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 0, 14, "One Division", true, false, false),
+            new CommandTreeBuilder.CommandProbe(201, 100, 0, 13, "1st Brigade", true, false, false),
+            new CommandTreeBuilder.CommandProbe(202, 100, 0, 13, "2nd Brigade", true, false, false),
+            new CommandTreeBuilder.CommandProbe(203, 100, 0, 13, "3rd Brigade", true, false, false),
+            new CommandTreeBuilder.CommandProbe(204, 100, 0, 13, "4th Brigade", true, false, false),
+        }, 0, -1);
+        var intents = CommandTreeIntentAllocator.Allocate(tree, new[]
+        {
+            DirectIntent("child-100", DirectChildRole.Main, DirectChildAxis.SectorAxis, 1, 0.75f, 0.6f),
+        });
+        var operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
+        var objective = new ObjectiveRecord(
+            new ObjectiveObservationInput(
+                "ridge-a",
+                TacticalObjectiveType.Ridge,
+                TacticalObjectiveSource.VerifiedSceneObject,
+                new TacticalMapPoint(1000f, 1000f),
+                0.8f,
+                0.7f,
+                typeAnchorVerified: true,
+                TacticalApproachAvenueEstimate.Create(
+                    new TacticalMapPoint(1000f, 0f),
+                    new TacticalMapPoint(1000f, 1000f),
+                    TacticalApproachAvenueSource.EntryPoint,
+                    0.9f,
+                    roadAnchored: true,
+                    crossingAnchored: false,
+                    "entrypoint-axis")),
+            TacticalObjectiveStatus.Scouting,
+            0f,
+            0f);
+        var baseStates = CommandNodeOperationsRuntime.Build(intents, operation, new[] { objective });
+
+        var nestedStates = TacticalNestedDivisionPlayPlanner.Apply(tree, baseStates);
+        var nestedArray = new CommandNodeOperationalState[nestedStates.Count];
+        for (int i = 0; i < nestedStates.Count; i++) nestedArray[i] = nestedStates[i];
+        var orders = CommandDoctrineAssignment.Build(
+            nestedArray,
+            operation,
+            new BattlefieldPictureSnapshot(new[]
+            {
+                new BattlefieldObjectiveEstimate(
+                    "ridge-a",
+                    TacticalObjectiveType.Ridge,
+                    0f,
+                    0.8f,
+                    false,
+                    0.7f,
+                    1000f,
+                    1000f,
+                    0.6f,
+                    0.2f,
+                    objective.Observation.ApproachAvenue)
+            }),
+            ownStrength: 5000f,
+            nowSeconds: 100f);
+
+        AssertEqual(5, nestedStates.Count, "brigade children plus the parent HQ should receive nested division play slots");
+        AssertEqual("node-201", nestedStates[0].NodeId, "left brigade");
+        AssertEqual("node-204", nestedStates[3].NodeId, "right brigade");
+        AssertEqual(CommandNodeRole.FlankMarch, nestedStates[0].Role, "left nested flank");
+        AssertEqual(CommandNodeRole.MainEffort, nestedStates[1].Role, "nested main body");
+        AssertEqual(CommandNodeRole.Reserve, nestedStates[2].Role, "nested depth reserve");
+        AssertEqual(CommandNodeRole.FlankMarch, nestedStates[3].Role, "right nested flank");
+        AssertEqual("node-100", nestedStates[4].NodeId, "parent HQ");
+        AssertEqual(CommandNodeRole.Reserve, nestedStates[4].Role, "parent HQ reserve anchor");
+        AssertEqual(CommandTaskType.ReserveWait, nestedStates[4].Task, "parent HQ waits with the main body reserve");
+        AssertEqual(CommandTaskType.GuardFlank, orders[0].Task, "left flank guard");
+        AssertEqual(CommandTaskType.ReserveWait, orders[2].Task, "depth reserve");
+        AssertEqual(CommandTaskType.GuardFlank, orders[3].Task, "right flank guard");
+        AssertEqual(CommandTaskType.ReserveWait, orders[4].Task, "parent HQ reserve order");
+        AssertContains(orders[0].Reason, "scourge-slot-flank-guard", "left flank reason");
+        AssertTrue(orders[2].PrimaryTarget.Z > 1000f, "nested reserve should sit behind the objective against the avenue");
+        AssertTrue(orders[4].PrimaryTarget.Z > 1000f, "parent HQ should sit behind the objective with the main body");
     }
 
     private static void TestCommandIntentAllocatorMapsDirectChildRole()
@@ -15887,6 +18288,31 @@ static class Program
     {
         var orch = NewArmyOrchestratorWithPlan();
         AssertEqual(DirectChildRole.Unknown, orch.GetDirectChildRole("never-registered"));
+    }
+
+    private static void ArmyOrchestratorRefreshesExpandedDirectChildSnapshots()
+    {
+        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
+        bool first = orch.RegisterDirectChildrenIfChanged(new[]
+        {
+            new DirectChildSnapshot("child-100", "army-1", 15, 0, "First", true),
+        });
+        AssertTrue(first, "initial registration changes snapshot set");
+
+        bool same = orch.RegisterDirectChildrenIfChanged(new[]
+        {
+            new DirectChildSnapshot("child-100", "army-1", 15, 0, "First", true),
+        });
+        AssertFalse(same, "identical registration is ignored");
+
+        bool expanded = orch.RegisterDirectChildrenIfChanged(new[]
+        {
+            new DirectChildSnapshot("child-100", "army-1", 15, 0, "First", true),
+            new DirectChildSnapshot("child-200", "army-1", 15, 0, "Second", true),
+        });
+        AssertTrue(expanded, "expanded command tree refreshes direct child registration");
+        AssertEqual(2, orch.CurrentDirectChildIntents.Count);
+        AssertEqual("child-200", orch.CurrentDirectChildIntents[1].ChildId);
     }
 
     private static void ArmyOrchestratorReturnsRoleForSynthArmyChildId()

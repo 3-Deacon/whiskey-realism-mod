@@ -63,7 +63,8 @@ namespace WhiskeyRealism.Patches
                         probability *= GamePrefs.chanceoffeudsvolunteercommanders;
                     }
 
-                    GameObject closestEnemy = group.GetClosestEnemyUnit(GamePrefs.neededdistancefeudgroupmovement);
+                    Regiment visibleEnemyRegiment = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
+                    GameObject closestEnemy = visibleEnemyRegiment != null ? visibleEnemyRegiment.gameObject : null;
                     if (UnityEngine.Random.Range(0f, 1f) > probability || closestEnemy == null) continue;
 
                     bool attachedUnderCommander = ContainsAttachedUnderCommander(group);
@@ -271,11 +272,8 @@ namespace WhiskeyRealism.Patches
                 Vector3 groupPos = ((Component)group).gameObject.transform.position;
                 Vector3 targetPos = closestEnemy.transform.position;
                 // Both bearings are relative to the group's position so DecideAxis / DecideFallback
-                // compare like-with-like. Since closestEnemy IS the nearest enemy at this call site,
-                // the intended-target bearing and the nearest-enemy bearing are identical here —
-                // which means a feud-driven move toward the closest enemy is always on-axis for
-                // Main/SupportMain. The gate's geometry will diverge from this trivial case once
-                // O3.x lets the orchestrator override the target with a sector-axis hint.
+                // compare like-with-like. The target is the nearest vanilla FOW-visible enemy, not
+                // the broad closest-enemy cache.
                 float intendedBearingFromGroup = Mathf.Atan2(targetPos.z - groupPos.z, targetPos.x - groupPos.x);
                 float dist = Vector3.Distance(groupPos, targetPos);
                 float enemyBearingFromGroup = intendedBearingFromGroup;

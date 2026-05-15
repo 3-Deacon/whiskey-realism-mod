@@ -243,7 +243,7 @@ namespace WhiskeyRealism.Patches
                 var group = units[i] as Regiment;
                 if (group == null || group.unittyp <= 13) continue;
 
-                Regiment closest = group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+                Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
                 sectors.Add(TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                     sectorId++,
                     Math.Max(group.groupowninrange, group.groupstrengthaigroup),
@@ -263,35 +263,7 @@ namespace WhiskeyRealism.Patches
 
         private static float EstimateVisibleEnemyStrength(IList units)
         {
-            if (units == null) return 0f;
-
-            float total = 0f;
-            var seen = new HashSet<int>();
-            for (int i = 0; i < units.Count; i++)
-            {
-                var unit = units[i] as Regiment;
-                if (unit == null || unit.unitrange == null) continue;
-                if (unit.unitrange.closestenemyunitfarreg != null)
-                {
-                    int id = UnitIdentity(unit.unitrange.closestenemyunitfarreg);
-                    if (seen.Add(id))
-                        total += Math.Max(0f, unit.unitrange.closestenemyunitfarreg.strength);
-                }
-                else if (unit.unitrange.closestenemyunitfar != null)
-                {
-                    var enemy = unit.unitrange.closestenemyunitfar.GetComponent<Regiment>();
-                    int id = enemy != null ? UnitIdentity(enemy) : unit.unitrange.closestenemyunitfar.GetInstanceID();
-                    if (seen.Add(id)) total += enemy != null ? Math.Max(0f, enemy.strength) : 100f;
-                }
-            }
-
-            return total;
-        }
-
-        private static int UnitIdentity(Regiment unit)
-        {
-            if (unit == null) return 0;
-            return unit.unitid != 0 ? unit.unitid : unit.GetInstanceID();
+            return TacticalFogOfWarContact.VisibleEnemyStrength(units);
         }
 
         private static float EstimateInferredEnemyStrength(IList units)
@@ -312,7 +284,11 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                if (unit == null || unit.unitrange == null || unit.unitrange.enemystrengthwithinangle == null) return 0f;
+                if (unit == null ||
+                    unit.unitrange == null ||
+                    unit.unitrange.enemystrengthwithinangle == null ||
+                    !TacticalFogOfWarContact.HasVisibleEnemy(unit))
+                    return 0f;
                 float total = 0f;
                 for (int i = 0; i < unit.unitrange.enemystrengthwithinangle.Length; i++)
                     total += Math.Max(0f, unit.unitrange.enemystrengthwithinangle[i]);

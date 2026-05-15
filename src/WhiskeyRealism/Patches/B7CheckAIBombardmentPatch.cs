@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using HarmonyLib;
+using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
@@ -56,10 +57,21 @@ namespace WhiskeyRealism.Patches
                     DoctrineArtilleryDecision doctrineDecision = default(DoctrineArtilleryDecision);
                     if (TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder doctrineOrder, out BattlefieldPictureSnapshot picture))
                     {
+                        bool enemyArtilleryVisible = HasEnemyArtilleryInFireRange(unit);
+                        bool friendlyDangerClose = HasFriendlyCloseRangeRisk(unit, unit.firerange);
+                        bool enemyMainLineExposed = DoctrineConsumerDecisions.EnemyMainLineExposed(doctrineOrder, picture);
                         doctrineDecision = DoctrineConsumerDecisions.DecideArtillery(
                             doctrineOrder,
-                            DoctrineConsumerDecisions.EnemyMainLineExposed(doctrineOrder, picture),
-                            HasFriendlyCloseRangeRisk(unit, unit.firerange));
+                            new TacticalArtilleryMissionInput(
+                                requestedSupport: enemyMainLineExposed,
+                                enemyArtilleryVisible: enemyArtilleryVisible,
+                                ammoRatio01: snapshot.AmmoTotalRatio,
+                                targetDistance: snapshot.ClosestEnemyDistance,
+                                optimalRange: unit.firerange * 0.75f,
+                                maxRange: unit.firerange,
+                                friendlyDangerClose: friendlyDangerClose,
+                                threatenedByCloseEnemy: snapshot.ClosestEnemyDistance <= snapshot.DangerRadius,
+                                canDisplace: true));
                     }
 
                     var doctrineInput = new TacticalArtilleryDoctrine.Input
@@ -76,7 +88,23 @@ namespace WhiskeyRealism.Patches
                         DoctrineDecision = doctrineDecision,
                     };
                     var decision = TacticalArtilleryDoctrine.Score(doctrineInput);
+                    var micro = TacticalArtilleryMicroDoctrine.Decide(new TacticalArtilleryMicroInput(
+                        hasEnemy: snapshot.ClosestEnemyDistance > 0f && snapshot.ClosestEnemyDistance < 9999f,
+                        enemyCloseDistance: snapshot.ClosestEnemyDistance,
+                        panicDistance: snapshot.DangerRadius,
+                        supportCount: snapshot.InfCavScreenCount,
+                        moraleBonus: snapshot.Morale >= snapshot.FallbackThreshold,
+                        enemyRoutedOrRetreating: ClosestEnemyRoutedOrRetreating(unit),
+                        limberState: LimberState(unit),
+                        ammoRatio01: snapshot.AmmoTotalRatio,
+                        targetDistance: snapshot.ClosestEnemyDistance,
+                        maxRange: unit.firerange,
+                        currentQuadrantThreat: CurrentQuadrantThreat(unit),
+                        bestQuadrantThreat: BestQuadrantThreat(unit),
+                        canWheel: true,
+                        frontalTargetInRange: HasFrontalTargetInRange(unit)));
 
+                    ApplyMicroDecision(bunits, unit, snapshot, micro);
                     ApplyDecision(bunits, unit, snapshot, decision);
                 }
             }
@@ -114,8 +142,8 @@ namespace WhiskeyRealism.Patches
             float closestEnemy = 9999f;
             try
             {
-                if (unit.unitrange != null && unit.unitrange.closestenemyunitfardistance > 0f)
-                    closestEnemy = unit.unitrange.closestenemyunitfardistance;
+                if (TacticalFogOfWarContact.TryClosestVisibleEnemy(unit, out _, out float distance) && distance > 0f)
+                    closestEnemy = distance;
             }
             catch { }
 
@@ -283,12 +311,203 @@ namespace WhiskeyRealism.Patches
             if (unit == null) return false;
             if (unit.unittyp != TacticalUnitType.Artillery) return false;
             if (unit.isrouted) return false;
-            if (unit.combatbehaviorordered == 8) return false;
             if (unit.markedforrout) return false;
             if (unit.guns <= 0) return false;
             if (unit.permanentlydetached) return false;
             if (!(aigroup.ai_feudstance == -1 || isPlayerAiOrFeud == 2)) return false;
             return PerformAiActionDlcWl(battle, unit, aigroup);
+        }
+
+        private static void ApplyMicroDecision(
+            BattleUnits bunits,
+            Regiment unit,
+            in TacticalArtilleryInputAdapter.Snapshot snapshot,
+            TacticalArtilleryMicroDecision decision)
+        {
+            try
+            {
+                if (bunits == null || unit == null) return;
+                switch (decision.Action)
+                {
+                    case TacticalArtilleryMicroAction.Limber:
+                        if (unit.mounted != 1)
+                        {
+                            unit.ChangeRegimentFormation(GameVars.SetFormationParam(0, manualset: true, 1));
+                            OnceLog.Info("b7-artillery-limber", "B7 artillery limber decision applied.");
+                        }
+                        break;
+                    case TacticalArtilleryMicroAction.Unlimber:
+                        if (unit.mounted != 0)
+                        {
+                            unit.ChangeRegimentFormation(GameVars.SetFormationParam(0, manualset: true, 0));
+                            TryRotateTowardClosestEnemy(unit);
+                            OnceLog.Info("b7-artillery-unlimber", "B7 artillery unlimber decision applied.");
+                        }
+                        break;
+                    case TacticalArtilleryMicroAction.Retreat:
+                        ApplyArtilleryRetreat(bunits, unit);
+                        OnceLog.Info("b7-artillery-retreat", "B7 artillery retreat decision applied.");
+                        break;
+                    case TacticalArtilleryMicroAction.WheelToBestThreat:
+                        if (TryRotateTowardClosestEnemy(unit))
+                            OnceLog.Info("b7-artillery-wheel", "B7 artillery wheel decision applied.");
+                        break;
+                    case TacticalArtilleryMicroAction.ConserveAmmo:
+                        if (snapshot.CombatBehaviorOrdered == 9)
+                        {
+                            bunits.ChangeCombatBehavior(((Component)unit).gameObject, 7);
+                            unit.bombardstarttime = 0f;
+                            OnceLog.Info("b7-artillery-conserve", "B7 artillery conserve-ammo decision applied.");
+                        }
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("b7-artillery-micro-error", "[B7] Artillery micro decision failed: " + ex.Message);
+            }
+        }
+
+        private static void ApplyArtilleryRetreat(BattleUnits bunits, Regiment unit)
+        {
+            Regiment enemy = ClosestEnemy(unit);
+            if (enemy == null) return;
+
+            Vector3 own = ((Component)unit).transform.position;
+            Vector3 enemyPos = ((Component)enemy).transform.position;
+            Vector3 away = own - enemyPos;
+            away.y = 0f;
+            if (away.sqrMagnitude < 1f) return;
+            away.Normalize();
+
+            float distance = GamePrefs.artilleryfallbackenemyclosedist > 0f
+                ? GamePrefs.artilleryfallbackenemyclosedist
+                : 180f;
+            Vector3 target = own + away * distance;
+            unit.ChangeRegimentFormation(GameVars.SetFormationParam(0, manualset: true, 1));
+            bunits.SetWaypoint(
+                unit,
+                target,
+                newpath: true,
+                doublequick: false,
+                manualfinalrotation: -1f,
+                modifylastwaypoint: false,
+                useorderdelay: true,
+                timetomove: -1f,
+                direction: -1,
+                showmovementoptions: false,
+                ignorebattlemonuments: false,
+                groupmoveonly: false,
+                ignoredisabledships: false,
+                checkforreadiness: true,
+                clearinterruptionpaths: true);
+            unit.SetMovementMode(4);
+        }
+
+        private static TacticalArtilleryLimberState LimberState(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return TacticalArtilleryLimberState.Unknown;
+                return unit.mounted == 1
+                    ? TacticalArtilleryLimberState.Limbered
+                    : TacticalArtilleryLimberState.Unlimbered;
+            }
+            catch
+            {
+                return TacticalArtilleryLimberState.Unknown;
+            }
+        }
+
+        private static Regiment ClosestEnemy(Regiment unit)
+        {
+            try
+            {
+                return TacticalFogOfWarContact.ClosestVisibleEnemy(unit);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool ClosestEnemyRoutedOrRetreating(Regiment unit)
+        {
+            try
+            {
+                Regiment enemy = ClosestEnemy(unit);
+                return enemy != null &&
+                    (enemy.isrouted || enemy.markedforrout || enemy.movementmode == 4);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool HasFrontalTargetInRange(Regiment unit)
+        {
+            try
+            {
+                return unit != null &&
+                    unit.unitrange != null &&
+                    unit.unitrange.enemyinfirerangereg != null &&
+                    unit.unitrange.enemyinfirerangereg.Count > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static float CurrentQuadrantThreat(Regiment unit)
+        {
+            try
+            {
+                return HasFrontalTargetInRange(unit) ? unit.groupenemiesinrange : 0f;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float BestQuadrantThreat(Regiment unit)
+        {
+            try
+            {
+                float threat = CurrentQuadrantThreat(unit);
+                Regiment enemy = TacticalFogOfWarContact.ClosestVisibleEnemy(unit);
+                if (enemy != null)
+                    threat = Math.Max(
+                        threat,
+                        Math.Max(1f, enemy.groupstrengthactive) +
+                        Math.Max(0f, enemy.guns) * 25f);
+                return threat;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static bool TryRotateTowardClosestEnemy(Regiment unit)
+        {
+            try
+            {
+                Regiment enemy = ClosestEnemy(unit);
+                if (unit == null || enemy == null) return false;
+                Vector3 own = ((Component)unit).transform.position;
+                Vector3 enemyPos = ((Component)enemy).transform.position;
+                float rotation = Tools.GetAngle(own, enemyPos) + 180f;
+                if (float.IsNaN(rotation) || float.IsInfinity(rotation)) return false;
+                unit.RotateRegiment(rotation);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static BattleUnits BattleUnits(AIBattle battle)

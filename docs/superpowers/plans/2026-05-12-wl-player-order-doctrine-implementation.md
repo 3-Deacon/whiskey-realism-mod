@@ -2,6 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status as of 2026-05-14:** tactical #62 `PlayerSubordinateOrderPatch`
+> is implemented in the working tree behind default-off `Enable Player Order
+> Doctrine`, built, deployed, and hash-verified in DLL
+> `f2e7705b96c55ea371ca08a3a56d28ebf324bfc114618c184ccba375d17ee1f1`
+> (1027072 bytes; 893 PASS). This plan remains active only for focused enabled
+> #62 smoke and final archive closeout. Current runtime truth lives in
+> [`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md)
+> and [`docs/patch-catalog.md`](../../patch-catalog.md).
+
 **Goal:** Implement the W&L player-order doctrine as one cohesive, default-off feature that lets Whiskey translate existing campaign and tactical doctrine into player-facing vanilla W&L orders without spamming, overriding vanilla transition orders, or crossing campaign/tactical scopes unsafely.
 
 **Architecture:** Add a pure `Tactical/PlayerOrders/` doctrine layer for intent, priority, mapping, dedupe, provenance, and diagnostics decisions; add one runtime adapter that reads vanilla objects through safe reflection; add one `PlayerSubordinateOrderPatch` around `AIBattle.UpdateDLCPlayerOrders()`; and extend `WlStrategicOrderBridge` with the same signature/provenance discipline for campaign calls already routed through the bridge.

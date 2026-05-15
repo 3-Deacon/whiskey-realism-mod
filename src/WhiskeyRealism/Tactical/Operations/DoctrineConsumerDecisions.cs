@@ -88,17 +88,89 @@ namespace WhiskeyRealism.Tactical.Operations
             float localOdds,
             bool targetRouted)
         {
+            return DecideCharge(
+                order,
+                enemyMainLineExposed,
+                localOdds,
+                targetRouted,
+                new TacticalEnduranceDecision(
+                    canAssault: true,
+                    canHold: true,
+                    canFallback: true,
+                    needsRelief: false,
+                    reason: "endurance-ready"));
+        }
+
+        public static DoctrineChargeDecision DecideCharge(
+            CommandDoctrineOrder order,
+            bool enemyMainLineExposed,
+            float localOdds,
+            bool targetRouted,
+            TacticalEnduranceDecision endurance)
+        {
+            return DecideCharge(
+                order,
+                enemyMainLineExposed,
+                localOdds,
+                targetRouted,
+                endurance,
+                TacticalMeleeFearDecision.NoOpinion,
+                TacticalInfantryFireDecision.NoOpinion);
+        }
+
+        public static DoctrineChargeDecision DecideCharge(
+            CommandDoctrineOrder order,
+            bool enemyMainLineExposed,
+            float localOdds,
+            bool targetRouted,
+            TacticalEnduranceDecision endurance,
+            TacticalMeleeFearDecision meleeFear,
+            TacticalInfantryFireDecision fireDiscipline)
+        {
             if (order.Task == CommandTaskType.ReserveWait)
                 return new DoctrineChargeDecision(DoctrineConsumerAction.Deny, "reserve-held");
             if (order.Task == CommandTaskType.FallBackToLine)
                 return new DoctrineChargeDecision(DoctrineConsumerAction.Deny, "fallback");
+            if (order.Sop.RequiresSupportBeforeMajorAttack)
+                return new DoctrineChargeDecision(DoctrineConsumerAction.Deny, "support-required");
+            if (!order.Sop.AllowsMajorAttack &&
+                (order.Sop.Authority == TacticalSopAuthority.Scout ||
+                 order.Sop.Authority == TacticalSopAuthority.Probe ||
+                 order.Sop.Authority == TacticalSopAuthority.Screen))
+            {
+                return new DoctrineChargeDecision(DoctrineConsumerAction.Deny, "sop-limited-contact");
+            }
+            if ((order.Task == CommandTaskType.AttackObjective ||
+                    order.Task == CommandTaskType.SupportAttack) &&
+                !endurance.CanAssault)
+            {
+                return new DoctrineChargeDecision(
+                    DoctrineConsumerAction.Deny,
+                    "endurance-" + endurance.Reason);
+            }
+            if (fireDiscipline.BlocksCharge)
+            {
+                return new DoctrineChargeDecision(
+                    DoctrineConsumerAction.Deny,
+                    "fire-discipline-" + fireDiscipline.Reason);
+            }
+            if (meleeFear.HasOpinion && !meleeFear.AllowsCharge)
+            {
+                return new DoctrineChargeDecision(
+                    DoctrineConsumerAction.Deny,
+                    "melee-fear-" + meleeFear.Reason);
+            }
             if (!enemyMainLineExposed && !targetRouted)
                 return new DoctrineChargeDecision(DoctrineConsumerAction.Observe, "main-line-not-exposed");
             if ((order.Task == CommandTaskType.AttackObjective ||
                     order.Task == CommandTaskType.SupportAttack) &&
-                IsFinite(localOdds) &&
-                localOdds >= 1.5f)
-                return new DoctrineChargeDecision(DoctrineConsumerAction.Allow, "doctrine-charge");
+                IsFinite(localOdds))
+            {
+                if (meleeFear.HasOpinion && meleeFear.EncouragesCharge && localOdds >= 1.2f)
+                    return new DoctrineChargeDecision(DoctrineConsumerAction.Allow, "doctrine-charge-melee-fear");
+                if (localOdds >= 1.5f)
+                    return new DoctrineChargeDecision(DoctrineConsumerAction.Allow, "doctrine-charge");
+            }
 
             return new DoctrineChargeDecision(DoctrineConsumerAction.Observe, "odds-not-ready");
         }
@@ -113,19 +185,86 @@ namespace WhiskeyRealism.Tactical.Operations
                 return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.FallBackToLine, "fallback-relief");
 
             if (order.Role == CommandNodeRole.Reserve &&
-                order.Task == CommandTaskType.ReserveWait &&
-                IsFinite(mainEffortOdds) &&
-                IsFinite(reserveFraction) &&
-                mainEffortOdds < 0.9f &&
-                reserveFraction >= 0.15f)
+                (!IsFinite(mainEffortOdds) || !IsFinite(reserveFraction)))
             {
-                return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.ReleaseReserve, "main-effort-under-pressure");
+                return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, "reserve-held");
             }
 
-            if (order.Role == CommandNodeRole.Reserve)
-                return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, "reserve-held");
+            OperationalReserveInput input = new OperationalReserveInput(
+                reserveFraction,
+                mainEffortOdds,
+                flankThreat01: 0f,
+                reserveEndurance01: 1f,
+                assaultAuthorized: IsFinite(mainEffortOdds) && mainEffortOdds >= 1.60f,
+                fallbackPressure: false);
 
-            return new DoctrineReserveDecision(DoctrineConsumerAction.Observe, order.Task, "no-doctrine-opinion");
+            return DecideReserve(order, input, currentTimeSeconds);
+        }
+
+        public static DoctrineReserveDecision DecideReserve(
+            CommandDoctrineOrder order,
+            OperationalReserveInput reserveInput,
+            float currentTimeSeconds)
+        {
+            if (order.Task == CommandTaskType.FallBackToLine)
+                return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.FallBackToLine, "fallback-relief");
+
+            if (order.Role != CommandNodeRole.Reserve)
+                return new DoctrineReserveDecision(DoctrineConsumerAction.Observe, order.Task, "no-doctrine-opinion");
+
+            if (order.Task != CommandTaskType.ReserveWait)
+                return new DoctrineReserveDecision(DoctrineConsumerAction.Observe, order.Task, "no-doctrine-opinion");
+
+            OperationalReserveDecision mission = OperationalReserveDoctrine.Decide(reserveInput);
+            if (!mission.ShouldMove)
+                return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, mission.Reason);
+
+            switch (mission.Mission)
+            {
+                case OperationalReserveMission.RelieveLine:
+                case OperationalReserveMission.Counterattack:
+                    return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.ReleaseReserve, mission.Reason);
+                case OperationalReserveMission.SealFlank:
+                    return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.GuardFlank, mission.Reason);
+                case OperationalReserveMission.WithdrawReserve:
+                    return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, mission.Reason);
+                case OperationalReserveMission.RefuseReserve:
+                    return new DoctrineReserveDecision(DoctrineConsumerAction.Allow, CommandTaskType.GuardFlank, mission.Reason);
+                default:
+                    return new DoctrineReserveDecision(DoctrineConsumerAction.Deny, CommandTaskType.ReserveWait, mission.Reason);
+            }
+        }
+
+        public static DoctrineReserveDecision DecideFallback(
+            CommandDoctrineOrder order,
+            TacticalFallbackInput fallbackInput)
+        {
+            TacticalFallbackDecision fallback = TacticalFallbackLadder.Decide(fallbackInput);
+            switch (fallback.Step)
+            {
+                case TacticalFallbackStep.FallbackByBounds:
+                case TacticalFallbackStep.RearGuard:
+                case TacticalFallbackStep.FullRetreat:
+                    return new DoctrineReserveDecision(
+                        DoctrineConsumerAction.Allow,
+                        CommandTaskType.FallBackToLine,
+                        fallback.Reason);
+                case TacticalFallbackStep.ScreenWithdrawal:
+                    return new DoctrineReserveDecision(
+                        DoctrineConsumerAction.Allow,
+                        CommandTaskType.Delay,
+                        fallback.Reason);
+                case TacticalFallbackStep.Stabilize:
+                    return new DoctrineReserveDecision(
+                        DoctrineConsumerAction.Observe,
+                        order.Task,
+                        fallback.Reason);
+                default:
+                    return new DoctrineReserveDecision(
+                        DoctrineConsumerAction.Deny,
+                        order.Task,
+                        fallback.Reason);
+            }
         }
 
         public static DoctrineArtilleryDecision DecideArtillery(
@@ -140,10 +279,49 @@ namespace WhiskeyRealism.Tactical.Operations
                  order.Task == CommandTaskType.SupportAttack ||
                  order.Task == CommandTaskType.FixEnemy))
             {
-                return new DoctrineArtilleryDecision(DoctrineConsumerAction.Allow, "support-main-effort");
+                return DecideArtillery(
+                    order,
+                    new TacticalArtilleryMissionInput(
+                        requestedSupport: true,
+                        enemyArtilleryVisible: false,
+                        ammoRatio01: 1f,
+                        targetDistance: 0f,
+                        optimalRange: 1f,
+                        maxRange: 1f,
+                        friendlyDangerClose: false,
+                        threatenedByCloseEnemy: false,
+                        canDisplace: true));
             }
 
             return new DoctrineArtilleryDecision(DoctrineConsumerAction.Observe, "no-doctrine-opinion");
+        }
+
+        public static DoctrineArtilleryDecision DecideArtillery(
+            CommandDoctrineOrder order,
+            TacticalArtilleryMissionInput missionInput)
+        {
+            TacticalArtilleryMissionDecision mission = TacticalArtilleryMissionPlanner.Decide(missionInput);
+            switch (mission.Mission)
+            {
+                case TacticalArtilleryMission.SupportMainEffort:
+                    if (order.Task == CommandTaskType.AttackObjective ||
+                        order.Task == CommandTaskType.SupportAttack ||
+                        order.Task == CommandTaskType.FixEnemy)
+                    {
+                        return new DoctrineArtilleryDecision(DoctrineConsumerAction.Allow, mission.Reason);
+                    }
+
+                    return new DoctrineArtilleryDecision(DoctrineConsumerAction.Observe, "no-doctrine-opinion");
+                case TacticalArtilleryMission.CounterBattery:
+                    return new DoctrineArtilleryDecision(DoctrineConsumerAction.Allow, mission.Reason);
+                case TacticalArtilleryMission.HoldFireDangerClose:
+                case TacticalArtilleryMission.ConserveAmmo:
+                case TacticalArtilleryMission.Displace:
+                case TacticalArtilleryMission.DefensiveFallback:
+                    return new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, mission.Reason);
+                default:
+                    return new DoctrineArtilleryDecision(DoctrineConsumerAction.Observe, "no-doctrine-opinion");
+            }
         }
 
         public static bool EnemyMainLineExposed(CommandDoctrineOrder order, BattlefieldPictureSnapshot picture)

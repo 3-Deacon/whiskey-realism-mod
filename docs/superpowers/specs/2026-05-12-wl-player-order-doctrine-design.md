@@ -1,6 +1,11 @@
 # W&L Player Order Doctrine Design
 
-Status: active design spec; implementation plan not written.
+Status: tactical #62 implemented/hash-deployed behind default-off
+`Enable Player Order Doctrine`; focused enabled smoke pending before archive.
+Current runtime truth lives in
+[`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md) and
+[`docs/patch-catalog.md`](../../patch-catalog.md). This spec is no longer the
+implementation source of truth.
 Date: 2026-05-12.
 Owner: Whiskey Realism W&L / tactical command workstream.
 
@@ -389,7 +394,7 @@ When disabled:
 
 ## Not Verified
 
-- Whether current full-spectrum tactical command smoke has already produced enough player-subordinate context for a meaningful O6 test. Current living docs still mark fresh Active smoke pending.
+- Whether current tactical completion smoke has already produced enough player-subordinate context for a meaningful #62/O6 test. Current living docs still mark fresh Active smoke pending.
 - The final campaign-caller audit outcome. The implementation plan must enumerate each current Whiskey strategic caller before campaign signature-cache work.
 - Exact real-world frequency of `microaitaskupdatecycle == 28` per battle minute. Vanilla cadence anchor is confirmed at lines 5682-5684, but runtime frequency needs a log sample.
 - Whether `ArmyOrchestrator.CurrentStrategicBattleIntent`, `CurrentOperation`, and `CurrentDoctrineOrders` are populated before the first eligible `UpdateDLCPlayerOrders()` cycle in a fresh battle.

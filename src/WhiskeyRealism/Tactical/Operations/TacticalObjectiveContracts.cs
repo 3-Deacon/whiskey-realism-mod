@@ -53,6 +53,7 @@ namespace WhiskeyRealism.Tactical.Operations
         public float SourceConfidence { get; }
         public float Value { get; }
         public bool TypeAnchorVerified { get; }
+        public TacticalApproachAvenueEstimate ApproachAvenue { get; }
 
         public ObjectiveObservationInput(
             string objectiveId,
@@ -62,6 +63,27 @@ namespace WhiskeyRealism.Tactical.Operations
             float sourceConfidence,
             float value,
             bool typeAnchorVerified)
+            : this(
+                objectiveId,
+                type,
+                source,
+                location,
+                sourceConfidence,
+                value,
+                typeAnchorVerified,
+                TacticalApproachAvenueEstimate.None)
+        {
+        }
+
+        public ObjectiveObservationInput(
+            string objectiveId,
+            TacticalObjectiveType type,
+            TacticalObjectiveSource source,
+            TacticalMapPoint location,
+            float sourceConfidence,
+            float value,
+            bool typeAnchorVerified,
+            TacticalApproachAvenueEstimate approachAvenue)
         {
             ObjectiveId = string.IsNullOrWhiteSpace(objectiveId) ? "objective-unknown" : objectiveId;
             Type = type;
@@ -70,6 +92,7 @@ namespace WhiskeyRealism.Tactical.Operations
             SourceConfidence = Clamp01(sourceConfidence);
             Value = SanitizeValue(value);
             TypeAnchorVerified = typeAnchorVerified;
+            ApproachAvenue = approachAvenue.HasAvenue ? approachAvenue : TacticalApproachAvenueEstimate.None;
         }
 
         private static float Clamp01(float input)

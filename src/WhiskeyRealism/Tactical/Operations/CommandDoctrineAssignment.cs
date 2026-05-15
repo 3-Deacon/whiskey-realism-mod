@@ -10,7 +10,8 @@ namespace WhiskeyRealism.Tactical.Operations
             OperationRecord operation,
             BattlefieldPictureSnapshot picture,
             float ownStrength,
-            float nowSeconds)
+            float nowSeconds,
+            float reserveFraction = 0f)
         {
             if (nodes == null || nodes.Length == 0) return Array.Empty<CommandDoctrineOrder>();
 
@@ -20,32 +21,143 @@ namespace WhiskeyRealism.Tactical.Operations
                 picture.Objectives,
                 out objectiveMatched);
             float odds = ResolveOdds(ownStrength, objective.EnemyStrength);
+            TacticalBattlefrontSnapshot battlefront = TacticalBattlefrontGeometry.Build(nodes, objective);
+            TacticalMassingDecision massing = TacticalMassingCycle.Evaluate(new TacticalMassingInput(
+                operation.Phase,
+                CountRole(nodes, CommandNodeRole.MainEffort),
+                CountRole(nodes, CommandNodeRole.SupportingAttack),
+                CountRole(nodes, CommandNodeRole.Reserve),
+                artilleryReady: true,
+                objectiveExposed: objective.MainLineExposed,
+                objectiveConfidence01: objective.Confidence01,
+                ownStrength: ownStrength,
+                enemyStrength: objective.EnemyStrength,
+                reserveFraction: reserveFraction));
             var orders = new List<CommandDoctrineOrder>(nodes.Length);
 
             for (int i = 0; i < nodes.Length; i++)
             {
                 CommandNodeOperationalState node = nodes[i];
                 CommandTaskType task = ResolveTask(node.Role, operation, objective, objectiveMatched, odds);
+                task = ApplyScourgeSlotTask(task, node.Role, i, nodes.Length);
                 DoctrineAllowedIdleReason idle = ResolveIdle(node.Role, task, operation);
-                DoctrineTargetPoint primary = ResolvePrimaryTarget(task, objective);
-                DoctrineTargetPoint fallback = ResolveFallbackTarget(task, node, objective);
+                TacticalBattleLinePlan linePlan = TacticalBattleLinePlanner.PlanNode(
+                    node,
+                    task,
+                    objective,
+                    objectiveMatched,
+                    i,
+                    battlefront,
+                    nodes.Length);
+                TacticalSopDecision sop = TacticalSopDoctrine.Resolve(
+                    node.Role,
+                    task,
+                    operation.Phase,
+                    objective,
+                    ownStrength,
+                    reserveFraction);
+                sop = ApplyOperationalGates(sop, task, massing, battlefront);
 
                 orders.Add(CommandDoctrineOrder.Create(
                     node.NodeId,
                     node.Role,
                     task,
                     objective.ObjectiveId,
-                    primary,
-                    DoctrineTargetPoint.None,
-                    fallback,
+                    linePlan.PrimaryTarget,
+                    linePlan.SupportTarget,
+                    linePlan.FallbackTarget,
                     idle,
                     operation.MinimumCommitSeconds,
                     nowSeconds,
                     objective.Confidence01,
-                    "doctrine-assignment"));
+                    linePlan.Reason).WithSop(sop));
             }
 
             return orders.ToArray();
+        }
+
+        private static CommandTaskType ApplyScourgeSlotTask(
+            CommandTaskType task,
+            CommandNodeRole role,
+            int commandIndex,
+            int nodeCount)
+        {
+            if (role == CommandNodeRole.FlankMarch &&
+                (task == CommandTaskType.FormUp || task == CommandTaskType.AdvanceToAssembly))
+            {
+                return CommandTaskType.GuardFlank;
+            }
+
+            if (nodeCount < 6) return task;
+            if (task != CommandTaskType.FormUp &&
+                task != CommandTaskType.AdvanceToAssembly)
+            {
+                return task;
+            }
+
+            int safeIndex = commandIndex < 0 ? 0 : commandIndex;
+            if (safeIndex == 0 || safeIndex == nodeCount - 1)
+            {
+                return CommandTaskType.GuardFlank;
+            }
+
+            return task;
+        }
+
+        private static TacticalSopDecision ApplyOperationalGates(
+            TacticalSopDecision sop,
+            CommandTaskType task,
+            TacticalMassingDecision massing,
+            TacticalBattlefrontSnapshot battlefront)
+        {
+            bool assaultTask = task == CommandTaskType.AttackObjective ||
+                task == CommandTaskType.SupportAttack;
+
+            if (!assaultTask) return sop;
+            if (sop.Authority == TacticalSopAuthority.Probe ||
+                sop.Authority == TacticalSopAuthority.Screen ||
+                sop.Authority == TacticalSopAuthority.Fallback)
+            {
+                return sop;
+            }
+
+            if (massing.Phase == TacticalMassingPhase.MassSupport && !massing.MayCommitAssault)
+            {
+                return new TacticalSopDecision(
+                    TacticalSopAuthority.Attack,
+                    false,
+                    true,
+                    true,
+                    Math.Min(sop.RiskBudget01, 0.45f),
+                    Math.Max(45f, sop.ReacquireSeconds),
+                    "massing-" + massing.Reason);
+            }
+
+            if (battlefront.Gap == TacticalBattlefrontGap.WideUnsupportedGap &&
+                sop.Authority == TacticalSopAuthority.Attack)
+            {
+                return new TacticalSopDecision(
+                    TacticalSopAuthority.Attack,
+                    false,
+                    true,
+                    true,
+                    Math.Min(sop.RiskBudget01, 0.40f),
+                    Math.Max(45f, sop.ReacquireSeconds),
+                    "battlefront-wide-gap");
+            }
+
+            return sop;
+        }
+
+        private static int CountRole(CommandNodeOperationalState[] nodes, CommandNodeRole role)
+        {
+            int count = 0;
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                if (nodes[i].Role == role) count++;
+            }
+
+            return count;
         }
 
         private static CommandTaskType ResolveTask(
@@ -55,7 +167,7 @@ namespace WhiskeyRealism.Tactical.Operations
             bool objectiveMatched,
             float odds)
         {
-            if (role == CommandNodeRole.Unknown) return CommandTaskType.None;
+            if (role == CommandNodeRole.Unknown) return CommandTaskType.FormUp;
 
             if (operation.Phase == TacticalOperationPhase.SoftAbort ||
                 operation.Shape == TacticalOperationShape.DelayAndFallback)
@@ -69,7 +181,21 @@ namespace WhiskeyRealism.Tactical.Operations
             if (role == CommandNodeRole.Reserve) return CommandTaskType.ReserveWait;
             if (!objectiveMatched) return CommandTaskType.FormUp;
 
+            if (operation.Phase == TacticalOperationPhase.Scouting &&
+                TacticalDecisionDoctrine.IsReconnaissanceContact(objective))
+            {
+                return TacticalDecisionDoctrine.ReconnaissanceTaskFor(role);
+            }
+
             if (role == CommandNodeRole.Probe) return CommandTaskType.Probe;
+
+            if (ShouldAdvanceCommittedMapObjective(operation, objective))
+            {
+                if (role == CommandNodeRole.MainEffort) return CommandTaskType.AttackObjective;
+                if (role == CommandNodeRole.SupportingAttack) return CommandTaskType.SupportAttack;
+                if (role == CommandNodeRole.FixingForce) return CommandTaskType.FixEnemy;
+                if (role == CommandNodeRole.ScreeningForce) return CommandTaskType.Screen;
+            }
 
             if (role == CommandNodeRole.MainEffort &&
                 IsCommittedFallbackEnemyLine(operation))
@@ -112,10 +238,37 @@ namespace WhiskeyRealism.Tactical.Operations
             OperationRecord operation,
             BattlefieldObjectiveEstimate objective)
         {
-            if (objective.Confidence01 >= 0.65f) return true;
-            return operation.Phase == TacticalOperationPhase.Committed &&
-                objective.Type == TacticalObjectiveType.EnemyLine &&
-                objective.Confidence01 >= 0.50f;
+            return TacticalDecisionDoctrine.HasAttackableLineEvidence(operation, objective);
+        }
+
+        private static bool ShouldAdvanceCommittedMapObjective(
+            OperationRecord operation,
+            BattlefieldObjectiveEstimate objective)
+        {
+            if (operation.Phase != TacticalOperationPhase.Committed) return false;
+            if (operation.Shape == TacticalOperationShape.DefensiveNetwork ||
+                operation.Shape == TacticalOperationShape.DelayAndFallback)
+            {
+                return false;
+            }
+
+            if (string.Equals(objective.ObjectiveId, "objective-unknown", StringComparison.Ordinal))
+                return false;
+
+            if (float.IsNaN(objective.X) || float.IsInfinity(objective.X) ||
+                float.IsNaN(objective.Z) || float.IsInfinity(objective.Z))
+            {
+                return false;
+            }
+
+            return objective.Confidence01 >= 0.35f ||
+                objective.Type == TacticalObjectiveType.VictoryPoint ||
+                objective.Type == TacticalObjectiveType.Bridge ||
+                objective.Type == TacticalObjectiveType.Ford ||
+                objective.Type == TacticalObjectiveType.RoadJunction ||
+                objective.Type == TacticalObjectiveType.Town ||
+                objective.Type == TacticalObjectiveType.Ridge ||
+                objective.Type == TacticalObjectiveType.ChokePoint;
         }
 
         private static DoctrineAllowedIdleReason ResolveIdle(
@@ -123,6 +276,11 @@ namespace WhiskeyRealism.Tactical.Operations
             CommandTaskType task,
             OperationRecord operation)
         {
+            if (role == CommandNodeRole.Unknown)
+            {
+                return DoctrineAllowedIdleReason.None;
+            }
+
             if (role == CommandNodeRole.Reserve && task == CommandTaskType.ReserveWait)
             {
                 return DoctrineAllowedIdleReason.HeldReserve;
@@ -139,51 +297,6 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             return DoctrineAllowedIdleReason.None;
-        }
-
-        private static DoctrineTargetPoint ResolvePrimaryTarget(
-            CommandTaskType task,
-            BattlefieldObjectiveEstimate objective)
-        {
-            if (task == CommandTaskType.AttackObjective ||
-                task == CommandTaskType.SupportAttack ||
-                task == CommandTaskType.FixEnemy ||
-                task == CommandTaskType.Probe ||
-                task == CommandTaskType.Scout ||
-                task == CommandTaskType.Screen)
-            {
-                return DoctrineTargetPoint.From(objective.X, objective.Z);
-            }
-
-            return DoctrineTargetPoint.None;
-        }
-
-        private static DoctrineTargetPoint ResolveFallbackTarget(
-            CommandTaskType task,
-            CommandNodeOperationalState node,
-            BattlefieldObjectiveEstimate objective)
-        {
-            if (task != CommandTaskType.FallBackToLine) return DoctrineTargetPoint.None;
-
-            double dx = (double)node.X - objective.X;
-            double dz = (double)node.Z - objective.Z;
-            double length = Math.Sqrt(dx * dx + dz * dz);
-            if (double.IsNaN(length) || double.IsInfinity(length) || length < 1d)
-            {
-                return DoctrineTargetPoint.From(node.X, ClampToFloat((double)node.Z - 300d));
-            }
-
-            return DoctrineTargetPoint.From(
-                ClampToFloat(node.X + dx / length * 300d),
-                ClampToFloat(node.Z + dz / length * 300d));
-        }
-
-        private static float ClampToFloat(double value)
-        {
-            if (double.IsNaN(value)) return 0f;
-            if (value > float.MaxValue) return float.MaxValue;
-            if (value < -float.MaxValue) return -float.MaxValue;
-            return (float)value;
         }
 
         private static BattlefieldObjectiveEstimate ResolveObjective(
@@ -208,7 +321,8 @@ namespace WhiskeyRealism.Tactical.Operations
 
             if (objectives.Length > 0)
             {
-                if (IsCommittedFallbackEnemyLine(operation))
+                if (IsCommittedFallbackEnemyLine(operation) ||
+                    IsUnknownPrimary(operation.PrimaryObjectiveId))
                 {
                     objectiveMatched = true;
                 }
@@ -234,6 +348,12 @@ namespace WhiskeyRealism.Tactical.Operations
             return operation.Phase == TacticalOperationPhase.Committed &&
                 !string.IsNullOrWhiteSpace(operation.PrimaryObjectiveId) &&
                 operation.PrimaryObjectiveId.StartsWith("enemy-line-", StringComparison.Ordinal);
+        }
+
+        private static bool IsUnknownPrimary(string objectiveId)
+        {
+            return string.IsNullOrWhiteSpace(objectiveId) ||
+                string.Equals(objectiveId, "objective-unknown", StringComparison.Ordinal);
         }
 
         private static float ResolveOdds(float ownStrength, float enemyStrength)

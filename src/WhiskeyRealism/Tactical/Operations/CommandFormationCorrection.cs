@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical;
 
 namespace WhiskeyRealism.Tactical.Operations
 {
@@ -55,6 +56,44 @@ namespace WhiskeyRealism.Tactical.Operations
             float dx = enemyX - ownX;
             float dz = enemyZ - ownZ;
             return (float)(Math.Atan2(dx, dz) / Math.PI * 180.0);
+        }
+
+        public static TacticalRefuseFlankIntent.Decision RefuseDecisionForThreatFacing(
+            float currentRotationDegrees,
+            float threatRotationDegrees)
+        {
+            if (float.IsNaN(currentRotationDegrees) ||
+                float.IsNaN(threatRotationDegrees) ||
+                float.IsInfinity(currentRotationDegrees) ||
+                float.IsInfinity(threatRotationDegrees))
+                return TacticalRefuseFlankIntent.Decision.NoRefuse;
+
+            float delta = NormalizeDelta(threatRotationDegrees - currentRotationDegrees);
+            if (Math.Abs(delta) < 45f || Math.Abs(delta) > 150f)
+                return TacticalRefuseFlankIntent.Decision.NoRefuse;
+
+            return delta < 0f
+                ? TacticalRefuseFlankIntent.Decision.RefuseLeft
+                : TacticalRefuseFlankIntent.Decision.RefuseRight;
+        }
+
+        public static int RefuseFlankParameter(
+            TacticalRefuseFlankIntent.Decision decision,
+            CommandTaskType task,
+            bool closeEngaged)
+        {
+            if (!closeEngaged) return -1;
+            if (!ShouldSkewFormationForRefuse(task)) return -1;
+
+            switch (decision)
+            {
+                case TacticalRefuseFlankIntent.Decision.RefuseLeft:
+                    return 0;
+                case TacticalRefuseFlankIntent.Decision.RefuseRight:
+                    return 1;
+                default:
+                    return -1;
+            }
         }
 
         public static bool NeedsFacingCorrection(
@@ -154,6 +193,16 @@ namespace WhiskeyRealism.Tactical.Operations
                 default:
                     return current;
             }
+        }
+
+        private static bool ShouldSkewFormationForRefuse(CommandTaskType task)
+        {
+            return task == CommandTaskType.GuardFlank ||
+                task == CommandTaskType.FallBackToLine ||
+                task == CommandTaskType.HoldObjective ||
+                task == CommandTaskType.HoldChoke ||
+                task == CommandTaskType.Delay ||
+                task == CommandTaskType.Consolidate;
         }
 
         private static float NormalizeDelta(float value)

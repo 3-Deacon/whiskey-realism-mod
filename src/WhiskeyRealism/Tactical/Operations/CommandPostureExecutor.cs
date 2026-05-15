@@ -206,11 +206,30 @@ namespace WhiskeyRealism.Tactical.Operations
 
             if (order.AllowsIdle && order.Task == CommandTaskType.ReserveWait)
             {
+                if (order.PrimaryTarget.HasValue && !eligibility.AtAssignedLocation)
+                {
+                    return new PostureExecutionDecision(
+                        PostureExecutionAction.SetWaypoint,
+                        "reserve-area",
+                        PostureExecutionTarget.DoctrinePrimaryTarget);
+                }
+
                 return NoWrite("legal-idle");
             }
 
             if (eligibility.CloseEngaged)
             {
+                if (TacticalDecisionDoctrine.ShouldBreakOffRecon(
+                        order.Task,
+                        closeEngaged: true,
+                        hasFallbackTarget: order.FallbackTarget.HasValue))
+                {
+                    return new PostureExecutionDecision(
+                        PostureExecutionAction.SetFormationAndWaypoint,
+                        "close-engaged-screen-breakoff",
+                        PostureExecutionTarget.DoctrineFallbackTarget);
+                }
+
                 if (order.Task == CommandTaskType.FallBackToLine)
                 {
                     return new PostureExecutionDecision(
@@ -247,12 +266,16 @@ namespace WhiskeyRealism.Tactical.Operations
 
             switch (order.Task)
             {
+                case CommandTaskType.FormUp:
+                case CommandTaskType.AdvanceToAssembly:
+                    return FormationAndWaypoint(TaskReason(order.Task), PostureExecutionTarget.DoctrinePrimaryTarget);
                 case CommandTaskType.Scout:
                 case CommandTaskType.Probe:
                 case CommandTaskType.AttackObjective:
                 case CommandTaskType.SupportAttack:
                 case CommandTaskType.FixEnemy:
                 case CommandTaskType.Screen:
+                case CommandTaskType.GuardFlank:
                     return FormationAndWaypoint(TaskReason(order.Task), PostureExecutionTarget.DoctrinePrimaryTarget);
                 case CommandTaskType.FallBackToLine:
                     return new PostureExecutionDecision(

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
@@ -27,8 +28,13 @@ namespace WhiskeyRealism.Patches
         private const float MaxConservativeWaypointDistance = 2500f;
         private const float MinWaypointDistance = 15f;
         private const float FacingRefreshToleranceDegrees = 15f;
+        private const float OutboundCourierIntervalSeconds = 900f;
+        private const float FireControlOrderCooldownSeconds = 45f;
 
         private static readonly Dictionary<int, float> _lastExecutorOrderAt = new Dictionary<int, float>();
+        private static readonly Dictionary<int, float> _lastFireControlAt = new Dictionary<int, float>();
+        private static readonly Dictionary<string, float> _lastCourierAt = new Dictionary<string, float>();
+        private static readonly Dictionary<string, string> _lastOutboundOrderSignatureByGroup = new Dictionary<string, string>();
         private static readonly Dictionary<string, float> _lastTelemetryAt = new Dictionary<string, float>();
 
         private static FieldInfo _stateField;
@@ -69,21 +75,43 @@ namespace WhiskeyRealism.Patches
             if (state < 5 || macro < 0 || side < 0 || bunits == null || units == null) return;
             if (isPlayerAiOrFeud != 0 && !GameVars.ai_vs_ai) return;
 
+            Dictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders = BuildRuntimeDivisionPlayOrders(units);
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i] as Regiment;
                 if (!IsEligibleCommandGroup(group)) continue;
-                TryApplyGroup(bunits, side, group);
+                TryApplyGroup(bunits, side, group, runtimePlayOrders);
             }
         }
 
-        private static void TryApplyGroup(BattleUnits bunits, int side, Regiment group)
+        private static void TryApplyGroup(
+            BattleUnits bunits,
+            int side,
+            Regiment group,
+            IReadOnlyDictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders)
         {
             if (!TryResolveLedgerState(group, out CommandNodeOperationalState state, out TacticalBattleOrchestrator orchestrator))
                 return;
 
             int instanceId = SafeInstanceId(group);
             bool hasDoctrineOrder = TryResolveDoctrineOrder(group, orchestrator?.Army, state.NodeId, out CommandDoctrineOrder doctrineOrder);
+            if (runtimePlayOrders != null &&
+                runtimePlayOrders.TryGetValue(state.NodeId, out TacticalDivisionPlayOrder playOrder) &&
+                playOrder.HasOrder)
+            {
+                state = new CommandNodeOperationalState(
+                    state.NodeId,
+                    state.Echelon,
+                    state.Role,
+                    playOrder.Task,
+                    state.TaskState);
+                if (hasDoctrineOrder)
+                {
+                    doctrineOrder = doctrineOrder
+                        .WithTask(playOrder.Task, playOrder.Reason)
+                        .WithDelivery(playOrder.Delivery, playOrder.ParentNodeId, OutboundCourierIntervalSeconds, playOrder.Reason);
+                }
+            }
             if (hasDoctrineOrder && doctrineOrder.Task != state.Task)
             {
                 state = new CommandNodeOperationalState(
@@ -96,6 +124,36 @@ namespace WhiskeyRealism.Patches
 
             bool playerProtected = IsPlayerProtected(group);
             bool routed = SafeRouted(group);
+            bool hasCavalryCapability = HasCavalryCapability(group);
+            bool hasFowVisibleEnemy = HasFowVisibleEnemy(group);
+            bool underRecentFire = HasRecentReceivedFire(group);
+            if (TryApplyGrandTacticianReconDoctrine(
+                    state,
+                    doctrineOrder,
+                    hasDoctrineOrder,
+                    hasCavalryCapability,
+                    hasFowVisibleEnemy,
+                    underRecentFire,
+                    out CommandNodeOperationalState reconState,
+                    out CommandDoctrineOrder reconOrder,
+                    out bool reconHasDoctrineOrder))
+            {
+                state = reconState;
+                doctrineOrder = reconOrder;
+                hasDoctrineOrder = reconHasDoctrineOrder;
+            }
+
+            if (TryApplyCavalryFollowMode(group, state, hasDoctrineOrder, doctrineOrder, playerProtected,
+                    hasCavalryCapability,
+                    out CommandNodeOperationalState cavalryState,
+                    out CommandDoctrineOrder cavalryOrder,
+                    out bool cavalryHasDoctrineOrder))
+            {
+                state = cavalryState;
+                doctrineOrder = cavalryOrder;
+                hasDoctrineOrder = cavalryHasDoctrineOrder;
+            }
+
             var physical = BuildPhysicalState(group, playerProtected, routed);
             TacticalIdleClassification idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
             bool closeEngaged = HasCloseEngagement(group);
@@ -114,18 +172,20 @@ namespace WhiskeyRealism.Patches
                     state.TaskState);
             }
 
+            TacticalRefuseFlankIntent.Decision refusedFlank = ResolveRefusedFlank(group, state.Task, closeEngaged, flankRisk);
             int targetFormation = TargetFormationForTask(state.Task, group);
             bool visibleFormationMismatch = CommandFormationCorrection.NeedsCorrection(
                 SafeFormation(group),
                 SafeFormationOrdered(group),
                 SafeGroupFormation(group),
                 targetFormation);
+            bool allowStaleQueuedBypass = CanBypassStaleQueuedOrder(state.Task);
             bool allowPendingLocalFormation = CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
                 closeEngaged,
                 flankRisk,
                 visibleFormationMismatch,
                 state.Task);
-            bool orderPending = HasPendingOrder(group) && !allowPendingLocalFormation;
+            bool orderPending = HasPendingOrder(group, allowStaleQueuedBypass) && !allowPendingLocalFormation;
             float recentOrderSeconds = CommandFormationCorrection.RecentOrderCooldownSeconds(
                 closeEngaged,
                 visibleFormationMismatch,
@@ -134,6 +194,7 @@ namespace WhiskeyRealism.Patches
                 UrgentFormationRetrySeconds);
             bool recentOrder = HasRecentExecutorOrder(instanceId, recentOrderSeconds);
             bool alreadyCorrect = IsAlreadyDoingCorrectTask(group, state, physical, targetFormation, idle);
+            bool pendingOrderOnChild = HasPendingOrder(group);
 
             var eligibility = new WriteEligibilitySnapshot(
                 modeAllowsWrites: true,
@@ -146,33 +207,380 @@ namespace WhiskeyRealism.Patches
                 missingLedgerAssignment: false,
                 closeEngaged: closeEngaged);
 
+            if (hasDoctrineOrder &&
+                doctrineOrder.Delivery == TacticalOrderDelivery.Courier &&
+                !AllowsOutboundCourier(side, group, doctrineOrder, playerProtected, pendingOrderOnChild, out TacticalOutboundCourierDecision courierDecision))
+            {
+                EmitPostureTelemetry(
+                    side,
+                    group,
+                    state,
+                    new PostureExecutionDecision(PostureExecutionAction.NoWrite, "courier-" + courierDecision.Reason),
+                    idle,
+                    applied: false,
+                    extraReason: "courier-" + courierDecision.Reason);
+                return;
+            }
+
             var decision = hasDoctrineOrder
                 ? CommandPostureExecutor.Decide(doctrineOrder, physical, eligibility, Time.realtimeSinceStartup)
                 : CommandPostureExecutor.Decide(state, physical, eligibility);
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
+                if (CanWrite(group, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass) &&
+                    TryApplyFireControl(bunits, group, state, out TacticalFireControlDecision fireDecision))
+                {
+                    _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                    EmitPostureTelemetry(side, group, state, decision, idle, applied: true, extraReason: "fire-control-" + fireDecision.Reason);
+                    return;
+                }
+
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: decision.Reason);
                 return;
             }
 
-            if (!CanWrite(group, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation))
+            if (!CanWrite(group, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass))
             {
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "write-gate-denied");
                 return;
             }
 
             bool hasTarget = TryResolveTarget(group, orchestrator, state, doctrineOrder, decision.Target, out Vector3 target);
-            bool wrote = ApplyDecision(bunits, group, state, decision, targetFormation, eligibility.CloseEngaged, hasTarget, target);
+            string outboundSignature = OutboundOrderSignature(state, decision, targetFormation, hasTarget, target);
+            if (!AllowsOutboundOrderLedger(
+                    group,
+                    state,
+                    outboundSignature,
+                    pendingOrderOnChild,
+                    physical.ActiveMove,
+                    out TacticalOutboundOrderLedgerDecision outboundDecision))
+            {
+                string reason = "outbound-" + outboundDecision.Reason;
+                EmitPostureTelemetry(
+                    side,
+                    group,
+                    state,
+                    new PostureExecutionDecision(PostureExecutionAction.NoWrite, reason),
+                    idle,
+                    applied: false,
+                    extraReason: reason);
+                return;
+            }
+
+            bool wrote = ApplyDecision(
+                bunits,
+                group,
+                state,
+                decision,
+                targetFormation,
+                eligibility.CloseEngaged,
+                refusedFlank,
+                hasTarget,
+                target);
 
             if (wrote)
             {
                 _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                RecordOutboundOrder(group, state, outboundSignature);
+                if (hasDoctrineOrder && doctrineOrder.Delivery == TacticalOrderDelivery.Courier)
+                    _lastCourierAt[CourierParentKey(side, doctrineOrder)] = Time.realtimeSinceStartup;
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: true, extraReason: decision.Reason);
             }
             else
             {
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "target-unresolved");
             }
+        }
+
+        private sealed class RuntimePlayChild
+        {
+            public RuntimePlayChild(string parentNodeId, TacticalDivisionPlaySubordinate subordinate)
+            {
+                ParentNodeId = parentNodeId;
+                Subordinate = subordinate;
+            }
+
+            public string ParentNodeId { get; }
+            public TacticalDivisionPlaySubordinate Subordinate { get; }
+        }
+
+        private static Dictionary<string, TacticalDivisionPlayOrder> BuildRuntimeDivisionPlayOrders(IList units)
+        {
+            var result = new Dictionary<string, TacticalDivisionPlayOrder>();
+            if (units == null) return result;
+
+            var byParent = new Dictionary<string, List<RuntimePlayChild>>();
+            for (int i = 0; i < units.Count; i++)
+            {
+                var group = units[i] as Regiment;
+                if (!IsEligibleCommandGroup(group)) continue;
+                if (!TryResolveLedgerState(group, out CommandNodeOperationalState state, out _)) continue;
+
+                string parentKey = ParentNodeKey(group, state);
+                if (string.IsNullOrWhiteSpace(parentKey)) continue;
+                if (!byParent.TryGetValue(parentKey, out List<RuntimePlayChild> children))
+                {
+                    children = new List<RuntimePlayChild>();
+                    byParent[parentKey] = children;
+                }
+
+                children.Add(new RuntimePlayChild(
+                    parentKey,
+                    new TacticalDivisionPlaySubordinate(
+                        state.NodeId,
+                        state.Role,
+                        hasTargets: HasVisibleTarget(group),
+                        engagingEnemy: HasCloseEngagement(group),
+                        underCloseFire: HasCloseEngagement(group) || HasLocalFlankRisk(group),
+                        inTrouble: HasLocalFlankRisk(group) || SafeMorale(group) < 0.35f,
+                        isArtillery: HasArtilleryCapability(group),
+                        enemyDistance: SafeEnemyDistance(group),
+                        hasOrders: HasPendingOrder(group) || HasActiveMoveMakingProgress(group))));
+            }
+
+            foreach (var pair in byParent)
+            {
+                if (pair.Value.Count < 2) continue;
+                var subordinates = new TacticalDivisionPlaySubordinate[pair.Value.Count];
+                for (int i = 0; i < pair.Value.Count; i++) subordinates[i] = pair.Value[i].Subordinate;
+
+                TacticalDivisionPlayDecision decision = TacticalDivisionPlayExecutor.Decide(
+                    new TacticalDivisionPlayInput(pair.Key, Time.realtimeSinceStartup, subordinates));
+                if (!decision.HasAnchor) continue;
+
+                for (int i = 0; i < decision.Orders.Count; i++)
+                {
+                    TacticalDivisionPlayOrder order = decision.Orders[i];
+                    if (order.HasOrder) result[order.NodeId] = order;
+                }
+            }
+
+            return result;
+        }
+
+        private static bool TryApplyCavalryFollowMode(
+            Regiment group,
+            CommandNodeOperationalState state,
+            bool hasDoctrineOrder,
+            CommandDoctrineOrder doctrineOrder,
+            bool playerProtected,
+            bool hasCavalryCapability,
+            out CommandNodeOperationalState updatedState,
+            out CommandDoctrineOrder updatedOrder,
+            out bool updatedHasDoctrineOrder)
+        {
+            updatedState = state;
+            updatedOrder = doctrineOrder;
+            updatedHasDoctrineOrder = hasDoctrineOrder;
+
+            if (!hasCavalryCapability || playerProtected) return false;
+
+            TacticalCavalryFollowMode mode = CavalryFollowModeFor(state.Role, state.Task);
+            if (mode == TacticalCavalryFollowMode.None) return false;
+
+            Regiment target = ClosestEnemy(group);
+            float enemyDistance = SafeEnemyDistance(group);
+            TacticalCavalryFollowDecision follow = TacticalCavalryFollowDoctrine.Decide(
+                new TacticalCavalryFollowInput(
+                    mode,
+                    hasFollowTarget: target != null,
+                    targetHidden: false,
+                    targetIsOfficer: target != null && target.unittyp == TacticalUnitType.Officer,
+                    targetInFort: TargetInFort(target),
+                    targetInSquare: false,
+                    targetHasInfantryOrArtillerySupport: TargetHasCloseSupport(target),
+                    canChargeTarget: target != null && enemyDistance <= 350f,
+                    leaderAllowsCharge: !playerProtected,
+                    fearAdvantage01: CavalryFearAdvantage(group),
+                    enemyClose: enemyDistance > 0f && enemyDistance <= 350f,
+                    enemyDistance: enemyDistance,
+                    longRange: Math.Max(300f, SafeFireRange(group)),
+                    atFollowLocation: false));
+
+            CommandTaskType task = state.Task;
+            switch (follow.Action)
+            {
+                case TacticalCavalryFollowAction.GetAway:
+                    task = CommandTaskType.FallBackToLine;
+                    break;
+                case TacticalCavalryFollowAction.ChargeRaidTarget:
+                    task = CommandTaskType.AttackObjective;
+                    break;
+                case TacticalCavalryFollowAction.MoveBehindTarget:
+                    task = CommandTaskType.GuardFlank;
+                    break;
+                case TacticalCavalryFollowAction.RequestScoutLocation:
+                    task = mode == TacticalCavalryFollowMode.Screen ? CommandTaskType.Screen : CommandTaskType.Scout;
+                    break;
+                case TacticalCavalryFollowAction.ClearFollowTarget:
+                    task = CommandTaskType.Screen;
+                    break;
+                default:
+                    return false;
+            }
+
+            if (task == state.Task) return false;
+
+            updatedState = new CommandNodeOperationalState(
+                state.NodeId,
+                state.Echelon,
+                state.Role,
+                task,
+                state.TaskState);
+            if (hasDoctrineOrder)
+            {
+                updatedOrder = doctrineOrder
+                    .WithTask(task, follow.Reason)
+                    .WithDelivery(TacticalOrderDelivery.Courier, ParentNodeKey(group, state), OutboundCourierIntervalSeconds, follow.Reason);
+            }
+
+            return true;
+        }
+
+        private static bool TryApplyGrandTacticianReconDoctrine(
+            CommandNodeOperationalState state,
+            CommandDoctrineOrder doctrineOrder,
+            bool hasDoctrineOrder,
+            bool hasCavalryCapability,
+            bool hasFowVisibleEnemy,
+            bool underRecentFire,
+            out CommandNodeOperationalState updatedState,
+            out CommandDoctrineOrder updatedOrder,
+            out bool updatedHasDoctrineOrder)
+        {
+            updatedState = state;
+            updatedOrder = doctrineOrder;
+            updatedHasDoctrineOrder = hasDoctrineOrder;
+
+            TacticalGrandTacticianReconDecision recon = TacticalGrandTacticianReconDoctrine.Decide(
+                new TacticalGrandTacticianReconInput(
+                    state.Role,
+                    state.Task,
+                    hasCavalryCapability,
+                    hasFowVisibleEnemy,
+                    underRecentFire));
+
+            if (recon.Task == state.Task) return false;
+
+            updatedState = WithTask(state, recon.Task);
+            if (hasDoctrineOrder)
+            {
+                updatedOrder = doctrineOrder
+                    .WithTask(recon.Task, recon.Reason)
+                    .WithDelivery(TacticalOrderDelivery.Courier, state.NodeId, OutboundCourierIntervalSeconds, recon.Reason);
+            }
+
+            return true;
+        }
+
+        private static CommandNodeOperationalState WithTask(CommandNodeOperationalState state, CommandTaskType task)
+        {
+            return new CommandNodeOperationalState(
+                state.NodeId,
+                state.Echelon,
+                state.Role,
+                task,
+                state.TaskState,
+                state.X,
+                state.Z,
+                state.FacingDegrees);
+        }
+
+        private static bool AllowsOutboundCourier(
+            int side,
+            Regiment group,
+            CommandDoctrineOrder order,
+            bool playerProtected,
+            bool pendingOrderOnChild,
+            out TacticalOutboundCourierDecision decision)
+        {
+            string parentKey = CourierParentKey(side, order);
+            _lastCourierAt.TryGetValue(parentKey, out float lastCourierAt);
+            decision = TacticalOutboundCourierCadence.Decide(
+                new TacticalOutboundCourierInput(
+                    parentKey,
+                    order.NodeId,
+                    Time.realtimeSinceStartup,
+                    lastCourierAt,
+                    pendingOrderOnChild,
+                    commanderHasOrder: order.HasPurpose,
+                    commanderHasPlay: order.Task != CommandTaskType.None,
+                    childIsPlayerControlled: playerProtected,
+                    courierIntervalSeconds: order.CourierIntervalSeconds));
+            return decision.AllowIssue;
+        }
+
+        private static bool AllowsOutboundOrderLedger(
+            Regiment group,
+            CommandNodeOperationalState state,
+            string desiredSignature,
+            bool childHasOrders,
+            bool activeMove,
+            out TacticalOutboundOrderLedgerDecision decision)
+        {
+            string key = OutboundOrderKey(group, state);
+            string previous = null;
+            if (!string.IsNullOrWhiteSpace(key))
+                _lastOutboundOrderSignatureByGroup.TryGetValue(key, out previous);
+
+            bool hasPrevious = !string.IsNullOrWhiteSpace(previous);
+            bool duplicate = hasPrevious && string.Equals(previous, desiredSignature, StringComparison.Ordinal);
+            bool changed = hasPrevious && !duplicate;
+            decision = TacticalOutboundOrderLedger.Decide(
+                new TacticalOutboundOrderLedgerInput(
+                    childHasOrders,
+                    duplicate,
+                    activeMove,
+                    changed));
+            return decision.AllowIssue;
+        }
+
+        private static void RecordOutboundOrder(Regiment group, CommandNodeOperationalState state, string signature)
+        {
+            string key = OutboundOrderKey(group, state);
+            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(signature)) return;
+            _lastOutboundOrderSignatureByGroup[key] = signature;
+        }
+
+        private static string OutboundOrderKey(Regiment group, CommandNodeOperationalState state)
+        {
+            int instanceId = SafeInstanceId(group);
+            string nodeId = string.IsNullOrWhiteSpace(state.NodeId) ? "node-unknown" : state.NodeId.Trim();
+            return instanceId + "|" + nodeId;
+        }
+
+        private static string OutboundOrderSignature(
+            CommandNodeOperationalState state,
+            PostureExecutionDecision decision,
+            int targetFormation,
+            bool hasTarget,
+            Vector3 target)
+        {
+            return TacticalOperationsTelemetry.SafeToken(state.NodeId) +
+                "|" + state.Role +
+                "|" + state.Task +
+                "|" + decision.Action +
+                "|" + decision.Target +
+                "|formation-" + targetFormation +
+                "|" + TargetSignature(hasTarget, target);
+        }
+
+        private static string TargetSignature(bool hasTarget, Vector3 target)
+        {
+            if (!hasTarget || IsDefaultVector(target)) return "target-none";
+            return "target-" + BucketCoordinate(target.x) + "-" + BucketCoordinate(target.z);
+        }
+
+        private static int BucketCoordinate(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return 0;
+            return (int)Math.Round(value / 10f, MidpointRounding.AwayFromZero);
+        }
+
+        private static string CourierParentKey(int side, CommandDoctrineOrder order)
+        {
+            if (!string.IsNullOrWhiteSpace(order.ParentNodeId)) return order.ParentNodeId;
+            return "side-" + side + ":parent-unknown";
         }
 
         private static bool ApplyDecision(
@@ -182,16 +590,17 @@ namespace WhiskeyRealism.Patches
             PostureExecutionDecision decision,
             int targetFormation,
             bool closeEngaged,
+            TacticalRefuseFlankIntent.Decision refusedFlank,
             bool hasTarget,
             Vector3 target)
         {
             switch (decision.Action)
             {
                 case PostureExecutionAction.SetFormation:
-                    return SetFormation(bunits, group, state.Task, targetFormation, closeEngaged);
+                    return SetFormation(bunits, group, state.Task, targetFormation, closeEngaged, refusedFlank);
                 case PostureExecutionAction.SetFormationAndWaypoint:
                     if (!hasTarget) return false;
-                    bool formed = SetFormation(bunits, group, state.Task, targetFormation, closeEngaged);
+                    bool formed = SetFormation(bunits, group, state.Task, targetFormation, closeEngaged, refusedFlank);
                     return SetWaypoint(bunits, group, target) || formed;
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
@@ -210,7 +619,8 @@ namespace WhiskeyRealism.Patches
             Regiment group,
             CommandTaskType task,
             int targetFormation,
-            bool closeEngaged)
+            bool closeEngaged,
+            TacticalRefuseFlankIntent.Decision refusedFlank)
         {
             if (!CanUseGroupFormation(group)) return false;
             if (targetFormation < 0 || targetFormation > 4) return false;
@@ -226,7 +636,12 @@ namespace WhiskeyRealism.Patches
                     SafeRotationY(group),
                     manualFinalRotation,
                     FacingRefreshToleranceDegrees);
-            if (!needsFormation && !needsFacing) return false;
+            int refuseFlankParameter = CommandFormationCorrection.RefuseFlankParameter(
+                refusedFlank,
+                task,
+                closeEngaged);
+            bool needsRefusedFlank = refuseFlankParameter >= 0;
+            if (!needsFormation && !needsFacing && !needsRefusedFlank) return false;
             bool useNewPath = CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
                 closeEngaged,
                 needsFormation);
@@ -240,7 +655,7 @@ namespace WhiskeyRealism.Patches
                 newpath: useNewPath,
                 modifylastwaypoint: !useNewPath && needsFacing,
                 newstate: 2,
-                refuseflank: -1,
+                refuseflank: refuseFlankParameter,
                 ignoredeplyomentzone: false,
                 skiprotation: false,
                 showmovementoptions: false,
@@ -259,9 +674,7 @@ namespace WhiskeyRealism.Patches
 
             try
             {
-                Regiment enemy = group != null && group.unitrange != null
-                    ? group.unitrange.closestenemyunitfarreg
-                    : null;
+                Regiment enemy = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
                 if (enemy == null) return false;
 
                 Vector3 own = SafePosition(group);
@@ -342,6 +755,97 @@ namespace WhiskeyRealism.Patches
             return true;
         }
 
+        private static bool TryApplyFireControl(
+            BattleUnits bunits,
+            Regiment group,
+            CommandNodeOperationalState state,
+            out TacticalFireControlDecision appliedDecision)
+        {
+            appliedDecision = TacticalFireControlDecision.NoWrite(0, "no-fire-control-write");
+            if (bunits == null || group == null || IsPlayerProtected(group) || SafeRouted(group)) return false;
+
+            bool wrote = false;
+            var visited = new HashSet<int>();
+            Regiment[] units = group.allattachedunits;
+            if (units != null)
+            {
+                for (int i = 0; i < units.Length; i++)
+                {
+                    if (TryApplyFireControlToUnit(bunits, group, units[i], state, visited, out TacticalFireControlDecision decision))
+                    {
+                        appliedDecision = decision;
+                        wrote = true;
+                    }
+                }
+            }
+
+            if (TryApplyFireControlToUnit(bunits, group, group, state, visited, out TacticalFireControlDecision groupDecision))
+            {
+                appliedDecision = groupDecision;
+                wrote = true;
+            }
+
+            return wrote;
+        }
+
+        private static bool TryApplyFireControlToUnit(
+            BattleUnits bunits,
+            Regiment group,
+            Regiment unit,
+            CommandNodeOperationalState state,
+            ISet<int> visited,
+            out TacticalFireControlDecision decision)
+        {
+            decision = TacticalFireControlDecision.NoWrite(0, "no-unit");
+            try
+            {
+                if (!IsFireControlUnit(unit)) return false;
+                int instanceId = SafeInstanceId(unit);
+                if (instanceId == 0 || !visited.Add(instanceId)) return false;
+                if (HasRecentFireControlOrder(instanceId)) return false;
+                if (IsPlayerProtected(unit) || SafeRouted(unit) || unit.permanentlydetached) return false;
+                if (HasPendingOrder(unit) || HasActiveMoveMakingProgress(unit)) return false;
+
+                GameObject gameObject = UnityObject(unit);
+                if (gameObject == null || !gameObject.activeInHierarchy) return false;
+
+                Regiment target = ClosestEnemy(unit) ?? ClosestEnemy(group);
+                float targetDistance = SafeEnemyDistance(unit);
+                if (targetDistance <= 0f && target != null)
+                    targetDistance = SafeDistance(SafePosition(unit), SafePosition(target));
+
+                decision = TacticalFireControlDoctrine.Decide(new TacticalFireControlInput(
+                    unit.unittyp,
+                    unit.mounted > 0,
+                    state.Task,
+                    state.Role,
+                    target != null && targetDistance > 0f,
+                    targetDistance,
+                    SafeEffectiveFireRange(unit),
+                    SafeAmmoRatio(unit),
+                    SafeMorale(unit),
+                    SafeFatigue(unit),
+                    UnitInCover(unit),
+                    EnemyAdvancing(target),
+                    target != null && EstimateFriendlyFrontBlocker(group, SafePosition(unit), SafePosition(target)) > 0.35f,
+                    IsAlignedToTarget(unit, target),
+                    UnitLoadedVolley(unit),
+                    IsChargeOrdered(unit),
+                    unit.combatbehaviorordered));
+
+                if (!decision.ShouldWrite) return false;
+                if (decision.RecommendedCombatBehavior == unit.combatbehaviorordered) return false;
+
+                bunits.ChangeCombatBehavior(gameObject, decision.RecommendedCombatBehavior);
+                _lastFireControlAt[instanceId] = Time.realtimeSinceStartup;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static bool TryResolveTarget(
             Regiment group,
             TacticalBattleOrchestrator orchestrator,
@@ -351,37 +855,373 @@ namespace WhiskeyRealism.Patches
             out Vector3 target)
         {
             target = default(Vector3);
+            bool resolved;
             switch (targetKind)
             {
                 case PostureExecutionTarget.DoctrinePrimaryTarget:
                     if (TryDoctrineTarget(doctrineOrder.PrimaryTarget, out target) && IsSafeWaypoint(group, target))
-                        return true;
-                    return TryObjectiveApproach(group, orchestrator, ObjectiveApproachStandOff, out target);
+                    {
+                        resolved = true;
+                        break;
+                    }
+                    resolved = TryObjectiveApproach(group, orchestrator, ObjectiveApproachStandOff, out target);
+                    break;
                 case PostureExecutionTarget.DoctrineSupportTarget:
                     if (TryDoctrineTarget(doctrineOrder.SupportTarget, out target) && IsSafeWaypoint(group, target))
-                        return true;
-                    return TryObjectiveApproach(group, orchestrator, ObjectiveApproachStandOff, out target);
+                    {
+                        resolved = true;
+                        break;
+                    }
+                    resolved = TryObjectiveApproach(group, orchestrator, ObjectiveApproachStandOff, out target);
+                    break;
                 case PostureExecutionTarget.DoctrineFallbackTarget:
                     if (TryDoctrineTarget(doctrineOrder.FallbackTarget, out target) && IsSafeWaypoint(group, target))
-                        return true;
-                    return TryFallbackFromObjective(group, orchestrator, out target);
+                    {
+                        resolved = true;
+                        break;
+                    }
+                    resolved = TryFallbackFromObjective(group, orchestrator, out target);
+                    break;
                 case PostureExecutionTarget.ObjectiveApproach:
                 case PostureExecutionTarget.ReleasePoint:
-                    return TryObjectiveApproach(group, orchestrator, ObjectiveApproachStandOff, out target);
+                    resolved = TryObjectiveApproach(group, orchestrator, ObjectiveApproachStandOff, out target);
+                    break;
                 case PostureExecutionTarget.AssemblyArea:
-                    return TryObjectiveApproach(group, orchestrator, AssemblyStandOff, out target);
+                    resolved = TryObjectiveApproach(group, orchestrator, AssemblyStandOff, out target);
+                    break;
                 case PostureExecutionTarget.FallbackLine:
-                    return TryFallbackFromObjective(group, orchestrator, out target);
+                    resolved = TryFallbackFromObjective(group, orchestrator, out target);
+                    break;
                 case PostureExecutionTarget.RecoveryPath:
-                    return TryRecoveryPath(group, orchestrator, out target);
+                    resolved = TryRecoveryPath(group, orchestrator, out target);
+                    break;
                 case PostureExecutionTarget.ReserveArea:
-                    return TryObjectiveApproach(group, orchestrator, ReserveStandOff, out target);
+                    resolved = TryObjectiveApproach(group, orchestrator, ReserveStandOff, out target);
+                    break;
                 case PostureExecutionTarget.CurrentPosition:
                 case PostureExecutionTarget.None:
                     return false;
                 default:
                     return false;
             }
+
+            if (!resolved) return false;
+            return TryApplyNavPlan(group, state, doctrineOrder, targetKind, target, out target);
+        }
+
+        private static bool TryApplyNavPlan(
+            Regiment group,
+            CommandNodeOperationalState state,
+            CommandDoctrineOrder doctrineOrder,
+            PostureExecutionTarget targetKind,
+            Vector3 resolvedTarget,
+            out Vector3 target)
+        {
+            target = resolvedTarget;
+
+            if (targetKind != PostureExecutionTarget.DoctrinePrimaryTarget &&
+                targetKind != PostureExecutionTarget.DoctrineSupportTarget &&
+                targetKind != PostureExecutionTarget.DoctrineFallbackTarget)
+                return IsSafeWaypoint(group, target);
+
+            try
+            {
+                Vector3 own = SafePosition(group);
+                if (IsDefaultVector(own)) return IsSafeWaypoint(group, target);
+
+                bool hasThreat = TryClosestEnemyPoint(group, out Vector3 threat);
+                Vector3 currentWaypoint = default(Vector3);
+                bool hasCurrentWaypoint = false;
+                try
+                {
+                    currentWaypoint = group != null ? group.lastsetwaypointposition : default(Vector3);
+                    hasCurrentWaypoint = !IsDefaultVector(currentWaypoint);
+                }
+                catch { }
+
+                DoctrineTargetPoint primary = DoctrineTargetPoint.From(resolvedTarget.x, resolvedTarget.z);
+                DoctrineTargetPoint fallback = doctrineOrder.FallbackTarget;
+                if (targetKind == PostureExecutionTarget.DoctrineFallbackTarget)
+                {
+                    primary = doctrineOrder.PrimaryTarget.HasValue
+                        ? doctrineOrder.PrimaryTarget
+                        : DoctrineTargetPoint.From(resolvedTarget.x, resolvedTarget.z);
+                    fallback = DoctrineTargetPoint.From(resolvedTarget.x, resolvedTarget.z);
+                }
+
+                TacticalNavPlanDecision plan = TacticalNavMeshPlanner.Plan(new TacticalNavPlanInput(
+                    state.Task,
+                    own.x,
+                    own.z,
+                    primary,
+                    fallback,
+                    hasThreat,
+                    hasThreat ? threat.x : 0f,
+                    hasThreat ? threat.z : 0f,
+                    hasCurrentWaypoint,
+                    hasCurrentWaypoint ? currentWaypoint.x : 0f,
+                    hasCurrentWaypoint ? currentWaypoint.z : 0f,
+                    HasCloseEngagement(group),
+                    MinWaypointDistance,
+                    MaxConservativeWaypointDistance,
+                    BuildRuntimePathQualitySamples(
+                        group,
+                        own,
+                        resolvedTarget,
+                        state.Task,
+                        hasThreat,
+                        hasThreat ? threat : default(Vector3),
+                        hasCurrentWaypoint,
+                        currentWaypoint)));
+
+                if (!plan.HasTarget) return IsSafeWaypoint(group, target);
+
+                Vector3 plannedTarget = PlannedTargetVector(plan.Target);
+                if (!IsSafeWaypoint(group, plannedTarget)) return IsSafeWaypoint(group, target);
+
+                target = plannedTarget;
+                return true;
+            }
+            catch
+            {
+                target = resolvedTarget;
+                return IsSafeWaypoint(group, target);
+            }
+        }
+
+        private static Vector3 PlannedTargetVector(DoctrineTargetPoint point)
+        {
+            return new Vector3(point.X, SafeBattleY(), point.Z);
+        }
+
+        private static TacticalPathQualitySample[] BuildRuntimePathQualitySamples(
+            Regiment group,
+            Vector3 own,
+            Vector3 target,
+            CommandTaskType task,
+            bool hasThreat,
+            Vector3 threat,
+            bool hasCurrentWaypoint,
+            Vector3 currentWaypoint)
+        {
+            try
+            {
+                if (IsDefaultVector(own) || IsDefaultVector(target))
+                    return Array.Empty<TacticalPathQualitySample>();
+
+                Vector3 direction = target - own;
+                direction.y = 0f;
+                if (direction.sqrMagnitude < 1f)
+                    return Array.Empty<TacticalPathQualitySample>();
+
+                direction.Normalize();
+                Vector3 lateral = new Vector3(-direction.z, 0f, direction.x);
+                return new[]
+                {
+                    BuildPathQualitySample(group, own, target, task, hasThreat, threat, hasCurrentWaypoint, currentWaypoint),
+                    BuildPathQualitySample(group, own, target + lateral * 120f, task, hasThreat, threat, hasCurrentWaypoint, currentWaypoint),
+                    BuildPathQualitySample(group, own, target - lateral * 120f, task, hasThreat, threat, hasCurrentWaypoint, currentWaypoint)
+                };
+            }
+            catch
+            {
+                return Array.Empty<TacticalPathQualitySample>();
+            }
+        }
+
+        private static TacticalPathQualitySample BuildPathQualitySample(
+            Regiment group,
+            Vector3 own,
+            Vector3 candidate,
+            CommandTaskType task,
+            bool hasThreat,
+            Vector3 threat,
+            bool hasCurrentWaypoint,
+            Vector3 currentWaypoint)
+        {
+            float slopeCost = 0f;
+            float terrainRisk = 0f;
+            float bridgeRisk = 0f;
+            float congestion = 0f;
+            float roadPreference = 0f;
+            float deadGround = 0f;
+            float threatExposure = 0f;
+            float routeContinuity = 0f;
+            float reservationPressure = 0f;
+            float fallbackLaneConflict = 0f;
+            float artilleryDanger = 0f;
+
+            try
+            {
+                var path = new NavMeshPath();
+                bool pathFound = NavMesh.CalculatePath(own, candidate, NavMesh.AllAreas, path);
+                Vector3[] corners = path != null ? path.corners : null;
+                int count = corners != null ? corners.Length : 0;
+                if (!pathFound || path.status != NavMeshPathStatus.PathComplete || count <= 0)
+                {
+                    terrainRisk = 1f;
+                }
+                else
+                {
+                    roadPreference = count <= 3 ? 0.65f : 0.25f;
+                    congestion = Math.Min(1f, Math.Max(0f, (count - 4) * 0.12f));
+                    float previousHeight = SampleHeight(own);
+                    for (int i = 0; i < count; i++)
+                    {
+                        Vector3 corner = corners[i];
+                        float height = SampleHeight(corner);
+                        slopeCost = Math.Max(slopeCost, Math.Min(1f, Math.Abs(height - previousHeight) / 35f));
+                        previousHeight = height;
+                        int terrain = SafeTerrain(corner);
+                        if (terrain == 4 || terrain == 8 || terrain == 6)
+                        {
+                            terrainRisk = Math.Max(terrainRisk, 0.85f);
+                            bridgeRisk = Math.Max(bridgeRisk, 0.70f);
+                        }
+                        if (SafeSearchCrossingTerrain(corner))
+                        {
+                            bridgeRisk = Math.Max(bridgeRisk, 0.55f);
+                        }
+                    }
+                }
+
+                if (hasThreat && !IsDefaultVector(threat))
+                {
+                    float distance = Vector3.Distance(candidate, threat);
+                    deadGround = distance >= 250f ? 0.70f : Math.Max(0f, distance / 250f * 0.45f);
+                    threatExposure = distance <= 100f ? 1f : Math.Max(0f, 1f - ((distance - 100f) / 350f));
+                    artilleryDanger = threatExposure * (1f - deadGround) * 0.40f;
+                    if (task == CommandTaskType.FallBackToLine)
+                    {
+                        float axisDistance = DistanceToSegment2D(candidate, threat, own);
+                        float axisRisk = Math.Max(0f, 1f - (axisDistance / 180f));
+                        float closesThreat = distance < Vector3.Distance(own, threat) ? 0.35f : 0f;
+                        fallbackLaneConflict = Math.Max(axisRisk, closesThreat);
+                    }
+                }
+
+                if (hasCurrentWaypoint && !IsDefaultVector(currentWaypoint))
+                    routeContinuity = Math.Max(0f, 1f - (Vector3.Distance(candidate, currentWaypoint) / 350f));
+
+                reservationPressure = Math.Max(
+                    congestion,
+                    Math.Max(bridgeRisk * 0.75f, terrainRisk * 0.45f));
+            }
+            catch
+            {
+                terrainRisk = Math.Max(terrainRisk, 0.50f);
+            }
+
+            return new TacticalPathQualitySample(
+                candidate.x,
+                candidate.z,
+                roadPreference,
+                slopeCost,
+                congestion,
+                terrainRisk,
+                bridgeRisk,
+                deadGround,
+                EstimateFriendlyFrontBlocker(group, own, candidate),
+                threatExposure,
+                routeContinuity,
+                reservationPressure,
+                fallbackLaneConflict,
+                artilleryDanger);
+        }
+
+        private static float DistanceToSegment2D(Vector3 point, Vector3 start, Vector3 end)
+        {
+            try
+            {
+                Vector3 segment = end - start;
+                segment.y = 0f;
+                float lengthSquared = segment.sqrMagnitude;
+                if (lengthSquared < 0.001f) return SafeDistance(point, start);
+
+                Vector3 rel = point - start;
+                rel.y = 0f;
+                float t = Vector3.Dot(rel, segment) / lengthSquared;
+                t = Math.Max(0f, Math.Min(1f, t));
+                Vector3 projected = start + segment * t;
+                projected.y = point.y;
+                return SafeDistance(point, projected);
+            }
+            catch
+            {
+                return 9999f;
+            }
+        }
+
+        private static float EstimateFriendlyFrontBlocker(Regiment group, Vector3 own, Vector3 candidate)
+        {
+            try
+            {
+                if (group == null || IsDefaultVector(own) || IsDefaultVector(candidate))
+                    return 0f;
+                var units = BattleUnits.completeunitlist as IList;
+                if (units == null || units.Count == 0) return 0f;
+
+                Vector3 axis = candidate - own;
+                axis.y = 0f;
+                float axisLength = axis.magnitude;
+                if (axisLength < 1f) return 0f;
+                axis.Normalize();
+
+                float worst = 0f;
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var friend = units[i] as Regiment;
+                    if (friend == null || friend == group) continue;
+                    if (friend.alliance != group.alliance) continue;
+                    if (friend.isrouted || friend.markedforrout || friend.permanentlydetached) continue;
+                    if (friend.unittyp > 14) continue;
+
+                    Vector3 pos = SafePosition(friend);
+                    if (IsDefaultVector(pos)) continue;
+                    Vector3 rel = pos - own;
+                    rel.y = 0f;
+                    float forward = Vector3.Dot(rel, axis);
+                    if (forward < 30f || forward > axisLength + 120f) continue;
+
+                    float lateral = (rel - axis * forward).magnitude;
+                    if (lateral > 120f) continue;
+                    float distanceToCandidate = Vector3.Distance(pos, candidate);
+                    float proximity = distanceToCandidate <= 80f ? 1f : Math.Max(0f, 1f - ((distanceToCandidate - 80f) / 220f));
+                    float lateralBlock = 1f - Math.Min(1f, lateral / 120f);
+                    worst = Math.Max(worst, Math.Max(proximity, lateralBlock * 0.8f));
+                }
+
+                return Math.Min(1f, worst);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float SampleHeight(Vector3 point)
+        {
+            try
+            {
+                BattlefieldSetup bfs = SafeBattlefieldSetup();
+                return bfs != null ? bfs.GetTerrainHeight(point) : point.y;
+            }
+            catch
+            {
+                return point.y;
+            }
+        }
+
+        private static int SafeTerrain(Vector3 point)
+        {
+            try { return BattlefieldSetup.GetCurrentTerrainOnPos(point); }
+            catch { return -1; }
+        }
+
+        private static bool SafeSearchCrossingTerrain(Vector3 point)
+        {
+            try { return BattlefieldSetup.SearchTerrainInRangePos(point, new[] { 4, 8 }, 2) != null; }
+            catch { return false; }
         }
 
         private static bool TryDoctrineTarget(DoctrineTargetPoint point, out Vector3 target)
@@ -445,9 +1285,7 @@ namespace WhiskeyRealism.Patches
             target = default(Vector3);
             try
             {
-                Regiment enemy = group != null && group.unitrange != null
-                    ? group.unitrange.closestenemyunitfarreg
-                    : null;
+                Regiment enemy = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
                 if (enemy == null) return false;
 
                 Vector3 position = SafePosition(enemy);
@@ -493,7 +1331,8 @@ namespace WhiskeyRealism.Patches
             if (TryCurrentSetObjectivePoint(group, out objective)) return true;
 
             var objectives = orchestrator?.OperationsLedger?.CurrentObjectives;
-            if (objectives == null || objectives.Count == 0) return false;
+            if (objectives == null || objectives.Count == 0)
+                return TryLastWaypointPoint(group, out objective);
 
             string primary = orchestrator.Army != null
                 ? orchestrator.Army.CurrentOperation.PrimaryObjectiveId
@@ -508,7 +1347,31 @@ namespace WhiskeyRealism.Patches
                 return !IsDefaultVector(objective);
             }
 
+            if (objectives.Count > 0)
+            {
+                var fallback = objectives[0];
+                objective = new Vector3(fallback.Observation.Location.X, SafeBattleY(), fallback.Observation.Location.Z);
+                return !IsDefaultVector(objective);
+            }
+
             return false;
+        }
+
+        private static bool TryLastWaypointPoint(Regiment group, out Vector3 objective)
+        {
+            objective = default(Vector3);
+            try
+            {
+                if (group == null) return false;
+                Vector3 waypoint = group.lastsetwaypointposition;
+                if (IsDefaultVector(waypoint)) return false;
+                objective = new Vector3(waypoint.x, SafeBattleY(), waypoint.z);
+                return IsSafeWaypoint(group, objective);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool TryCurrentSetObjectivePoint(Regiment group, out Vector3 objective)
@@ -543,7 +1406,8 @@ namespace WhiskeyRealism.Patches
             WriteEligibilitySnapshot eligibility,
             CommandPhysicalState physical,
             float recentOrderSeconds,
-            bool allowPendingLocalFormation)
+            bool allowPendingLocalFormation,
+            bool allowStaleQueuedBypass)
         {
             if (!eligibility.ModeAllowsWrites) return false;
             if (eligibility.PlayerProtected || physical.PlayerProtected) return false;
@@ -551,9 +1415,30 @@ namespace WhiskeyRealism.Patches
             if (eligibility.OrderPending) return false;
             if (eligibility.RecentOrder) return false;
             if (physical.ActiveMove) return false;
-            if (!allowPendingLocalFormation && HasPendingOrder(group)) return false;
+            if (!allowPendingLocalFormation && HasPendingOrder(group, allowStaleQueuedBypass)) return false;
             if (HasRecentExecutorOrder(SafeInstanceId(group), recentOrderSeconds)) return false;
             return true;
+        }
+
+        private static bool CanBypassStaleQueuedOrder(CommandTaskType task)
+        {
+            switch (task)
+            {
+                case CommandTaskType.Scout:
+                case CommandTaskType.Probe:
+                case CommandTaskType.Screen:
+                case CommandTaskType.FormUp:
+                case CommandTaskType.AdvanceToAssembly:
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.FallBackToLine:
+                case CommandTaskType.ReleaseReserve:
+                case CommandTaskType.RecoverStuckOrder:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static CommandPhysicalState BuildPhysicalState(Regiment group, bool playerProtected, bool routed)
@@ -698,6 +1583,7 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (!DLC_WL.dlc_scenarioactive) return true;
+                if (GameVars.ai_vs_ai) return true;
                 if (group == null) return false;
                 if (group.dlcw_isundercommander) return false;
                 if (group.allattachedunits == null) return true;
@@ -742,13 +1628,18 @@ namespace WhiskeyRealism.Patches
 
         private static bool HasPendingOrder(Regiment group)
         {
-            if (PendingOrderOn(group)) return true;
+            return HasPendingOrder(group, allowStaleQueuedBypass: false);
+        }
+
+        private static bool HasPendingOrder(Regiment group, bool allowStaleQueuedBypass)
+        {
+            if (PendingOrderOn(group, allowStaleQueuedBypass)) return true;
             try
             {
                 if (group == null || group.allattachedunits == null) return false;
                 for (int i = 0; i < group.allattachedunits.Length; i++)
                 {
-                    if (PendingOrderOn(group.allattachedunits[i])) return true;
+                    if (PendingOrderOn(group.allattachedunits[i], allowStaleQueuedBypass)) return true;
                 }
             }
             catch
@@ -759,7 +1650,7 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        private static bool PendingOrderOn(Regiment unit)
+        private static bool PendingOrderOn(Regiment unit, bool allowStaleQueuedBypass)
         {
             try
             {
@@ -771,7 +1662,8 @@ namespace WhiskeyRealism.Patches
                     RegimentPaths = unit.regimentpaths,
                     PathInterrupted = unit.pathinterrupted,
                     MovementMode = unit.movementmode,
-                    ActiveMove = HasActiveMoveMakingProgress(unit)
+                    ActiveMove = HasActiveMoveMakingProgress(unit),
+                    AllowStaleQueuedBypass = allowStaleQueuedBypass
                 });
             }
             catch
@@ -792,6 +1684,13 @@ namespace WhiskeyRealism.Patches
             return Time.realtimeSinceStartup - last < Math.Max(0f, cooldownSeconds);
         }
 
+        private static bool HasRecentFireControlOrder(int instanceId)
+        {
+            if (instanceId == 0) return true;
+            if (!_lastFireControlAt.TryGetValue(instanceId, out float last)) return false;
+            return Time.realtimeSinceStartup - last < FireControlOrderCooldownSeconds;
+        }
+
         private static bool HasActiveMoveMakingProgress(Regiment group)
         {
             try
@@ -801,8 +1700,7 @@ namespace WhiskeyRealism.Patches
                 if (group.regimentpaths <= 0) return false;
                 if (group.groupsubordinatesmoving > 0.05f || group.groupsubordinatesmovingnonai > 0.05f) return true;
                 if (group.movementmode > 0) return true;
-                Vector3 lastWaypoint = group.lastsetwaypointposition;
-                return !IsDefaultVector(lastWaypoint) && SafeDistance(SafePosition(group), lastWaypoint) > MinWaypointDistance;
+                return false;
             }
             catch
             {
@@ -835,6 +1733,418 @@ namespace WhiskeyRealism.Patches
             catch
             {
                 return false;
+            }
+        }
+
+        private static bool IsFireControlUnit(Regiment unit)
+        {
+            try
+            {
+                return unit != null &&
+                    (unit.unittyp == TacticalUnitType.Infantry ||
+                     unit.unittyp == TacticalUnitType.Skirmisher ||
+                     unit.unittyp == TacticalUnitType.Cavalry);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool HasVisibleTarget(Regiment group)
+        {
+            try
+            {
+                return group != null &&
+                    (TacticalFogOfWarContact.HasVisibleEnemy(group) ||
+                     group.groupenemiesinrange > 0f);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool HasFowVisibleEnemy(Regiment group)
+        {
+            try
+            {
+                return TacticalFogOfWarContact.HasVisibleEnemy(group);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool HasRecentReceivedFire(Regiment group)
+        {
+            try
+            {
+                if (group == null) return false;
+                if (HasReceivedFire(group)) return true;
+                if (group.allattachedunits == null) return false;
+
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    if (HasReceivedFire(group.allattachedunits[i])) return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            return false;
+        }
+
+        private static bool HasReceivedFire(Regiment unit)
+        {
+            try
+            {
+                return unit != null && unit.receivedfire != null && unit.receivedfire.Count > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static Regiment ClosestEnemy(Regiment group)
+        {
+            try
+            {
+                return TacticalFogOfWarContact.ClosestVisibleEnemy(group);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static float SafeEnemyDistance(Regiment group)
+        {
+            try
+            {
+                if (!TacticalFogOfWarContact.TryClosestVisibleEnemy(group, out _, out float value)) return 0f;
+                return !float.IsNaN(value) && !float.IsInfinity(value) && value > 0f ? value : 0f;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float SafeMorale(Regiment group)
+        {
+            try
+            {
+                if (group == null) return 1f;
+                float value = group.morale;
+                return !float.IsNaN(value) && !float.IsInfinity(value) ? value : 1f;
+            }
+            catch
+            {
+                return 1f;
+            }
+        }
+
+        private static float SafeFireRange(Regiment group)
+        {
+            try
+            {
+                if (group == null) return 0f;
+                float value = group.firerange;
+                return !float.IsNaN(value) && !float.IsInfinity(value) && value > 0f ? value : 0f;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float SafeEffectiveFireRange(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return 0f;
+                float value = unit.GetFireRange(true);
+                if (!float.IsNaN(value) && !float.IsInfinity(value) && value > 0f)
+                    return value;
+            }
+            catch { }
+
+            return SafeFireRange(unit);
+        }
+
+        private static float SafeAmmoRatio(Regiment unit)
+        {
+            try
+            {
+                if (unit == null || unit.ammo == null || unit.ammo.Length == 0) return 1f;
+                float total = 0f;
+                int count = 0;
+                for (int i = 0; i < unit.ammo.Length; i++)
+                {
+                    float value = unit.ammo[i];
+                    if (float.IsNaN(value) || float.IsInfinity(value)) continue;
+                    total += Math.Max(0f, value);
+                    count++;
+                }
+
+                return count > 0 ? Clamp01(total / count) : 1f;
+            }
+            catch
+            {
+                return 1f;
+            }
+        }
+
+        private static float SafeFatigue(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return 0f;
+                float value = unit.fatigue;
+                return !float.IsNaN(value) && !float.IsInfinity(value) ? Clamp01(value) : 0f;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static bool UnitInCover(Regiment unit)
+        {
+            try
+            {
+                return unit != null && unit.covervalue > 0.05f && unit.coverobject != 3;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool EnemyAdvancing(Regiment target)
+        {
+            try
+            {
+                return target != null && (target.regimentpaths > 0 || target.movementmode > 0);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool UnitLoadedVolley(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return false;
+                if (unit.allspritesreloaded) return true;
+                return GameVars.currenttimefromstart - unit.lastfiredshottime > 0.05f;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static bool IsChargeOrdered(Regiment unit)
+        {
+            try
+            {
+                return unit != null &&
+                    (unit.combatbehaviorordered == TacticalFireControlDoctrine.InfantryCharge ||
+                     unit.combatbehaviorordered == TacticalFireControlDoctrine.CavalryCharge ||
+                     unit.movementmode == 3 ||
+                     (UnityEngine.Object)unit.chargetarget != null);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsAlignedToTarget(Regiment unit, Regiment target)
+        {
+            try
+            {
+                if (unit == null || target == null) return true;
+                Vector3 own = SafePosition(unit);
+                Vector3 enemy = SafePosition(target);
+                if (IsDefaultVector(own) || IsDefaultVector(enemy)) return true;
+
+                Vector3 direction = enemy - own;
+                direction.y = 0f;
+                if (direction.sqrMagnitude < 0.01f) return true;
+                direction.Normalize();
+
+                Vector3 forward = unit.transform.forward;
+                forward.y = 0f;
+                if (forward.sqrMagnitude < 0.01f) return true;
+                forward.Normalize();
+
+                return Vector3.Dot(forward, direction) >= 0.25f;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static float Clamp01(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
+            return value > 1f ? 1f : value;
+        }
+
+        private static bool HasArtilleryCapability(Regiment group)
+        {
+            try
+            {
+                if (group == null) return false;
+                if (group.unittyp == TacticalUnitType.Artillery || group.guns > 0) return true;
+                if (group.allattachedunits == null) return false;
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit != null && (unit.unittyp == TacticalUnitType.Artillery || unit.guns > 0)) return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static bool HasCavalryCapability(Regiment group)
+        {
+            try
+            {
+                if (group == null) return false;
+                if (group.unittyp == TacticalUnitType.Cavalry) return true;
+                if (group.allattachedunits == null) return false;
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit != null && unit.unittyp == TacticalUnitType.Cavalry) return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static TacticalCavalryFollowMode CavalryFollowModeFor(CommandNodeRole role, CommandTaskType task)
+        {
+            if (task == CommandTaskType.GuardFlank || role == CommandNodeRole.Reserve)
+                return TacticalCavalryFollowMode.Guard;
+            if (task == CommandTaskType.Screen || role == CommandNodeRole.ScreeningForce)
+                return TacticalCavalryFollowMode.Screen;
+            if (task == CommandTaskType.Scout || task == CommandTaskType.Probe || role == CommandNodeRole.Probe)
+                return TacticalCavalryFollowMode.Scout;
+            if (task == CommandTaskType.AttackObjective || task == CommandTaskType.SupportAttack)
+                return TacticalCavalryFollowMode.Raid;
+            return TacticalCavalryFollowMode.None;
+        }
+
+        private static bool TargetInFort(Regiment target)
+        {
+            try { return target != null && target.fortinrange != null; }
+            catch { return false; }
+        }
+
+        private static bool TargetHasCloseSupport(Regiment target)
+        {
+            try
+            {
+                if (target == null || target.unitrange == null || target.unitrange.temp_owninrangeregs == null) return false;
+                for (int i = 0; i < target.unitrange.temp_owninrangeregs.Count; i++)
+                {
+                    Regiment support = target.unitrange.temp_owninrangeregs[i];
+                    if (support == null || support.isrouted || support.markedforrout) continue;
+                    if (support.unittyp == TacticalUnitType.Infantry || support.unittyp == TacticalUnitType.Artillery)
+                        return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static float CavalryFearAdvantage(Regiment group)
+        {
+            try
+            {
+                if (group == null) return 0.5f;
+                float morale = SafeMorale(group);
+                float closeThreat = HasLocalFlankRisk(group) ? -0.25f : 0f;
+                return Math.Max(0f, Math.Min(1f, morale + closeThreat));
+            }
+            catch
+            {
+                return 0.5f;
+            }
+        }
+
+        private static string ParentNodeKey(Regiment group, CommandNodeOperationalState state)
+        {
+            try
+            {
+                if (group != null)
+                {
+                    FieldInfo parentField = AccessTools.Field(typeof(Regiment), "parentregiment");
+                    object parent = parentField != null ? parentField.GetValue(group) : null;
+                    var parentGameObject = parent as GameObject;
+                    if (parentGameObject != null) return "parent-go:" + parentGameObject.GetInstanceID();
+                    var parentComponent = parent as Component;
+                    if (parentComponent != null) return "parent-co:" + parentComponent.GetInstanceID();
+
+                    Transform parentTransform = group.transform != null ? group.transform.parent : null;
+                    if (parentTransform != null) return "parent-tr:" + parentTransform.GetInstanceID();
+                }
+            }
+            catch { }
+
+            return "role-parent:" + state.Echelon + ":" + state.Role;
+        }
+
+        private static TacticalRefuseFlankIntent.Decision ResolveRefusedFlank(
+            Regiment group,
+            CommandTaskType task,
+            bool closeEngaged,
+            bool flankRisk)
+        {
+            if (!closeEngaged || !flankRisk)
+                return TacticalRefuseFlankIntent.Decision.NoRefuse;
+
+            int candidate = CommandFormationCorrection.RefuseFlankParameter(
+                TacticalRefuseFlankIntent.Decision.RefuseLeft,
+                task,
+                closeEngaged);
+            if (candidate < 0)
+                return TacticalRefuseFlankIntent.Decision.NoRefuse;
+
+            try
+            {
+                Vector3 own = SafePosition(group);
+                if (IsDefaultVector(own)) return TacticalRefuseFlankIntent.Decision.NoRefuse;
+                if (!TryClosestEnemyPoint(group, out Vector3 threat)) return TacticalRefuseFlankIntent.Decision.NoRefuse;
+
+                float threatRotation = CommandFormationCorrection.ThreatFacingRotationDegrees(
+                    own.x,
+                    own.z,
+                    threat.x,
+                    threat.z);
+                return CommandFormationCorrection.RefuseDecisionForThreatFacing(
+                    SafeRotationY(group),
+                    threatRotation);
+            }
+            catch
+            {
+                return TacticalRefuseFlankIntent.Decision.NoRefuse;
             }
         }
 

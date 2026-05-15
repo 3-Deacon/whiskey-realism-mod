@@ -17,7 +17,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 input.Location,
                 input.SourceConfidence,
                 cappedValue,
-                input.TypeAnchorVerified);
+                input.TypeAnchorVerified,
+                input.ApproachAvenue);
         }
 
         public static bool CanDriveTypedOperationScoring(ObjectiveObservationInput input)

@@ -146,7 +146,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             if (best >= 0) return best;
 
-            return PickFallbackMainEffort(plan, snaps, ev);
+            best = PickFallbackMainEffort(plan, snaps, ev);
+            if (best >= 0) return best;
+
+            return PickAggressiveProvisionalMainEffort(plan, snaps, ev);
         }
 
         private static int PickFallbackMainEffort(
@@ -178,6 +181,56 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
             return best;
+        }
+
+        private static int PickAggressiveProvisionalMainEffort(
+            TacticalBattlePlan plan,
+            IReadOnlyList<DirectChildSnapshot> snaps,
+            IReadOnlyList<DirectChildEvidence> ev)
+        {
+            if (!AllowsProvisionalAttackAxis(plan)) return -1;
+
+            int best = -1;
+            int bestScore = -1;
+            for (int i = 0; i < snaps.Count; i++)
+            {
+                if (!snaps[i].Active) continue;
+                if (Contains(plan.FixingSectors, ev[i].PrimarySector)) continue;
+                if (Contains(plan.ScreeningSectors, ev[i].PrimarySector)) continue;
+                if (ev[i].EnemyStrengthBucket > ev[i].OwnStrengthBucket + 1) continue;
+
+                int distancePenalty = Math.Abs(ev[i].PrimarySector - plan.MainEffortSector);
+                int contactScore = ev[i].ContactFlag ? 4 : 0;
+                int confidenceScore = (int)Math.Round(ev[i].Confidence01 * 4f);
+                int score = ev[i].OwnStrengthBucket * 8
+                    - ev[i].EnemyStrengthBucket * 2
+                    - ev[i].FlankExposureBucket
+                    - distancePenalty
+                    + contactScore
+                    + confidenceScore;
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = i;
+                }
+            }
+
+            return best;
+        }
+
+        private static bool AllowsProvisionalAttackAxis(TacticalBattlePlan plan)
+        {
+            if (plan.Phase == BattlePhase.Withdraw || plan.Phase == BattlePhase.Consolidate) return false;
+            switch (plan.PlanId)
+            {
+                case BattlePlanId.HoodFrontalAssault:
+                case BattlePlanId.BurnsideForcedAssault:
+                case BattlePlanId.GenericAggressive:
+                case BattlePlanId.GenericDesperate:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static bool Contains(int[] arr, int val)

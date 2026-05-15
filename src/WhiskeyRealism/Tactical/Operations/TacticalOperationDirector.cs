@@ -93,9 +93,9 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             bool activeOperation = IsActiveOperation(input.Current.Phase);
             if (input.Current.Phase == TacticalOperationPhase.Committed &&
-                ShouldSoftAbortCommitted(input))
+                TryEvaluateCommittedContact(input, out TacticalOperationDirectorDecision committedContactDecision))
             {
-                return SoftAbort(input, "odds-collapse");
+                return committedContactDecision;
             }
 
             if (input.Current.Phase == TacticalOperationPhase.Committed &&
@@ -117,6 +117,22 @@ namespace WhiskeyRealism.Tactical.Operations
                     : new TacticalOperationDirectorDecision(OperationRecord.Noop, "no-objective");
             }
 
+            TacticalObjectiveGate objectiveGate = TacticalDecisionDoctrine.ClassifyObjective(
+                primary,
+                input.OwnStrength,
+                input.ReserveFraction);
+
+            if (objectiveGate == TacticalObjectiveGate.ReconnaissanceContact)
+            {
+                return new TacticalOperationDirectorDecision(
+                    new OperationRecord(
+                        TacticalOperationShape.FixAndFlank,
+                        TacticalOperationPhase.Scouting,
+                        primary.ObjectiveId,
+                        input.CurrentTimeSeconds + 420f),
+                    "recon-contact");
+            }
+
             if (CanParallelAttack(input))
             {
                 return new TacticalOperationDirectorDecision(
@@ -126,6 +142,17 @@ namespace WhiskeyRealism.Tactical.Operations
                         primary.ObjectiveId,
                         input.CurrentTimeSeconds + 1200f),
                     "parallel-advantage");
+            }
+
+            if (objectiveGate == TacticalObjectiveGate.ExposedWeakPoint)
+            {
+                return new TacticalOperationDirectorDecision(
+                    new OperationRecord(
+                        TacticalOperationShape.FixAndFlank,
+                        TacticalOperationPhase.Committed,
+                        primary.ObjectiveId,
+                        input.CurrentTimeSeconds + 900f),
+                    "fix-and-flank");
             }
 
             float odds = Odds(input.OwnStrength, primary.EnemyStrength);
@@ -141,20 +168,44 @@ namespace WhiskeyRealism.Tactical.Operations
                 "selected");
         }
 
-        private static bool ShouldSoftAbortCommitted(TacticalOperationDirectorInput input)
+        private static bool TryEvaluateCommittedContact(
+            TacticalOperationDirectorInput input,
+            out TacticalOperationDirectorDecision decision)
         {
+            decision = default(TacticalOperationDirectorDecision);
             if (!TryFindObjective(input.Objectives, input.Current.PrimaryObjectiveId, out BattlefieldObjectiveEstimate primary))
             {
                 return false;
             }
 
-            float odds = Odds(input.OwnStrength, primary.EnemyStrength);
-            if (odds < 0.75f)
+            if (TacticalDecisionDoctrine.ShouldCancelCommittedContact(primary))
             {
+                decision = SoftAbort(input, "contact-lost");
                 return true;
             }
 
-            return input.ReserveFraction < 0.05f && odds < 1.10f;
+            if (TacticalDecisionDoctrine.ShouldSoftAbortCommitted(
+                    primary,
+                    input.OwnStrength,
+                    input.ReserveFraction))
+            {
+                decision = SoftAbort(input, "odds-collapse");
+                return true;
+            }
+
+            if (TacticalDecisionDoctrine.ShouldDowngradeCommittedContact(primary))
+            {
+                decision = new TacticalOperationDirectorDecision(
+                    new OperationRecord(
+                        input.Current.Shape,
+                        TacticalOperationPhase.Scouting,
+                        input.Current.PrimaryObjectiveId,
+                        input.CurrentTimeSeconds + 420f),
+                    "contact-downgraded");
+                return true;
+            }
+
+            return false;
         }
 
         private static TacticalOperationDirectorDecision SoftAbort(

@@ -49,6 +49,33 @@ namespace WhiskeyRealism.Tactical.Operations
                 + " phase=" + operation.Phase;
         }
 
+        public static string CommandAssignment(
+            int side,
+            CommandNodeOperationalState state,
+            OperationRecord operation,
+            CommandDoctrineOrder order)
+        {
+            string row = CommandAssignment(side, state, operation);
+            if (!order.HasPurpose)
+            {
+                return row + " doctrine=none";
+            }
+
+            return row
+                + " doctrineTask=" + order.Task
+                + " sop=" + order.Sop.Authority
+                + " risk=" + FormatFloat(order.Sop.RiskBudget01)
+                + " reacquire=" + FormatFloat(order.Sop.ReacquireSeconds)
+                + " supportReq=" + order.Sop.RequiresSupportBeforeMajorAttack
+                + " fallbackReq=" + order.Sop.RequiresFallbackIfPressed
+                + " doctrineReason=" + SafeToken(order.Reason)
+                + " primary=" + FormatTarget(order.PrimaryTarget)
+                + " support=" + FormatTarget(order.SupportTarget)
+                + " fallback=" + FormatTarget(order.FallbackTarget)
+                + " idle=" + order.AllowedIdle
+                + " confidence=" + FormatFloat(order.Confidence01);
+        }
+
         public static string CommandPosture(
             int side,
             CommandNodeOperationalState state,
@@ -117,6 +144,27 @@ namespace WhiskeyRealism.Tactical.Operations
                 + "|" + SafeToken(operation.PrimaryObjectiveId)
                 + "|" + operation.Shape
                 + "|" + operation.Phase;
+        }
+
+        public static string CommandAssignmentSignature(
+            int side,
+            CommandNodeOperationalState state,
+            OperationRecord operation,
+            CommandDoctrineOrder order)
+        {
+            return CommandAssignmentSignature(side, state, operation)
+                + "|" + order.Task
+                + "|" + order.Sop.Authority
+                + "|" + Bucket(order.Sop.RiskBudget01)
+                + "|" + Bucket(order.Sop.ReacquireSeconds)
+                + "|" + order.Sop.RequiresSupportBeforeMajorAttack
+                + "|" + order.Sop.RequiresFallbackIfPressed
+                + "|" + SafeToken(order.Reason)
+                + "|" + FormatTarget(order.PrimaryTarget)
+                + "|" + FormatTarget(order.SupportTarget)
+                + "|" + FormatTarget(order.FallbackTarget)
+                + "|" + order.AllowedIdle
+                + "|" + Bucket(order.Confidence01);
         }
 
         public static string CommandPostureSignature(
@@ -253,6 +301,12 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) return "0.00";
             return value.ToString("0.00");
+        }
+
+        private static string FormatTarget(DoctrineTargetPoint target)
+        {
+            if (!target.HasValue) return "none";
+            return Bucket(target.X) + "," + Bucket(target.Z);
         }
 
         private static string Bucket(float value)

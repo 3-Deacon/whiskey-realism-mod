@@ -39,6 +39,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalHqLinkGuard;
         internal ConfigEntry<bool> EnableTacticalReserveOrderDelayGuard;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
+        internal ConfigEntry<bool> EnableWlPlayerSubordinateOrderBridge;
+        internal ConfigEntry<bool> EnableWlPlayerOrderDoctrineDiagnostics;
         internal ConfigEntry<bool> EnableWlOperationNullGuard;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
@@ -236,6 +238,16 @@ namespace WhiskeyRealism
                 "Enable W&L Tactical Charge Guard",
                 false,
                 "Default OFF for Slice B1/BUG-TAC-005. When enabled, blocks ungated W&L AI feud/charge/objective-chain movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
+            EnableWlPlayerSubordinateOrderBridge = Config.Bind(
+                "W&L",
+                "Enable Player Order Doctrine",
+                false,
+                "Default OFF. When true, the tactical operations ledger may issue player-subordinate W&L current orders through vanilla AIBattle.CheckCurrentOrderUpdate after vanilla UpdateDLCPlayerOrders runs.");
+            EnableWlPlayerOrderDoctrineDiagnostics = Config.Bind(
+                "W&L",
+                "Enable Player Order Doctrine Diagnostics",
+                true,
+                "Logs bounded classify/dedupe/issue decisions for the player-order doctrine. Diagnostics do not issue orders when Enable Player Order Doctrine is off.");
             EnableWlOperationNullGuard = Config.Bind(
                 "W&L",
                 "Enable Operation Null Guard",

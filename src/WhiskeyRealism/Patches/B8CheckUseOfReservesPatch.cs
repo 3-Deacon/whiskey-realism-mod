@@ -42,8 +42,7 @@ namespace WhiskeyRealism.Patches
 
                 DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
                     doctrineOrder,
-                    LocalOdds(aigroup),
-                    ReserveFraction(aigroup),
+                    BuildOperationalReserveInput(aigroup),
                     SafeCurrentTimeSeconds());
                 if (doctrineDecision.Action != DoctrineConsumerAction.Deny) return;
 
@@ -91,8 +90,7 @@ namespace WhiskeyRealism.Patches
                 {
                     DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
                         doctrineOrder,
-                        LocalOdds(aigroup),
-                        ReserveFraction(aigroup),
+                        BuildOperationalReserveInput(aigroup),
                         SafeCurrentTimeSeconds());
                     if (doctrineDecision.Action == DoctrineConsumerAction.Deny)
                     {
@@ -263,10 +261,11 @@ namespace WhiskeyRealism.Patches
             bool fired = false;
             try
             {
-                if (unit.unitrange != null && unit.unitrange.closestenemyunitfarreg != null)
+                Regiment visibleEnemy = TacticalFogOfWarContact.ClosestVisibleEnemy(unit);
+                if (visibleEnemy != null)
                 {
-                    fired = unit.ReceivedFireFromUnit(unit.unitrange.closestenemyunitfarreg)
-                        || unit.CheckReceivedFireOtherUnit(unit.unitrange.closestenemyunitfarreg);
+                    fired = unit.ReceivedFireFromUnit(visibleEnemy)
+                        || unit.CheckReceivedFireOtherUnit(visibleEnemy);
                 }
             }
             catch { }
@@ -550,7 +549,10 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                if (group == null || group.unitrange == null || group.unitrange.enemystrengthwithinangle == null)
+                if (group == null ||
+                    group.unitrange == null ||
+                    group.unitrange.enemystrengthwithinangle == null ||
+                    !TacticalFogOfWarContact.HasVisibleEnemy(group))
                     return 0f;
 
                 float total = 0f;
@@ -562,6 +564,110 @@ namespace WhiskeyRealism.Patches
             {
                 return 0f;
             }
+        }
+
+        private static OperationalReserveInput BuildOperationalReserveInput(Regiment group)
+        {
+            float odds = LocalOdds(group);
+            float reserveFraction = ReserveFraction(group);
+            float flankThreat = FlankThreat(group, odds);
+            float endurance = ReserveEndurance(group);
+
+            return new OperationalReserveInput(
+                reserveFraction,
+                odds,
+                flankThreat,
+                endurance,
+                assaultAuthorized: odds >= 1.60f && flankThreat < 0.70f && endurance >= 0.35f,
+                fallbackPressure: odds < 0.75f || flankThreat >= 0.85f);
+        }
+
+        private static float FlankThreat(Regiment group, float odds)
+        {
+            try
+            {
+                if (group == null) return 0f;
+                float threat = 0f;
+                if (group.outflanked > 0) threat = System.Math.Max(threat, 0.80f);
+                if (group.friendlyroutednear > 0f) threat = System.Math.Max(threat, 0.65f);
+
+                float enemy = System.Math.Max(Sanitize(group.groupenemiesinrange), SumEnemyStrengthWithinAngle(group));
+                float own = System.Math.Max(1f, System.Math.Max(Sanitize(group.groupowninrange), Sanitize(group.groupstrengthaigroup)));
+                if (enemy > own) threat = System.Math.Max(threat, System.Math.Min(1f, enemy / System.Math.Max(1f, own * 1.5f)));
+                if (odds < 0.70f) threat = System.Math.Max(threat, 0.70f);
+                return Clamp01(threat);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float ReserveEndurance(Regiment group)
+        {
+            try
+            {
+                if (group == null || group.allattachedunits == null || group.allattachedunits.Length == 0)
+                    return 0f;
+
+                float total = 0f;
+                int count = 0;
+                for (int i = 0; i < group.allattachedunits.Length; i++)
+                {
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit == null) continue;
+                    if (unit.isrouted || unit.markedforrout || unit.permanentlydetached) continue;
+                    if (unit.unittyp > TacticalUnitType.Cavalry) continue;
+                    if (unit.regimentpaths > 0 || unit.inengagement) continue;
+
+                    total += 0.40f * AverageAmmoRatio(unit) +
+                        0.30f * (1f - Clamp01(unit.fatigue)) +
+                        0.30f * MoraleRatio(unit);
+                    count++;
+                }
+
+                return count > 0 ? Clamp01(total / count) : 0f;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float AverageAmmoRatio(Regiment unit)
+        {
+            try
+            {
+                if (unit == null || unit.ammo == null || unit.ammo.Length == 0) return 0f;
+                float total = 0f;
+                for (int i = 0; i < unit.ammo.Length; i++) total += System.Math.Max(0f, unit.ammo[i]);
+                return Clamp01(total / unit.ammo.Length);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float MoraleRatio(Regiment unit)
+        {
+            try
+            {
+                if (unit == null) return 0f;
+                if (unit.battlestartmorale > 0f)
+                    return Clamp01(unit.morale / System.Math.Max(0.01f, unit.battlestartmorale));
+                return Clamp01(unit.morale);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float Clamp01(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
+            return value > 1f ? 1f : value;
         }
 
         private static float SafeCurrentTimeSeconds()

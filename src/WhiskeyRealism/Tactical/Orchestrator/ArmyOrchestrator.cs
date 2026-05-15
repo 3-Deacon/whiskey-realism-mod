@@ -261,6 +261,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
         }
 
+        public bool RegisterDirectChildrenIfChanged(IReadOnlyList<DirectChildSnapshot> snapshots)
+        {
+            if (SnapshotsEqual(_directChildSnapshots, snapshots)) return false;
+            RegisterDirectChildren(snapshots);
+            return true;
+        }
+
+        private static bool SnapshotsEqual(DirectChildSnapshot[] current, IReadOnlyList<DirectChildSnapshot> next)
+        {
+            int currentCount = current == null ? 0 : current.Length;
+            int nextCount = next == null ? 0 : next.Count;
+            if (currentCount != nextCount) return false;
+            for (int i = 0; i < currentCount; i++)
+            {
+                if (!SnapshotEqual(current[i], next[i])) return false;
+            }
+
+            return true;
+        }
+
+        private static bool SnapshotEqual(DirectChildSnapshot a, DirectChildSnapshot b)
+        {
+            return string.Equals(a.ChildId, b.ChildId, StringComparison.Ordinal) &&
+                string.Equals(a.ParentArmyId, b.ParentArmyId, StringComparison.Ordinal) &&
+                a.RawUnitTyp == b.RawUnitTyp &&
+                a.CommandHierarchyShift == b.CommandHierarchyShift &&
+                string.Equals(a.DisplayName, b.DisplayName, StringComparison.Ordinal) &&
+                a.Active == b.Active;
+        }
+
         internal void RegisterCommandTree(CommandTreeSnapshot tree)
         {
             _commandTree = tree ?? CommandTreeSnapshot.Empty;

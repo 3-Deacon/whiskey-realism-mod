@@ -115,7 +115,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _currentOperation,
                     picture,
                     _currentForce.AvailableStrength,
-                    _currentTimeSeconds));
+                    _currentTimeSeconds,
+                    _currentForce.ReserveFraction));
         }
 
         private static IReadOnlyList<ObjectiveRecord> CopyObjectives(IReadOnlyList<ObjectiveRecord> objectives)
@@ -149,7 +150,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     observation.Location.X,
                     observation.Location.Z,
                     terrainStrength: 0f,
-                    approachDifficulty: 0f);
+                    approachDifficulty: 0f,
+                    observation.ApproachAvenue);
             }
 
             return new BattlefieldPictureSnapshot(estimates);

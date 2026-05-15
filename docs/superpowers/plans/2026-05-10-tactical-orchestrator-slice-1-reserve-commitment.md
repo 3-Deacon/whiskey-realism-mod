@@ -2,6 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status as of 2026-05-14:** implementation is merged to `main` and now
+> superseded by the current tactical completion DLL
+> `f2e7705b96c55ea371ca08a3a56d28ebf324bfc114618c184ccba375d17ee1f1`
+> (1027072 bytes; 893 PASS). Slice 1 remains here only for focused reserve-gate
+> smoke traceability and final archive closeout. Current runtime truth lives in
+> [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md) and
+> [`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md).
+
 **Goal:** Make the smoke-confirmed command-node tree influence tactical reserve commitment by denying premature vanilla reserve movement for command nodes resolved as `Reserve`, while preserving vanilla movement, #56 order-delay conversion, and #57 reserve-list mutation when the orchestrator role allows it.
 
 **Architecture:** Add a pure `TacticalReserveCommitGate` decision helper under `Tactical/Orchestrator/`, then add a default-off Harmony Prefix/Postfix on `AIBattle.CheckUseOfReserves(Regiment)` that snapshots attached-unit paths before vanilla, resolves the group's command-node intent after vanilla, and rolls back newly-created direct reserve paths only when the resolved role says to hold reserves. Extend existing #57 `BattleReserveDoctrinePatch` so reserve-list bias also consults command-node intent before moving a reserve to the front of `objectivechain[i].reservegroups`.

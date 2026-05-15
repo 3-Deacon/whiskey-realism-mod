@@ -1,6 +1,11 @@
 # Full-Spectrum Tactical Command Doctrine Design
 
-Status: approved brainstorming design; not an implementation plan.
+Status: implemented/hash-deployed design artifact; fresh Active smoke pending
+before archive. Current runtime truth lives in
+[`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md),
+[`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md), and
+[`docs/patch-catalog.md`](../../patch-catalog.md). Do not implement directly
+from this spec or use it to infer missing work without checking shipped source.
 Date: 2026-05-11
 
 This umbrella spec defines the next tactical command-doctrine layer for Whiskey

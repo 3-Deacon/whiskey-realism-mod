@@ -173,6 +173,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 && Plugin.EnableTacticalOrchestratorIntentInference.Value)
             {
                 DriveTickCycle(side, battle, deltaSeconds);
+                AttachDirectChildrenIfReady(side, battle);
                 AttachCommandTreeIfReady(side, battle);
                 DriveDirectChildCycle(side, battle);
             }
@@ -478,7 +479,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             army.PickInitialPlan(evidence);
             if (army.HasPlan)
             {
-                Plugin.Log.LogInfo("[TacticalPlan] side=" + side.AllianceId
+                Plugin.Log.LogInfo("[TacticalPlan] " + SideLogContext(side.AllianceId)
                     + " plan=" + army.CurrentPlan.PlanId
                     + " phase=" + army.CurrentPlan.Phase
                     + " mainEffort=" + army.CurrentPlan.MainEffortSector);
@@ -490,14 +491,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 if (side == null || side.Army == null || !side.Army.HasPlan) return;
-                // Already registered: skip silently. RegisterDirectChildren on a non-empty
-                // list is idempotent in effect but resets allocator caches; avoid the churn.
-                if (side.Army.CurrentDirectChildIntents.Count > 0) return;
-
                 var snapshots = DirectChildDiscovery.Snapshot(side.AllianceId);
                 if (snapshots.Count == 0)
                 {
-                    if (!_directChildDeferLogged.Contains(side.AllianceId))
+                    if (side.Army.CurrentDirectChildIntents.Count == 0 &&
+                        !_directChildDeferLogged.Contains(side.AllianceId))
                     {
                         _directChildDeferLogged.Add(side.AllianceId);
                         OnceLog.Info("o3-defer-discovery:" + side.AllianceId,
@@ -506,10 +504,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return;
                 }
 
-                side.Army.RegisterDirectChildren(snapshots);
+                if (!side.Army.RegisterDirectChildrenIfChanged(snapshots)) return;
 
-                Plugin.Log.LogInfo("[TacticalDirectChildDiscovery] side=" + side.AllianceId
-                    + " army=" + (snapshots.Count > 0 ? snapshots[0].ParentArmyId : "<none>")
+                string parentCommandId = snapshots.Count > 0 ? snapshots[0].ParentArmyId : string.Empty;
+                var parentCommand = ResolveCommandLabelById(parentCommandId, "army-");
+                Plugin.Log.LogInfo("[TacticalDirectChildDiscovery] " + SideLogContext(side.AllianceId, parentCommand, default(CommandLogLabel))
+                    + " parentCommandId=" + SafeLog(parentCommandId)
                     + " shift=" + (snapshots.Count > 0 ? snapshots[0].CommandHierarchyShift : 0)
                     + " children=" + snapshots.Count
                     + " synthetic=" + IsSynthetic(snapshots));
@@ -618,14 +618,153 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
 
                 _commandTreeTelemetrySignatures[key] = signature;
-                Plugin.Log.LogInfo("[TacticalCommandTree] side=" + allianceId
-                    + " root=" + tree.RootNodeId
+                var root = ResolveRootCommandLabel(tree);
+                Plugin.Log.LogInfo("[TacticalCommandTree] " + SideLogContext(allianceId, root, root)
                     + " nodes=" + tree.Nodes.Count
                     + " maxDepth=" + tree.MaxDepth
                     + " unittyps=" + tree.RawUnitTypDistribution
                     + " missingParents=" + tree.MissingParentCount);
             }
             catch { }
+        }
+
+        private readonly struct CommandLogLabel
+        {
+            public CommandLogLabel(string id, string name, string level)
+            {
+                Id = id ?? string.Empty;
+                Name = name ?? string.Empty;
+                Level = level ?? string.Empty;
+            }
+
+            public string Id { get; }
+            public string Name { get; }
+            public string Level { get; }
+            public bool HasValue => !string.IsNullOrWhiteSpace(Id) || !string.IsNullOrWhiteSpace(Name);
+        }
+
+        private static string SideLogContext(int allianceId)
+        {
+            var top = ResolveTopCommandLabelForAlliance(allianceId);
+            return SideLogContext(allianceId, top, default(CommandLogLabel));
+        }
+
+        private static string SideLogContext(int allianceId, CommandLogLabel topCommand, CommandLogLabel rootCommand)
+        {
+            if (!topCommand.HasValue)
+            {
+                topCommand = ResolveTopCommandLabelForAlliance(allianceId);
+            }
+
+            return TacticalSideLogFormatter.Format(
+                allianceId,
+                _playerAllianceId,
+                SafeAiVsAi(),
+                topCommand.Id,
+                topCommand.Name,
+                topCommand.Level,
+                rootCommand.Id,
+                rootCommand.Name);
+        }
+
+        private static CommandLogLabel ResolveRootCommandLabel(CommandTreeSnapshot tree)
+        {
+            try
+            {
+                if (tree == null || !tree.HasNodes) return default(CommandLogLabel);
+                for (int i = 0; i < tree.Nodes.Count; i++)
+                {
+                    var node = tree.Nodes[i];
+                    if (string.Equals(node.NodeId, tree.RootNodeId, StringComparison.Ordinal))
+                    {
+                        return new CommandLogLabel(
+                            node.NodeId,
+                            node.DisplayName,
+                            RawLevelLabel(node.RawUnitTyp, node.EffectiveCommandLevel));
+                    }
+                }
+            }
+            catch { }
+            return default(CommandLogLabel);
+        }
+
+        private static CommandLogLabel ResolveCommandLabelById(string id, string prefix)
+        {
+            int instanceId = ParseInstanceId(id, prefix);
+            if (instanceId == 0) return default(CommandLogLabel);
+
+            try
+            {
+                var units = BattleUnits.completeunitlist as System.Collections.IList;
+                if (units == null) return default(CommandLogLabel);
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var reg = units[i] as Regiment;
+                    if (reg == null) continue;
+                    var go = ((Component)reg).gameObject;
+                    if (go == null || go.GetInstanceID() != instanceId) continue;
+                    return new CommandLogLabel(
+                        id,
+                        ((UnityEngine.Object)go).name,
+                        RawLevelLabel(reg.unittyp, reg.unittyp - ArmyEvidenceBuilder.ReadCommandHierarchyShift()));
+                }
+            }
+            catch { }
+
+            return default(CommandLogLabel);
+        }
+
+        private static CommandLogLabel ResolveTopCommandLabelForAlliance(int allianceId)
+        {
+            try
+            {
+                var units = BattleUnits.completeunitlist as System.Collections.IList;
+                if (units == null) return default(CommandLogLabel);
+                Regiment best = null;
+                GameObject bestGo = null;
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var reg = units[i] as Regiment;
+                    if (reg == null || reg.alliance != allianceId) continue;
+                    var go = ((Component)reg).gameObject;
+                    if (go == null || !go.activeInHierarchy) continue;
+                    if (best == null || reg.unittyp > best.unittyp)
+                    {
+                        best = reg;
+                        bestGo = go;
+                    }
+                }
+
+                if (best == null || bestGo == null) return default(CommandLogLabel);
+                int shift = ArmyEvidenceBuilder.ReadCommandHierarchyShift();
+                return new CommandLogLabel(
+                    "unit-" + bestGo.GetInstanceID(),
+                    ((UnityEngine.Object)bestGo).name,
+                    RawLevelLabel(best.unittyp, best.unittyp - shift));
+            }
+            catch
+            {
+                return default(CommandLogLabel);
+            }
+        }
+
+        private static int ParseInstanceId(string value, string prefix)
+        {
+            if (string.IsNullOrWhiteSpace(value) || string.IsNullOrEmpty(prefix)) return 0;
+            if (!value.StartsWith(prefix, StringComparison.Ordinal)) return 0;
+            string raw = value.Substring(prefix.Length);
+            int parsed;
+            return int.TryParse(raw, out parsed) ? parsed : 0;
+        }
+
+        private static string RawLevelLabel(int rawUnitTyp, int effectiveCommandLevel)
+        {
+            return "rawUnitTyp" + rawUnitTyp + "_effective" + effectiveCommandLevel;
+        }
+
+        private static string SafeLog(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "<unresolved>" : value.Trim().Replace(' ', '_');
         }
 
         private static void DriveDirectChildCycle(TacticalBattleOrchestrator side, AIBattle battle)
@@ -700,8 +839,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var dci = side.Army.CurrentDirectChildIntents[i];
                     if (dci.Role == DirectChildRole.Unknown) continue;
                     OnceLog.Info("o3-direct-child-intent:" + _battleSequence + ":" + side.AllianceId + ":" + dci.ChildId + ":" + dci.Role,
-                        "[TacticalDirectChildIntent] side=" + side.AllianceId
+                        "[TacticalDirectChildIntent] " + SideLogContext(side.AllianceId)
                         + " child=" + dci.ChildId
+                        + " childName=" + SafeLog(dci.DisplayName)
                         + " raw=" + dci.RawUnitTyp
                         + " effective=" + dci.EffectiveCommandLevel
                         + " role=" + dci.Role

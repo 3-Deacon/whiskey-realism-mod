@@ -747,10 +747,12 @@ namespace WhiskeyRealism.Patches
             for (int i = 0; i < commandOperations.Count; i++)
             {
                 var state = commandOperations[i];
+                TryFindDoctrineOrder(army.CurrentDoctrineOrders, state.NodeId, out CommandDoctrineOrder doctrineOrder);
                 string assignmentSignature = TacticalOperationsTelemetry.CommandAssignmentSignature(
                     side,
                     state,
-                    operation);
+                    operation,
+                    doctrineOrder);
                 if (TacticalOperationsTelemetry.ShouldEmitChangedAfterInterval(
                     _operationsTelemetrySignatures,
                     _operationsPendingTelemetrySignatures,
@@ -761,7 +763,7 @@ namespace WhiskeyRealism.Patches
                     OperationsDetailTelemetrySeconds,
                     verbose: false))
                 {
-                    Plugin.Log.LogInfo(TacticalOperationsTelemetry.CommandAssignment(side, state, operation));
+                    Plugin.Log.LogInfo(TacticalOperationsTelemetry.CommandAssignment(side, state, operation, doctrineOrder));
                 }
 
                 Regiment group = FindCommandNodeGroup(state.NodeId);
@@ -844,6 +846,26 @@ namespace WhiskeyRealism.Patches
             {
                 reservesWaiting++;
             }
+        }
+
+        private static bool TryFindDoctrineOrder(
+            IReadOnlyList<CommandDoctrineOrder> orders,
+            string nodeId,
+            out CommandDoctrineOrder order)
+        {
+            order = default(CommandDoctrineOrder);
+            if (orders == null || string.IsNullOrWhiteSpace(nodeId)) return false;
+
+            for (int i = 0; i < orders.Count; i++)
+            {
+                if (string.Equals(orders[i].NodeId, nodeId, StringComparison.Ordinal))
+                {
+                    order = orders[i];
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static CommandPhysicalState BuildCommandPhysicalState(Regiment group)
@@ -1559,7 +1581,7 @@ namespace WhiskeyRealism.Patches
                 " queue=" + SafeOrderQueueCount(group) +
                 " activeMove=" + HasActiveMoveOrder(group) +
                 " receivedFire=" + MatrixReceivedFire(group) +
-                " closestEnemy=" + MatrixClosestEnemy(group) +
+                " visibleEnemy=" + MatrixClosestEnemy(group) +
                 " angleEnemy=" + BucketForObserver(MatrixEnemyAngleStrength(group)) +
                 " flankThreat=" + BucketForObserver(group.flanksthreated) +
                 " outflanked=" + group.outflanked +
@@ -1574,7 +1596,7 @@ namespace WhiskeyRealism.Patches
 
         private static TacticalSectorAssessment BuildMatrixSector(Regiment group, int index)
         {
-            Regiment closest = group != null && group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+            Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
             return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                 index,
                 group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
@@ -1621,7 +1643,11 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                if (group == null || group.unitrange == null || group.unitrange.enemystrengthwithinangle == null) return 0f;
+                if (group == null ||
+                    group.unitrange == null ||
+                    group.unitrange.enemystrengthwithinangle == null ||
+                    !TacticalFogOfWarContact.HasVisibleEnemy(group))
+                    return 0f;
                 float total = 0f;
                 for (int i = 0; i < group.unitrange.enemystrengthwithinangle.Length; i++)
                     total += Math.Max(0f, group.unitrange.enemystrengthwithinangle[i]);
@@ -1637,16 +1663,8 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                if (group == null || group.unitrange == null) return "-";
-                if (group.unitrange.closestenemyunitfarreg != null)
-                    return SafeUnitName(group.unitrange.closestenemyunitfarreg);
-                if (group.unitrange.closestenemyunit != null)
-                {
-                    var nearest = group.unitrange.closestenemyunit as Regiment[];
-                    return nearest != null
-                        ? "enemy-array-" + nearest.Length
-                        : TacticalCurrentOrderSignature.Safe(group.unitrange.closestenemyunit.GetType().Name);
-                }
+                Regiment visible = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
+                if (visible != null) return SafeUnitName(visible);
                 return "-";
             }
             catch
@@ -1746,7 +1764,7 @@ namespace WhiskeyRealism.Patches
                 var group = units[i] as Regiment;
                 if (group == null || group.unittyp <= 13) continue;
 
-                Regiment closest = group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+                Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
                 sectors.Add(TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                     sectorId++,
                     Math.Max(group.groupowninrange, group.groupstrengthaigroup),
@@ -1766,20 +1784,7 @@ namespace WhiskeyRealism.Patches
 
         private static float EstimateVisibleEnemyStrength(IList units)
         {
-            if (units == null) return 0f;
-
-            float total = 0f;
-            for (int i = 0; i < units.Count; i++)
-            {
-                var unit = units[i] as Regiment;
-                if (unit == null || unit.unitrange == null) continue;
-                if (unit.unitrange.closestenemyunitfarreg != null)
-                    total += Math.Max(0, unit.unitrange.closestenemyunitfarreg.strength);
-                else if (unit.unitrange.closestenemyunit != null)
-                    total += 100f;
-            }
-
-            return total;
+            return TacticalFogOfWarContact.VisibleEnemyStrength(units);
         }
 
         private static float EstimateInferredEnemyStrength(IList units)
@@ -1790,7 +1795,11 @@ namespace WhiskeyRealism.Patches
             for (int i = 0; i < units.Count; i++)
             {
                 var unit = units[i] as Regiment;
-                if (unit == null || unit.unitrange == null || unit.unitrange.enemystrengthwithinangle == null) continue;
+                if (unit == null ||
+                    unit.unitrange == null ||
+                    unit.unitrange.enemystrengthwithinangle == null ||
+                    !TacticalFogOfWarContact.HasVisibleEnemy(unit))
+                    continue;
                 for (int j = 0; j < unit.unitrange.enemystrengthwithinangle.Length; j++)
                     total += Math.Max(0f, unit.unitrange.enemystrengthwithinangle[j]);
             }
@@ -1907,11 +1916,7 @@ namespace WhiskeyRealism.Patches
             if (unit.unittyp == 2) context.ArtilleryGroupCount++;
             if (unit.unittyp > 13 && SafeIntField(unit, ref _orderedStanceField, "ai_" + "stanceordered", -1) == 1)
                 context.ReserveGroupCount++;
-            if (unit.unitrange != null)
-            {
-                if (unit.unitrange.closestenemyunitfarreg != null) context.VisibleEnemyCount++;
-                else if (unit.unitrange.closestenemyunit != null) context.VisibleEnemyCount++;
-            }
+                if (TacticalFogOfWarContact.HasVisibleEnemy(unit)) context.VisibleEnemyCount++;
         }
 
         private static string BuildOrderSignature(IList units)

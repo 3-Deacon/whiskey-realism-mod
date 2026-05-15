@@ -74,12 +74,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     allianceId: reg.alliance,
                     rawUnitTyp: reg.unittyp,
                     displayName: ((UnityEngine.Object)go).name,
-                    active: go.activeInHierarchy,
+                    active: IsOperationallyPresent(reg, go, commandHierarchyShift),
                     routed: reg.isrouted,
                     markedForRout: reg.markedforrout));
             }
 
             return probes;
+        }
+
+        private static bool IsOperationallyPresent(Regiment reg, GameObject go, int commandHierarchyShift)
+        {
+            if (reg == null || go == null) return false;
+            if (go.activeInHierarchy) return true;
+
+            int effectiveCommandMin = ClampShiftedMin(commandHierarchyShift);
+            if (reg.unittyp < effectiveCommandMin) return false;
+            if (reg.isrouted || reg.markedforrout) return false;
+
+            return true;
         }
 
         private static Dictionary<int, int> BuildAttachedParentMap(System.Collections.IList units, int allianceId, int commandHierarchyShift)

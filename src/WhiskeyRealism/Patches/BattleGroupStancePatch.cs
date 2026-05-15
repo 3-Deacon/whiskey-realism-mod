@@ -336,7 +336,7 @@ namespace WhiskeyRealism.Patches
 
         private static TacticalSectorAssessment BuildGroupSector(Regiment group, int index)
         {
-            Regiment closest = group != null && group.unitrange != null ? group.unitrange.closestenemyunitfarreg : null;
+            Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
             return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                 index,
                 group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
@@ -392,7 +392,10 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                if (group == null || group.unitrange == null || group.unitrange.enemystrengthwithinangle == null)
+                if (group == null ||
+                    group.unitrange == null ||
+                    group.unitrange.enemystrengthwithinangle == null ||
+                    !TacticalFogOfWarContact.HasVisibleEnemy(group))
                     return 0f;
 
                 float total = 0f;

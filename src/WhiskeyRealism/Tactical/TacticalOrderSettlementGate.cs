@@ -10,6 +10,7 @@ namespace WhiskeyRealism.Tactical
             public bool PathInterrupted;
             public int MovementMode;
             public bool ActiveMove;
+            public bool AllowStaleQueuedBypass;
         }
 
         public readonly struct Decision
@@ -27,7 +28,15 @@ namespace WhiskeyRealism.Tactical
         public static Decision Evaluate(in Input input)
         {
             if (input.OrderQueueCount > 0)
+            {
+                if (input.AllowStaleQueuedBypass &&
+                    input.OrderState <= 1 &&
+                    input.MovementMode <= 0 &&
+                    !input.ActiveMove)
+                    return new Decision(true, "stalled-queued-order");
+
                 return new Decision(false, "queued-order");
+            }
 
             if (input.OrderState < 0)
                 return new Decision(false, "unknown-orderstate");
@@ -58,7 +67,7 @@ namespace WhiskeyRealism.Tactical
 
         public static bool HasBlockingPendingOrder(in Input input)
         {
-            if (input.OrderQueueCount > 0) return true;
+            if (input.OrderQueueCount > 0) return !Evaluate(input).AllowChange;
             if (input.OrderState < 0) return true;
             if (input.OrderState <= 0) return false;
 

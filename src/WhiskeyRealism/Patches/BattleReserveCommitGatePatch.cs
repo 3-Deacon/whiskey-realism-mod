@@ -928,7 +928,10 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                if (group == null || group.unitrange == null || group.unitrange.enemystrengthwithinangle == null)
+                if (group == null ||
+                    group.unitrange == null ||
+                    group.unitrange.enemystrengthwithinangle == null ||
+                    !TacticalFogOfWarContact.HasVisibleEnemy(group))
                     return 0f;
 
                 float total = 0f;

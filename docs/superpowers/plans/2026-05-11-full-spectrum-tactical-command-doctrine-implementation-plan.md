@@ -2,6 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status as of 2026-05-14:** implementation is merged in the working tree,
+> built, deployed, and hash-verified in DLL
+> `f2e7705b96c55ea371ca08a3a56d28ebf324bfc114618c184ccba375d17ee1f1`
+> (1027072 bytes; 893 PASS). This plan remains active only for fresh Active
+> battle smoke and final archive closeout. Current runtime truth lives in
+> [`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md)
+> and [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md); do not
+> infer missing code from unchecked historical task boxes below without checking
+> shipped source and the living docs.
+
 **Goal:** Build the full tactical command doctrine system so each AI side maintains battle intent, enemy/objective awareness, echelon assignments, committed operations, reserve/fallback doctrine, and concrete movement/fight orders instead of leaving brigades scattered or stalled.
 
 **Architecture:** The system stays deterministic and in-process. Pure doctrine models live under `src/WhiskeyRealism/Tactical/Operations/` and are covered by the console harness; runtime adapters collect vanilla battle evidence and write only during the per-battle orchestrator tick; Harmony patches remain bounded consumers that read doctrine decisions and steer vanilla battle state through existing vanilla APIs.
