@@ -8,6 +8,7 @@ using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -228,9 +229,13 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            var decision = hasDoctrineOrder
-                ? CommandPostureExecutor.Decide(doctrineOrder, physical, eligibility, Time.realtimeSinceStartup)
-                : CommandPostureExecutor.Decide(state, physical, eligibility);
+            PostureExecutionDecision decision;
+            using (TelemetryPerf.Scope("tactical.posture-executor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                decision = hasDoctrineOrder
+                    ? CommandPostureExecutor.Decide(doctrineOrder, physical, eligibility, Time.realtimeSinceStartup)
+                    : CommandPostureExecutor.Decide(state, physical, eligibility);
+            }
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
                 if (CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass) &&

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Telemetry;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -40,8 +41,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public void Tick()
         {
-            TickCount++;
-            for (int i = 0; i < Echelons.Count; i++) Echelons[i]?.Tick();
+            using (TelemetryPerf.Scope("tactical.orchestrator-side-tick", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                TickCount++;
+                for (int i = 0; i < Echelons.Count; i++) Echelons[i]?.Tick();
+            }
         }
 
         public void PropagateIntent()
@@ -59,13 +63,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (Army == null) return;
 
             OperationsLedger.Update(mode, objectives, strategicBattleIntent, force, personality);
-            var commandOperations = CommandNodeOperationsRuntime.Build(
-                Army.CurrentCommandNodeIntents,
-                OperationsLedger.CurrentOperation,
-                OperationsLedger.CurrentObjectives);
-            commandOperations = TacticalNestedDivisionPlayPlanner.Apply(
-                Army.CurrentCommandTree,
-                commandOperations);
+            IReadOnlyList<CommandNodeOperationalState> commandOperations;
+            using (TelemetryPerf.Scope("tactical.command-assignment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                commandOperations = CommandNodeOperationsRuntime.Build(
+                    Army.CurrentCommandNodeIntents,
+                    OperationsLedger.CurrentOperation,
+                    OperationsLedger.CurrentObjectives);
+                commandOperations = TacticalNestedDivisionPlayPlanner.Apply(
+                    Army.CurrentCommandTree,
+                    commandOperations);
+            }
             Army.UpdateOperationsLedger(OperationsLedger, commandOperations ?? Array.Empty<CommandNodeOperationalState>());
         }
     }

@@ -6,6 +6,7 @@ namespace WhiskeyRealism.Telemetry
     {
         private static readonly object Gate = new object();
         private static TelemetryRuntime _runtime;
+        private static TelemetryRuntime _shutdownRuntime;
         private static TelemetryProfile _profile = TelemetryProfile.Off;
 
         internal static TelemetryProfile CurrentProfile
@@ -72,6 +73,7 @@ namespace WhiskeyRealism.Telemetry
             lock (Gate)
             {
                 _runtime = runtime;
+                _shutdownRuntime = null;
                 _profile = runtime != null ? runtime.Profile : TelemetryProfile.Off;
             }
         }
@@ -89,7 +91,7 @@ namespace WhiskeyRealism.Telemetry
                 TelemetryProfile profile;
                 lock (Gate)
                 {
-                    runtime = _runtime;
+                    runtime = _runtime ?? _shutdownRuntime;
                     profile = _profile;
                 }
 
@@ -125,13 +127,31 @@ namespace WhiskeyRealism.Telemetry
 
                 TelemetryRuntime runtime;
                 lock (Gate)
-                    runtime = _runtime;
+                    runtime = _runtime ?? _shutdownRuntime;
 
                 return runtime != null && runtime.IsRunning && runtime.TryEmit(ev);
             }
             catch
             {
                 return false;
+            }
+        }
+
+        internal static TelemetryRuntimeDiagnostics DiagnosticsSnapshot()
+        {
+            try
+            {
+                TelemetryRuntime runtime;
+                lock (Gate)
+                    runtime = _runtime ?? _shutdownRuntime;
+
+                return runtime != null
+                    ? runtime.DiagnosticsSnapshot()
+                    : TelemetryRuntimeDiagnostics.Empty;
+            }
+            catch
+            {
+                return TelemetryRuntimeDiagnostics.Empty;
             }
         }
 
@@ -143,15 +163,32 @@ namespace WhiskeyRealism.Telemetry
                 lock (Gate)
                 {
                     runtime = _runtime;
+                    if (runtime == null)
+                        return;
                     _runtime = null;
-                    _profile = TelemetryProfile.Off;
+                    _shutdownRuntime = runtime;
+                    _profile = runtime.Profile;
                 }
 
-                if (runtime != null)
-                    runtime.Shutdown(reason);
+                runtime.Shutdown(reason);
+
+                lock (Gate)
+                {
+                    if (object.ReferenceEquals(_shutdownRuntime, runtime))
+                    {
+                        _shutdownRuntime = null;
+                        _profile = TelemetryProfile.Off;
+                    }
+                }
             }
             catch
             {
+                lock (Gate)
+                {
+                    _runtime = null;
+                    _shutdownRuntime = null;
+                    _profile = TelemetryProfile.Off;
+                }
             }
         }
 

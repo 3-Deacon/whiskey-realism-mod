@@ -8,6 +8,7 @@ using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -655,35 +656,38 @@ namespace WhiskeyRealism.Patches
         {
             if (!Enabled()) return;
 
-            try
+            using (TelemetryPerf.Scope("tactical.observer-pass", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                OnceLog.Info("tactical-observer", "TacticalObserverPatch wired");
-
-                var context = BuildContext(battle, group);
-                EmitDecisionMatrix(eventType, battle, group, context);
-                string signature = TacticalTelemetry.Signature(eventType, context);
-                bool verbose = Plugin.Instance != null && Plugin.Instance.TacticalObserverVerboseLogging.Value;
-                float minSeconds = Plugin.Instance != null
-                    ? Mathf.Max(1f, Plugin.Instance.TacticalObserverMinSecondsBetweenSummaries.Value)
-                    : 30f;
-                float now = Time.realtimeSinceStartup;
-                string key = eventType.ToString();
-
-                if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, key, signature, now, minSeconds, verbose))
-                    return;
-
-                string message = TacticalTelemetry.Summary(eventType, context);
-                if (before != null)
+                try
                 {
-                    var after = group != null ? SnapshotGroup(group) : SnapshotBattle(battle);
-                    message += " delta=" + TacticalTelemetry.Delta(before, after);
-                }
+                    OnceLog.Info("tactical-observer", "TacticalObserverPatch wired");
 
-                Plugin.Log.LogInfo(message);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-observer:" + eventType, "Tactical observer " + eventType + " failed: " + ex.Message);
+                    var context = BuildContext(battle, group);
+                    EmitDecisionMatrix(eventType, battle, group, context);
+                    string signature = TacticalTelemetry.Signature(eventType, context);
+                    bool verbose = Plugin.Instance != null && Plugin.Instance.TacticalObserverVerboseLogging.Value;
+                    float minSeconds = Plugin.Instance != null
+                        ? Mathf.Max(1f, Plugin.Instance.TacticalObserverMinSecondsBetweenSummaries.Value)
+                        : 30f;
+                    float now = Time.realtimeSinceStartup;
+                    string key = eventType.ToString();
+
+                    if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, key, signature, now, minSeconds, verbose))
+                        return;
+
+                    string message = TacticalTelemetry.Summary(eventType, context);
+                    if (before != null)
+                    {
+                        var after = group != null ? SnapshotGroup(group) : SnapshotBattle(battle);
+                        message += " delta=" + TacticalTelemetry.Delta(before, after);
+                    }
+
+                    Plugin.Log.LogInfo(message);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-observer:" + eventType, "Tactical observer " + eventType + " failed: " + ex.Message);
+                }
             }
         }
 
@@ -769,19 +773,23 @@ namespace WhiskeyRealism.Patches
                 Regiment group = FindCommandNodeGroup(state.NodeId);
                 var physical = BuildCommandPhysicalState(group);
                 var idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
-                var decision = CommandPostureExecutor.Decide(
-                    state,
-                    physical,
-                    new WriteEligibilitySnapshot(
-                        modeAllowsWrites: TacticalCommanderModePolicy.AllowsWrites(army.CommanderMode),
-                        playerProtected: physical.PlayerProtected,
-                        routed: physical.Routed,
-                        orderPending: group != null && (SafeOrderQueueCount(group) > 0 || SafeOrderState(group) > 0),
-                        recentOrder: false,
-                        alreadyDoingCorrectTask: false,
-                        atAssignedLocation: idle == TacticalIdleClassification.ValidIdle,
-                        missingLedgerAssignment: false,
-                        closeEngaged: false));
+                PostureExecutionDecision decision;
+                using (TelemetryPerf.Scope("tactical.posture-executor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+                {
+                    decision = CommandPostureExecutor.Decide(
+                        state,
+                        physical,
+                        new WriteEligibilitySnapshot(
+                            modeAllowsWrites: TacticalCommanderModePolicy.AllowsWrites(army.CommanderMode),
+                            playerProtected: physical.PlayerProtected,
+                            routed: physical.Routed,
+                            orderPending: group != null && (SafeOrderQueueCount(group) > 0 || SafeOrderState(group) > 0),
+                            recentOrder: false,
+                            alreadyDoingCorrectTask: false,
+                            atAssignedLocation: idle == TacticalIdleClassification.ValidIdle,
+                            missingLedgerAssignment: false,
+                            closeEngaged: false));
+                }
 
                 CountPosture(state, physical, idle, ref validIdle, ref illegalIdle, ref recoveringStuck, ref activeAttacks, ref reservesWaiting);
 

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Patches;
+using WhiskeyRealism.Telemetry;
 #if !NET8_0
 using WhiskeyRealism.Util;
 #endif
@@ -136,50 +137,53 @@ namespace WhiskeyRealism.Strategic
             WlStrategicIntent intent,
             string sourceSystem)
         {
-            try
+            using (TelemetryPerf.Scope("campaign.coordinated-operations", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
             {
-                if (output == null ||
-                    output.Decision == CoordinatedOperationDecision.None ||
-                    output.Decision == CoordinatedOperationDecision.Delay ||
-                    output.Decision == CoordinatedOperationDecision.Recover)
+                try
+                {
+                    if (output == null ||
+                        output.Decision == CoordinatedOperationDecision.None ||
+                        output.Decision == CoordinatedOperationDecision.Delay ||
+                        output.Decision == CoordinatedOperationDecision.Recover)
+                        return false;
+                    var faction = AICampaignReflect.GetFaction(aifactionIndex);
+                    if (faction == null) return false;
+                    var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
+                    var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
+                    if (ownUnits == null || offensive == null) return false;
+
+                    var plans = BuildCommitPlans(
+                        allianceId,
+                        aifactionIndex,
+                        ownUnits,
+                        output,
+                        target,
+                        targetName,
+                        objectiveId,
+                        intent,
+                        sourceSystem);
+                    if (plans == null || plans.Count == 0) return false;
+
+                    int committedCount = 0;
+                    var directRecords = new List<DirectCommitRecord>();
+                    for (int i = 0; i < plans.Count; i++)
+                    {
+                        if (CommitUnit(allianceId, aifactionIndex, offensive, plans[i], target, targetName, objectiveId, sourceSystem, output.Signature(), directRecords))
+                            committedCount++;
+                    }
+                    if (committedCount > 0 && committedCount < plans.Count)
+                    {
+                        RollBackDirectCommits(offensive, directRecords, output.Signature());
+                        LogInfo(
+                            $"[CoordinatedOps] alliance={allianceId} action=package-partial-rollback committed={committedCount}/{plans.Count} package={output.Signature()}");
+                    }
+                    return committedCount == plans.Count;
+                }
+                catch (Exception ex)
+                {
+                    WarnOnce("coordinated-ops:commit", "[CoordinatedOps] commit failed: " + ex.Message);
                     return false;
-                var faction = AICampaignReflect.GetFaction(aifactionIndex);
-                if (faction == null) return false;
-                var ownUnits = AccessTools.Field(faction.GetType(), "ownunits")?.GetValue(faction) as IList;
-                var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
-                if (ownUnits == null || offensive == null) return false;
-
-                var plans = BuildCommitPlans(
-                    allianceId,
-                    aifactionIndex,
-                    ownUnits,
-                    output,
-                    target,
-                    targetName,
-                    objectiveId,
-                    intent,
-                    sourceSystem);
-                if (plans == null || plans.Count == 0) return false;
-
-                int committedCount = 0;
-                var directRecords = new List<DirectCommitRecord>();
-                for (int i = 0; i < plans.Count; i++)
-                {
-                    if (CommitUnit(allianceId, aifactionIndex, offensive, plans[i], target, targetName, objectiveId, sourceSystem, output.Signature(), directRecords))
-                        committedCount++;
                 }
-                if (committedCount > 0 && committedCount < plans.Count)
-                {
-                    RollBackDirectCommits(offensive, directRecords, output.Signature());
-                    LogInfo(
-                        $"[CoordinatedOps] alliance={allianceId} action=package-partial-rollback committed={committedCount}/{plans.Count} package={output.Signature()}");
-                }
-                return committedCount == plans.Count;
-            }
-            catch (Exception ex)
-            {
-                WarnOnce("coordinated-ops:commit", "[CoordinatedOps] commit failed: " + ex.Message);
-                return false;
             }
         }
 

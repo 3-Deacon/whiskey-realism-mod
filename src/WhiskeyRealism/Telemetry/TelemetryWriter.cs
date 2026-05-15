@@ -151,8 +151,13 @@ namespace WhiskeyRealism.Telemetry
             if (rows.Count == 0)
                 return;
 
-            for (int i = 0; i < rows.Count; i++)
-                WriteRow(rows[i]);
+            using (HasNonPerformanceRow(rows)
+                ? TelemetryPerf.Scope("telemetry.flush", TelemetryLayer.System, TelemetryCategory.Performance, 10.0)
+                : NoopDisposable.Instance)
+            {
+                for (int i = 0; i < rows.Count; i++)
+                    WriteRow(rows[i]);
+            }
 
             SafeWriteManifest();
         }
@@ -185,7 +190,12 @@ namespace WhiskeyRealism.Telemetry
                     return RowWriteResult.Dropped;
 
                 string path = Path.Combine(_sessionDirectory, fileName);
-                File.AppendAllText(path, json);
+                using (ev.Category == TelemetryCategory.Performance
+                    ? NoopDisposable.Instance
+                    : TelemetryPerf.Scope("telemetry.file-write", TelemetryLayer.System, TelemetryCategory.Performance, 5.0))
+                {
+                    File.AppendAllText(path, json);
+                }
                 lock (_gate)
                 {
                     _outputFiles.Add(fileName);
@@ -387,12 +397,32 @@ namespace WhiskeyRealism.Telemetry
                 || category == TelemetryCategory.Performance;
         }
 
+        private static bool HasNonPerformanceRow(List<TelemetryEvent> rows)
+        {
+            if (rows == null) return false;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i] != null && rows[i].Category != TelemetryCategory.Performance)
+                    return true;
+            }
+            return false;
+        }
+
         private enum RowWriteResult
         {
             Written,
             Dropped,
             SinkFailed,
             SinkDisabled
+        }
+
+        private sealed class NoopDisposable : IDisposable
+        {
+            internal static readonly NoopDisposable Instance = new NoopDisposable();
+
+            public void Dispose()
+            {
+            }
         }
     }
 }

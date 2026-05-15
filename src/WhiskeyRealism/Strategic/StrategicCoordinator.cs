@@ -9,6 +9,7 @@ using UnityEngine;
 using WhiskeyRealism.Patches;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
@@ -219,6 +220,12 @@ namespace WhiskeyRealism.Strategic
         }
 
         private void RunStrategicReview(int day, int month, int year, bool logHeartbeat)
+        {
+            using (TelemetryPerf.Scope("campaign.daily-review", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
+                RunStrategicReviewCore(day, month, year, logHeartbeat);
+        }
+
+        private void RunStrategicReviewCore(int day, int month, int year, bool logHeartbeat)
         {
             var totalWatch = Stopwatch.StartNew();
             double mapMs = 0d;
@@ -526,6 +533,12 @@ namespace WhiskeyRealism.Strategic
 
         private void UpdateConstructionIntent(int alliance, EraStage era, bool logHeartbeat)
         {
+            using (TelemetryPerf.Scope("campaign.construction", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
+                UpdateConstructionIntentCore(alliance, era, logHeartbeat);
+        }
+
+        private void UpdateConstructionIntentCore(int alliance, EraStage era, bool logHeartbeat)
+        {
             try
             {
                 var plugin = Plugin.Instance;
@@ -573,6 +586,12 @@ namespace WhiskeyRealism.Strategic
         }
 
         private void UpdateDefenseIntent(int alliance, EraStage era, int day, int month, int year)
+        {
+            using (TelemetryPerf.Scope("campaign.defense-intent", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
+                UpdateDefenseIntentCore(alliance, era, day, month, year);
+        }
+
+        private void UpdateDefenseIntentCore(int alliance, EraStage era, int day, int month, int year)
         {
             try
             {
@@ -714,6 +733,12 @@ namespace WhiskeyRealism.Strategic
         }
 
         private void UpdateFiscalIntent(int alliance, EraStage era, int day, int month, int year, bool logHeartbeat)
+        {
+            using (TelemetryPerf.Scope("campaign.fiscal", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
+                UpdateFiscalIntentCore(alliance, era, day, month, year, logHeartbeat);
+        }
+
+        private void UpdateFiscalIntentCore(int alliance, EraStage era, int day, int month, int year, bool logHeartbeat)
         {
             var input = FiscalRuntime.BuildInput(alliance, era, _fiscalMemory[alliance]);
             var options = new FiscalOptions();
@@ -1258,8 +1283,11 @@ namespace WhiskeyRealism.Strategic
             try
             {
                 var dto = BuildDto();
-                var json = Newtonsoft.Json.JsonConvert.SerializeObject(dto, Newtonsoft.Json.Formatting.Indented);
-                System.IO.File.WriteAllText(fullPath, json);
+                string json;
+                using (TelemetryPerf.Scope("campaign.sidecar-json-serialization", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
+                    json = Newtonsoft.Json.JsonConvert.SerializeObject(dto, Newtonsoft.Json.Formatting.Indented);
+                using (TelemetryPerf.Scope("campaign.sidecar-file-write", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
+                    System.IO.File.WriteAllText(fullPath, json);
                 Plugin.Log.LogInfo("[Coordinator] sidecar written: " + fullPath);
             }
             catch (Exception ex) { Plugin.Log.LogError("[Coordinator] sidecar save failed: " + ex); }

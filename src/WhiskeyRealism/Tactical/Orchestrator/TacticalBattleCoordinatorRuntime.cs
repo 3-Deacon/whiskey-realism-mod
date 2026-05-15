@@ -6,6 +6,7 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -122,18 +123,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public static void Tick(AIBattle battle)
         {
             if (!active) return;
-            try
+            using (TelemetryPerf.Scope("tactical.orchestrator-tick", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                OnceLog.Info("orch-coordinator", "[TacticalOrchestrator] coordinator first tick");
-                bool aiVsAi = SafeAiVsAi();
-                float deltaSeconds = ComputeTickDeltaSeconds();
-                DriveTacticalCommanderSide(side0, battle, aiVsAi, deltaSeconds);
-                DriveTacticalCommanderSide(side1, battle, aiVsAi, deltaSeconds);
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] Tick skipped: "
-                    + e.GetType().Name + " " + e.Message);
+                try
+                {
+                    OnceLog.Info("orch-coordinator", "[TacticalOrchestrator] coordinator first tick");
+                    bool aiVsAi = SafeAiVsAi();
+                    float deltaSeconds = ComputeTickDeltaSeconds();
+                    DriveTacticalCommanderSide(side0, battle, aiVsAi, deltaSeconds);
+                    DriveTacticalCommanderSide(side1, battle, aiVsAi, deltaSeconds);
+                }
+                catch (Exception e)
+                {
+                    Plugin.Log.LogWarning("[TacticalOrchestrator] Tick skipped: "
+                        + e.GetType().Name + " " + e.Message);
+                }
             }
         }
 
@@ -265,41 +269,44 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static void DriveOperationsLedger(TacticalBattleOrchestrator side, AIBattle battle)
         {
-            try
+            using (TelemetryPerf.Scope("tactical.operations-ledger", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                var plugin = Plugin.Instance;
-                if (side == null || side.Army == null || plugin == null) return;
-                TacticalCommanderMode mode = plugin.TacticalCommanderModeValue;
-                if (!TacticalCommanderModePolicy.RunsLedger(mode))
+                try
                 {
+                    var plugin = Plugin.Instance;
+                    if (side == null || side.Army == null || plugin == null) return;
+                    TacticalCommanderMode mode = plugin.TacticalCommanderModeValue;
+                    if (!TacticalCommanderModePolicy.RunsLedger(mode))
+                    {
+                        side.OperationsLedger.SetRuntimeClock(SafeRealtimeSeconds());
+                        side.TickOperationsLedger(
+                            mode,
+                            Array.Empty<ObjectiveRecord>(),
+                            StrategicBattleIntentSnapshot.Empty,
+                            new ForceAvailabilitySnapshot(0f, 0f),
+                            side.Army.CommanderPersonality);
+                        return;
+                    }
+
+                    var bundle = ArmyEvidenceBuilder.Build(battle, side.AllianceId);
+                    var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, side.AllianceId);
+                    var strategic = BuildStrategicBattleIntentSnapshot(side, bundle);
+                    var force = new ForceAvailabilitySnapshot(
+                        bundle.OwnMainEffortStrength,
+                        Math.Max(0f, 1f - Clamp01(bundle.OwnReservesCommittedFraction)));
+
                     side.OperationsLedger.SetRuntimeClock(SafeRealtimeSeconds());
                     side.TickOperationsLedger(
                         mode,
-                        Array.Empty<ObjectiveRecord>(),
-                        StrategicBattleIntentSnapshot.Empty,
-                        new ForceAvailabilitySnapshot(0f, 0f),
+                        objectives,
+                        strategic,
+                        force,
                         side.Army.CommanderPersonality);
-                    return;
                 }
-
-                var bundle = ArmyEvidenceBuilder.Build(battle, side.AllianceId);
-                var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, side.AllianceId);
-                var strategic = BuildStrategicBattleIntentSnapshot(side, bundle);
-                var force = new ForceAvailabilitySnapshot(
-                    bundle.OwnMainEffortStrength,
-                    Math.Max(0f, 1f - Clamp01(bundle.OwnReservesCommittedFraction)));
-
-                side.OperationsLedger.SetRuntimeClock(SafeRealtimeSeconds());
-                side.TickOperationsLedger(
-                    mode,
-                    objectives,
-                    strategic,
-                    force,
-                    side.Army.CommanderPersonality);
-            }
-            catch (Exception e)
-            {
-                WarnTickCycleOnce(side, e);
+                catch (Exception e)
+                {
+                    WarnTickCycleOnce(side, e);
+                }
             }
         }
 

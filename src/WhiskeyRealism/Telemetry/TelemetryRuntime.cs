@@ -2,10 +2,44 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using Newtonsoft.Json.Linq;
 
 namespace WhiskeyRealism.Telemetry
 {
+    internal readonly struct TelemetryRuntimeDiagnostics
+    {
+        internal TelemetryRuntimeDiagnostics(
+            int queueDepth,
+            long emittedCount,
+            long queueDroppedCount,
+            long protectedOverflowCount,
+            long budgetDroppedCount,
+            long emittedBytes,
+            long sinkFailureCount)
+        {
+            QueueDepth = queueDepth;
+            EmittedCount = emittedCount;
+            QueueDroppedCount = queueDroppedCount;
+            ProtectedOverflowCount = protectedOverflowCount;
+            BudgetDroppedCount = budgetDroppedCount;
+            EmittedBytes = emittedBytes;
+            SinkFailureCount = sinkFailureCount;
+        }
+
+        internal int QueueDepth { get; }
+        internal long EmittedCount { get; }
+        internal long QueueDroppedCount { get; }
+        internal long ProtectedOverflowCount { get; }
+        internal long BudgetDroppedCount { get; }
+        internal long EmittedBytes { get; }
+        internal long SinkFailureCount { get; }
+        internal long DroppedCount => QueueDroppedCount + ProtectedOverflowCount + BudgetDroppedCount;
+
+        internal static TelemetryRuntimeDiagnostics Empty =>
+            new TelemetryRuntimeDiagnostics(0, 0L, 0L, 0L, 0L, 0L, 0L);
+    }
+
     internal sealed class TelemetryRuntimeConfig
     {
         private TelemetryRuntimeConfig()
@@ -73,6 +107,7 @@ namespace WhiskeyRealism.Telemetry
         private bool _shutdown;
         private bool _finalManifestWritten;
         private bool _writerShutdownTimedOut;
+        private long _acceptedCount;
 
         private TelemetryRuntime(TelemetryRuntimeConfig config)
         {
@@ -111,6 +146,29 @@ namespace WhiskeyRealism.Telemetry
         internal int UnflushedCount
         {
             get { return _queue != null ? _queue.Count : 0; }
+        }
+
+        internal TelemetryRuntimeDiagnostics DiagnosticsSnapshot()
+        {
+            try
+            {
+                long queueDropped = _queue != null ? _queue.DroppedCount : 0L;
+                long protectedOverflow = _queue != null ? _queue.ProtectedOverflowCount : 0L;
+                long budgetDropped = _budget != null ? _budget.DroppedCount : 0L;
+                long sinkFailures = _writer != null ? _writer.SinkFailureCount : 0L;
+                return new TelemetryRuntimeDiagnostics(
+                    queueDepth: _queue != null ? _queue.Count : 0,
+                    emittedCount: Interlocked.Read(ref _acceptedCount),
+                    queueDroppedCount: queueDropped,
+                    protectedOverflowCount: protectedOverflow,
+                    budgetDroppedCount: budgetDropped,
+                    emittedBytes: _budget != null ? _budget.EmittedBytes : 0L,
+                    sinkFailureCount: sinkFailures);
+            }
+            catch
+            {
+                return TelemetryRuntimeDiagnostics.Empty;
+            }
         }
 
         internal static TelemetryRuntime Start(TelemetryRuntimeConfig config)
@@ -152,7 +210,10 @@ namespace WhiskeyRealism.Telemetry
 
                 TelemetryQueueResult result = _queue.Enqueue(ev);
                 if (result == TelemetryQueueResult.Enqueued && _writer != null)
+                {
+                    Interlocked.Increment(ref _acceptedCount);
                     _writer.Signal();
+                }
                 return result != TelemetryQueueResult.Dropped;
             }
             catch
@@ -180,6 +241,15 @@ namespace WhiskeyRealism.Telemetry
                         TelemetryCategory.Health,
                         "TelemetryShutdown",
                         TelemetrySeverity.Info).WithField("reason", TelemetryEvent.Safe(reason)));
+                    try
+                    {
+                        WriteSummaryOnShutdown();
+                    }
+                    catch (Exception ex)
+                    {
+                        _writer.RecordRuntimeSinkFailure("summary-write", ex);
+                        Warn(_config, "Telemetry summary failed closed: " + ex.GetType().Name);
+                    }
                     _writer.Signal();
                     lock (_gate)
                         _shutdown = true;
@@ -301,6 +371,40 @@ namespace WhiskeyRealism.Telemetry
             string note = "Telemetry issue bundle manifest generated on shutdown for session " + SessionId + ".";
             string json = TelemetryIssueBundle.CreateManifest(SessionId, _sessionDirectory, files, note).ToJson();
             File.WriteAllText(Path.Combine(_sessionDirectory, "issue-bundle.json"), json);
+        }
+
+        private void WriteSummaryOnShutdown()
+        {
+            if (_config == null || !_config.EmitHumanSummary)
+                return;
+            if (string.IsNullOrWhiteSpace(_sessionDirectory) || _sessionDirectory == "-")
+                return;
+
+            using (TelemetryPerf.Scope("telemetry.summary-generation", TelemetryLayer.System, TelemetryCategory.Performance, 5.0))
+            {
+                var lines = new List<string>();
+                lines.Add("# Whiskey Realism Telemetry Summary");
+                lines.Add("");
+                lines.Add("- session: " + SessionId);
+                lines.Add("- profile: " + Profile);
+                lines.Add("- queuedRows: " + Interlocked.Read(ref _acceptedCount).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                lines.Add("- unflushedRows: " + UnflushedCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                if (_budget != null)
+                {
+                    lines.Add("- emittedBytes: " + _budget.EmittedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    lines.Add("- budgetDroppedRows: " + _budget.DroppedCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+                if (_queue != null)
+                {
+                    lines.Add("- queueDroppedRows: " + _queue.DroppedCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    lines.Add("- protectedOverflowRows: " + _queue.ProtectedOverflowCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+                if (_writer != null)
+                    lines.Add("- sinkFailures: " + _writer.SinkFailureCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+                using (TelemetryPerf.Scope("telemetry.summary-file-write", TelemetryLayer.System, TelemetryCategory.Performance, 5.0))
+                    File.WriteAllText(Path.Combine(_sessionDirectory, "summary.md"), string.Join(Environment.NewLine, lines) + Environment.NewLine);
+            }
         }
 
         private void AddManifestOutputFiles(List<string> files)

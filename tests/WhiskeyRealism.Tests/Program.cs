@@ -76,6 +76,8 @@ static class Program
             ("telemetry runtime final manifest reports issue bundle failure", TelemetryRuntimeFinalManifestReportsIssueBundleFailure),
             ("telemetry writer bounds repeated sink failures", TelemetryWriterBoundsRepeatedSinkFailures),
             ("telemetry router double shutdown is idempotent", TelemetryRouterDoubleShutdownIsIdempotent),
+            ("telemetry perf scope emits slow event", TelemetryPerfScopeEmitsSlowEvent),
+            ("telemetry perf scope swallows sink failure", TelemetryPerfScopeSwallowsSinkFailure),
             ("telemetry profile parses unknown as off", TelemetryProfileParsesUnknownAsOff),
             ("telemetry behavior gates are independent from profile", TelemetryBehaviorGatesAreIndependentFromProfile),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
@@ -1584,6 +1586,95 @@ static class Program
             AssertTrue(manifest["endUtc"].Type != JTokenType.Null, "double shutdown manifest is parseable and final");
             AssertEqual(0L, (long)manifest["droppedCounters"]["sinkFailures"], "double shutdown does not duplicate sink failures");
             AssertEqual(0, warnings.Count, "double shutdown does not duplicate warnings");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryPerfScopeEmitsSlowEvent()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            TelemetryRouter.AttachRuntime(runtime);
+
+            using (TelemetryPerf.Scope("unit.perf", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.0))
+            {
+                System.Threading.Thread.Sleep(1);
+            }
+
+            TelemetryRouter.Shutdown("perf-test");
+
+            string performance = File.ReadAllText(Path.Combine(sessionDirectory, "performance.jsonl"));
+            JObject row = ParseJsonLine(performance);
+            AssertEqual("Performance", (string)row["event"], "performance event name");
+            AssertEqual("Tactical", (string)row["layer"], "performance layer");
+            AssertEqual("Performance", (string)row["category"], "performance category");
+            AssertContains(performance, "\"scope\":\"unit.perf\"", "scope field");
+            AssertContains(performance, "\"slow\":true", "slow field");
+            AssertContains(performance, "\"thresholdMs\":0", "threshold field");
+            AssertContains(performance, "\"queueDepth\"", "queue depth field");
+            AssertContains(performance, "\"emittedCount\"", "emitted counter field");
+            AssertContains(performance, "\"droppedCount\"", "dropped counter field");
+            AssertTrue((double)row["durationMs"] >= 0.0, "duration is finite");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryPerfScopeSwallowsSinkFailure()
+    {
+        string gameRoot = CreateTempDirectory();
+        var warnings = new List<string>();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: warnings.Add);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            TelemetryRouter.AttachRuntime(runtime);
+            Directory.Delete(sessionDirectory, recursive: true);
+
+            using (TelemetryPerf.Scope("unit.perf.failure", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.0))
+            {
+            }
+
+            TelemetryRouter.Shutdown("perf-sink-failure");
+
+            AssertFalse(runtime.IsRunning, "runtime stops after sink failure");
+            AssertTrue(warnings.Count >= 1, "sink failure is reported through bounded warning");
         }
         finally
         {
