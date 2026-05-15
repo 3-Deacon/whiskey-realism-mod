@@ -70,18 +70,24 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
-        internal void StopAndFlush(int timeoutMs)
+        internal bool StopAndFlush(int timeoutMs)
         {
             _stopRequested = true;
             Signal();
             try
             {
                 if (!_thread.Join(Math.Max(1, timeoutMs)))
+                {
                     RecordSinkFailure("writer-shutdown-timeout", null);
+                    return false;
+                }
+
+                return true;
             }
             catch (Exception ex)
             {
                 RecordSinkFailure("writer-shutdown", ex);
+                return false;
             }
         }
 
@@ -138,12 +144,17 @@ namespace WhiskeyRealism.Telemetry
 
         private void WriteRow(TelemetryEvent ev)
         {
+            WriteRow(ev, reportSinkFailure: true);
+        }
+
+        private void WriteRow(TelemetryEvent ev, bool reportSinkFailure)
+        {
             try
             {
                 string json = TelemetryJson.ToJsonLine(ev);
                 long bytes = System.Text.Encoding.UTF8.GetByteCount(json);
                 string fileName = FileNameForNextWrite(ev, bytes);
-                if (!_budget.TryReserve(ev.Category, bytes))
+                if (!_budget.TryReserve(ev.Category, bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(ev)))
                     return;
 
                 string path = Path.Combine(_sessionDirectory, fileName);
@@ -158,7 +169,8 @@ namespace WhiskeyRealism.Telemetry
             }
             catch (Exception ex)
             {
-                RecordSinkFailure("write-row", ex);
+                if (reportSinkFailure)
+                    RecordSinkFailure("write-row", ex);
             }
         }
 
@@ -194,10 +206,9 @@ namespace WhiskeyRealism.Telemetry
                     TelemetryCategory.Failure,
                     "TelemetrySinkFailure",
                     TelemetrySeverity.Warning)
+                    .WithField("protectedSummary", true)
                     .WithField("reason", message);
-                string json = TelemetryJson.ToJsonLine(failure);
-                string path = Path.Combine(_sessionDirectory, FileNameFor(failure, _budget.RotationIndex));
-                File.AppendAllText(path, json);
+                WriteRow(failure, reportSinkFailure: false);
             }
             catch
             {
@@ -233,6 +244,33 @@ namespace WhiskeyRealism.Telemetry
                 default:
                     return ev.Layer == TelemetryLayer.Campaign ? "campaign" : "tactical";
             }
+        }
+
+        private static bool IsCapSurvivingRuntimeRow(TelemetryEvent ev)
+        {
+            if (ev == null || !IsCapSurvivingCategory(ev.Category))
+                return false;
+            if (ev.Fields != null && ev.Fields.GetBool("protectedSummary"))
+                return true;
+
+            string eventName = TelemetryEvent.Safe(ev.EventName);
+            if (string.Equals(eventName, "TelemetryShutdown", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (string.Equals(eventName, "TelemetrySinkFailure", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (eventName.IndexOf("summary", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            if (eventName.IndexOf("counter", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            return false;
+        }
+
+        private static bool IsCapSurvivingCategory(TelemetryCategory category)
+        {
+            return category == TelemetryCategory.Failure
+                || category == TelemetryCategory.Health
+                || category == TelemetryCategory.Performance;
         }
     }
 }

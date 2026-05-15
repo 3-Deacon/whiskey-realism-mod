@@ -66,6 +66,10 @@ static class Program
             ("telemetry profile off does not allocate session", TelemetryProfileOffDoesNotAllocateSession),
             ("telemetry runtime full tuning writes sidecars and drains shutdown", TelemetryRuntimeFullTuningWritesSidecarsAndDrainsShutdown),
             ("telemetry runtime budget drops oversized detail rows", TelemetryRuntimeBudgetDropsOversizedDetailRows),
+            ("telemetry runtime protected summaries survive consumed budget", TelemetryRuntimeProtectedSummariesSurviveConsumedBudget),
+            ("telemetry writer sink failure rows use output accounting", TelemetryWriterSinkFailureRowsUseOutputAccounting),
+            ("telemetry writer reports shutdown timeout", TelemetryWriterReportsShutdownTimeout),
+            ("telemetry runtime final manifest ignores late non final writes", TelemetryRuntimeFinalManifestIgnoresLateNonFinalWrites),
             ("telemetry runtime writes scoped issue bundle on shutdown", TelemetryRuntimeWritesScopedIssueBundleOnShutdown),
             ("telemetry profile parses unknown as off", TelemetryProfileParsesUnknownAsOff),
             ("telemetry behavior gates are independent from profile", TelemetryBehaviorGatesAreIndependentFromProfile),
@@ -1208,6 +1212,161 @@ static class Program
             AssertTrue((long)manifest["droppedCounters"]["Decision"] >= 1L, "manifest records budget decision drop");
             AssertTrue(File.Exists(Path.Combine(sessionDirectory, "failures.jsonl")), "protected failure sidecar survives tiny cap");
             AssertEqual(0, runtime.UnflushedCount, "budget shutdown drains queue");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryRuntimeProtectedSummariesSurviveConsumedBudget()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 1,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            var probe = TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Tactical, TelemetryCategory.Write, "BudgetFiller", TelemetrySeverity.Info).WithField("payload", "");
+            int fillerOverhead = System.Text.Encoding.UTF8.GetByteCount(TelemetryJson.ToJsonLine(probe));
+            string filler = new string('x', (int)Math.Max(1L, config.MaxTuningLogBytes - fillerOverhead - 40L));
+
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Tactical, TelemetryCategory.Write, "BudgetFiller", TelemetrySeverity.Info).WithField("payload", filler)), "filler row queues before writer consumes budget");
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.System, TelemetryCategory.Failure, "RawFailureDetail", TelemetrySeverity.Warning).WithField("payload", new string('d', 128))), "raw failure detail queues before writer cap check");
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.System, TelemetryCategory.Failure, "FailureSummary", TelemetrySeverity.Warning).WithField("protectedSummary", true).WithField("reason", "after-cap")), "failure summary queues before writer cap check");
+
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            runtime.Shutdown("after-cap");
+
+            string failures = File.ReadAllText(Path.Combine(sessionDirectory, "failures.jsonl"));
+            string health = File.ReadAllText(Path.Combine(sessionDirectory, "health.jsonl"));
+            JObject manifest = JObject.Parse(File.ReadAllText(Path.Combine(sessionDirectory, "manifest.json")));
+            AssertContains(failures, "\"event\":\"FailureSummary\"", "protected failure summary survives consumed cap");
+            AssertFalse(failures.Contains("\"event\":\"RawFailureDetail\""), "raw failure detail remains capped after consumed budget");
+            AssertContains(health, "\"event\":\"TelemetryShutdown\"", "shutdown health survives consumed cap");
+            AssertTrue((long)manifest["droppedCounters"]["Failure"] >= 1L, "raw failure detail budget drop recorded");
+            AssertTrue(JsonArrayContainsSubstring((JArray)manifest["outputFiles"], "failures.jsonl"), "manifest includes protected failure output");
+            AssertTrue(JsonArrayContainsSubstring((JArray)manifest["outputFiles"], "health.jsonl"), "manifest includes shutdown health output");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryWriterSinkFailureRowsUseOutputAccounting()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            var queue = new TelemetryQueue(capacity: 8);
+            var budget = new TelemetryBudget(totalBytes: 256, rotateBytes: 64);
+            TelemetryWriter writer = null;
+            writer = new TelemetryWriter(queue, budget, sessionDirectory, delegate
+            {
+                var manifest = TelemetryManifest.Create("sink-test", "0.2.2-test", "abcdef1234567890", TelemetryProfile.FullTuning, DateTime.UtcNow, budget, queue.Count);
+                foreach (string file in writer.OutputFilesSnapshot())
+                    manifest.OutputFiles.Add(file);
+                File.WriteAllText(Path.Combine(sessionDirectory, "manifest.json"), manifest.ToJson());
+            });
+
+            writer.RecordRuntimeSinkFailure("unit-test-sink", null);
+            writer.Start();
+            AssertTrue(writer.StopAndFlush(1000), "writer stops after sink failure accounting manifest");
+
+            string failuresPath = Path.Combine(sessionDirectory, "failures.jsonl");
+            AssertTrue(File.Exists(failuresPath), "sink failure sidecar written");
+            AssertContains(File.ReadAllText(failuresPath), "\"event\":\"TelemetrySinkFailure\"", "sink failure row event");
+            AssertTrue(budget.EmittedBytes > 0L, "sink failure row consumes budget accounting");
+            AssertTrue(writer.OutputFilesSnapshot().Contains("failures.jsonl"), "sink failure row appears in output file accounting");
+            JObject manifestJson = JObject.Parse(File.ReadAllText(Path.Combine(sessionDirectory, "manifest.json")));
+            AssertTrue(JsonArrayContainsSubstring((JArray)manifestJson["outputFiles"], "failures.jsonl"), "manifest includes sink failure output");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryWriterReportsShutdownTimeout()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        var enteredManifest = new System.Threading.ManualResetEvent(false);
+        var releaseManifest = new System.Threading.ManualResetEvent(false);
+        try
+        {
+            var queue = new TelemetryQueue(capacity: 8);
+            var budget = new TelemetryBudget(totalBytes: 4096, rotateBytes: 1024);
+            int manifestCalls = 0;
+            var writer = new TelemetryWriter(queue, budget, sessionDirectory, delegate
+            {
+                if (System.Threading.Interlocked.Increment(ref manifestCalls) == 1)
+                {
+                    enteredManifest.Set();
+                    releaseManifest.WaitOne(5000);
+                }
+            });
+
+            writer.Start();
+            queue.Enqueue(TelemetryEvent.Create("s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical, TelemetryCategory.Decision, "TimeoutDecision", TelemetrySeverity.Info).WithDecision("hold", "test", "sig-timeout"));
+            writer.Signal();
+
+            AssertTrue(enteredManifest.WaitOne(1000), "writer entered blocking manifest callback");
+            AssertFalse(writer.StopAndFlush(1), "writer reports timeout when background thread is still blocked");
+            releaseManifest.Set();
+            AssertTrue(writer.StopAndFlush(1000), "writer joins after blocked manifest callback releases");
+        }
+        finally
+        {
+            releaseManifest.Set();
+            enteredManifest.Dispose();
+            releaseManifest.Dispose();
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryRuntimeFinalManifestIgnoresLateNonFinalWrites()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            runtime.Shutdown("final-manifest");
+
+            JObject finalManifest = JObject.Parse(File.ReadAllText(Path.Combine(sessionDirectory, "manifest.json")));
+            AssertTrue(finalManifest["endUtc"].Type != JTokenType.Null, "shutdown writes final manifest");
+
+            typeof(TelemetryRuntime)
+                .GetMethod("WriteManifest", BindingFlags.Instance | BindingFlags.NonPublic, null, Type.EmptyTypes, null)
+                .Invoke(runtime, new object[0]);
+
+            JObject afterLateWrite = JObject.Parse(File.ReadAllText(Path.Combine(sessionDirectory, "manifest.json")));
+            AssertTrue(afterLateWrite["endUtc"].Type != JTokenType.Null, "late non-final manifest cannot clear final end");
         }
         finally
         {

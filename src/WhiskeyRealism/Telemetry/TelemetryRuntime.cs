@@ -63,6 +63,7 @@ namespace WhiskeyRealism.Telemetry
     internal sealed class TelemetryRuntime
     {
         private readonly object _gate = new object();
+        private readonly object _manifestGate = new object();
         private readonly TelemetryRuntimeConfig _config;
         private readonly TelemetryQueue _queue;
         private readonly TelemetryBudget _budget;
@@ -70,6 +71,8 @@ namespace WhiskeyRealism.Telemetry
         private readonly string _sessionDirectory;
         private readonly DateTime _startUtc;
         private bool _shutdown;
+        private bool _finalManifestWritten;
+        private bool _writerShutdownTimedOut;
 
         private TelemetryRuntime(TelemetryRuntimeConfig config)
         {
@@ -180,7 +183,11 @@ namespace WhiskeyRealism.Telemetry
                     _writer.Signal();
                     lock (_gate)
                         _shutdown = true;
-                    _writer.StopAndFlush(2500);
+                    if (!_writer.StopAndFlush(2500))
+                    {
+                        lock (_manifestGate)
+                            _writerShutdownTimedOut = true;
+                    }
                 }
                 else
                 {
@@ -226,40 +233,51 @@ namespace WhiskeyRealism.Telemetry
             if (_budget == null || string.IsNullOrWhiteSpace(_sessionDirectory) || _sessionDirectory == "-")
                 return;
 
-            var manifest = TelemetryManifest.Create(
-                SessionId,
-                _config.PluginVersion,
-                _config.RuntimeAssemblySha256,
-                Profile,
-                _startUtc,
-                _budget,
-                UnflushedCount);
-
-            manifest.EndUtc = endUtc;
-            manifest.ConfigSnapshot["loggingProfile"] = Profile.ToString();
-            manifest.ConfigSnapshot["maxTuningLogBytes"] = _config.MaxTuningLogBytes.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            manifest.ConfigSnapshot["fileRotateBytes"] = _config.FileRotateBytes.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            manifest.ConfigSnapshot["retainedSessions"] = _config.RetainedSessions.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            manifest.ConfigSnapshot["emitHumanSummary"] = _config.EmitHumanSummary ? "true" : "false";
-            manifest.ConfigSnapshot["performanceWarnings"] = _config.PerformanceWarnings ? "true" : "false";
-            manifest.ConfigSnapshot["createIssueBundleOnShutdown"] = _config.CreateIssueBundleOnShutdown ? "true" : "false";
-
-            if (_queue != null)
+            lock (_manifestGate)
             {
-                foreach (KeyValuePair<string, long> entry in _queue.ProtectedOverflowSnapshot())
-                    manifest.DroppedCounters["queueProtectedOverflow." + entry.Key] = entry.Value;
-                manifest.DroppedCounters["queueDropped"] = _queue.DroppedCount;
-            }
+                if (!endUtc.HasValue && _finalManifestWritten)
+                    return;
 
-            if (_writer != null)
-            {
-                foreach (string file in _writer.OutputFilesSnapshot())
-                    manifest.OutputFiles.Add(file);
-                manifest.DroppedCounters["sinkFailures"] = _writer.SinkFailureCount;
-            }
+                var manifest = TelemetryManifest.Create(
+                    SessionId,
+                    _config.PluginVersion,
+                    _config.RuntimeAssemblySha256,
+                    Profile,
+                    _startUtc,
+                    _budget,
+                    UnflushedCount);
 
-            string path = Path.Combine(_sessionDirectory, "manifest.json");
-            File.WriteAllText(path, manifest.ToJson());
+                manifest.EndUtc = endUtc;
+                manifest.ConfigSnapshot["loggingProfile"] = Profile.ToString();
+                manifest.ConfigSnapshot["maxTuningLogBytes"] = _config.MaxTuningLogBytes.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                manifest.ConfigSnapshot["fileRotateBytes"] = _config.FileRotateBytes.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                manifest.ConfigSnapshot["retainedSessions"] = _config.RetainedSessions.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                manifest.ConfigSnapshot["emitHumanSummary"] = _config.EmitHumanSummary ? "true" : "false";
+                manifest.ConfigSnapshot["performanceWarnings"] = _config.PerformanceWarnings ? "true" : "false";
+                manifest.ConfigSnapshot["createIssueBundleOnShutdown"] = _config.CreateIssueBundleOnShutdown ? "true" : "false";
+
+                if (_queue != null)
+                {
+                    foreach (KeyValuePair<string, long> entry in _queue.ProtectedOverflowSnapshot())
+                        manifest.DroppedCounters["queueProtectedOverflow." + entry.Key] = entry.Value;
+                    manifest.DroppedCounters["queueDropped"] = _queue.DroppedCount;
+                }
+
+                if (_writer != null)
+                {
+                    foreach (string file in _writer.OutputFilesSnapshot())
+                        manifest.OutputFiles.Add(file);
+                    manifest.DroppedCounters["sinkFailures"] = _writer.SinkFailureCount;
+                }
+
+                if (_writerShutdownTimedOut)
+                    manifest.DroppedCounters["writerShutdownTimedOut"] = 1L;
+
+                string path = Path.Combine(_sessionDirectory, "manifest.json");
+                File.WriteAllText(path, manifest.ToJson());
+                if (endUtc.HasValue)
+                    _finalManifestWritten = true;
+            }
         }
 
         private void WriteIssueBundleOnShutdown()
