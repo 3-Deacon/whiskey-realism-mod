@@ -89,6 +89,8 @@ static class Program
             ("telemetry tag policy keeps startup allowlisted", TelemetryTagPolicyKeepsStartupAllowlisted),
             ("telemetry tag policy routes deployment diagnostics sidecar only", TelemetryTagPolicyRoutesDeploymentDiagnosticsSidecarOnly),
             ("telemetry legacy off suppresses sidecar only but allows serious", TelemetryLegacyOffSuppressesSidecarOnlyButAllowsSerious),
+            ("telemetry legacy unavailable runtime keeps protected failures visible", TelemetryLegacyUnavailableRuntimeKeepsProtectedFailuresVisible),
+            ("deployment legacy helper suppresses off profile tuning rows", DeploymentLegacyHelperSuppressesOffProfileTuningRows),
             ("once log retries when logger unavailable", OnceLogRetriesWhenLoggerUnavailable),
             ("once log concurrent calls keep one time semantics", OnceLogConcurrentCallsKeepOneTimeSemantics),
             ("telemetry legacy parser extracts key values", TelemetryLegacyParserExtractsKeyValues),
@@ -1913,6 +1915,70 @@ static class Program
             "off profile suppresses sidecar-only deployment row from main log");
         AssertTrue(TelemetryRouter.LegacyWarning("[TacDeployTerrain] unit=brigade-4 failed missing terrain probe"),
             "serious deployment row is still allowed to main log");
+    }
+
+    private static void TelemetryLegacyUnavailableRuntimeKeepsProtectedFailuresVisible()
+    {
+        TelemetryRouter.AttachRuntime(null);
+        Plugin.Log = new TestLog();
+
+        AssertTrue(TelemetryRouter.LegacyWarning("[TacticalCommanderUnknown] echelon=division reason=unmapped-commander"),
+            "protected failure rows should fall back to main log when sidecar emission is unavailable");
+        AssertFalse(TelemetryRouter.LegacyInfo("[TacDeployObs] surface=DoPlacement phase=initial alliance=1"),
+            "non-failure sidecar-only tuning rows stay suppressed under Off");
+
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 1,
+                emitHumanSummary: false,
+                performanceWarnings: false,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            TelemetryRouter.AttachRuntime(runtime);
+            runtime.Shutdown("simulate-sidecar-unavailable");
+
+            AssertTrue(TelemetryRouter.LegacyWarning("[TacticalCommanderUnknown] echelon=corps reason=stopped-runtime"),
+                "protected failure rows should fall back to main log when sidecar emission fails");
+            AssertFalse(TelemetryRouter.LegacyInfo("[TacDeployObs] surface=DoPlacement phase=initial alliance=1"),
+                "non-failure sidecar-only tuning rows stay suppressed when stopped runtime cannot emit");
+        }
+        finally
+        {
+            TelemetryRouter.AttachRuntime(null);
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void DeploymentLegacyHelperSuppressesOffProfileTuningRows()
+    {
+        TelemetryRouter.AttachRuntime(null);
+        var log = new TestLog();
+        Plugin.Log = log;
+
+        TelemetryRouter.LegacyInfoToMainLogIfAllowed(
+            "[TacDeployObs] surface=DoPlacement phase=initial alliance=1",
+            TelemetryLayer.Tactical);
+        AssertEqual(0, log.InfoCount, "deployment tuning row should not leak to main log under Off");
+
+        TelemetryRouter.LegacyInfoToMainLogIfAllowed(
+            "[TacDeployTerrain] unit=brigade-4 failed missing terrain probe",
+            TelemetryLayer.Tactical);
+        AssertEqual(1, log.InfoCount, "serious deployment row should remain visible in main log");
+
+        log.ThrowOnInfo = true;
+        TelemetryRouter.LegacyInfoToMainLogIfAllowed(
+            "[TacDeployTerrain] unit=brigade-5 failed missing terrain probe",
+            TelemetryLayer.Tactical);
     }
 
     private static void OnceLogRetriesWhenLoggerUnavailable()

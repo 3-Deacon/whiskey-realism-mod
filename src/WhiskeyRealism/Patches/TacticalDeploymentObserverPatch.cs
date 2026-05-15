@@ -6,6 +6,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -108,13 +109,13 @@ namespace WhiskeyRealism.Patches
                 BattleUnits battleUnits = GetBattleUnits(__instance);
                 var before = __state.Before ?? TacticalDeploymentSnapshot.Empty("before", -1, 0, 0, __state.Phase);
                 string action = active ? "open" : "close";
-                Plugin.Log.LogInfo("[TacticalDeploymentPhase]" +
-                                   " action=" + action +
-                                   " calledFromSave=" + calledfromsave +
-                                   " eod=" + before.EodCycle +
-                                   " days=" + before.BattlePassedDays +
-                                   " groups=" + before.Groups.Count +
-                                   " outerDeltaSuppressed=" + __state.SuppressOuterDelta);
+                LogDeploymentTelemetry("[TacticalDeploymentPhase]" +
+                                       " action=" + action +
+                                       " calledFromSave=" + calledfromsave +
+                                       " eod=" + before.EodCycle +
+                                       " days=" + before.BattlePassedDays +
+                                       " groups=" + before.Groups.Count +
+                                       " outerDeltaSuppressed=" + __state.SuppressOuterDelta);
                 if (!__state.SuppressOuterDelta)
                 {
                     EmitDelta(battleUnits, "SetActiveDeploymentPhase:" + action, -1, __state);
@@ -221,10 +222,10 @@ namespace WhiskeyRealism.Patches
                 var before = state.Before ?? TacticalDeploymentSnapshot.Empty("before", alliance, 0, 0, state.Phase);
                 var after = Capture(battleUnits, "post", alliance, state.Phase);
                 var delta = TacticalDeploymentTelemetry.Delta(surface, before, after);
-                Plugin.Log.LogInfo(TacticalDeploymentTelemetry.FormatSummary(delta));
+                LogDeploymentTelemetry(TacticalDeploymentTelemetry.FormatSummary(delta));
                 foreach (string line in TopMoveLines(battleUnits, surface, before, after))
                 {
-                    Plugin.Log.LogInfo(line);
+                    LogDeploymentTelemetry(line);
                 }
             }
             catch (Exception ex)
@@ -402,6 +403,11 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning("tactical-deployment-observer:read-grp", "Failed to read BattleUnits.grp: " + ex.GetType().Name);
                 return Array.Empty<BattleUnits.Grp>();
             }
+        }
+
+        private static void LogDeploymentTelemetry(string line)
+        {
+            TelemetryRouter.LegacyInfoToMainLogIfAllowed(line, TelemetryLayer.Tactical);
         }
 
         private static int ReadInt(BattleUnits battleUnits, FieldInfo field, string fieldName, string warningKey)

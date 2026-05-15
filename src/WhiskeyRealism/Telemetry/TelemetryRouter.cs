@@ -102,6 +102,21 @@ namespace WhiskeyRealism.Telemetry
             return Legacy(line, TelemetrySeverity.Warning);
         }
 
+        internal static void LegacyInfoToMainLogIfAllowed(string line, TelemetryLayer fallbackLayer)
+        {
+            try
+            {
+                if (!LegacyInfo(line, fallbackLayer))
+                    return;
+
+                if (Plugin.Log != null)
+                    Plugin.Log.LogInfo(line);
+            }
+            catch
+            {
+            }
+        }
+
         internal static bool Emit(
             TelemetryLayer layer,
             TelemetryCategory category,
@@ -238,6 +253,7 @@ namespace WhiskeyRealism.Telemetry
                 }
 
                 TelemetryEvent ev;
+                bool emitted = false;
                 if (TelemetryLegacyParser.TryParse(
                     line,
                     profile,
@@ -245,18 +261,27 @@ namespace WhiskeyRealism.Telemetry
                     severity,
                     out ev))
                 {
-                    Emit(ev);
+                    emitted = Emit(ev);
                 }
 
-                if (profile == TelemetryProfile.Off && !route.AllowMainLog)
+                bool protectMainLog = !emitted && ShouldProtectLegacyMainLog(route, severity);
+
+                if (profile == TelemetryProfile.Off && !route.AllowMainLog && !protectMainLog)
                     NoteLegacySuppressedByProfile();
 
-                return route.AllowMainLog;
+                return route.AllowMainLog || protectMainLog;
             }
             catch
             {
                 return true;
             }
+        }
+
+        private static bool ShouldProtectLegacyMainLog(TelemetryTagRoute route, TelemetrySeverity severity)
+        {
+            return IsProtected(route.Category)
+                || route.Severity >= TelemetrySeverity.Warning
+                || severity >= TelemetrySeverity.Warning;
         }
 
         private static void NoteLegacySuppressedByProfile()

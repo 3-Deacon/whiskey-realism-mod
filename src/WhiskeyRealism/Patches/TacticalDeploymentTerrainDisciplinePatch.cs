@@ -6,6 +6,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -378,11 +379,16 @@ namespace WhiskeyRealism.Patches
                     enemy.Visible ? enemy.DistanceMeters : 0f,
                     decision));
 
-                Plugin.Log.LogInfo(line.Replace("[TacDeployTerrain]", "[TacDeployTerrainAdvice]"));
+                LogDeploymentTelemetry(line.Replace("[TacDeployTerrain]", "[TacDeployTerrainAdvice]"));
             }
             catch
             {
             }
+        }
+
+        private static void LogDeploymentTelemetry(string line)
+        {
+            TelemetryRouter.LegacyInfoToMainLogIfAllowed(line, TelemetryLayer.Tactical);
         }
 
         private static void ResetAdviceLogForBattle(BattleUnits battleUnits, string phase)
