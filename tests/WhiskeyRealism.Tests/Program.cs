@@ -42,6 +42,10 @@ static class Program
             ("telemetry retention no manifest orders by directory before mtime", TelemetryRetentionNoManifestOrdersByDirectoryBeforeMtime),
             ("telemetry queue protected bypass waits until detail capacity full", TelemetryQueueProtectedBypassWaitsUntilDetailCapacityFull),
             ("telemetry retention mixed manifest prefers directory before mtime", TelemetryRetentionMixedManifestPrefersDirectoryBeforeMtime),
+            ("telemetry queue bounds protected bursts with overflow counts", TelemetryQueueBoundsProtectedBurstsWithOverflowCounts),
+            ("telemetry queue dropped count read is stable", TelemetryQueueDroppedCountReadIsStable),
+            ("telemetry budget dropped snapshot is stable", TelemetryBudgetDroppedSnapshotIsStable),
+            ("telemetry issue bundle redacts json and bearer equals secrets", TelemetryIssueBundleRedactsJsonAndBearerEqualsSecrets),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1254,6 +1258,7 @@ static class Program
         AssertTrue(notFullDrained.Exists(e => e.EventName == "trace-a"), "trace retained while detail capacity not full");
         AssertTrue(notFullDrained.Exists(e => e.EventName == "health-a"), "health retained while detail capacity not full");
         AssertEqual(0L, notFull.DroppedCount, "not-full queue drops none");
+        AssertEqual(0L, notFull.ProtectedOverflowCount, "not-full queue overflows none");
 
         var full = new TelemetryQueue(capacity: 2);
         AssertTrue(full.TryEnqueue(EventForQueue(TelemetryCategory.Trace, "trace-b")), "trace accepted under detail capacity");
@@ -1267,6 +1272,7 @@ static class Program
         AssertTrue(fullDrained.Exists(e => e.EventName == "health-b"), "health retained when detail capacity full");
         AssertEqual(1L, full.DroppedCount, "full queue evicts one detail row");
         AssertEqual(1L, full.DroppedCountFor(TelemetryCategory.Trace), "trace drop counted");
+        AssertEqual(0L, full.ProtectedOverflowCount, "full queue has no protected overflow");
     }
 
     private static void TelemetryRetentionMixedManifestPrefersDirectoryBeforeMtime()
@@ -1280,6 +1286,64 @@ static class Program
         var ordered = TelemetrySession.OrderRetentionCandidates(candidates);
         AssertEqual("20260515-120001-manifest", ordered[0].DirectoryName, "manifest newer directory wins before no-manifest mtime");
         AssertEqual("20260515-120000-no-manifest", ordered[1].DirectoryName, "no-manifest mtime is final fallback only");
+    }
+
+    private static void TelemetryQueueBoundsProtectedBurstsWithOverflowCounts()
+    {
+        var queue = new TelemetryQueue(capacity: 2);
+        for (int i = 0; i < 20; i++)
+            AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-" + i.ToString(CultureInfo.InvariantCulture))), "protected accepted " + i.ToString(CultureInfo.InvariantCulture));
+
+        AssertTrue(queue.ProtectedReserveCapacity >= 4, "reserve has deterministic minimum");
+        AssertTrue(queue.Count <= 2 + queue.ProtectedReserveCapacity, "protected burst bounded");
+        AssertEqual(20L - queue.ProtectedReserveCapacity, queue.ProtectedOverflowCountFor(TelemetryCategory.Failure), "failure overflow counted");
+        AssertEqual(20L - queue.ProtectedReserveCapacity, queue.ProtectedOverflowCount, "aggregate overflow counted");
+        AssertEqual(0L, queue.DroppedCount, "protected overflow is not a drop");
+
+        var drained = queue.Drain(100);
+        AssertEqual(queue.ProtectedReserveCapacity, drained.Count, "drained bounded reserve");
+        AssertTrue(drained.Exists(e => e.Category == TelemetryCategory.Failure), "protected evidence retained");
+        AssertEqual(20L - queue.ProtectedReserveCapacity, queue.ProtectedOverflowCountFor(TelemetryCategory.Failure), "overflow survives drain for summary");
+    }
+
+    private static void TelemetryQueueDroppedCountReadIsStable()
+    {
+        var queue = new TelemetryQueue(capacity: 1);
+        AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Gate, "gate-a")), "gate accepted");
+        AssertFalse(queue.TryEnqueue(EventForQueue(TelemetryCategory.Trace, "trace-a")), "trace dropped below gate priority");
+        AssertEqual(1L, queue.DroppedCount, "drop count read is locked");
+        AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.Trace), "trace drop counted");
+    }
+
+    private static void TelemetryBudgetDroppedSnapshotIsStable()
+    {
+        var budget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        budget.RecordDropped(TelemetryCategory.Trace);
+        budget.RecordDropped(TelemetryCategory.Trace);
+        budget.RecordDropped(TelemetryCategory.State);
+
+        var snapshot = budget.DroppedSnapshot();
+        AssertEqual(3L, budget.DroppedCount, "budget drop aggregate");
+        AssertEqual(2L, budget.DroppedCountFor(TelemetryCategory.Trace), "trace drop count");
+        AssertEqual(1L, budget.DroppedCountFor(TelemetryCategory.State), "state drop count");
+        AssertEqual(2L, snapshot["Trace"], "snapshot trace count");
+        AssertEqual(1L, snapshot["State"], "snapshot state count");
+
+        budget.RecordDropped(TelemetryCategory.Failure);
+        AssertFalse(snapshot.ContainsKey("Failure"), "snapshot is a stable copy");
+    }
+
+    private static void TelemetryIssueBundleRedactsJsonAndBearerEqualsSecrets()
+    {
+        string redacted = TelemetryIssueBundle.Redact("\"token\":\"abc\" \"api_key\": \"def\" password: \"ghi\" Authorization=Bearer jkl");
+        AssertFalse(redacted.Contains("abc"), "json token removed");
+        AssertFalse(redacted.Contains("def"), "json api key removed");
+        AssertFalse(redacted.Contains("ghi"), "colon password removed");
+        AssertFalse(redacted.Contains("jkl"), "bearer equals removed");
+        AssertContains(redacted, "\"token\":<redacted>", "json token context");
+        AssertContains(redacted, "\"api_key\":<redacted>", "json api key context");
+        AssertContains(redacted, "password:<redacted>", "password context");
+        AssertContains(redacted, "Authorization=Bearer <redacted>", "bearer equals context");
     }
 
     private static FrontSectorLedger BuildLedger()

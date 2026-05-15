@@ -9,12 +9,19 @@ namespace WhiskeyRealism.Telemetry
         private readonly List<TelemetryEvent> _events = new List<TelemetryEvent>();
         private readonly Dictionary<TelemetryCategory, long> _droppedByCategory =
             new Dictionary<TelemetryCategory, long>();
+        private readonly Dictionary<TelemetryCategory, long> _protectedOverflowByCategory =
+            new Dictionary<TelemetryCategory, long>();
         private readonly int _capacity;
+        private long _droppedCount;
+        private long _protectedOverflowCount;
 
         internal TelemetryQueue(int capacity)
         {
             _capacity = Math.Max(1, capacity);
+            ProtectedReserveCapacity = Math.Max(4, _capacity);
         }
+
+        internal int ProtectedReserveCapacity { get; private set; }
 
         internal int Count
         {
@@ -25,7 +32,23 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
-        internal long DroppedCount { get; private set; }
+        internal long DroppedCount
+        {
+            get
+            {
+                lock (_gate)
+                    return _droppedCount;
+            }
+        }
+
+        internal long ProtectedOverflowCount
+        {
+            get
+            {
+                lock (_gate)
+                    return _protectedOverflowCount;
+            }
+        }
 
         internal bool TryEnqueue(TelemetryEvent ev)
         {
@@ -39,6 +62,12 @@ namespace WhiskeyRealism.Telemetry
 
                 if (IsProtected(ev.Category))
                 {
+                    if (ProtectedCount() >= ProtectedReserveCapacity)
+                    {
+                        RecordProtectedOverflow(ev.Category);
+                        return true;
+                    }
+
                     if (DetailCount() >= _capacity)
                     {
                         int protectedEvictIndex = FindLowestPriorityIndex();
@@ -84,6 +113,15 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
+        internal long ProtectedOverflowCountFor(TelemetryCategory category)
+        {
+            lock (_gate)
+            {
+                long count;
+                return _protectedOverflowByCategory.TryGetValue(category, out count) ? count : 0L;
+            }
+        }
+
         internal long DroppedCountFor(TelemetryCategory category)
         {
             lock (_gate)
@@ -125,12 +163,32 @@ namespace WhiskeyRealism.Telemetry
             return count;
         }
 
+        private int ProtectedCount()
+        {
+            int count = 0;
+            for (int i = 0; i < _events.Count; i++)
+            {
+                if (IsProtected(_events[i].Category))
+                    count++;
+            }
+
+            return count;
+        }
+
         private void RecordDropped(TelemetryCategory category)
         {
-            DroppedCount++;
+            _droppedCount++;
             long count;
             _droppedByCategory.TryGetValue(category, out count);
             _droppedByCategory[category] = count + 1L;
+        }
+
+        private void RecordProtectedOverflow(TelemetryCategory category)
+        {
+            _protectedOverflowCount++;
+            long count;
+            _protectedOverflowByCategory.TryGetValue(category, out count);
+            _protectedOverflowByCategory[category] = count + 1L;
         }
 
         private static int Priority(TelemetryCategory category)

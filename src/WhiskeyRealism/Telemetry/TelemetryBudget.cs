@@ -5,21 +5,28 @@ namespace WhiskeyRealism.Telemetry
 {
     internal sealed class TelemetryBudget
     {
+        private readonly object _gate = new object();
         private readonly Dictionary<TelemetryCategory, long> _droppedByCategory =
             new Dictionary<TelemetryCategory, long>();
+        private readonly long _totalBytes;
+        private readonly long _rotateBytes;
+        private long _emittedBytes;
+        private long _currentFileBytes;
+        private long _droppedCount;
+        private int _rotationIndex;
 
         internal TelemetryBudget(long totalBytes, long rotateBytes)
         {
-            TotalBytes = Math.Max(1L, totalBytes);
-            RotateBytes = Math.Max(1L, rotateBytes);
+            _totalBytes = Math.Max(1L, totalBytes);
+            _rotateBytes = Math.Max(1L, rotateBytes);
         }
 
-        internal long TotalBytes { get; private set; }
-        internal long RotateBytes { get; private set; }
-        internal long EmittedBytes { get; private set; }
-        internal long CurrentFileBytes { get; private set; }
-        internal long DroppedCount { get; private set; }
-        internal int RotationIndex { get; private set; }
+        internal long TotalBytes { get { lock (_gate) return _totalBytes; } }
+        internal long RotateBytes { get { lock (_gate) return _rotateBytes; } }
+        internal long EmittedBytes { get { lock (_gate) return _emittedBytes; } }
+        internal long CurrentFileBytes { get { lock (_gate) return _currentFileBytes; } }
+        internal long DroppedCount { get { lock (_gate) return _droppedCount; } }
+        internal int RotationIndex { get { lock (_gate) return _rotationIndex; } }
 
         internal bool Allow(TelemetryCategory category, long estimatedBytes)
         {
@@ -28,55 +35,79 @@ namespace WhiskeyRealism.Telemetry
 
         internal bool Allow(TelemetryCategory category, long estimatedBytes, bool lowPriority)
         {
-            long safeBytes = Math.Max(0L, estimatedBytes);
-            if (IsProtected(category))
-                return true;
+            lock (_gate)
+            {
+                long safeBytes = Math.Max(0L, estimatedBytes);
+                if (IsProtected(category))
+                    return true;
 
-            bool allowed = lowPriority ? WithinCategoryCut(category, safeBytes) : WithinTotalCap(safeBytes);
-            if (!allowed)
-                RecordDropped(category);
-            return allowed;
+                bool allowed = lowPriority ? WithinCategoryCut(category, safeBytes) : WithinTotalCap(safeBytes);
+                if (!allowed)
+                    RecordDroppedLocked(category);
+                return allowed;
+            }
         }
 
         internal void RecordBytes(TelemetryCategory category, long bytes)
         {
-            long safeBytes = Math.Max(0L, bytes);
-            EmittedBytes += safeBytes;
-            CurrentFileBytes += safeBytes;
+            lock (_gate)
+            {
+                long safeBytes = Math.Max(0L, bytes);
+                _emittedBytes += safeBytes;
+                _currentFileBytes += safeBytes;
+            }
         }
 
         internal bool ShouldRotateBefore(long estimatedBytes)
         {
-            long safeBytes = Math.Max(0L, estimatedBytes);
-            return CurrentFileBytes > 0L && CurrentFileBytes + safeBytes > RotateBytes;
+            lock (_gate)
+            {
+                long safeBytes = Math.Max(0L, estimatedBytes);
+                return _currentFileBytes > 0L && _currentFileBytes + safeBytes > _rotateBytes;
+            }
         }
 
         internal void MarkRotated()
         {
-            RotationIndex++;
-            CurrentFileBytes = 0L;
+            lock (_gate)
+            {
+                _rotationIndex++;
+                _currentFileBytes = 0L;
+            }
         }
 
         internal void RecordDropped(TelemetryCategory category)
         {
-            DroppedCount++;
-            long count;
-            _droppedByCategory.TryGetValue(category, out count);
-            _droppedByCategory[category] = count + 1L;
+            lock (_gate)
+                RecordDroppedLocked(category);
         }
 
         internal long DroppedCountFor(TelemetryCategory category)
         {
-            long count;
-            return _droppedByCategory.TryGetValue(category, out count) ? count : 0L;
+            lock (_gate)
+            {
+                long count;
+                return _droppedByCategory.TryGetValue(category, out count) ? count : 0L;
+            }
         }
 
         internal Dictionary<string, long> DroppedSnapshot()
         {
-            var snapshot = new Dictionary<string, long>(StringComparer.Ordinal);
-            foreach (var entry in _droppedByCategory)
-                snapshot[entry.Key.ToString()] = entry.Value;
-            return snapshot;
+            lock (_gate)
+            {
+                var snapshot = new Dictionary<string, long>(StringComparer.Ordinal);
+                foreach (var entry in _droppedByCategory)
+                    snapshot[entry.Key.ToString()] = entry.Value;
+                return snapshot;
+            }
+        }
+
+        private void RecordDroppedLocked(TelemetryCategory category)
+        {
+            _droppedCount++;
+            long count;
+            _droppedByCategory.TryGetValue(category, out count);
+            _droppedByCategory[category] = count + 1L;
         }
 
         private static bool IsProtected(TelemetryCategory category)
@@ -86,13 +117,13 @@ namespace WhiskeyRealism.Telemetry
 
         private bool WithinCategoryCut(TelemetryCategory category, long estimatedBytes)
         {
-            decimal projected = (decimal)EmittedBytes + estimatedBytes;
-            return projected * 100m <= (decimal)TotalBytes * CutPercent(category);
+            decimal projected = (decimal)_emittedBytes + estimatedBytes;
+            return projected * 100m <= (decimal)_totalBytes * CutPercent(category);
         }
 
         private bool WithinTotalCap(long estimatedBytes)
         {
-            return EmittedBytes + estimatedBytes <= TotalBytes;
+            return _emittedBytes + estimatedBytes <= _totalBytes;
         }
 
         private static int CutPercent(TelemetryCategory category)
