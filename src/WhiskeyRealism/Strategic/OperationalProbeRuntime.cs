@@ -205,6 +205,10 @@ namespace WhiskeyRealism.Strategic
                             TelemetrySeverity.Warning,
                             targetName,
                             "commit-failed");
+                        OnceLog.Warning(
+                            "coordinated-ops:probe:package-no-commit:" + allianceId + ":" + (output.Package?.Signature() ?? "-"),
+                            "Coordinated operation probe package did not commit alliance=" + allianceId +
+                            " reason=commit-failed package=" + (output.Package?.Signature() ?? "-"));
                     }
                     return;
                 }

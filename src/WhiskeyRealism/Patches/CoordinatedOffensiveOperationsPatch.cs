@@ -136,6 +136,10 @@ namespace WhiskeyRealism.Patches
                         TelemetrySeverity.Warning,
                         decision,
                         "commit-failed");
+                    OnceLog.Warning(
+                        "coordinated-ops:offensive:package-no-commit:" + allianceId + ":" + (decision?.PackageSignature ?? "-"),
+                        "Coordinated operation package did not commit alliance=" + allianceId +
+                        " reason=commit-failed package=" + (decision?.PackageSignature ?? "-"));
                 }
 
                 ownUnits.Clear();

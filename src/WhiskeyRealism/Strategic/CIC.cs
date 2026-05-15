@@ -402,7 +402,15 @@ namespace WhiskeyRealism.Strategic
             var profile = match.Profile;
             if (!HistoricalOperationCatalog.ValidateProfile(profile, out var reason))
             {
-                EmitHistoricalOperation("no-profile", profile?.OperationId, GetObjectiveId(pickedObjective), null, reason, null);
+                EmitHistoricalOperation(
+                    "no-profile",
+                    profile?.OperationId,
+                    GetObjectiveId(pickedObjective),
+                    null,
+                    reason,
+                    null,
+                    TelemetryCategory.Failure,
+                    TelemetrySeverity.Warning);
                 OnceLog.Warning(
                     "historical-operation:no-profile:" + AllianceId + ":" + (profile?.OperationId ?? "<null>"),
                     $"CIC historical operation profile invalid alliance={AllianceId} operation={profile?.OperationId ?? "<null>"} reason={reason}");
@@ -543,7 +551,9 @@ namespace WhiskeyRealism.Strategic
             int objectiveId,
             string phaseId,
             string reason,
-            float? score)
+            float? score,
+            TelemetryCategory category = TelemetryCategory.Decision,
+            TelemetrySeverity severity = TelemetrySeverity.Info)
         {
             string safeOperation = string.IsNullOrWhiteSpace(operationId) ? "-" : operationId;
             string safePhase = string.IsNullOrWhiteSpace(phaseId) ? "-" : phaseId;
@@ -556,7 +566,7 @@ namespace WhiskeyRealism.Strategic
             if (score.HasValue)
                 signature += "|score=" + (Math.Round(score.Value * 2.0f) / 2.0f).ToString("0.0");
 
-            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "HistoricalOperation", TelemetrySeverity.Info, ev =>
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, category, "HistoricalOperation", severity, ev =>
             {
                 ev.WithAlliance(AllianceId)
                     .WithPhase(safePhase)
