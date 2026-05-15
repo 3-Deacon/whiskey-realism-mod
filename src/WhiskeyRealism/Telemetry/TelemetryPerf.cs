@@ -23,6 +23,74 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
+        internal static void EmitAggregate(
+            string scope,
+            TelemetryLayer layer,
+            TelemetryCategory category,
+            double durationMs,
+            double thresholdMs,
+            long eventsEmitted,
+            long eventsDropped,
+            long bytesWritten)
+        {
+            try
+            {
+                if (!TelemetryRouter.ShouldEmit(TelemetryRouter.CurrentProfile, layer, category))
+                    return;
+
+                EmitPerformance(
+                    scope,
+                    layer,
+                    category,
+                    durationMs,
+                    thresholdMs,
+                    eventsEmitted,
+                    eventsDropped,
+                    bytesWritten);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void EmitPerformance(
+            string scope,
+            TelemetryLayer layer,
+            TelemetryCategory category,
+            double durationMs,
+            double thresholdMs,
+            long eventsEmitted,
+            long eventsDropped,
+            long bytesWritten)
+        {
+            durationMs = TelemetryFields.SanitizedNumber(durationMs);
+            thresholdMs = TelemetryFields.SanitizedNumber(thresholdMs);
+            bool slow = durationMs >= thresholdMs;
+            TelemetryRuntimeDiagnostics counters = TelemetryRouter.DiagnosticsSnapshot();
+
+            TelemetryRouter.Emit(
+                layer,
+                category,
+                "Performance",
+                slow ? TelemetrySeverity.Warning : TelemetrySeverity.Info,
+                ev => ev
+                    .WithDurationMs(durationMs)
+                    .WithField("scope", TelemetryEvent.Safe(scope))
+                    .WithField("slow", slow)
+                    .WithField("thresholdMs", thresholdMs)
+                    .WithField("queueDepth", counters.QueueDepth)
+                    .WithField("eventsEmitted", eventsEmitted)
+                    .WithField("eventsDropped", eventsDropped)
+                    .WithField("bytesWritten", bytesWritten)
+                    .WithField("emittedCount", eventsEmitted)
+                    .WithField("droppedCount", eventsDropped)
+                    .WithField("queueDroppedCount", counters.QueueDroppedCount)
+                    .WithField("protectedOverflowCount", counters.ProtectedOverflowCount)
+                    .WithField("budgetDroppedCount", counters.BudgetDroppedCount)
+                    .WithField("emittedBytes", bytesWritten)
+                    .WithField("sinkFailureCount", counters.SinkFailureCount));
+        }
+
         private sealed class PerfScope : IDisposable
         {
             private readonly string _scope;
@@ -49,28 +117,16 @@ namespace WhiskeyRealism.Telemetry
                 try
                 {
                     _watch.Stop();
-                    double durationMs = TelemetryFields.SanitizedNumber(_watch.Elapsed.TotalMilliseconds);
-                    bool slow = durationMs >= _thresholdMs;
                     TelemetryRuntimeDiagnostics counters = TelemetryRouter.DiagnosticsSnapshot();
-
-                    TelemetryRouter.Emit(
+                    EmitPerformance(
+                        _scope,
                         _layer,
                         _category,
-                        "Performance",
-                        slow ? TelemetrySeverity.Warning : TelemetrySeverity.Info,
-                        ev => ev
-                            .WithDurationMs(durationMs)
-                            .WithField("scope", _scope)
-                            .WithField("slow", slow)
-                            .WithField("thresholdMs", _thresholdMs)
-                            .WithField("queueDepth", counters.QueueDepth)
-                            .WithField("emittedCount", counters.EmittedCount)
-                            .WithField("droppedCount", counters.DroppedCount)
-                            .WithField("queueDroppedCount", counters.QueueDroppedCount)
-                            .WithField("protectedOverflowCount", counters.ProtectedOverflowCount)
-                            .WithField("budgetDroppedCount", counters.BudgetDroppedCount)
-                            .WithField("emittedBytes", counters.EmittedBytes)
-                            .WithField("sinkFailureCount", counters.SinkFailureCount));
+                        _watch.Elapsed.TotalMilliseconds,
+                        _thresholdMs,
+                        counters.EmittedCount,
+                        counters.DroppedCount,
+                        counters.EmittedBytes);
                 }
                 catch
                 {

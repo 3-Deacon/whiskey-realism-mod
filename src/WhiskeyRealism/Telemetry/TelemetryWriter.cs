@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 
@@ -151,28 +152,47 @@ namespace WhiskeyRealism.Telemetry
             if (rows.Count == 0)
                 return;
 
-            using (HasNonPerformanceRow(rows)
+            bool hasNonPerformanceRow = HasNonPerformanceRow(rows);
+            var fileWritePerf = hasNonPerformanceRow ? new FileWritePerfAccumulator() : null;
+            using (hasNonPerformanceRow
                 ? TelemetryPerf.Scope("telemetry.flush", TelemetryLayer.System, TelemetryCategory.Performance, 10.0)
                 : NoopDisposable.Instance)
             {
                 for (int i = 0; i < rows.Count; i++)
-                    WriteRow(rows[i]);
+                {
+                    RowWriteResult result = WriteRow(rows[i], fileWritePerf);
+                    if (fileWritePerf != null && IsFileWritePerfRow(rows[i]) && result != RowWriteResult.Written)
+                        fileWritePerf.RecordDropped();
+                }
             }
+
+            if (fileWritePerf != null)
+                fileWritePerf.Emit();
 
             SafeWriteManifest();
         }
 
         private void WriteRow(TelemetryEvent ev)
         {
-            WriteRow(ev, reportSinkFailure: true, bypassSinkDisabled: false);
+            WriteRow(ev, reportSinkFailure: true, bypassSinkDisabled: false, fileWritePerf: null);
         }
 
         private RowWriteResult WriteRow(TelemetryEvent ev, bool reportSinkFailure)
         {
-            return WriteRow(ev, reportSinkFailure, bypassSinkDisabled: false);
+            return WriteRow(ev, reportSinkFailure, bypassSinkDisabled: false, fileWritePerf: null);
+        }
+
+        private RowWriteResult WriteRow(TelemetryEvent ev, FileWritePerfAccumulator fileWritePerf)
+        {
+            return WriteRow(ev, reportSinkFailure: true, bypassSinkDisabled: false, fileWritePerf: fileWritePerf);
         }
 
         private RowWriteResult WriteRow(TelemetryEvent ev, bool reportSinkFailure, bool bypassSinkDisabled)
+        {
+            return WriteRow(ev, reportSinkFailure, bypassSinkDisabled, fileWritePerf: null);
+        }
+
+        private RowWriteResult WriteRow(TelemetryEvent ev, bool reportSinkFailure, bool bypassSinkDisabled, FileWritePerfAccumulator fileWritePerf)
         {
             try
             {
@@ -190,11 +210,14 @@ namespace WhiskeyRealism.Telemetry
                     return RowWriteResult.Dropped;
 
                 string path = Path.Combine(_sessionDirectory, fileName);
-                using (ev.Category == TelemetryCategory.Performance
-                    ? NoopDisposable.Instance
-                    : TelemetryPerf.Scope("telemetry.file-write", TelemetryLayer.System, TelemetryCategory.Performance, 5.0))
+                Stopwatch fileWriteWatch = IsFileWritePerfRow(ev) && fileWritePerf != null
+                    ? Stopwatch.StartNew()
+                    : null;
+                File.AppendAllText(path, json);
+                if (fileWriteWatch != null)
                 {
-                    File.AppendAllText(path, json);
+                    fileWriteWatch.Stop();
+                    fileWritePerf.RecordWritten(fileWriteWatch.Elapsed.TotalMilliseconds, bytes);
                 }
                 lock (_gate)
                 {
@@ -408,6 +431,11 @@ namespace WhiskeyRealism.Telemetry
             return false;
         }
 
+        private static bool IsFileWritePerfRow(TelemetryEvent ev)
+        {
+            return ev != null && ev.Category != TelemetryCategory.Performance;
+        }
+
         private enum RowWriteResult
         {
             Written,
@@ -422,6 +450,42 @@ namespace WhiskeyRealism.Telemetry
 
             public void Dispose()
             {
+            }
+        }
+
+        private sealed class FileWritePerfAccumulator
+        {
+            private long _eventsEmitted;
+            private long _eventsDropped;
+            private long _bytesWritten;
+            private double _durationMs;
+
+            internal void RecordWritten(double durationMs, long bytesWritten)
+            {
+                _eventsEmitted++;
+                _bytesWritten += Math.Max(0L, bytesWritten);
+                _durationMs += TelemetryFields.SanitizedNumber(durationMs);
+            }
+
+            internal void RecordDropped()
+            {
+                _eventsDropped++;
+            }
+
+            internal void Emit()
+            {
+                if (_eventsEmitted <= 0L && _eventsDropped <= 0L)
+                    return;
+
+                TelemetryPerf.EmitAggregate(
+                    "telemetry.file-write",
+                    TelemetryLayer.System,
+                    TelemetryCategory.Performance,
+                    _durationMs,
+                    5.0,
+                    _eventsEmitted,
+                    _eventsDropped,
+                    _bytesWritten);
             }
         }
     }

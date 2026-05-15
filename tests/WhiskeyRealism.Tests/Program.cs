@@ -71,6 +71,7 @@ static class Program
             ("telemetry writer sink failure rows use output accounting", TelemetryWriterSinkFailureRowsUseOutputAccounting),
             ("telemetry writer reports shutdown timeout", TelemetryWriterReportsShutdownTimeout),
             ("telemetry writer sink failure rows use active identity", TelemetryWriterSinkFailureRowsUseActiveIdentity),
+            ("telemetry writer aggregates file write performance", TelemetryWriterAggregatesFileWritePerformance),
             ("telemetry runtime final manifest ignores late non final writes", TelemetryRuntimeFinalManifestIgnoresLateNonFinalWrites),
             ("telemetry runtime writes scoped issue bundle on shutdown", TelemetryRuntimeWritesScopedIssueBundleOnShutdown),
             ("telemetry runtime final manifest reports issue bundle failure", TelemetryRuntimeFinalManifestReportsIssueBundleFailure),
@@ -1385,6 +1386,75 @@ static class Program
         }
     }
 
+    private static void TelemetryWriterAggregatesFileWritePerformance()
+    {
+        string gameRoot = CreateTempDirectory();
+        string writerSessionDirectory = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            TelemetryRouter.AttachRuntime(runtime);
+            string runtimeSessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            const int normalRows = 5;
+
+            var queue = new TelemetryQueue(capacity: 16);
+            var budget = new TelemetryBudget(totalBytes: 65536, rotateBytes: 65536);
+            for (int i = 0; i < normalRows; i++)
+            {
+                queue.Enqueue(TelemetryEvent.Create(
+                    "writer-batch",
+                    TelemetryProfile.FullTuning,
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Decision,
+                    "BatchDecision",
+                    TelemetrySeverity.Info).WithDecision("hold", "batch", "sig-" + i.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            var writer = new TelemetryWriter(
+                queue,
+                budget,
+                writerSessionDirectory,
+                delegate { },
+                "writer-batch",
+                TelemetryProfile.FullTuning,
+                null);
+
+            writer.Start();
+            AssertTrue(writer.StopAndFlush(1000), "batch writer stops after preloaded rows");
+
+            TelemetryRouter.Shutdown("writer-performance-test");
+
+            string tactical = File.ReadAllText(Path.Combine(writerSessionDirectory, "tactical.jsonl"));
+            AssertEqual(normalRows, CountJsonLines(tactical), "normal writer row count");
+
+            string performance = File.ReadAllText(Path.Combine(runtimeSessionDirectory, "performance.jsonl"));
+            int fileWriteScopes = CountPerformanceScope(performance, "telemetry.file-write");
+            AssertTrue(fileWriteScopes > 0, "writer emits file write performance");
+            AssertTrue(fileWriteScopes < normalRows, "writer file write performance is aggregated, not one row per normal row");
+            AssertEqual(1, CountPerformanceScopeWithNumber(performance, "telemetry.file-write", "eventsEmitted", normalRows), "one file write performance row summarizes the normal row batch");
+            AssertTrue(AnyPerformanceScopeWithNumberAtLeast(performance, "telemetry.file-write", "bytesWritten", 1.0), "aggregated file write performance records bytes written");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteDirectoryQuietly(gameRoot);
+            DeleteDirectoryQuietly(writerSessionDirectory);
+        }
+    }
+
     private static void TelemetryRuntimeFinalManifestIgnoresLateNonFinalWrites()
     {
         string gameRoot = CreateTempDirectory();
@@ -1632,8 +1702,12 @@ static class Program
             AssertContains(performance, "\"slow\":true", "slow field");
             AssertContains(performance, "\"thresholdMs\":0", "threshold field");
             AssertContains(performance, "\"queueDepth\"", "queue depth field");
+            AssertContains(performance, "\"eventsEmitted\"", "spec emitted counter field");
+            AssertContains(performance, "\"eventsDropped\"", "spec dropped counter field");
+            AssertContains(performance, "\"bytesWritten\"", "spec bytes written field");
             AssertContains(performance, "\"emittedCount\"", "emitted counter field");
             AssertContains(performance, "\"droppedCount\"", "dropped counter field");
+            AssertTrue(row["fields"]["bytesWritten"] != null, "bytesWritten field exists");
             AssertTrue((double)row["durationMs"] >= 0.0, "duration is finite");
         }
         finally
@@ -16697,6 +16771,95 @@ static class Program
         }
 
         return false;
+    }
+
+    private static int CountJsonLines(string jsonl)
+    {
+        if (string.IsNullOrWhiteSpace(jsonl))
+            return 0;
+
+        int count = 0;
+        using (var reader = new StringReader(jsonl))
+        {
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                    count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountPerformanceScope(string jsonl, string scope)
+    {
+        if (string.IsNullOrWhiteSpace(jsonl))
+            return 0;
+
+        int count = 0;
+        using (var reader = new StringReader(jsonl))
+        {
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                JObject row = ParseJsonLine(line);
+                JObject fields = row["fields"] as JObject;
+                if (fields != null && string.Equals((string)fields["scope"], scope, StringComparison.Ordinal))
+                    count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountPerformanceScopeWithNumber(string jsonl, string scope, string fieldName, double expected)
+    {
+        int count = 0;
+        foreach (JObject fields in PerformanceScopeFields(jsonl, scope))
+        {
+            JToken value = fields[fieldName];
+            if (value != null && Math.Abs((double)value - expected) < 0.0001)
+                count++;
+        }
+
+        return count;
+    }
+
+    private static bool AnyPerformanceScopeWithNumberAtLeast(string jsonl, string scope, string fieldName, double minimum)
+    {
+        foreach (JObject fields in PerformanceScopeFields(jsonl, scope))
+        {
+            JToken value = fields[fieldName];
+            if (value != null && (double)value >= minimum)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<JObject> PerformanceScopeFields(string jsonl, string scope)
+    {
+        if (string.IsNullOrWhiteSpace(jsonl))
+            yield break;
+
+        using (var reader = new StringReader(jsonl))
+        {
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                JObject row = ParseJsonLine(line);
+                JObject fields = row["fields"] as JObject;
+                if (fields != null && string.Equals((string)fields["scope"], scope, StringComparison.Ordinal))
+                    yield return fields;
+            }
+        }
     }
 
     private static string CreateTempDirectory()
