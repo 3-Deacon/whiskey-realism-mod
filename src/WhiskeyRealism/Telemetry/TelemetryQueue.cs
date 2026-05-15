@@ -3,6 +3,13 @@ using System.Collections.Generic;
 
 namespace WhiskeyRealism.Telemetry
 {
+    internal enum TelemetryQueueResult
+    {
+        Enqueued,
+        Coalesced,
+        Dropped
+    }
+
     internal sealed class TelemetryQueue
     {
         private readonly object _gate = new object();
@@ -52,12 +59,17 @@ namespace WhiskeyRealism.Telemetry
 
         internal bool TryEnqueue(TelemetryEvent ev)
         {
+            return Enqueue(ev) == TelemetryQueueResult.Enqueued;
+        }
+
+        internal TelemetryQueueResult Enqueue(TelemetryEvent ev)
+        {
             lock (_gate)
             {
                 if (ev == null)
                 {
                     RecordDropped(TelemetryCategory.Trace);
-                    return false;
+                    return TelemetryQueueResult.Dropped;
                 }
 
                 if (IsProtected(ev.Category))
@@ -65,7 +77,7 @@ namespace WhiskeyRealism.Telemetry
                     if (ProtectedCount() >= ProtectedReserveCapacity)
                     {
                         RecordProtectedOverflow(ev.Category);
-                        return true;
+                        return TelemetryQueueResult.Coalesced;
                     }
 
                     if (DetailCount() >= _capacity)
@@ -79,13 +91,13 @@ namespace WhiskeyRealism.Telemetry
                     }
 
                     _events.Add(ev);
-                    return true;
+                    return TelemetryQueueResult.Enqueued;
                 }
 
                 if (DetailCount() < _capacity)
                 {
                     _events.Add(ev);
-                    return true;
+                    return TelemetryQueueResult.Enqueued;
                 }
 
                 int evictIndex = FindLowestPriorityIndex();
@@ -94,11 +106,11 @@ namespace WhiskeyRealism.Telemetry
                     RecordDropped(_events[evictIndex].Category);
                     _events.RemoveAt(evictIndex);
                     _events.Add(ev);
-                    return true;
+                    return TelemetryQueueResult.Enqueued;
                 }
 
                 RecordDropped(ev.Category);
-                return false;
+                return TelemetryQueueResult.Dropped;
             }
         }
 
@@ -119,6 +131,17 @@ namespace WhiskeyRealism.Telemetry
             {
                 long count;
                 return _protectedOverflowByCategory.TryGetValue(category, out count) ? count : 0L;
+            }
+        }
+
+        internal Dictionary<string, long> ProtectedOverflowSnapshot()
+        {
+            lock (_gate)
+            {
+                var snapshot = new Dictionary<string, long>(StringComparer.Ordinal);
+                foreach (var entry in _protectedOverflowByCategory)
+                    snapshot[entry.Key.ToString()] = entry.Value;
+                return snapshot;
             }
         }
 

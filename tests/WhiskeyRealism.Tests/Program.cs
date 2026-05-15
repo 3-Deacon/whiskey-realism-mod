@@ -46,6 +46,10 @@ static class Program
             ("telemetry queue dropped count read is stable", TelemetryQueueDroppedCountReadIsStable),
             ("telemetry budget dropped snapshot is stable", TelemetryBudgetDroppedSnapshotIsStable),
             ("telemetry issue bundle redacts json and bearer equals secrets", TelemetryIssueBundleRedactsJsonAndBearerEqualsSecrets),
+            ("telemetry budget caps raw protected detail but allows summaries", TelemetryBudgetCapsRawProtectedDetailButAllowsSummaries),
+            ("telemetry queue reports coalesced protected overflow", TelemetryQueueReportsCoalescedProtectedOverflow),
+            ("telemetry issue bundle redacts auth bypass forms", TelemetryIssueBundleRedactsAuthBypassForms),
+            ("telemetry issue bundle preserves json redaction validity", TelemetryIssueBundlePreservesJsonRedactionValidity),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1049,7 +1053,7 @@ static class Program
         AssertTrue(budget.Allow(TelemetryCategory.Trace, 900), "trace allowed before cap");
         budget.RecordBytes(TelemetryCategory.Trace, 900);
         AssertFalse(budget.Allow(TelemetryCategory.Trace, 200), "trace cut first near cap");
-        AssertTrue(budget.Allow(TelemetryCategory.Failure, 200), "failure protected near cap");
+        AssertTrue(budget.Allow(TelemetryCategory.Failure, 200, lowPriority: true, protectedSummary: true), "failure summary protected near cap");
     }
 
     private static void TelemetryQueuePreservesFailureUnderPressure()
@@ -1138,8 +1142,8 @@ static class Program
         gateBudget.RecordBytes(TelemetryCategory.Gate, 990);
         AssertFalse(gateBudget.Allow(TelemetryCategory.Gate, 20), "gate cuts above total cap");
         AssertFalse(gateBudget.Allow(TelemetryCategory.Write, 20), "write cuts above total cap");
-        AssertTrue(gateBudget.Allow(TelemetryCategory.Failure, 20), "failure protected above total cap");
-        AssertTrue(gateBudget.Allow(TelemetryCategory.Health, 20), "health protected above total cap");
+        AssertTrue(gateBudget.Allow(TelemetryCategory.Failure, 20, lowPriority: true, protectedSummary: true), "failure summary protected above total cap");
+        AssertTrue(gateBudget.Allow(TelemetryCategory.Health, 20, lowPriority: true, protectedSummary: true), "health summary protected above total cap");
     }
 
     private static void TelemetryQueueEvictsDecisionBeforeGateWrite()
@@ -1292,7 +1296,7 @@ static class Program
     {
         var queue = new TelemetryQueue(capacity: 2);
         for (int i = 0; i < 20; i++)
-            AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-" + i.ToString(CultureInfo.InvariantCulture))), "protected accepted " + i.ToString(CultureInfo.InvariantCulture));
+            AssertTrue(queue.Enqueue(EventForQueue(TelemetryCategory.Failure, "failure-" + i.ToString(CultureInfo.InvariantCulture))) != TelemetryQueueResult.Dropped, "protected accepted or coalesced " + i.ToString(CultureInfo.InvariantCulture));
 
         AssertTrue(queue.ProtectedReserveCapacity >= 4, "reserve has deterministic minimum");
         AssertTrue(queue.Count <= 2 + queue.ProtectedReserveCapacity, "protected burst bounded");
@@ -1344,6 +1348,69 @@ static class Program
         AssertContains(redacted, "\"api_key\":<redacted>", "json api key context");
         AssertContains(redacted, "password:<redacted>", "password context");
         AssertContains(redacted, "Authorization=Bearer <redacted>", "bearer equals context");
+    }
+
+    private static void TelemetryBudgetCapsRawProtectedDetailButAllowsSummaries()
+    {
+        var overload = typeof(TelemetryBudget).GetMethod(
+            "Allow",
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            new[] { typeof(TelemetryCategory), typeof(long), typeof(bool), typeof(bool) },
+            null);
+        AssertTrue(overload != null, "protected summary overload exists");
+
+        var failureBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        failureBudget.RecordBytes(TelemetryCategory.Write, 1000);
+        AssertFalse(failureBudget.Allow(TelemetryCategory.Failure, 1), "raw failure detail capped by total bytes");
+        AssertTrue((bool)overload.Invoke(failureBudget, new object[] { TelemetryCategory.Failure, 1L, true, true }), "failure summary allowed past cap");
+
+        var healthBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        healthBudget.RecordBytes(TelemetryCategory.Write, 1001);
+        AssertFalse((bool)overload.Invoke(healthBudget, new object[] { TelemetryCategory.Health, 1L, true, false }), "raw health detail capped past total bytes");
+        AssertTrue((bool)overload.Invoke(healthBudget, new object[] { TelemetryCategory.Health, 1L, true, true }), "health summary allowed past cap");
+    }
+
+    private static void TelemetryQueueReportsCoalescedProtectedOverflow()
+    {
+        var queue = new TelemetryQueue(capacity: 2);
+        TelemetryQueueResult last = TelemetryQueueResult.Enqueued;
+        for (int i = 0; i < queue.ProtectedReserveCapacity + 3; i++)
+            last = queue.Enqueue(EventForQueue(TelemetryCategory.Failure, "failure-coalesce-" + i.ToString(CultureInfo.InvariantCulture)));
+
+        AssertEqual(TelemetryQueueResult.Coalesced, last, "overflow enqueue result");
+        AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-wrapper")) == false, "compat wrapper reports coalesced as not enqueued");
+
+        var snapshot = queue.ProtectedOverflowSnapshot();
+        AssertEqual(4L, snapshot["Failure"], "snapshot reports coalesced failure rows");
+        AssertEqual(4L, queue.ProtectedOverflowCountFor(TelemetryCategory.Failure), "direct overflow count");
+        AssertEqual(4L, queue.ProtectedOverflowCount, "aggregate overflow count");
+        AssertTrue(queue.Count <= 2 + queue.ProtectedReserveCapacity, "queue remains bounded");
+    }
+
+    private static void TelemetryIssueBundleRedactsAuthBypassForms()
+    {
+        string redacted = TelemetryIssueBundle.Redact("C:/Users/Kyle/AppData Authorization: Basic abc123 Authorization=Bearer def456 X-Api-Key: ghi789 client-secret: jkl012");
+        AssertFalse(redacted.Contains("Kyle"), "forward slash windows username removed");
+        AssertFalse(redacted.Contains("abc123"), "basic auth removed");
+        AssertFalse(redacted.Contains("def456"), "bearer equals removed");
+        AssertFalse(redacted.Contains("ghi789"), "x api key removed");
+        AssertFalse(redacted.Contains("jkl012"), "client secret removed");
+        AssertContains(redacted, "C:/Users/<redacted>/AppData", "forward slash windows path context");
+        AssertContains(redacted, "Authorization: Basic <redacted>", "basic auth context");
+        AssertContains(redacted, "Authorization=Bearer <redacted>", "bearer equals context");
+        AssertContains(redacted, "X-Api-Key:<redacted>", "x api key context");
+        AssertContains(redacted, "client-secret:<redacted>", "client secret context");
+    }
+
+    private static void TelemetryIssueBundlePreservesJsonRedactionValidity()
+    {
+        string redacted = TelemetryIssueBundle.Redact("{\"token\":\"abc\",\"password\":\"hunter2\"}");
+        var parsed = JObject.Parse(redacted);
+        AssertEqual("<redacted>", (string)parsed["token"], "json token value redacted");
+        AssertEqual("<redacted>", (string)parsed["password"], "json password value redacted");
+        AssertFalse(redacted.Contains("abc"), "json raw token removed");
+        AssertFalse(redacted.Contains("hunter2"), "json raw password removed");
     }
 
     private static FrontSectorLedger BuildLedger()
