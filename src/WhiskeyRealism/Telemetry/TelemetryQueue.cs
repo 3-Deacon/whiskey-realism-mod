@@ -39,11 +39,14 @@ namespace WhiskeyRealism.Telemetry
 
                 if (IsProtected(ev.Category))
                 {
-                    int protectedEvictIndex = FindLowestPriorityIndex();
-                    if (protectedEvictIndex >= 0)
+                    if (DetailCount() >= _capacity)
                     {
-                        RecordDropped(_events[protectedEvictIndex].Category);
-                        _events.RemoveAt(protectedEvictIndex);
+                        int protectedEvictIndex = FindLowestPriorityIndex();
+                        if (protectedEvictIndex >= 0)
+                        {
+                            RecordDropped(_events[protectedEvictIndex].Category);
+                            _events.RemoveAt(protectedEvictIndex);
+                        }
                     }
 
                     _events.Add(ev);

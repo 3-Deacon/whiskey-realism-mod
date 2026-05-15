@@ -40,6 +40,8 @@ static class Program
             ("telemetry issue bundle redacts public bundle secrets and user paths", TelemetryIssueBundleRedactsPublicBundleSecretsAndUserPaths),
             ("telemetry budget low priority cuts before high priority", TelemetryBudgetLowPriorityCutsBeforeHighPriority),
             ("telemetry retention no manifest orders by directory before mtime", TelemetryRetentionNoManifestOrdersByDirectoryBeforeMtime),
+            ("telemetry queue protected bypass waits until detail capacity full", TelemetryQueueProtectedBypassWaitsUntilDetailCapacityFull),
+            ("telemetry retention mixed manifest prefers directory before mtime", TelemetryRetentionMixedManifestPrefersDirectoryBeforeMtime),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1104,10 +1106,10 @@ static class Program
 
         var deletes = TelemetrySession.SelectRetentionDeletes(candidates, keepNewest: 2);
         AssertEqual(2, deletes.Count, "delete count");
-        AssertTrue(deletes.Exists(c => c.DirectoryName == "same-start-a"), "directory name tie loses older name");
+        AssertTrue(deletes.Exists(c => c.DirectoryName == "mtime-fallback-new"), "no-manifest mtime loses to directory name ordering");
         AssertTrue(deletes.Exists(c => c.DirectoryName == "old-with-start"), "oldest manifest start deleted");
+        AssertFalse(deletes.Exists(c => c.DirectoryName == "same-start-a"), "same manifest start older directory retained ahead of mtime fallback");
         AssertFalse(deletes.Exists(c => c.DirectoryName == "same-start-b"), "newer directory name retained");
-        AssertFalse(deletes.Exists(c => c.DirectoryName == "mtime-fallback-new"), "mtime fallback retained");
     }
 
     private static void TelemetryBudgetAppliesStagedCategoryCuts()
@@ -1239,6 +1241,45 @@ static class Program
         var ordered = TelemetrySession.OrderRetentionCandidates(candidates);
         AssertEqual("20260515-120001-newer-dir", ordered[0].DirectoryName, "newer directory name wins before mtime");
         AssertEqual("20260515-120000-older-dir", ordered[1].DirectoryName, "older directory name loses despite newer mtime");
+    }
+
+    private static void TelemetryQueueProtectedBypassWaitsUntilDetailCapacityFull()
+    {
+        var notFull = new TelemetryQueue(capacity: 2);
+        AssertTrue(notFull.TryEnqueue(EventForQueue(TelemetryCategory.Trace, "trace-a")), "trace accepted");
+        AssertTrue(notFull.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-a")), "health accepted without detail pressure");
+
+        var notFullDrained = notFull.Drain(10);
+        AssertEqual(2, notFullDrained.Count, "not-full queue count");
+        AssertTrue(notFullDrained.Exists(e => e.EventName == "trace-a"), "trace retained while detail capacity not full");
+        AssertTrue(notFullDrained.Exists(e => e.EventName == "health-a"), "health retained while detail capacity not full");
+        AssertEqual(0L, notFull.DroppedCount, "not-full queue drops none");
+
+        var full = new TelemetryQueue(capacity: 2);
+        AssertTrue(full.TryEnqueue(EventForQueue(TelemetryCategory.Trace, "trace-b")), "trace accepted under detail capacity");
+        AssertTrue(full.TryEnqueue(EventForQueue(TelemetryCategory.State, "state-b")), "state accepted under detail capacity");
+        AssertTrue(full.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-b")), "health accepted with full detail capacity");
+
+        var fullDrained = full.Drain(10);
+        AssertEqual(2, fullDrained.Count, "full queue count after protected eviction");
+        AssertFalse(fullDrained.Exists(e => e.EventName == "trace-b"), "lowest priority detail evicted when detail capacity full");
+        AssertTrue(fullDrained.Exists(e => e.EventName == "state-b"), "higher priority detail retained when health arrives");
+        AssertTrue(fullDrained.Exists(e => e.EventName == "health-b"), "health retained when detail capacity full");
+        AssertEqual(1L, full.DroppedCount, "full queue evicts one detail row");
+        AssertEqual(1L, full.DroppedCountFor(TelemetryCategory.Trace), "trace drop counted");
+    }
+
+    private static void TelemetryRetentionMixedManifestPrefersDirectoryBeforeMtime()
+    {
+        var candidates = new[]
+        {
+            new TelemetryRetentionCandidate("20260515-120001-manifest", new DateTime(2026, 5, 15, 12, 0, 1, DateTimeKind.Utc), new DateTime(2026, 5, 15, 9, 0, 0, DateTimeKind.Utc)),
+            new TelemetryRetentionCandidate("20260515-120000-no-manifest", null, new DateTime(2026, 5, 15, 13, 0, 0, DateTimeKind.Utc))
+        };
+
+        var ordered = TelemetrySession.OrderRetentionCandidates(candidates);
+        AssertEqual("20260515-120001-manifest", ordered[0].DirectoryName, "manifest newer directory wins before no-manifest mtime");
+        AssertEqual("20260515-120000-no-manifest", ordered[1].DirectoryName, "no-manifest mtime is final fallback only");
     }
 
     private static FrontSectorLedger BuildLedger()

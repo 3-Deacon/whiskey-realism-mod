@@ -81,23 +81,18 @@ namespace WhiskeyRealism.Telemetry
 
         private static int CompareNewestFirst(TelemetryRetentionCandidate left, TelemetryRetentionCandidate right)
         {
-            int byStart = SortStartUtc(right, left).CompareTo(SortStartUtc(left, right));
-            if (byStart != 0)
-                return byStart;
+            if (left.ManifestStartUtc.HasValue && right.ManifestStartUtc.HasValue)
+            {
+                int byStart = right.ManifestStartUtc.Value.CompareTo(left.ManifestStartUtc.Value);
+                if (byStart != 0)
+                    return byStart;
+            }
 
             int byName = string.CompareOrdinal(right.DirectoryName, left.DirectoryName);
             if (byName != 0)
                 return byName;
 
             return right.LastWriteUtc.CompareTo(left.LastWriteUtc);
-        }
-
-        private static DateTime SortStartUtc(TelemetryRetentionCandidate candidate, TelemetryRetentionCandidate other)
-        {
-            if (candidate.ManifestStartUtc.HasValue)
-                return candidate.ManifestStartUtc.Value;
-
-            return other.ManifestStartUtc.HasValue ? candidate.LastWriteUtc : DateTime.MinValue;
         }
 
         private static string SafeHashPrefix(string assemblyHash)
