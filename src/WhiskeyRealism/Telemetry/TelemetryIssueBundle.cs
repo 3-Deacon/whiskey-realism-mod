@@ -9,6 +9,11 @@ namespace WhiskeyRealism.Telemetry
     internal sealed class TelemetryIssueBundleManifest
     {
         internal TelemetryIssueBundleManifest(string sessionId, IEnumerable<string> files, string note)
+            : this(sessionId, null, files, note)
+        {
+        }
+
+        internal TelemetryIssueBundleManifest(string sessionId, string sessionDirectory, IEnumerable<string> files, string note)
         {
             SessionId = TelemetryIssueBundle.Redact(TelemetryEvent.Safe(sessionId));
             Files = new List<string>();
@@ -16,7 +21,7 @@ namespace WhiskeyRealism.Telemetry
             {
                 foreach (string file in files)
                 {
-                    if (TelemetryIssueBundle.IsTelemetryOwnedFile(file))
+                    if (TelemetryIssueBundle.IsTelemetryOwnedFile(file, sessionDirectory))
                         Files.Add(TelemetryIssueBundle.Redact(file));
                 }
             }
@@ -222,43 +227,48 @@ namespace WhiskeyRealism.Telemetry
 
         internal static bool IsTelemetryOwnedFile(string file)
         {
+            return false;
+        }
+
+        internal static bool IsTelemetryOwnedFile(string file, string sessionDirectory)
+        {
             if (string.IsNullOrWhiteSpace(file))
                 return false;
 
             string normalized = file.Trim().Replace('\\', '/');
-            string fileName = FileNameFromNormalizedPath(normalized);
+            string sessionRoot = NormalizeSessionDirectory(sessionDirectory);
+            if (string.IsNullOrWhiteSpace(sessionRoot))
+                return false;
+
+            if (!normalized.StartsWith(sessionRoot + "/", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            string fileName = normalized.Substring(sessionRoot.Length + 1);
+            if (fileName.IndexOf('/') >= 0)
+                return false;
+
             if (!(TelemetryBundleFiles.Contains(fileName) || RotatedTelemetryFile.IsMatch(fileName)))
                 return false;
 
-            if (fileName.Length == normalized.Length)
-                return true;
-
-            return IsTelemetrySessionPath(normalized);
+            return true;
         }
 
-        private static string FileNameFromNormalizedPath(string normalized)
+        private static string NormalizeSessionDirectory(string sessionDirectory)
         {
-            int slash = normalized.LastIndexOf('/');
-            return slash >= 0 && slash < normalized.Length - 1
-                ? normalized.Substring(slash + 1)
-                : normalized;
-        }
+            if (string.IsNullOrWhiteSpace(sessionDirectory))
+                return string.Empty;
 
-        private static bool IsTelemetrySessionPath(string normalized)
-        {
-            const string Marker = "BepInEx/WhiskeyRealism/tuning-logs/";
-            int marker = normalized.IndexOf(Marker, StringComparison.OrdinalIgnoreCase);
-            if (marker < 0)
-                return false;
-
-            string remainder = normalized.Substring(marker + Marker.Length).Trim('/');
-            int slash = remainder.IndexOf('/');
-            return slash > 0 && slash < remainder.Length - 1;
+            return sessionDirectory.Trim().Replace('\\', '/').TrimEnd('/');
         }
 
         internal static TelemetryIssueBundleManifest CreateManifest(string sessionId, IEnumerable<string> files, string note)
         {
             return new TelemetryIssueBundleManifest(sessionId, files, note);
+        }
+
+        internal static TelemetryIssueBundleManifest CreateManifest(string sessionId, string sessionDirectory, IEnumerable<string> files, string note)
+        {
+            return new TelemetryIssueBundleManifest(sessionId, sessionDirectory, files, note);
         }
     }
 }

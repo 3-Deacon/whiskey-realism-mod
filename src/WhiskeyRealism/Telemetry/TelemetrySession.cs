@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace WhiskeyRealism.Telemetry
 {
@@ -46,11 +48,89 @@ namespace WhiskeyRealism.Telemetry
         internal static string SessionDirectory(string gameRoot, string sessionId)
         {
             return Path.Combine(
+                TuningLogRoot(gameRoot),
+                TelemetryEvent.Safe(sessionId));
+        }
+
+        internal static string TuningLogRoot(string gameRoot)
+        {
+            return Path.Combine(
                 string.IsNullOrWhiteSpace(gameRoot) ? "." : gameRoot,
                 "BepInEx",
                 "WhiskeyRealism",
-                "tuning-logs",
-                TelemetryEvent.Safe(sessionId));
+                "tuning-logs");
+        }
+
+        internal static string CreateSessionDirectory(string gameRoot, string sessionId)
+        {
+            string directory = SessionDirectory(gameRoot, sessionId);
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+
+        internal static List<TelemetryRetentionCandidate> ScanRetentionCandidates(string gameRoot)
+        {
+            var candidates = new List<TelemetryRetentionCandidate>();
+            string root = TuningLogRoot(gameRoot);
+            if (!Directory.Exists(root))
+                return candidates;
+
+            string[] directories;
+            try
+            {
+                directories = Directory.GetDirectories(root);
+            }
+            catch
+            {
+                return candidates;
+            }
+
+            foreach (string directory in directories)
+            {
+                string name = Path.GetFileName(directory);
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                candidates.Add(new TelemetryRetentionCandidate(
+                    directory,
+                    name,
+                    TryReadManifestStartUtc(Path.Combine(directory, "manifest.json")),
+                    SafeDirectoryLastWriteUtc(directory)));
+            }
+
+            return candidates;
+        }
+
+        internal static List<TelemetryRetentionCandidate> ApplyRetention(string gameRoot, string currentSessionId, int keepNewest)
+        {
+            return DeleteRetentionCandidates(SelectRetentionDeletes(
+                ScanRetentionCandidates(gameRoot),
+                keepNewest,
+                currentSessionId));
+        }
+
+        internal static List<TelemetryRetentionCandidate> DeleteRetentionCandidates(IEnumerable<TelemetryRetentionCandidate> candidates)
+        {
+            var deleted = new List<TelemetryRetentionCandidate>();
+            if (candidates == null)
+                return deleted;
+
+            foreach (var candidate in candidates)
+            {
+                if (candidate == null || string.IsNullOrWhiteSpace(candidate.DirectoryPath) || !Directory.Exists(candidate.DirectoryPath))
+                    continue;
+
+                try
+                {
+                    Directory.Delete(candidate.DirectoryPath, true);
+                    deleted.Add(candidate);
+                }
+                catch
+                {
+                }
+            }
+
+            return deleted;
         }
 
         internal static List<TelemetryRetentionCandidate> OrderRetentionCandidates(IEnumerable<TelemetryRetentionCandidate> candidates)
@@ -79,6 +159,43 @@ namespace WhiskeyRealism.Telemetry
             return deletes;
         }
 
+        internal static List<TelemetryRetentionCandidate> SelectRetentionDeletes(IEnumerable<TelemetryRetentionCandidate> candidates, int keepNewest, string currentSessionId)
+        {
+            var ordered = OrderRetentionCandidates(candidates);
+            string currentName = TelemetryEvent.Safe(currentSessionId);
+            var retained = new HashSet<TelemetryRetentionCandidate>();
+            int keep = Math.Max(string.IsNullOrWhiteSpace(currentName) ? 0 : 1, keepNewest);
+
+            if (!string.IsNullOrWhiteSpace(currentName))
+            {
+                foreach (var candidate in ordered)
+                {
+                    if (string.Equals(candidate.DirectoryName, currentName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        retained.Add(candidate);
+                        break;
+                    }
+                }
+            }
+
+            foreach (var candidate in ordered)
+            {
+                if (retained.Count >= keep)
+                    break;
+
+                retained.Add(candidate);
+            }
+
+            var deletes = new List<TelemetryRetentionCandidate>();
+            foreach (var candidate in ordered)
+            {
+                if (!retained.Contains(candidate))
+                    deletes.Add(candidate);
+            }
+
+            return deletes;
+        }
+
         private static int CompareNewestFirst(TelemetryRetentionCandidate left, TelemetryRetentionCandidate right)
         {
             if (left.ManifestStartUtc.HasValue && right.ManifestStartUtc.HasValue)
@@ -93,6 +210,48 @@ namespace WhiskeyRealism.Telemetry
                 return byName;
 
             return right.LastWriteUtc.CompareTo(left.LastWriteUtc);
+        }
+
+        private static DateTime SafeDirectoryLastWriteUtc(string directory)
+        {
+            try
+            {
+                return Directory.GetLastWriteTimeUtc(directory);
+            }
+            catch
+            {
+                return DateTime.MinValue;
+            }
+        }
+
+        private static DateTime? TryReadManifestStartUtc(string manifestPath)
+        {
+            if (string.IsNullOrWhiteSpace(manifestPath) || !File.Exists(manifestPath))
+                return null;
+
+            try
+            {
+                JObject manifest = JObject.Parse(File.ReadAllText(manifestPath));
+                JToken token = manifest["startUtc"];
+                if (token == null || token.Type == JTokenType.Null)
+                    return null;
+
+                if (token.Type == JTokenType.Date)
+                    return token.Value<DateTime>().ToUniversalTime();
+
+                DateTime parsed;
+                if (DateTime.TryParse(
+                    token.Type == JTokenType.String ? (string)token : token.ToString(Formatting.None),
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out parsed))
+                    return parsed.ToUniversalTime();
+            }
+            catch
+            {
+            }
+
+            return null;
         }
 
         private static string SafeHashPrefix(string assemblyHash)

@@ -30,8 +30,10 @@ static class Program
             ("telemetry queue preserves failure under pressure", TelemetryQueuePreservesFailureUnderPressure),
             ("telemetry session id sorts by utc milliseconds", TelemetrySessionIdSortsByUtcMilliseconds),
             ("telemetry manifest redacts user paths", TelemetryManifestRedactsUserPaths),
+            ("telemetry session creates directory under tuning logs", TelemetrySessionCreatesDirectoryUnderTuningLogs),
             ("telemetry queue never drops health for lower priority rows", TelemetryQueueNeverDropsHealthForLowerPriorityRows),
             ("telemetry retention keeps newest two by manifest dir and mtime", TelemetryRetentionKeepsNewestTwoByManifestDirAndMtime),
+            ("telemetry retention deletes old dirs and pins current", TelemetryRetentionDeletesOldDirsAndPinsCurrent),
             ("telemetry budget applies staged category cuts", TelemetryBudgetAppliesStagedCategoryCuts),
             ("telemetry queue evicts decision before gate write", TelemetryQueueEvictsDecisionBeforeGateWrite),
             ("telemetry issue bundle redacts spaced windows usernames", TelemetryIssueBundleRedactsSpacedWindowsUsernames),
@@ -55,6 +57,7 @@ static class Program
             ("telemetry issue bundle manifest has explicit json", TelemetryIssueBundleManifestHasExplicitJson),
             ("telemetry issue bundle manifest redacts unsafe session id", TelemetryIssueBundleManifestRedactsUnsafeSessionId),
             ("telemetry issue bundle manifest filters non telemetry files", TelemetryIssueBundleManifestFiltersNonTelemetryFiles),
+            ("telemetry issue bundle manifest scopes files to active session", TelemetryIssueBundleManifestScopesFilesToActiveSession),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1094,6 +1097,24 @@ static class Program
         AssertFalse(redacted.Contains("secret"), "token redacted");
     }
 
+    private static void TelemetrySessionCreatesDirectoryUnderTuningLogs()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            string sessionId = "20260515-120000-000-p12-abcdef123456";
+            string sessionDirectory = TelemetrySession.CreateSessionDirectory(gameRoot, sessionId);
+            string expected = Path.Combine(gameRoot, "BepInEx", "WhiskeyRealism", "tuning-logs", sessionId);
+
+            AssertTrue(Directory.Exists(sessionDirectory), "session directory created");
+            AssertEqual(Path.GetFullPath(expected), Path.GetFullPath(sessionDirectory), "session directory path");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
     private static void TelemetryQueueNeverDropsHealthForLowerPriorityRows()
     {
         var queue = new TelemetryQueue(capacity: 2);
@@ -1123,6 +1144,41 @@ static class Program
         AssertTrue(deletes.Exists(c => c.DirectoryName == "old-with-start"), "oldest manifest start deleted");
         AssertFalse(deletes.Exists(c => c.DirectoryName == "same-start-a"), "same manifest start older directory retained ahead of mtime fallback");
         AssertFalse(deletes.Exists(c => c.DirectoryName == "same-start-b"), "newer directory name retained");
+    }
+
+    private static void TelemetryRetentionDeletesOldDirsAndPinsCurrent()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            string currentSession = "20260515-080000-000-p1-current0000";
+            string newestSession = "20260515-120000-000-p1-newest0000";
+            string middleSession = "20260515-110000-000-p1-middle0000";
+            string malformedSession = "20260515-070000-000-p1-badmanifest";
+
+            string currentDir = TelemetrySession.CreateSessionDirectory(gameRoot, currentSession);
+            string newestDir = CreateTelemetrySessionDirectory(gameRoot, newestSession, "2026-05-15T12:00:00Z");
+            string middleDir = CreateTelemetrySessionDirectory(gameRoot, middleSession, "2026-05-15T11:00:00Z");
+            string malformedDir = CreateTelemetrySessionDirectory(gameRoot, malformedSession, null);
+            File.WriteAllText(Path.Combine(malformedDir, "manifest.json"), "{ malformed manifest");
+
+            Directory.SetLastWriteTimeUtc(currentDir, new DateTime(2026, 5, 15, 8, 0, 0, DateTimeKind.Utc));
+            Directory.SetLastWriteTimeUtc(newestDir, new DateTime(2026, 5, 15, 12, 0, 0, DateTimeKind.Utc));
+            Directory.SetLastWriteTimeUtc(middleDir, new DateTime(2026, 5, 15, 11, 0, 0, DateTimeKind.Utc));
+            Directory.SetLastWriteTimeUtc(malformedDir, new DateTime(2026, 5, 15, 7, 0, 0, DateTimeKind.Utc));
+
+            var deletes = TelemetrySession.ApplyRetention(gameRoot, currentSession, keepNewest: 2);
+
+            AssertEqual(2, deletes.Count, "deleted directory count");
+            AssertTrue(Directory.Exists(currentDir), "current session pinned without manifest");
+            AssertTrue(Directory.Exists(newestDir), "newest other session retained");
+            AssertFalse(Directory.Exists(middleDir), "middle session deleted because current is pinned");
+            AssertFalse(Directory.Exists(malformedDir), "malformed old session deleted without throwing");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
     }
 
     private static void TelemetryBudgetAppliesStagedCategoryCuts()
@@ -1445,9 +1501,11 @@ static class Program
 
     private static void TelemetryIssueBundleManifestHasExplicitJson()
     {
+        string sessionDirectory = @"C:\Users\Kyle\AppData\BepInEx\WhiskeyRealism\tuning-logs\session-1";
         TelemetryIssueBundleManifest manifest = TelemetryIssueBundle.CreateManifest(
             "session-1",
-            new[] { @"C:\Users\Kyle\AppData\BepInEx\WhiskeyRealism\tuning-logs\session-1\manifest.json" },
+            sessionDirectory,
+            new[] { sessionDirectory + @"\manifest.json" },
             "Authorization=Bearer abc token=secret");
 
         string json = manifest.ToJson();
@@ -1479,13 +1537,15 @@ static class Program
 
     private static void TelemetryIssueBundleManifestFiltersNonTelemetryFiles()
     {
+        string sessionDirectory = @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\session-1";
         TelemetryIssueBundleManifest manifest = TelemetryIssueBundle.CreateManifest(
             "session-1",
+            sessionDirectory,
             new[]
             {
-                @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\20260515-120000-p1-abcdef123456\manifest.json",
-                @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\20260515-120000-p1-abcdef123456\summary.md",
-                @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\20260515-120000-p1-abcdef123456\campaign.001.jsonl",
+                sessionDirectory + @"\manifest.json",
+                sessionDirectory + @"\summary.md",
+                sessionDirectory + @"\campaign.001.jsonl",
                 @"C:\Games\Grand Tactician\BepInEx\plugins\WhiskeyRealism.dll",
                 @"C:\Games\Grand Tactician\Campaigns\001\save.dat",
                 @"C:\Games\Grand Tactician\BepInEx\LogOutput.log",
@@ -1507,6 +1567,44 @@ static class Program
         AssertFalse(json.Contains("LogOutput.log"), "bepinex log excluded");
         AssertFalse(json.Contains("OtherPlugin.log"), "other plugin log excluded");
         AssertFalse(json.Contains("Kyle"), "user document path excluded");
+    }
+
+    private static void TelemetryIssueBundleManifestScopesFilesToActiveSession()
+    {
+        string sessionA = @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\session-a";
+        string sessionB = @"C:\Games\Grand Tactician\BepInEx\WhiskeyRealism\tuning-logs\session-b";
+        TelemetryIssueBundleManifest manifest = TelemetryIssueBundle.CreateManifest(
+            "session-a",
+            sessionA,
+            new[]
+            {
+                sessionA + @"\manifest.json",
+                sessionA + @"\summary.md",
+                sessionA + @"\health.jsonl",
+                sessionA + @"\failures.002.jsonl",
+                sessionB + @"\manifest.json",
+                sessionB + @"\summary.md",
+                sessionA + @"\health.2.jsonl",
+                sessionA + @"\health.0002.jsonl",
+                sessionA + @"\LogOutput.log",
+                "manifest.json",
+                @"C:\Users\Kyle\Documents\tokens\summary.md"
+            },
+            null);
+
+        string json = manifest.ToJson();
+        var parsed = JObject.Parse(json);
+        var files = (JArray)parsed["files"];
+
+        AssertEqual(4, files.Count, "only active session telemetry files included");
+        AssertContains((string)files[0], @"session-a\manifest.json", "manifest included");
+        AssertContains((string)files[1], @"session-a\summary.md", "summary included");
+        AssertContains((string)files[2], @"session-a\health.jsonl", "health included");
+        AssertContains((string)files[3], @"session-a\failures.002.jsonl", "rotated failures included");
+        AssertFalse(json.Contains("session-b"), "other session excluded");
+        AssertFalse(json.Contains("LogOutput.log"), "bepinex log excluded");
+        AssertFalse(json.Contains("Kyle"), "user document username redacted or excluded");
+        AssertFalse(json.Contains("tokens"), "user token path excluded");
     }
 
     private static FrontSectorLedger BuildLedger()
@@ -15794,6 +15892,34 @@ static class Program
         using (var jsonReader = new JsonTextReader(textReader) { DateParseHandling = DateParseHandling.None })
         {
             return JObject.Load(jsonReader);
+        }
+    }
+
+    private static string CreateTempDirectory()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "wr-tests-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static string CreateTelemetrySessionDirectory(string gameRoot, string sessionId, string startUtc)
+    {
+        string directory = Path.Combine(gameRoot, "BepInEx", "WhiskeyRealism", "tuning-logs", sessionId);
+        Directory.CreateDirectory(directory);
+        if (startUtc != null)
+            File.WriteAllText(Path.Combine(directory, "manifest.json"), "{\"startUtc\":\"" + startUtc + "\"}");
+        return directory;
+    }
+
+    private static void DeleteDirectoryQuietly(string path)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                Directory.Delete(path, true);
+        }
+        catch
+        {
         }
     }
 
