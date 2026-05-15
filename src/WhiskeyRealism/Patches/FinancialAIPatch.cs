@@ -115,9 +115,14 @@ namespace WhiskeyRealism.Patches
             if (!_logGate.ShouldLog(signature)) return;
 
             string label = laneType == "tax" ? "taxLane" : "subsidyLane";
-            TelemetryRouter.LegacyInfo(
-                $"[FiscalTelemetry] alliance={alliance} {label}={lane} old={oldValue:F2} new={newValue:F2} posture={posture}",
-                TelemetryLayer.Campaign);
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Write, "FiscalTelemetry", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithDecision("correct-" + laneType, posture.ToString(), signature)
+                .WithField("laneType", laneType)
+                .WithField(label, lane)
+                .WithField("old", oldValue)
+                .WithField("new", newValue)
+                .WithField("posture", posture.ToString()));
         }
 
         private static bool NearlyEqual(float left, float right)

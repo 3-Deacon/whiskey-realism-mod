@@ -148,7 +148,15 @@ namespace WhiskeyRealism.Patches
                 deficitField.SetValue(faction, transferData);
 
                 if (Plugin.Instance.VerboseLogging.Value)
-                    TelemetryRouter.LegacyInfo($"[Plan] alliance={allianceId} action=transfer-steer objective={phase.TargetObjectiveId} ownNear={ownNear:F0} required={requiredAtTarget:F0} enemyNear={enemyNear:F0}", TelemetryLayer.Campaign);
+                    EmitPlanTransferSteer(
+                        allianceId,
+                        phase.TargetObjectiveId,
+                        ownNear,
+                        requiredAtTarget,
+                        enemyNear,
+                        sourceSector,
+                        destinationSector,
+                        budgetAction);
             }
             catch (Exception ex)
             {
@@ -166,10 +174,7 @@ namespace WhiskeyRealism.Patches
                 int afterTransferCount = TransferCount(__state.Faction);
                 if (afterTransferCount > __state.BeforeTransferCount)
                 {
-                    TelemetryRouter.LegacyInfo(
-                        $"[Plan] alliance={__state.AllianceId} action=transfer-queued objective={__state.ObjectiveId} " +
-                        $"queued={afterTransferCount - __state.BeforeTransferCount}",
-                        TelemetryLayer.Campaign);
+                    EmitPlanTransferQueued(__state, afterTransferCount - __state.BeforeTransferCount);
                 }
             }
             catch (Exception ex)
@@ -301,6 +306,56 @@ namespace WhiskeyRealism.Patches
             if (value < min) return min;
             if (value > max) return max;
             return value;
+        }
+
+        private static void EmitPlanTransferSteer(
+            int allianceId,
+            int objectiveId,
+            float ownNear,
+            float requiredAtTarget,
+            float enemyNear,
+            string sourceSector,
+            string destinationSector,
+            TransferBudgetAction budgetAction)
+        {
+            string safeSource = string.IsNullOrWhiteSpace(sourceSector) ? "-" : sourceSector;
+            string safeDestination = string.IsNullOrWhiteSpace(destinationSector) ? "-" : destinationSector;
+            string signature = "alliance=" + allianceId +
+                "|action=transfer-steer" +
+                "|objective=" + objectiveId +
+                "|from=" + safeSource +
+                "|to=" + safeDestination +
+                "|budget=" + budgetAction;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Plan", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(allianceId)
+                .WithDecision("transfer-steer", budgetAction.ToString(), signature)
+                .WithField("objective", objectiveId)
+                .WithField("ownNear", ownNear)
+                .WithField("required", requiredAtTarget)
+                .WithField("enemyNear", enemyNear)
+                .WithField("sourceSector", safeSource)
+                .WithField("destinationSector", safeDestination)
+                .WithField("budgetAction", budgetAction.ToString()));
+        }
+
+        private static void EmitPlanTransferQueued(TransferSteerState state, int queued)
+        {
+            string safeSource = string.IsNullOrWhiteSpace(state.SourceSector) ? "-" : state.SourceSector;
+            string safeDestination = string.IsNullOrWhiteSpace(state.DestinationSector) ? "-" : state.DestinationSector;
+            string signature = "alliance=" + state.AllianceId +
+                "|action=transfer-queued" +
+                "|objective=" + state.ObjectiveId +
+                "|from=" + safeSource +
+                "|to=" + safeDestination +
+                "|queued=" + queued;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Write, "Plan", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(state.AllianceId)
+                .WithDecision("transfer-queued", state.BudgetAction.ToString(), signature)
+                .WithField("objective", state.ObjectiveId)
+                .WithField("queued", queued)
+                .WithField("sourceSector", safeSource)
+                .WithField("destinationSector", safeDestination)
+                .WithField("budgetAction", state.BudgetAction.ToString()));
         }
 
         private static void EmitCampaignInfoOnce(string key, string line, TelemetryLayer layer)

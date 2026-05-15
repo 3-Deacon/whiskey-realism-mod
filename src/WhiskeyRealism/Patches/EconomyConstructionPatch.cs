@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
@@ -137,11 +138,14 @@ namespace WhiskeyRealism.Patches
 
                     if (Plugin.Instance.VerboseLogging.Value)
                     {
-                        TelemetryRouter.LegacyInfo(
-                            $"[ConstructionTelemetry] alliance={alliance} building={type.name} " +
-                            $"oldProb={oldProb:F3} originalProb={originalProb:F3} " +
-                            $"newProb={newProb:F3} posture={intent.Posture} constructionReason={constructionReason}",
-                            TelemetryLayer.Campaign);
+                        EmitConstructionTelemetry(
+                            alliance,
+                            type.name,
+                            oldProb,
+                            originalProb,
+                            newProb,
+                            intent.Posture,
+                            constructionReason);
                     }
                 }
             }
@@ -182,6 +186,34 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning("economy-construction:construction-intent", "[Patch:EconomyConstruction] construction intent read failed: " + ex.Message);
                 return null;
             }
+        }
+
+        private static void EmitConstructionTelemetry(
+            int alliance,
+            string buildingName,
+            float oldProbability,
+            float originalProbability,
+            float newProbability,
+            FiscalPosture posture,
+            string reason)
+        {
+            string safeBuilding = string.IsNullOrWhiteSpace(buildingName) ? "-" : buildingName;
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "-" : reason;
+            string signature = "alliance=" + alliance +
+                "|building=" + safeBuilding +
+                "|posture=" + posture +
+                "|reason=" + safeReason +
+                "|old=" + oldProbability.ToString("0.000", CultureInfo.InvariantCulture) +
+                "|new=" + newProbability.ToString("0.000", CultureInfo.InvariantCulture);
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Trace, "ConstructionTelemetry", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithDecision("bias-probability", safeReason, signature)
+                .WithField("building", safeBuilding)
+                .WithField("oldProb", oldProbability)
+                .WithField("originalProb", originalProbability)
+                .WithField("newProb", newProbability)
+                .WithField("posture", posture.ToString())
+                .WithField("constructionReason", safeReason));
         }
 
         private static DirectorPosture GetDirectorPosture(int alliance)

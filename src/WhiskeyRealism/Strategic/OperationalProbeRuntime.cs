@@ -152,9 +152,7 @@ namespace WhiskeyRealism.Strategic
                     if (offensive.Contains(pausedUnit))
                     {
                         offensive.Remove(pausedUnit);
-                        EmitCampaignInfo(
-                            $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
-                            $"unit={SafeName(pausedUnit)} reason={output.Reason}");
+                        EmitOperationalProbeWrite(allianceId, output, "remove-offensive", pausedUnit, null, null, null);
                     }
                     return;
                 }
@@ -207,9 +205,15 @@ namespace WhiskeyRealism.Strategic
                 if (unit == null) return;
                 if (!OffensiveAvailabilityWrapper.IsAvailable(aifactionIndex, unit, target.Value))
                 {
-                    EmitCampaignInfoOnce(
+                    EmitOperationalProbeWriteOnce(
                         "operational-probe:gate-blocked:" + allianceId,
-                        $"[OperationalProbe] alliance={allianceId} unit={SafeName(unit)} blocked-by-availability");
+                        allianceId,
+                        output,
+                        "availability-blocked",
+                        unit,
+                        targetName,
+                        null,
+                        "blocked-by-availability");
                     return;
                 }
 
@@ -232,26 +236,28 @@ namespace WhiskeyRealism.Strategic
 
                 if (bridgeDecision.Result == WlStrategicOrderResult.IssuedWlCurrentOrder)
                 {
-                    EmitCampaignInfo(
-                        $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
-                        $"unit={SafeName(unit)} action=wl-current-order type={bridgeDecision.WlOrderType} reason={output.Reason}");
+                    EmitOperationalProbeWrite(allianceId, output, "wl-current-order", unit, targetName, bridgeDecision.WlOrderType.ToString(), null);
                     return;
                 }
 
                 if (!bridgeDecision.MayDirectMove)
                 {
-                    EmitCampaignInfoOnce(
+                    EmitOperationalProbeWriteOnce(
                         $"operational-probe:wl-skip:{allianceId}:{UnitKey(unit)}:{bridgeDecision.Result}",
-                        $"[OperationalProbe] alliance={allianceId} unit={SafeName(unit)} action=skip-direct-move wlResult={bridgeDecision.Result} reason={bridgeDecision.Reason}");
+                        allianceId,
+                        output,
+                        "skip-direct-move",
+                        unit,
+                        targetName,
+                        bridgeDecision.Result.ToString(),
+                        bridgeDecision.Reason);
                     return;
                 }
 
                 if (AICampaign.MoveUnitTo(unit, target.Value, true) && !offensive.Contains(unit))
                 {
                     offensive.Add(unit);
-                    EmitCampaignInfo(
-                        $"[OperationalProbe] alliance={allianceId} decision={output.Decision} " +
-                        $"unit={SafeName(unit)} target={targetName} reason={output.Reason}");
+                    EmitOperationalProbeWrite(allianceId, output, "direct-move", unit, targetName, null, null);
                 }
             }
             catch (Exception ex)
@@ -280,6 +286,57 @@ namespace WhiskeyRealism.Strategic
         {
             if (!LogOnceKeys.Add(key ?? string.Empty)) return;
             EmitCampaignInfo(line);
+        }
+
+        private static void EmitOperationalProbeWriteOnce(
+            string key,
+            int allianceId,
+            OperationalProbeOutput output,
+            string action,
+            Regiment unit,
+            string targetName,
+            string result,
+            string reasonOverride)
+        {
+            if (!LogOnceKeys.Add(key ?? string.Empty)) return;
+            EmitOperationalProbeWrite(allianceId, output, action, unit, targetName, result, reasonOverride);
+        }
+
+        private static void EmitOperationalProbeWrite(
+            int allianceId,
+            OperationalProbeOutput output,
+            string action,
+            Regiment unit,
+            string targetName,
+            string result,
+            string reasonOverride)
+        {
+            string unitName = SafeName(unit);
+            string reason = string.IsNullOrWhiteSpace(reasonOverride) ? (output?.Reason ?? "-") : reasonOverride;
+            string safeTarget = string.IsNullOrWhiteSpace(targetName) ? (output?.TargetAreaKey ?? "-") : targetName;
+            string safeResult = string.IsNullOrWhiteSpace(result) ? "-" : result;
+            string signature = "alliance=" + allianceId +
+                "|action=" + action +
+                "|decision=" + (output != null ? output.Decision.ToString() : "-") +
+                "|unit=" + UnitKey(unit) +
+                "|target=" + safeTarget +
+                "|result=" + safeResult +
+                "|reason=" + reason;
+            TelemetryCategory category = action == "availability-blocked" || action == "skip-direct-move"
+                ? TelemetryCategory.Gate
+                : TelemetryCategory.Write;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, category, "OperationalProbe", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(allianceId)
+                .WithUnit(unitName)
+                .WithDecision(action, reason, signature)
+                .WithField("probeDecision", output != null ? output.Decision.ToString() : "-")
+                .WithField("objective", output != null ? output.ObjectiveId : -1)
+                .WithField("probeId", output?.ProbeId ?? "-")
+                .WithField("unit", unitName)
+                .WithField("unitKey", UnitKey(unit))
+                .WithField("target", safeTarget)
+                .WithField("result", safeResult)
+                .WithField("mass", output != null && output.RequiresMassCommitment));
         }
 
         private static Regiment FindUnit(IList ownUnits, string unitKey)

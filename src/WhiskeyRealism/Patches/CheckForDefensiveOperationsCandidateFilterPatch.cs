@@ -62,7 +62,7 @@ namespace WhiskeyRealism.Patches
             if (!_wiredLogged)
             {
                 _wiredLogged = true;
-                TelemetryRouter.LegacyInfo("[DefenseIntent] observer=candidate-filter patch=25", TelemetryLayer.Campaign);
+                EmitDefenseIntentObserver();
             }
 
             try
@@ -147,8 +147,7 @@ namespace WhiskeyRealism.Patches
 
                 if (removed > 0 && Plugin.Instance.DefenseIntentVerboseLogging.Value)
                 {
-                    TelemetryRouter.LegacyInfo(
-                        $"[DefenseIntent] filtered alliance={allianceId} removed={removed} forbidden={forbidden.Count}");
+                    EmitDefenseIntentFilter(allianceId, removed, forbidden.Count);
                 }
             }
             catch (Exception ex)
@@ -234,9 +233,7 @@ namespace WhiskeyRealism.Patches
                                         {
                                             if (ShouldAvoidDirectWlRevert(unit, allianceId))
                                             {
-                                                TelemetryRouter.LegacyInfo(
-                                                    $"[DefenseIntent] skipped direct W&L revert alliance={allianceId} candidate={SafeUnitName(unit, id)} reason=player-chain",
-                                                    TelemetryLayer.Campaign);
+                                                EmitDefenseIntentSkipRevert(allianceId, id, SafeUnitName(unit, id), sig, "player-chain");
                                             }
                                             else
                                             {
@@ -255,11 +252,7 @@ namespace WhiskeyRealism.Patches
                                         bool firstRevert = _revertLogged.Add(revertKey);
                                         if (firstRevert || verbose)
                                         {
-                                            TelemetryRouter.LegacyInfo(
-                                                $"[DefenseIntent] reverted alliance={allianceId} " +
-                                                $"candidate={candidateName} " +
-                                                $"reason={reason}",
-                                                TelemetryLayer.Campaign);
+                                            EmitDefenseIntentRevert(allianceId, id, candidateName, sig, reason);
                                         }
                                     }
                                 }
@@ -316,6 +309,52 @@ namespace WhiskeyRealism.Patches
                 }
             }
             return ids;
+        }
+
+        private static void EmitDefenseIntentObserver()
+        {
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.State, "DefenseIntent", TelemetrySeverity.Info, ev => ev
+                .WithDecision("observer", "candidate-filter", "observer=candidate-filter|patch=25")
+                .WithField("observer", "candidate-filter")
+                .WithField("patch", 25));
+        }
+
+        private static void EmitDefenseIntentFilter(int allianceId, int removed, int forbidden)
+        {
+            string signature = "alliance=" + allianceId + "|removed=" + removed + "|forbidden=" + forbidden;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Gate, "DefenseIntent", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(allianceId)
+                .WithDecision("filter-candidates", "forbidden-defense-package", signature)
+                .WithField("removed", removed)
+                .WithField("forbidden", forbidden));
+        }
+
+        private static void EmitDefenseIntentSkipRevert(int allianceId, int unitId, string candidateName, string threatSignature, string reason)
+        {
+            string safeThreat = string.IsNullOrWhiteSpace(threatSignature) ? "-" : threatSignature;
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "-" : reason;
+            string signature = "alliance=" + allianceId + "|unit=" + unitId + "|threat=" + safeThreat + "|reason=" + safeReason;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Gate, "DefenseIntent", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(allianceId)
+                .WithUnit(candidateName)
+                .WithDecision("skip-direct-revert", safeReason, signature)
+                .WithField("unitId", unitId)
+                .WithField("candidate", candidateName ?? "-")
+                .WithField("threat", safeThreat));
+        }
+
+        private static void EmitDefenseIntentRevert(int allianceId, int unitId, string candidateName, string threatSignature, string reason)
+        {
+            string safeThreat = string.IsNullOrWhiteSpace(threatSignature) ? "-" : threatSignature;
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "-" : reason;
+            string signature = "alliance=" + allianceId + "|unit=" + unitId + "|threat=" + safeThreat + "|reason=" + safeReason;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Write, "DefenseIntent", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(allianceId)
+                .WithUnit(candidateName)
+                .WithDecision("revert-candidate", safeReason, signature)
+                .WithField("unitId", unitId)
+                .WithField("candidate", candidateName ?? "-")
+                .WithField("threat", safeThreat));
         }
 
         private static void RemoveFromStaticDefensiveOperation(Regiment unit)

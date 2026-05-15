@@ -57,7 +57,7 @@ namespace WhiskeyRealism.Patches
                 {
                     arr.SetValue(targetArea, aifaction);
                     if (Plugin.Instance.VerboseLogging.Value)
-                        TelemetryRouter.LegacyInfo($"[Plan] alliance={allianceId} action=importance-target objective={phase.TargetObjectiveId}", TelemetryLayer.Campaign);
+                        EmitPlanImportanceTarget(allianceId, phase.TargetObjectiveId);
                 }
             }
             catch (Exception ex)
@@ -129,6 +129,17 @@ namespace WhiskeyRealism.Patches
                 Plugin.Log.LogWarning("[Patch:Importance] ResolveTargetAIArea failed: " + ex.Message);
                 return null;
             }
+        }
+
+        private static void EmitPlanImportanceTarget(int allianceId, int objectiveId)
+        {
+            string signature = "alliance=" + allianceId +
+                "|action=importance-target" +
+                "|objective=" + objectiveId;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Plan", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(allianceId)
+                .WithDecision("importance-target", "active-plan-target", signature)
+                .WithField("objective", objectiveId));
         }
     }
 }

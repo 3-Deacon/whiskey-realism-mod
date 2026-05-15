@@ -1943,6 +1943,41 @@ static class Program
         string projectPatch = ReadRepoFile("src/WhiskeyRealism/Patches/ProjectSelectionPatch.cs");
         AssertFalse(projectPatch.Contains("TelemetryRouter.LegacyInfo(\"[ProjectDoctrine]"), "project doctrine observer rows typed");
         AssertFalse(projectPatch.Contains("TelemetryRouter.LegacyInfo(\n                                $\"[ProjectDoctrine]"), "project doctrine starved lane typed");
+
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/EconomyConstructionPatch.cs", "ConstructionTelemetry");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/FinancialAIPatch.cs", "FiscalTelemetry");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/PolicySelectionPatch.cs", "FiscalIntent");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/CheckForDefensiveOperationsCandidateFilterPatch.cs", "DefenseIntent");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs", "OperationalProbe");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/ImportanceValuesPatch.cs", "Plan");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/TransferOfUnitsPatch.cs", "Plan");
+    }
+
+    private static void AssertNoLegacyTask7Tag(string relativePath, string tag)
+    {
+        string source = ReadRepoFile(relativePath);
+        string[] legacyMarkers =
+        {
+            "TelemetryRouter.LegacyInfo",
+            "EmitCampaignInfo(",
+            "EmitCampaignInfoOnce("
+        };
+
+        for (int markerIndex = 0; markerIndex < legacyMarkers.Length; markerIndex++)
+        {
+            string marker = legacyMarkers[markerIndex];
+            int index = 0;
+            while (true)
+            {
+                index = source.IndexOf(marker, index, StringComparison.Ordinal);
+                if (index < 0) break;
+                int length = Math.Min(400, source.Length - index);
+                string segment = source.Substring(index, length);
+                AssertFalse(segment.Contains("\"[" + tag + "]") || segment.Contains("$\"[" + tag + "]"),
+                    relativePath + " legacy " + tag + " row");
+                index += marker.Length;
+            }
+        }
     }
 
     private static void AssertDeploymentRoute(string line, string expectedTag, TelemetryCategory expectedCategory)

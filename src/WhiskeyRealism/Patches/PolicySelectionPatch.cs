@@ -105,10 +105,17 @@ namespace WhiskeyRealism.Patches
                         OnceLog.Info("policy-selection", "PolicySelectionPatch wired");
                         if (Plugin.Instance.VerboseLogging.Value)
                         {
-                            TelemetryRouter.LegacyInfo(
-                                $"[FiscalIntent] source=PolicySelection alliance={alliance} blocked={firstVanillaPolicy} " +
-                                $"posture={intent.Posture} vanillaScore={firstVanillaScore:F2} reason={reason}",
-                                TelemetryLayer.Campaign);
+                            EmitFiscalIntentPolicy(
+                                alliance,
+                                "block-policy",
+                                intent,
+                                firstVanillaPolicy,
+                                selectedPolicyId: -1,
+                                firstVanillaScore,
+                                selectedScore,
+                                selectedFiscalScore,
+                                selectedStrategyScore,
+                                reason);
                         }
                         return false;
                     }
@@ -128,12 +135,17 @@ namespace WhiskeyRealism.Patches
 
                 OnceLog.Info("policy-selection", "PolicySelectionPatch wired");
                 Policies.AddResearch(alliance, selected);
-                TelemetryRouter.LegacyInfo(
-                    $"[FiscalIntent] source=PolicySelection alliance={alliance} policy={selectedPolicyId} " +
-                    $"posture={intent.Posture} vanilla={firstVanillaPolicy} " +
-                    $"vanillaScore={firstVanillaScore:F2} selectedScore={selectedScore:F2} " +
-                    $"fiscalScore={selectedFiscalScore:F2} strategyScore={selectedStrategyScore:F2} reason={reason}",
-                    TelemetryLayer.Campaign);
+                EmitFiscalIntentPolicy(
+                    alliance,
+                    "select-policy",
+                    intent,
+                    firstVanillaPolicy,
+                    selectedPolicyId,
+                    firstVanillaScore,
+                    selectedScore,
+                    selectedFiscalScore,
+                    selectedStrategyScore,
+                    reason);
                 return false;
             }
             catch (Exception ex)
@@ -157,6 +169,37 @@ namespace WhiskeyRealism.Patches
             }
 
             return GrandStrategyRegistry.Resolve(alliance, stage);
+        }
+
+        private static void EmitFiscalIntentPolicy(
+            int alliance,
+            string decision,
+            FiscalOutput intent,
+            int vanillaPolicyId,
+            int selectedPolicyId,
+            float vanillaScore,
+            float selectedScore,
+            float fiscalScore,
+            float strategyScore,
+            string reason)
+        {
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "-" : reason;
+            string signature = "source=PolicySelection|alliance=" + alliance +
+                "|decision=" + decision +
+                "|vanilla=" + vanillaPolicyId +
+                "|selected=" + selectedPolicyId +
+                "|reason=" + safeReason;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "FiscalIntent", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(alliance)
+                .WithDecision(decision, safeReason, signature)
+                .WithField("source", "PolicySelection")
+                .WithField("posture", intent != null ? intent.Posture.ToString() : "-")
+                .WithField("vanillaPolicy", vanillaPolicyId)
+                .WithField("selectedPolicy", selectedPolicyId)
+                .WithField("vanillaScore", vanillaScore)
+                .WithField("selectedScore", selectedScore)
+                .WithField("fiscalScore", fiscalScore)
+                .WithField("strategyScore", strategyScore));
         }
 
         private static bool IsAvailable(GameVars.Alliance state, Policy policy, int alliance)
