@@ -10,8 +10,10 @@ namespace WhiskeyRealism.Telemetry
             new Dictionary<TelemetryCategory, long>();
         private readonly long _totalBytes;
         private readonly long _rotateBytes;
+        private readonly long _protectedSummaryReserveBytes;
         private long _emittedBytes;
         private long _currentFileBytes;
+        private long _protectedSummaryBytes;
         private long _droppedCount;
         private int _rotationIndex;
 
@@ -19,12 +21,15 @@ namespace WhiskeyRealism.Telemetry
         {
             _totalBytes = Math.Max(1L, totalBytes);
             _rotateBytes = Math.Max(1L, rotateBytes);
+            _protectedSummaryReserveBytes = ComputeProtectedSummaryReserveBytes(_totalBytes);
         }
 
         internal long TotalBytes { get { lock (_gate) return _totalBytes; } }
         internal long RotateBytes { get { lock (_gate) return _rotateBytes; } }
         internal long EmittedBytes { get { lock (_gate) return _emittedBytes; } }
         internal long CurrentFileBytes { get { lock (_gate) return _currentFileBytes; } }
+        internal long ProtectedSummaryBytes { get { lock (_gate) return _protectedSummaryBytes; } }
+        internal long ProtectedSummaryReserveBytes { get { lock (_gate) return _protectedSummaryReserveBytes; } }
         internal long DroppedCount { get { lock (_gate) return _droppedCount; } }
         internal int RotationIndex { get { lock (_gate) return _rotationIndex; } }
 
@@ -73,6 +78,8 @@ namespace WhiskeyRealism.Telemetry
 
                 _emittedBytes += safeBytes;
                 _currentFileBytes += safeBytes;
+                if (protectedSummary && IsCapSurvivingSummary(category))
+                    _protectedSummaryBytes += safeBytes;
                 return true;
             }
         }
@@ -142,7 +149,7 @@ namespace WhiskeyRealism.Telemetry
         private bool CanEmitLocked(TelemetryCategory category, long estimatedBytes, bool lowPriority, bool protectedSummary)
         {
             if (protectedSummary && IsCapSurvivingSummary(category))
-                return true;
+                return WithinProtectedSummaryReserve(estimatedBytes);
 
             if (IsProtected(category))
                 return WithinTotalCap(estimatedBytes);
@@ -171,6 +178,20 @@ namespace WhiskeyRealism.Telemetry
         private bool WithinTotalCap(long estimatedBytes)
         {
             return _emittedBytes + estimatedBytes <= _totalBytes;
+        }
+
+        private bool WithinProtectedSummaryReserve(long estimatedBytes)
+        {
+            return _protectedSummaryBytes + estimatedBytes <= _protectedSummaryReserveBytes;
+        }
+
+        private static long ComputeProtectedSummaryReserveBytes(long totalBytes)
+        {
+            if (totalBytes < 64L * 1024L)
+                return Math.Max(4L * 1024L, Math.Min(64L * 1024L, totalBytes * 4L));
+
+            long twoPercent = Math.Max(1L, totalBytes / 50L);
+            return Math.Max(64L * 1024L, Math.Min(twoPercent, 5L * 1024L * 1024L));
         }
 
         private static int CutPercent(TelemetryCategory category)

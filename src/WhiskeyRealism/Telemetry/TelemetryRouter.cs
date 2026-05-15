@@ -41,11 +41,14 @@ namespace WhiskeyRealism.Telemetry
 
         internal static bool ShouldEmit(TelemetryProfile profile, TelemetryLayer layer, TelemetryCategory category)
         {
+            if (IsProtected(category))
+                return true;
+
             if (profile == TelemetryProfile.FullTuning)
                 return true;
 
             if (profile == TelemetryProfile.Off)
-                return IsProtected(category);
+                return false;
 
             if (layer == TelemetryLayer.System)
                 return IsSystemTuningCategory(category);

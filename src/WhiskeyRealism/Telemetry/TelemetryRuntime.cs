@@ -97,7 +97,7 @@ namespace WhiskeyRealism.Telemetry
             _queue = queue;
             _budget = budget;
             _startUtc = DateTime.UtcNow;
-            _writer = new TelemetryWriter(_queue, _budget, _sessionDirectory, WriteManifest);
+            _writer = new TelemetryWriter(_queue, _budget, _sessionDirectory, WriteManifest, SessionId, Profile, config.WarningCallback);
         }
 
         internal TelemetryProfile Profile { get; private set; }

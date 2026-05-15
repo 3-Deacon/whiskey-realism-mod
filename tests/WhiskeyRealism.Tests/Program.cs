@@ -53,6 +53,7 @@ static class Program
             ("telemetry budget dropped snapshot is stable", TelemetryBudgetDroppedSnapshotIsStable),
             ("telemetry issue bundle redacts json and bearer equals secrets", TelemetryIssueBundleRedactsJsonAndBearerEqualsSecrets),
             ("telemetry budget caps raw protected detail but allows summaries", TelemetryBudgetCapsRawProtectedDetailButAllowsSummaries),
+            ("telemetry budget bounds protected summary reserve", TelemetryBudgetBoundsProtectedSummaryReserve),
             ("telemetry queue reports coalesced protected overflow", TelemetryQueueReportsCoalescedProtectedOverflow),
             ("telemetry issue bundle redacts auth bypass forms", TelemetryIssueBundleRedactsAuthBypassForms),
             ("telemetry issue bundle preserves json redaction validity", TelemetryIssueBundlePreservesJsonRedactionValidity),
@@ -69,6 +70,7 @@ static class Program
             ("telemetry runtime protected summaries survive consumed budget", TelemetryRuntimeProtectedSummariesSurviveConsumedBudget),
             ("telemetry writer sink failure rows use output accounting", TelemetryWriterSinkFailureRowsUseOutputAccounting),
             ("telemetry writer reports shutdown timeout", TelemetryWriterReportsShutdownTimeout),
+            ("telemetry writer sink failure rows use active identity", TelemetryWriterSinkFailureRowsUseActiveIdentity),
             ("telemetry runtime final manifest ignores late non final writes", TelemetryRuntimeFinalManifestIgnoresLateNonFinalWrites),
             ("telemetry runtime writes scoped issue bundle on shutdown", TelemetryRuntimeWritesScopedIssueBundleOnShutdown),
             ("telemetry profile parses unknown as off", TelemetryProfileParsesUnknownAsOff),
@@ -1304,26 +1306,36 @@ static class Program
         string sessionDirectory = CreateTempDirectory();
         var enteredManifest = new System.Threading.ManualResetEvent(false);
         var releaseManifest = new System.Threading.ManualResetEvent(false);
+        var warnings = new List<string>();
         try
         {
             var queue = new TelemetryQueue(capacity: 8);
             var budget = new TelemetryBudget(totalBytes: 4096, rotateBytes: 1024);
             int manifestCalls = 0;
-            var writer = new TelemetryWriter(queue, budget, sessionDirectory, delegate
-            {
-                if (System.Threading.Interlocked.Increment(ref manifestCalls) == 1)
+            var writer = new TelemetryWriter(
+                queue,
+                budget,
+                sessionDirectory,
+                delegate
                 {
-                    enteredManifest.Set();
-                    releaseManifest.WaitOne(5000);
-                }
-            });
+                    if (System.Threading.Interlocked.Increment(ref manifestCalls) == 1)
+                    {
+                        enteredManifest.Set();
+                        releaseManifest.WaitOne(5000);
+                    }
+                },
+                "timeout-session",
+                TelemetryProfile.CampaignTuning,
+                warnings.Add);
 
             writer.Start();
-            queue.Enqueue(TelemetryEvent.Create("s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical, TelemetryCategory.Decision, "TimeoutDecision", TelemetrySeverity.Info).WithDecision("hold", "test", "sig-timeout"));
+            queue.Enqueue(TelemetryEvent.Create("timeout-session", TelemetryProfile.CampaignTuning, TelemetryLayer.Tactical, TelemetryCategory.Decision, "TimeoutDecision", TelemetrySeverity.Info).WithDecision("hold", "test", "sig-timeout"));
             writer.Signal();
 
             AssertTrue(enteredManifest.WaitOne(1000), "writer entered blocking manifest callback");
             AssertFalse(writer.StopAndFlush(1), "writer reports timeout when background thread is still blocked");
+            AssertEqual(1, warnings.Count, "shutdown timeout emits one warning callback");
+            AssertContains(warnings[0], "Telemetry writer shutdown timed out", "shutdown timeout warning message");
             releaseManifest.Set();
             AssertTrue(writer.StopAndFlush(1000), "writer joins after blocked manifest callback releases");
         }
@@ -1332,6 +1344,38 @@ static class Program
             releaseManifest.Set();
             enteredManifest.Dispose();
             releaseManifest.Dispose();
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryWriterSinkFailureRowsUseActiveIdentity()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            var queue = new TelemetryQueue(capacity: 8);
+            var budget = new TelemetryBudget(totalBytes: 4096, rotateBytes: 1024);
+            var writer = new TelemetryWriter(
+                queue,
+                budget,
+                sessionDirectory,
+                delegate { },
+                "active-session",
+                TelemetryProfile.CampaignTuning,
+                null);
+
+            writer.RecordRuntimeSinkFailure("unit-test-sink", null);
+            writer.Start();
+            AssertTrue(writer.StopAndFlush(1000), "writer stops after active identity sink failure");
+
+            string failuresPath = Path.Combine(sessionDirectory, "failures.jsonl");
+            AssertTrue(File.Exists(failuresPath), "sink failure sidecar written");
+            JObject row = ParseJsonLine(File.ReadAllText(failuresPath));
+            AssertEqual("active-session", (string)row["sessionId"], "sink failure session id");
+            AssertEqual("CampaignTuning", (string)row["profile"], "sink failure profile");
+        }
+        finally
+        {
             DeleteDirectoryQuietly(sessionDirectory);
         }
     }
@@ -1439,8 +1483,10 @@ static class Program
 
         AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.Campaign, TelemetryCategory.Decision), "tactical tuning excludes campaign decisions");
         AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.Tactical, TelemetryCategory.Decision), "tactical tuning includes tactical decisions");
+        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.Campaign, TelemetryCategory.Failure), "tactical tuning includes cross-layer campaign failure");
         AssertFalse(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.Tactical, TelemetryCategory.State), "campaign tuning excludes tactical state");
         AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.Campaign, TelemetryCategory.State), "campaign tuning includes campaign state");
+        AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.Tactical, TelemetryCategory.Failure), "campaign tuning includes cross-layer tactical failure");
         AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.TacticalTuning, TelemetryLayer.System, TelemetryCategory.Performance), "tactical tuning includes system performance");
         AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.CampaignTuning, TelemetryLayer.System, TelemetryCategory.Failure), "campaign tuning includes system failure");
         AssertTrue(TelemetryRouter.ShouldEmit(TelemetryProfile.FullTuning, TelemetryLayer.Tactical, TelemetryCategory.Trace), "full tuning includes trace");
@@ -1900,6 +1946,27 @@ static class Program
         healthBudget.RecordBytes(TelemetryCategory.Write, 1001);
         AssertFalse((bool)overload.Invoke(healthBudget, new object[] { TelemetryCategory.Health, 1L, true, false }), "raw health detail capped past total bytes");
         AssertTrue((bool)overload.Invoke(healthBudget, new object[] { TelemetryCategory.Health, 1L, true, true }), "health summary allowed past cap");
+    }
+
+    private static void TelemetryBudgetBoundsProtectedSummaryReserve()
+    {
+        var budget = new TelemetryBudget(totalBytes: 1024, rotateBytes: 256);
+        budget.RecordBytes(TelemetryCategory.Write, 1024);
+
+        AssertFalse(budget.TryReserve(TelemetryCategory.Failure, 1, lowPriority: true, protectedSummary: false), "raw failure detail remains capped");
+        AssertTrue(budget.TryReserve(TelemetryCategory.Failure, 900, lowPriority: true, protectedSummary: true), "first protected summary survives consumed detail cap");
+
+        int accepted = 1;
+        for (int i = 0; i < 32; i++)
+        {
+            if (budget.TryReserve(TelemetryCategory.Failure, 900, lowPriority: true, protectedSummary: true))
+                accepted++;
+        }
+
+        AssertTrue(accepted < 33, "protected summaries eventually hit reserve cap");
+        AssertTrue(budget.DroppedCountFor(TelemetryCategory.Failure) >= 1L, "protected summary reserve drops are counted");
+        AssertTrue(budget.ProtectedSummaryBytes > 0L, "protected summary bytes tracked separately");
+        AssertTrue(budget.ProtectedSummaryBytes <= budget.ProtectedSummaryReserveBytes, "protected summary bytes stay within reserve cap");
     }
 
     private static void TelemetryQueueReportsCoalescedProtectedOverflow()

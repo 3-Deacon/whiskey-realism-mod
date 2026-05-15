@@ -14,6 +14,9 @@ namespace WhiskeyRealism.Telemetry
         private readonly TelemetryBudget _budget;
         private readonly string _sessionDirectory;
         private readonly Action _manifestWriter;
+        private readonly string _sessionId;
+        private readonly TelemetryProfile _profile;
+        private readonly Action<string> _warningCallback;
         private readonly AutoResetEvent _signal = new AutoResetEvent(false);
         private readonly object _gate = new object();
         private readonly HashSet<string> _outputFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -21,17 +24,24 @@ namespace WhiskeyRealism.Telemetry
         private readonly Thread _thread;
         private volatile bool _stopRequested;
         private long _sinkFailureCount;
+        private bool _shutdownTimeoutWarningEmitted;
 
         internal TelemetryWriter(
             TelemetryQueue queue,
             TelemetryBudget budget,
             string sessionDirectory,
-            Action manifestWriter)
+            Action manifestWriter,
+            string sessionId = "sink",
+            TelemetryProfile profile = TelemetryProfile.FullTuning,
+            Action<string> warningCallback = null)
         {
             _queue = queue;
             _budget = budget;
             _sessionDirectory = sessionDirectory;
             _manifestWriter = manifestWriter;
+            _sessionId = TelemetryEvent.Safe(sessionId);
+            _profile = profile;
+            _warningCallback = warningCallback;
             _thread = new Thread(Run)
             {
                 IsBackground = true,
@@ -78,6 +88,7 @@ namespace WhiskeyRealism.Telemetry
             {
                 if (!_thread.Join(Math.Max(1, timeoutMs)))
                 {
+                    WarnShutdownTimeout();
                     RecordSinkFailure("writer-shutdown-timeout", null);
                     return false;
                 }
@@ -200,8 +211,8 @@ namespace WhiskeyRealism.Telemetry
             {
                 string message = ex == null ? reason : reason + ": " + ex.GetType().Name;
                 var failure = TelemetryEvent.Create(
-                    "sink",
-                    TelemetryProfile.FullTuning,
+                    _sessionId,
+                    _profile,
                     TelemetryLayer.System,
                     TelemetryCategory.Failure,
                     "TelemetrySinkFailure",
@@ -209,6 +220,28 @@ namespace WhiskeyRealism.Telemetry
                     .WithField("protectedSummary", true)
                     .WithField("reason", message);
                 WriteRow(failure, reportSinkFailure: false);
+            }
+            catch
+            {
+            }
+        }
+
+        private void WarnShutdownTimeout()
+        {
+            try
+            {
+                Action<string> callback = _warningCallback;
+                if (callback == null)
+                    return;
+
+                lock (_gate)
+                {
+                    if (_shutdownTimeoutWarningEmitted)
+                        return;
+                    _shutdownTimeoutWarningEmitted = true;
+                }
+
+                callback("Telemetry writer shutdown timed out; telemetry rows may be truncated.");
             }
             catch
             {
