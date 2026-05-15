@@ -27,7 +27,7 @@ namespace WhiskeyRealism.Telemetry
             if (IsProtected(category))
                 return true;
 
-            bool allowed = EmittedBytes + safeBytes <= TotalBytes;
+            bool allowed = WithinCategoryCut(category, safeBytes);
             if (!allowed)
                 RecordDropped(category);
             return allowed;
@@ -77,6 +77,29 @@ namespace WhiskeyRealism.Telemetry
         private static bool IsProtected(TelemetryCategory category)
         {
             return category == TelemetryCategory.Failure || category == TelemetryCategory.Health;
+        }
+
+        private bool WithinCategoryCut(TelemetryCategory category, long estimatedBytes)
+        {
+            decimal projected = (decimal)EmittedBytes + estimatedBytes;
+            return projected * 100m <= (decimal)TotalBytes * CutPercent(category);
+        }
+
+        private static int CutPercent(TelemetryCategory category)
+        {
+            switch (category)
+            {
+                case TelemetryCategory.Trace:
+                    return 90;
+                case TelemetryCategory.State:
+                    return 95;
+                case TelemetryCategory.Decision:
+                    return 98;
+                case TelemetryCategory.Gate:
+                case TelemetryCategory.Write:
+                default:
+                    return 100;
+            }
         }
     }
 }

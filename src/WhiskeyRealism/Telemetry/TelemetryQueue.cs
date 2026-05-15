@@ -112,11 +112,10 @@ namespace WhiskeyRealism.Telemetry
                     return 1;
                 case TelemetryCategory.Performance:
                     return 2;
-                case TelemetryCategory.Decision:
-                    return 3;
                 case TelemetryCategory.Gate:
-                    return 4;
                 case TelemetryCategory.Write:
+                    return 4;
+                case TelemetryCategory.Decision:
                     return 5;
                 case TelemetryCategory.State:
                     return 6;

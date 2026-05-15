@@ -27,7 +27,7 @@ namespace WhiskeyRealism.Telemetry
     internal static class TelemetryIssueBundle
     {
         private static readonly Regex WindowsUserPath = new Regex(
-            @"(?i)\b([A-Z]:\\Users\\)[^\\\s]+",
+            @"(?i)\b([A-Z]:\\Users\\)[^\\]+",
             RegexOptions.CultureInvariant);
 
         private static readonly Regex SecretAssignment = new Regex(

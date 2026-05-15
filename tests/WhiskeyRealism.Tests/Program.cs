@@ -32,6 +32,9 @@ static class Program
             ("telemetry manifest redacts user paths", TelemetryManifestRedactsUserPaths),
             ("telemetry queue never drops health for lower priority rows", TelemetryQueueNeverDropsHealthForLowerPriorityRows),
             ("telemetry retention keeps newest two by manifest dir and mtime", TelemetryRetentionKeepsNewestTwoByManifestDirAndMtime),
+            ("telemetry budget applies staged category cuts", TelemetryBudgetAppliesStagedCategoryCuts),
+            ("telemetry queue evicts decision before gate write", TelemetryQueueEvictsDecisionBeforeGateWrite),
+            ("telemetry issue bundle redacts spaced windows usernames", TelemetryIssueBundleRedactsSpacedWindowsUsernames),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1100,6 +1103,55 @@ static class Program
         AssertTrue(deletes.Exists(c => c.DirectoryName == "old-with-start"), "oldest manifest start deleted");
         AssertFalse(deletes.Exists(c => c.DirectoryName == "same-start-b"), "newer directory name retained");
         AssertFalse(deletes.Exists(c => c.DirectoryName == "mtime-fallback-new"), "mtime fallback retained");
+    }
+
+    private static void TelemetryBudgetAppliesStagedCategoryCuts()
+    {
+        var traceBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        traceBudget.RecordBytes(TelemetryCategory.Trace, 890);
+        AssertFalse(traceBudget.Allow(TelemetryCategory.Trace, 20), "trace cuts above 90 percent");
+        AssertTrue(traceBudget.Allow(TelemetryCategory.State, 20), "state survives trace cutoff");
+
+        var stateBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        stateBudget.RecordBytes(TelemetryCategory.State, 940);
+        AssertFalse(stateBudget.Allow(TelemetryCategory.State, 20), "state cuts above 95 percent");
+        AssertTrue(stateBudget.Allow(TelemetryCategory.Decision, 20), "decision survives state cutoff");
+
+        var decisionBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        decisionBudget.RecordBytes(TelemetryCategory.Decision, 970);
+        AssertFalse(decisionBudget.Allow(TelemetryCategory.Decision, 20), "decision cuts above 98 percent");
+        AssertTrue(decisionBudget.Allow(TelemetryCategory.Gate, 20), "gate survives decision cutoff");
+        AssertTrue(decisionBudget.Allow(TelemetryCategory.Write, 20), "write survives decision cutoff");
+
+        var gateBudget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        gateBudget.RecordBytes(TelemetryCategory.Gate, 990);
+        AssertFalse(gateBudget.Allow(TelemetryCategory.Gate, 20), "gate cuts above total cap");
+        AssertFalse(gateBudget.Allow(TelemetryCategory.Write, 20), "write cuts above total cap");
+        AssertTrue(gateBudget.Allow(TelemetryCategory.Failure, 20), "failure protected above total cap");
+        AssertTrue(gateBudget.Allow(TelemetryCategory.Health, 20), "health protected above total cap");
+    }
+
+    private static void TelemetryQueueEvictsDecisionBeforeGateWrite()
+    {
+        var queue = new TelemetryQueue(capacity: 3);
+        queue.TryEnqueue(EventForQueue(TelemetryCategory.Decision, "decision-a"));
+        queue.TryEnqueue(EventForQueue(TelemetryCategory.Gate, "gate-a"));
+        queue.TryEnqueue(EventForQueue(TelemetryCategory.Write, "write-a"));
+        AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-a")), "failure accepted under pressure");
+
+        var drained = queue.Drain(10);
+        AssertEqual(3, drained.Count, "queue count");
+        AssertFalse(drained.Exists(e => e.EventName == "decision-a"), "decision evicted first");
+        AssertTrue(drained.Exists(e => e.EventName == "gate-a"), "gate retained");
+        AssertTrue(drained.Exists(e => e.EventName == "write-a"), "write retained");
+        AssertTrue(drained.Exists(e => e.EventName == "failure-a"), "failure retained");
+    }
+
+    private static void TelemetryIssueBundleRedactsSpacedWindowsUsernames()
+    {
+        string redacted = TelemetryIssueBundle.Redact(@"C:\Users\Kyle Davis\AppData\Roaming\test");
+        AssertContains(redacted, @"C:\Users\<redacted>\AppData", "spaced user path redacted");
+        AssertFalse(redacted.Contains("Kyle Davis"), "spaced username removed");
     }
 
     private static FrontSectorLedger BuildLedger()
