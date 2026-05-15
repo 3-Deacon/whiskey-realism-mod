@@ -125,6 +125,11 @@
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryContracts.cs" Link="Telemetry\TelemetryContracts.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryFields.cs" Link="Telemetry\TelemetryFields.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryJson.cs" Link="Telemetry\TelemetryJson.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryBudget.cs" Link="Telemetry\TelemetryBudget.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryQueue.cs" Link="Telemetry\TelemetryQueue.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetrySession.cs" Link="Telemetry\TelemetrySession.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryManifest.cs" Link="Telemetry\TelemetryManifest.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryIssueBundle.cs" Link="Telemetry\TelemetryIssueBundle.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalBattleContext.cs" Link="TacticalBattleContext.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalTelemetry.cs" Link="TacticalTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalDeploymentTelemetry.cs" Link="TacticalDeploymentTelemetry.cs" />

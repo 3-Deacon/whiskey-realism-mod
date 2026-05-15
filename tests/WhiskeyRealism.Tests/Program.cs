@@ -26,6 +26,12 @@ static class Program
             ("telemetry fields sanitize nulls and nonfinite numbers", TelemetryFieldsSanitizeNullsAndNonfiniteNumbers),
             ("telemetry duration marks invalid float", TelemetryDurationMarksInvalidFloat),
             ("telemetry decision requires input signature", TelemetryDecisionRequiresInputSignature),
+            ("telemetry budget drops trace first", TelemetryBudgetDropsTraceFirst),
+            ("telemetry queue preserves failure under pressure", TelemetryQueuePreservesFailureUnderPressure),
+            ("telemetry session id sorts by utc milliseconds", TelemetrySessionIdSortsByUtcMilliseconds),
+            ("telemetry manifest redacts user paths", TelemetryManifestRedactsUserPaths),
+            ("telemetry queue never drops health for lower priority rows", TelemetryQueueNeverDropsHealthForLowerPriorityRows),
+            ("telemetry retention keeps newest two by manifest dir and mtime", TelemetryRetentionKeepsNewestTwoByManifestDirAndMtime),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1021,6 +1027,79 @@ static class Program
         }
 
         return 0;
+    }
+
+    private static void TelemetryBudgetDropsTraceFirst()
+    {
+        var budget = new TelemetryBudget(totalBytes: 1000, rotateBytes: 250);
+        AssertTrue(budget.Allow(TelemetryCategory.Trace, 900), "trace allowed before cap");
+        budget.RecordBytes(TelemetryCategory.Trace, 900);
+        AssertFalse(budget.Allow(TelemetryCategory.Trace, 200), "trace cut first near cap");
+        AssertTrue(budget.Allow(TelemetryCategory.Failure, 200), "failure protected near cap");
+    }
+
+    private static void TelemetryQueuePreservesFailureUnderPressure()
+    {
+        var queue = new TelemetryQueue(capacity: 2);
+        queue.TryEnqueue(EventForQueue(TelemetryCategory.Trace, "trace-a"));
+        queue.TryEnqueue(EventForQueue(TelemetryCategory.State, "state-a"));
+        queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-a"));
+        var drained = queue.Drain(10);
+        AssertEqual(2, drained.Count, "queue count");
+        AssertTrue(drained.Exists(e => e.Category == TelemetryCategory.Failure), "failure preserved");
+        AssertTrue(queue.DroppedCount > 0, "dropped counted");
+    }
+
+    private static TelemetryEvent EventForQueue(TelemetryCategory category, string name)
+    {
+        return TelemetryEvent.Create("s", TelemetryProfile.FullTuning, TelemetryLayer.System, category, name, TelemetrySeverity.Info);
+    }
+
+    private static void TelemetrySessionIdSortsByUtcMilliseconds()
+    {
+        string a = TelemetrySession.CreateSessionId(new DateTime(2026, 5, 15, 12, 0, 0, 1, DateTimeKind.Utc), 12, "abcdef1234567890");
+        string b = TelemetrySession.CreateSessionId(new DateTime(2026, 5, 15, 12, 0, 0, 2, DateTimeKind.Utc), 12, "abcdef1234567890");
+        AssertTrue(string.CompareOrdinal(a, b) < 0, "session ids sort by start time");
+        AssertContains(a, "p12", "pid");
+        AssertContains(a, "abcdef123456", "hash prefix");
+    }
+
+    private static void TelemetryManifestRedactsUserPaths()
+    {
+        string redacted = TelemetryIssueBundle.Redact(@"C:\Users\Kyle\AppData\Roaming\test token=secret");
+        AssertContains(redacted, @"C:\Users\<redacted>", "user path redacted");
+        AssertFalse(redacted.Contains("secret"), "token redacted");
+    }
+
+    private static void TelemetryQueueNeverDropsHealthForLowerPriorityRows()
+    {
+        var queue = new TelemetryQueue(capacity: 2);
+        queue.TryEnqueue(EventForQueue(TelemetryCategory.Trace, "trace-a"));
+        queue.TryEnqueue(EventForQueue(TelemetryCategory.State, "state-a"));
+        AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-a")), "health accepted under pressure");
+
+        var drained = queue.Drain(10);
+        AssertEqual(2, drained.Count, "queue count");
+        AssertTrue(drained.Exists(e => e.Category == TelemetryCategory.Health), "health preserved");
+        AssertFalse(drained.Exists(e => e.EventName == "trace-a"), "trace evicted before health");
+    }
+
+    private static void TelemetryRetentionKeepsNewestTwoByManifestDirAndMtime()
+    {
+        var candidates = new[]
+        {
+            new TelemetryRetentionCandidate("old-with-start", new DateTime(2026, 5, 15, 10, 0, 0, DateTimeKind.Utc), new DateTime(2026, 5, 15, 14, 0, 0, DateTimeKind.Utc)),
+            new TelemetryRetentionCandidate("same-start-a", new DateTime(2026, 5, 15, 12, 0, 0, DateTimeKind.Utc), new DateTime(2026, 5, 15, 8, 0, 0, DateTimeKind.Utc)),
+            new TelemetryRetentionCandidate("same-start-b", new DateTime(2026, 5, 15, 12, 0, 0, DateTimeKind.Utc), new DateTime(2026, 5, 15, 8, 0, 0, DateTimeKind.Utc)),
+            new TelemetryRetentionCandidate("mtime-fallback-new", null, new DateTime(2026, 5, 15, 13, 0, 0, DateTimeKind.Utc))
+        };
+
+        var deletes = TelemetrySession.SelectRetentionDeletes(candidates, keepNewest: 2);
+        AssertEqual(2, deletes.Count, "delete count");
+        AssertTrue(deletes.Exists(c => c.DirectoryName == "same-start-a"), "directory name tie loses older name");
+        AssertTrue(deletes.Exists(c => c.DirectoryName == "old-with-start"), "oldest manifest start deleted");
+        AssertFalse(deletes.Exists(c => c.DirectoryName == "same-start-b"), "newer directory name retained");
+        AssertFalse(deletes.Exists(c => c.DirectoryName == "mtime-fallback-new"), "mtime fallback retained");
     }
 
     private static FrontSectorLedger BuildLedger()
