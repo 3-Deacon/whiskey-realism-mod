@@ -174,14 +174,29 @@ namespace WhiskeyRealism.Strategic
                     if (committedCount > 0 && committedCount < plans.Count)
                     {
                         RollBackDirectCommits(offensive, directRecords, output.Signature());
-                        LogInfo(
-                            $"[CoordinatedOps] alliance={allianceId} action=package-partial-rollback committed={committedCount}/{plans.Count} package={output.Signature()}");
+                        EmitCoordinatedOps(
+                            TelemetryCategory.Write,
+                            TelemetrySeverity.Warning,
+                            allianceId,
+                            "package-partial-rollback",
+                            "partial-commit",
+                            output.Signature(),
+                            ev => ev
+                                .WithField("committed", committedCount)
+                                .WithField("planned", plans.Count));
                     }
                     return committedCount == plans.Count;
                 }
                 catch (Exception ex)
                 {
-                    WarnOnce("coordinated-ops:commit", "[CoordinatedOps] commit failed: " + ex.Message);
+                    EmitCoordinatedOps(
+                        TelemetryCategory.Failure,
+                        TelemetrySeverity.Warning,
+                        allianceId,
+                        "commit-failed",
+                        ex.Message,
+                        output?.Signature() ?? "-");
+                    WarnOnce("coordinated-ops:commit", "Runtime CoordinatedOps commit failed: " + ex.Message);
                     return false;
                 }
             }
@@ -240,7 +255,13 @@ namespace WhiskeyRealism.Strategic
             }
             if (wlCurrentOrders > 1 || (wlCurrentOrders == 1 && plans.Count > 1))
             {
-                LogInfo($"[CoordinatedOps] alliance={allianceId} action=preflight-failed reason=wl-current-order-not-atomic package={output.Signature()}");
+                EmitCoordinatedOps(
+                    TelemetryCategory.Gate,
+                    TelemetrySeverity.Warning,
+                    allianceId,
+                    "preflight-failed",
+                    "wl-current-order-not-atomic",
+                    output.Signature());
                 return null;
             }
             return plans;
@@ -262,12 +283,28 @@ namespace WhiskeyRealism.Strategic
             var unit = FindUnitById(ownUnits, stableUnitId);
             if (unit == null)
             {
-                LogInfo($"[CoordinatedOps] alliance={allianceId} unitId={stableUnitId} action=preflight-failed reason=unit-unresolved package={packageSignature}");
+                EmitCoordinatedOps(
+                    TelemetryCategory.Gate,
+                    TelemetrySeverity.Warning,
+                    allianceId,
+                    "preflight-failed",
+                    "unit-unresolved",
+                    packageSignature,
+                    ev => ev.WithField("unitId", stableUnitId));
                 return false;
             }
             if (!IsAvailable(aifactionIndex, unit, target))
             {
-                LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=preflight-failed reason=availability package={packageSignature}");
+                EmitCoordinatedOps(
+                    TelemetryCategory.Gate,
+                    TelemetrySeverity.Warning,
+                    allianceId,
+                    "preflight-failed",
+                    "availability",
+                    packageSignature,
+                    ev => ev
+                        .WithUnit(SafeName(unit))
+                        .WithField("unit", SafeName(unit)));
                 return false;
             }
 
@@ -286,7 +323,17 @@ namespace WhiskeyRealism.Strategic
             });
             if (decision.Result != WlStrategicOrderResult.IssuedWlCurrentOrder && !decision.MayDirectMove)
             {
-                LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=preflight-failed wlResult={decision.Result} reason={decision.Reason} package={packageSignature}");
+                EmitCoordinatedOps(
+                    TelemetryCategory.Gate,
+                    TelemetrySeverity.Warning,
+                    allianceId,
+                    "preflight-failed",
+                    decision.Reason,
+                    packageSignature,
+                    ev => ev
+                        .WithUnit(SafeName(unit))
+                        .WithField("unit", SafeName(unit))
+                        .WithField("wlResult", decision.Result.ToString()));
                 return false;
             }
 
@@ -332,11 +379,31 @@ namespace WhiskeyRealism.Strategic
                 });
                 if (decision.Result != WlStrategicOrderResult.IssuedWlCurrentOrder)
                 {
-                    LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=skip wlResult={decision.Result} reason={decision.Reason} package={packageSignature}");
+                    EmitCoordinatedOps(
+                        TelemetryCategory.Gate,
+                        TelemetrySeverity.Warning,
+                        allianceId,
+                        "skip",
+                        decision.Reason,
+                        packageSignature,
+                        ev => ev
+                            .WithUnit(SafeName(unit))
+                            .WithField("unit", SafeName(unit))
+                            .WithField("wlResult", decision.Result.ToString()));
                     return false;
                 }
                 MarkPackageLocked(plan.StableUnitId, packageSignature);
-                LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=wl-current-order type={decision.WlOrderType} package={packageSignature}");
+                EmitCoordinatedOps(
+                    TelemetryCategory.Write,
+                    TelemetrySeverity.Info,
+                    allianceId,
+                    "wl-current-order",
+                    decision.WlOrderType.ToString(),
+                    packageSignature,
+                    ev => ev
+                        .WithUnit(SafeName(unit))
+                        .WithField("unit", SafeName(unit))
+                        .WithField("type", decision.WlOrderType.ToString()));
                 return true;
             }
 
@@ -356,11 +423,29 @@ namespace WhiskeyRealism.Strategic
                     RegimentPathsBefore = regimentPathsBefore
                 });
                 MarkPackageLocked(plan.StableUnitId, packageSignature);
-                LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=direct-move package={packageSignature}");
+                EmitCoordinatedOps(
+                    TelemetryCategory.Write,
+                    TelemetrySeverity.Info,
+                    allianceId,
+                    "direct-move",
+                    "move-issued",
+                    packageSignature,
+                    ev => ev
+                        .WithUnit(SafeName(unit))
+                        .WithField("unit", SafeName(unit)));
                 return true;
             }
 
-            LogInfo($"[CoordinatedOps] alliance={allianceId} unit={SafeName(unit)} action=skip reason=move-failed package={packageSignature}");
+            EmitCoordinatedOps(
+                TelemetryCategory.Gate,
+                TelemetrySeverity.Warning,
+                allianceId,
+                "skip",
+                "move-failed",
+                packageSignature,
+                ev => ev
+                    .WithUnit(SafeName(unit))
+                    .WithField("unit", SafeName(unit)));
             return false;
         }
 
@@ -377,7 +462,17 @@ namespace WhiskeyRealism.Strategic
                     record.Unit.StopRegiment(skipfinalrotation: true, manualstop: true);
                 if (!record.WasInOffensive)
                     offensive.Remove(record.Unit);
-                LogInfo($"[CoordinatedOps] unit={SafeName(record.Unit)} action=direct-rollback package={packageSignature}");
+                EmitCoordinatedOps(
+                    TelemetryCategory.Write,
+                    TelemetrySeverity.Warning,
+                    -1,
+                    "direct-rollback",
+                    "partial-commit-rollback",
+                    packageSignature,
+                    ev => ev
+                        .WithUnit(SafeName(record.Unit))
+                        .WithField("unit", SafeName(record.Unit))
+                        .WithField("unitId", record.StableUnitId));
             }
         }
 
@@ -423,9 +518,16 @@ namespace WhiskeyRealism.Strategic
             }
             catch (Exception ex)
             {
+                EmitCoordinatedOps(
+                    TelemetryCategory.Failure,
+                    TelemetrySeverity.Warning,
+                    -1,
+                    "objective-name-failed",
+                    ex.Message,
+                    "objective=" + objectiveId);
                 WarnOnce(
                     "coordinated-ops:objective-name",
-                    $"[CoordinatedOps] objective name resolve failed for objective ID {objectiveId}: {ex.Message}");
+                    $"Runtime CoordinatedOps objective name resolve failed for objective ID {objectiveId}: {ex.Message}");
                 return null;
             }
 #else
@@ -445,28 +547,18 @@ namespace WhiskeyRealism.Strategic
             }
             catch (Exception ex)
             {
-                WarnOnce("coordinated-ops:availability", "[CoordinatedOps] availability check failed: " + ex.Message);
+                EmitCoordinatedOps(
+                    TelemetryCategory.Failure,
+                    TelemetrySeverity.Warning,
+                    -1,
+                    "availability-check-failed",
+                    ex.Message,
+                    "aifaction=" + aifactionIndex);
+                WarnOnce("coordinated-ops:availability", "Runtime CoordinatedOps availability check failed: " + ex.Message);
                 return false;
             }
 #else
             return OffensiveAvailabilityWrapper.IsAvailable(aifactionIndex, unit, target);
-#endif
-        }
-
-        private static void LogInfo(string message)
-        {
-#if NET8_0
-            try
-            {
-                var pluginType = typeof(CoordinatedOperationRuntime).Assembly.GetType("WhiskeyRealism.Plugin");
-                var log = AccessTools.Field(pluginType, "Log")?.GetValue(null);
-                AccessTools.Method(log?.GetType(), "LogInfo", new[] { typeof(object) })?.Invoke(log, new object[] { message });
-            }
-            catch
-            {
-            }
-#else
-            TelemetryRouter.LegacyInfo(message, TelemetryLayer.Campaign);
 #endif
         }
 
@@ -499,6 +591,33 @@ namespace WhiskeyRealism.Strategic
 #else
             OnceLog.Warning(key, message);
 #endif
+        }
+
+        internal static void EmitCoordinatedOps(
+            TelemetryCategory category,
+            TelemetrySeverity severity,
+            int allianceId,
+            string action,
+            string reason,
+            string packageSignature,
+            Action<TelemetryEvent> configure = null)
+        {
+            string safeAction = string.IsNullOrWhiteSpace(action) ? "-" : action;
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "-" : reason;
+            string safePackage = string.IsNullOrWhiteSpace(packageSignature) ? "-" : packageSignature;
+            string signature = "alliance=" + allianceId +
+                "|action=" + safeAction +
+                "|reason=" + safeReason +
+                "|package=" + safePackage;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, category, "CoordinatedOps", severity, ev =>
+            {
+                ev.WithAlliance(allianceId)
+                    .WithDecision(safeAction, safeReason, signature)
+                    .WithField("action", safeAction)
+                    .WithField("reason", safeReason)
+                    .WithField("package", safePackage);
+                configure?.Invoke(ev);
+            });
         }
     }
 }

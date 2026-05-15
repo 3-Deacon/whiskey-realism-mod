@@ -186,17 +186,25 @@ namespace WhiskeyRealism.Strategic
                         "OperationalProbe");
                     if (committed)
                     {
-                        EmitCampaignInfo(
-                            $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
-                            $"target={targetName} ratio={output.Package.Ratio:0.00} " +
-                            $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
+                        EmitCoordinatedProbePackage(
+                            allianceId,
+                            output.Package,
+                            "commit-package",
+                            TelemetryCategory.Write,
+                            TelemetrySeverity.Info,
+                            targetName,
+                            null);
                     }
                     else
                     {
-                        Plugin.Log.LogWarning(
-                            $"[CoordinatedOps] alliance={allianceId} intent=Probe decision={output.Package.Decision} " +
-                            $"action=package-no-commit target={targetName} " +
-                            $"lead={output.Package.LeadDisplayUnitKey} support={output.Package.SupportStableUnitIds.Count} reason={output.Package.Reason}");
+                        EmitCoordinatedProbePackage(
+                            allianceId,
+                            output.Package,
+                            "package-no-commit",
+                            TelemetryCategory.Gate,
+                            TelemetrySeverity.Warning,
+                            targetName,
+                            "commit-failed");
                     }
                     return;
                 }
@@ -277,15 +285,30 @@ namespace WhiskeyRealism.Strategic
             return -1;
         }
 
-        private static void EmitCampaignInfo(string line)
+        private static void EmitCoordinatedProbePackage(
+            int allianceId,
+            CoordinatedOperationOutput package,
+            string action,
+            TelemetryCategory category,
+            TelemetrySeverity severity,
+            string targetName,
+            string reasonOverride)
         {
-            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
-        }
-
-        private static void EmitCampaignInfoOnce(string key, string line)
-        {
-            if (!LogOnceKeys.Add(key ?? string.Empty)) return;
-            EmitCampaignInfo(line);
+            string reason = string.IsNullOrWhiteSpace(reasonOverride) ? (package?.Reason ?? "-") : reasonOverride;
+            CoordinatedOperationRuntime.EmitCoordinatedOps(
+                category,
+                severity,
+                allianceId,
+                action,
+                reason,
+                package != null ? package.Signature() : "-",
+                ev => ev
+                    .WithField("intent", "Probe")
+                    .WithField("decision", package != null ? package.Decision.ToString() : "-")
+                    .WithField("target", targetName ?? "-")
+                    .WithField("ratio", package != null ? package.Ratio : 0.0)
+                    .WithField("lead", package?.LeadDisplayUnitKey ?? "-")
+                    .WithField("support", package?.SupportStableUnitIds != null ? package.SupportStableUnitIds.Count : 0));
         }
 
         private static void EmitOperationalProbeWriteOnce(

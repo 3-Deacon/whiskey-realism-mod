@@ -1951,6 +1951,10 @@ static class Program
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs", "OperationalProbe");
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/ImportanceValuesPatch.cs", "Plan");
         AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/TransferOfUnitsPatch.cs", "Plan");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Patches/CoordinatedOffensiveOperationsPatch.cs", "CoordinatedOps");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs", "CoordinatedOps");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Strategic/CoordinatedOperationRuntime.cs", "CoordinatedOps");
+        AssertNoLegacyTask7Tag("src/WhiskeyRealism/Strategic/CIC.cs", "HistoricalOperation");
     }
 
     private static void AssertNoLegacyTask7Tag(string relativePath, string tag)
@@ -1960,7 +1964,10 @@ static class Program
         {
             "TelemetryRouter.LegacyInfo",
             "EmitCampaignInfo(",
-            "EmitCampaignInfoOnce("
+            "EmitCampaignInfoOnce(",
+            "LogInfo(",
+            "Plugin.Log.LogInfo(",
+            "Plugin.Log.LogWarning("
         };
 
         for (int markerIndex = 0; markerIndex < legacyMarkers.Length; markerIndex++)
@@ -1973,7 +1980,10 @@ static class Program
                 if (index < 0) break;
                 int length = Math.Min(400, source.Length - index);
                 string segment = source.Substring(index, length);
-                AssertFalse(segment.Contains("\"[" + tag + "]") || segment.Contains("$\"[" + tag + "]"),
+                AssertFalse(segment.Contains("\"[" + tag + "]") ||
+                    segment.Contains("$\"[" + tag + "]") ||
+                    segment.Contains("\"[" + tag + ":") ||
+                    segment.Contains("$\"[" + tag + ":"),
                     relativePath + " legacy " + tag + " row");
                 index += marker.Length;
             }

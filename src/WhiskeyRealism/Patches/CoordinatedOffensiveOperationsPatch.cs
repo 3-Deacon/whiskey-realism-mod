@@ -63,7 +63,16 @@ namespace WhiskeyRealism.Patches
             if (!_wiredLogged)
             {
                 _wiredLogged = true;
-                TelemetryRouter.LegacyInfo("[CoordinatedOps] observer=offensive patch=38", TelemetryLayer.Campaign);
+                CoordinatedOperationRuntime.EmitCoordinatedOps(
+                    TelemetryCategory.State,
+                    TelemetrySeverity.Info,
+                    -1,
+                    "observer",
+                    "offensive-patch",
+                    "patch=38",
+                    ev => ev
+                        .WithField("observer", "offensive")
+                        .WithField("patch", 38));
             }
 
             IList ownUnits = null;
@@ -110,26 +119,38 @@ namespace WhiskeyRealism.Patches
                 if (committed)
                 {
                     SetBool(faction, "recruitingzonesupdated", false);
-                    TelemetryRouter.LegacyInfo(
-                        $"[CoordinatedOps] alliance={allianceId} intent=VanillaOffensive decision={decision.Output.Decision} " +
-                        $"target={decision.TargetName} ratio={decision.Output.Ratio:0.00} " +
-                        $"lead={decision.Output.LeadDisplayUnitKey} support={decision.Output.SupportStableUnitIds.Count} reason={decision.Output.Reason}",
-                        TelemetryLayer.Campaign);
+                    EmitCoordinatedOffensivePackage(
+                        allianceId,
+                        "commit-package",
+                        TelemetryCategory.Write,
+                        TelemetrySeverity.Info,
+                        decision,
+                        null);
                 }
                 else
                 {
-                    Plugin.Log.LogWarning(
-                        $"[CoordinatedOps] alliance={allianceId} intent=VanillaOffensive decision={decision.Output.Decision} " +
-                        $"action=package-no-commit target={decision.TargetName} " +
-                        $"lead={decision.Output.LeadDisplayUnitKey} support={decision.Output.SupportStableUnitIds.Count} reason={decision.Output.Reason} package={decision.PackageSignature}");
+                    EmitCoordinatedOffensivePackage(
+                        allianceId,
+                        "package-no-commit",
+                        TelemetryCategory.Gate,
+                        TelemetrySeverity.Warning,
+                        decision,
+                        "commit-failed");
                 }
 
                 ownUnits.Clear();
             }
             catch (Exception ex)
             {
+                CoordinatedOperationRuntime.EmitCoordinatedOps(
+                    TelemetryCategory.Failure,
+                    TelemetrySeverity.Warning,
+                    -1,
+                    "prefix-failed",
+                    ex.Message,
+                    "aifaction=" + _aifaction);
                 OnceLog.Warning("coordinated-ops:offensive:prefix",
-                    "[CoordinatedOps] offensive Prefix failed: " + ex.Message);
+                    "Patch CoordinatedOps offensive Prefix failed: " + ex.Message);
                 if (snapshotRegistered && _snapshots.TryGetValue(_aifaction, out var snapshot))
                 {
                     try
@@ -143,9 +164,16 @@ namespace WhiskeyRealism.Patches
                 }
                 else
                 {
+                    CoordinatedOperationRuntime.EmitCoordinatedOps(
+                        TelemetryCategory.Failure,
+                        TelemetrySeverity.Warning,
+                        -1,
+                        "prefix-failed-before-snapshot",
+                        "candidate-list-unchanged",
+                        "aifaction=" + _aifaction);
                     OnceLog.Warning(
                         "coord-offensive:no-snapshot:" + _aifaction,
-                        "[CoordinatedOps] prefix failed before snapshot; vanilla candidate list left unchanged");
+                        "Patch CoordinatedOps prefix failed before snapshot; vanilla candidate list left unchanged");
                 }
             }
         }
@@ -177,14 +205,30 @@ namespace WhiskeyRealism.Patches
                 snapshot.Watch?.Stop();
                 if (snapshot.Watch != null && snapshot.Watch.ElapsedMilliseconds > 5L)
                 {
-                    TelemetryRouter.LegacyInfo(
-                        $"[CoordinatedOps:Perf] offensiveFilterMs={snapshot.Watch.ElapsedMilliseconds} sig={snapshot.Signature}");
+                    CoordinatedOperationRuntime.EmitCoordinatedOps(
+                        TelemetryCategory.Performance,
+                        TelemetrySeverity.Info,
+                        -1,
+                        "offensive-filter",
+                        "slow-filter",
+                        snapshot.Signature,
+                        ev => ev
+                            .WithDurationMs(snapshot.Watch.ElapsedMilliseconds)
+                            .WithField("offensiveFilterMs", (int)snapshot.Watch.ElapsedMilliseconds)
+                            .WithField("signature", snapshot.Signature ?? "-"));
                 }
             }
             catch (Exception ex)
             {
+                CoordinatedOperationRuntime.EmitCoordinatedOps(
+                    TelemetryCategory.Failure,
+                    TelemetrySeverity.Warning,
+                    -1,
+                    "restore-failed",
+                    ex.Message,
+                    "aifaction=" + aifactionIndex + "|source=" + source);
                 OnceLog.Warning("coordinated-ops:offensive:restore:" + source,
-                    "[CoordinatedOps] offensive restore failed: " + ex.Message);
+                    "Patch CoordinatedOps offensive restore failed: " + ex.Message);
             }
             finally
             {
@@ -214,6 +258,34 @@ namespace WhiskeyRealism.Patches
                 formationSig + "|" +
                 formationDataSig + "|" +
                 WlChainSignature();
+        }
+
+        private static void EmitCoordinatedOffensivePackage(
+            int allianceId,
+            string action,
+            TelemetryCategory category,
+            TelemetrySeverity severity,
+            PackageFilterDecision decision,
+            string reasonOverride)
+        {
+            string reason = string.IsNullOrWhiteSpace(reasonOverride)
+                ? (decision?.Output?.Reason ?? "-")
+                : reasonOverride;
+            string packageSignature = decision?.PackageSignature ?? decision?.Output?.Signature() ?? "-";
+            CoordinatedOperationRuntime.EmitCoordinatedOps(
+                category,
+                severity,
+                allianceId,
+                action,
+                reason,
+                packageSignature,
+                ev => ev
+                    .WithField("intent", "VanillaOffensive")
+                    .WithField("decision", decision?.Output != null ? decision.Output.Decision.ToString() : "-")
+                    .WithField("target", decision?.TargetName ?? "-")
+                    .WithField("ratio", decision?.Output != null ? decision.Output.Ratio : 0.0)
+                    .WithField("lead", decision?.Output?.LeadDisplayUnitKey ?? "-")
+                    .WithField("support", decision?.Output?.SupportStableUnitIds != null ? decision.Output.SupportStableUnitIds.Count : 0));
         }
 
         private static PackageFilterDecision BuildAllowedSet(
@@ -395,8 +467,15 @@ namespace WhiskeyRealism.Patches
             }
             catch (Exception ex)
             {
+                CoordinatedOperationRuntime.EmitCoordinatedOps(
+                    TelemetryCategory.Failure,
+                    TelemetrySeverity.Warning,
+                    -1,
+                    "target-resolve-failed",
+                    ex.Message,
+                    "aifaction=" + aifactionIndex);
                 OnceLog.Warning("coordinated-ops:offensive:target",
-                    "[CoordinatedOps] vanilla target resolve failed: " + ex.Message);
+                    "Patch CoordinatedOps vanilla target resolve failed: " + ex.Message);
                 return null;
             }
         }
