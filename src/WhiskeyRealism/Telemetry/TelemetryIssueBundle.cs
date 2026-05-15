@@ -31,7 +31,7 @@ namespace WhiskeyRealism.Telemetry
             RegexOptions.CultureInvariant);
 
         private static readonly Regex SecretAssignment = new Regex(
-            @"(?i)\b(token|secret)\s*=\s*[^&\s;,""']+",
+            @"(?i)\b(token|secret|api_key)\s*=\s*(?:""[^""]*""|'[^']*'|[^&\s;,""']+)",
             RegexOptions.CultureInvariant);
 
         internal static string Redact(string value)

@@ -35,6 +35,8 @@ static class Program
             ("telemetry budget applies staged category cuts", TelemetryBudgetAppliesStagedCategoryCuts),
             ("telemetry queue evicts decision before gate write", TelemetryQueueEvictsDecisionBeforeGateWrite),
             ("telemetry issue bundle redacts spaced windows usernames", TelemetryIssueBundleRedactsSpacedWindowsUsernames),
+            ("telemetry queue drops protected incoming when protected full", TelemetryQueueDropsProtectedIncomingWhenProtectedFull),
+            ("telemetry issue bundle redacts quoted secrets", TelemetryIssueBundleRedactsQuotedSecrets),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
             ("noncritical understrength sector is economy of force", NoncriticalUnderstrengthSectorEconomyOfForce),
             ("hold source blocks transfer", HoldSourceBlocksTransfer),
@@ -1152,6 +1154,44 @@ static class Program
         string redacted = TelemetryIssueBundle.Redact(@"C:\Users\Kyle Davis\AppData\Roaming\test");
         AssertContains(redacted, @"C:\Users\<redacted>\AppData", "spaced user path redacted");
         AssertFalse(redacted.Contains("Kyle Davis"), "spaced username removed");
+    }
+
+    private static void TelemetryQueueDropsProtectedIncomingWhenProtectedFull()
+    {
+        var queue = new TelemetryQueue(capacity: 2);
+        AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-a")), "initial health accepted");
+        AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-a")), "initial failure accepted");
+        AssertFalse(queue.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-b")), "protected incoming dropped when only protected rows exist");
+
+        var drained = queue.Drain(10);
+        AssertEqual(2, drained.Count, "queue count");
+        AssertTrue(drained.Exists(e => e.EventName == "health-a"), "existing health retained");
+        AssertTrue(drained.Exists(e => e.EventName == "failure-a"), "existing failure retained");
+        AssertFalse(drained.Exists(e => e.EventName == "health-b"), "incoming health dropped");
+        AssertTrue(queue.DroppedCount > 0, "dropped counted");
+        AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.Health), "incoming health drop counted");
+
+        var secondQueue = new TelemetryQueue(capacity: 2);
+        secondQueue.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-c"));
+        secondQueue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-c"));
+        AssertFalse(secondQueue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-d")), "protected failure incoming dropped when only protected rows exist");
+
+        var secondDrained = secondQueue.Drain(10);
+        AssertTrue(secondDrained.Exists(e => e.EventName == "health-c"), "second existing health retained");
+        AssertTrue(secondDrained.Exists(e => e.EventName == "failure-c"), "second existing failure retained");
+        AssertFalse(secondDrained.Exists(e => e.EventName == "failure-d"), "incoming failure dropped");
+        AssertEqual(1L, secondQueue.DroppedCountFor(TelemetryCategory.Failure), "incoming failure drop counted");
+    }
+
+    private static void TelemetryIssueBundleRedactsQuotedSecrets()
+    {
+        string redacted = TelemetryIssueBundle.Redact("token=\"secret\" secret = 'value with spaces' api_key=\"abc\"");
+        AssertFalse(redacted.Contains("secret\""), "quoted token value removed");
+        AssertFalse(redacted.Contains("value with spaces"), "quoted secret value removed");
+        AssertFalse(redacted.Contains("\"abc\""), "api key value removed");
+        AssertContains(redacted, "token=<redacted>", "token redacted");
+        AssertContains(redacted, "secret=<redacted>", "secret redacted");
+        AssertContains(redacted, "api_key=<redacted>", "api key redacted");
     }
 
     private static FrontSectorLedger BuildLedger()

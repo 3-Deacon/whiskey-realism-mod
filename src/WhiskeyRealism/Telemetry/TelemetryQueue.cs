@@ -83,6 +83,9 @@ namespace WhiskeyRealism.Telemetry
             int priority = int.MinValue;
             for (int i = 0; i < _events.Count; i++)
             {
+                if (IsProtected(_events[i].Category))
+                    continue;
+
                 int candidate = Priority(_events[i].Category);
                 if (candidate >= priority)
                 {
@@ -122,6 +125,11 @@ namespace WhiskeyRealism.Telemetry
                 default:
                     return 7;
             }
+        }
+
+        private static bool IsProtected(TelemetryCategory category)
+        {
+            return category == TelemetryCategory.Health || category == TelemetryCategory.Failure;
         }
     }
 }
