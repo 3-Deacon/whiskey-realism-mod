@@ -64,6 +64,9 @@ static class Program
             ("telemetry issue bundle manifest scopes files to active session", TelemetryIssueBundleManifestScopesFilesToActiveSession),
             ("telemetry issue bundle scopes equivalent windows and wsl paths", TelemetryIssueBundleScopesEquivalentWindowsAndWslPaths),
             ("telemetry profile off does not allocate session", TelemetryProfileOffDoesNotAllocateSession),
+            ("telemetry runtime full tuning writes sidecars and drains shutdown", TelemetryRuntimeFullTuningWritesSidecarsAndDrainsShutdown),
+            ("telemetry runtime budget drops oversized detail rows", TelemetryRuntimeBudgetDropsOversizedDetailRows),
+            ("telemetry runtime writes scoped issue bundle on shutdown", TelemetryRuntimeWritesScopedIssueBundleOnShutdown),
             ("telemetry profile parses unknown as off", TelemetryProfileParsesUnknownAsOff),
             ("telemetry behavior gates are independent from profile", TelemetryBehaviorGatesAreIndependentFromProfile),
             ("critical understrength sector holds", CriticalUnderstrengthSectorHolds),
@@ -1113,6 +1116,145 @@ static class Program
             AssertFalse(Directory.Exists(TelemetrySession.TuningLogRoot(gameRoot)), "off profile should not create tuning log root");
             runtime.Shutdown("test-off");
             AssertFalse(Directory.Exists(TelemetrySession.TuningLogRoot(gameRoot)), "off shutdown should not create tuning log root");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryRuntimeFullTuningWritesSidecarsAndDrainsShutdown()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            AssertTrue(runtime.IsRunning, "full tuning runtime starts writer");
+
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalDecision", TelemetrySeverity.Info).WithDecision("advance", "test", "sig-a")), "tactical event accepted");
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Campaign, TelemetryCategory.State, "CampaignState", TelemetrySeverity.Info).WithField("campaign", "ok")), "campaign event accepted");
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.System, TelemetryCategory.Performance, "PerformanceWarning", TelemetrySeverity.Warning).WithDurationMs(12.5)), "performance event accepted");
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.System, TelemetryCategory.Failure, "FailureWarning", TelemetrySeverity.Warning).WithField("reason", "test")), "failure event accepted");
+
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            runtime.Shutdown("test-full");
+
+            AssertFalse(runtime.IsRunning, "runtime stopped after shutdown");
+            AssertEqual(0, runtime.UnflushedCount, "shutdown drains queue");
+            AssertTrue(Directory.Exists(sessionDirectory), "session directory exists");
+            AssertTrue(File.Exists(Path.Combine(sessionDirectory, "manifest.json")), "manifest exists");
+            AssertTrue(File.Exists(Path.Combine(sessionDirectory, "tactical.jsonl")), "tactical sidecar exists");
+            AssertTrue(File.Exists(Path.Combine(sessionDirectory, "campaign.jsonl")), "campaign sidecar exists");
+            AssertTrue(File.Exists(Path.Combine(sessionDirectory, "performance.jsonl")), "performance sidecar exists");
+            AssertTrue(File.Exists(Path.Combine(sessionDirectory, "failures.jsonl")), "failures sidecar exists");
+
+            JObject manifest = JObject.Parse(File.ReadAllText(Path.Combine(sessionDirectory, "manifest.json")));
+            AssertEqual(runtime.SessionId, (string)manifest["sessionId"], "manifest session id");
+            AssertEqual("FullTuning", (string)manifest["profile"], "manifest profile");
+            AssertTrue(manifest["endUtc"].Type != JTokenType.Null, "manifest records shutdown end");
+            AssertTrue(JsonArrayContainsSubstring((JArray)manifest["outputFiles"], "tactical.jsonl"), "manifest includes tactical output");
+            AssertTrue(JsonArrayContainsSubstring((JArray)manifest["outputFiles"], "campaign.jsonl"), "manifest includes campaign output");
+            AssertTrue(JsonArrayContainsSubstring((JArray)manifest["outputFiles"], "performance.jsonl"), "manifest includes performance output");
+            AssertTrue(JsonArrayContainsSubstring((JArray)manifest["outputFiles"], "failures.jsonl"), "manifest includes failures output");
+            AssertTrue(manifest["droppedCounters"]["queueDropped"] != null, "manifest includes queue drop state");
+            AssertTrue(manifest["droppedCounters"]["sinkFailures"] != null, "manifest includes sink failure state");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryRuntimeBudgetDropsOversizedDetailRows()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 1,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            string huge = new string('x', 1024 * 1024);
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Tactical, TelemetryCategory.Decision, "OversizedDecision", TelemetrySeverity.Info).WithField("payload", huge)), "oversized row queues before writer budget cut");
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.System, TelemetryCategory.Failure, "ProtectedFailure", TelemetrySeverity.Warning).WithField("reason", "after-drop")), "protected row queues after drop");
+
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            runtime.Shutdown("test-budget");
+
+            JObject manifest = JObject.Parse(File.ReadAllText(Path.Combine(sessionDirectory, "manifest.json")));
+            AssertTrue((long)manifest["droppedCounters"]["Decision"] >= 1L, "manifest records budget decision drop");
+            AssertTrue(File.Exists(Path.Combine(sessionDirectory, "failures.jsonl")), "protected failure sidecar survives tiny cap");
+            AssertEqual(0, runtime.UnflushedCount, "budget shutdown drains queue");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryRuntimeWritesScopedIssueBundleOnShutdown()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: true,
+                warningCallback: null);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            File.WriteAllText(Path.Combine(sessionDirectory, "summary.md"), "shutdown summary");
+            File.WriteAllText(Path.Combine(sessionDirectory, "not-telemetry.txt"), "token=secret");
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Tactical, TelemetryCategory.Decision, "BundleDecision", TelemetrySeverity.Info).WithDecision("hold", "bundle", "sig-bundle")), "bundle event accepted");
+
+            runtime.Shutdown("test-bundle");
+
+            string bundlePath = Path.Combine(sessionDirectory, "issue-bundle.json");
+            AssertTrue(File.Exists(bundlePath), "issue bundle written on shutdown");
+            string bundleJson = File.ReadAllText(bundlePath);
+            JObject bundle = JObject.Parse(bundleJson);
+            AssertEqual(runtime.SessionId, (string)bundle["sessionId"], "bundle session id");
+            JArray files = (JArray)bundle["files"];
+            AssertTrue(files.Count >= 3, "bundle includes known telemetry files");
+            AssertTrue(JsonArrayContainsSubstring(files, "manifest.json"), "bundle includes manifest");
+            AssertTrue(JsonArrayContainsSubstring(files, "tactical.jsonl"), "bundle includes tactical output");
+            AssertTrue(JsonArrayContainsSubstring(files, "summary.md"), "bundle includes standard summary output");
+            AssertFalse(JsonArrayContainsSubstring(files, "not-telemetry.txt"), "bundle excludes non-telemetry file");
+            AssertFalse(bundleJson.Contains("token=secret"), "bundle does not include unrelated secret content");
+            for (int i = 0; i < files.Count; i++)
+                AssertContains((string)files[i], runtime.SessionId, "bundle file scoped to session");
         }
         finally
         {
@@ -16096,6 +16238,21 @@ static class Program
         {
             return JObject.Load(jsonReader);
         }
+    }
+
+    private static bool JsonArrayContainsSubstring(JArray array, string expected)
+    {
+        if (array == null)
+            return false;
+
+        for (int i = 0; i < array.Count; i++)
+        {
+            string value = (string)array[i];
+            if (value != null && value.Contains(expected))
+                return true;
+        }
+
+        return false;
     }
 
     private static string CreateTempDirectory()

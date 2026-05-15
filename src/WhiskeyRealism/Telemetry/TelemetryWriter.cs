@@ -85,6 +85,11 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
+        internal void RecordRuntimeSinkFailure(string reason, Exception ex)
+        {
+            RecordSinkFailure(reason, ex);
+        }
+
         internal static string FileNameFor(TelemetryEvent ev, int rotationIndex)
         {
             string stem = StemFor(ev);

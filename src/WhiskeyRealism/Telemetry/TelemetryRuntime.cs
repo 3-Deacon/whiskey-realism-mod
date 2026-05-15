@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using Newtonsoft.Json.Linq;
 
 namespace WhiskeyRealism.Telemetry
 {
@@ -202,6 +203,17 @@ namespace WhiskeyRealism.Telemetry
             {
                 Warn(_config, "Telemetry shutdown manifest failed closed: " + ex.GetType().Name);
             }
+
+            try
+            {
+                WriteIssueBundleOnShutdown();
+            }
+            catch (Exception ex)
+            {
+                if (_writer != null)
+                    _writer.RecordRuntimeSinkFailure("issue-bundle-write", ex);
+                Warn(_config, "Telemetry issue bundle failed closed: " + ex.GetType().Name);
+            }
         }
 
         private void WriteManifest()
@@ -248,6 +260,79 @@ namespace WhiskeyRealism.Telemetry
 
             string path = Path.Combine(_sessionDirectory, "manifest.json");
             File.WriteAllText(path, manifest.ToJson());
+        }
+
+        private void WriteIssueBundleOnShutdown()
+        {
+            if (_config == null || !_config.CreateIssueBundleOnShutdown)
+                return;
+            if (string.IsNullOrWhiteSpace(_sessionDirectory) || _sessionDirectory == "-")
+                return;
+
+            var files = new List<string>();
+            AddIfExists(files, Path.Combine(_sessionDirectory, "manifest.json"));
+            AddManifestOutputFiles(files);
+            if (_writer != null)
+            {
+                foreach (string file in _writer.OutputFilesSnapshot())
+                    AddIfExists(files, Path.Combine(_sessionDirectory, file));
+            }
+
+            AddStandardShutdownOutputs(files);
+
+            string note = "Telemetry issue bundle manifest generated on shutdown for session " + SessionId + ".";
+            string json = TelemetryIssueBundle.CreateManifest(SessionId, _sessionDirectory, files, note).ToJson();
+            File.WriteAllText(Path.Combine(_sessionDirectory, "issue-bundle.json"), json);
+        }
+
+        private void AddManifestOutputFiles(List<string> files)
+        {
+            try
+            {
+                string manifestPath = Path.Combine(_sessionDirectory, "manifest.json");
+                if (!File.Exists(manifestPath))
+                    return;
+
+                JObject manifest = JObject.Parse(File.ReadAllText(manifestPath));
+                var outputs = manifest["outputFiles"] as JArray;
+                if (outputs == null)
+                    return;
+
+                for (int i = 0; i < outputs.Count; i++)
+                {
+                    string fileName = (string)outputs[i];
+                    if (string.IsNullOrWhiteSpace(fileName) || fileName.IndexOfAny(new[] { '/', '\\' }) >= 0)
+                        continue;
+                    AddIfExists(files, Path.Combine(_sessionDirectory, fileName));
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void AddStandardShutdownOutputs(List<string> files)
+        {
+            AddIfExists(files, Path.Combine(_sessionDirectory, "summary.md"));
+            AddIfExists(files, Path.Combine(_sessionDirectory, "health.jsonl"));
+            AddIfExists(files, Path.Combine(_sessionDirectory, "failures.jsonl"));
+            AddIfExists(files, Path.Combine(_sessionDirectory, "performance.jsonl"));
+            AddIfExists(files, Path.Combine(_sessionDirectory, "tactical.jsonl"));
+            AddIfExists(files, Path.Combine(_sessionDirectory, "campaign.jsonl"));
+        }
+
+        private static void AddIfExists(List<string> files, string path)
+        {
+            if (files == null || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                return;
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                if (string.Equals(files[i], path, StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+
+            files.Add(path);
         }
 
         private static int SafeProcessId()

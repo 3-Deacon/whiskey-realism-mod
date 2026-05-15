@@ -195,19 +195,25 @@ namespace WhiskeyRealism
                 "Off, TacticalTuning, CampaignTuning, or FullTuning. Controls structured tuning sidecars only; it does not enable or disable tactical/campaign behavior gates.");
             TelemetryMaxTuningLogMb = Config.Bind(
                 "Telemetry",
-                "Max Tuning Log Mb",
+                "Max Tuning Log MB",
                 250,
-                "Total per-session structured telemetry cap in megabytes.");
+                new ConfigDescription(
+                    "Total per-session structured telemetry cap in megabytes.",
+                    new AcceptableValueRange<int>(25, 2000)));
             TelemetryFileRotateMb = Config.Bind(
                 "Telemetry",
-                "File Rotate Mb",
+                "Tuning Log File Rotate MB",
                 25,
-                "Approximate JSONL file rotation size in megabytes.");
+                new ConfigDescription(
+                    "Approximate JSONL file rotation size in megabytes.",
+                    new AcceptableValueRange<int>(1, 250)));
             TelemetryRetainedSessions = Config.Bind(
                 "Telemetry",
-                "Retained Sessions",
+                "Tuning Log Retained Sessions",
                 2,
-                "Number of newest telemetry sessions to retain under BepInEx/WhiskeyRealism/tuning-logs.");
+                new ConfigDescription(
+                    "Number of newest telemetry sessions to retain under BepInEx/WhiskeyRealism/tuning-logs.",
+                    new AcceptableValueRange<int>(1, 10)));
             TelemetryEmitHumanSummary = Config.Bind(
                 "Telemetry",
                 "Emit Human Summary",
@@ -215,7 +221,7 @@ namespace WhiskeyRealism
                 "Reserved for human-readable summary output at shutdown.");
             TelemetryPerformanceWarnings = Config.Bind(
                 "Telemetry",
-                "Performance Warnings",
+                "Telemetry Performance Warnings",
                 true,
                 "Emit bounded telemetry performance warning rows when the writer detects pressure.");
             TelemetryCreateIssueBundleOnShutdown = Config.Bind(
