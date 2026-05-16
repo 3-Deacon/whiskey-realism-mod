@@ -41,7 +41,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Task 6 heavy-path gate + battle-level dedup caches (per AGENTS.md runtime safety: try/catch guarded, degrade, never throw).
         // Battle-level dedup keyed by BattleUnits owner (GetInstanceID) per revised plan (not per-AIBattle lastsidestatupdate).
         // Per-side (0/1) state for last heavy time, signature, published snapshot, pending flag (pending tracked by caller per gate contract).
-        private static FieldInfo _lastSideStatUpdateFieldCache;
+        private static FieldInfo _battleUnitsLastSideStatUpdateFieldCache;
         private static readonly Dictionary<int, float> _lastProcessedSideStatUpdateByBunitsId = new Dictionary<int, float>();
         private static readonly float[] _lastHeavyReviewHours = { 0f, 0f };
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
@@ -139,11 +139,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     // Task 6 battle-level dedup guard: prevent duplicate Tick work for the two sides
                     // in the same vanilla CalculateSideStatsAndUpdateAITasks cycle.
-                    // Uses BattleUnits owner (GetInstanceID) + read of lastsidestatupdate (via reflection) to
+                    // Uses BattleUnits owner (GetInstanceID) + read of lastsidestatupdate *from the BattleUnits instance* (via reflection on typeof(BattleUnits)) to
                     // detect the second per-side CheckGlobal call within one side-stat update window.
                     // Mark processed ONLY after both DriveTacticalCommanderSide calls complete (per plan contract).
                     int battleKey = GetBattleKeyFromBunits(battle);
-                    float vanillaLastSideStat = SafeGetLastSideStatUpdate(battle);
+                    float vanillaLastSideStat = SafeGetLastSideStatUpdateFromBattleUnitsOwner(battle);
                     float lastProcessed;
                     if (_lastProcessedSideStatUpdateByBunitsId.TryGetValue(battleKey, out lastProcessed)
                         && Math.Abs(vanillaLastSideStat - lastProcessed) < 0.0001f)
@@ -480,15 +480,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static float SafeGetLastSideStatUpdate(AIBattle battle)
+        private static float SafeGetLastSideStatUpdateFromBattleUnitsOwner(AIBattle battle)
         {
             try
             {
                 if (battle == null) return 0f;
-                if (_lastSideStatUpdateFieldCache == null)
-                    _lastSideStatUpdateFieldCache = AccessTools.Field(typeof(AIBattle), "lastsidestatupdate");
-                if (_lastSideStatUpdateFieldCache == null) return 0f;
-                object val = _lastSideStatUpdateFieldCache.GetValue(battle);
+                var bunits = ResolveBattleUnits(battle);
+                if (bunits == null) return 0f;
+                if (_battleUnitsLastSideStatUpdateFieldCache == null)
+                    _battleUnitsLastSideStatUpdateFieldCache = AccessTools.Field(typeof(BattleUnits), "lastsidestatupdate");
+                if (_battleUnitsLastSideStatUpdateFieldCache == null) return 0f;
+                object val = _battleUnitsLastSideStatUpdateFieldCache.GetValue(bunits);
                 return val is float f ? f : 0f;
             }
             catch
