@@ -7,8 +7,8 @@ Living reference for the tactical operations-ledger command system, active comma
 - **Implementation state:** full-spectrum tactical command doctrine is implemented and intended for `main`; release/default config is `Tactical Commander Mode = Active`.
 - **Patch ordinal:** #61 `BattleCommandPostureExecutorPatch`; #62 `PlayerSubordinateOrderPatch` is the default-off W&L player-subordinate order bridge.
 - **Config contract:** `Active` is the release/default mode; `MonitorOnly` is for smoke and diagnostics; rollback is `Off`.
-- **Build/deploy proof:** console harness exits 0 across `986` registered tests; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `ec00120fb8f8e08d729ec6f99418910d76356edd8e5b642f50e903d9d468c526` (1121792 bytes).
-- **Runtime smoke:** pending. The deployed plugin timestamp is `2026-05-15 08:16:53 -0500`; current `LogOutput.log` mtime is `2026-05-15 07:54:28 -0500`, so only a fresh `LogOutput.log` after a GTCW restart can prove Active operations-ledger runtime behavior for this build.
+- **Build/deploy proof:** console harness exits 0 across `1075` registered tests; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75` (1245184 bytes).
+- **Runtime smoke:** pending. The deployed plugin timestamp is `2026-05-15 20:20:19 -0500`; current `LogOutput.log` mtime is `2026-05-15 07:54:28 -0500`, so only a fresh `LogOutput.log` after a GTCW restart can prove Active operations-ledger runtime behavior for this build.
 
 The system turns the tactical orchestrator's command tree into a per-side operations ledger. The ledger classifies the current battle operation, assigns command-node tasks, monitors whether assigned commands are validly idle or illegally stuck, and lets #61 issue bounded vanilla commands only when the mode is `Active`.
 
@@ -238,7 +238,7 @@ Pass criteria:
 
 If the active smoke fails, set `Tactical Commander Mode = Off` for rollback. If evidence is needed before a fix, set `MonitorOnly` to keep ledger telemetry while suppressing writes.
 
-Current Active smoke boundary: not passed. The deployed plugin timestamp is `2026-05-15 08:16:53 -0500`; current `LogOutput.log` mtime is `2026-05-15 07:54:28 -0500`, so only a fresh `LogOutput.log` after restarting GTCW can prove this build. Fresh operations-ledger and doctrine-consumer markers are still required, including `approach-intercept` / `objective-lane` on corridor defense, `scourge-slot-flank-guard` / `scourge-slot-depth` on wide or nested line assembly, the parent command/HQ retained as a reserve anchor in nested single-division battles, and no broad `doctrine=none` fallback for unknown command roles.
+Current Active smoke boundary: not passed. The deployed plugin timestamp is `2026-05-15 20:20:19 -0500`; current `LogOutput.log` mtime is `2026-05-15 07:54:28 -0500`, so only a fresh `LogOutput.log` after restarting GTCW can prove this build. Fresh operations-ledger and doctrine-consumer markers are still required, including `approach-intercept` / `objective-lane` on corridor defense, `scourge-slot-flank-guard` / `scourge-slot-depth` on wide or nested line assembly, the parent command/HQ retained as a reserve anchor in nested single-division battles, and no broad `doctrine=none` fallback for unknown command roles.
 
 ## Risks
 

@@ -7,7 +7,7 @@ Living reference for #62, Whiskey's W&L player-facing current-order doctrine for
 - **Implementation state:** merged to `main` and hash-deployed locally; runtime smoke is still pending.
 - **Patch ordinal:** #62 `PlayerSubordinateOrderPatch`.
 - **Default behavior:** diagnostics are on by default, writes are off by default.
-- **Verification:** console harness `986 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `ec00120fb8f8e08d729ec6f99418910d76356edd8e5b642f50e903d9d468c526` (1121792 bytes).
+- **Verification:** console harness `1075 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75` (1245184 bytes).
 - **Lifecycle:** the design spec and implementation plan remain active until fresh in-game smoke proves bounded diagnostics and focused write behavior. Do not archive them yet.
 
 The doctrine translates existing tactical-orchestrator intent into vanilla W&L current orders for the player when the player is a subordinate in the W&L chain. It does not replace vanilla movement, campaign movement, or the W&L order UI. It asks vanilla `AIBattle.CheckCurrentOrderUpdate(...)` to deliver an order only after Whiskey dedupe and safety gates predict the request is valid.

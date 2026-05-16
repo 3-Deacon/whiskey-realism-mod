@@ -84,7 +84,7 @@ Current deployed proof:
 
 - `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` passed.
 - `./build.sh` passed with 0 warnings / 0 errors.
-- The operational-probe implementation is included in current deployed `main` DLL `f2e7705b96c55ea371ca08a3a56d28ebf324bfc114618c184ccba375d17ee1f1` (1027072 bytes; 893 PASS).
+- The operational-probe implementation is included in current deployed `main` DLL `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75` (1245184 bytes; 1075 PASS).
 - Operational-probe runtime smoke remains pending after a game restart and a real probe opportunity.
 
 Runtime smoke markers:

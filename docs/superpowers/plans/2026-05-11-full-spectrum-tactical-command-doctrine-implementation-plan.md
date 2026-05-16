@@ -4,8 +4,8 @@
 
 > **Status as of 2026-05-14:** implementation is merged in the working tree,
 > built, deployed, and hash-verified in DLL
-> `f2e7705b96c55ea371ca08a3a56d28ebf324bfc114618c184ccba375d17ee1f1`
-> (1027072 bytes; 893 PASS). This plan remains active only for fresh Active
+> `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75`
+> (1245184 bytes; 1075 PASS). This plan remains active only for fresh Active
 > battle smoke and final archive closeout. Current runtime truth lives in
 > [`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md)
 > and [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md); do not

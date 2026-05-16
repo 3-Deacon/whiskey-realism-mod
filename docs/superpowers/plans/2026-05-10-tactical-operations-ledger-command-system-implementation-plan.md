@@ -4,8 +4,8 @@
 
 > **Status as of 2026-05-14:** Implementation is merged to `main`, built,
 > deployed, and hash-verified through the tactical completion DLL
-> `f2e7705b96c55ea371ca08a3a56d28ebf324bfc114618c184ccba375d17ee1f1`
-> (1027072 bytes; 893 PASS). The current operational source of truth is now
+> `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75`
+> (1245184 bytes; 1075 PASS). The current operational source of truth is now
 > [`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md);
 > this plan remains active only for Active smoke and final archive closeout. Do
 > not use unchecked historical task boxes below to infer missing code without

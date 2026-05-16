@@ -43,6 +43,6 @@ Patch catalog entry:
 
 ## Runtime Evidence
 
-The first implementation was build/deploy/hash verified as DLL `348d6aed04adeba2848cd24db32221ebcfcd34bde78d717c189e89caf0f60444` (456192 bytes). Current deployed `main` DLL is `f2e7705b96c55ea371ca08a3a56d28ebf324bfc114618c184ccba375d17ee1f1` (1027072 bytes; 893 PASS), which includes later historical-operation hardening plus tactical orchestrator, deployment, terrain/facing, operations-ledger, and default-off W&L player-subordinate bridge work.
+The first implementation was build/deploy/hash verified as DLL `348d6aed04adeba2848cd24db32221ebcfcd34bde78d717c189e89caf0f60444` (456192 bytes). Current deployed `main` DLL is `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75` (1245184 bytes; 1075 PASS), which includes later historical-operation hardening plus tactical orchestrator, deployment, terrain/facing, operations-ledger, and default-off W&L player-subordinate bridge work.
 
 Runtime `[CoordinatedOps]` smoke is still pending a fresh game launch and an actual AI offensive opportunity. Do not claim in-game coordinated package fire until the log shows it.

@@ -64,6 +64,6 @@ For a telemetry smoke run:
 
 ## Evidence Boundary
 
-Task 10 deploy/hash proof was recorded on 2026-05-15 for branch commit `c8db29a`: `dist/WhiskeyRealism.dll` and the deployed BepInEx plugin were both `1245184` bytes and matched SHA-256 `f1ace5cf26567cd018b35fb1bdd5987c3869232a49a209287717a6770db91866`.
+Task 10 deploy/hash proof was recorded on 2026-05-15 after `telemetry-framework-plan` was fast-forwarded into `main` at `feffbfc`: `dist/WhiskeyRealism.dll` and the deployed BepInEx plugin were both `1245184` bytes and matched SHA-256 `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75`.
 
-Runtime smoke is still pending. The current `LogOutput.log` timestamp (`2026-05-15 07:54:28.457939800 -0500`) predates the `19:39` deploy, no `tuning-logs` session existed in the read-only check, and new `[Telemetry]` config entries will not be proven until the freshly deployed plugin is launched.
+Runtime smoke is still pending. The current `LogOutput.log` timestamp (`2026-05-15 07:54:28.457939800 -0500`) predates the `20:20` deploy, no `tuning-logs` directory existed in the read-only check, and new `[Telemetry]` config entries will not be proven until the freshly deployed plugin is launched.

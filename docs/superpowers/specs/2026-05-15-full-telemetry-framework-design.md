@@ -286,7 +286,7 @@ Required stable fields:
 {
   "schema": "wr.telemetry.v1",
   "ts": "2026-05-15T13:22:01.123Z",
-  "sessionId": "20260515-081653-ec00120f",
+  "sessionId": "20260515-202019-cfdb9018",
   "profile": "TacticalTuning",
   "layer": "Tactical",
   "category": "Decision",

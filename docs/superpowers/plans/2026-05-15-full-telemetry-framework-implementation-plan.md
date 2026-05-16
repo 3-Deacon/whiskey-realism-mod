@@ -8,6 +8,8 @@
 
 **Tech Stack:** C# netstandard2.1, BepInEx 5.4.x, HarmonyX, Newtonsoft.Json already referenced from `refs/`, existing console harness under `tests/WhiskeyRealism.Tests`, no new packages.
 
+**Current status:** Tasks 1-10 are implemented. Branch `telemetry-framework-plan` was fast-forwarded into `main` at `feffbfc`; merged-main harness/build/deploy/hash proof is complete at DLL SHA-256 `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75` (1245184 bytes). Runtime smoke remains open and must not be claimed until a fresh GTCW launch proves the telemetry profiles and validator path.
+
 ---
 
 ## Source Anchors
@@ -26,7 +28,7 @@
 
 ## Handoff Checkpoint - 2026-05-15 After Task 6
 
-Resume from worktree branch `telemetry-framework-plan` at commit `e617d2eaac70fcd54a0702d1362b50499456ef2b` or later.
+Historical resume checkpoint: resume from worktree branch `telemetry-framework-plan` at commit `e617d2eaac70fcd54a0702d1362b50499456ef2b` or later. This checkpoint is superseded by the merged-main status above.
 
 Completed and reviewed:
 
@@ -1148,10 +1150,19 @@ Task 10 deploy/hash evidence from controller closeout on 2026-05-15:
 - `stat`: `dist/WhiskeyRealism.dll` was `2026-05-15 19:39:43.472409696 -0500`, `1245184` bytes; deployed plugin was `2026-05-15 19:39:59.237663600 -0500`, `1245184` bytes.
 - `sha256sum`: both local and deployed DLLs matched `f1ace5cf26567cd018b35fb1bdd5987c3869232a49a209287717a6770db91866`.
 
+Merged-main closeout evidence after the user requested merge/docs cleanup:
+
+- Branch `telemetry-framework-plan` was fast-forwarded into `main` at `feffbfc`.
+- Main-checkout full harness exited `0` with **1075 PASS**.
+- Main-checkout `./build.sh` exited `0` with `0 Warning(s)` and `0 Error(s)`.
+- The main rebuild had a different SHA from the earlier worktree-built deployed DLL, so `dist/WhiskeyRealism.dll` was redeployed from the main checkout.
+- `stat`: `dist/WhiskeyRealism.dll` was `2026-05-15 20:20:03.985742375 -0500`, `1245184` bytes; deployed plugin was `2026-05-15 20:20:19.255906800 -0500`, `1245184` bytes.
+- `sha256sum`: both local and deployed DLLs matched `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75`.
+
 Runtime smoke boundary:
 
-- Current `BepInEx/LogOutput.log` is stale for this deploy: `2026-05-15 07:54:28.457939800 -0500`, `133252053` bytes, which predates the `19:39` deployed DLL.
-- No `BepInEx/WhiskeyRealism/tuning-logs/<session-id>/` directory/session was present in the read-only check.
+- Current `BepInEx/LogOutput.log` is stale for this deploy: `2026-05-15 07:54:28.457939800 -0500`, `133252053` bytes, which predates the `20:20` deployed DLL.
+- No `BepInEx/WhiskeyRealism/tuning-logs/` directory/session was present in the read-only check.
 - Current config has a `[Telemetry]` section but only the old `Director Verbose Trace`; the new telemetry config entries will not be proven until the freshly deployed plugin is launched.
 - Therefore `Off`, `TacticalTuning`, `CampaignTuning`, `FullTuning`, telemetry validator on a real session, cap-transition smoke, and production-cap restore remain pending and require a fresh GTCW launch after deploy.
 
@@ -1228,12 +1239,18 @@ git diff --check
 
 Expected: no unresolved markers, no whitespace errors, only intentional changes staged/committed.
 
-Final repo-check evidence before closeout commit:
+Final repo-check evidence before branch closeout commit:
 
 - `git status --short --branch` showed branch `telemetry-framework-plan` with only closeout doc edits pending.
 - `git log --oneline -10` showed Task 6-9 telemetry commits through `c8db29a`.
 - Unresolved-marker scan returned no matches.
 - `git diff --check` exited `0`.
+
+Final repo-check evidence after merge-doc update:
+
+- `main` was fast-forwarded to `feffbfc`.
+- `git diff --check` exited `0`.
+- Runtime smoke remains intentionally open and is not claimed by this merge/docs pass.
 
 ## Rollback And Scope Boundary
 

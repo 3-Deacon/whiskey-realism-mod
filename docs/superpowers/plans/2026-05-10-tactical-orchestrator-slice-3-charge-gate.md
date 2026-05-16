@@ -1,6 +1,6 @@
 # Tactical Orchestrator Slice 3 Charge Gate Implementation Plan
 
-Status: implemented and merged to `main`. Slice 3 was hash-deployed in DLL `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8` (841216 bytes; 717 PASS), now superseded by the current operations-ledger `main` DLL `f2e7705b96c55ea371ca08a3a56d28ebf324bfc114618c184ccba375d17ee1f1` (1027072 bytes; 893 PASS). Focused gate-OFF/gate-ON in-game smoke is still pending. Living status now lives in [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md).
+Status: implemented and merged to `main`. Slice 3 was hash-deployed in DLL `b00e03bd7e635e981380459e09a0d52a19d635c22c49bd340b403dacfbdf4cf8` (841216 bytes; 717 PASS), now superseded by the current telemetry-merged `main` DLL `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75` (1245184 bytes; 1075 PASS). Focused gate-OFF/gate-ON in-game smoke is still pending. Living status now lives in [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

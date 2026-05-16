@@ -4,8 +4,8 @@
 
 > **Status as of 2026-05-14:** implementation is merged to `main` and now
 > superseded by the current tactical completion DLL
-> `f2e7705b96c55ea371ca08a3a56d28ebf324bfc114618c184ccba375d17ee1f1`
-> (1027072 bytes; 893 PASS). Slice 1 remains here only for focused reserve-gate
+> `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75`
+> (1245184 bytes; 1075 PASS). Slice 1 remains here only for focused reserve-gate
 > smoke traceability and final archive closeout. Current runtime truth lives in
 > [`docs/tactical-orchestrator.md`](../../tactical-orchestrator.md) and
 > [`docs/tactical-operations-ledger.md`](../../tactical-operations-ledger.md).
