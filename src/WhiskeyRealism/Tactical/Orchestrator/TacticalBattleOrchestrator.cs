@@ -11,6 +11,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// O0 shipped with empty Echelons; O1 attaches a single ArmyOrchestrator via AttachArmy.
     /// Future phases attach Corps / Division / Brigade echelons as children of Army.
     /// </summary>
+    // ============================================================
+    // URGENT RECOVERY SAFETY BOUNDARY (Task 8)
+    // ============================================================
+    // TickOperationsLedger accepts optional snapshot (Task 7) and uses HasData guard to prefer snapshot
+    // Objectives + CommandTree for ledger update, CommandNodeOperationsRuntime.Build, NestedDivisionPlayPlanner,
+    // and downstream doctrine assignment.
+    //
+    // When snapshot default/Empty or !HasData: degrades to passed-in objectives + Army.CurrentCommandTree
+    // (vanilla-only or prior behavior). This is the safe fallback for urgent recovery when heavy path
+    // has not run or snapshot is stale.
+    //
+    // The ledger state (CurrentObjectives, CurrentOperation, doctrine) produced here is then consumed by
+    // #61 urgent recovery (BattleCommandPostureExecutorPatch.TryResolveLedgerState + BuildRuntimeDivisionPlayOrders
+    // + doctrine order resolution) together with live vanilla per-group fields (pathinterrupted etc.).
+    // Urgent code never forces a heavy build to get fresh ledger data.
+    //
+    // Authoritative: plan Task 7/8.
+    // ============================================================
     public sealed class TacticalBattleOrchestrator
     {
         public TacticalBattleOrchestrator(int allianceId, TacticalCommanderRoster roster)

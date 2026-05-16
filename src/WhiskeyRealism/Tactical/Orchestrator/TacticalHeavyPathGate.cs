@@ -4,9 +4,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
     /// Pure, stateless heavy-path execution gate (Task 3).
-    /// See full docs and semantics in the implementation plan.
-    /// This is the STUB version for initial TDD RED phase.
+    /// Decides Run vs Skip for side-wide heavy snapshot build using cheap signature + min/max battle-hour intervals.
+    /// First tick always Run; signature/pending changes respect cycle floor; max-interval forces refresh.
+    /// See implementation plan for full semantics.
     /// </summary>
+    // ============================================================
+    // URGENT RECOVERY SAFETY BOUNDARY (Task 8)
+    // ============================================================
+    // This gate (plus coordinator's cheap ExtractCurrentSignature + Decide) is the *sole* decider for when
+    // heavy TacticalBattleRuntimeSnapshot is built. Urgent recovery paths (#61 + local formation/fallback fixes)
+    // MUST NEVER call Build or force Run; they always operate on the *last published* snapshot (or Empty) + live vanilla.
+    //
+    // Gate callers in frequent path (DriveTickCycle, DriveDirectChildCycle, DriveOperationsLedger) do call
+    // ExtractCurrentSignature (cheap, no heavy) + Decide on *every* tick to check for pending/max, but this does
+    // not build heavy unless ShouldRun. Urgent #61 patch runs completely outside coordinator (vanilla AdjustGroupFormations
+    // postfix) and does not consult the gate at all.
+    //
+    // When Decide returns Skip (stable-under-max, throttled-pending), urgent recovery still has the prior snapshot
+    // for high-level doctrine/ledger + full live vanilla per-group reads (positions, pathinterrupted, groupsubordinatesmoving,
+    // local contacts, recent formation/order state, etc. — see snapshot file boundary doc for full list).
+    //
+    // The gate Input uses only TacticalBattleStateSignature (coarse, cheap) + battle hours + pending flag.
+    // No Regiment, no positions, no pathinterrupted per group, no local contacts — those belong exclusively to
+    // the urgent recovery live-vanilla reads.
+    //
+    // Authoritative: plan Task 8 + Task 3/6/7 wiring.
+    // ============================================================
     public static class TacticalHeavyPathGate
     {
         public enum Action

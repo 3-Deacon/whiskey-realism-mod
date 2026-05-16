@@ -25,6 +25,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// All methods are try/catch guarded — this code runs inside or adjacent to Harmony
     /// patches and must never throw.
     /// </summary>
+    // ============================================================
+    // URGENT RECOVERY SAFETY BOUNDARY (Task 8)
+    // ============================================================
+    // This runtime coordinator is the ONLY place that:
+    //   - Calls ExtractCurrentSignature (cheap, every frequent tick for gate input)
+    //   - Calls TacticalHeavyPathGate.Decide
+    //   - Calls TacticalBattleSnapshotBuilder.Build (expensive, ONLY on dec.ShouldRun)
+    //   - Publishes _lastPublishedSnapshots[side] (Empty or HasData)
+    //
+    // Urgent recovery (#61 patch + formation/local fallback) MUST NOT be here and does not call these.
+    // It consumes the published snapshot (when HasData) via orchestrator/ledger for doctrine/ledger state,
+    // then ALWAYS pairs it with fresh live vanilla reads for positions, pathinterrupted, groupsubordinatesmoving,
+    // local contacts, recent formation/order state (see full list in TacticalBattleRuntimeSnapshot.cs boundary doc).
+    //
+    // DriveTickCycle / DriveDirectChildCycle / DriveOperationsLedger all follow the same pattern:
+    //   if (!IsHeavyThrottlingEnabled()) { full build for compat }
+    //   else { sig = Extract...; dec = Decide(...); if (Run) Build+publish else reuse lastPublished (may be !HasData) }
+    //   then synthesize bundle/objectives from snap (degrade safe on Empty)
+    //
+    // All paths are try/catch guarded, degrade on error (per Tactical/AGENTS.md), use bounded OnceLog/Telemetry.
+    // Battle-level dedup prevents duplicate heavy work for the two sides in one vanilla CalculateSideStats cycle.
+    //
+    // When snapshot !HasData or throttled: urgent recovery still fully responsive via live vanilla fields.
+    // Authoritative: plan Tasks 6/7/8.
+    // ============================================================
     public static partial class TacticalBattleCoordinator
     {
         private const float MaxTickDeltaSeconds = 5f;

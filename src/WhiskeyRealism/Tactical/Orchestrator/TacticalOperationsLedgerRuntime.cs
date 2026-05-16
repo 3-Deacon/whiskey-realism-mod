@@ -7,6 +7,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 {
     internal sealed class TacticalOperationsLedgerRuntime
     {
+        // ============================================================
+        // URGENT RECOVERY SAFETY BOUNDARY (Task 8)
+        // ============================================================
+        // Update/Replace accept optional snapshot and apply HasData guard (Task 7) so that when coordinator
+        // provides a fresh gated snapshot, the ledger (and thus doctrine orders + command node states)
+        // consume the atomic snapshot data. When !HasData or default: degrade to the passed objectives array
+        // (which may be empty in Off mode or stale cases).
+        //
+        // This ledger state is read by urgent recovery (#61 patch) for CommandNodeOperationalState + doctrine
+        // orders. The patch pairs it with live vanilla reads (pathinterrupted, groupsubordinatesmoving, local
+        // contacts, formation state, positions, recent orders) for physical decisions and local fallback.
+        // No heavy build is ever triggered from ledger consumers or the patch.
+        //
+        // StoreDoctrine currently writes empty (placeholder); future slices will populate from snapshot picture
+        // when available.
+        //
+        // Authoritative: plan Task 7/8 + runtime safety (degrade on !HasData).
+        // ============================================================
+
         private IReadOnlyList<ObjectiveRecord> _currentObjectives = Array.Empty<ObjectiveRecord>();
         private StrategicBattleIntentSnapshot _currentStrategicBattleIntent = StrategicBattleIntentSnapshot.Empty;
         private OperationRecord _currentOperation = NoOpOperation();
