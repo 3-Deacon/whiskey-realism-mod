@@ -240,6 +240,8 @@ public static void Test_SignatureEquals_Identical()
 
 **Record all evidence** (numbers, session IDs, marker examples) in `docs/handoff.md` and/or `MEMORY.md`. Do not create git commits just for binary/DLL evidence.
 
+**Completion note:** Task 11 procedure + enhanced python extractor (performance.jsonl p95/p99 for 5 scopes incl. tactical.posture-executor + tactical.jsonl TacticalHeavyGate counts/reasons/samples) fully documented in dedicated notes file `docs/tactical-tick-optimization-task11-smoke.md`. Exact parity with Task 10 (same battle, speeds, TacticalTuning profile, durations, post-Task9 DLL) except throttling flag=true + cycle=0.003. Build/harness clean (0 warnings, 1112+ PASS incl. all prior gate/signature/snapshot/urgent tests). Git status clean. Self-review passed. Evidence (deltas, gate telemetry, no-hitch, urgent responsive, rollback parity) + config citations (Plugin.cs:401-410 "TacticalTickOptimization", CoordinatorRuntime.cs:1230 EmitHeavyGateTelemetry Category.Gate, HeavyPathGate.cs reasons, Writer.cs:425 tactical.jsonl) to be populated post Windows GTCW run. Ready for Task 12 living docs.
+
 ---
 
 ## Task 12: Documentation Updates
