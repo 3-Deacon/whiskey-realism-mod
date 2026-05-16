@@ -1111,6 +1111,11 @@ static class Program
             ("parse instance id child negative", ParseInstanceIdChildNegative),
             ("parse instance id synth army positive", ParseInstanceIdSynthArmyPositive),
             ("parse instance id synth army negative", ParseInstanceIdSynthArmyNegative),
+            ("tactical battle state signature equals identical", TacticalBattleStateSignatureEqualsIdentical),
+            ("tactical battle state signature differs on macro ai", TacticalBattleStateSignatureDiffersOnMacroAI),
+            ("tactical battle state signature differs on objective hash", TacticalBattleStateSignatureDiffersOnObjectiveHash),
+            ("tactical battle state signature differs on active unit count", TacticalBattleStateSignatureDiffersOnActiveUnitCount),
+            ("tactical battle state signature equals ignores hour bucket", TacticalBattleStateSignatureEqualsIgnoresHourBucket),
         };
 
         foreach (var test in tests)
@@ -23095,5 +23100,40 @@ static class Program
         AssertEqual(5, refuseInput.IntendedTargetSector);
         var dRefuse = TacticalDirectChildGate.Decide(refuseInput);
         AssertTrue(dRefuse.Allow, "RefuseLeft with -1 target sector coerces to primary and allows in-flank-sector");
+    }
+
+    private static void TacticalBattleStateSignatureEqualsIdentical()
+    {
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        AssertTrue(a.SignatureEquals(b), "identical signatures must be equal");
+    }
+
+    private static void TacticalBattleStateSignatureDiffersOnMacroAI()
+    {
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 2, false, 98765, false, 12); // macro AI side1 differs
+        AssertTrue(!a.SignatureEquals(b), "different MacroAI must cause signature differ");
+    }
+
+    private static void TacticalBattleStateSignatureDiffersOnObjectiveHash()
+    {
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 54321, false, 12); // objective hash differs
+        AssertTrue(!a.SignatureEquals(b), "different MajorObjectiveAnchorHash must cause signature differ");
+    }
+
+    private static void TacticalBattleStateSignatureDiffersOnActiveUnitCount()
+    {
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var b = new TacticalBattleStateSignature(101, 12000, 11500, 3, 1, false, 98765, false, 12); // active count differs
+        AssertTrue(!a.SignatureEquals(b), "different ActiveUnitCount must cause signature differ");
+    }
+
+    private static void TacticalBattleStateSignatureEqualsIgnoresHourBucket()
+    {
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 13); // only bucket differs
+        AssertTrue(a.SignatureEquals(b), "hour bucket change alone must not affect signature equality (time gate separate)");
     }
 }
