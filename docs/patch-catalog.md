@@ -93,6 +93,10 @@ The 2026-05-11 full-spectrum tactical command doctrine build retargets existing 
 | `AICampaignSaveLoadPatch.SavePatch` | Postfix | `Patches/AICampaignSaveLoadPatch.cs` | `AICampaign.Save` (16631) | Writes `whiskeyrealism.json` sidecar inside the save folder. |
 | `AICampaignSaveLoadPatch.LoadPatch` | Postfix | `Patches/AICampaignSaveLoadPatch.cs` | `AICampaign.Load` (16435) | Reads sidecar; falls back to fresh init with explicit log if missing. |
 
+**Telemetry framework (not numbered — cross-cutting runtime):**
+
+`src/WhiskeyRealism/Telemetry/` owns structured tuning evidence for tactical and campaign diagnostics. The default `[Telemetry] Logging Profile` is `Off`, so customer installs should not create tuning sidecars. `TacticalTuning`, `CampaignTuning`, and `FullTuning` write JSONL under `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session-id>/`; the default runtime controls are `Telemetry Queue Capacity = 8192` detail rows, `Telemetry Flush Milliseconds = 250`, and `Telemetry Flush Rows = 256`, with bounded config values recorded in each session manifest. The queue capacity is the detail queue capacity; protected health/failure rows have a separate reserve. Tactical/campaign tuning rows, including `TacticalDecisionMatrix`, operations-ledger analysis, and strategic/campaign operation rows, route to sidecars under tuning profiles instead of normal `LogOutput.log` firehoses. Serious warnings/errors may still emit bounded `LogOutput.log` entries where player/operator visibility matters. Operator details live in [`docs/telemetry.md`](telemetry.md).
+
 ---
 
 ## Conventions

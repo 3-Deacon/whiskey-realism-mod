@@ -8,8 +8,6 @@ namespace WhiskeyRealism.Telemetry
 {
     internal sealed class TelemetryWriter
     {
-        internal const int FlushIntervalMs = 250;
-        internal const int FlushBatchSize = 256;
         private const int FileWritePerfWindowMs = 1000;
         private const int FileWritePerfWindowMinEvents = 2;
 
@@ -20,6 +18,8 @@ namespace WhiskeyRealism.Telemetry
         private readonly string _sessionId;
         private readonly TelemetryProfile _profile;
         private readonly Action<string> _warningCallback;
+        private readonly int _flushMilliseconds;
+        private readonly int _flushRows;
         private readonly AutoResetEvent _signal = new AutoResetEvent(false);
         private readonly object _gate = new object();
         private readonly HashSet<string> _outputFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -41,7 +41,9 @@ namespace WhiskeyRealism.Telemetry
             Action manifestWriter,
             string sessionId = "sink",
             TelemetryProfile profile = TelemetryProfile.FullTuning,
-            Action<string> warningCallback = null)
+            Action<string> warningCallback = null,
+            int flushMilliseconds = TelemetryRuntimeConfig.DefaultFlushMilliseconds,
+            int flushRows = TelemetryRuntimeConfig.DefaultFlushRows)
         {
             _queue = queue;
             _budget = budget;
@@ -50,6 +52,8 @@ namespace WhiskeyRealism.Telemetry
             _sessionId = TelemetryEvent.Safe(sessionId);
             _profile = profile;
             _warningCallback = warningCallback;
+            _flushMilliseconds = TelemetryRuntimeConfig.ClampFlushMilliseconds(flushMilliseconds);
+            _flushRows = TelemetryRuntimeConfig.ClampFlushRows(flushRows);
             _thread = new Thread(Run)
             {
                 IsBackground = true,
@@ -101,6 +105,12 @@ namespace WhiskeyRealism.Telemetry
                     return false;
                 }
 
+                if (_queue != null && _queue.Count > 0)
+                {
+                    RecordSinkFailure("writer-shutdown-undrained", null);
+                    return false;
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -128,19 +138,22 @@ namespace WhiskeyRealism.Telemetry
         {
             while (!_stopRequested)
             {
-                _signal.WaitOne(FlushIntervalMs);
-                FlushBatch(FlushBatchSize);
+                _signal.WaitOne(_flushMilliseconds);
+                FlushBatch(_flushRows);
             }
 
-            DateTime deadline = DateTime.UtcNow.AddSeconds(2);
-            while (_queue.Count > 0 && DateTime.UtcNow < deadline)
-                FlushBatch(FlushBatchSize);
+            FlushUntilEmpty();
 
             EmitPendingFileWritePerf(force: true);
-            while (_queue.Count > 0 && DateTime.UtcNow < deadline)
-                FlushBatch(FlushBatchSize);
+            FlushUntilEmpty();
 
             SafeWriteManifest();
+        }
+
+        private void FlushUntilEmpty()
+        {
+            while (_queue != null && _queue.Count > 0)
+                FlushBatch(_flushRows);
         }
 
         private void FlushBatch(int maxRows)
@@ -183,7 +196,7 @@ namespace WhiskeyRealism.Telemetry
             if (!_fileWritePerf.ShouldEmit(
                 force,
                 DateTime.UtcNow,
-                FlushBatchSize,
+                _flushRows,
                 FileWritePerfWindowMs,
                 FileWritePerfWindowMinEvents))
                 return;

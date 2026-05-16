@@ -42,6 +42,16 @@ namespace WhiskeyRealism.Telemetry
 
     internal sealed class TelemetryRuntimeConfig
     {
+        internal const int DefaultQueueCapacity = 8192;
+        internal const int DefaultFlushMilliseconds = 250;
+        internal const int DefaultFlushRows = 256;
+        internal const int MinQueueCapacity = 128;
+        internal const int MaxQueueCapacity = 65536;
+        internal const int MinFlushMilliseconds = 50;
+        internal const int MaxFlushMilliseconds = 5000;
+        internal const int MinFlushRows = 1;
+        internal const int MaxFlushRows = 4096;
+
         private TelemetryRuntimeConfig()
         {
         }
@@ -56,6 +66,9 @@ namespace WhiskeyRealism.Telemetry
         internal bool EmitHumanSummary { get; private set; }
         internal bool PerformanceWarnings { get; private set; }
         internal bool CreateIssueBundleOnShutdown { get; private set; }
+        internal int QueueCapacity { get; private set; }
+        internal int FlushMilliseconds { get; private set; }
+        internal int FlushRows { get; private set; }
         internal Action<string> WarningCallback { get; private set; }
 
         internal static TelemetryRuntimeConfig Create(
@@ -69,7 +82,10 @@ namespace WhiskeyRealism.Telemetry
             bool emitHumanSummary,
             bool performanceWarnings,
             bool createIssueBundleOnShutdown,
-            Action<string> warningCallback)
+            Action<string> warningCallback,
+            int queueCapacity = DefaultQueueCapacity,
+            int flushMilliseconds = DefaultFlushMilliseconds,
+            int flushRows = DefaultFlushRows)
         {
             return new TelemetryRuntimeConfig
             {
@@ -83,6 +99,9 @@ namespace WhiskeyRealism.Telemetry
                 EmitHumanSummary = emitHumanSummary,
                 PerformanceWarnings = performanceWarnings,
                 CreateIssueBundleOnShutdown = createIssueBundleOnShutdown,
+                QueueCapacity = ClampQueueCapacity(queueCapacity),
+                FlushMilliseconds = ClampFlushMilliseconds(flushMilliseconds),
+                FlushRows = ClampFlushRows(flushRows),
                 WarningCallback = warningCallback
             };
         }
@@ -91,6 +110,28 @@ namespace WhiskeyRealism.Telemetry
         {
             int safe = value > 0 ? value : fallback;
             return (long)safe * 1024L * 1024L;
+        }
+
+        internal static int ClampQueueCapacity(int value)
+        {
+            return Clamp(value, MinQueueCapacity, MaxQueueCapacity);
+        }
+
+        internal static int ClampFlushMilliseconds(int value)
+        {
+            return Clamp(value, MinFlushMilliseconds, MaxFlushMilliseconds);
+        }
+
+        internal static int ClampFlushRows(int value)
+        {
+            return Clamp(value, MinFlushRows, MaxFlushRows);
+        }
+
+        private static int Clamp(int value, int min, int max)
+        {
+            if (value < min) return min;
+            if (value > max) return max;
+            return value;
         }
     }
 
@@ -132,7 +173,16 @@ namespace WhiskeyRealism.Telemetry
             _queue = queue;
             _budget = budget;
             _startUtc = DateTime.UtcNow;
-            _writer = new TelemetryWriter(_queue, _budget, _sessionDirectory, WriteManifest, SessionId, Profile, config.WarningCallback);
+            _writer = new TelemetryWriter(
+                _queue,
+                _budget,
+                _sessionDirectory,
+                WriteManifest,
+                SessionId,
+                Profile,
+                config.WarningCallback,
+                config.FlushMilliseconds,
+                config.FlushRows);
         }
 
         internal TelemetryProfile Profile { get; private set; }
@@ -185,7 +235,7 @@ namespace WhiskeyRealism.Telemetry
                 TelemetrySessionDirectory sessionDirectory = TelemetrySession.CreateUniqueSessionDirectory(config.GameRoot, sessionBase);
                 TelemetrySession.ApplyRetention(config.GameRoot, sessionDirectory.SessionId, config.RetainedSessions);
 
-                var queue = new TelemetryQueue(capacity: 8192);
+                var queue = new TelemetryQueue(config.QueueCapacity);
                 var budget = new TelemetryBudget(config.MaxTuningLogBytes, config.FileRotateBytes);
                 var runtime = new TelemetryRuntime(config, sessionDirectory.SessionId, sessionDirectory.DirectoryPath, queue, budget);
                 runtime.WriteManifest();
@@ -356,6 +406,9 @@ namespace WhiskeyRealism.Telemetry
                 manifest.ConfigSnapshot["emitHumanSummary"] = _config.EmitHumanSummary ? "true" : "false";
                 manifest.ConfigSnapshot["performanceWarnings"] = _config.PerformanceWarnings ? "true" : "false";
                 manifest.ConfigSnapshot["createIssueBundleOnShutdown"] = _config.CreateIssueBundleOnShutdown ? "true" : "false";
+                manifest.ConfigSnapshot["queueCapacity"] = _config.QueueCapacity.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                manifest.ConfigSnapshot["flushMilliseconds"] = _config.FlushMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                manifest.ConfigSnapshot["flushRows"] = _config.FlushRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
                 if (_queue != null)
                 {

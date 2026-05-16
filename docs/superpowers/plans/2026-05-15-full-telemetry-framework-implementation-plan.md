@@ -521,7 +521,7 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: new telemetry schema tests pass.
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
 git add src/WhiskeyRealism/Telemetry/TelemetryContracts.cs src/WhiskeyRealism/Telemetry/TelemetryFields.cs src/WhiskeyRealism/Telemetry/TelemetryJson.cs tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj tests/WhiskeyRealism.Tests/Program.cs
@@ -1032,7 +1032,7 @@ git commit -m "feat: add telemetry summary and validator"
 - Modify: `docs/handoff.md`
 - Modify: `MEMORY.md`
 
-- [ ] Add smoke-only config controls under `[Telemetry]` if they are not already represented by production config:
+- [x] Add smoke-only config controls under `[Telemetry]` if they are not already represented by production config:
 
 ```ini
 Telemetry Queue Capacity = 8192
@@ -1040,9 +1040,9 @@ Telemetry Flush Milliseconds = 250
 Telemetry Flush Rows = 256
 ```
 
-Use bounded `AcceptableValueRange` values in `Plugin.cs`.
+Use bounded `AcceptableValueRange` values in `Plugin.cs`. `Telemetry Queue Capacity` is the detail queue capacity; protected health/failure rows have a separate reserve and can temporarily exceed the detail cap.
 
-- [ ] Write `docs/telemetry.md` with:
+- [x] Write `docs/telemetry.md` with:
 
 ```markdown
 # Whiskey Realism Telemetry
@@ -1066,19 +1066,30 @@ Validation:
 Issue bundles contain redacted telemetry files only. They do not contain save files, copied game DLLs, tokens, unrelated plugin logs, or raw Windows usernames.
 ```
 
-- [ ] Update `docs/patch-catalog.md` for telemetry framework ownership and migrated log policy.
+- [x] Update `docs/patch-catalog.md` for telemetry framework ownership and migrated log policy.
 
-- [ ] Update `docs/handoff.md` with current profile defaults, smoke checklist, deployed DLL hash after deploy, and runtime evidence boundary.
+- [x] Update `docs/handoff.md` with current profile defaults, smoke checklist, and runtime evidence boundary. No deployed DLL hash was added because Task 10 owns deploy/hash verification.
 
-- [ ] Update `MEMORY.md` with durable telemetry routing and smoke-test facts after runtime verification.
+- [x] Update `MEMORY.md` with durable telemetry routing/default facts and the Task 10 pending boundary. No runtime smoke facts were claimed.
 
-- [ ] Run documentation scan:
+- [x] Run documentation scan:
 
 ```bash
 rg -n "LogOutput\.log|TacticalDecisionMatrix|Telemetry|tuning-logs" docs README.md MEMORY.md
 ```
 
 Expected: docs explain that tuning rows route to sidecars and customer profile is quiet by default.
+
+- [x] Verification evidence for Task 9:
+
+```bash
+dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
+./build.sh
+git diff --check
+rg -n "LogOutput\.log|TacticalDecisionMatrix|Telemetry|tuning-logs" docs README.md MEMORY.md
+```
+
+Results: console harness exited 0; `./build.sh` exited 0 with 0 warnings / 0 errors; `git diff --check` exited 0; docs scan exited 0 and includes the new sidecar/default-off routing references in `docs/telemetry.md`, `docs/patch-catalog.md`, `docs/handoff.md`, and `MEMORY.md`.
 
 - [ ] Commit:
 

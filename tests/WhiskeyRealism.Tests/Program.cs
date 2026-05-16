@@ -44,6 +44,10 @@ static class Program
             ("telemetry decision requires input signature", TelemetryDecisionRequiresInputSignature),
             ("telemetry budget drops trace first", TelemetryBudgetDropsTraceFirst),
             ("telemetry queue preserves failure under pressure", TelemetryQueuePreservesFailureUnderPressure),
+            ("telemetry runtime config sanitizes smoke controls", TelemetryRuntimeConfigSanitizesSmokeControls),
+            ("telemetry runtime manifest snapshots smoke controls", TelemetryRuntimeManifestSnapshotsSmokeControls),
+            ("telemetry writer honors configured flush rows", TelemetryWriterHonorsConfiguredFlushRows),
+            ("telemetry writer shutdown drains past internal deadline", TelemetryWriterShutdownDrainsPastInternalDeadline),
             ("telemetry session id sorts by utc milliseconds", TelemetrySessionIdSortsByUtcMilliseconds),
             ("telemetry manifest redacts user paths", TelemetryManifestRedactsUserPaths),
             ("telemetry session creates directory under tuning logs", TelemetrySessionCreatesDirectoryUnderTuningLogs),
@@ -1142,6 +1146,188 @@ static class Program
     private static TelemetryEvent EventForQueue(TelemetryCategory category, string name)
     {
         return TelemetryEvent.Create("s", TelemetryProfile.FullTuning, TelemetryLayer.System, category, name, TelemetrySeverity.Info);
+    }
+
+    private static void TelemetryRuntimeConfigSanitizesSmokeControls()
+    {
+        var defaults = TelemetryRuntimeConfig.Create(
+            ".",
+            "0.2.2-test",
+            "abcdef1234567890",
+            TelemetryProfile.FullTuning,
+            maxTuningLogMb: 250,
+            fileRotateMb: 25,
+            retainedSessions: 2,
+            emitHumanSummary: true,
+            performanceWarnings: true,
+            createIssueBundleOnShutdown: false,
+            warningCallback: null);
+
+        AssertEqual(TelemetryRuntimeConfig.DefaultQueueCapacity, defaults.QueueCapacity, "default queue capacity");
+        AssertEqual(TelemetryRuntimeConfig.DefaultFlushMilliseconds, defaults.FlushMilliseconds, "default flush milliseconds");
+        AssertEqual(TelemetryRuntimeConfig.DefaultFlushRows, defaults.FlushRows, "default flush rows");
+
+        var low = TelemetryRuntimeConfig.Create(
+            ".",
+            "0.2.2-test",
+            "abcdef1234567890",
+            TelemetryProfile.FullTuning,
+            maxTuningLogMb: 250,
+            fileRotateMb: 25,
+            retainedSessions: 2,
+            emitHumanSummary: true,
+            performanceWarnings: true,
+            createIssueBundleOnShutdown: false,
+            warningCallback: null,
+            queueCapacity: int.MinValue,
+            flushMilliseconds: int.MinValue,
+            flushRows: int.MinValue);
+
+        AssertEqual(TelemetryRuntimeConfig.MinQueueCapacity, low.QueueCapacity, "low queue capacity clamps");
+        AssertEqual(TelemetryRuntimeConfig.MinFlushMilliseconds, low.FlushMilliseconds, "low flush milliseconds clamps");
+        AssertEqual(TelemetryRuntimeConfig.MinFlushRows, low.FlushRows, "low flush rows clamps");
+
+        var high = TelemetryRuntimeConfig.Create(
+            ".",
+            "0.2.2-test",
+            "abcdef1234567890",
+            TelemetryProfile.FullTuning,
+            maxTuningLogMb: 250,
+            fileRotateMb: 25,
+            retainedSessions: 2,
+            emitHumanSummary: true,
+            performanceWarnings: true,
+            createIssueBundleOnShutdown: false,
+            warningCallback: null,
+            queueCapacity: int.MaxValue,
+            flushMilliseconds: int.MaxValue,
+            flushRows: int.MaxValue);
+
+        AssertEqual(TelemetryRuntimeConfig.MaxQueueCapacity, high.QueueCapacity, "high queue capacity clamps");
+        AssertEqual(TelemetryRuntimeConfig.MaxFlushMilliseconds, high.FlushMilliseconds, "high flush milliseconds clamps");
+        AssertEqual(TelemetryRuntimeConfig.MaxFlushRows, high.FlushRows, "high flush rows clamps");
+    }
+
+    private static void TelemetryRuntimeManifestSnapshotsSmokeControls()
+    {
+        string gameRoot = CreateTempDirectory();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot,
+                "0.2.2-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                maxTuningLogMb: 4,
+                fileRotateMb: 1,
+                retainedSessions: 2,
+                emitHumanSummary: true,
+                performanceWarnings: true,
+                createIssueBundleOnShutdown: false,
+                warningCallback: null,
+                queueCapacity: 1024,
+                flushMilliseconds: 777,
+                flushRows: 17);
+
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            string sessionDirectory = Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+            runtime.Shutdown("config-snapshot");
+
+            JObject snapshot = (JObject)JObject.Parse(File.ReadAllText(Path.Combine(sessionDirectory, "manifest.json")))["configSnapshot"];
+            AssertEqual("1024", (string)snapshot["queueCapacity"], "manifest queue capacity");
+            AssertEqual("777", (string)snapshot["flushMilliseconds"], "manifest flush milliseconds");
+            AssertEqual("17", (string)snapshot["flushRows"], "manifest flush rows");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(gameRoot);
+        }
+    }
+
+    private static void TelemetryWriterHonorsConfiguredFlushRows()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            var queue = new TelemetryQueue(capacity: 8);
+            var budget = new TelemetryBudget(totalBytes: 65536, rotateBytes: 65536);
+            int manifestCalls = 0;
+            for (int i = 0; i < 5; i++)
+            {
+                queue.Enqueue(TelemetryEvent.Create(
+                    "flush-session",
+                    TelemetryProfile.FullTuning,
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Decision,
+                    "FlushRowsDecision",
+                    TelemetrySeverity.Info).WithDecision("hold", "flush-test", "sig-flush-" + i.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            var writer = new TelemetryWriter(
+                queue,
+                budget,
+                sessionDirectory,
+                delegate { manifestCalls++; },
+                "flush-session",
+                TelemetryProfile.FullTuning,
+                null,
+                flushMilliseconds: 10000,
+                flushRows: 2);
+
+            writer.Start();
+            AssertTrue(writer.StopAndFlush(1000), "writer stops after configured row batches");
+            AssertEqual(5, CountJsonLines(File.ReadAllText(Path.Combine(sessionDirectory, "tactical.jsonl"))), "configured flush writer row count");
+            AssertTrue(manifestCalls >= 4, "flushRows=2 should split five rows across multiple flush manifest writes");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryWriterShutdownDrainsPastInternalDeadline()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            var queue = new TelemetryQueue(capacity: 16);
+            var budget = new TelemetryBudget(totalBytes: 65536, rotateBytes: 65536);
+            int manifestCalls = 0;
+            for (int i = 0; i < 5; i++)
+            {
+                queue.Enqueue(TelemetryEvent.Create(
+                    "shutdown-drain-session",
+                    TelemetryProfile.FullTuning,
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Decision,
+                    "ShutdownDrainDecision",
+                    TelemetrySeverity.Info).WithDecision("hold", "shutdown-drain", "sig-shutdown-" + i.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            var writer = new TelemetryWriter(
+                queue,
+                budget,
+                sessionDirectory,
+                delegate
+                {
+                    if (System.Threading.Interlocked.Increment(ref manifestCalls) == 1)
+                        System.Threading.Thread.Sleep(2200);
+                },
+                "shutdown-drain-session",
+                TelemetryProfile.FullTuning,
+                null,
+                flushMilliseconds: 5000,
+                flushRows: 1);
+
+            writer.Start();
+            AssertTrue(writer.StopAndFlush(6000), "writer should finish when caller timeout is long enough");
+            AssertEqual(0, queue.Count, "successful shutdown must drain queued rows");
+            AssertEqual(5, CountJsonLines(File.ReadAllText(Path.Combine(sessionDirectory, "tactical.jsonl"))), "shutdown drain writes every queued row");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
     }
 
     private static void TelemetryProfileOffDoesNotAllocateSession()

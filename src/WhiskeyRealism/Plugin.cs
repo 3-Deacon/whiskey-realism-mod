@@ -38,6 +38,9 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> TelemetryEmitHumanSummary;
         internal ConfigEntry<bool> TelemetryPerformanceWarnings;
         internal ConfigEntry<bool> TelemetryCreateIssueBundleOnShutdown;
+        internal ConfigEntry<int> TelemetryQueueCapacity;
+        internal ConfigEntry<int> TelemetryFlushMilliseconds;
+        internal ConfigEntry<int> TelemetryFlushRows;
         internal ConfigEntry<bool> EnableTacticalObserver;
         internal ConfigEntry<bool> TacticalObserverVerboseLogging;
         internal ConfigEntry<int> TacticalObserverMinSecondsBetweenSummaries;
@@ -229,6 +232,27 @@ namespace WhiskeyRealism
                 "Create Issue Bundle On Shutdown",
                 false,
                 "When true, future telemetry closeout may create a redacted issue bundle on shutdown.");
+            TelemetryQueueCapacity = Config.Bind(
+                "Telemetry",
+                "Telemetry Queue Capacity",
+                TelemetryRuntimeConfig.DefaultQueueCapacity,
+                new ConfigDescription(
+                    "Bounded structured telemetry detail queue capacity; protected health/failure rows have a separate reserve. Default preserves the shipped smoke profile.",
+                    new AcceptableValueRange<int>(TelemetryRuntimeConfig.MinQueueCapacity, TelemetryRuntimeConfig.MaxQueueCapacity)));
+            TelemetryFlushMilliseconds = Config.Bind(
+                "Telemetry",
+                "Telemetry Flush Milliseconds",
+                TelemetryRuntimeConfig.DefaultFlushMilliseconds,
+                new ConfigDescription(
+                    "Maximum writer wait interval before flushing queued structured telemetry rows.",
+                    new AcceptableValueRange<int>(TelemetryRuntimeConfig.MinFlushMilliseconds, TelemetryRuntimeConfig.MaxFlushMilliseconds)));
+            TelemetryFlushRows = Config.Bind(
+                "Telemetry",
+                "Telemetry Flush Rows",
+                TelemetryRuntimeConfig.DefaultFlushRows,
+                new ConfigDescription(
+                    "Maximum structured telemetry rows drained by the writer per flush batch.",
+                    new AcceptableValueRange<int>(TelemetryRuntimeConfig.MinFlushRows, TelemetryRuntimeConfig.MaxFlushRows)));
             EnableTacticalObserver = Config.Bind(
                 "Tactical",
                 "Enable Tactical Observer",
@@ -663,7 +687,10 @@ namespace WhiskeyRealism
                 TelemetryEmitHumanSummary?.Value ?? true,
                 TelemetryPerformanceWarnings?.Value ?? true,
                 TelemetryCreateIssueBundleOnShutdown?.Value ?? false,
-                message => Log?.LogWarning("[Telemetry] " + message));
+                message => Log?.LogWarning("[Telemetry] " + message),
+                TelemetryQueueCapacity?.Value ?? TelemetryRuntimeConfig.DefaultQueueCapacity,
+                TelemetryFlushMilliseconds?.Value ?? TelemetryRuntimeConfig.DefaultFlushMilliseconds,
+                TelemetryFlushRows?.Value ?? TelemetryRuntimeConfig.DefaultFlushRows);
 
             _telemetryRuntime = TelemetryRuntime.Start(config);
             TelemetryRouter.AttachRuntime(_telemetryRuntime);
