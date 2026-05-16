@@ -130,6 +130,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetrySession.cs" Link="Telemetry\TelemetrySession.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryManifest.cs" Link="Telemetry\TelemetryManifest.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryIssueBundle.cs" Link="Telemetry\TelemetryIssueBundle.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetrySummary.cs" Link="Telemetry\TelemetrySummary.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetrySessionValidator.cs" Link="Telemetry\TelemetrySessionValidator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryRouter.cs" Link="Telemetry\TelemetryRouter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryWriter.cs" Link="Telemetry\TelemetryWriter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Telemetry\TelemetryRuntime.cs" Link="Telemetry\TelemetryRuntime.cs" />

@@ -241,15 +241,6 @@ namespace WhiskeyRealism.Telemetry
                         TelemetryCategory.Health,
                         "TelemetryShutdown",
                         TelemetrySeverity.Info).WithField("reason", TelemetryEvent.Safe(reason)));
-                    try
-                    {
-                        WriteSummaryOnShutdown();
-                    }
-                    catch (Exception ex)
-                    {
-                        _writer.RecordRuntimeSinkFailure("summary-write", ex);
-                        Warn(_config, "Telemetry summary failed closed: " + ex.GetType().Name);
-                    }
                     _writer.Signal();
                     if (!_writer.StopAndFlush(2500))
                     {
@@ -274,6 +265,26 @@ namespace WhiskeyRealism.Telemetry
 
             try
             {
+                WriteManifest(DateTime.UtcNow);
+            }
+            catch (Exception ex)
+            {
+                Warn(_config, "Telemetry shutdown manifest failed closed: " + ex.GetType().Name);
+            }
+
+            try
+            {
+                WriteSummaryOnShutdown();
+            }
+            catch (Exception ex)
+            {
+                if (_writer != null)
+                    _writer.RecordRuntimeSinkFailure("summary-write", ex);
+                Warn(_config, "Telemetry summary failed closed: " + ex.GetType().Name);
+            }
+
+            try
+            {
                 WriteIssueBundleOnShutdown();
             }
             catch (Exception ex)
@@ -281,6 +292,26 @@ namespace WhiskeyRealism.Telemetry
                 if (_writer != null)
                     _writer.RecordRuntimeSinkFailure("issue-bundle-write", ex);
                 Warn(_config, "Telemetry issue bundle failed closed: " + ex.GetType().Name);
+            }
+
+            try
+            {
+                WriteManifest(DateTime.UtcNow);
+            }
+            catch (Exception ex)
+            {
+                Warn(_config, "Telemetry shutdown manifest failed closed: " + ex.GetType().Name);
+            }
+
+            try
+            {
+                WriteSummaryOnShutdown();
+            }
+            catch (Exception ex)
+            {
+                if (_writer != null)
+                    _writer.RecordRuntimeSinkFailure("summary-write", ex);
+                Warn(_config, "Telemetry summary failed closed: " + ex.GetType().Name);
             }
 
             try
@@ -380,31 +411,8 @@ namespace WhiskeyRealism.Telemetry
             if (string.IsNullOrWhiteSpace(_sessionDirectory) || _sessionDirectory == "-")
                 return;
 
-            using (TelemetryPerf.Scope("telemetry.summary-generation", TelemetryLayer.System, TelemetryCategory.Performance, 5.0))
-            {
-                var lines = new List<string>();
-                lines.Add("# Whiskey Realism Telemetry Summary");
-                lines.Add("");
-                lines.Add("- session: " + SessionId);
-                lines.Add("- profile: " + Profile);
-                lines.Add("- queuedRows: " + Interlocked.Read(ref _acceptedCount).ToString(System.Globalization.CultureInfo.InvariantCulture));
-                lines.Add("- unflushedRows: " + UnflushedCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                if (_budget != null)
-                {
-                    lines.Add("- emittedBytes: " + _budget.EmittedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                    lines.Add("- budgetDroppedRows: " + _budget.DroppedCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                }
-                if (_queue != null)
-                {
-                    lines.Add("- queueDroppedRows: " + _queue.DroppedCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                    lines.Add("- protectedOverflowRows: " + _queue.ProtectedOverflowCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                }
-                if (_writer != null)
-                    lines.Add("- sinkFailures: " + _writer.SinkFailureCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
-
-                using (TelemetryPerf.Scope("telemetry.summary-file-write", TelemetryLayer.System, TelemetryCategory.Performance, 5.0))
-                    File.WriteAllText(Path.Combine(_sessionDirectory, "summary.md"), string.Join(Environment.NewLine, lines) + Environment.NewLine);
-            }
+            TelemetrySummary summary = TelemetrySummary.FromDirectory(_sessionDirectory);
+            File.WriteAllText(Path.Combine(_sessionDirectory, "summary.md"), summary.ToMarkdown());
         }
 
         private void AddManifestOutputFiles(List<string> files)

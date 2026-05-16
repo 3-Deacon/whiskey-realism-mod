@@ -19,8 +19,21 @@ using WhiskeyRealism.Util;
 
 static class Program
 {
-    static int Main()
+    static int Main(string[] args)
     {
+        if (args != null && args.Length > 0)
+        {
+            if (args[0] != "--validate-telemetry" || args.Length != 2)
+            {
+                Console.Error.WriteLine("usage: --validate-telemetry <session-dir>");
+                return 1;
+            }
+
+            var result = TelemetrySessionValidator.ValidateDirectory(args[1]);
+            Console.WriteLine(result.Summary);
+            return result.Success ? 0 : 1;
+        }
+
         var tests = new (string name, Action run)[]
         {
             ("telemetry enum contracts match plan", TelemetryEnumContractsMatchPlan),
@@ -67,6 +80,14 @@ static class Program
             ("telemetry issue bundle manifest filters non telemetry files", TelemetryIssueBundleManifestFiltersNonTelemetryFiles),
             ("telemetry issue bundle manifest scopes files to active session", TelemetryIssueBundleManifestScopesFilesToActiveSession),
             ("telemetry issue bundle scopes equivalent windows and wsl paths", TelemetryIssueBundleScopesEquivalentWindowsAndWslPaths),
+            ("telemetry summary includes drops failures and slow scopes", TelemetrySummaryIncludesDropsFailuresAndSlowScopes),
+            ("telemetry validator tolerates partial final line", TelemetryValidatorToleratesPartialFinalLine),
+            ("telemetry validator rejects non telemetry json", TelemetryValidatorRejectsNonTelemetryJson),
+            ("telemetry validator rejects empty session directory", TelemetryValidatorRejectsEmptySessionDirectory),
+            ("telemetry validator rejects session without valid rows", TelemetryValidatorRejectsSessionWithoutValidRows),
+            ("telemetry validator cli rejects missing path", TelemetryValidatorCliRejectsMissingPath),
+            ("telemetry issue bundle writes redacted manifest", TelemetryIssueBundleWritesRedactedManifest),
+            ("telemetry issue bundle manifest requires existing session directory", TelemetryIssueBundleManifestRequiresExistingSessionDirectory),
             ("telemetry profile off does not allocate session", TelemetryProfileOffDoesNotAllocateSession),
             ("telemetry runtime full tuning writes sidecars and drains shutdown", TelemetryRuntimeFullTuningWritesSidecarsAndDrainsShutdown),
             ("telemetry runtime budget drops oversized detail rows", TelemetryRuntimeBudgetDropsOversizedDetailRows),
@@ -1202,6 +1223,15 @@ static class Program
             AssertTrue(JsonArrayContainsSubstring((JArray)manifest["outputFiles"], "failures.jsonl"), "manifest includes failures output");
             AssertTrue(manifest["droppedCounters"]["queueDropped"] != null, "manifest includes queue drop state");
             AssertTrue(manifest["droppedCounters"]["sinkFailures"] != null, "manifest includes sink failure state");
+
+            string summary = File.ReadAllText(Path.Combine(sessionDirectory, "summary.md"));
+            AssertContains(summary, "- sessionId: " + runtime.SessionId, "runtime summary uses telemetry summary session id");
+            AssertContains(summary, "- pluginVersion: 0.2.2-test", "runtime summary includes plugin version");
+            AssertContains(summary, "- runtimeAssemblySha256: abcdef1234567890", "runtime summary includes runtime assembly hash");
+            AssertContains(summary, "Tactical=1", "runtime summary includes tactical count");
+            AssertContains(summary, "Campaign=1", "runtime summary includes campaign count");
+            AssertContains(summary, "FailureWarning=1", "runtime summary includes failure event count");
+            AssertContains(summary, "category=Failure", "runtime summary includes inspection query");
         }
         finally
         {
@@ -1646,6 +1676,11 @@ static class Program
             AssertTrue((long)manifest["droppedCounters"]["sinkFailures"] >= 1L, "final manifest records issue bundle sink failure");
             AssertTrue(JsonArrayContainsSubstring((JArray)manifest["outputFiles"], "failures.jsonl"), "final manifest includes failure sidecar");
             AssertTrue(warnings.Count >= 1, "issue bundle failure emits bounded warning callback");
+
+            string summary = File.ReadAllText(Path.Combine(sessionDirectory, "summary.md"));
+            AssertContains(summary, "Failure=1", "summary regenerated after issue bundle failure includes failure count");
+            AssertContains(summary, "TelemetrySinkFailure=1", "summary regenerated after issue bundle failure includes failure event");
+            AssertContains(summary, "category=Failure", "summary regenerated after issue bundle failure includes inspection query");
         }
         finally
         {
@@ -2880,6 +2915,292 @@ static class Program
         AssertContains((string)windowsFiles[0], "manifest.json", "equivalent wsl manifest included");
         AssertEqual(1, wslFiles.Count, "wsl session accepts equivalent windows active-session file only");
         AssertContains((string)wslFiles[0], "summary.md", "equivalent windows summary included");
+    }
+
+    private static void TelemetrySummaryIncludesDropsFailuresAndSlowScopes()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            var budget = new TelemetryBudget(totalBytes: 1024, rotateBytes: 512);
+            budget.RecordDropped(TelemetryCategory.Decision);
+            var manifest = TelemetryManifest.Create(
+                "summary-session",
+                "0.8.0-test",
+                "abcdef1234567890",
+                TelemetryProfile.FullTuning,
+                new DateTime(2026, 5, 15, 12, 0, 0, DateTimeKind.Utc),
+                budget,
+                unflushedCount: 3);
+            manifest.EndUtc = new DateTime(2026, 5, 15, 12, 30, 0, DateTimeKind.Utc);
+            manifest.DroppedCounters["queueDropped"] = 2L;
+            manifest.DroppedCounters["queueProtectedOverflow.Failure"] = 1L;
+            manifest.DroppedCounters["capTransition.detailToSummary"] = 1L;
+            manifest.DroppedCounters["sinkFailures"] = 4L;
+            manifest.OutputFiles.Add("tactical.jsonl");
+            manifest.OutputFiles.Add("failures.jsonl");
+            manifest.OutputFiles.Add("performance.jsonl");
+            File.WriteAllText(Path.Combine(sessionDirectory, "manifest.json"), manifest.ToJson());
+
+            WriteJsonLines(
+                Path.Combine(sessionDirectory, "tactical.jsonl"),
+                SummaryRow("summary-session", "FullTuning", "Tactical", "Decision", "TacticalDecision", "Info", "1862-05-01", "battle-7", 4.0, "advance", "odds-high", "sig-a", new Dictionary<string, object>()),
+                SummaryRow("summary-session", "FullTuning", "Tactical", "Gate", "ReserveGate", "Warning", "1862-05-01", "battle-7", 2.0, "deny", "reserve-low", "sig-b", new Dictionary<string, object> { { "allowed", false }, { "anchor", "reserve" } }),
+                SummaryRow("summary-session", "FullTuning", "Tactical", "Write", "PostureWrite", "Info", "1862-05-02", "battle-8", 3.0, "write", "applied", "sig-c", new Dictionary<string, object> { { "result", "applied" } }));
+            WriteJsonLines(
+                Path.Combine(sessionDirectory, "failures.jsonl"),
+                SummaryRow("summary-session", "FullTuning", "System", "Failure", "TelemetrySinkFailure", "Error", "-", "-", 1.0, "-", "write-row", "-", new Dictionary<string, object> { { "reason", "write-row" } }),
+                SummaryRow("summary-session", "FullTuning", "System", "Failure", "TelemetrySinkFailure", "Error", "-", "-", 1.0, "-", "write-row", "-", new Dictionary<string, object> { { "reason", "write-row" } }),
+                SummaryRow("summary-session", "FullTuning", "Campaign", "Failure", "MissingAnchor", "Warning", "1862-05-03", "-", 1.0, "-", "missing-anchor", "-", new Dictionary<string, object> { { "anchor", "CampaignObjective" } }));
+            WriteJsonLines(
+                Path.Combine(sessionDirectory, "performance.jsonl"),
+                SummaryRow("summary-session", "FullTuning", "System", "Performance", "PerfScope", "Warning", "-", "-", 27.5, "-", "-", "-", new Dictionary<string, object> { { "scope", "telemetry.flush" } }),
+                SummaryRow("summary-session", "FullTuning", "System", "Performance", "PerfScope", "Warning", "-", "-", 42.0, "-", "-", "-", new Dictionary<string, object> { { "scope", "telemetry.summary-generation" } }));
+
+            TelemetrySummary summary = TelemetrySummary.FromDirectory(sessionDirectory);
+            string markdown = summary.ToMarkdown();
+
+            AssertEqual("summary-session", summary.SessionId, "summary session id");
+            AssertEqual("FullTuning", summary.Profile, "summary profile");
+            AssertContains(markdown, "pluginVersion: 0.8.0-test", "plugin version");
+            AssertContains(markdown, "runtimeAssemblySha256: abcdef1234567890", "assembly hash");
+            AssertContains(markdown, "campaignDates: 1862-05-01, 1862-05-02, 1862-05-03", "campaign date range");
+            AssertContains(markdown, "battles: battle-7, battle-8", "battle ids");
+            AssertContains(markdown, "Tactical=3", "layer count");
+            AssertContains(markdown, "Decision=1", "category count");
+            AssertContains(markdown, "TacticalDecision=1", "event count");
+            AssertContains(markdown, "advance=1", "top decision");
+            AssertContains(markdown, "odds-high=1", "top reason");
+            AssertContains(markdown, "ReserveGate reserve-low", "denied gate");
+            AssertContains(markdown, "PostureWrite applied=1", "write result");
+            AssertContains(markdown, "telemetry.summary-generation 42", "slow scope");
+            AssertContains(markdown, "queueDropped=2", "queue drop");
+            AssertContains(markdown, "budgetDrops: Decision=1", "budget drop");
+            AssertContains(markdown, "detailToSummary=1", "cap transition");
+            AssertContains(markdown, "runtimeCounters: sinkFailures=4", "manifest sink failure counter");
+            AssertContains(markdown, "TelemetrySinkFailure=4", "manifest reconciles sink failure event count");
+            AssertContains(markdown, "TelemetrySinkFailure write-row x2", "repeated failure");
+            AssertContains(markdown, "TelemetrySinkFailure manifest-sinkFailures x2", "manifest sink failures repeated");
+            AssertContains(markdown, "CampaignObjective", "missing anchor");
+            AssertContains(markdown, "category=Failure", "inspection query");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryValidatorToleratesPartialFinalLine()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(sessionDirectory, "health.jsonl"),
+                SummaryRow("validator-session", "FullTuning", "System", "Health", "TelemetryStartup", "Info", "-", "-", 0.0, "-", "-", "-", new Dictionary<string, object>())
+                + Environment.NewLine
+                + "{\"schema\":\"wr.telemetry.v1\",\"event\":\"partial\"");
+
+            TelemetryValidationResult result = TelemetrySessionValidator.ValidateDirectory(sessionDirectory);
+            AssertTrue(result.Success, "partial final json line is tolerated");
+            AssertContains(result.Summary, "validRows=1", "valid row count");
+            AssertContains(result.Summary, "partialFinalLines=1", "partial final count");
+            AssertContains(result.Summary, "invalidRows=0", "invalid row count");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryValidatorRejectsNonTelemetryJson()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(sessionDirectory, "health.jsonl"),
+                SummaryRow("validator-session", "FullTuning", "System", "Health", "TelemetryStartup", "Info", "-", "-", 0.0, "-", "-", "-", new Dictionary<string, object>())
+                + Environment.NewLine
+                + "{}"
+                + Environment.NewLine
+                + "{\"schema\":\"wrong\",\"event\":\"bad\"}"
+                + Environment.NewLine
+                + "42"
+                + Environment.NewLine
+                + "{\"schema\":\"wr.telemetry.v1\",\"ts\":0,\"sessionId\":{},\"profile\":999,\"layer\":[],\"category\":{},\"event\":false,\"severity\":true}"
+                + Environment.NewLine
+                + "{\"schema\":\"wr.telemetry.v1\",\"ts\":\"2026-05-15T12:00:00Z\",\"sessionId\":\"validator-session\",\"profile\":\"Unknown\",\"layer\":\"System\",\"category\":\"Health\",\"event\":\"bad-profile\",\"severity\":\"Info\"}"
+                + Environment.NewLine);
+
+            TelemetryValidationResult result = TelemetrySessionValidator.ValidateDirectory(sessionDirectory);
+            AssertFalse(result.Success, "non telemetry json rows fail validation");
+            AssertContains(result.Summary, "validRows=1", "valid telemetry row count");
+            AssertContains(result.Summary, "invalidRows=5", "invalid telemetry row count");
+            AssertContains(result.Summary, "health.jsonl:2", "empty object line reported");
+            AssertContains(result.Summary, "health.jsonl:3", "wrong schema line reported");
+            AssertContains(result.Summary, "health.jsonl:4", "scalar json line reported");
+            AssertContains(result.Summary, "health.jsonl:5", "bad field types line reported");
+            AssertContains(result.Summary, "health.jsonl:6", "bad enum domain line reported");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryValidatorRejectsEmptySessionDirectory()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            TelemetryValidationResult result = TelemetrySessionValidator.ValidateDirectory(sessionDirectory);
+            AssertFalse(result.Success, "empty telemetry session directory fails validation");
+            AssertContains(result.Summary, "files=0", "empty directory file count");
+            AssertContains(result.Summary, "invalidRows=1", "empty directory invalid marker");
+            AssertContains(result.Summary, "no telemetry JSONL files found", "empty directory issue");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryValidatorRejectsSessionWithoutValidRows()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(sessionDirectory, "health.jsonl"),
+                Environment.NewLine
+                + "{\"schema\":\"wr.telemetry.v1\",\"event\":\"partial\"");
+
+            TelemetryValidationResult result = TelemetrySessionValidator.ValidateDirectory(sessionDirectory);
+            AssertFalse(result.Success, "session without valid telemetry rows fails validation");
+            AssertContains(result.Summary, "files=1", "blank file count");
+            AssertContains(result.Summary, "validRows=0", "no valid row count");
+            AssertContains(result.Summary, "partialFinalLines=1", "partial final line still tracked");
+            AssertContains(result.Summary, "no valid telemetry rows found", "no valid row issue");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryValidatorCliRejectsMissingPath()
+    {
+        AssertEqual(1, Main(new[] { "--validate-telemetry" }), "validator cli missing path exit code");
+        AssertEqual(1, Main(new[] { "--unknown-telemetry-arg" }), "validator cli unknown arg exit code");
+    }
+
+    private static void TelemetryIssueBundleWritesRedactedManifest()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        try
+        {
+            string sessionId = "bundle-session";
+            string manifestPath = Path.Combine(sessionDirectory, "manifest.json");
+            string summaryPath = Path.Combine(sessionDirectory, "summary.md");
+            string failuresPath = Path.Combine(sessionDirectory, "failures.jsonl");
+            File.WriteAllText(manifestPath, "{}");
+            File.WriteAllText(summaryPath, "summary token=secret");
+            File.WriteAllText(failuresPath, "{}");
+            File.WriteAllText(Path.Combine(sessionDirectory, "notes.txt"), "token=do-not-include");
+
+            string bundlePath = TelemetrySummary.WriteIssueBundleManifest(
+                sessionDirectory,
+                sessionId,
+                @"C:\Users\Kyle\AppData token=secret");
+            string json = File.ReadAllText(bundlePath);
+            JObject bundle = JObject.Parse(json);
+            var files = (JArray)bundle["files"];
+
+            AssertEqual(sessionId, (string)bundle["sessionId"], "bundle session id");
+            AssertTrue(JsonArrayContainsSubstring(files, "manifest.json"), "bundle includes manifest");
+            AssertTrue(JsonArrayContainsSubstring(files, "summary.md"), "bundle includes summary");
+            AssertTrue(JsonArrayContainsSubstring(files, "failures.jsonl"), "bundle includes failures");
+            AssertFalse(JsonArrayContainsSubstring(files, "notes.txt"), "bundle excludes non telemetry file");
+            AssertFalse(json.Contains("Kyle"), "bundle note redacts username");
+            AssertFalse(json.Contains("secret"), "bundle note redacts secret");
+            AssertContains((string)bundle["note"], @"C:\Users\<redacted>", "bundle note keeps redacted path context");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void TelemetryIssueBundleManifestRequiresExistingSessionDirectory()
+    {
+        string sessionDirectory = CreateTempDirectory();
+        string missingDirectory = Path.Combine(sessionDirectory, "missing-session");
+        try
+        {
+            bool threw = false;
+            try
+            {
+                TelemetrySummary.WriteIssueBundleManifest(missingDirectory, "missing-session", "note");
+            }
+            catch (DirectoryNotFoundException)
+            {
+                threw = true;
+            }
+
+            AssertTrue(threw, "missing session directory throws");
+            AssertFalse(Directory.Exists(missingDirectory), "missing session directory is not created");
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(sessionDirectory);
+        }
+    }
+
+    private static void WriteJsonLines(string path, params string[] rows)
+    {
+        File.WriteAllText(path, string.Join(Environment.NewLine, rows) + Environment.NewLine);
+    }
+
+    private static string SummaryRow(
+        string sessionId,
+        string profile,
+        string layer,
+        string category,
+        string eventName,
+        string severity,
+        string campaignDate,
+        string battleId,
+        double durationMs,
+        string decision,
+        string reason,
+        string inputSignature,
+        Dictionary<string, object> fields)
+    {
+        var row = new JObject
+        {
+            ["schema"] = TelemetryEvent.Schema,
+            ["ts"] = "2026-05-15T12:00:00.0000000Z",
+            ["sessionId"] = sessionId,
+            ["profile"] = profile,
+            ["layer"] = layer,
+            ["category"] = category,
+            ["event"] = eventName,
+            ["severity"] = severity,
+            ["campaignDate"] = campaignDate,
+            ["battleId"] = battleId,
+            ["side"] = -1,
+            ["alliance"] = -1,
+            ["unit"] = "-",
+            ["phase"] = "-",
+            ["durationMs"] = durationMs,
+            ["decision"] = decision,
+            ["reason"] = reason,
+            ["inputSignature"] = inputSignature,
+            ["fields"] = JObject.FromObject(fields ?? new Dictionary<string, object>())
+        };
+
+        return row.ToString(Formatting.None);
     }
 
     private static FrontSectorLedger BuildLedger()
