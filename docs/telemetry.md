@@ -53,7 +53,7 @@ For a telemetry smoke run:
 - Close GTCW before deploy.
 - Build `dist/WhiskeyRealism.dll`.
 - Deploy to `<GTCW>/BepInEx/plugins/WhiskeyRealism.dll`.
-- Verify `dist/WhiskeyRealism.dll` and the deployed plugin DLL have matching timestamp/size and `sha256sum`.
+- Verify the deployed plugin timestamp is fresh, and confirm `dist/WhiskeyRealism.dll` and the deployed plugin DLL have matching size and `sha256sum`.
 - Enable a tuning profile intentionally, usually `FullTuning` for framework smoke.
 - Launch GTCW and start a career/battle path that emits tactical and campaign rows.
 - Confirm a new session appears under `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session-id>/`.
@@ -64,4 +64,6 @@ For a telemetry smoke run:
 
 ## Evidence Boundary
 
-Task 9 verifies config/runtime contracts through the console harness and plugin build. Task 10 is still required before any claim that the telemetry framework was deployed, hash-verified in the game plugin directory, or smoke-tested in GTCW.
+Task 10 deploy/hash proof was recorded on 2026-05-15 for branch commit `c8db29a`: `dist/WhiskeyRealism.dll` and the deployed BepInEx plugin were both `1245184` bytes and matched SHA-256 `f1ace5cf26567cd018b35fb1bdd5987c3869232a49a209287717a6770db91866`.
+
+Runtime smoke is still pending. The current `LogOutput.log` timestamp (`2026-05-15 07:54:28.457939800 -0500`) predates the `19:39` deploy, no `tuning-logs` session existed in the read-only check, and new `[Telemetry]` config entries will not be proven until the freshly deployed plugin is launched.

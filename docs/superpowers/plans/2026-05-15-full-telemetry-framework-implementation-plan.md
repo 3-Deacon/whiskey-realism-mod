@@ -1091,12 +1091,13 @@ rg -n "LogOutput\.log|TacticalDecisionMatrix|Telemetry|tuning-logs" docs README.
 
 Results: console harness exited 0; `./build.sh` exited 0 with 0 warnings / 0 errors; `git diff --check` exited 0; docs scan exited 0 and includes the new sidecar/default-off routing references in `docs/telemetry.md`, `docs/patch-catalog.md`, `docs/handoff.md`, and `MEMORY.md`.
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
-git add src/WhiskeyRealism/Plugin.cs docs/telemetry.md docs/patch-catalog.md docs/handoff.md MEMORY.md
-git commit -m "docs: document telemetry framework"
+git commit -m "feat: add telemetry runtime controls and docs"
 ```
+
+Committed as `c8db29a feat: add telemetry runtime controls and docs`.
 
 ## Task 10: Final Verification, Deploy, And Runtime Smoke
 
@@ -1105,7 +1106,7 @@ git commit -m "docs: document telemetry framework"
 - Deployed output: `/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/WhiskeyRealism.dll`
 - Runtime outputs: `/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/WhiskeyRealism/tuning-logs/`
 
-- [ ] Run full harness:
+- [x] Run full harness:
 
 ```bash
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
@@ -1113,7 +1114,7 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 
 Expected: exits `0`.
 
-- [ ] Run build:
+- [x] Run build:
 
 ```bash
 ./build.sh
@@ -1121,7 +1122,7 @@ Expected: exits `0`.
 
 Expected: `dist/WhiskeyRealism.dll` exists and build exits `0`.
 
-- [ ] Deploy with game closed:
+- [x] Deploy with game closed:
 
 ```bash
 cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"
@@ -1129,7 +1130,7 @@ cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Gr
 
 If Windows holds the DLL lock, close GTCW and rerun the same command.
 
-- [ ] Verify local/deployed DLL identity:
+- [x] Verify local/deployed DLL identity:
 
 ```bash
 stat -c '%y %s %n' dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/WhiskeyRealism.dll"
@@ -1137,6 +1138,22 @@ sha256sum dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/co
 ```
 
 Expected: sizes and SHA-256 hashes match.
+
+Task 10 deploy/hash evidence from controller closeout on 2026-05-15:
+
+- Task 9 commit: `c8db29a feat: add telemetry runtime controls and docs`.
+- Full harness: `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` exited `0`; only existing CS0649 warnings were reported.
+- Build: `./build.sh` exited `0` with `0 Warning(s)` and `0 Error(s)` and produced `dist/WhiskeyRealism.dll`.
+- Deploy: `cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"` succeeded.
+- `stat`: `dist/WhiskeyRealism.dll` was `2026-05-15 19:39:43.472409696 -0500`, `1245184` bytes; deployed plugin was `2026-05-15 19:39:59.237663600 -0500`, `1245184` bytes.
+- `sha256sum`: both local and deployed DLLs matched `f1ace5cf26567cd018b35fb1bdd5987c3869232a49a209287717a6770db91866`.
+
+Runtime smoke boundary:
+
+- Current `BepInEx/LogOutput.log` is stale for this deploy: `2026-05-15 07:54:28.457939800 -0500`, `133252053` bytes, which predates the `19:39` deployed DLL.
+- No `BepInEx/WhiskeyRealism/tuning-logs/<session-id>/` directory/session was present in the read-only check.
+- Current config has a `[Telemetry]` section but only the old `Director Verbose Trace`; the new telemetry config entries will not be proven until the freshly deployed plugin is launched.
+- Therefore `Off`, `TacticalTuning`, `CampaignTuning`, `FullTuning`, telemetry validator on a real session, cap-transition smoke, and production-cap restore remain pending and require a fresh GTCW launch after deploy.
 
 - [ ] `Off` smoke:
 
@@ -1200,7 +1217,7 @@ Tuning Log File Rotate MB = 25
 Tuning Log Retained Sessions = 2
 ```
 
-- [ ] Final repo checks:
+- [x] Final repo checks:
 
 ```bash
 git status --short --branch
@@ -1210,6 +1227,13 @@ git diff --check
 ```
 
 Expected: no unresolved markers, no whitespace errors, only intentional changes staged/committed.
+
+Final repo-check evidence before closeout commit:
+
+- `git status --short --branch` showed branch `telemetry-framework-plan` with only closeout doc edits pending.
+- `git log --oneline -10` showed Task 6-9 telemetry commits through `c8db29a`.
+- Unresolved-marker scan returned no matches.
+- `git diff --check` exited `0`.
 
 ## Rollback And Scope Boundary
 
