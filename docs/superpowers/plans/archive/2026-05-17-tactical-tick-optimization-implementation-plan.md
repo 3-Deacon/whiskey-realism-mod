@@ -15,8 +15,8 @@
 ## Task 0: Preparation & Context
 
 **Files:**
-- Read in full: `docs/superpowers/plans/2026-05-17-tactical-tick-optimization-implementation-plan.md` (this document — authoritative)
-- Read: `docs/superpowers/specs/2026-05-16-tactical-tick-optimization-design.md` (for context only; plan supersedes it)
+- Read in full: `docs/superpowers/plans/archive/2026-05-17-tactical-tick-optimization-implementation-plan.md` (this document — authoritative, archived post-Task 12)
+- Read: `docs/superpowers/specs/archive/2026-05-16-tactical-tick-optimization-design.md` (for context only; plan supersedes it; archived post-Task 12)
 - Review: `src/WhiskeyRealism/Tactical/Orchestrator/TacticalBattleCoordinatorRuntime.cs` (DriveTacticalCommanderSide, DriveTickCycle, DriveOperationsLedger, Tick)
 - Review: `src/WhiskeyRealism/Tactical/Orchestrator/TacticalBattleOrchestrator.cs` (TickOperationsLedger)
 - Review: `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (CalculateSideStatsAndUpdateAITasks ~84570, currenttimefromstart calculation ~93543, aibattle[0..2] calls ~84864)

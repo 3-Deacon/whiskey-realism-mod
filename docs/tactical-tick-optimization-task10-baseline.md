@@ -60,7 +60,7 @@
 
 **Evidence Location for Plan:**
 - This file: `docs/tactical-tick-optimization-task10-baseline.md`
-- Referenced from: `docs/handoff.md` (Task 10 block + Last updated), `docs/superpowers/plans/2026-05-17-tactical-tick-optimization-implementation-plan.md` (Task 10 section updated with completion note)
+- Referenced from: `docs/handoff.md` (Task 10 block + Last updated), `docs/superpowers/plans/archive/2026-05-17-tactical-tick-optimization-implementation-plan.md` (Task 10 section updated with completion note; archived post-Task 12)
 - Git commit: docs only (post `git status` / `git log -10` clean on feature/tactical-tick-optimization branch)
 - Harness: 0 FAIL, full PASS (Task 9 additions for gate/signature/snapshot included; total >1075)
 - Build: `./build.sh` 0 warnings / 0 errors

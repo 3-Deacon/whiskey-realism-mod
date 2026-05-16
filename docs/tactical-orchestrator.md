@@ -26,6 +26,30 @@ The tactical orchestrator is a read-owned per-battle brain layered over vanilla 
 
 The hierarchy is reference-inspired but Grand Tactician-native: runtime command nodes are built from `BattleUnits.completeunitlist`, `Regiment.GetAttachedUnitsReg(... directonly: true ...)`, `Regiment.parentregiment`, `Regiment.unittyp`, and `GamePrefs.commandhierarchyshift`.
 
+## Tactical Tick Optimization (Heavy Path Throttling)
+
+The tactical tick path (O0 `TacticalBattleCoordinator` + per-side `TacticalBattleOrchestrator` + #61 operations-ledger) uses **Approach 1** (signature + battle-hours gated heavy path; authoritative plan `docs/superpowers/plans/archive/2026-05-17-tactical-tick-optimization-implementation-plan.md` + design `docs/superpowers/specs/archive/2026-05-16-tactical-tick-optimization-design.md`).
+
+**Frequent (cheap) path** (every `CheckGlobalAIStrategy` Postfix / vanilla `CalculateSideStatsAndUpdateAITasks` cycle): cheap `TacticalBattleStateSignature` extraction + `TacticalHeavyPathGate.Decide` + reuse of last published `TacticalBattleRuntimeSnapshot` (or Empty) + full live vanilla per-group reads. All `TelemetryPerf.Scope` ("tactical.orchestrator-tick" at CoordinatorRuntime.cs:161, "tactical.operations-ledger":374, "tactical.command-assignment" at TacticalBattleOrchestrator.cs:99) and urgent recovery remain responsive.
+
+**Throttled (heavy) path** (only when gate returns Run): `TacticalBattleSnapshotBuilder.Build` (expensive: `ArmyEvidenceBuilder.Build` + `TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle` + command tree + direct-child snapshots) then publish the atomic snapshot. Reused by DriveTickCycle, DriveDirectChildCycle, DriveOperationsLedger, doctrine assignment, and #61 high-level targets.
+
+**Components (pure + runtime split per Tactical/AGENTS.md):**
+- `TacticalBattleStateSignature` (pure struct, Task 2; `TacticalBattleStateSignature.cs:30`): `ActiveUnitCount`, `Side[0/1]ActiveForce`, `Side[0/1]MacroAI`, `AnySideInRetreatOrEOD`, `MajorObjectiveAnchorHash`, `AnyInterruptedPathsOrNewContact`, `BattleHourBucket`. `SignatureEquals` (excludes bucket, follows DirectChildEvidence pattern at DirectChildContracts.cs:89).
+- `TacticalHeavyPathGate` (pure static, Task 3; `TacticalHeavyPathGate.cs:33`): `Input`/`Decision`; `Decide` (HeavyPathGate.cs:80) — first-tick always Run; effective change (sig diff or pending) after cycle floor; max-interval force even on stable sig; 6 reasons (`"first-tick"|"signature-change"|"pending-change"|"max-interval-force"|"throttled-pending"|"stable-under-max"`).
+- `TacticalBattleRuntimeSnapshot` (pure immutable DTO, Task 4; `TacticalBattleRuntimeSnapshot.cs:80`): atomic reusable unit (signature, build hours, OwnEvidence, EnemyVisibleState, scalars, Objectives with avenues, CommandTreeSnapshot, DirectChildSnapshots); `Empty` singleton; degrade-safe.
+- `TacticalBattleSnapshotBuilder` (runtime-only, Task 5; `TacticalBattleSnapshotBuilder.cs:42`, excluded from test csproj): `ExtractCurrentSignature` (cheap) + `Build` (heavy only on gate Run; SnapshotBuilder.cs:119).
+- Coordinator wiring + dedup (Task 6; `TacticalBattleCoordinatorRuntime.cs:42-47` comments, 272/396/1011 Drive* sites, 482 `IsHeavyThrottlingEnabled`, 1230 `EmitHeavyGateTelemetry` Category.Gate, 1288 per-battle reset): per-side caches for last sig/time/published/pending; battle-level dedup via `BattleUnits` owner `lastsidestatupdate` (not AIBattle); conditional Build+publish vs reuse `_lastPublishedSnapshots[s]`.
+- Orchestrator/ledger consumers (Task 7): synthesize from snapshot (or degrade); see TacticalBattleOrchestrator.cs, TacticalOperationsLedgerRuntime.cs.
+- Urgent Recovery Safety Boundary (Task 8): #61 (`BattleCommandPostureExecutorPatch` on `AdjustGroupFormations`) + local fixes (CommandFormationCorrection, posture executor, RecoverInterruptedOrder, etc.) **never** call heavy Build or gate. Always last published snapshot (HasData guard) + live vanilla (pathinterrupted, groupsubordinatesmoving, local FOW contacts via TacticalFogOfWarContact, formation/order state, cooldowns, macroai, positions — full list in Snapshot.cs:44-56 boundary comments). Guarantees no 1-2 s hitch for close threats even under throttle. Harness regression test + comments in 5 files.
+- Telemetry (Task 9): correct repeated `TelemetryRouter.Emit` (not OnceLog fixed-key) for `[TacticalHeavyGate]` executed/skipped + reasons + inputSig fields in tactical.jsonl (Writer.cs:425 Category.Gate); Performance scopes unchanged. Frequent "skipped", occasional "executed" visible in TacticalTuning/FullTuning.
+
+**Config** (`Plugin.cs:401-410` Bind in "TacticalTickOptimization" section after Tactical Commander Mode; getter at 150; `IsHeavy...` at CoordinatorRuntime:482/487): default-off for safe rollout. "Heavy Ledger Review Cycle Hours" = 0.003f (≈10.8 battle seconds; must be ≤ vanilla sidestatupdatecycle from decompile ~84570 / GamePrefs).
+
+**Performance results** (Task 10 pre-change baseline with throttling disabled vs Task 11 smoke with enabled + 0.003 h cycle; identical large battle e.g. Gettysburg rec., 1× ≥60 battle-min + 20× ≥30 battle-min, TacticalTuning profile, same post-Task9 DLL): see dedicated `docs/tactical-tick-optimization-task10-baseline.md` and `docs/tactical-tick-optimization-task11-smoke.md` (python stdlib extractor for p95/p99 on 5 scopes incl. `tactical.posture-executor`; TacticalHeavyGate counts/reasons/samples from tactical.jsonl; manifest + cfg verification; no-hitch/urgent/rollback observations). Expected: significant p95/p99 reduction in orchestrator/ledger/command scopes (heavy now gated); posture-executor parity (urgent responsive on stale snap + live vanilla); gate: hundreds/thousands skipped (mostly stable-under-max), executed on first-tick/sig/pending/max-interval; no repeated exceptions; rollback (flag=false) matches baseline exactly. Gate telemetry samples show decision/reason/battleHours/cycle/activeUnits.
+
+**Rollback parity**: `Enable Tactical Heavy Path Throttling = false` (or delete section) restores 100% heavy every tick with identical behavior and p95 numbers to pre-Task6.
+
 ## Shipped Slices
 
 | Slice | State | Runtime proof |
@@ -41,6 +65,7 @@ The hierarchy is reference-inspired but Grand Tactician-native: runtime command 
 | #60 terrain/facing discipline | Shipped on `main` | Build/deploy/hash verified; focused enabled terrain-correction smoke pending |
 | #61 operations-ledger posture executor + doctrine consumers | Shipped on `main` | Harness/build/deploy/hash verified at `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75`; Active smoke pending fresh battle log |
 | #62 W&L player-subordinate order bridge | Shipped on `main`, default-off | Harness/build/deploy/hash verified in `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75`; focused enabled smoke pending |
+| Tactical tick optimization (Approach 1 internal) | Shipped in worktree (Task 12) | Gate telemetry + p95/p99 improvement under TacticalTuning/FullTuning; urgent #61 parity on stale snapshot + live vanilla; harness 1112+ PASS (Tasks 2-8 tests); see `docs/tactical-tick-optimization-task10-baseline.md` + task11-smoke.md + CoordinatorRuntime.cs:272/482/1230 + HeavyPathGate.cs:80 |
 
 ## Patch Consumers
 

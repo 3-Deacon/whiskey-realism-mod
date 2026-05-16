@@ -111,7 +111,7 @@
 
 **Evidence Location for Plan + Handoff:**
 - This file: `docs/tactical-tick-optimization-task11-smoke.md`
-- Referenced from: `docs/handoff.md` (Task 11 block + Last updated), `docs/superpowers/plans/2026-05-17-tactical-tick-optimization-implementation-plan.md` (Task 11 section + completion note)
+- Referenced from: `docs/handoff.md` (Task 11 block + Last updated), `docs/superpowers/plans/archive/2026-05-17-tactical-tick-optimization-implementation-plan.md` (Task 11 section + completion note; archived post-Task 12)
 - Git commit: docs only (post `git status` / `git log --oneline -10` clean on feature/tactical-tick-optimization worktree; see Task 10 commit 7bc1b1b precedent)
 - Harness: all PASS (1112+ tests incl. new signature/gate/snapshot/urgent-boundary tests from Tasks 2-8); build `./build.sh` 0 warnings / 0 errors; deployed DLL hash/timestamp verified match (no new code in Task 11)
 - Code citations (research-verified): Plugin.cs:401 (config Bind), 150 (getter), 488 (IsHeavy...); CoordinatorRuntime.cs:161/374 (Perf scopes), 272/396/1011 (if !enabled full-build else gate), 482 (IsHeavyThrottlingEnabled), 1230-1272 (EmitHeavyGateTelemetry + Category.Gate), 1258 (WithDecision executed/skipped), 1288+ (reset per battle); HeavyPathGate.cs:80 (Decide + reasons), 92/106/113/119/122 (exact reason strings); SnapshotBuilder.cs:119 (Build heavy path only on gate Run), 128 (ArmyEvidenceBuilder.Build etc.); TelemetryWriter.cs:425 (tactical.jsonl for Gate), TelemetryJson.cs:36 (decision/reason/inputSignature); BattleCommandPostureExecutorPatch.cs:233 + TacticalObserverPatch.cs:777 ("tactical.posture-executor"); Task 8 safety boundary comments in 5 files.

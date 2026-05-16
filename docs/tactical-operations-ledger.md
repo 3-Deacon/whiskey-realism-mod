@@ -74,6 +74,20 @@ Objective anchors come from vanilla battle state before synthetic evidence. The 
 
 Fallback target resolution is bounded and threat-aware. When a `FallBackToLine` task has a current or primary objective point, #61 steps away from that objective by the configured fallback standoff. If the objective anchor is unavailable but a closest visible enemy unit is available, #61 derives the fallback waypoint by stepping away from that enemy bearing instead of failing with `target-unresolved`. If neither objective nor visible threat can be resolved, the movement write still fails closed.
 
+## Tactical Tick Optimization (Heavy Path Throttling)
+
+#61 operations-ledger posture execution and doctrine consumers now ride the split tick cadence (Approach 1; see plan `docs/superpowers/plans/archive/2026-05-17-tactical-tick-optimization-implementation-plan.md` Task 12 + archived design).
+
+**DriveOperationsLedger** (CoordinatorRuntime.cs:396 and 416) follows the same gate as DriveTick/DirectChild: cheap signature + `TacticalHeavyPathGate.Decide` (HeavyPathGate.cs:80); on Run, heavy `TacticalBattleSnapshotBuilder.Build` (SnapshotBuilder.cs:119 — evidence + full objectives with approach avenues + command tree + direct children) + publish; otherwise reuse `_lastPublishedSnapshots[side]` (or Empty) for director + `CommandDoctrineAssignment`.
+
+**Frequent path for #61** (`BattleCommandPostureExecutorPatch` Postfix on `AdjustGroupFormations`, TacticalOperationsLedgerRuntime.Update, CommandPostureExecutor, local formation/fallback fixes): always uses last published snapshot (HasData guard, degrade to live vanilla only) + fresh per-Regiment vanilla reads (`pathinterrupted`, `groupsubordinatesmoving`, local FOW contacts, formation state, cooldowns, etc. — full allowed list in TacticalBattleRuntimeSnapshot.cs:44-56 Task 8 boundary comments). The gate and heavy Build are **never** called from #61 or urgent recovery paths. This preserves the responsive character of posture execution, RecoverInterruptedOrder, close-flank `GuardFlank`/`FallBackToLine`, and formation corrections even when side-wide heavy planning is throttled.
+
+**Heavy path impact on ledger**: full `TacticalOperationDirector`, battle-line/nav/defensive planners, `CommandDoctrineOrder` generation, and assignment only when gate allows (first-tick, signature/pending change after cycle floor, or max-interval force). The snapshot is the single source of truth for high-level doctrine targets and command tree/direct-child roles consumed by #61.
+
+**Config, gate reasons, telemetry, urgent boundary, and performance evidence** are identical to the orchestrator description (Plugin.cs:401 "TacticalTickOptimization", CoordinatorRuntime.cs:482/1230 Category.Gate repeated events, 6 reasons in HeavyPathGate.cs:92/106/113/119/122, Task 8 safety in 5 files + harness test, Task 10/11 dedicated notes for p95 deltas on `tactical.posture-executor` + gate counts/reasons/samples showing frequent skipped + occasional executed, no-hitch + rollback parity).
+
+Rollback (`Enable Tactical Heavy Path Throttling = false`) restores 100% heavy ledger passes on every tick with exact pre-optimization behavior.
+
 ## Decision Gate Translation
 
 The tactical command system uses gates, not a single aggression value. The reference SDK patterns that matter are: scouts/screens move ahead until contact; screens break off or reform when too close; commanders run a play only after real contact; attacks require a target, odds, morale, and reserve support; artillery falls back or cancels fire when unsupported; and fallback/retreat comes from morale, flank, danger, and target-validity failures. Whiskey translates those ideas into Grand Tactician-owned anchors instead of copying foreign code or data.
