@@ -287,6 +287,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     float cycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
                     var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP);
                     var dec = TacticalHeavyPathGate.Decide(input);
+                    EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig);
                     TacticalBattleRuntimeSnapshot snap;
                     if (dec.ShouldRun)
                     {
@@ -415,6 +416,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         float cycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
                         var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP);
                         var dec = TacticalHeavyPathGate.Decide(input);
+                        EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig);
                         TacticalBattleRuntimeSnapshot snap;
                         if (dec.ShouldRun)
                         {
@@ -1025,6 +1027,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     float cycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
                     var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP);
                     var dec = TacticalHeavyPathGate.Decide(input);
+                    EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig);
                     TacticalBattleRuntimeSnapshot snap;
                     if (dec.ShouldRun)
                     {
@@ -1215,6 +1218,57 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
             catch { }
+        }
+
+        /// <summary>
+        /// Emits repeated heavy-gate decision telemetry using TelemetryRouter + Category.Gate
+        /// (not OnceLog with fixed key) so "executed"/"skipped" + reasons appear frequently
+        /// in TacticalTuning / FullTuning profiles. Includes BattleHourBucket for time-bucketing.
+        /// Called from all three Drive* gate sites when heavy throttling is enabled.
+        /// try/catch guarded per runtime safety rules.
+        /// </summary>
+        private static void EmitHeavyGateTelemetry(
+            int side,
+            TacticalHeavyPathGate.Decision dec,
+            float nowH,
+            float lastH,
+            float cycle,
+            bool hasP,
+            TacticalBattleStateSignature currSig)
+        {
+            try
+            {
+                // Time-bucketed input signature (coarse BattleHourBucket changes over time)
+                string inputSig = "TacticalHeavyGate|side=" + side +
+                    "|nowH=" + nowH.ToString("F4") +
+                    "|lastH=" + lastH.ToString("F4") +
+                    "|cycle=" + cycle.ToString("F4") +
+                    "|pending=" + hasP +
+                    "|units=" + currSig.ActiveUnitCount +
+                    "|objHash=" + currSig.MajorObjectiveAnchorHash +
+                    "|bucket=" + currSig.BattleHourBucket;
+
+                TelemetryRouter.Emit(
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Gate,
+                    "TacticalHeavyGate",
+                    TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(side)
+                        .WithDecision(dec.ShouldRun ? "executed" : "skipped", dec.Reason, inputSig)
+                        .WithField("cycleHours", cycle)
+                        .WithField("battleHours", nowH)
+                        .WithField("lastHeavyHours", lastH)
+                        .WithField("hasPending", hasP)
+                        .WithField("activeUnits", currSig.ActiveUnitCount)
+                        .WithField("majorObjAnchorHash", currSig.MajorObjectiveAnchorHash)
+                        .WithField("battleHourBucket", currSig.BattleHourBucket)
+                        .WithField("gateReason", dec.Reason));
+            }
+            catch
+            {
+                // degrade silently; telemetry must never break tick path
+            }
         }
 
         private static void ClearForFailure()
