@@ -83,6 +83,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
         public static ConfigEntry<int> TacticalDeploymentTerrainMaxCandidates;
         public static ConfigEntry<float> TacticalDeploymentFacingPreferredDeltaDegrees;
+        internal ConfigEntry<bool> EnableTacticalHeavyPathThrottling;
+        internal ConfigEntry<float> TacticalHeavyReviewCycleHours;
         public const int TacticalMoraleSnapshotLedgerCapacity = 4;
         public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
@@ -144,6 +146,8 @@ namespace WhiskeyRealism
 
         internal bool TacticalOperationsLedgerAllowsWrites =>
             TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderModeValue);
+
+        public float HeavyReviewCycleHours => TacticalHeavyReviewCycleHours?.Value ?? 0.003f;
 
         private TacticalCommanderMode ResolveTacticalCommanderMode()
         {
@@ -394,6 +398,16 @@ namespace WhiskeyRealism
                 "Active",
                 "Default Active. Off disables the operations-ledger command system; MonitorOnly runs vision/ledger/tasks/monitor without vanilla writes; Active runs the full tactical command system for AI sides.");
             _ = TacticalCommanderModeValue;
+            EnableTacticalHeavyPathThrottling = Config.Bind(
+                "TacticalTickOptimization",
+                "Enable Tactical Heavy Path Throttling",
+                false,
+                "Enable the heavy path throttle for side-wide evidence, vision, and doctrine assignment (default off until smoke complete).");
+            TacticalHeavyReviewCycleHours = Config.Bind(
+                "TacticalTickOptimization",
+                "Heavy Ledger Review Cycle Hours",
+                0.003f,
+                "Max battle hours between full heavy planning passes even if signature is unchanged (0.003 hours ≈ 10.8 battle seconds). Must be <= vanilla sidestatupdatecycle for constraint C.");
             EnableTacticalBattleOrchestrator = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Battle Orchestrator",
