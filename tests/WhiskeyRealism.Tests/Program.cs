@@ -1116,6 +1116,13 @@ static class Program
             ("tactical battle state signature differs on objective hash", TacticalBattleStateSignatureDiffersOnObjectiveHash),
             ("tactical battle state signature differs on active unit count", TacticalBattleStateSignatureDiffersOnActiveUnitCount),
             ("tactical battle state signature equals ignores hour bucket", TacticalBattleStateSignatureEqualsIgnoresHourBucket),
+            ("tactical heavy path gate first tick always runs", TacticalHeavyPathGateFirstTickAlwaysRuns),
+            ("tactical heavy path gate signature change respects floor", TacticalHeavyPathGateSignatureChangeRespectsFloor),
+            ("tactical heavy path gate signature change runs after floor", TacticalHeavyPathGateSignatureChangeRunsAfterFloor),
+            ("tactical heavy path gate max interval forces even on stable", TacticalHeavyPathGateMaxIntervalForcesEvenOnStable),
+            ("tactical heavy path gate pending change runs after floor", TacticalHeavyPathGatePendingChangeRunsAfterFloor),
+            ("tactical heavy path gate pending does not bypass floor", TacticalHeavyPathGatePendingDoesNotBypassFloor),
+            ("tactical heavy path gate no run when stable under max", TacticalHeavyPathGateNoRunWhenStableUnderMax),
         };
 
         foreach (var test in tests)
@@ -23135,5 +23142,81 @@ static class Program
         var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
         var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 13); // only bucket differs
         AssertTrue(a.SignatureEquals(b), "hour bucket change alone must not affect signature equality (time gate separate)");
+    }
+
+    // TacticalHeavyPathGate TDD tests (Task 3). Written first (RED until gate impl correct).
+    // Uses per-side scalar Input per gate pattern (DirectChildGate etc). cycleHours is both floor and max.
+    // hasPending tracked by caller; gate is pure decision only.
+
+    private static void TacticalHeavyPathGateFirstTickAlwaysRuns()
+    {
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        // lastHeavy <=0 -> first tick
+        var input = new TacticalHeavyPathGate.Input(curr, 1.5f, 0f, lastSig, 0.003f, false);
+        var dec = TacticalHeavyPathGate.Decide(input);
+        AssertTrue(dec.ShouldRun, "first tick (lastHeavy=0) must always run heavy");
+        AssertEqual(TacticalHeavyPathGate.Action.Run, dec.Action, "first tick action");
+    }
+
+    private static void TacticalHeavyPathGateSignatureChangeRespectsFloor()
+    {
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 2, false, 98765, false, 12); // macro AI differs -> sig change
+        // elapsed < cycle -> must throttle even on change
+        var input = new TacticalHeavyPathGate.Input(curr, 1.502f, 1.5f, lastSig, 0.003f, false);
+        var dec = TacticalHeavyPathGate.Decide(input);
+        AssertFalse(dec.ShouldRun, "sig change must respect min floor (cycleHours)");
+    }
+
+    private static void TacticalHeavyPathGateSignatureChangeRunsAfterFloor()
+    {
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 2, false, 98765, false, 12); // differs
+        // elapsed >= cycle -> run
+        var input = new TacticalHeavyPathGate.Input(curr, 1.504f, 1.5f, lastSig, 0.003f, false);
+        var dec = TacticalHeavyPathGate.Decide(input);
+        AssertTrue(dec.ShouldRun, "sig change must run once floor (cycle) passed");
+        AssertContains(dec.Reason, "signature-change", "reason for sig change execution");
+    }
+
+    private static void TacticalHeavyPathGateMaxIntervalForcesEvenOnStable()
+    {
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12); // identical
+        // no pending, same sig, but elapsed >= cycle -> force refresh (max interval)
+        var input = new TacticalHeavyPathGate.Input(curr, 1.504f, 1.5f, lastSig, 0.003f, false);
+        var dec = TacticalHeavyPathGate.Decide(input);
+        AssertTrue(dec.ShouldRun, "max interval must force heavy even on identical signature (no starvation)");
+        AssertEqual("max-interval-force", dec.Reason, "reason for max force");
+    }
+
+    private static void TacticalHeavyPathGatePendingChangeRunsAfterFloor()
+    {
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12); // same now, but pending from earlier change
+        var input = new TacticalHeavyPathGate.Input(curr, 1.504f, 1.5f, lastSig, 0.003f, true); // hasPending
+        var dec = TacticalHeavyPathGate.Decide(input);
+        AssertTrue(dec.ShouldRun, "pending change must execute once floor met");
+        AssertContains(dec.Reason, "pending-change", "reason for pending execution");
+    }
+
+    private static void TacticalHeavyPathGatePendingDoesNotBypassFloor()
+    {
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var input = new TacticalHeavyPathGate.Input(curr, 1.502f, 1.5f, lastSig, 0.003f, true); // pending but under floor
+        var dec = TacticalHeavyPathGate.Decide(input);
+        AssertFalse(dec.ShouldRun, "pending must still respect the cycleHours floor");
+    }
+
+    private static void TacticalHeavyPathGateNoRunWhenStableUnderMax()
+    {
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var input = new TacticalHeavyPathGate.Input(curr, 1.502f, 1.5f, lastSig, 0.003f, false);
+        var dec = TacticalHeavyPathGate.Decide(input);
+        AssertFalse(dec.ShouldRun, "stable + under max interval must skip (cheap path)");
+        AssertEqual("stable-under-max", dec.Reason, "reason for stable skip");
     }
 }
