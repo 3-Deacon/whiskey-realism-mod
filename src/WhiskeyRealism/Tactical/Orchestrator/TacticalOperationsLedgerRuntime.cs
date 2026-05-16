@@ -30,9 +30,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<ObjectiveRecord> objectives,
             StrategicBattleIntentSnapshot strategicBattleIntent,
             ForceAvailabilitySnapshot force,
-            PersonalityVector personality)
+            PersonalityVector personality,
+            TacticalBattleRuntimeSnapshot snapshot = default)
         {
-            Replace(mode, objectives, strategicBattleIntent, force, personality);
+            // Task 7: forward snapshot (optional) so ledger uses snapshot objectives when HasData.
+            // This ensures doctrine assignment (CommandDoctrineAssignment.Build via picture from _currentObjectives)
+            // and downstream consumers operate on snapshot data when the heavy atomic unit is provided.
+            var effectiveObjectives = (snapshot.Objectives != null && snapshot.HasData)
+                ? snapshot.Objectives
+                : objectives;
+            Replace(mode, effectiveObjectives, strategicBattleIntent, force, personality);
         }
 
         internal void Replace(
@@ -40,7 +47,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<ObjectiveRecord> objectives,
             StrategicBattleIntentSnapshot strategicBattleIntent,
             ForceAvailabilitySnapshot force,
-            PersonalityVector personality)
+            PersonalityVector personality,
+            TacticalBattleRuntimeSnapshot snapshot = default)
         {
             _commanderMode = mode;
             if (!RunsLedger)
@@ -54,7 +62,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return;
             }
 
-            _currentObjectives = CopyObjectives(objectives);
+            // Use snapshot objectives if the caller provided a HasData snapshot (atomic with command tree / evidence at heavy build time).
+            // Degrades safely for default/Empty (null guard + HasData false).
+            var effectiveObjectives = (snapshot.Objectives != null && snapshot.HasData)
+                ? snapshot.Objectives
+                : objectives;
+            _currentObjectives = CopyObjectives(effectiveObjectives);
             _currentStrategicBattleIntent = strategicBattleIntent;
             _currentForce = force;
             _currentPersonality = personality;

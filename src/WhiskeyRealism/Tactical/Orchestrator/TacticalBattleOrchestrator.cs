@@ -58,11 +58,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<ObjectiveRecord> objectives,
             StrategicBattleIntentSnapshot strategicBattleIntent,
             ForceAvailabilitySnapshot force,
-            PersonalityVector personality)
+            PersonalityVector personality,
+            TacticalBattleRuntimeSnapshot snapshot = default)
         {
             if (Army == null) return;
 
-            OperationsLedger.Update(mode, objectives, strategicBattleIntent, force, personality);
+            // Task 7: accept snapshot (optional for compat; default/Empty degrades to prior paths per plan).
+            // When provided and HasData (from heavy gated build in coordinator), use its Objectives (for ledger/director/doctrine)
+            // and CommandTree (for nested division play) so CommandNodeOperationsRuntime.Build, TacticalNestedDivisionPlayPlanner,
+            // and CommandDoctrineAssignment (via ledger picture) all consume the atomic snapshot data instead of independently rebuilt values.
+            // Safe guards prevent NRE on default(struct) zeroed refs (Objectives/CommandTree may be null only for default param).
+            IReadOnlyList<ObjectiveRecord> effectiveObjectives = (snapshot.Objectives != null && snapshot.HasData)
+                ? snapshot.Objectives
+                : (objectives ?? Array.Empty<ObjectiveRecord>());
+
+            CommandTreeSnapshot effectiveCommandTree = (snapshot.CommandTree != null && snapshot.CommandTree.HasNodes)
+                ? snapshot.CommandTree
+                : Army.CurrentCommandTree;
+
+            OperationsLedger.Update(mode, effectiveObjectives, strategicBattleIntent, force, personality, snapshot);
             IReadOnlyList<CommandNodeOperationalState> commandOperations;
             using (TelemetryPerf.Scope("tactical.command-assignment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
@@ -71,7 +85,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     OperationsLedger.CurrentOperation,
                     OperationsLedger.CurrentObjectives);
                 commandOperations = TacticalNestedDivisionPlayPlanner.Apply(
-                    Army.CurrentCommandTree,
+                    effectiveCommandTree,
                     commandOperations);
             }
             Army.UpdateOperationsLedger(OperationsLedger, commandOperations ?? Array.Empty<CommandNodeOperationalState>());
