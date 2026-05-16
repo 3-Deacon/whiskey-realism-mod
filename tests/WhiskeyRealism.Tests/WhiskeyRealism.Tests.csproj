@@ -232,6 +232,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\CommandNodeOperationsRuntime.cs" Link="Orchestrator\CommandNodeOperationsRuntime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalNestedDivisionPlayPlanner.cs" Link="Orchestrator\TacticalNestedDivisionPlayPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\StrategicBattleIntentSnapshot.cs" Link="Orchestrator\StrategicBattleIntentSnapshot.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattleRuntimeSnapshot.cs" Link="Orchestrator\TacticalBattleRuntimeSnapshot.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattleLifecycleDetector.cs" Link="Orchestrator\TacticalBattleLifecycleDetector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalBattlePlan.cs" Link="Orchestrator\TacticalBattlePlan.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalIntentModel.cs" Link="Orchestrator\TacticalIntentModel.cs" />
