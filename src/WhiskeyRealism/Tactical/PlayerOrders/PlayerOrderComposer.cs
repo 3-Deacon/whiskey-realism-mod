@@ -197,6 +197,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return Candidate(input, PlayerOrderIntent.HoldObjective, input.ObjectivePoint, ObjectiveKey(input), "hold-objective");
             }
 
+            if (WantsHold(input) && PlayerOrderTargetPolicy.IsValid(input.UnitPosition))
+            {
+                return Candidate(input, PlayerOrderIntent.HoldObjective, input.UnitPosition, "hold-position", "hold-position");
+            }
+
             if (WantsSupport(input) && input.HasValidObjective)
             {
                 return Candidate(input, PlayerOrderIntent.SupportMainEffort, input.ObjectivePoint, ObjectiveKey(input), "support-main-effort");

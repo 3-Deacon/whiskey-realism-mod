@@ -85,6 +85,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<float> TacticalDeploymentFacingPreferredDeltaDegrees;
         internal ConfigEntry<bool> EnableTacticalHeavyPathThrottling;
         internal ConfigEntry<float> TacticalHeavyReviewCycleHours;
+        internal ConfigEntry<float> TacticalHeavyReviewMinRealtimeSeconds;
         public const int TacticalMoraleSnapshotLedgerCapacity = 4;
         public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
@@ -148,6 +149,7 @@ namespace WhiskeyRealism
             TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderModeValue);
 
         public float HeavyReviewCycleHours => TacticalHeavyReviewCycleHours?.Value ?? 0.003f;
+        public float HeavyReviewMinRealtimeSeconds => TacticalHeavyReviewMinRealtimeSeconds?.Value ?? 2.0f;
 
         private TacticalCommanderMode ResolveTacticalCommanderMode()
         {
@@ -408,6 +410,11 @@ namespace WhiskeyRealism
                 "Heavy Ledger Review Cycle Hours",
                 0.003f,
                 "Max battle hours between full heavy planning passes even if signature is unchanged (0.003 hours ≈ 10.8 battle seconds). Must be <= vanilla sidestatupdatecycle for constraint C.");
+            TacticalHeavyReviewMinRealtimeSeconds = Config.Bind(
+                "TacticalTickOptimization",
+                "Heavy Ledger Review Min Realtime Seconds",
+                2.0f,
+                "Minimum real seconds between heavy planning passes under time compression. First tick still runs; urgent recovery still uses the latest snapshot plus live vanilla reads.");
             EnableTacticalBattleOrchestrator = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Battle Orchestrator",

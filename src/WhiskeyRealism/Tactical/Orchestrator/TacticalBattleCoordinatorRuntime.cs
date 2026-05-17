@@ -69,6 +69,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static FieldInfo _battleUnitsLastSideStatUpdateFieldCache;
         private static readonly Dictionary<int, float> _lastProcessedSideStatUpdateByBunitsId = new Dictionary<int, float>();
         private static readonly float[] _lastHeavyReviewHours = { 0f, 0f };
+        private static readonly float[] _lastHeavyReviewRealtimeSeconds = { 0f, 0f };
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
         private static readonly TacticalBattleRuntimeSnapshot[] _lastPublishedSnapshots = { TacticalBattleRuntimeSnapshot.Empty, TacticalBattleRuntimeSnapshot.Empty };
         private static readonly bool[] _hasPendingChange = { false, false };
@@ -282,17 +283,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     int s = side.AllianceId;
                     if (s < 0 || s > 1) s = 0;
                     float lastH = _lastHeavyReviewHours[s];
+                    float nowReal = SafeRealtimeSeconds();
+                    float lastReal = _lastHeavyReviewRealtimeSeconds[s];
                     var lastS = _lastSignatures[s];
                     bool hasP = _hasPendingChange[s];
                     float cycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
-                    var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP);
+                    float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
+                    var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
                     var dec = TacticalHeavyPathGate.Decide(input);
-                    EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig);
+                    EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
                     TacticalBattleRuntimeSnapshot snap;
                     if (dec.ShouldRun)
                     {
                         snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
                         _lastHeavyReviewHours[s] = nowH;
+                        _lastHeavyReviewRealtimeSeconds[s] = nowReal;
                         _lastSignatures[s] = currSig;
                         _lastPublishedSnapshots[s] = snap;
                         _hasPendingChange[s] = false;
@@ -411,17 +416,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         int s = side.AllianceId;
                         if (s < 0 || s > 1) s = 0;
                         float lastH = _lastHeavyReviewHours[s];
+                        float nowReal = SafeRealtimeSeconds();
+                        float lastReal = _lastHeavyReviewRealtimeSeconds[s];
                         var lastS = _lastSignatures[s];
                         bool hasP = _hasPendingChange[s];
                         float cycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
-                        var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP);
+                        float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
+                        var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
                         var dec = TacticalHeavyPathGate.Decide(input);
-                        EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig);
+                        EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
                         TacticalBattleRuntimeSnapshot snap;
                         if (dec.ShouldRun)
                         {
                             snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
                             _lastHeavyReviewHours[s] = nowH;
+                            _lastHeavyReviewRealtimeSeconds[s] = nowReal;
                             _lastSignatures[s] = currSig;
                             _lastPublishedSnapshots[s] = snap;
                             _hasPendingChange[s] = false;
@@ -1022,17 +1031,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     int s = side.AllianceId;
                     if (s < 0 || s > 1) s = 0;
                     float lastH = _lastHeavyReviewHours[s];
+                    float nowReal = SafeRealtimeSeconds();
+                    float lastReal = _lastHeavyReviewRealtimeSeconds[s];
                     var lastS = _lastSignatures[s];
                     bool hasP = _hasPendingChange[s];
                     float cycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
-                    var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP);
+                    float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
+                    var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
                     var dec = TacticalHeavyPathGate.Decide(input);
-                    EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig);
+                    EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
                     TacticalBattleRuntimeSnapshot snap;
                     if (dec.ShouldRun)
                     {
                         snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
                         _lastHeavyReviewHours[s] = nowH;
+                        _lastHeavyReviewRealtimeSeconds[s] = nowReal;
                         _lastSignatures[s] = currSig;
                         _lastPublishedSnapshots[s] = snap;
                         _hasPendingChange[s] = false;
@@ -1212,6 +1225,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < 2; i++)
                 {
                     _lastHeavyReviewHours[i] = 0f;
+                    _lastHeavyReviewRealtimeSeconds[i] = 0f;
                     _lastSignatures[i] = default(TacticalBattleStateSignature);
                     _lastPublishedSnapshots[i] = TacticalBattleRuntimeSnapshot.Empty;
                     _hasPendingChange[i] = false;
@@ -1234,7 +1248,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float lastH,
             float cycle,
             bool hasP,
-            TacticalBattleStateSignature currSig)
+            TacticalBattleStateSignature currSig,
+            float nowReal,
+            float lastReal,
+            float minReal)
         {
             try
             {
@@ -1243,6 +1260,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     "|nowH=" + nowH.ToString("F4") +
                     "|lastH=" + lastH.ToString("F4") +
                     "|cycle=" + cycle.ToString("F4") +
+                    "|real=" + nowReal.ToString("F2") +
+                    "|minReal=" + minReal.ToString("F2") +
                     "|pending=" + hasP +
                     "|units=" + currSig.ActiveUnitCount +
                     "|objHash=" + currSig.MajorObjectiveAnchorHash +
@@ -1259,6 +1278,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         .WithField("cycleHours", cycle)
                         .WithField("battleHours", nowH)
                         .WithField("lastHeavyHours", lastH)
+                        .WithField("realtimeSeconds", nowReal)
+                        .WithField("lastHeavyRealtimeSeconds", lastReal)
+                        .WithField("minRealtimeSeconds", minReal)
+                        .WithField("elapsedRealtimeSeconds", nowReal - lastReal)
                         .WithField("hasPending", hasP)
                         .WithField("activeUnits", currSig.ActiveUnitCount)
                         .WithField("majorObjAnchorHash", currSig.MajorObjectiveAnchorHash)

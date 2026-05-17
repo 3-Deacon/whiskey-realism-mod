@@ -222,6 +222,7 @@ static class Program
             ("tactical battle line planner uses predicted avenue axis", TacticalBattleLinePlannerUsesPredictedAvenueAxis),
             ("tactical defensive line anchor shifts road corridor forward", TacticalDefensiveLineAnchorShiftsRoadCorridorForward),
             ("tactical battle line planner defends corridor with reserve and artillery depth", TacticalBattleLinePlannerDefendsCorridorWithReserveAndArtilleryDepth),
+            ("tactical battle line planner keeps crossing corridor orders on defensive bank", TacticalBattleLinePlannerKeepsCrossingCorridorOrdersOnDefensiveBank),
             ("tactical scouting avenue sends screen forward and reserve rear", TacticalScoutingAvenueSendsScreenForwardAndReserveRear),
             ("tactical massing cycle waits for support before commit", TacticalMassingCycleWaitsForSupportBeforeCommit),
             ("tactical massing cycle blocks commit when endurance needs relief", TacticalMassingCycleBlocksCommitWhenEnduranceNeedsRelief),
@@ -503,6 +504,7 @@ static class Program
             ("player order composer prefers retreat from withdrawal with valid exit", PlayerOrderComposerPrefersRetreatFromWithdrawalWithValidExit),
             ("player order composer maps fallback role to fallback line", PlayerOrderComposerMapsFallbackRoleToFallbackLine),
             ("player order composer maps hold task to hold objective", PlayerOrderComposerMapsHoldTaskToHoldObjective),
+            ("player order composer maps hold intent without objective to hold position", PlayerOrderComposerMapsHoldIntentWithoutObjectiveToHoldPosition),
             ("player order composer maps support role to support main effort", PlayerOrderComposerMapsSupportRoleToSupportMainEffort),
             ("player order composer maps probe task to probe objective", PlayerOrderComposerMapsProbeTaskToProbeObjective),
             ("player order composer returns none without concrete target", PlayerOrderComposerReturnsNoneWithoutConcreteTarget),
@@ -1124,6 +1126,7 @@ static class Program
             ("tactical heavy path gate pending change runs after floor", TacticalHeavyPathGatePendingChangeRunsAfterFloor),
             ("tactical heavy path gate pending does not bypass floor", TacticalHeavyPathGatePendingDoesNotBypassFloor),
             ("tactical heavy path gate no run when stable under max", TacticalHeavyPathGateNoRunWhenStableUnderMax),
+            ("tactical heavy path gate real-time floor throttles time compression", TacticalHeavyPathGateRealtimeFloorThrottlesTimeCompression),
             ("tactical battle runtime snapshot empty is valid", TacticalBattleRuntimeSnapshotEmptyIsValid),
             ("tactical battle runtime snapshot construction sanitizes and stores", TacticalBattleRuntimeSnapshotConstructionSanitizesAndStores),
             ("tactical battle runtime snapshot copies objectives defensively", TacticalBattleRuntimeSnapshotCopiesObjectivesDefensively),
@@ -5090,6 +5093,59 @@ static class Program
         AssertTrue(reserve.PrimaryTarget.Z > main.PrimaryTarget.Z, "reserve should sit behind the defended corridor");
         AssertContains(main.Reason, "approach-intercept", "main reason");
         AssertContains(main.Reason, "objective-lane", "choke width reason");
+    }
+
+    private static void TacticalBattleLinePlannerKeepsCrossingCorridorOrdersOnDefensiveBank()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("main", CommandEchelonKind.DivisionLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 900f, 1300f, 180f),
+            CommandNodeOperationalState.Create("support", CommandEchelonKind.DivisionLike, CommandNodeRole.SupportingAttack, CommandTaskType.FormUp, 950f, 1320f, 180f),
+            CommandNodeOperationalState.Create("fix", CommandEchelonKind.DivisionLike, CommandNodeRole.FixingForce, CommandTaskType.FormUp, 1025f, 1340f, 180f),
+            CommandNodeOperationalState.Create("flank", CommandEchelonKind.BrigadeLike, CommandNodeRole.FlankMarch, CommandTaskType.FormUp, 1100f, 1360f, 180f),
+            CommandNodeOperationalState.Create("forming", CommandEchelonKind.BrigadeLike, CommandNodeRole.Unknown, CommandTaskType.FormUp, 1125f, 1380f, 180f)
+        };
+        var objective = new BattlefieldObjectiveEstimate(
+            "river-road",
+            TacticalObjectiveType.VictoryPoint,
+            0f,
+            0.82f,
+            false,
+            0.8f,
+            1000f,
+            1000f,
+            0.25f,
+            0.4f,
+            TacticalApproachAvenueEstimate.Create(
+                new TacticalMapPoint(1000f, 0f),
+                new TacticalMapPoint(1000f, 1000f),
+                TacticalApproachAvenueSource.ScheduledArrival,
+                0.92f,
+                roadAnchored: true,
+                crossingAnchored: true,
+                "river-road-crossing"));
+        TacticalDefensiveLineAnchor anchor = TacticalDefensiveLineAnchorPlanner.Plan(
+            objective,
+            TacticalBattlefrontGeometry.Build(nodes, objective),
+            nodes.Length);
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "river-road", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[] { objective });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 5000f, nowSeconds: 100f, reserveFraction: 0.20f);
+
+        AssertTrue(anchor.HasAnchor, "anchor");
+        AssertTrue(anchor.Center.HasValue, "anchor center");
+        for (int i = 0; i < orders.Length; i++)
+        {
+            AssertTrue(orders[i].PrimaryTarget.HasValue, "target " + i.ToString(CultureInfo.InvariantCulture));
+            AssertTrue(
+                orders[i].PrimaryTarget.Z > anchor.Center.Z,
+                "target should stay on defensive bank " + orders[i].Task.ToString());
+            AssertTrue(
+                orders[i].PrimaryTarget.Z < objective.Z,
+                "target should still defend before the road objective " + orders[i].Task.ToString());
+            AssertContains(orders[i].Reason, "defensive-side-corridor", "reason");
+        }
     }
 
     private static void TacticalScoutingAvenueSendsScreenForwardAndReserveRear()
@@ -12134,6 +12190,40 @@ static class Program
         AssertEqual(PlayerOrderIntent.HoldObjective, candidate.Intent, "hold task should map to hold objective");
         AssertEqual(12, candidate.VanillaType, "hold vanilla type");
         AssertEqual("ridge-a", candidate.ObjectiveKey, "objective key");
+    }
+
+    private static void PlayerOrderComposerMapsHoldIntentWithoutObjectiveToHoldPosition()
+    {
+        var input = new PlayerOrderComposerInput(
+            hasSideOrchestrator: true,
+            isPlayerSubordinate: true,
+            isCommanderInChief: false,
+            unitKey: "u1",
+            battleIdentity: "battle-a",
+            givenOrderSession: 12,
+            commandIntent: new CommandIntentResolutionSnapshot(
+                true,
+                new CommandNodeIntentSnapshot("node-u1", "node-parent", "RefuseLeft", "Hold", 0, 30, 0.4f, 1),
+                "inherited-defensive-intent"),
+            commandTask: new CommandTaskSnapshot(false, "Defender", string.Empty, default(PlayerOrderPoint), default(PlayerOrderPoint), string.Empty, "intent-only"),
+            doctrine: new ArmyDoctrineSnapshot("Committed", "DefensiveNetwork", "road-approach", "runtime"),
+            unitPosition: new PlayerOrderPoint(512f, 768f),
+            objectivePoint: default(PlayerOrderPoint),
+            fallbackPoint: default(PlayerOrderPoint),
+            exitPoint: default(PlayerOrderPoint),
+            hasValidObjective: false,
+            hasValidFallback: false,
+            hasValidExitPoint: false);
+
+        var candidate = PlayerOrderComposer.Compose(input);
+
+        AssertTrue(candidate.HasCandidate, "hold position candidate");
+        AssertEqual(PlayerOrderIntent.HoldObjective, candidate.Intent, "hold intent");
+        AssertEqual(12, candidate.VanillaType, "hold vanilla type");
+        AssertEqual(512f, candidate.TargetPoint.X, "hold x");
+        AssertEqual(768f, candidate.TargetPoint.Z, "hold z");
+        AssertEqual("hold-position", candidate.ObjectiveKey, "hold position objective");
+        AssertContains(candidate.Reason, "hold-position", "reason");
     }
 
     private static void PlayerOrderComposerMapsSupportRoleToSupportMainEffort()
@@ -23275,6 +23365,42 @@ static class Program
         var dec = TacticalHeavyPathGate.Decide(input);
         AssertFalse(dec.ShouldRun, "stable + under max interval must skip (cheap path)");
         AssertEqual("stable-under-max", dec.Reason, "reason for stable skip");
+    }
+
+    private static void TacticalHeavyPathGateRealtimeFloorThrottlesTimeCompression()
+    {
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+
+        var compressed = new TacticalHeavyPathGate.Input(
+            curr,
+            currentBattleHours: 1.510f,
+            lastHeavyHoursForSide: 1.500f,
+            lastSignatureForSide: lastSig,
+            cycleHours: 0.003f,
+            hasPendingChangeForSide: false,
+            currentRealtimeSeconds: 101f,
+            lastHeavyRealtimeSecondsForSide: 100f,
+            minRealtimeSeconds: 2f);
+        var skipped = TacticalHeavyPathGate.Decide(compressed);
+
+        AssertFalse(skipped.ShouldRun, "battle-time max must not bypass real-time floor under compression");
+        AssertEqual("realtime-floor", skipped.Reason, "real-time floor reason");
+
+        var afterFloor = new TacticalHeavyPathGate.Input(
+            curr,
+            currentBattleHours: 1.510f,
+            lastHeavyHoursForSide: 1.500f,
+            lastSignatureForSide: lastSig,
+            cycleHours: 0.003f,
+            hasPendingChangeForSide: false,
+            currentRealtimeSeconds: 102.1f,
+            lastHeavyRealtimeSecondsForSide: 100f,
+            minRealtimeSeconds: 2f);
+        var executed = TacticalHeavyPathGate.Decide(afterFloor);
+
+        AssertTrue(executed.ShouldRun, "heavy path should run once both battle-time and real-time floors pass");
+        AssertEqual("max-interval-force", executed.Reason, "max force still owns reason after real floor");
     }
 
     // TacticalBattleRuntimeSnapshot TDD tests (Task 4). Written first (RED: stub has no members).

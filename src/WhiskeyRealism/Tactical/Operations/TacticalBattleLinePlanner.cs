@@ -276,12 +276,14 @@ namespace WhiskeyRealism.Tactical.Operations
             private readonly Direction _direction;
             private readonly double _halfWidth;
             private readonly double _laneScale;
+            private readonly bool _defensiveSideTargets;
 
             private FrontageGeometry(
                 BattlefieldObjectiveEstimate objective,
                 Direction direction,
                 double halfWidth,
                 double laneScale,
+                bool defensiveSideTargets,
                 DoctrineTargetPoint left,
                 DoctrineTargetPoint right,
                 DoctrineTargetPoint artillery,
@@ -291,6 +293,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 _direction = direction;
                 _halfWidth = halfWidth;
                 _laneScale = laneScale;
+                _defensiveSideTargets = defensiveSideTargets;
                 Left = left;
                 Right = right;
                 Artillery = artillery;
@@ -305,7 +308,9 @@ namespace WhiskeyRealism.Tactical.Operations
             public DoctrineTargetPoint Target(double standOff, double fallbackLateral)
             {
                 double lateral = _halfWidth > 0d ? fallbackLateral * _laneScale : fallbackLateral;
-                return Approach(_objective, _direction, standOff, lateral);
+                return _defensiveSideTargets
+                    ? BehindObjective(_objective, _direction, standOff, lateral)
+                    : Approach(_objective, _direction, standOff, lateral);
             }
 
             public double SupportLane(int side)
@@ -425,17 +430,23 @@ namespace WhiskeyRealism.Tactical.Operations
 
                 double half = width * 0.5d;
                 double laneScale = defensiveAnchor.CorridorAnchor || IsChokeObjective(objective) ? 0.65d : 1d;
-                DoctrineTargetPoint left = Approach(objective, direction, MainApproachDistance, half);
-                DoctrineTargetPoint right = Approach(objective, direction, MainApproachDistance, -half);
+                bool defensiveSideTargets = defensiveAnchor.CorridorAnchor;
+                DoctrineTargetPoint left = defensiveSideTargets
+                    ? BehindObjective(objective, direction, MainApproachDistance, half)
+                    : Approach(objective, direction, MainApproachDistance, half);
+                DoctrineTargetPoint right = defensiveSideTargets
+                    ? BehindObjective(objective, direction, MainApproachDistance, -half)
+                    : Approach(objective, direction, MainApproachDistance, -half);
                 DoctrineTargetPoint artillery = defensiveAnchor.HasAnchor && defensiveAnchor.DefensiveArtilleryDepth > 0f
                     ? BehindObjective(objective, direction, defensiveAnchor.DefensiveArtilleryDepth, 0d)
                     : Approach(objective, direction, ArtilleryLineDistance, 0d);
                 string suffix = battlefront.HasFrontage ? ":frontage" : ":generated-frontage";
                 if (direction.UsesApproachAvenue) suffix += ":approach-avenue";
                 if (defensiveAnchor.HasAnchor) suffix += ":" + defensiveAnchor.Reason;
+                if (defensiveSideTargets) suffix += ":defensive-side-corridor";
                 if (!defensiveAnchor.CorridorAnchor && IsTerrainAnchor(objective)) suffix += ":terrain-anchor";
                 if (defensiveAnchor.CorridorAnchor || IsChokeObjective(objective)) suffix += ":objective-lane";
-                return new FrontageGeometry(objective, direction, half, laneScale, left, right, artillery, suffix);
+                return new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, left, right, artillery, suffix);
             }
 
             private static bool IsTerrainAnchor(BattlefieldObjectiveEstimate objective)

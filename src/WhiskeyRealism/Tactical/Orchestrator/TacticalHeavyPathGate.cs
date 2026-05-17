@@ -46,7 +46,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float lastHeavyHoursForSide,
                 TacticalBattleStateSignature lastSignatureForSide,
                 float cycleHours,
-                bool hasPendingChangeForSide)
+                bool hasPendingChangeForSide,
+                float currentRealtimeSeconds = 0f,
+                float lastHeavyRealtimeSecondsForSide = 0f,
+                float minRealtimeSeconds = 0f)
             {
                 CurrentSignature = currentSignature;
                 CurrentBattleHours = currentBattleHours;
@@ -54,6 +57,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 LastSignatureForSide = lastSignatureForSide;
                 CycleHours = cycleHours <= 0f ? 0.003f : cycleHours;
                 HasPendingChangeForSide = hasPendingChangeForSide;
+                CurrentRealtimeSeconds = SanitizeNonNegative(currentRealtimeSeconds);
+                LastHeavyRealtimeSecondsForSide = SanitizeNonNegative(lastHeavyRealtimeSecondsForSide);
+                MinRealtimeSeconds = SanitizeNonNegative(minRealtimeSeconds);
             }
 
             public TacticalBattleStateSignature CurrentSignature { get; }
@@ -62,6 +68,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public TacticalBattleStateSignature LastSignatureForSide { get; }
             public float CycleHours { get; }
             public bool HasPendingChangeForSide { get; }
+            public float CurrentRealtimeSeconds { get; }
+            public float LastHeavyRealtimeSecondsForSide { get; }
+            public float MinRealtimeSeconds { get; }
         }
 
         public readonly struct Decision
@@ -94,6 +103,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             float elapsed = now - last;
             if (elapsed < 0f) elapsed = 0f;
+            if (IsUnderRealtimeFloor(input))
+            {
+                return new Decision(Action.Skip, "realtime-floor");
+            }
 
             bool sigDiff = !curr.SignatureEquals(lastSig);
             bool effectiveChange = sigDiff || hasPending;
@@ -120,6 +133,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             return new Decision(Action.Skip, "stable-under-max");
+        }
+
+        private static bool IsUnderRealtimeFloor(Input input)
+        {
+            float minRealtime = input.MinRealtimeSeconds;
+            if (minRealtime <= 0f) return false;
+
+            float lastRealtime = input.LastHeavyRealtimeSecondsForSide;
+            if (lastRealtime <= 0f) return false;
+
+            float nowRealtime = input.CurrentRealtimeSeconds;
+            if (nowRealtime <= 0f) return false;
+
+            float elapsedRealtime = nowRealtime - lastRealtime;
+            if (elapsedRealtime < 0f) elapsedRealtime = 0f;
+            return elapsedRealtime < minRealtime;
+        }
+
+        private static float SanitizeNonNegative(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
+            return value;
         }
     }
 }

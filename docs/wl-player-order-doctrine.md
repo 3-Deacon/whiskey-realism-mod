@@ -7,7 +7,7 @@ Living reference for #62, Whiskey's W&L player-facing current-order doctrine for
 - **Implementation state:** merged to `main` and hash-deployed locally; runtime smoke is still pending.
 - **Patch ordinal:** #62 `PlayerSubordinateOrderPatch`.
 - **Default behavior:** diagnostics are on by default, writes are off by default.
-- **Verification:** console harness `1075 PASS / 0 FAIL`; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75` (1245184 bytes).
+- **Verification:** console harness exits 0; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `a3c9552b8681ef983d3a9cec7acc3cde1906e4b3f691a5d5bcfcf71b8f775b33` (1260032 bytes).
 - **Lifecycle:** the design spec and implementation plan remain active until fresh in-game smoke proves bounded diagnostics and focused write behavior. Do not archive them yet.
 
 The doctrine translates existing tactical-orchestrator intent into vanilla W&L current orders for the player when the player is a subordinate in the W&L chain. It does not replace vanilla movement, campaign movement, or the W&L order UI. It asks vanilla `AIBattle.CheckCurrentOrderUpdate(...)` to deliver an order only after Whiskey dedupe and safety gates predict the request is valid.
@@ -97,7 +97,7 @@ The consumed `CommandIntentResolution` shape is `Found`, `Intent`, and `Reason`.
 
 All vanilla object reads go through safe runtime helpers. Missing objectives, group geometry, current waypoints, entry points, or target names downgrade to a bounded warning or a skipped candidate; patches must not throw.
 
-The composer fails closed without a concrete target. Direct-child role alone is not enough to invent a player order at the current unit position.
+The composer fails closed without a concrete target except for inherited defensive/refuse/guard hold intent. In that case, a player-subordinate command may receive a type-12 hold order at its current position so W&L has an explicit "hold here" current order even when the tactical ledger has no separate objective marker for that exact brigade/division.
 
 ## Type 15
 
