@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -12,6 +13,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix()
         {
+            using (TelemetryPerf.Scope("campaign.patch.monthly-tick-hook", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             OnceLog.Info("strategic-cadence", "Strategic cadence hook wired (monthly heartbeat + weekly CIC review)");
             try
             {
@@ -40,6 +43,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("strategic-cadence:postfix", "[MonthlyTickHookPatch] cadence hook failed: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         // Cached BattleUnits component reference. GameObject.Find is expensive

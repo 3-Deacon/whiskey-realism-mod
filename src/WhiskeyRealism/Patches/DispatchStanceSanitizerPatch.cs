@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -13,26 +14,29 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(Messages.Message __instance)
         {
-            try
+            using (TelemetryPerf.Scope("campaign.patch.dispatch-sanitizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
-                if (__instance == null || !WlDispatchSanitizer.IsCandidateType(__instance.type)) return;
-                if (!DLC_WL.dlc_scenarioactive) return;
+                try
+                {
+                    if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
+                    if (__instance == null || !WlDispatchSanitizer.IsCandidateType(__instance.type)) return;
+                    if (!DLC_WL.dlc_scenarioactive) return;
 
-                Regiment unit = ResolveMessageUnit(__instance);
-                if (!IsPlayerChainWlUnit(unit)) return;
+                    Regiment unit = ResolveMessageUnit(__instance);
+                    if (!IsPlayerChainWlUnit(unit)) return;
 
-                WlDispatchSanitizerResult result = WlDispatchSanitizer.Sanitize(__instance.type, __instance.content);
-                if (!result.Changed) return;
+                    WlDispatchSanitizerResult result = WlDispatchSanitizer.Sanitize(__instance.type, __instance.content);
+                    if (!result.Changed) return;
 
-                __instance.content = result.Content;
-                OnceLog.Info(
-                    "wl-dispatch-sanitizer:sanitized:" + __instance.type,
-                    "[W&LDispatch] sanitized stance text for message type " + __instance.type + ": " + Preview(result.Content));
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("wl-dispatch-sanitizer:postfix", "[W&LDispatch] sanitizer Postfix failed: " + ex.Message);
+                    __instance.content = result.Content;
+                    OnceLog.Info(
+                        "wl-dispatch-sanitizer:sanitized:" + __instance.type,
+                        "[W&LDispatch] sanitized stance text for message type " + __instance.type + ": " + Preview(result.Content));
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("wl-dispatch-sanitizer:postfix", "[W&LDispatch] sanitizer Postfix failed: " + ex.Message);
+                }
             }
         }
 

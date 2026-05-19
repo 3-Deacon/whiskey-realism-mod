@@ -18,6 +18,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(int alliance)
         {
+            using (TelemetryPerf.Scope("campaign.patch.financial-ai", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
@@ -47,6 +49,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("financial-ai:postfix", "[Patch:FinancialAI] postfix failed: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static int MoveTaxTowardTarget(int alliance, float[] tax, FiscalOutput intent, int lane)

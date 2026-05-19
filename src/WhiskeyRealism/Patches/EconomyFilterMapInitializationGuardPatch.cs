@@ -3,6 +3,7 @@ using System.Collections;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -26,26 +27,32 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(ref CampaignFilterMapState __state)
         {
-            __state = CaptureState();
+            using (TelemetryPerf.Scope("campaign.patch.economy-filter-init-guard.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                __state = CaptureState();
+            }
         }
 
         [HarmonyPostfix]
         internal static void Postfix(bool initialization, ref bool __result, CampaignFilterMapState __state)
         {
-            try
+            using (TelemetryPerf.Scope("campaign.patch.economy-filter-init-guard.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled()) return;
-                var decision = Guard.Observe(initialization, __result, __state, CaptureState());
-                if (!decision.ForceComplete) return;
+                try
+                {
+                    if (!Enabled()) return;
+                    var decision = Guard.Observe(initialization, __result, __state, CaptureState());
+                    if (!decision.ForceComplete) return;
 
-                __result = true;
-                OnceLog.Warning(
-                    "filter-map-init:" + decision.Reason,
-                    "[Patch:FilterMapInit] forced initialization complete after repeated no-progress UpdateFilterMaps result");
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("filter-map-init:postfix", "[Patch:FilterMapInit] postfix failed: " + ex.Message);
+                    __result = true;
+                    OnceLog.Warning(
+                        "filter-map-init:" + decision.Reason,
+                        "[Patch:FilterMapInit] forced initialization complete after repeated no-progress UpdateFilterMaps result");
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("filter-map-init:postfix", "[Patch:FilterMapInit] postfix failed: " + ex.Message);
+                }
             }
         }
 
@@ -56,44 +63,47 @@ namespace WhiskeyRealism.Patches
             ref bool __result,
             CampaignFilterMapState __state)
         {
-            try
+            using (TelemetryPerf.Scope("campaign.patch.economy-filter-init-guard.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (__exception == null || !Enabled()) return __exception;
-                var decision = Guard.ObserveException(initialization, __exception, __state);
-                if (!decision.ForceComplete) return __exception;
-
-                if (initialization)
+                try
                 {
-                    __result = true;
-                    OnceLog.Warning(
-                        "filter-map-init:" + decision.Reason,
-                        "[Patch:FilterMapInit] suppressed initialization UpdateFilterMaps exception and ended bounded startup loop: "
-                            + __exception.Message);
+                    if (__exception == null || !Enabled()) return __exception;
+                    var decision = Guard.ObserveException(initialization, __exception, __state);
+                    if (!decision.ForceComplete) return __exception;
+
+                    if (initialization)
+                    {
+                        __result = true;
+                        OnceLog.Warning(
+                            "filter-map-init:" + decision.Reason,
+                            "[Patch:FilterMapInit] suppressed initialization UpdateFilterMaps exception and ended bounded startup loop: "
+                                + __exception.Message);
+                        return null;
+                    }
+
+                    var current = CaptureState();
+                    bool vanillaAlreadyAdvanced = !__state.SamePosition(current);
+                    CampaignFilterMapState after;
+                    if (vanillaAlreadyAdvanced)
+                    {
+                        after = current;
+                    }
+                    else if (!CampaignFilterMapInitializationGuard.TryAdvanceRuntimeCursor(__state, out after))
+                    {
+                        return __exception;
+                    }
+
+                    if (!vanillaAlreadyAdvanced)
+                        ApplyState(after);
+                    __result = false;
+                    LogRuntimeDiagnostic(decision, __state, after, vanillaAlreadyAdvanced, __exception);
                     return null;
                 }
-
-                var current = CaptureState();
-                bool vanillaAlreadyAdvanced = !__state.SamePosition(current);
-                CampaignFilterMapState after;
-                if (vanillaAlreadyAdvanced)
+                catch (Exception ex)
                 {
-                    after = current;
-                }
-                else if (!CampaignFilterMapInitializationGuard.TryAdvanceRuntimeCursor(__state, out after))
-                {
+                    OnceLog.Warning("filter-map-init:finalizer", "[Patch:FilterMapInit] finalizer failed: " + ex.Message);
                     return __exception;
                 }
-
-                if (!vanillaAlreadyAdvanced)
-                    ApplyState(after);
-                __result = false;
-                LogRuntimeDiagnostic(decision, __state, after, vanillaAlreadyAdvanced, __exception);
-                return null;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("filter-map-init:finalizer", "[Patch:FilterMapInit] finalizer failed: " + ex.Message);
-                return __exception;
             }
         }
 

@@ -21,67 +21,70 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static bool Prefix(AICampaign __instance)
         {
-            try
+            using (TelemetryPerf.Scope("campaign.patch.campaign-ai-governor", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (__instance == null) return true;
-                var plugin = Plugin.Instance;
-                if (plugin == null || !plugin.Enabled.Value) return true;
-                if (GameVars.debug_turnoffcampaignai) return false;
-
-                bool initialized = Initialized(__instance);
-                if (initialized && FastForwardAiScheduler.ShouldSkipCampaignAiUpdate(GameVars.gamepaused, GameVars.gamespeed))
+                try
                 {
-                    OnceLog.Info("campaign-ai-paused", "[Patch:CampaignAIGovernor] paused AICampaign.Update guard active");
+                    if (__instance == null) return true;
+                    var plugin = Plugin.Instance;
+                    if (plugin == null || !plugin.Enabled.Value) return true;
+                    if (GameVars.debug_turnoffcampaignai) return false;
+
+                    bool initialized = Initialized(__instance);
+                    if (initialized && FastForwardAiScheduler.ShouldSkipCampaignAiUpdate(GameVars.gamepaused, GameVars.gamespeed))
+                    {
+                        OnceLog.Info("campaign-ai-paused", "[Patch:CampaignAIGovernor] paused AICampaign.Update guard active");
+                        return false;
+                    }
+
+                    if (!plugin.CampaignAiGovernorEnabled.Value) return true;
+                    if (GameVars.gamespeed < 20f) return true;
+                    if (GameVars.debug_showcampaignaimapvalues) return true;
+
+                    if (!initialized)
+                    {
+                        var initialize = ResolveInitializeAi();
+                        if (initialize == null) return true;
+                        initialize.Invoke(__instance, null);
+                        return false;
+                    }
+
+                    var updateUnitAi = ResolveUpdateUnitAi();
+                    var updateCompanyFoundationList = ResolveUpdateCompanyFoundationList();
+                    var workDownConstructionWishes = ResolveWorkDownConstructionWishes();
+                    if (updateUnitAi == null || updateCompanyFoundationList == null || workDownConstructionWishes == null)
+                        return true;
+
+                    OnceLog.Info("campaign-ai-governor", "CampaignAiUpdateGovernorPatch wired (bounded high-speed AICampaign.Update wrapper)");
+
+                    float gameSpeed = GameVars.gamespeed;
+                    int desiredPasses = FastForwardAiScheduler.VanillaPasses(gameSpeed);
+                    var options = BuildOptions(plugin);
+                    var watch = Stopwatch.StartNew();
+                    int executedPasses = 0;
+
+                    while (FastForwardAiScheduler.ShouldRunGovernedPass(
+                               executedPasses,
+                               (float)watch.Elapsed.TotalMilliseconds,
+                               gameSpeed,
+                               options))
+                    {
+                        updateUnitAi.Invoke(__instance, null);
+                        executedPasses++;
+                    }
+
+                    updateCompanyFoundationList.Invoke(__instance, null);
+                    workDownConstructionWishes.Invoke(null, null);
+                    watch.Stop();
+
+                    LogSample(gameSpeed, desiredPasses, executedPasses, options, watch.Elapsed.TotalMilliseconds);
                     return false;
                 }
-
-                if (!plugin.CampaignAiGovernorEnabled.Value) return true;
-                if (GameVars.gamespeed < 20f) return true;
-                if (GameVars.debug_showcampaignaimapvalues) return true;
-
-                if (!initialized)
+                catch (Exception ex)
                 {
-                    var initialize = ResolveInitializeAi();
-                    if (initialize == null) return true;
-                    initialize.Invoke(__instance, null);
-                    return false;
-                }
-
-                var updateUnitAi = ResolveUpdateUnitAi();
-                var updateCompanyFoundationList = ResolveUpdateCompanyFoundationList();
-                var workDownConstructionWishes = ResolveWorkDownConstructionWishes();
-                if (updateUnitAi == null || updateCompanyFoundationList == null || workDownConstructionWishes == null)
+                    OnceLog.Warning("campaign-ai-governor:prefix", "[Patch:CampaignAIGovernor] prefix failed: " + ex.Message);
                     return true;
-
-                OnceLog.Info("campaign-ai-governor", "CampaignAiUpdateGovernorPatch wired (bounded high-speed AICampaign.Update wrapper)");
-
-                float gameSpeed = GameVars.gamespeed;
-                int desiredPasses = FastForwardAiScheduler.VanillaPasses(gameSpeed);
-                var options = BuildOptions(plugin);
-                var watch = Stopwatch.StartNew();
-                int executedPasses = 0;
-
-                while (FastForwardAiScheduler.ShouldRunGovernedPass(
-                           executedPasses,
-                           (float)watch.Elapsed.TotalMilliseconds,
-                           gameSpeed,
-                           options))
-                {
-                    updateUnitAi.Invoke(__instance, null);
-                    executedPasses++;
                 }
-
-                updateCompanyFoundationList.Invoke(__instance, null);
-                workDownConstructionWishes.Invoke(null, null);
-                watch.Stop();
-
-                LogSample(gameSpeed, desiredPasses, executedPasses, options, watch.Elapsed.TotalMilliseconds);
-                return false;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("campaign-ai-governor:prefix", "[Patch:CampaignAIGovernor] prefix failed: " + ex.Message);
-                return true;
             }
         }
 

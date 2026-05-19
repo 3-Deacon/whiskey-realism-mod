@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -31,24 +32,30 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(Policy policy, int alliance, ref bool __state)
         {
-            __state = false;
-            try
+            using (TelemetryPerf.Scope("campaign.patch.militia-act-handover-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled() || !ShouldScope(policy, alliance)) return;
-                MilitiaActStateHandoverScope.Enter();
-                __state = true;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("state-handover:scope-prefix", "[Patch:StateHandover] scope prefix failed: " + ex.Message);
+                __state = false;
+                try
+                {
+                    if (!Enabled() || !ShouldScope(policy, alliance)) return;
+                    MilitiaActStateHandoverScope.Enter();
+                    __state = true;
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("state-handover:scope-prefix", "[Patch:StateHandover] scope prefix failed: " + ex.Message);
+                }
             }
         }
 
         [HarmonyFinalizer]
         internal static Exception Finalizer(Exception __exception, bool __state)
         {
-            if (__state) MilitiaActStateHandoverScope.Exit();
-            return __exception;
+            using (TelemetryPerf.Scope("campaign.patch.militia-act-handover-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                if (__state) MilitiaActStateHandoverScope.Exit();
+                return __exception;
+            }
         }
 
         private static bool ShouldScope(Policy policy, int alliance)
@@ -72,6 +79,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static bool Prefix(int state, int newalliance)
         {
+            using (TelemetryPerf.Scope("campaign.patch.militia-act-handover-guard", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (!MilitiaActStateHandoverScope.Active) return true;
@@ -97,6 +106,7 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning("state-handover:prefix", "[Patch:StateHandover] prefix failed: " + ex.Message);
                 return true;
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static float Support(GameVars.Nation nation, int alliance)

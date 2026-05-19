@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using HarmonyLib;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -30,6 +31,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(object __instance)
         {
+            using (TelemetryPerf.Scope("campaign.patch.realism-checkboxes-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
             try
             {
@@ -58,6 +61,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("settings:realism:error", "[RealismCheckboxesLockPatch] " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static void ResolveMembers(Type mainMenuType)

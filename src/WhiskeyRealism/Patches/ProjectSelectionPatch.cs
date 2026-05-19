@@ -25,6 +25,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int alliance)
         {
+            using (TelemetryPerf.Scope("campaign.patch.project-selection", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
@@ -144,6 +146,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("project-selection:prefix", "[Patch:ProjectSelection] prefix failed: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static List<ProjectCandidateInput> BuildCandidates(

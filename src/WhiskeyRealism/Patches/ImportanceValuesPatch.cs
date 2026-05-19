@@ -32,6 +32,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(int aifaction, object __instance)
         {
+            using (TelemetryPerf.Scope("campaign.patch.importance-values", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             OnceLog.Info("importance", "ImportanceValuesPatch wired (Postfix on CalculateMostValueableAIZones)");
             try
             {
@@ -64,6 +66,7 @@ namespace WhiskeyRealism.Patches
             {
                 Plugin.Log.LogWarning("[Patch:Importance] " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         // Resolve a CampaignObjective UniqueObjectiveID → AIArea by:

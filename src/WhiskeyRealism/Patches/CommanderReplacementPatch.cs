@@ -33,49 +33,52 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static bool Prefix(int _aifaction)
         {
-            OnceLog.Info("replace", "CommanderReplacementPatch wired (v0.2.1 concrete swap)");
-            try
+            using (TelemetryPerf.Scope("campaign.patch.commander-replacement", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (StrategicCoordinator.Instance == null) return true;
-
-                int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
-                if (allianceId < 0) return true;
-
-                int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
-                if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return true;
-
-                // Apply any pending scripted-event swaps. We collect first to
-                // avoid mutating the AppliedEventIds set during enumeration.
-                var pending = new System.Collections.Generic.List<SuccessionScheduler.Event>();
-                foreach (var e in StrategicCoordinator.Instance.Succession.GetPendingApplications(allianceId))
-                    pending.Add(e);
-
-                bool anyApplied = false;
-                foreach (var e in pending)
+                OnceLog.Info("replace", "CommanderReplacementPatch wired (v0.2.1 concrete swap)");
+                try
                 {
-                    if (TryApplyScriptedSwap(allianceId, e))
-                    {
-                        StrategicCoordinator.Instance.Succession.MarkApplied(e.Id);
-                        anyApplied = true;
-                    }
-                    else
-                    {
-                        // Couldn't apply (no replacement / no displaceable commander).
-                        // Don't mark applied — retry next tick. But avoid spam: log once per event id.
-                        EmitSuccessionInfoOnce("replace:retry:" + e.Id,
-                            $"[Succession:{e.Id}] action=defer alliance={allianceId} reason=preconditions-unmet");
-                    }
-                }
+                    if (StrategicCoordinator.Instance == null) return true;
 
-                // If we applied a scripted swap, skip vanilla's competence-based
-                // pick this tick — vanilla would otherwise look at the same
-                // worstcommanderidperlevel slots we just consumed.
-                return !anyApplied;
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogWarning("[Patch:Replace] " + ex.Message);
-                return true;
+                    int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
+                    if (allianceId < 0) return true;
+
+                    int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
+                    if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return true;
+
+                    // Apply any pending scripted-event swaps. We collect first to
+                    // avoid mutating the AppliedEventIds set during enumeration.
+                    var pending = new System.Collections.Generic.List<SuccessionScheduler.Event>();
+                    foreach (var e in StrategicCoordinator.Instance.Succession.GetPendingApplications(allianceId))
+                        pending.Add(e);
+
+                    bool anyApplied = false;
+                    foreach (var e in pending)
+                    {
+                        if (TryApplyScriptedSwap(allianceId, e))
+                        {
+                            StrategicCoordinator.Instance.Succession.MarkApplied(e.Id);
+                            anyApplied = true;
+                        }
+                        else
+                        {
+                            // Couldn't apply (no replacement / no displaceable commander).
+                            // Don't mark applied — retry next tick. But avoid spam: log once per event id.
+                            EmitSuccessionInfoOnce("replace:retry:" + e.Id,
+                                $"[Succession:{e.Id}] action=defer alliance={allianceId} reason=preconditions-unmet");
+                        }
+                    }
+
+                    // If we applied a scripted swap, skip vanilla's competence-based
+                    // pick this tick — vanilla would otherwise look at the same
+                    // worstcommanderidperlevel slots we just consumed.
+                    return !anyApplied;
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogWarning("[Patch:Replace] " + ex.Message);
+                    return true;
+                }
             }
         }
 

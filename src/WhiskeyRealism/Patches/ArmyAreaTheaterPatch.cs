@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -17,25 +18,28 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(int _aifaction)
         {
-            OnceLog.Info("army-area", "ArmyAreaTheaterPatch wired (historical operating-area steering)");
-
-            try
+            using (TelemetryPerf.Scope("campaign.patch.army-area-theater", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
-                if (StrategicCoordinator.Instance == null) return;
+                OnceLog.Info("army-area", "ArmyAreaTheaterPatch wired (historical operating-area steering)");
 
-                int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
-                if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.ArmyAreas.Length) return;
+                try
+                {
+                    if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
+                    if (StrategicCoordinator.Instance == null) return;
 
-                int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
-                if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
-                if (StrategicCoordinator.WlCareerStartPending()) return;
+                    int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
+                    if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.ArmyAreas.Length) return;
 
-                ArmyAreaRuntime.ApplyHistoricalAreaOrders(_aifaction, allianceId);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("army-area:postfix", "[Patch:ArmyArea] postfix failed: " + ex.Message);
+                    int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
+                    if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
+                    if (StrategicCoordinator.WlCareerStartPending()) return;
+
+                    ArmyAreaRuntime.ApplyHistoricalAreaOrders(_aifaction, allianceId);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("army-area:postfix", "[Patch:ArmyArea] postfix failed: " + ex.Message);
+                }
             }
         }
     }

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -16,60 +17,66 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(GameVars.Commander __instance, Regiment reg, ref State __state)
         {
-            __state = default;
-            try
+            using (TelemetryPerf.Scope("campaign.patch.commander-prev-command.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled() || __instance == null) return;
-                int commanderId = GameVars.commander != null ? GameVars.commander.IndexOf(__instance) : -1;
-                __state = new State(
-                    __instance.currentcommand,
-                    reg,
-                    commanderId,
-                    IsCalledFromReplaceCommanderOfUnit());
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("commander-previous-command:prefix", "[Patch:CommanderAssignment] prefix failed: " + ex.Message);
+                __state = default;
+                try
+                {
+                    if (!Enabled() || __instance == null) return;
+                    int commanderId = GameVars.commander != null ? GameVars.commander.IndexOf(__instance) : -1;
+                    __state = new State(
+                        __instance.currentcommand,
+                        reg,
+                        commanderId,
+                        IsCalledFromReplaceCommanderOfUnit());
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("commander-previous-command:prefix", "[Patch:CommanderAssignment] prefix failed: " + ex.Message);
+                }
             }
         }
 
         [HarmonyPostfix]
         internal static void Postfix(State __state)
         {
-            try
+            using (TelemetryPerf.Scope("campaign.patch.commander-prev-command.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (!__state.Valid) return;
-                var prior = __state.PriorCommand;
-                if ((UnityEngine.Object)(object)prior == (UnityEngine.Object)null) return;
-
-                bool priorIsTarget = (UnityEngine.Object)(object)prior == (UnityEngine.Object)(object)__state.TargetCommand;
-                if (!CommanderAssignmentGuard.ShouldClearPreviousCommand(
-                        priorCommandExists: true,
-                        priorIsAssignedTarget: priorIsTarget,
-                        priorCommandCommanderId: prior.commander,
-                        assignedCommanderId: __state.CommanderId,
-                        vanillaReplacementWillReadPriorCommander: __state.VanillaReplacementWillReadPriorCommander))
+                try
                 {
-                    if (__state.VanillaReplacementWillReadPriorCommander)
+                    if (!__state.Valid) return;
+                    var prior = __state.PriorCommand;
+                    if ((UnityEngine.Object)(object)prior == (UnityEngine.Object)null) return;
+
+                    bool priorIsTarget = (UnityEngine.Object)(object)prior == (UnityEngine.Object)(object)__state.TargetCommand;
+                    if (!CommanderAssignmentGuard.ShouldClearPreviousCommand(
+                            priorCommandExists: true,
+                            priorIsAssignedTarget: priorIsTarget,
+                            priorCommandCommanderId: prior.commander,
+                            assignedCommanderId: __state.CommanderId,
+                            vanillaReplacementWillReadPriorCommander: __state.VanillaReplacementWillReadPriorCommander))
                     {
-                        OnceLog.Info(
-                            "commander-previous-command:skip-vanilla-replacement",
-                            "[Patch:CommanderAssignment] skipped stale previous-command clear during vanilla ReplaceCommanderOfUnit");
+                        if (__state.VanillaReplacementWillReadPriorCommander)
+                        {
+                            OnceLog.Info(
+                                "commander-previous-command:skip-vanilla-replacement",
+                                "[Patch:CommanderAssignment] skipped stale previous-command clear during vanilla ReplaceCommanderOfUnit");
+                        }
+                        return;
                     }
-                    return;
+
+                    prior.commander = -1;
+                    try { prior.UpdateCommanderPicture(); }
+                    catch { }
+
+                    OnceLog.Info(
+                        "commander-previous-command",
+                        "[Patch:CommanderAssignment] cleared stale previous command after AssignCommando");
                 }
-
-                prior.commander = -1;
-                try { prior.UpdateCommanderPicture(); }
-                catch { }
-
-                OnceLog.Info(
-                    "commander-previous-command",
-                    "[Patch:CommanderAssignment] cleared stale previous command after AssignCommando");
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("commander-previous-command:postfix", "[Patch:CommanderAssignment] postfix failed: " + ex.Message);
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("commander-previous-command:postfix", "[Patch:CommanderAssignment] postfix failed: " + ex.Message);
+                }
             }
         }
 

@@ -3,6 +3,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -21,6 +22,8 @@ namespace WhiskeyRealism.Patches
             Exception __exception,
             ref bool __result)
         {
+            using (TelemetryPerf.Scope("campaign.patch.wl-operation-null-guard", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             if (__exception == null) return null;
             if (!Enabled()) return __exception;
 
@@ -48,6 +51,7 @@ namespace WhiskeyRealism.Patches
                     "[Patch:WLOperationNullGuard] failed while handling missing operation unit: " + ex.Message);
                 return __exception;
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static bool Enabled()

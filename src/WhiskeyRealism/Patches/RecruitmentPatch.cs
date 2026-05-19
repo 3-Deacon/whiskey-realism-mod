@@ -23,18 +23,24 @@ namespace WhiskeyRealism.Patches
             [HarmonyPrefix]
             internal static void Prefix(int _aifaction)
             {
-                _zoneDepth++;
-                _activeAifaction = _aifaction;
+                using (TelemetryPerf.Scope("campaign.patch.recruitment.zone-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
+                    _zoneDepth++;
+                    _activeAifaction = _aifaction;
+                }
             }
 
             [HarmonyFinalizer]
             internal static void Finalizer()
             {
-                _zoneDepth--;
-                if (_zoneDepth <= 0)
+                using (TelemetryPerf.Scope("campaign.patch.recruitment.zone-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
-                    _zoneDepth = 0;
-                    _activeAifaction = -1;
+                    _zoneDepth--;
+                    if (_zoneDepth <= 0)
+                    {
+                        _zoneDepth = 0;
+                        _activeAifaction = -1;
+                    }
                 }
             }
         }
@@ -64,6 +70,8 @@ namespace WhiskeyRealism.Patches
                 bool lookforwiderrecruiting,
                 ref int __result)
             {
+                using (TelemetryPerf.Scope("campaign.patch.recruitment.state-steer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
                 try
                 {
                     if (_zoneDepth <= 0 || _activeAifaction != _aifaction) return;
@@ -107,6 +115,7 @@ namespace WhiskeyRealism.Patches
                 {
                     OnceLog.Warning("recruitment:state-postfix", "[Patch:Recruitment] state postfix failed: " + ex.Message);
                 }
+                } // end using TelemetryPerf.Scope
             }
         }
 

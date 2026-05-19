@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -27,40 +28,43 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(object __instance)
         {
-            if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
-            try
+            using (TelemetryPerf.Scope("campaign.patch.aggressiveness-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                var component = __instance as Component;
-                if (component == null) return;
-
-                // Don't touch the battle-panel branch — it's a different setting.
-                if (component.gameObject.name == "BattlePanel") return;
-
-                OnceLog.Info("settings:slider", "AggressivenessSliderLockPatch wired");
-
-                var t = __instance.GetType();
-                var aimodeField = AccessTools.Field(t, "aimode");
-                aimodeField?.SetValue(__instance, 1.0f);
-
-                // Compute the side index the same way vanilla does.
-                var selectedSideField = AccessTools.Field(t, "selectedside");
-                int selectedSide = selectedSideField != null ? (int)selectedSideField.GetValue(__instance) : 0;
-                int displaySlot = (selectedSide == 0) ? 1 : 0;
-
-                var textField = AccessTools.Field(t, "aimodetext");
-                if (textField?.GetValue(__instance) is Array textArr)
+                if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
+                try
                 {
-                    if (displaySlot >= 0 && displaySlot < textArr.Length)
+                    var component = __instance as Component;
+                    if (component == null) return;
+
+                    // Don't touch the battle-panel branch — it's a different setting.
+                    if (component.gameObject.name == "BattlePanel") return;
+
+                    OnceLog.Info("settings:slider", "AggressivenessSliderLockPatch wired");
+
+                    var t = __instance.GetType();
+                    var aimodeField = AccessTools.Field(t, "aimode");
+                    aimodeField?.SetValue(__instance, 1.0f);
+
+                    // Compute the side index the same way vanilla does.
+                    var selectedSideField = AccessTools.Field(t, "selectedside");
+                    int selectedSide = selectedSideField != null ? (int)selectedSideField.GetValue(__instance) : 0;
+                    int displaySlot = (selectedSide == 0) ? 1 : 0;
+
+                    var textField = AccessTools.Field(t, "aimodetext");
+                    if (textField?.GetValue(__instance) is Array textArr)
                     {
-                        var textObj = textArr.GetValue(displaySlot);
-                        var textProp = textObj?.GetType().GetProperty("text");
-                        textProp?.SetValue(textObj, "Locked:Realism", null);
+                        if (displaySlot >= 0 && displaySlot < textArr.Length)
+                        {
+                            var textObj = textArr.GetValue(displaySlot);
+                            var textProp = textObj?.GetType().GetProperty("text");
+                            textProp?.SetValue(textObj, "Locked:Realism", null);
+                        }
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogWarning("[AggressivenessSliderLockPatch] " + ex.Message);
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogWarning("[AggressivenessSliderLockPatch] " + ex.Message);
+                }
             }
         }
     }

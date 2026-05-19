@@ -2,6 +2,7 @@ using System;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -17,6 +18,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix()
         {
+            using (TelemetryPerf.Scope("campaign.patch.economy-filter-assign-bootstrap", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (!Enabled()) return;
@@ -89,6 +92,7 @@ namespace WhiskeyRealism.Patches
                     "filter-map-assignfilters-bootstrap:failed",
                     "[Patch:FilterMapAssignFilters] bootstrap failed: " + ex.GetType().Name + ":" + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static string[] GetMissingFilterMaps()

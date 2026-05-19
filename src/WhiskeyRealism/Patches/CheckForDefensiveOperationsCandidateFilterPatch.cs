@@ -59,6 +59,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction)
         {
+            using (TelemetryPerf.Scope("campaign.patch.defensive-ops-candidate-filter.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             if (!_wiredLogged)
             {
                 _wiredLogged = true;
@@ -157,11 +159,14 @@ namespace WhiskeyRealism.Patches
                 // If we partially filtered before throwing, Postfix still sees the snapshot
                 // and restores ownunits. No explicit rollback needed here.
             }
+            } // end using TelemetryPerf.Scope
         }
 
         [HarmonyPostfix]
         internal static void Postfix(int _aifaction)
         {
+            using (TelemetryPerf.Scope("campaign.patch.defensive-ops-candidate-filter.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 var faction = AICampaignReflect.GetFaction(_aifaction);
@@ -270,6 +275,7 @@ namespace WhiskeyRealism.Patches
             {
                 ClearSnapshots(_aifaction);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         // Collect all UnitInstanceIds that are suppressed for one of the three

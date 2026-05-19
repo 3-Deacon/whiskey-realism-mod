@@ -19,12 +19,17 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix()
         {
-            _updateStartTicks = Stopwatch.GetTimestamp();
+            using (TelemetryPerf.Scope("campaign.patch.fast-forward-ai-catchup.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                _updateStartTicks = Stopwatch.GetTimestamp();
+            }
         }
 
         [HarmonyPostfix]
         internal static void Postfix(AICampaign __instance)
         {
+            using (TelemetryPerf.Scope("campaign.patch.fast-forward-ai-catchup.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (__instance == null) return;
@@ -98,6 +103,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("fast-forward-ai:postfix", "[Patch:FastForwardAI] postfix failed: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static System.Reflection.MethodInfo _updateUnitAiMethod;

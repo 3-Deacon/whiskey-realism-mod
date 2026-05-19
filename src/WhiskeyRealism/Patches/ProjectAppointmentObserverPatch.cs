@@ -30,6 +30,8 @@ namespace WhiskeyRealism.Patches
             bool manualappointment,
             ref AppointmentSnapshot __state)
         {
+            using (TelemetryPerf.Scope("campaign.patch.project-appoint-observer.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 __state = default(AppointmentSnapshot);
@@ -63,6 +65,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("project-appoint-observer:prefix", "[ProjectAppointed] observer prefix failed: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         [HarmonyPostfix]
@@ -72,6 +75,8 @@ namespace WhiskeyRealism.Patches
             bool manualappointment,
             AppointmentSnapshot __state)
         {
+            using (TelemetryPerf.Scope("campaign.patch.project-appoint-observer.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
@@ -109,6 +114,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("project-appoint-observer:postfix", "[ProjectAppointed] observer failed: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static bool TryReadProjectLevel(int projectId, int alliance, out float level)

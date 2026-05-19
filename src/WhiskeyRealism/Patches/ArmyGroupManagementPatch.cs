@@ -21,42 +21,45 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(AICampaign __instance, int _aifaction)
         {
-            OnceLog.Info("armygroup", "ArmyGroupManagementPatch wired (historical army-group steering)");
-
-            try
+            using (TelemetryPerf.Scope("campaign.patch.army-group-management", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
-                if (StrategicCoordinator.Instance == null) return;
+                OnceLog.Info("armygroup", "ArmyGroupManagementPatch wired (historical army-group steering)");
 
-                int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
-                if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.ArmyAreas.Length) return;
-
-                int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
-                if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
-                if (StrategicCoordinator.WlCareerStartPending()) return;
-
-                var ledger = StrategicCoordinator.Instance.ArmyAreas[allianceId];
-                if (ledger == null) return;
-
-                var plans = ArmyGroupDoctrine.PlanGroups(ledger);
-                if (plans.Count == 0) return;
-
-                var faction = GetFaction(_aifaction);
-                var ownUnits = AccessTools.Field(faction?.GetType(), "ownunits")?.GetValue(faction) as IList;
-                if (ownUnits == null)
+                try
                 {
-                    OnceLog.Warning(
-                        "armygroup:no-ownunits:" + allianceId,
-                        $"[Patch:ArmyGroup] skipped: ownunits unavailable for alliance={allianceId}");
-                    return;
-                }
+                    if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
+                    if (StrategicCoordinator.Instance == null) return;
 
-                for (int i = 0; i < plans.Count; i++)
-                    ApplyPlan(__instance, allianceId, plans[i], ownUnits);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("armygroup:postfix", "[Patch:ArmyGroup] postfix failed: " + ex.Message);
+                    int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
+                    if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.ArmyAreas.Length) return;
+
+                    int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
+                    if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
+                    if (StrategicCoordinator.WlCareerStartPending()) return;
+
+                    var ledger = StrategicCoordinator.Instance.ArmyAreas[allianceId];
+                    if (ledger == null) return;
+
+                    var plans = ArmyGroupDoctrine.PlanGroups(ledger);
+                    if (plans.Count == 0) return;
+
+                    var faction = GetFaction(_aifaction);
+                    var ownUnits = AccessTools.Field(faction?.GetType(), "ownunits")?.GetValue(faction) as IList;
+                    if (ownUnits == null)
+                    {
+                        OnceLog.Warning(
+                            "armygroup:no-ownunits:" + allianceId,
+                            $"[Patch:ArmyGroup] skipped: ownunits unavailable for alliance={allianceId}");
+                        return;
+                    }
+
+                    for (int i = 0; i < plans.Count; i++)
+                        ApplyPlan(__instance, allianceId, plans[i], ownUnits);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("armygroup:postfix", "[Patch:ArmyGroup] postfix failed: " + ex.Message);
+                }
             }
         }
 

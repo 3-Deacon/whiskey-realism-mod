@@ -32,85 +32,88 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(int _aifaction)
         {
-            OnceLog.Info("defensiveops", "DefensiveOpsPatch wired (capital-defense strength gate)");
-
-            try
+            using (TelemetryPerf.Scope("campaign.patch.defensive-ops", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
-                if (StrategicCoordinator.Instance == null) return;
+                OnceLog.Info("defensiveops", "DefensiveOpsPatch wired (capital-defense strength gate)");
 
-                int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
-                if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.CICs.Length) return;
-
-                int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
-                if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
-
-                // Capital is owned exclusively by #4 — short-circuit if no capital
-                // can be resolved so this patch never touches non-capital state.
-                // The defense intent ledger (Slice 2) owns all non-capital coastal
-                // assets; this guard makes the spec's coexistence invariant explicit.
-                if (!TryResolveCapital(allianceId, out var capitalPosition, out var capitalName)) return;
-                var capitalTown = ResolveMapTown(capitalName);
-
-                var cic = StrategicCoordinator.Instance.CICs[allianceId];
-                if (cic == null) return;
-
-                var era = StrategicCoordinator.Instance.Eras[allianceId] ?? new EraStageManager { Stage = EraStage.Amateur1861 };
-                var personality = cic.Effective(era);
-
-                var faction = GetFaction(_aifaction);
-                if (faction == null) return;
-
-                var ownUnits = ReadList(faction, "ownunits", "defensiveops:field:ownunits");
-                var enemyUnits = ReadList(faction, "enemyunits", "defensiveops:field:enemyunits");
-                var capitalDefenders = ReadList(faction, "groupstodefendcapital", "defensiveops:field:capitaldefenders");
-                if (ownUnits == null || enemyUnits == null || capitalDefenders == null) return;
-
-                float required = CalculateRequiredDefense(ownUnits, enemyUnits, capitalDefenders, capitalPosition, personality, capitalTown);
-                if (required <= 0f) return;
-
-                // Scale the capital defense gate by the director's CapitalDefenseBudgetModifier.
-                // A positive modifier (e.g., TooFastCollapse → +0.10) raises the effective strength
-                // gate, causing the patch to add a defender when the vanilla threshold would not.
-                // Default preserved when coordinator or posture is absent.
                 try
                 {
-                    var directorMemories = StrategicCoordinator.Instance?.DirectorMemories;
-                    if (directorMemories != null && allianceId < directorMemories.Length)
+                    if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
+                    if (StrategicCoordinator.Instance == null) return;
+
+                    int allianceId = AICampaignReflect.GetAllianceId(_aifaction);
+                    if (allianceId < 0 || allianceId >= StrategicCoordinator.Instance.CICs.Length) return;
+
+                    int playerAlliance = StrategicCoordinator.ResolvePlayerAlliance();
+                    if (StrategicCoordinator.IsPlayerCICOf(allianceId, playerAlliance)) return;
+
+                    // Capital is owned exclusively by #4 — short-circuit if no capital
+                    // can be resolved so this patch never touches non-capital state.
+                    // The defense intent ledger (Slice 2) owns all non-capital coastal
+                    // assets; this guard makes the spec's coexistence invariant explicit.
+                    if (!TryResolveCapital(allianceId, out var capitalPosition, out var capitalName)) return;
+                    var capitalTown = ResolveMapTown(capitalName);
+
+                    var cic = StrategicCoordinator.Instance.CICs[allianceId];
+                    if (cic == null) return;
+
+                    var era = StrategicCoordinator.Instance.Eras[allianceId] ?? new EraStageManager { Stage = EraStage.Amateur1861 };
+                    var personality = cic.Effective(era);
+
+                    var faction = GetFaction(_aifaction);
+                    if (faction == null) return;
+
+                    var ownUnits = ReadList(faction, "ownunits", "defensiveops:field:ownunits");
+                    var enemyUnits = ReadList(faction, "enemyunits", "defensiveops:field:enemyunits");
+                    var capitalDefenders = ReadList(faction, "groupstodefendcapital", "defensiveops:field:capitaldefenders");
+                    if (ownUnits == null || enemyUnits == null || capitalDefenders == null) return;
+
+                    float required = CalculateRequiredDefense(ownUnits, enemyUnits, capitalDefenders, capitalPosition, personality, capitalTown);
+                    if (required <= 0f) return;
+
+                    // Scale the capital defense gate by the director's CapitalDefenseBudgetModifier.
+                    // A positive modifier (e.g., TooFastCollapse → +0.10) raises the effective strength
+                    // gate, causing the patch to add a defender when the vanilla threshold would not.
+                    // Default preserved when coordinator or posture is absent.
+                    try
                     {
-                        float capitalMod = directorMemories[allianceId]?.LastPosture?.CapitalDefenseBudgetModifier ?? 0f;
-                        float capitalFraction = Clamp(1f + capitalMod, 0.90f, 1.30f);
-                        required *= capitalFraction;
+                        var directorMemories = StrategicCoordinator.Instance?.DirectorMemories;
+                        if (directorMemories != null && allianceId < directorMemories.Length)
+                        {
+                            float capitalMod = directorMemories[allianceId]?.LastPosture?.CapitalDefenseBudgetModifier ?? 0f;
+                            float capitalFraction = Clamp(1f + capitalMod, 0.90f, 1.30f);
+                            required *= capitalFraction;
+                        }
                     }
+                    catch { }
+
+                    var candidate = FindCandidate(
+                        _aifaction,
+                        ownUnits,
+                        capitalDefenders,
+                        ReadList(faction, "unitsindefensiveoperations", "defensiveops:field:defensiveops"),
+                        ReadList(faction, "unitsinoffensiveoperations", "defensiveops:field:offensiveops"),
+                        ReadList(faction, "unitsconstructingsupplydepots", "defensiveops:field:supplyops"),
+                        capitalPosition,
+                        required,
+                        personality);
+                    if (candidate == null) return;
+
+                    capitalDefenders.Add(candidate);
+                    RemoveFromList(faction, "unitsindefensiveoperations", candidate);
+                    RemoveFromDefensiveOperation(candidate);
+                    RemoveFromList(faction, "unitsinoffensiveoperations", candidate);
+                    RemoveFromList(faction, "unitsconstructingsupplydepots", candidate);
+
+                    TelemetryRouter.LegacyInfo(
+                        $"[DefenseIntent] alliance={allianceId} capital={capitalName} " +
+                        $"assigned=1 need={required:F0} caution={personality.Caution:F2}",
+                        TelemetryLayer.Campaign);
                 }
-                catch { }
-
-                var candidate = FindCandidate(
-                    _aifaction,
-                    ownUnits,
-                    capitalDefenders,
-                    ReadList(faction, "unitsindefensiveoperations", "defensiveops:field:defensiveops"),
-                    ReadList(faction, "unitsinoffensiveoperations", "defensiveops:field:offensiveops"),
-                    ReadList(faction, "unitsconstructingsupplydepots", "defensiveops:field:supplyops"),
-                    capitalPosition,
-                    required,
-                    personality);
-                if (candidate == null) return;
-
-                capitalDefenders.Add(candidate);
-                RemoveFromList(faction, "unitsindefensiveoperations", candidate);
-                RemoveFromDefensiveOperation(candidate);
-                RemoveFromList(faction, "unitsinoffensiveoperations", candidate);
-                RemoveFromList(faction, "unitsconstructingsupplydepots", candidate);
-
-                TelemetryRouter.LegacyInfo(
-                    $"[DefenseIntent] alliance={allianceId} capital={capitalName} " +
-                    $"assigned=1 need={required:F0} caution={personality.Caution:F2}",
-                    TelemetryLayer.Campaign);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("defensiveops:postfix", "[Patch:DefensiveOps] postfix failed: " + ex.Message);
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("defensiveops:postfix", "[Patch:DefensiveOps] postfix failed: " + ex.Message);
+                }
             }
         }
 

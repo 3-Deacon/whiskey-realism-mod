@@ -37,6 +37,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction, out TransferSteerState __state)
         {
+            using (TelemetryPerf.Scope("campaign.patch.transfer-of-units.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             __state = null;
             OnceLog.Info("transfer", "TransferOfUnitsPatch wired (concrete plan-target steering)");
 
@@ -162,11 +164,14 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("transfer:prefix", "[Patch:Transfer] prefix failed: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         [HarmonyPostfix]
         internal static void Postfix(TransferSteerState __state)
         {
+            using (TelemetryPerf.Scope("campaign.patch.transfer-of-units.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             if (__state == null || !__state.Changed) return;
 
             try
@@ -192,6 +197,7 @@ namespace WhiskeyRealism.Patches
                     OnceLog.Warning("transfer:restore", "[Patch:Transfer] restore failed: " + ex.Message);
                 }
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static object GetFaction(int aifactionIndex)

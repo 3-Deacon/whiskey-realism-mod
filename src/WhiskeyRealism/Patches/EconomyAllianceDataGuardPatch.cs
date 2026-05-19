@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -15,23 +16,26 @@ namespace WhiskeyRealism.Patches
         [HarmonyFinalizer]
         internal static Exception Finalizer(Exception __exception)
         {
-            try
+            using (TelemetryPerf.Scope("campaign.patch.economy-alliance-data-guard", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return __exception;
-                if (!EconomyAllianceDataGuard.ShouldSuppress(__exception)) return __exception;
+                try
+                {
+                    if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return __exception;
+                    if (!EconomyAllianceDataGuard.ShouldSuppress(__exception)) return __exception;
 
-                OnceLog.Warning(
-                    "economy-alliance-data:nre",
-                    "[Patch:EconomyAllianceData] suppressed vanilla NullReferenceException in UpdateEconomyAllianceData; UpdateFilterMaps will advance iterator "
-                        + IteratorState());
-                return null;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "economy-alliance-data:guard-failed",
-                    "[Patch:EconomyAllianceData] finalizer guard failed: " + ex.Message);
-                return __exception;
+                    OnceLog.Warning(
+                        "economy-alliance-data:nre",
+                        "[Patch:EconomyAllianceData] suppressed vanilla NullReferenceException in UpdateEconomyAllianceData; UpdateFilterMaps will advance iterator "
+                            + IteratorState());
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "economy-alliance-data:guard-failed",
+                        "[Patch:EconomyAllianceData] finalizer guard failed: " + ex.Message);
+                    return __exception;
+                }
             }
         }
 

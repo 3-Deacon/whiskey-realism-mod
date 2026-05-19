@@ -3,6 +3,7 @@ using System.IO;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -23,15 +24,18 @@ namespace WhiskeyRealism.Patches
             [HarmonyPostfix]
             internal static void Postfix(string folder)
             {
-                OnceLog.Info("save", "AICampaign.Save Postfix wired");
-                try
+                using (TelemetryPerf.Scope("campaign.patch.save-load.save", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
-                    if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
-                    // Relative — let .NET resolve against CWD (the game install dir).
-                    var fullPath = Path.Combine(folder, SidecarFile);
-                    StrategicCoordinator.Instance.SaveSidecar(fullPath);
+                    OnceLog.Info("save", "AICampaign.Save Postfix wired");
+                    try
+                    {
+                        if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
+                        // Relative — let .NET resolve against CWD (the game install dir).
+                        var fullPath = Path.Combine(folder, SidecarFile);
+                        StrategicCoordinator.Instance.SaveSidecar(fullPath);
+                    }
+                    catch (Exception ex) { Plugin.Log.LogError("[SavePatch] " + ex); }
                 }
-                catch (Exception ex) { Plugin.Log.LogError("[SavePatch] " + ex); }
             }
         }
 
@@ -41,25 +45,28 @@ namespace WhiskeyRealism.Patches
             [HarmonyPostfix]
             internal static void Postfix(string folder)
             {
-                OnceLog.Info("load", "AICampaign.Load Postfix wired");
-                try
+                using (TelemetryPerf.Scope("campaign.patch.save-load.load", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
-                    if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
-                    var fullPath = Path.Combine(folder, SidecarFile);
-                    if (File.Exists(fullPath))
+                    OnceLog.Info("load", "AICampaign.Load Postfix wired");
+                    try
                     {
-                        StrategicCoordinator.Instance.LoadSidecar(fullPath);
+                        if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
+                        var fullPath = Path.Combine(folder, SidecarFile);
+                        if (File.Exists(fullPath))
+                        {
+                            StrategicCoordinator.Instance.LoadSidecar(fullPath);
+                        }
+                        else
+                        {
+                            Plugin.Log.LogInfo($"[Coordinator] no sidecar found at {fullPath} — initializing fresh state (this is normal for a brand-new career)");
+                            StrategicCoordinator.Instance.InitializeFromGameState();
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        Plugin.Log.LogInfo($"[Coordinator] no sidecar found at {fullPath} — initializing fresh state (this is normal for a brand-new career)");
+                        Plugin.Log.LogWarning("[LoadPatch] failed, falling back to fresh init: " + ex);
                         StrategicCoordinator.Instance.InitializeFromGameState();
                     }
-                }
-                catch (Exception ex)
-                {
-                    Plugin.Log.LogWarning("[LoadPatch] failed, falling back to fresh init: " + ex);
-                    StrategicCoordinator.Instance.InitializeFromGameState();
                 }
             }
         }

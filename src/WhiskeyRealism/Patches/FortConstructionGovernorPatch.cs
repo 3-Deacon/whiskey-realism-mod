@@ -24,6 +24,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction, ref List<Vector3> __state)
         {
+            using (TelemetryPerf.Scope("campaign.patch.fort-governor.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             __state = null;
 
             try
@@ -70,19 +72,26 @@ namespace WhiskeyRealism.Patches
                 RestoreSites(__state);
                 __state = null;
             }
+            } // end using TelemetryPerf.Scope
         }
 
         [HarmonyPostfix]
         internal static void Postfix(List<Vector3> __state)
         {
-            RestoreSites(__state);
+            using (TelemetryPerf.Scope("campaign.patch.fort-governor.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                RestoreSites(__state);
+            }
         }
 
         [HarmonyFinalizer]
         internal static Exception Finalizer(Exception __exception, List<Vector3> __state)
         {
-            RestoreSites(__state);
-            return __exception;
+            using (TelemetryPerf.Scope("campaign.patch.fort-governor.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                RestoreSites(__state);
+                return __exception;
+            }
         }
 
         private static bool Enabled()

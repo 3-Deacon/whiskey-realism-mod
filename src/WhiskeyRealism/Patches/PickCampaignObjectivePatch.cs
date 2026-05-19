@@ -12,6 +12,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static bool Prefix(int _aifaction)
         {
+            using (TelemetryPerf.Scope("campaign.patch.pick-campaign-objective", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             OnceLog.Info("pickcampobj", "PickCampaignObjectivePatch wired");
             try
             {
@@ -57,6 +59,7 @@ namespace WhiskeyRealism.Patches
                 Plugin.Log.LogWarning("[Patch:PickCampObj] " + ex.Message);
                 return true;
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static int ResolveAllianceId(int aifactionIndex)

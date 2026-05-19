@@ -21,6 +21,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static bool Prefix(int alliance)
         {
+            using (TelemetryPerf.Scope("campaign.patch.policy-selection", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return true;
@@ -153,6 +155,7 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning("policy-selection:prefix", "[Patch:PolicySelection] prefix failed: " + ex.Message);
                 return true;
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static GrandStrategyProfile ResolveProfile(int alliance)

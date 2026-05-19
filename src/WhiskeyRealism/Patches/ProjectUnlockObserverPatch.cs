@@ -17,12 +17,17 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int alliance, out HashSet<int> __state)
         {
-            __state = Snapshot(alliance);
+            using (TelemetryPerf.Scope("campaign.patch.project-unlock-observer.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                __state = Snapshot(alliance);
+            }
         }
 
         [HarmonyPostfix]
         internal static void Postfix(int alliance, HashSet<int> __state)
         {
+            using (TelemetryPerf.Scope("campaign.patch.project-unlock-observer.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
@@ -59,6 +64,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("project-unlock-observer:postfix", "[ProjectUnlock] observer failed: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static HashSet<int> Snapshot(int alliance)

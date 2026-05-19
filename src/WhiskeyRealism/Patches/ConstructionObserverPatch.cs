@@ -3,6 +3,7 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -23,34 +24,37 @@ namespace WhiskeyRealism.Patches
             int owner,
             bool newlycreated)
         {
-            if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
-            if (!newlycreated || __result == null) return;
-            if (owner < 0 || owner >= 2) return;
-            if (IsConstructionWishPlaceholder(position)) return;
-
-            try
+            using (TelemetryPerf.Scope("campaign.patch.construction-observer.building", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                OnceLog.Info("construction-observer:building", "ConstructionObserverPatch wired (CBuilding.Place)");
+                if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
+                if (!newlycreated || __result == null) return;
+                if (owner < 0 || owner >= 2) return;
+                if (IsConstructionWishPlaceholder(position)) return;
 
-                Vector3 actualPosition = ((Component)__result).transform.position;
-                var start = new ConstructionStartEvent
+                try
                 {
-                    AllianceId = owner,
-                    Kind = KindForBuilding(type),
-                    BuildingTypeId = type,
-                    Name = SafeBuildingName(__result, type),
-                    Theater = TheaterFromPosition(actualPosition),
-                    SiteKey = actualPosition.x.ToString("0") + "," + actualPosition.z.ToString("0"),
-                    Year = SafeYear(),
-                    Month = SafeMonth(),
-                    Day = SafeDay()
-                };
+                    OnceLog.Info("construction-observer:building", "ConstructionObserverPatch wired (CBuilding.Place)");
 
-                StrategicCoordinator.Instance?.RecordConstructionStart(start);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("construction-observer:building-failed", "[ConstructionObserver] building observer failed: " + ex.Message);
+                    Vector3 actualPosition = ((Component)__result).transform.position;
+                    var start = new ConstructionStartEvent
+                    {
+                        AllianceId = owner,
+                        Kind = KindForBuilding(type),
+                        BuildingTypeId = type,
+                        Name = SafeBuildingName(__result, type),
+                        Theater = TheaterFromPosition(actualPosition),
+                        SiteKey = actualPosition.x.ToString("0") + "," + actualPosition.z.ToString("0"),
+                        Year = SafeYear(),
+                        Month = SafeMonth(),
+                        Day = SafeDay()
+                    };
+
+                    StrategicCoordinator.Instance?.RecordConstructionStart(start);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("construction-observer:building-failed", "[ConstructionObserver] building observer failed: " + ex.Message);
+                }
             }
         }
 
@@ -62,34 +66,37 @@ namespace WhiskeyRealism.Patches
             bool checkonly,
             bool __result)
         {
-            if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
-            if (checkonly || !__result) return;
-            if (_alliancetoconstruct < 0 || _alliancetoconstruct >= 2) return;
-
-            try
+            using (TelemetryPerf.Scope("campaign.patch.construction-observer.railroad", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-                OnceLog.Info("construction-observer:railroad", "ConstructionObserverPatch wired (Railroad.StartConstruction)");
+                if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
+                if (checkonly || !__result) return;
+                if (_alliancetoconstruct < 0 || _alliancetoconstruct >= 2) return;
 
-                string name = SafeRailroadName(__instance);
-                Vector3 position = __instance != null ? __instance.averageposition : default(Vector3);
-                var start = new ConstructionStartEvent
+                try
                 {
-                    AllianceId = _alliancetoconstruct,
-                    Kind = ConstructionCandidateKind.Railroad,
-                    BuildingTypeId = -1,
-                    Name = name,
-                    Theater = TheaterFromPosition(position),
-                    SiteKey = name,
-                    Year = SafeYear(),
-                    Month = SafeMonth(),
-                    Day = SafeDay()
-                };
+                    OnceLog.Info("construction-observer:railroad", "ConstructionObserverPatch wired (Railroad.StartConstruction)");
 
-                StrategicCoordinator.Instance?.RecordConstructionStart(start);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("construction-observer:railroad-failed", "[ConstructionObserver] railroad observer failed: " + ex.Message);
+                    string name = SafeRailroadName(__instance);
+                    Vector3 position = __instance != null ? __instance.averageposition : default(Vector3);
+                    var start = new ConstructionStartEvent
+                    {
+                        AllianceId = _alliancetoconstruct,
+                        Kind = ConstructionCandidateKind.Railroad,
+                        BuildingTypeId = -1,
+                        Name = name,
+                        Theater = TheaterFromPosition(position),
+                        SiteKey = name,
+                        Year = SafeYear(),
+                        Month = SafeMonth(),
+                        Day = SafeDay()
+                    };
+
+                    StrategicCoordinator.Instance?.RecordConstructionStart(start);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("construction-observer:railroad-failed", "[ConstructionObserver] railroad observer failed: " + ex.Message);
+                }
             }
         }
 

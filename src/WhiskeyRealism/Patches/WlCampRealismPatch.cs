@@ -37,13 +37,19 @@ namespace WhiskeyRealism.Patches
             [HarmonyPrefix]
             internal static void Prefix()
             {
-                TryRefreshCurrentStatus();
+                using (TelemetryPerf.Scope("campaign.patch.wl-camp-realism.evaluate-camp-time.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
+                    TryRefreshCurrentStatus();
+                }
             }
 
             [HarmonyPostfix]
             internal static void Postfix()
             {
-                TryCorrectShortCampHistory();
+                using (TelemetryPerf.Scope("campaign.patch.wl-camp-realism.evaluate-camp-time.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
+                    TryCorrectShortCampHistory();
+                }
             }
         }
 
@@ -53,8 +59,11 @@ namespace WhiskeyRealism.Patches
             [HarmonyPostfix]
             internal static void Postfix(Camp.Station __instance, bool useaverage, ref float __result)
             {
-                TryApplyRestRewardCap(__instance, useaverage, ref __result);
-                TryApplyResponsiveBonus(__instance, useaverage, ref __result);
+                using (TelemetryPerf.Scope("campaign.patch.wl-camp-realism.station-bonus", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
+                    TryApplyRestRewardCap(__instance, useaverage, ref __result);
+                    TryApplyResponsiveBonus(__instance, useaverage, ref __result);
+                }
             }
         }
 
@@ -64,7 +73,10 @@ namespace WhiskeyRealism.Patches
             [HarmonyPostfix]
             internal static void Postfix(int stationid, bool dividebycommandedunits, ref float __result)
             {
-                TryApplyUnitPayoffTuning(stationid, dividebycommandedunits, ref __result);
+                using (TelemetryPerf.Scope("campaign.patch.wl-camp-realism.modifier", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
+                    TryApplyUnitPayoffTuning(stationid, dividebycommandedunits, ref __result);
+                }
             }
         }
 
@@ -74,14 +86,20 @@ namespace WhiskeyRealism.Patches
             [HarmonyPrefix]
             internal static void Prefix()
             {
-                _vanillaThresholdDepth++;
+                using (TelemetryPerf.Scope("campaign.patch.wl-camp-realism.camp-event-threshold-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
+                    _vanillaThresholdDepth++;
+                }
             }
 
             [HarmonyFinalizer]
             internal static Exception Finalizer(Exception __exception)
             {
-                if (_vanillaThresholdDepth > 0) _vanillaThresholdDepth--;
-                return __exception;
+                using (TelemetryPerf.Scope("campaign.patch.wl-camp-realism.camp-event-threshold-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
+                    if (_vanillaThresholdDepth > 0) _vanillaThresholdDepth--;
+                    return __exception;
+                }
             }
         }
 
@@ -91,6 +109,8 @@ namespace WhiskeyRealism.Patches
             [HarmonyPrefix]
             internal static bool Prefix(ref bool __state)
             {
+                using (TelemetryPerf.Scope("campaign.patch.wl-camp-realism.diary-threshold-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
                 __state = false;
                 try
                 {
@@ -111,11 +131,14 @@ namespace WhiskeyRealism.Patches
                 _vanillaThresholdDepth++;
                 __state = true;
                 return true;
+                } // end using TelemetryPerf.Scope
             }
 
             [HarmonyFinalizer]
             internal static Exception Finalizer(Exception __exception, bool __state)
             {
+                using (TelemetryPerf.Scope("campaign.patch.wl-camp-realism.diary-threshold-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                {
                 if (__state && _vanillaThresholdDepth > 0) _vanillaThresholdDepth--;
                 if (__exception is NullReferenceException && DLC_WL.dlc_scenarioactive)
                 {
@@ -128,6 +151,7 @@ namespace WhiskeyRealism.Patches
                     return null;
                 }
                 return __exception;
+                } // end using TelemetryPerf.Scope
             }
         }
 

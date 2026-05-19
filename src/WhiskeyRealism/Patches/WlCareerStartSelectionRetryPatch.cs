@@ -36,7 +36,10 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix()
         {
-            TryRetry(ResolveCareerPanel(), "ai");
+            using (TelemetryPerf.Scope("campaign.patch.wl-career-start-retry.ai", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                TryRetry(ResolveCareerPanel(), "ai");
+            }
         }
 
         internal static void TryRetry(object panel, string source)
@@ -206,7 +209,10 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(CampaignController __instance)
         {
-            WlCareerStartSelectionRetryPatch.TryRetry(WlCareerStartSelectionRetryPatch.ResolveCareerPanelFromController(__instance), "campaign");
+            using (TelemetryPerf.Scope("campaign.patch.wl-career-start-retry.campaign", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
+                WlCareerStartSelectionRetryPatch.TryRetry(WlCareerStartSelectionRetryPatch.ResolveCareerPanelFromController(__instance), "campaign");
+            }
         }
     }
 }

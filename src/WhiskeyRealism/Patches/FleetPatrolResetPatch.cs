@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -32,6 +33,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(Regiment __instance)
         {
+            using (TelemetryPerf.Scope("campaign.patch.fleet-patrol-reset", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (!Enabled() || __instance == null) return;
@@ -62,6 +65,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("fleet-patrol-reset:prefix", "[Patch:FleetPatrol] prefix failed: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static bool Enabled()
