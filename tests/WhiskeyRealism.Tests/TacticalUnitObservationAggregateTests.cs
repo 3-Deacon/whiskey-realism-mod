@@ -55,12 +55,12 @@ internal static class TacticalUnitObservationAggregateTests
                 MakeUnit(4, alliance: 1)
             };
             agg.LoadForTest(allianceId: 0, units: units);
-            TestHarness.AssertEqual(agg.Count, 4, "count");
-            TestHarness.AssertEqual(agg.CapturedForAlliance, 0, "capturedForAlliance");
-            TestHarness.AssertEqual(agg.AlliedIndices.Count, 2, "alliedCount");
-            TestHarness.AssertEqual(agg.EnemyIndices.Count, 2, "enemyCount");
-            TestHarness.AssertEqual(agg.AllUnits[agg.AlliedIndices[0]].InstanceId, 1, "alliedFirst");
-            TestHarness.AssertEqual(agg.AllUnits[agg.EnemyIndices[0]].InstanceId, 2, "enemyFirst");
+            TestHarness.AssertEqual(4, agg.Count, "count");
+            TestHarness.AssertEqual(0, agg.CapturedForAlliance, "capturedForAlliance");
+            TestHarness.AssertEqual(2, agg.AlliedIndices.Count, "alliedCount");
+            TestHarness.AssertEqual(2, agg.EnemyIndices.Count, "enemyCount");
+            TestHarness.AssertEqual(1, agg.AllUnits[agg.AlliedIndices[0]].InstanceId, "alliedFirst");
+            TestHarness.AssertEqual(2, agg.AllUnits[agg.EnemyIndices[0]].InstanceId, "enemyFirst");
             LogPass("tactical unit observation aggregate load partitions allied and enemy indices");
         }
 
@@ -69,10 +69,10 @@ internal static class TacticalUnitObservationAggregateTests
             var agg = new TacticalUnitObservationAggregate();
             agg.LoadForTest(0, new[] { MakeUnit(1, 0), MakeUnit(2, 1) });
             agg.LoadForTest(1, new[] { MakeUnit(3, 1) });
-            TestHarness.AssertEqual(agg.Count, 1, "count");
-            TestHarness.AssertEqual(agg.CapturedForAlliance, 1, "alliance");
-            TestHarness.AssertEqual(agg.AlliedIndices.Count, 1, "alliedCount");
-            TestHarness.AssertEqual(agg.EnemyIndices.Count, 0, "enemyCount");
+            TestHarness.AssertEqual(1, agg.Count, "count");
+            TestHarness.AssertEqual(1, agg.CapturedForAlliance, "alliance");
+            TestHarness.AssertEqual(1, agg.AlliedIndices.Count, "alliedCount");
+            TestHarness.AssertEqual(0, agg.EnemyIndices.Count, "enemyCount");
             LogPass("tactical unit observation aggregate load clears prior capture");
         }
 
@@ -81,10 +81,10 @@ internal static class TacticalUnitObservationAggregateTests
             var agg = new TacticalUnitObservationAggregate();
             agg.LoadForTest(0, new[] { MakeUnit(1, 0) });
             agg.ClearForBattleEnd();
-            TestHarness.AssertEqual(agg.Count, 0, "count");
-            TestHarness.AssertEqual(agg.CapturedForAlliance, -1, "alliance");
-            TestHarness.AssertEqual(agg.AlliedIndices.Count, 0, "alliedCount");
-            TestHarness.AssertEqual(agg.EnemyIndices.Count, 0, "enemyCount");
+            TestHarness.AssertEqual(0, agg.Count, "count");
+            TestHarness.AssertEqual(-1, agg.CapturedForAlliance, "alliance");
+            TestHarness.AssertEqual(0, agg.AlliedIndices.Count, "alliedCount");
+            TestHarness.AssertEqual(0, agg.EnemyIndices.Count, "enemyCount");
             LogPass("tactical unit observation aggregate clear for battle end resets alliance");
         }
 
@@ -92,9 +92,9 @@ internal static class TacticalUnitObservationAggregateTests
         {
             var agg = new TacticalUnitObservationAggregate();
             agg.LoadForTest(0, Array.Empty<TacticalUnitObservation>());
-            TestHarness.AssertEqual(agg.Count, 0, "count");
-            TestHarness.AssertEqual(agg.AlliedIndices.Count, 0, "alliedCount");
-            TestHarness.AssertEqual(agg.EnemyIndices.Count, 0, "enemyCount");
+            TestHarness.AssertEqual(0, agg.Count, "count");
+            TestHarness.AssertEqual(0, agg.AlliedIndices.Count, "alliedCount");
+            TestHarness.AssertEqual(0, agg.EnemyIndices.Count, "enemyCount");
             LogPass("tactical unit observation aggregate empty load produces empty views");
         }
     }

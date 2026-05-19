@@ -23,10 +23,4 @@ internal static class TestHarness
         if (condition)
             throw new Exception(message);
     }
-
-    public static void Pass(string message)
-    {
-        // No-op; if assertions don't throw, the test passes.
-        // This method exists for explicit test completion markers.
-    }
 }
