@@ -87,6 +87,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // time compression. Reset per battle in ResetRuntimeTickState.
         private static readonly int[] _lastGen0CountBySide = { 0, 0 };
 
+        /// <summary>
+        /// Battle sequence integer used as the parity-window key in
+        /// TacticalBattleSnapshotBuilder. Increments on each OnBattleStart;
+        /// reset to 0 in ClearForFailure. Public so the snapshot builder can
+        /// dedupe parity state per battle.
+        /// </summary>
+        public static int BattleSequenceForParity
+        {
+            get { return _battleSequence; }
+        }
+
         public static void OnBattleStart(AIBattle battle)
         {
             if (active) return;
@@ -1349,6 +1360,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
             catch { }
+            // Tasks 10/11: clear aggregate pool and parity window state for new battle
+            // (global singletons — outside per-side loop)
+            try { TacticalUnitObservationAggregate.Shared.ClearForBattleEnd(); } catch { }
+            try { TacticalBattleSnapshotBuilder.ClearParityState(); } catch { }
         }
 
         /// <summary>
