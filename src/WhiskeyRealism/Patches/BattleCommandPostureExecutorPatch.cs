@@ -1964,7 +1964,13 @@ namespace WhiskeyRealism.Patches
                     var group = units[i] as Regiment;
                     if (group == null) continue;
                     if (group.alliance != allianceId) continue;
-                    if (group.unittyp != TacticalUnitType.BattleGroupBrigade) continue;
+                    // Allow ANY command-tier group (brigade and above) — the leaf
+                    // map may record a Division/Corps as a degenerate leaf when
+                    // discovery couldn't find brigade-tier children under it.
+                    // Strict brigade-tier filtering here would silently drop
+                    // those nodes; relaxing to >= BattleGroupBrigade lets the
+                    // posture write reach whatever the leaf map registered.
+                    if (group.unittyp < TacticalUnitType.BattleGroupBrigade) continue;
                     if (!IsEligibleCommandGroup(group)) continue;
                     int instanceId = TacticalPatchIds.GameObjectInstanceId(group);
                     if (instanceId == 0) continue;
