@@ -4,22 +4,22 @@
 
 ---
 
-## 🚧 Resume from cold context (2026-05-19, IN FLIGHT)
+## 🚧 Resume from cold context (2026-05-19)
 
-A hot-path optimization workstream is in flight on branch `feat/hotpath-measurement` (HEAD: `b215a00`, not on main yet). If you're a fresh agent picking this up cold, read in this order:
+Hot-path optimization workstream — **Slice 1 + diagnostic completeness merged to main** at `6b9a410` (origin/main `6b9a410`). Slice 2 designed + planned but **not yet implemented**. If you're a fresh agent picking this up cold, read in this order:
 
 | Step | Path | Why |
 |---|---|---|
-| 1 | `docs/superpowers/specs/2026-05-19-tactical-objective-records-single-pass-design.md` | **Slice 1 (shipped on branch, NOT on main).** Single-pass aggregate refactor of `BuildObjectiveRecordsFromBattle`. Reduces that scope p99 from 11ms → 5.86ms. Parity test = 0 mismatches. Includes adversarial-review findings §14. |
+| 1 | `docs/superpowers/specs/2026-05-19-tactical-objective-records-single-pass-design.md` | **Slice 1 (shipped on main).** Single-pass aggregate refactor of `BuildObjectiveRecordsFromBattle`. Reduces that scope p99 from 11ms → 5.86ms. Parity test = 0 mismatches. Adversarial-review findings §14. |
 | 2 | `docs/superpowers/specs/2026-05-19-tactical-orchestrator-worker-thread-design.md` | **Slice 2 (designed, plan written, NOT IMPLEMENTED YET).** Moves orchestrator analysis to a dedicated background `Thread` (matching `TelemetryWriter` pattern). Drops main-thread `orchestrator-tick` p99 from 67ms → ≤10ms target. |
-| 3 | `docs/superpowers/plans/2026-05-19-tactical-orchestrator-worker-thread-implementation.md` | **The plan to execute.** 17 bite-sized tasks with full code in every step. Self-reviewed for spec coverage + type consistency. Begin with subagent-driven-development. |
+| 3 | `docs/superpowers/plans/2026-05-19-tactical-orchestrator-worker-thread-implementation.md` | **The plan to execute next.** 17 bite-sized tasks with full code in every step. Self-reviewed for spec coverage + type consistency. Begin with `superpowers:subagent-driven-development` on a new branch off main. |
 
 **Current state:**
-- Branch: `feat/hotpath-measurement` at `b215a00` (12+ commits since main `4036aaa`)
-- Deployed DLL: SHA-256 `601aa125655f0d2c17cf37df8fc7d86ae7080542929ed00141337e7ed260d56b` (batch-1 patch-scope instrumentation only — user is mid-session on this build)
-- Local `dist/WhiskeyRealism.dll`: SHA-256 `8d029a7ba4906fcacfd80f12cdfa432a803a87e4ae73c579610822b8b3ca100f` (HEAD `b215a00` build — includes Slice 1 fully, plus batches 2-3 of diagnostic coverage, plus parity-diag enrichment). Not deployed yet; user said "don't keep restarting."
-- Harness: **1253 PASS / 0 FAIL** (baseline 1244 + Slice 1 additions; the +5 ObjectiveRecords-from-aggregate test was removed in commit `9ad16c8` along with the wrong-data-set ApproachAvenue sub-builder).
-- Branch not pushed to remote.
+- Main: `6b9a410` = origin/main (in sync). Slice 1 (12 commits) + diagnostic completeness (3 commits) + Slice 2 spec/plan + fresh-context handoff prep all merged via fast-forward.
+- Local `dist/WhiskeyRealism.dll`: SHA-256 `d73f269041db6b8c94ff7e6f191a11eff2d919cbbbb3065ea4ed5e2e47ecda10` (built from `6b9a410` on main).
+- Deployed DLL on user's machine: SHA-256 `601aa125655f0d2c17cf37df8fc7d86ae7080542929ed00141337e7ed260d56b` (batch-1 instrumentation only — one revision BEHIND main; user wanted to avoid restarts). Redeploy from `dist/` when convenient.
+- Harness: **1253 PASS / 0 FAIL** on main.
+- No active feature branches. The `feat/hotpath-measurement` worktree and branch were cleaned up after the merge.
 
 **Critical context that ISN'T in code or docs:**
 - User's empirical claim: vanilla GTCW does NOT exhibit the 5-7 second hitches at 20× compression; the mod does. This invalidated an earlier hypothesis that vanilla AI was the culprit. **The hitches are in our code.**
@@ -28,9 +28,11 @@ A hot-path optimization workstream is in flight on branch `feat/hotpath-measurem
 - `TacticalUnitObservationAggregate` (built by Slice 1) is already a thread-safe immutable snapshot — Slice 2 builds on it.
 
 **Immediate next action (when resuming):**
-1. Read the Slice 2 plan, then dispatch subagent-driven-development to execute it.
-2. After the plan completes: build → deploy → user smokes → analyze → either close Slice 2 or open Slice 3 (per-frame visibility cache for any remaining heavy patches).
-3. Then merge `feat/hotpath-measurement` to `main` (Slice 1 + Slice 2 ship together).
+1. Branch off main: `git checkout -b feat/orchestrator-worker-thread main`.
+2. Set up worktree per `superpowers:using-git-worktrees` (and re-link `refs/` symlink — see `AGENTS.md`).
+3. Read the Slice 2 plan, then dispatch `superpowers:subagent-driven-development` to execute it.
+4. After plan completes: build → deploy → user smokes → analyze → either close Slice 2 or open Slice 3 (per-frame visibility cache for any remaining heavy patches).
+5. Merge to main when smoke confirms targets are met.
 
 **If you must reproduce the smoke data:** session `20260519-222744-843-p188588-601aa125655f` under `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/` is the baseline that shows `orchestrator-tick` p99=67ms, `battle-group-stance` p99=20.6ms, `telemetry.flush` p99=203ms.
 
