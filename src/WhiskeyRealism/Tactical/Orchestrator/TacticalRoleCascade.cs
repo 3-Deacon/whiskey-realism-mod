@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -35,7 +36,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int childCount,
                 int childStrengthBucket,
                 int childFlankExposureBucket,
-                float commanderAggression01)
+                float commanderAggression01,
+                int anchorIndex = -1)
             {
                 ParentRole = parentRole;
                 ChildIndex = childIndex < 0 ? 0 : childIndex;
@@ -43,6 +45,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ChildStrengthBucket = childStrengthBucket < 0 ? 0 : childStrengthBucket;
                 ChildFlankExposureBucket = childFlankExposureBucket < 0 ? 0 : childFlankExposureBucket;
                 CommanderAggression01 = Clamp01(commanderAggression01);
+                // anchorIndex = -1 means "use geometric center" (childCount / 2).
+                // Callers that have global sibling-strength data should pre-compute
+                // the anchor once and pass it here so every sibling sees the same
+                // anchor — preventing multi-self-anchor allocations.
+                AnchorIndex = anchorIndex;
             }
 
             public DirectChildRole ParentRole { get; }
@@ -51,6 +58,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public int ChildStrengthBucket { get; }
             public int ChildFlankExposureBucket { get; }
             public float CommanderAggression01 { get; }
+            public int AnchorIndex { get; }
+
+            public int ResolvedAnchorIndex
+            {
+                get
+                {
+                    if (AnchorIndex >= 0 && AnchorIndex < ChildCount) return AnchorIndex;
+                    return ChildCount / 2;
+                }
+            }
 
             private static float Clamp01(float value)
             {
@@ -59,6 +76,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (value > 1f) return 1f;
                 return value;
             }
+        }
+
+        /// <summary>
+        /// Caller-side helper: pre-pick the Main anchor index given each sibling's
+        /// strength bucket. Picks the center child by default; if a sibling with
+        /// higher strength sits within `nearCenterRadius` of center, the anchor
+        /// shifts there. Always returns a single index — no ambiguity between
+        /// per-child views of who's the anchor.
+        /// </summary>
+        public static int ChooseMainAnchorIndex(IReadOnlyList<int> siblingStrengthBuckets, int nearCenterRadius = 1)
+        {
+            if (siblingStrengthBuckets == null || siblingStrengthBuckets.Count <= 0) return 0;
+            int count = siblingStrengthBuckets.Count;
+            int center = count / 2;
+            int bestIndex = center;
+            int bestStrength = (center >= 0 && center < count) ? siblingStrengthBuckets[center] : -1;
+            for (int i = 0; i < count; i++)
+            {
+                int dist = i - center; if (dist < 0) dist = -dist;
+                if (dist > nearCenterRadius) continue;
+                if (siblingStrengthBuckets[i] > bestStrength)
+                {
+                    bestStrength = siblingStrengthBuckets[i];
+                    bestIndex = i;
+                }
+            }
+            return bestIndex;
         }
 
         public static DirectChildRole DistributeChildRole(CascadeContext ctx)
@@ -117,31 +161,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildRole DistributeMain(CascadeContext ctx)
         {
-            // The Main effort cascades down with the center child taking the attack
-            // anchor, adjacent siblings supporting, and the outer flanks refusing.
+            // The Main effort cascades down with one anchor child taking Main,
+            // adjacent siblings supporting, and outer flanks refusing.
             //
-            // High-aggression commanders (Hood/Jackson/Grant) widen the attack band:
-            // - aggression >= 0.75: 3-wide attack band (Main + 2x SupportMain)
-            // - aggression < 0.30 (cautious): narrow Main, more Reserve on flanks
-            // - default 0.30-0.75: Main + adjacent SupportMain, outer Refuse
-            int center = ctx.ChildCount / 2;
-            int distanceFromCenter = ctx.ChildIndex - center;
-            if (distanceFromCenter < 0) distanceFromCenter = -distanceFromCenter;
-
+            // High-aggression commanders widen the attack band: aggression >= 0.75 = 2 slots
+            // each side of anchor; < 0.30 (cautious) narrows the support band to 1 slot
+            // and outer children fall back to Reserve instead of Refuse.
+            //
+            // The anchor is supplied by the caller via ctx.AnchorIndex (or defaults to
+            // geometric center). This avoids the multi-self-anchor bug where two
+            // strong adjacent children both classified themselves as the anchor.
+            int anchorIndex = ctx.ResolvedAnchorIndex;
             int supportBand = ctx.CommanderAggression01 >= 0.75f ? 2 : 1;
             bool cautious = ctx.CommanderAggression01 < 0.30f;
 
-            // Strongest sibling pulls the Main anchor even if it's not perfectly
-            // centered, so big brigades anchor the attack.
-            int mainIndex = PickAnchorIndex(ctx, center);
-            if (ctx.ChildIndex == mainIndex)
+            if (ctx.ChildIndex == anchorIndex)
                 return DirectChildRole.Main;
 
-            // Re-derive distance from the resolved anchor, not the bare center.
-            distanceFromCenter = ctx.ChildIndex - mainIndex;
-            if (distanceFromCenter < 0) distanceFromCenter = -distanceFromCenter;
+            int distanceFromAnchor = ctx.ChildIndex - anchorIndex;
+            if (distanceFromAnchor < 0) distanceFromAnchor = -distanceFromAnchor;
 
-            if (distanceFromCenter <= supportBand)
+            if (distanceFromAnchor <= supportBand)
             {
                 if (cautious && ctx.ChildFlankExposureBucket >= 2)
                     return DirectChildRole.Reserve;
@@ -152,7 +192,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // relative to anchor for left vs right.
             if (cautious && ctx.ChildFlankExposureBucket < 2)
                 return DirectChildRole.Reserve;
-            return ctx.ChildIndex < mainIndex
+            return ctx.ChildIndex < anchorIndex
                 ? DirectChildRole.RefuseLeft
                 : DirectChildRole.RefuseRight;
         }
@@ -160,20 +200,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static DirectChildRole DistributeSupportMain(CascadeContext ctx)
         {
             // SupportMain children continue the attack but with fewer attack roles
-            // and more reserves. Strongest sibling continues SupportMain;
-            // aggressive commanders pull more siblings into SupportMain.
-            int supportSlots = ctx.CommanderAggression01 >= 0.75f ? 2 : 1;
-            if (ctx.CommanderAggression01 < 0.30f) supportSlots = 1;
-            if (supportSlots > ctx.ChildCount) supportSlots = ctx.ChildCount;
+            // and more reserves. Single anchor — caller-supplied via ctx.AnchorIndex
+            // — continues SupportMain; aggressive commanders allow one adjacent
+            // sibling to also be SupportMain.
+            int anchorIndex = ctx.ResolvedAnchorIndex;
+            int supportBand = ctx.CommanderAggression01 >= 0.75f ? 1 : 0;
 
-            int anchorIndex = PickStrongestIndex(ctx);
             if (ctx.ChildIndex == anchorIndex) return DirectChildRole.SupportMain;
-            if (supportSlots >= 2)
-            {
-                // Allow a second support slot adjacent to the anchor
-                if (ctx.ChildIndex == anchorIndex - 1 || ctx.ChildIndex == anchorIndex + 1)
-                    return DirectChildRole.SupportMain;
-            }
+            int distance = ctx.ChildIndex - anchorIndex;
+            if (distance < 0) distance = -distance;
+            if (distance <= supportBand) return DirectChildRole.SupportMain;
             return DirectChildRole.Reserve;
         }
 
@@ -217,29 +253,5 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return parentRole;
         }
 
-        private static int PickAnchorIndex(CascadeContext ctx, int defaultCenter)
-        {
-            // Default to the geometric center, but if a stronger sibling exists
-            // within 1 slot of center, pull the anchor there. Keeps the attack
-            // mass-concentrated on the heaviest brigade.
-            if (ctx.ChildStrengthBucket >= 2 &&
-                (ctx.ChildIndex == defaultCenter - 1 || ctx.ChildIndex == defaultCenter + 1))
-                return ctx.ChildIndex;
-            return defaultCenter;
-        }
-
-        private static int PickStrongestIndex(CascadeContext ctx)
-        {
-            // Used by SupportMain distribution. Without a global per-sibling
-            // strength comparison, treat the current index as the strongest if
-            // its strength bucket is >= 2 (a high bucket). Otherwise default to
-            // index 0.
-            //
-            // Callers that have full sibling strength data should pre-sort and
-            // pass index 0 as the strongest; this function is robust to that
-            // pre-sorting.
-            if (ctx.ChildStrengthBucket >= 2) return ctx.ChildIndex;
-            return 0;
-        }
     }
 }

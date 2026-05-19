@@ -74,6 +74,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
+        /// Maximum recursion depth for the cascade. Real GTCW hierarchies are
+        /// 3-4 tiers max (Army → Corps → Division → Brigade); 16 leaves plenty
+        /// of headroom while preventing stack overflow on malformed input.
+        /// </summary>
+        private const int MaxCascadeDepth = 16;
+
+        /// <summary>
         /// Builds the leaf assignment map. Walks each top-tier child via the tree,
         /// cascades the top role down to its descendant leaves, and returns a
         /// dictionary keyed by leaf brigade instanceId.
@@ -90,6 +97,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 var top = topLevelAssignments[i];
                 if (!tree.TryGetValue(top.ChildInstanceId, out var topNode)) continue;
+                // Visited set guards against parent-cycles in malformed vanilla
+                // data (A→B→A). Each top-tier walk gets its own visited set so
+                // multiple top assignments don't share state.
+                var visited = new HashSet<int>();
                 CascadeInto(
                     topNode,
                     top.Role,
@@ -98,6 +109,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     i,
                     tree,
                     commanderAggression01,
+                    visited,
+                    depth: 0,
                     result);
             }
 
@@ -112,9 +125,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int topLevelChildIndex,
             IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree,
             float commanderAggression01,
+            HashSet<int> visited,
+            int depth,
             Dictionary<int, LeafAssignment> output)
         {
             if (!node.Active) return;
+            if (depth > MaxCascadeDepth) return;
+            if (visited != null && !visited.Add(node.InstanceId))
+            {
+                // Cycle detected — already visited this node on this top-tier
+                // walk. Bail to avoid stack overflow on malformed parent links.
+                return;
+            }
 
             var children = TacticalCommandTreeProbe.EnumerateChildrenLeftToRight(node.InstanceId, tree);
             if (children.Count == 0)
@@ -131,8 +153,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return;
             }
 
-            // Non-leaf: distribute the parent role to each child via the cascade
-            // and recurse into each child.
+            // Non-leaf: pre-pick the Main anchor index for this sibling group
+            // using sibling strength buckets. Passing the same anchor to every
+            // sibling's distribution call ensures exactly one Main per non-leaf
+            // parent (no multi-self-anchor allocations).
+            int anchorIndex = -1;
+            if (nodeRole == DirectChildRole.Main || nodeRole == DirectChildRole.SupportMain)
+            {
+                var strengths = new int[children.Count];
+                for (int s = 0; s < children.Count; s++) strengths[s] = children[s].StrengthBucket;
+                anchorIndex = TacticalRoleCascade.ChooseMainAnchorIndex(strengths, nearCenterRadius: 1);
+            }
+
             for (int idx = 0; idx < children.Count; idx++)
             {
                 var child = children[idx];
@@ -142,7 +174,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     childCount: children.Count,
                     childStrengthBucket: child.StrengthBucket,
                     childFlankExposureBucket: 0,
-                    commanderAggression01: commanderAggression01);
+                    commanderAggression01: commanderAggression01,
+                    anchorIndex: anchorIndex);
                 var derived = TacticalRoleCascade.DistributeChildRole(ctx);
 
                 var nextChain = new List<DirectChildRole>(chainSoFar.Count + 1);
@@ -161,6 +194,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     topLevelChildIndex,
                     tree,
                     commanderAggression01,
+                    visited,
+                    depth + 1,
                     output);
             }
         }

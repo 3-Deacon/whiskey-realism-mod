@@ -1126,6 +1126,10 @@ static class Program
             ("leaf brigade map reserve cascades to all leaves", LeafBrigadeMapReserveCascadesToAllLeaves),
             ("leaf brigade map records full cascade chain", LeafBrigadeMapRecordsFullCascadeChain),
             ("leaf brigade map empty inputs return empty map", LeafBrigadeMapEmptyInputsReturnEmptyMap),
+            ("leaf brigade map exactly one main per sibling group", LeafBrigadeMapExactlyOneMainPerSiblingGroup),
+            ("leaf brigade map survives parent cycle", LeafBrigadeMapSurvivesParentCycle),
+            ("leaf brigade map bounded recursion depth", LeafBrigadeMapBoundedRecursionDepth),
+            ("role cascade choose main anchor picks strongest near center", RoleCascadeChooseMainAnchorPicksStrongestNearCenter),
             ("historical registry covers Hunter and Beauregard", HistoricalRegistryCoversHunterAndBeauregard),
             ("historical registry normalizes initials and punctuation", HistoricalRegistryNormalizesInitialsAndPunctuation),
             ("historical registry covers major Civil War commanders", HistoricalRegistryCoversMajorCivilWarCommanders),
@@ -23655,6 +23659,97 @@ static class Program
                 System.Array.Empty<TacticalLeafBrigadeMap.TopAssignment>(),
                 0.5f).Count,
             "empty tree+assignments yields empty map");
+    }
+
+    private static void LeafBrigadeMapExactlyOneMainPerSiblingGroup()
+    {
+        // Regression for the multi-self-anchor bug. Two adjacent siblings both
+        // with high strength (bucket 2) under a Main parent must produce
+        // exactly ONE Main leaf, not two. The cascade pre-picks the anchor at
+        // the parent level so the same anchor is passed to every sibling's
+        // distribution call.
+        var probes = new[]
+        {
+            Probe(-100, 16, "corps", 0, isDirectChild: false),
+            Probe(-200, 15, "div_main", -100),
+            // 4 leaves under div_main, strengths {1, 2, 2, 1}: idx 1 and 2 are
+            // both adjacent-to-center and both strength 2. Pre-2026-05-19 cascade
+            // would have flagged both as Main. After the anchor refactor, only
+            // one wins (the leftmost of the two strong, by ChooseMainAnchorIndex).
+            Probe(-201, 14, "leaf_left",       -200, x: -150f, strength: 1),
+            Probe(-202, 14, "leaf_strong1",    -200, x: -50f,  strength: 2),
+            Probe(-203, 14, "leaf_strong2",    -200, x: 50f,   strength: 2),
+            Probe(-204, 14, "leaf_right",      -200, x: 150f,  strength: 1),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        var top = new[] { new TacticalLeafBrigadeMap.TopAssignment(-200, DirectChildRole.Main) };
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, top, 0.5f);
+
+        int mainCount = 0;
+        foreach (var kv in map)
+            if (kv.Value.LeafRole == DirectChildRole.Main) mainCount++;
+        AssertEqual(1, mainCount, "exactly one Main leaf, not multi-anchor");
+    }
+
+    private static void LeafBrigadeMapSurvivesParentCycle()
+    {
+        // Defense-in-depth: malformed parent linkage (A's parent is B, B's
+        // parent is A) must not stack-overflow. The visited set in CascadeInto
+        // bails on revisited nodes.
+        var cycleProbes = new[]
+        {
+            new TacticalCommandTreeProbe.ExtendedProbe(-100, 15, "A", true, parentInstanceId: -200, isDirectChild: false, worldX: 0f, worldZ: 0f, strengthBucket: 1),
+            new TacticalCommandTreeProbe.ExtendedProbe(-200, 15, "B", true, parentInstanceId: -100, isDirectChild: true, worldX: 100f, worldZ: 0f, strengthBucket: 1),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(cycleProbes, 1);
+        var top = new[] { new TacticalLeafBrigadeMap.TopAssignment(-100, DirectChildRole.Main) };
+        // Should return (eventually) without exception.
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, top, 0.5f);
+        AssertTrue(map != null, "cycle did not stack-overflow");
+    }
+
+    private static void LeafBrigadeMapBoundedRecursionDepth()
+    {
+        // Build a degenerate 20-deep linear chain: each node has 1 child. The
+        // cascade's MaxCascadeDepth (16) should cap recursion well before the
+        // chain bottoms out. No exception, no stack overflow.
+        var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>();
+        for (int i = 0; i < 20; i++)
+        {
+            int id = -100 - i;
+            int parentId = i == 0 ? 0 : -(100 + i - 1);
+            probes.Add(new TacticalCommandTreeProbe.ExtendedProbe(
+                instanceId: id, unittyp: 14, name: "node" + i, active: true,
+                parentInstanceId: parentId, isDirectChild: i == 0,
+                worldX: 0f, worldZ: 0f, strengthBucket: 1));
+        }
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        var top = new[] { new TacticalLeafBrigadeMap.TopAssignment(-100, DirectChildRole.Reserve) };
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, top, 0.5f);
+        AssertTrue(map != null, "deep tree did not stack-overflow");
+        // Depth cap stops traversal; we don't assert exact count, just that the
+        // cascade terminated.
+    }
+
+    private static void RoleCascadeChooseMainAnchorPicksStrongestNearCenter()
+    {
+        // ChooseMainAnchorIndex: default to center, but a stronger sibling
+        // within nearCenterRadius pulls the anchor.
+        var allEqual = new[] { 1, 1, 1, 1, 1 };
+        AssertEqual(2, TacticalRoleCascade.ChooseMainAnchorIndex(allEqual), "all-equal picks center");
+
+        var strongLeft = new[] { 1, 2, 1, 1, 1 };
+        AssertEqual(1, TacticalRoleCascade.ChooseMainAnchorIndex(strongLeft), "stronger left-of-center pulls anchor");
+
+        var strongRight = new[] { 1, 1, 1, 2, 1 };
+        AssertEqual(3, TacticalRoleCascade.ChooseMainAnchorIndex(strongRight), "stronger right-of-center pulls anchor");
+
+        var farStrong = new[] { 3, 1, 1, 1, 1 };
+        // idx 0 is strongest but outside nearCenterRadius=1 from center=2 → center wins
+        AssertEqual(2, TacticalRoleCascade.ChooseMainAnchorIndex(farStrong), "far-from-center strong sibling is ignored");
+
+        var empty = System.Array.Empty<int>();
+        AssertEqual(0, TacticalRoleCascade.ChooseMainAnchorIndex(empty), "empty list returns 0");
     }
 
     private static void HistoricalRegistryCoversHunterAndBeauregard()

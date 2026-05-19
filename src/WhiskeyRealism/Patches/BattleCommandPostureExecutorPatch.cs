@@ -1873,6 +1873,50 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
+        // Cache for extended probe lists per alliance. completeunitlist may have
+        // 200+ regiments and walking it twice per Postfix per side is expensive.
+        // Cache invalidated by a coarse signature (alliance unit count + frame
+        // index) so a fresh probe build happens only when the unit roster
+        // materially changes between ticks.
+        private static readonly Dictionary<int, CachedExtendedProbes> _extendedProbeCache = new Dictionary<int, CachedExtendedProbes>();
+
+        private readonly struct CachedExtendedProbes
+        {
+            public CachedExtendedProbes(int unitCount, int frame, IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> probes)
+            {
+                UnitCount = unitCount; Frame = frame; Probes = probes;
+            }
+            public int UnitCount { get; }
+            public int Frame { get; }
+            public IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> Probes { get; }
+        }
+
+        private static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> GetCachedExtendedProbes(int allianceId)
+        {
+            int frame = -1;
+            int unitCount = -1;
+            try
+            {
+                var units = BattleUnits.completeunitlist as System.Collections.IList;
+                unitCount = units != null ? units.Count : 0;
+                frame = UnityEngine.Time.frameCount;
+            }
+            catch { }
+            if (_extendedProbeCache.TryGetValue(allianceId, out var cached) &&
+                cached.UnitCount == unitCount &&
+                cached.Frame == frame &&
+                cached.Probes != null)
+                return cached.Probes;
+            var probes = DirectChildDiscovery.BuildExtendedProbesForAlliance(allianceId);
+            _extendedProbeCache[allianceId] = new CachedExtendedProbes(unitCount, frame, probes);
+            return probes;
+        }
+
+        internal static void ResetExtendedProbeCache()
+        {
+            _extendedProbeCache.Clear();
+        }
+
         /// <summary>
         /// Second pass that writes posture decisions for leaf brigades nested
         /// inside division-tier nodes. Builds the depth-agnostic leaf brigade
@@ -1904,7 +1948,7 @@ namespace WhiskeyRealism.Patches
                 ArmyOrchestrator army = sideOrch?.Army;
                 if (army == null) return;
 
-                var extendedProbes = DirectChildDiscovery.BuildExtendedProbesForAlliance(allianceId);
+                var extendedProbes = GetCachedExtendedProbes(allianceId);
                 if (extendedProbes == null || extendedProbes.Count == 0) return;
 
                 var tree = TacticalCommandTreeProbe.BuildTree(extendedProbes, 0);
@@ -1998,6 +2042,26 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
+                // Mirror the primary executor's pending-order gate: don't overwrite
+                // a vanilla courier-in-flight or a queued order. Without this check
+                // the cascade could clobber an order that's already on its way.
+                if (HasPendingOrder(group, allowStaleQueuedBypass: false))
+                {
+                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "order-pending", false);
+                    return;
+                }
+
+                // W&L feud-action gate parity: if the group contains a player-
+                // subordinate attached unit (dlcw_isundercommander), deny the
+                // write. Mirrors the IsPlayerProtected walk used elsewhere in
+                // this patch — the existing IsPlayerProtected check above only
+                // catches the group itself, not its attached units.
+                if (HasPlayerSubordinateAttached(group))
+                {
+                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "wl-player-subordinate-attached", false);
+                    return;
+                }
+
                 // Emit the cascade telemetry BEFORE attempting the write, so we
                 // always see "what task was derived for this brigade" even if
                 // the actual write is gated.
@@ -2040,6 +2104,30 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        private static bool HasPlayerSubordinateAttached(Regiment group)
+        {
+            try
+            {
+                if (group == null) return false;
+                if (group.dlcw_isundercommander) return true;
+                var units = group.allattachedunits;
+                if (units == null) return false;
+                for (int i = 0; i < units.Length; i++)
+                {
+                    var unit = units[i];
+                    if (unit == null) continue;
+                    if (unit.dlcw_isundercommander) return true;
+                }
+                return false;
+            }
+            catch
+            {
+                // Fail closed: assume player-attached on error so we never write
+                // to a unit we can't verify is safe.
+                return true;
+            }
+        }
+
         private static CommandNodeRole MapDirectChildRoleToNodeRole(DirectChildRole role)
         {
             switch (role)
@@ -2065,17 +2153,13 @@ namespace WhiskeyRealism.Patches
             target = default(Vector3);
             try
             {
-                // Pick a movement target based on the leaf task. For now use the
-                // group's current waypoint as a baseline; future enhancements can
-                // pull objective positions from the orchestrator's parent intent.
                 if (group == null) return false;
                 Vector3 own = SafePosition(group);
                 if (IsDefaultVector(own)) return false;
 
-                // Use the parent division's last waypoint if available so the
-                // brigade follows the division's movement direction. This is the
-                // SoW pattern: brigade-think queries its parent's TACOBJLoc and
-                // moves toward it.
+                // Priority 1: parent regiment's last waypoint (SoW brigade-think
+                // pattern of following parent TACOBJLoc). Most accurate when the
+                // orchestrator has already issued a move to the parent division.
                 try
                 {
                     var parentTransform = ((Component)group).gameObject.transform != null
@@ -2093,13 +2177,33 @@ namespace WhiskeyRealism.Patches
                 }
                 catch { }
 
-                // Fallback: nudge the group forward in its current facing direction.
+                // Priority 2: fall back to the GROUP's own last-set waypoint
+                // (vanilla may have ordered the brigade before the orchestrator
+                // came online). Keeps the brigade on its existing line of
+                // advance rather than redirecting.
+                try
+                {
+                    if (!IsDefaultVector(group.lastsetwaypointposition))
+                    {
+                        target = group.lastsetwaypointposition;
+                        return true;
+                    }
+                }
+                catch { }
+
+                // Priority 3: nudge the brigade forward in its facing direction.
+                // 150m (was 75m) is large enough that vanilla won't immediately
+                // gate the order as "already there"; bounded so the brigade
+                // doesn't run off the map if facing is malformed.
                 try
                 {
                     var tf = ((Component)group).gameObject.transform;
                     if (tf == null) return false;
                     Vector3 forward = tf.forward;
-                    target = new Vector3(own.x + forward.x * 75f, own.y, own.z + forward.z * 75f);
+                    // Guard against zero-length forward (malformed transform).
+                    float fwdLen = forward.x * forward.x + forward.z * forward.z;
+                    if (fwdLen < 0.001f) return false;
+                    target = new Vector3(own.x + forward.x * 150f, own.y, own.z + forward.z * 150f);
                     return true;
                 }
                 catch
@@ -2114,6 +2218,7 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+
         private static void EmitLeafCascadeTelemetry(
             int side,
             Regiment group,
@@ -2124,14 +2229,24 @@ namespace WhiskeyRealism.Patches
             try
             {
                 string unit = SafeName(group);
+                int instanceId = TacticalPatchIds.GameObjectInstanceId(group);
                 string chain = leafAssignment.CascadeChainString;
                 string parents = string.Join(">", new List<string>(leafAssignment.ParentNameChain));
+                // Signature dedupes outcome + role + task. Same brigade re-emitting
+                // the same outcome within TelemetrySeconds (30s) is suppressed —
+                // bounds the per-brigade row count to roughly 2/min in steady
+                // state, lifting only when the cascade-driven role or outcome
+                // changes. Follows AGENTS.md bounded-logs guidance.
                 string sig = "TacticalLeafCascade|side=" + side
                     + "|leaf=" + unit
                     + "|role=" + leafAssignment.LeafRole
                     + "|task=" + leafAssignment.LeafTask
                     + "|outcome=" + outcome
                     + "|applied=" + applied;
+                string key = "tactical-leaf-cascade:" + side + ":" + instanceId;
+                if (!TacticalTelemetry.ShouldEmit(_lastTelemetryAt, key, sig, Time.realtimeSinceStartup, TelemetrySeconds, false))
+                    return;
+
                 TelemetryRouter.Emit(
                     TelemetryLayer.Tactical,
                     TelemetryCategory.Decision,
@@ -2147,7 +2262,11 @@ namespace WhiskeyRealism.Patches
                         .WithField("parents", parents)
                         .WithField("applied", applied));
             }
-            catch { }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-leaf-cascade:telemetry-failed",
+                    "EmitLeafCascadeTelemetry threw: " + ex.GetType().Name + " " + ex.Message);
+            }
         }
 
         private static bool IsEligibleCommandGroup(Regiment group)
