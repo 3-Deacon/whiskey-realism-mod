@@ -1465,5 +1465,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return 0f;
             }
         }
+
+        // Test accessors — thin wrappers so harness tests can reach private static
+        // aggregate sub-builders without reflection.
+        internal static bool TryVisibleEnemyLineFromAggregate_ForTest(
+            IObservationSource source, int allianceId,
+            out TacticalMapPoint point, out float enemyStrength, out float friendlyStrength)
+        {
+            return TryVisibleEnemyLineFromAggregate(source, allianceId, out point, out enemyStrength, out friendlyStrength);
+        }
+
+        internal static bool TryMovementAnchorLineFromAggregate_ForTest(
+            IObservationSource source, int allianceId,
+            out TacticalMapPoint point, out float friendlyStrength)
+        {
+            return TryMovementAnchorLineFromAggregate(source, allianceId, out point, out friendlyStrength);
+        }
+
+        internal static TacticalApproachAvenueObservation[] BuildApproachAvenueObservationsFromAggregate_ForTest(
+            IObservationSource source, int allianceId)
+        {
+            return BuildApproachAvenueObservationsFromAggregate(source, allianceId);
+        }
     }
 }

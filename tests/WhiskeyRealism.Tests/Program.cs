@@ -1296,6 +1296,7 @@ static class Program
 
         // External test suites
         TacticalUnitObservationAggregateTests.Run();
+        ObjectiveRecordsFromAggregateTests.Run();
 
         return 0;
     }
