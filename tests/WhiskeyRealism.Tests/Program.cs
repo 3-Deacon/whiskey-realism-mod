@@ -1132,6 +1132,22 @@ static class Program
             ("role cascade choose main anchor picks strongest near center", RoleCascadeChooseMainAnchorPicksStrongestNearCenter),
             ("leaf brigade map stops at brigade tier not regiments", LeafBrigadeMapStopsAtBrigadeTierNotRegiments),
             ("leaf brigade map handles four tier army corps division brigade", LeafBrigadeMapHandlesFourTierArmyCorpsDivisionBrigade),
+            ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h mid commander withdraws", ReinforcementOpportunity15kVs13kPlus7kIn12hMidWithdraws),
+            ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h aggressive attacks now", ReinforcementOpportunity15kVs13kPlus7kIn12hAggressiveAttacks),
+            ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h cautious withdraws", ReinforcementOpportunity15kVs13kPlus7kIn12hCautiousWithdraws),
+            ("reinforcement opportunity 10k vs 15k enemy growing cautious withdraws", ReinforcementOpportunity10kVs15kEnemyGrowingCautiousWithdraws),
+            ("reinforcement opportunity 15k own vs 10k enemy +5k in 8h attack window open", ReinforcementOpportunity15kVs10kPlus5kIn8hAttackWindowOpen),
+            ("reinforcement opportunity 12k own +5k in 6h vs 13k enemy waits to consolidate", ReinforcementOpportunity12kPlus5kIn6hWaitsToConsolidate),
+            ("reinforcement opportunity 13k vs 13k both reinforcing defensive hold", ReinforcementOpportunity13kVs13kBothReinforcingDefensiveHold),
+            ("reinforcement opportunity intel confidence floor falls through to no opportunity", ReinforcementOpportunityIntelConfidenceFloorFallsThrough),
+            ("reinforcement opportunity below min force absolute does not attack", ReinforcementOpportunityBelowMinForceAbsoluteDoesNotAttack),
+            ("reinforcement opportunity empty arrivals never reach parity", ReinforcementOpportunityEmptyArrivalsNeverReachParity),
+            ("reinforcement opportunity zero enemy does not divide by zero", ReinforcementOpportunityZeroEnemyDoesNotDivideByZero),
+            ("reinforcement opportunity attack threshold scales with aggression", ReinforcementOpportunityAttackThresholdScalesWithAggression),
+            ("reinforcement opportunity attack window scales with aggression", ReinforcementOpportunityAttackWindowScalesWithAggression),
+            ("reinforcement opportunity wait hours scales with aggression", ReinforcementOpportunityWaitHoursScalesWithAggression),
+            ("reinforcement opportunity strength at hour accumulates arrivals", ReinforcementOpportunityStrengthAtHourAccumulatesArrivals),
+            ("reinforcement opportunity parity hours for own short circuits when already ahead", ReinforcementOpportunityParityHoursForOwnShortCircuitsWhenAlreadyAhead),
             ("historical registry covers Hunter and Beauregard", HistoricalRegistryCoversHunterAndBeauregard),
             ("historical registry normalizes initials and punctuation", HistoricalRegistryNormalizesInitialsAndPunctuation),
             ("historical registry covers major Civil War commanders", HistoricalRegistryCoversMajorCivilWarCommanders),
@@ -23794,6 +23810,235 @@ static class Program
         AssertFalse(map.ContainsKey(-200), "corps NOT in leaf map");
         // Cascade chain should reflect the 4-tier walk: Main → ... → leaf role
         AssertTrue(map[-401].CascadeChain.Count >= 3, "cascade chain depth >= 3 (corps -> division -> brigade) but got " + map[-401].CascadeChain.Count);
+    }
+
+    // ====== Reinforcement opportunity doctrine tests ======
+
+    private static TacticalForceBalanceEvidence MakeForceBalance(
+        float own, float enemy,
+        ReinforcementArrival[] ownArrivals = null,
+        ReinforcementArrival[] enemyArrivals = null,
+        float aggression = 0.5f, float initiative = 0.5f, float intel = 0.8f)
+    {
+        return new TacticalForceBalanceEvidence(
+            own, enemy,
+            ownArrivals ?? System.Array.Empty<ReinforcementArrival>(),
+            enemyArrivals ?? System.Array.Empty<ReinforcementArrival>(),
+            initiative, aggression, intel);
+    }
+
+    private static void ReinforcementOpportunity15kVs13kPlus7kIn12hMidWithdraws()
+    {
+        // User's example #1 (per their explicit quote: "may be better to continue
+        // holding if reinforcements bring them to 20,000 in 12 hours"):
+        //   15K own vs 13K enemy now, enemy +7K in 12h, mid commander
+        // CurrentRatio = 1.15 (below mid-band threshold ~1.32)
+        // OwnParity = 0 (already ahead) → fails WaitAndConsolidate's > 0 check
+        // CurrentRatio above WithdrawalRatioThreshold (0.85) → not Withdraw
+        // → DefensiveHold (own ahead now, future worse, no own relief, hold ground)
+        var ev = MakeForceBalance(15000f, 13000f,
+            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
+            aggression: 0.5f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.DefensiveHold, d.Opportunity,
+            "mid commander holds when current advantage thin and future worse without own relief, got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunity15kVs13kPlus7kIn12hAggressiveAttacks()
+    {
+        // Same numbers, aggression=0.85 (Hood-style)
+        // AttackThreshold drops to ~1.20 * (1.30 - 0.85*0.40) = ~1.15
+        // CurrentRatio 1.15 now meets threshold
+        // ParityForEnemy = 12h, AttackWindow ~0.5h → window exists
+        // Decision: AttackNow
+        var ev = MakeForceBalance(15000f, 13000f,
+            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
+            aggression: 0.85f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
+            "aggressive commander strikes the defeat-in-detail window, got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunity15kVs13kPlus7kIn12hCautiousWithdraws()
+    {
+        // Same numbers, aggression=0.10 (McClellan-style)
+        // AttackThreshold rises to ~1.20 * (1.30 - 0.10*0.40) = ~1.51
+        // CurrentRatio 1.15 way below — won't attack
+        // CurrentRatio above WithdrawalRatioThreshold (0.85) → not Withdraw
+        // → DefensiveHold (cautious commander never attacks the unequal odds AND
+        //   doesn't withdraw from a position where own > enemy currently)
+        var ev = MakeForceBalance(15000f, 13000f,
+            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
+            aggression: 0.10f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.DefensiveHold, d.Opportunity,
+            "cautious commander holds defensively (not attack, not withdraw with own ahead now), got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunity10kVs15kEnemyGrowingCautiousWithdraws()
+    {
+        // Distinct withdrawal case: actually outnumbered NOW (10K vs 15K = 0.67 < 0.85)
+        // AND enemy growing AND no own relief in window → Withdraw.
+        var ev = MakeForceBalance(10000f, 15000f,
+            enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
+            aggression: 0.10f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, d.Opportunity,
+            "actually outnumbered + no relief → Withdraw, got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunity15kVs10kPlus5kIn8hAttackWindowOpen()
+    {
+        // 15K vs 10K now, enemy +5K in 8h, mid commander
+        // CurrentRatio = 1.5 (above threshold 1.20)
+        // EnemyAt 8h = 15K, OwnAt 8h = 15K → parity at 8h
+        // Window 1h required, parity 8h away → window comfortably open
+        // Decision: AttackNow
+        var ev = MakeForceBalance(15000f, 10000f,
+            enemyArrivals: new[] { new ReinforcementArrival(8f, 5000f) },
+            aggression: 0.5f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
+            "clear-advantage + parity in 8h → AttackNow, got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunity12kPlus5kIn6hWaitsToConsolidate()
+    {
+        // 12K own +5K in 6h vs 13K enemy now (no enemy arrivals)
+        // CurrentRatio = 0.92 (below threshold)
+        // OwnParity = 6h (own 17K vs enemy 13K = 1.31)
+        // EnemyParity = never (own > enemy after own arrival)
+        // Mid-band MaxWaitHours = 7.5h, ParityForOwn 6h fits
+        // Decision: WaitAndConsolidate
+        var ev = MakeForceBalance(12000f, 13000f,
+            ownArrivals: new[] { new ReinforcementArrival(6f, 5000f) },
+            aggression: 0.5f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.WaitAndConsolidate, d.Opportunity,
+            "own reinforcement arriving in time → WaitAndConsolidate, got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunity13kVs13kBothReinforcingDefensiveHold()
+    {
+        // 13K vs 13K now, both reinforcing — enemy +8K in 14h, own +3K in 12h
+        // CurrentRatio = 1.0 (below threshold)
+        // OwnAt 12h = 16K, EnemyAt 12h = 13K → own briefly ahead 12-14h
+        // OwnAt 14h = 16K, EnemyAt 14h = 21K → enemy decisive
+        // Mid-band MaxWaitHours = 7.5h, OwnParity 12h is BEYOND that
+        // Decision: DefensiveHold (not WaitAndConsolidate because relief is too far)
+        var ev = MakeForceBalance(13000f, 13000f,
+            ownArrivals: new[] { new ReinforcementArrival(12f, 3000f) },
+            enemyArrivals: new[] { new ReinforcementArrival(14f, 8000f) },
+            aggression: 0.5f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        // CurrentRatio 1.0 is below WithdrawalRatioThreshold(0.85)? No, 1.0 >= 0.85.
+        // So withdrawal is NOT triggered. Hold is the right call.
+        AssertEqual(ReinforcementOpportunity.DefensiveHold, d.Opportunity,
+            "neither side has clear leverage, hold and refuse decisive, got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunityIntelConfidenceFloorFallsThrough()
+    {
+        // Same scenario as attack-window-open but with intel confidence 0.3
+        // (below the 0.5 floor for action) → falls through to NoOpportunity
+        var ev = MakeForceBalance(15000f, 10000f,
+            enemyArrivals: new[] { new ReinforcementArrival(8f, 5000f) },
+            aggression: 0.5f, intel: 0.3f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.NoOpportunity, d.Opportunity,
+            "poor intel falls through to existing playbook, got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunityBelowMinForceAbsoluteDoesNotAttack()
+    {
+        // 1500K own (below MinAttackForceAbsolute=2000) vs 800 enemy +500 in 6h
+        // Ratio 1.875 above threshold but absolute force too small.
+        // Decision: NOT AttackNow.
+        var ev = MakeForceBalance(1500f, 800f,
+            enemyArrivals: new[] { new ReinforcementArrival(6f, 500f) },
+            aggression: 0.5f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertTrue(d.Opportunity != ReinforcementOpportunity.AttackNow,
+            "below-min-force does not attack, got " + d.Opportunity + " reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunityEmptyArrivalsNeverReachParity()
+    {
+        // Own AHEAD, no arrivals: enemy never reaches parity (999).
+        var aheadNoArrivals = MakeForceBalance(12000f, 10000f);
+        AssertTrue(aheadNoArrivals.ParityHoursForEnemy() >= 999f,
+            "own ahead + no arrivals → enemy parity never; got " + aheadNoArrivals.ParityHoursForEnemy());
+        AssertEqual(0f, aheadNoArrivals.ParityHoursForOwn(),
+            "own already ahead → own parity is 0");
+
+        // Equal NOW, no arrivals: enemy is already at parity (>=) at hour 0.
+        var equalNoArrivals = MakeForceBalance(10000f, 10000f);
+        AssertEqual(0f, equalNoArrivals.ParityHoursForEnemy(),
+            "equal at hour 0 → enemy parity is 0 (already there)");
+
+        // Own BEHIND, no arrivals: own never catches up (999).
+        var behindNoArrivals = MakeForceBalance(8000f, 10000f);
+        AssertTrue(behindNoArrivals.ParityHoursForOwn() >= 999f,
+            "own behind + no arrivals → own parity never; got " + behindNoArrivals.ParityHoursForOwn());
+    }
+
+    private static void ReinforcementOpportunityZeroEnemyDoesNotDivideByZero()
+    {
+        // Edge case: own 5000, enemy 0. CurrentRatio sentinel of 10.0 (own > 0 and enemy=0).
+        var ev = MakeForceBalance(5000f, 0f);
+        AssertEqual(10f, ev.CurrentRatio, "zero enemy + nonzero own → sentinel 10");
+        // Both zero: ratio is 1.0 (no advantage either way)
+        var zz = MakeForceBalance(0f, 0f);
+        AssertEqual(1f, zz.CurrentRatio, "zero/zero → 1.0");
+    }
+
+    private static void ReinforcementOpportunityAttackThresholdScalesWithAggression()
+    {
+        // Cautious (0.1) high threshold, mid (0.5) baseline, aggressive (0.9) low
+        float cautious = TacticalReinforcementOpportunityDoctrine.ComputeAttackThreshold(0.1f);
+        float mid = TacticalReinforcementOpportunityDoctrine.ComputeAttackThreshold(0.5f);
+        float aggressive = TacticalReinforcementOpportunityDoctrine.ComputeAttackThreshold(0.9f);
+        AssertTrue(cautious > mid && mid > aggressive,
+            "threshold decreases with aggression: cautious=" + cautious + " mid=" + mid + " aggressive=" + aggressive);
+        // Mid-band should be very close to BaseAttackThreshold * (1.30 - 0.20) = 1.32 (not exactly base)
+        // Actually 1.20 * (1.30 - 0.5*0.40) = 1.20 * 1.10 = 1.32
+        AssertNear(1.32f, mid, 0.001f, "mid-band threshold ~1.32");
+    }
+
+    private static void ReinforcementOpportunityAttackWindowScalesWithAggression()
+    {
+        float cautious = TacticalReinforcementOpportunityDoctrine.ComputeAttackWindowHours(0.1f);
+        float aggressive = TacticalReinforcementOpportunityDoctrine.ComputeAttackWindowHours(0.9f);
+        AssertTrue(cautious > aggressive, "cautious needs longer window than aggressive");
+        // Floor at 0.25h
+        AssertTrue(aggressive >= 0.25f, "window floored at 15 min");
+    }
+
+    private static void ReinforcementOpportunityWaitHoursScalesWithAggression()
+    {
+        float cautious = TacticalReinforcementOpportunityDoctrine.ComputeMaxWaitHours(0.0f);
+        float aggressive = TacticalReinforcementOpportunityDoctrine.ComputeMaxWaitHours(1.0f);
+        AssertTrue(cautious > aggressive, "cautious waits longer than aggressive");
+        AssertNear(9f, cautious, 0.001f, "cautious max wait ~9h");
+        AssertNear(6f, aggressive, 0.001f, "aggressive max wait ~6h");
+    }
+
+    private static void ReinforcementOpportunityStrengthAtHourAccumulatesArrivals()
+    {
+        var ev = MakeForceBalance(10000f, 5000f,
+            ownArrivals: new[] { new ReinforcementArrival(2f, 1500f), new ReinforcementArrival(6f, 1000f) },
+            enemyArrivals: new[] { new ReinforcementArrival(4f, 2000f) });
+        AssertEqual(10000f, ev.OwnStrengthAtHour(1f), "no arrivals yet at hour 1");
+        AssertEqual(11500f, ev.OwnStrengthAtHour(3f), "first arrival counted at hour 3");
+        AssertEqual(12500f, ev.OwnStrengthAtHour(8f), "both arrivals counted at hour 8");
+        AssertEqual(5000f, ev.EnemyStrengthAtHour(2f), "enemy arrival not yet at hour 2");
+        AssertEqual(7000f, ev.EnemyStrengthAtHour(5f), "enemy arrival counted at hour 5");
+    }
+
+    private static void ReinforcementOpportunityParityHoursForOwnShortCircuitsWhenAlreadyAhead()
+    {
+        var ahead = MakeForceBalance(15000f, 10000f);
+        AssertEqual(0f, ahead.ParityHoursForOwn(), "already ahead → ParityHoursForOwn is 0");
     }
 
     private static void RoleCascadeChooseMainAnchorPicksStrongestNearCenter()
