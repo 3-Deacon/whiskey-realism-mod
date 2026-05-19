@@ -1130,6 +1130,8 @@ static class Program
             ("leaf brigade map survives parent cycle", LeafBrigadeMapSurvivesParentCycle),
             ("leaf brigade map bounded recursion depth", LeafBrigadeMapBoundedRecursionDepth),
             ("role cascade choose main anchor picks strongest near center", RoleCascadeChooseMainAnchorPicksStrongestNearCenter),
+            ("leaf brigade map stops at brigade tier not regiments", LeafBrigadeMapStopsAtBrigadeTierNotRegiments),
+            ("leaf brigade map handles four tier army corps division brigade", LeafBrigadeMapHandlesFourTierArmyCorpsDivisionBrigade),
             ("historical registry covers Hunter and Beauregard", HistoricalRegistryCoversHunterAndBeauregard),
             ("historical registry normalizes initials and punctuation", HistoricalRegistryNormalizesInitialsAndPunctuation),
             ("historical registry covers major Civil War commanders", HistoricalRegistryCoversMajorCivilWarCommanders),
@@ -23729,6 +23731,69 @@ static class Program
         AssertTrue(map != null, "deep tree did not stack-overflow");
         // Depth cap stops traversal; we don't assert exact count, just that the
         // cascade terminated.
+    }
+
+    private static void LeafBrigadeMapStopsAtBrigadeTierNotRegiments()
+    {
+        // Critical regression test for the regiment-leaf bug. A brigade has
+        // regiments (combat units, unittyp Infantry=0, Cavalry=1, Artillery=2)
+        // attached to it via Regiment.allattachedunits. The cascade must NOT
+        // descend into those regiments or the leaf map would be keyed by
+        // combat-unit instance IDs and the brigade-tier posture filter would
+        // silently miss everything.
+        var probes = new[]
+        {
+            Probe(-100, 15, "division", 0, isDirectChild: false),
+            // A brigade with several Infantry regiments nested under it. Vanilla
+            // exposes these via allattachedunits, and BuildExtendedProbesForAlliance
+            // surfaces them as probe nodes too.
+            Probe(-200, 14, "brigade", -100, x: 0f, strength: 2),
+            new TacticalCommandTreeProbe.ExtendedProbe(-201, 0, "1st_Tennessee", true, parentInstanceId: -200, isDirectChild: false, worldX: -10f, worldZ: 0f, strengthBucket: 1),  // Infantry=0
+            new TacticalCommandTreeProbe.ExtendedProbe(-202, 0, "2nd_Tennessee", true, parentInstanceId: -200, isDirectChild: false, worldX: 0f, worldZ: 0f, strengthBucket: 1),
+            new TacticalCommandTreeProbe.ExtendedProbe(-203, 2, "Maney's_Battery", true, parentInstanceId: -200, isDirectChild: false, worldX: 10f, worldZ: 0f, strengthBucket: 1),  // Artillery=2
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        var top = new[] { new TacticalLeafBrigadeMap.TopAssignment(-200, DirectChildRole.Main) };
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, top, 0.5f);
+
+        AssertEqual(1, map.Count, "exactly one leaf assignment — the brigade, not its regiments");
+        AssertTrue(map.ContainsKey(-200), "leaf map keyed by brigade instance ID, not regiments");
+        AssertFalse(map.ContainsKey(-201), "1st_Tennessee regiment not in leaf map");
+        AssertFalse(map.ContainsKey(-202), "2nd_Tennessee regiment not in leaf map");
+        AssertFalse(map.ContainsKey(-203), "Maney's_Battery not in leaf map");
+        AssertEqual(DirectChildRole.Main, map[-200].LeafRole, "brigade inherits Main from cascade");
+    }
+
+    private static void LeafBrigadeMapHandlesFourTierArmyCorpsDivisionBrigade()
+    {
+        // Full 4-tier hierarchy: Army → Corps → Division → Brigade (with
+        // regiments under the brigades). Verifies the cascade walks corps and
+        // divisions correctly and stops at brigade tier.
+        var probes = new[]
+        {
+            new TacticalCommandTreeProbe.ExtendedProbe(-100, 16, "Army_of_Tennessee", true, parentInstanceId: 0, isDirectChild: false, worldX: 0f, worldZ: 0f, strengthBucket: 2),  // Army=16
+            new TacticalCommandTreeProbe.ExtendedProbe(-200, 15, "1st_Corps", true, parentInstanceId: -100, isDirectChild: true, worldX: -100f, worldZ: 0f, strengthBucket: 2),  // Corps slot via shift — represented as 15 here
+            new TacticalCommandTreeProbe.ExtendedProbe(-300, 15, "1st_Division", true, parentInstanceId: -200, isDirectChild: false, worldX: -100f, worldZ: 0f, strengthBucket: 2),  // Division=15
+            new TacticalCommandTreeProbe.ExtendedProbe(-400, 14, "1st_Brigade", true, parentInstanceId: -300, isDirectChild: false, worldX: -150f, worldZ: 0f, strengthBucket: 1),
+            new TacticalCommandTreeProbe.ExtendedProbe(-401, 14, "2nd_Brigade", true, parentInstanceId: -300, isDirectChild: false, worldX: -50f, worldZ: 0f, strengthBucket: 2),
+            // A regiment under each brigade for realism — must NOT appear in leaves.
+            new TacticalCommandTreeProbe.ExtendedProbe(-500, 0, "1st_Bde_1st_Reg", true, parentInstanceId: -400, isDirectChild: false, worldX: -150f, worldZ: 0f, strengthBucket: 1),
+            new TacticalCommandTreeProbe.ExtendedProbe(-501, 0, "2nd_Bde_1st_Reg", true, parentInstanceId: -401, isDirectChild: false, worldX: -50f, worldZ: 0f, strengthBucket: 1),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        // Top assignment fires from the Corps level (typical post-shift Whiskey OOB).
+        var top = new[] { new TacticalLeafBrigadeMap.TopAssignment(-200, DirectChildRole.Main) };
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, top, 0.5f);
+
+        AssertEqual(2, map.Count, "exactly 2 leaf brigade assignments under the corps");
+        AssertTrue(map.ContainsKey(-400), "1st_Brigade in leaf map");
+        AssertTrue(map.ContainsKey(-401), "2nd_Brigade in leaf map");
+        AssertFalse(map.ContainsKey(-500), "regiment under 1st_Brigade NOT in leaf map");
+        AssertFalse(map.ContainsKey(-501), "regiment under 2nd_Brigade NOT in leaf map");
+        AssertFalse(map.ContainsKey(-300), "intermediate division NOT in leaf map");
+        AssertFalse(map.ContainsKey(-200), "corps NOT in leaf map");
+        // Cascade chain should reflect the 4-tier walk: Main → ... → leaf role
+        AssertTrue(map[-401].CascadeChain.Count >= 3, "cascade chain depth >= 3 (corps -> division -> brigade) but got " + map[-401].CascadeChain.Count);
     }
 
     private static void RoleCascadeChooseMainAnchorPicksStrongestNearCenter()

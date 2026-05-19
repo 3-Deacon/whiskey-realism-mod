@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -147,8 +148,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Walks the tree from the given root and returns active leaf-tier nodes.
-        /// A "leaf" is a node whose unittyp is at or below MaxCombat + 1 (typically
-        /// brigade tier = 14). Pure: takes the tree map, returns descendant leaves.
+        /// A "leaf" for the role cascade is a brigade-tier node (unittyp ==
+        /// BattleGroupBrigade = 14), NOT a regiment-tier combat unit below it.
+        /// Brigades are the SoW-equivalent of `eRankBrig` — the tier orders are
+        /// issued to; the regiments below them (Infantry/Cavalry/Artillery/
+        /// Skirmisher unittyps 0-3) inherit orders from their brigade via
+        /// vanilla.
+        ///
+        /// If a non-brigade node has no active brigade-or-above descendants we
+        /// also consider it a leaf, so degenerate hierarchies (a lone corps with
+        /// no brigades) still produce assignments.
         /// </summary>
         public static IReadOnlyList<ProbeNode> EnumerateLeaves(
             int rootInstanceId,
@@ -163,7 +172,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>
         /// Returns direct active children of the parent node, sorted by world X
         /// (left to right) so the role-cascade can assign Main/SupportMain/Refuse
-        /// based on geometric position.
+        /// based on geometric position. Filters out combat-unit children
+        /// (unittyp &lt; BattleGroupBrigade) — those are regiments inside
+        /// brigades and don't participate in the command-tier cascade.
         /// </summary>
         public static IReadOnlyList<ProbeNode> EnumerateChildrenLeftToRight(
             int parentInstanceId,
@@ -177,6 +188,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 if (!tree.TryGetValue(parent.ChildInstanceIds[i], out var child)) continue;
                 if (!child.Active) continue;
+                // Skip non-command children (regiments, officers, etc.) so the
+                // cascade only walks brigade-and-above tiers.
+                if (child.UnitTyp < TacticalUnitType.BattleGroupBrigade) continue;
                 children.Add(child);
             }
             children.Sort(CompareByWorldXAscending);
@@ -189,25 +203,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             List<ProbeNode> accumulator)
         {
             if (!node.Active) return;
-            // Treat unittyp <= TacticalUnitType.MaxCombat as a non-command unit (artillery,
-            // skirmisher, infantry, etc.) — those are leaves in the command hierarchy.
-            // Above that we treat as command-tier; recurse if it has children, else
-            // consider it a leaf itself (small division with no nested brigades).
-            if (node.ChildInstanceIds.Count == 0)
+
+            // Stop at brigade tier. The cascade issues orders to brigades; their
+            // regiment children inherit via vanilla. Without this, the cascade
+            // would recurse through Regiment → Infantry/Cavalry/Artillery and
+            // assign roles to the wrong tier — the leaf map would then be
+            // keyed by combat-unit instance IDs, and the brigade-tier filter
+            // in TryApplyNestedLeafBrigades would never find a match.
+            if (node.UnitTyp == TacticalUnitType.BattleGroupBrigade)
             {
                 accumulator.Add(node);
                 return;
             }
 
+            // Combat units (Infantry/Cavalry/Artillery/Skirmisher/Officer) are
+            // not part of the command-tier cascade; skip entirely. The brigade
+            // containing them is the leaf.
+            if (node.UnitTyp < TacticalUnitType.BattleGroupBrigade) return;
+
+            // Above brigade tier (Division/Corps/Army): recurse into brigade-
+            // tier-or-above children.
             bool hasActiveCommandChild = false;
             for (int i = 0; i < node.ChildInstanceIds.Count; i++)
             {
                 if (!tree.TryGetValue(node.ChildInstanceIds[i], out var child)) continue;
                 if (!child.Active) continue;
+                if (child.UnitTyp < TacticalUnitType.BattleGroupBrigade) continue;
                 hasActiveCommandChild = true;
                 CollectLeaves(child, tree, accumulator);
             }
-            // If a node has no active children, it is itself a leaf.
+
+            // If a Division/Corps/Army has no active brigade descendants, treat
+            // it as a leaf so degenerate hierarchies still produce one assignment
+            // (better than silently dropping the whole branch).
             if (!hasActiveCommandChild) accumulator.Add(node);
         }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -138,10 +139,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return;
             }
 
+            // Stop the cascade at brigade tier. Regiment-tier children
+            // (Infantry/Cavalry/Artillery/Skirmisher) inherit orders from
+            // their brigade via vanilla; the cascade must not descend further
+            // or the leaf map ends up keyed by combat-unit instance IDs, which
+            // the brigade-tier filter in TryApplyNestedLeafBrigades silently
+            // misses.
+            if (node.UnitTyp == TacticalUnitType.BattleGroupBrigade)
+            {
+                output[node.InstanceId] = new LeafAssignment(
+                    node.InstanceId,
+                    node.Name,
+                    nodeRole,
+                    TacticalRoleCascade.RoleToLeafTask(nodeRole),
+                    chainSoFar.ToArray(),
+                    parentNamesSoFar.ToArray(),
+                    topLevelChildIndex);
+                return;
+            }
+
+            // Combat-unit nodes (unittyp < BattleGroupBrigade) are skipped
+            // entirely — they're regiments inside brigades, not part of the
+            // command-tier cascade.
+            if (node.UnitTyp < TacticalUnitType.BattleGroupBrigade) return;
+
             var children = TacticalCommandTreeProbe.EnumerateChildrenLeftToRight(node.InstanceId, tree);
             if (children.Count == 0)
             {
-                // Leaf brigade reached. Record its assignment.
+                // Above-brigade node with no brigade descendants. Record as a
+                // leaf so degenerate hierarchies (a corps with only attached
+                // batteries, no brigades) still produce one assignment.
                 output[node.InstanceId] = new LeafAssignment(
                     node.InstanceId,
                     node.Name,
