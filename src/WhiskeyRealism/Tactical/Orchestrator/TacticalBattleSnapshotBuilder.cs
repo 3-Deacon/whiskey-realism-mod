@@ -3,6 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -124,10 +126,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                // Expensive calls — this is the throttled path
-                var bundle = ArmyEvidenceBuilder.Build(battle, allianceId);
+                // Expensive calls — this is the throttled path. Per-sub-call
+                // scopes (added 2026-05-19 hot-path diagnostic) split the cost
+                // so the tuning sidecar shows which inner walk dominates the
+                // 5-16ms p99 Build wall time.
+                ArmyEvidenceBuilder.Bundle bundle;
+                using (TelemetryPerf.Scope("tactical.snapshot-build.evidence-bundle", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                {
+                    bundle = ArmyEvidenceBuilder.Build(battle, allianceId);
+                }
 
-                var objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, allianceId);
+                ObjectiveRecord[] objectives;
+                using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                {
+                    objectives = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, allianceId);
+                }
 
                 var commandTree = CommandTreeRuntime.Snapshot(allianceId);
 

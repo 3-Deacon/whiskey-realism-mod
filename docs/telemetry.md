@@ -62,10 +62,12 @@ Per-side scopes wrapped around the orchestrator hot path:
 | `tactical.snapshot-build.tick-cycle` | 5.0 ms | `TacticalBattleSnapshotBuilder.Build` from `DriveTickCycle` |
 | `tactical.snapshot-build.operations-ledger` | 5.0 ms | `TacticalBattleSnapshotBuilder.Build` from `DriveOperationsLedger` |
 | `tactical.snapshot-build.direct-child-cycle` | 5.0 ms | `TacticalBattleSnapshotBuilder.Build` from `DriveDirectChildCycle` |
+| `tactical.snapshot-build.evidence-bundle` | 5.0 ms | `ArmyEvidenceBuilder.Build` inside `Build` (walks `completeunitlist`) |
+| `tactical.snapshot-build.objective-records` | 5.0 ms | `BuildObjectiveRecordsFromBattle` inside `Build` (walks `completeunitlist`) |
 
 Each emission carries `durationMs` plus standard counters. `slow=true` fires when `durationMs >= threshold`.
 
-`TacticalHeavyGate` emissions (Gate category) additionally carry GC pressure deltas per side, captured at every gate decision: `gen0CountAbs` / `gen1CountAbs` / `gen2CountAbs` (absolute generation counters at decision time) and `gen0Delta` / `gen1Delta` / `gen2Delta` (count since last gate decision on this side). Reset per battle in `ResetRuntimeTickState`. Use these to determine whether frame hitches at high compression correlate with gen-0 churn (allocation cost) or with `Build` wall time (algorithmic cost).
+`TacticalHeavyGate` emissions (Gate category) additionally carry GC pressure data per side, captured at every gate decision: `gcCountAbs` (absolute `GC.CollectionCount(0)` at decision time) and `gcDelta` (collections since last gate decision on this side). Mono uses Boehm (non-generational) so a single counter suffices; if the runtime ever migrates, restore per-generation tracking. Reset per battle in `ResetRuntimeTickState`. Use `gcDelta` correlated with `snapshot-build.*` `durationMs` to determine whether frame hitches at high compression are allocation churn (high `gcDelta`) or algorithmic cost (high `durationMs` with low `gcDelta`).
 
 ## Smoke Checklist
 
