@@ -32,8 +32,12 @@ namespace WhiskeyRealism.Patches
         private const float FacingRefreshToleranceDegrees = 15f;
         private const float OutboundCourierIntervalSeconds = 900f;
         private const float FireControlOrderCooldownSeconds = 45f;
+        private const float BrigadeFacingPulseCooldownSeconds = 12f;
+        private const float RegimentFacingPulseCooldownSeconds = 5f;
+        private const int MaxRegimentFacingPulseWritesPerGroup = 4;
 
         private static readonly Dictionary<int, float> _lastExecutorOrderAt = new Dictionary<int, float>();
+        private static readonly Dictionary<int, float> _lastFacingPulseAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _lastFireControlAt = new Dictionary<int, float>();
         private static readonly Dictionary<string, float> _lastCourierAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, string> _lastOutboundOrderSignatureByGroup = new Dictionary<string, string>();
@@ -216,7 +220,7 @@ namespace WhiskeyRealism.Patches
 
             if (hasDoctrineOrder &&
                 doctrineOrder.Delivery == TacticalOrderDelivery.Courier &&
-                !AllowsOutboundCourier(side, group, doctrineOrder, playerProtected, pendingOrderOnChild, out TacticalOutboundCourierDecision courierDecision))
+                !AllowsOutboundCourier(side, group, doctrineOrder, playerProtected, pendingOrderOnChild, physical.ActiveMove, out TacticalOutboundCourierDecision courierDecision))
             {
                 EmitPostureTelemetry(
                     side,
@@ -238,6 +242,13 @@ namespace WhiskeyRealism.Patches
             }
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
+                if (TryApplyContactFacingPulse(bunits, side, group, state, closeEngaged, flankRisk))
+                {
+                    _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                    EmitPostureTelemetry(side, group, state, decision, idle, applied: true, extraReason: "contact-facing-pulse");
+                    return;
+                }
+
                 if (CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass) &&
                     TryApplyFireControl(bunits, group, state, out TacticalFireControlDecision fireDecision))
                 {
@@ -504,6 +515,7 @@ namespace WhiskeyRealism.Patches
             CommandDoctrineOrder order,
             bool playerProtected,
             bool pendingOrderOnChild,
+            bool childActiveMove,
             out TacticalOutboundCourierDecision decision)
         {
             string parentKey = CourierParentKey(side, order);
@@ -518,8 +530,26 @@ namespace WhiskeyRealism.Patches
                     commanderHasOrder: order.HasPurpose,
                     commanderHasPlay: order.Task != CommandTaskType.None,
                     childIsPlayerControlled: playerProtected,
-                    courierIntervalSeconds: order.CourierIntervalSeconds));
+                    courierIntervalSeconds: order.CourierIntervalSeconds,
+                    allowObjectiveMovementContinuation: IsCourierObjectiveContinuationTask(order.Task) && order.HasConcreteMovementTarget,
+                    childActiveMove: childActiveMove));
             return decision.AllowIssue;
+        }
+
+        private static bool IsCourierObjectiveContinuationTask(CommandTaskType task)
+        {
+            switch (task)
+            {
+                case CommandTaskType.Scout:
+                case CommandTaskType.Probe:
+                case CommandTaskType.Screen:
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static bool AllowsOutboundOrderLedger(
@@ -685,6 +715,15 @@ namespace WhiskeyRealism.Patches
             manualFinalRotation = -1f;
             if (!CommandFormationCorrection.ShouldFaceThreat(task)) return false;
 
+            return TryThreatFacingRotation(group, out manualFinalRotation);
+        }
+
+        private static bool TryThreatFacingRotation(
+            Regiment group,
+            out float manualFinalRotation)
+        {
+            manualFinalRotation = -1f;
+
             try
             {
                 Regiment enemy = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
@@ -834,7 +873,7 @@ namespace WhiskeyRealism.Patches
                     target.z,
                     MinWaypointDistance,
                     group.pathinterrupted,
-                    SafeRegimentPaths(group),
+                    CountMovingPaths(group),
                     HasActiveMoveMakingProgress(group),
                     currentPosition.x,
                     currentPosition.z);
@@ -855,6 +894,182 @@ namespace WhiskeyRealism.Patches
 
             bunits.ChangeStance(gameObject, stance, immediate: false, overwriteaigroups: false);
             return true;
+        }
+
+        private static bool TryApplyContactFacingPulse(
+            BattleUnits bunits,
+            int side,
+            Regiment group,
+            CommandNodeOperationalState state,
+            bool closeEngaged,
+            bool flankRisk)
+        {
+            if (!ContactFacingPulseEnabled() || bunits == null || group == null) return false;
+
+            bool wrote = false;
+            TacticalFacingPulseScope scope = ScopeFor(state.Echelon);
+            if (scope == TacticalFacingPulseScope.Division)
+            {
+                if (TryEvaluateFacingPulse(group, state.Task, scope, targetFormation: -1, closeEngaged, flankRisk, out TacticalFacingPulseDecision decision, out TacticalFacingThreatSource source))
+                    EmitFacingPulseTelemetry(side, group, group, state, scope, decision, source, applied: false);
+            }
+            else if (scope == TacticalFacingPulseScope.Brigade &&
+                     TryEvaluateFacingPulse(group, state.Task, scope, TargetFormationForTask(state.Task, group), closeEngaged, flankRisk, out TacticalFacingPulseDecision decision, out TacticalFacingThreatSource source))
+            {
+                if (decision.ShouldWrite &&
+                    SetFormation(bunits, group, state.Task, decision.TargetFormation, closeEngaged, TacticalRefuseFlankIntent.Decision.NoRefuse))
+                {
+                    MarkFacingPulse(group);
+                    EmitFacingPulseTelemetry(side, group, group, state, scope, decision, source, applied: true);
+                    wrote = true;
+                }
+                else
+                {
+                    EmitFacingPulseTelemetry(side, group, group, state, scope, decision, source, applied: false);
+                }
+            }
+
+            int regimentWrites = scope == TacticalFacingPulseScope.Brigade
+                ? TryApplyRegimentFacingPulses(
+                    side,
+                    group,
+                    state,
+                    closeEngaged,
+                    flankRisk)
+                : 0;
+            return wrote || regimentWrites > 0;
+        }
+
+        private static int TryApplyRegimentFacingPulses(
+            int side,
+            Regiment group,
+            CommandNodeOperationalState state,
+            bool groupCloseEngaged,
+            bool groupFlankRisk)
+        {
+            int wrote = 0;
+            var visited = new HashSet<int>();
+            TryApplyRegimentFacingPulse(side, group, group, state, groupCloseEngaged, groupFlankRisk, visited, ref wrote);
+
+            try
+            {
+                Regiment[] units = group.allattachedunits;
+                if (units == null) return wrote;
+
+                for (int i = 0; i < units.Length && wrote < MaxRegimentFacingPulseWritesPerGroup; i++)
+                    TryApplyRegimentFacingPulse(side, group, units[i], state, groupCloseEngaged, groupFlankRisk, visited, ref wrote);
+            }
+            catch { }
+
+            return wrote;
+        }
+
+        private static void TryApplyRegimentFacingPulse(
+            int side,
+            Regiment parent,
+            Regiment unit,
+            CommandNodeOperationalState state,
+            bool groupCloseEngaged,
+            bool groupFlankRisk,
+            ISet<int> visited,
+            ref int wrote)
+        {
+            if (wrote >= MaxRegimentFacingPulseWritesPerGroup) return;
+            if (!IsCombatRegiment(unit)) return;
+
+            int unitId = SafeInstanceId(unit);
+            if (unitId == 0 || (visited != null && !visited.Add(unitId))) return;
+
+            bool closeEngaged = groupCloseEngaged || HasCloseEngagement(unit);
+            bool flankRisk = groupFlankRisk || HasLocalFlankRisk(unit);
+            if (!TryEvaluateFacingPulse(
+                    unit,
+                    state.Task,
+                    TacticalFacingPulseScope.Regiment,
+                    targetFormation: 0,
+                    closeEngaged,
+                    flankRisk,
+                    out TacticalFacingPulseDecision decision,
+                    out TacticalFacingThreatSource source))
+            {
+                return;
+            }
+
+            if (decision.ShouldWrite && ApplyRegimentFacingPulse(unit, decision))
+            {
+                MarkFacingPulse(unit);
+                EmitFacingPulseTelemetry(side, parent, unit, state, TacticalFacingPulseScope.Regiment, decision, source, applied: true);
+                wrote++;
+                return;
+            }
+
+            EmitFacingPulseTelemetry(side, parent, unit, state, TacticalFacingPulseScope.Regiment, decision, source, applied: false);
+        }
+
+        private static bool TryEvaluateFacingPulse(
+            Regiment unit,
+            CommandTaskType task,
+            TacticalFacingPulseScope scope,
+            int targetFormation,
+            bool closeEngaged,
+            bool flankRisk,
+            out TacticalFacingPulseDecision decision,
+            out TacticalFacingThreatSource source)
+        {
+            decision = TacticalFacingPulseDecision.NoWrite(-1f, "not-evaluated");
+            source = TacticalFacingThreatSource.None;
+            if (unit == null) return false;
+
+            bool hasThreatFacing = TryThreatFacingRotation(unit, out float targetFacing);
+            source = hasThreatFacing ? TacticalFacingThreatSource.Visible : TacticalFacingThreatSource.None;
+            int instanceId = SafeInstanceId(unit);
+            float cooldown = scope == TacticalFacingPulseScope.Regiment
+                ? RegimentFacingPulseCooldownSeconds
+                : BrigadeFacingPulseCooldownSeconds;
+
+            decision = TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
+                scope,
+                task,
+                SafeFormation(unit),
+                targetFormation,
+                SafeRotationY(unit),
+                targetFacing,
+                hasThreatFacing,
+                source,
+                closeEngaged,
+                flankRisk,
+                IsPlayerProtected(unit),
+                SafeRouted(unit),
+                HasPendingOrder(unit, allowStaleQueuedBypass: true),
+                HasActiveMoveMakingProgress(unit),
+                HasRecentFacingPulse(instanceId, cooldown),
+                FacingRefreshToleranceDegrees));
+
+            return decision.Action != TacticalFacingPulseAction.NoWrite || source != TacticalFacingThreatSource.None;
+        }
+
+        private static bool ApplyRegimentFacingPulse(Regiment unit, TacticalFacingPulseDecision decision)
+        {
+            if (unit == null || !decision.ShouldWrite) return false;
+            if (decision.TargetFormation < 0 || decision.TargetFormation > 4) return false;
+
+            try
+            {
+                unit.ChangeRegimentFormation(GameVars.SetFormationParam(
+                    decision.TargetFormation,
+                    manualset: true,
+                    newmounted: -1,
+                    manualrotationtarget: decision.TargetFacingDegrees,
+                    setalsoformationorderedvariable: true));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning(
+                    "tactical-facing-pulse:regiment-write-failed",
+                    "Tactical contact-facing regiment write failed: " + ex.Message);
+                return false;
+            }
         }
 
         private static bool TryApplyFireControl(
@@ -1570,14 +1785,7 @@ namespace WhiskeyRealism.Patches
             if (physical.ActiveMove) return true;
             if (targetFormation >= 0 && SafeGroupFormation(group) != targetFormation) return false;
             return idle == TacticalIdleClassification.ValidIdle &&
-                (state.Task == CommandTaskType.ReserveWait ||
-                 state.Task == CommandTaskType.HoldObjective ||
-                 state.Task == CommandTaskType.HoldChoke ||
-                 state.Task == CommandTaskType.FixEnemy ||
-                 state.Task == CommandTaskType.Screen ||
-                 state.Task == CommandTaskType.Probe ||
-                 state.Task == CommandTaskType.Delay ||
-                 state.Task == CommandTaskType.Consolidate);
+                CommandPostureExecutor.IdleCanSatisfyTask(state.Task);
         }
 
         private static bool TryResolveLedgerState(
@@ -1791,6 +1999,21 @@ namespace WhiskeyRealism.Patches
             return Time.realtimeSinceStartup - last < Math.Max(0f, cooldownSeconds);
         }
 
+        private static bool HasRecentFacingPulse(int instanceId, float cooldownSeconds)
+        {
+            if (instanceId == 0) return true;
+            if (!_lastFacingPulseAt.TryGetValue(instanceId, out float last)) return false;
+            return Time.realtimeSinceStartup - last < Math.Max(0f, cooldownSeconds);
+        }
+
+        private static void MarkFacingPulse(Regiment unit)
+        {
+            int instanceId = SafeInstanceId(unit);
+            if (instanceId == 0) return;
+            _lastFacingPulseAt[instanceId] = Time.realtimeSinceStartup;
+            _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+        }
+
         private static bool HasRecentFireControlOrder(int instanceId)
         {
             if (instanceId == 0) return true;
@@ -1808,7 +2031,7 @@ namespace WhiskeyRealism.Patches
                 float distance = hasLastWaypoint ? SafeDistance(SafePosition(group), lastWaypoint) : 0f;
                 return CommandWaypointWritePolicy.IsExecutorMovementActive(
                     group.pathinterrupted,
-                    group.regimentpaths,
+                    CountMovingPaths(group),
                     group.movementmode,
                     group.groupsubordinatesmoving,
                     group.groupsubordinatesmovingnonai,
@@ -1858,6 +2081,23 @@ namespace WhiskeyRealism.Patches
                     (unit.unittyp == TacticalUnitType.Infantry ||
                      unit.unittyp == TacticalUnitType.Skirmisher ||
                      unit.unittyp == TacticalUnitType.Cavalry);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsCombatRegiment(Regiment unit)
+        {
+            try
+            {
+                return unit != null &&
+                    unit.unittyp <= TacticalUnitType.MaxCombat &&
+                    (unit.unittyp == TacticalUnitType.Infantry ||
+                     unit.unittyp == TacticalUnitType.Cavalry ||
+                     unit.unittyp == TacticalUnitType.Artillery ||
+                     unit.unittyp == TacticalUnitType.Skirmisher);
             }
             catch
             {
@@ -2164,6 +2404,21 @@ namespace WhiskeyRealism.Patches
             return TacticalCavalryFollowMode.None;
         }
 
+        private static TacticalFacingPulseScope ScopeFor(CommandEchelonKind echelon)
+        {
+            switch (echelon)
+            {
+                case CommandEchelonKind.ArmyLike:
+                case CommandEchelonKind.CorpsLike:
+                case CommandEchelonKind.DivisionLike:
+                    return TacticalFacingPulseScope.Division;
+                case CommandEchelonKind.BrigadeLike:
+                    return TacticalFacingPulseScope.Brigade;
+                default:
+                    return TacticalFacingPulseScope.Unknown;
+            }
+        }
+
         private static bool TargetInFort(Regiment target)
         {
             try { return target != null && target.fortinrange != null; }
@@ -2433,6 +2688,47 @@ namespace WhiskeyRealism.Patches
                     .WithField("activeMove", HasActiveMoveMakingProgress(group)));
         }
 
+        private static void EmitFacingPulseTelemetry(
+            int side,
+            Regiment parent,
+            Regiment unit,
+            CommandNodeOperationalState state,
+            TacticalFacingPulseScope scope,
+            TacticalFacingPulseDecision decision,
+            TacticalFacingThreatSource source,
+            bool applied)
+        {
+            string signature = side + "|" + SafeInstanceId(unit) + "|" + scope + "|" + state.Task +
+                "|" + decision.Action + "|" + decision.Reason + "|" + applied + "|" +
+                BucketCoordinate(SafeRotationY(unit)) + "|" + BucketCoordinate(decision.TargetFacingDegrees);
+            string key = "tactical-facing-pulse:" + side + ":" + SafeInstanceId(unit);
+            if (!TacticalTelemetry.ShouldEmit(_lastTelemetryAt, key, signature, Time.realtimeSinceStartup, TelemetrySeconds, false))
+                return;
+
+            TelemetryRouter.Emit(
+                TelemetryLayer.Tactical,
+                decision.ShouldWrite ? TelemetryCategory.Write : TelemetryCategory.Decision,
+                "TacticalFacingPulse",
+                TelemetrySeverity.Info,
+                ev => ev
+                    .WithSide(side)
+                    .WithUnit(SafeName(unit))
+                    .WithDecision(decision.Action.ToString(), decision.Reason, signature)
+                    .WithField("scope", scope.ToString())
+                    .WithField("parent", SafeName(parent) + "#" + SafeInstanceId(parent))
+                    .WithField("unit", SafeName(unit) + "#" + SafeInstanceId(unit))
+                    .WithField("node", TacticalOperationsTelemetry.SafeToken(state.NodeId))
+                    .WithField("task", state.Task.ToString())
+                    .WithField("currentFormation", SafeFormation(unit))
+                    .WithField("targetFormation", decision.TargetFormation)
+                    .WithField("currentFacing", SafeRotationY(unit))
+                    .WithField("targetFacing", decision.TargetFacingDegrees)
+                    .WithField("threatSource", source.ToString())
+                    .WithField("urgent", decision.Urgent)
+                    .WithField("writeResult", applied ? "applied" : "not-applied")
+                    .WithField("gateReason", TacticalOperationsTelemetry.SafeToken(decision.Reason)));
+        }
+
         private static string SafeGroupMovingFlag(Regiment group)
         {
             try
@@ -2459,6 +2755,30 @@ namespace WhiskeyRealism.Patches
             {
                 return false;
             }
+        }
+
+        private static bool ContactFacingPulseEnabled()
+        {
+            try
+            {
+                return EnabledForWrites() &&
+                    Plugin.EnableTacticalContactFacingPulse != null &&
+                    Plugin.EnableTacticalContactFacingPulse.Value;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        internal static void Reset()
+        {
+            _lastExecutorOrderAt.Clear();
+            _lastFacingPulseAt.Clear();
+            _lastFireControlAt.Clear();
+            _lastCourierAt.Clear();
+            _lastOutboundOrderSignatureByGroup.Clear();
+            _lastTelemetryAt.Clear();
         }
 
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)

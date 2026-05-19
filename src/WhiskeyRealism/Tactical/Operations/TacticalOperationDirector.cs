@@ -331,7 +331,7 @@ namespace WhiskeyRealism.Tactical.Operations
             for (int i = 0; i < objectives.Length; i++)
             {
                 BattlefieldObjectiveEstimate objective = objectives[i];
-                if (string.Equals(objective.ObjectiveId, objectiveId, StringComparison.Ordinal))
+                if (ObjectiveIdMatches(objective.ObjectiveId, objectiveId))
                 {
                     match = objective;
                     return true;
@@ -339,6 +339,27 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             return false;
+        }
+
+        private static bool ObjectiveIdMatches(string left, string right)
+        {
+            if (string.Equals(left, right, StringComparison.Ordinal)) return true;
+            return string.Equals(NormalizeObjectiveId(left), NormalizeObjectiveId(right), StringComparison.Ordinal);
+        }
+
+        private static string NormalizeObjectiveId(string objectiveId)
+        {
+            if (string.IsNullOrWhiteSpace(objectiveId)) return string.Empty;
+            char[] chars = objectiveId.Trim().ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                if (char.IsWhiteSpace(chars[i]) || chars[i] == '|')
+                {
+                    chars[i] = '_';
+                }
+            }
+
+            return new string(chars);
         }
 
         private static bool IsUsableObjective(BattlefieldObjectiveEstimate objective)

@@ -78,6 +78,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalOrchestratorChargeGate;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
+        public static ConfigEntry<bool> EnableTacticalMapKnowledgeDiagnostics;
+        public static ConfigEntry<bool> EnableTacticalContactFacingPulse;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
         public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
@@ -301,32 +303,32 @@ namespace WhiskeyRealism
             EnableTacticalFallbackRetreatNullGuard = Config.Bind(
                 "Tactical",
                 "Enable Tactical Fallback Retreat Null Guard",
-                false,
+                true,
                 "Default OFF. Suppresses NullReferenceException from two vanilla tactical fallback/retreat methods during focused bug-smoke runs; all non-null exceptions still propagate.");
             EnableTacticalPathfinderDiscipline = Config.Bind(
                 "Tactical",
                 "Enable Tactical Pathfinder Discipline",
-                false,
+                true,
                 "Default OFF. Corrects BUG-TAC-010 by accepting close complete tactical path endpoints, removing failed non-target path fragments, and rejecting non-complete NavMesh paths before they poison movement retries.");
             EnableTacticalHqLinkGuard = Config.Bind(
                 "Tactical",
                 "Enable Tactical HQ Link Guard",
-                false,
+                true,
                 "Default OFF. Corrects cross-command group/HQ auto-links created by Regiment.MoveNonAIUnits while preserving same-command and same-hierarchy links.");
             EnableTacticalReserveOrderDelayGuard = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reserve Order Delay Guard",
-                false,
+                true,
                 "Default OFF. Converts vanilla reserve support moves that were issued by direct RegimentSetPath into normal delayed SetWaypoint orders after removing the immediate path.");
             EnableWlTacticalChargeGuard = Config.Bind(
                 "Tactical",
                 "Enable W&L Tactical Charge Guard",
-                false,
+                true,
                 "Default OFF for Slice B1/BUG-TAC-005. When enabled, blocks ungated W&L AI feud/charge/objective-chain movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
             EnableWlPlayerSubordinateOrderBridge = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine",
-                false,
+                true,
                 "Default OFF. When true, the tactical operations ledger may issue player-subordinate W&L current orders through vanilla AIBattle.CheckCurrentOrderUpdate after vanilla UpdateDLCPlayerOrders runs.");
             EnableWlPlayerOrderDoctrineDiagnostics = Config.Bind(
                 "W&L",
@@ -341,7 +343,7 @@ namespace WhiskeyRealism
             EnablePlayerOrderDoctrine = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine",
-                false,
+                true,
                 "Default-off write valve for Whiskey-authored player-facing W&L orders. Diagnostics can run while this is disabled.");
             EnablePlayerOrderDoctrineDiagnostics = Config.Bind(
                 "W&L",
@@ -351,47 +353,47 @@ namespace WhiskeyRealism
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",
-                false,
+                true,
                 "Default OFF for Slice B4. Uses B3 odds doctrine to bias battle-level macroai after vanilla dynamic macro logic runs.");
             EnableTacticalGroupSectorStance = Config.Bind(
                 "Tactical",
                 "Enable Tactical Group Sector Stance",
-                false,
+                true,
                 "Default OFF for Slice B5. Uses B3 sector doctrine to bias group ai_stance without issuing movement, reserve, artillery, fallback, or charge orders.");
             EnableTacticalCommanderIntentDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Commander Intent Doctrine",
-                false,
+                true,
                 "Default OFF for Slice B6a. Computes tactical commander intent and playbook from B3-B5 evidence and the active OperationPosture, and emits read-only [TacticalIntent] and [TacticalPlaybook] telemetry. Does not change any vanilla battle state.");
             EnableTacticalLocalReactionDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Local Reaction Doctrine",
-                false,
+                true,
                 "Default OFF for Slice B6c. Computes per-group local reactions from B6a intent + playbook + B3 evidence and emits read-only [TacticalLocalReaction] telemetry. Enables stance-4 preservation/demotion contract in BattleGroupStancePatch.");
             EnableTacticalChargeDenial = Config.Bind(
                 "Tactical",
                 "Enable Tactical Charge Denial",
-                false,
+                true,
                 "Default OFF for Slice B6c. When local reaction is not PermitCharge, BattleGroupStancePatch demotes vanilla stance 4 to 3 with [TacticalChargeDeny] telemetry, and BattleChargeGatePatch denies SetMovementMode(3) at the per-unit charge initiation surface as defense in depth.");
             EnableTacticalReserveIntentTelemetry = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reserve Intent Telemetry",
-                false,
+                true,
                 "Default OFF for Slice B6c. Emits read-only [TacticalReserveIntent] lines aggregating LineReliefRequest signals + reserve availability per side. Does not mutate reserve lists.");
             EnableTacticalReserveListMutation = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reserve List Mutation",
-                false,
+                true,
                 "Default OFF for Slice B6c. Allows BattleReserveDoctrinePatch to bias objectivechain[i].reservegroups membership under snapshot/restore protection when reserve intent allows mutation. W&L ownership and stale-order gates apply.");
             EnableTacticalArtilleryDoctrine = Config.Bind(
                 "Tactical Doctrine",
                 "Enable Tactical Artillery Doctrine",
-                false,
+                true,
                 "Default-off. When true, B7 may rewrite vanilla artillery combatbehaviorordered to favor counter-battery, preserve-fire, or cancel-bombard decisions based on doctrine. Read the patch source before enabling.");
             EnableTacticalWithdrawalDoctrine = Config.Bind(
                 "Tactical Doctrine",
                 "Enable Tactical Withdrawal Doctrine",
-                false,
+                true,
                 "Default-off. When true, B8 may call BattleUnits.SetWithdrawal for individual units classified as WithdrawalCandidate or CollapseCandidate by TacticalWithdrawalDoctrine. Read the patch source before enabling.");
             TacticalCommanderModeRaw = Config.Bind(
                 "Tactical Orchestrator",
@@ -403,7 +405,7 @@ namespace WhiskeyRealism
             EnableTacticalHeavyPathThrottling = Config.Bind(
                 "TacticalTickOptimization",
                 "Enable Tactical Heavy Path Throttling",
-                false,
+                true,
                 "Enable the heavy path throttle for side-wide evidence, vision, and doctrine assignment (default off until smoke complete).");
             TacticalHeavyReviewCycleHours = Config.Bind(
                 "TacticalTickOptimization",
@@ -455,7 +457,7 @@ namespace WhiskeyRealism
             EnableTacticalOrchestratorDirectChildGate = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Direct-Child Gate",
-                false,
+                true,
                 "Default OFF. O3: when true, BattleFeudActionGatePatch (#42) consults " +
                 "ArmyOrchestrator.GetDirectChildRole(group) between the W&L decision and " +
                 "SetWaypoint, denying off-axis Main/SupportMain, wide Fix, out-of-sector " +
@@ -465,7 +467,7 @@ namespace WhiskeyRealism
             EnableTacticalOrchestratorReserveCommitGate = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Reserve Commit Gate",
-                false,
+                true,
                 "Default OFF. Slice 1: when true, AIBattle.CheckUseOfReserves consults " +
                 "the command-node intent for the calling command group and rolls back new " +
                 "vanilla reserve support paths when the group resolves to a Reserve role. " +
@@ -473,7 +475,7 @@ namespace WhiskeyRealism
             EnableTacticalOrchestratorChargeGate = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Charge Gate",
-                false,
+                true,
                 "Default OFF. Slice 3: when true, AIBattle.MicroAICheckForCharges consults " +
                 "the command-node intent for the calling command group before allowing vanilla " +
                 "SetMovementMode(3) charge initiation. Main charges require favorable local odds; " +
@@ -495,6 +497,23 @@ namespace WhiskeyRealism
                 "Default seeds Hampton's Legion + any Tennessee-named regiment (the reported " +
                 "stuck-retreat units). Add more as needed: 'Hampton,Tennessee,2nd_South_Carolina'. " +
                 "Empty string disables logging (feature stays enabled but watches nothing).");
+            EnableTacticalMapKnowledgeDiagnostics = Config.Bind(
+                "Tactical Diagnostics",
+                "Enable Tactical Map Knowledge Diagnostics",
+                false,
+                "Default OFF. Read-only tactical scene-object probe for map-knowledge debugging. " +
+                "When enabled, emits bounded [TacticalMapKnowledge] rows for Objectives, EntryPoints, " +
+                "AIFortifications, FortificationGroup, road/railroad anchors, and watched-regiment " +
+                "cover/facing context. Does not change unit orders, facing, formation, or pathing.");
+            EnableTacticalContactFacingPulse = Config.Bind(
+                "Tactical",
+                "Enable Tactical Contact Facing Pulse",
+                true,
+                "Default ON. The active operations-ledger posture executor may run a " +
+                "bounded division/brigade/regiment contact-facing pulse after vanilla formation adjustment. " +
+                "Division scope only publishes/logs axis intent; brigade scope may correct command-group " +
+                "frontage; regiment scope may reform and face attached combat regiments under visible " +
+                "contact. Disable this flag for rollback without turning off Tactical Commander Mode.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
@@ -503,7 +522,7 @@ namespace WhiskeyRealism
             EnableTacticalDeploymentTerrainDiscipline = Config.Bind(
                 "Tactical",
                 "Enable Tactical Deployment Terrain Discipline",
-                false,
+                true,
                 "Default off. When enabled, may correct clear AI deployment terrain or deployment-zone failures after vanilla deployment using bounded terrain-safe candidates. Visible enemy bearing may align final facing only as part of those terrain corrections.");
             TacticalDeploymentTerrainMaxCorrectionMeters = Config.Bind(
                 "Tactical",

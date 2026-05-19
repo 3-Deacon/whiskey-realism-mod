@@ -133,11 +133,11 @@ namespace WhiskeyRealism.Tactical.Operations
             float minWaypointDistance)
         {
             if (pathInterrupted) return false;
+            if (regimentPaths <= 0) return false;
+            if (movementMode > 0) return true;
             if (groupSubordinatesMoving > MovementFlagThreshold ||
                 groupSubordinatesMovingNonAi > MovementFlagThreshold)
                 return true;
-            if (regimentPaths <= 0) return false;
-            if (movementMode > 0) return true;
             if (!hasLastWaypoint) return false;
             if (!IsFinite(distanceToLastWaypoint) || !IsFinite(minWaypointDistance)) return false;
             return distanceToLastWaypoint > minWaypointDistance;
@@ -211,6 +211,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 case CommandTaskType.AttackObjective:
                 case CommandTaskType.SupportAttack:
                 case CommandTaskType.FixEnemy:
+                case CommandTaskType.Scout:
+                case CommandTaskType.Probe:
                 case CommandTaskType.Screen:
                 case CommandTaskType.FallBackToLine:
                 case CommandTaskType.ReleaseReserve:
@@ -224,6 +226,15 @@ namespace WhiskeyRealism.Tactical.Operations
 
     public static class CommandPostureExecutor
     {
+        public static bool IdleCanSatisfyTask(CommandTaskType task)
+        {
+            return task == CommandTaskType.ReserveWait ||
+                task == CommandTaskType.HoldObjective ||
+                task == CommandTaskType.HoldChoke ||
+                task == CommandTaskType.Delay ||
+                task == CommandTaskType.Consolidate;
+        }
+
         public static PostureExecutionDecision Decide(
             CommandDoctrineOrder order,
             CommandPhysicalState physical,
@@ -521,6 +532,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 case CommandTaskType.AttackObjective:
                 case CommandTaskType.SupportAttack:
                 case CommandTaskType.FixEnemy:
+                case CommandTaskType.Scout:
+                case CommandTaskType.Probe:
                 case CommandTaskType.Screen:
                 case CommandTaskType.FallBackToLine:
                 case CommandTaskType.ReleaseReserve:

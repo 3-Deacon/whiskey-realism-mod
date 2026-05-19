@@ -1211,6 +1211,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try { TacticalSectorLedger.ClearHelpRequests(); } catch { }
             try { Plugin.MoraleSnapshotLedger?.Clear(); } catch { }
             try { WhiskeyRealism.Patches.TacticalRegimentDiagnosticsPatch.Reset(); } catch { }
+            try { WhiskeyRealism.Patches.TacticalMapKnowledgeDiagnosticsPatch.Reset(); } catch { }
+            try { WhiskeyRealism.Patches.BattleCommandPostureExecutorPatch.Reset(); } catch { }
         }
 
         private static void ResetRuntimeTickState()

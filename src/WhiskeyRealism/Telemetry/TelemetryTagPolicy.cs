@@ -64,6 +64,7 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalSector", TelemetryCategory.State);
             AddTactical("TacticalOdds", TelemetryCategory.State);
             AddTactical("TacticalFormationChange", TelemetryCategory.Write);
+            AddTactical("TacticalFacingPulse", TelemetryCategory.Decision);
             AddTactical("TacticalPathShape", TelemetryCategory.Trace);
             AddTactical("TacticalWaypointDrift", TelemetryCategory.Trace);
             AddTactical("TacticalOrder", TelemetryCategory.Write);
@@ -93,6 +94,7 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalDeploymentPhase", TelemetryCategory.State);
             AddTactical("TacticalRegimentDiagnostics", TelemetryCategory.Trace);
             AddTactical("TacticalRegimentTrace", TelemetryCategory.Trace);
+            AddTactical("TacticalMapKnowledge", TelemetryCategory.Trace);
             AddTactical("TacticalObjectiveGuard", TelemetryCategory.Gate);
             AddTactical("TacticalObjectiveMove", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveMutation", TelemetryCategory.Write);

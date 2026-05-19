@@ -113,6 +113,7 @@ static class Program
             ("telemetry tag policy routes tactical matrix to state", TelemetryTagPolicyRoutesTacticalMatrixToState),
             ("telemetry tag policy keeps startup allowlisted", TelemetryTagPolicyKeepsStartupAllowlisted),
             ("telemetry tag policy routes deployment diagnostics sidecar only", TelemetryTagPolicyRoutesDeploymentDiagnosticsSidecarOnly),
+            ("telemetry tag policy routes tactical map knowledge sidecar only", TelemetryTagPolicyRoutesTacticalMapKnowledgeSidecarOnly),
             ("telemetry tag policy does not promote missing parents count", TelemetryTagPolicyDoesNotPromoteMissingParentsCount),
             ("telemetry tag policy routes campaign plan and succession sidecar only", TelemetryTagPolicyRoutesCampaignPlanAndSuccessionSidecarOnly),
             ("task7 explicit campaign groups use typed telemetry", Task7ExplicitCampaignGroupsUseTypedTelemetry),
@@ -163,6 +164,8 @@ static class Program
             ("tactical deployment snapshot carries terrain facing evidence", TacticalDeploymentSnapshotCarriesTerrainFacingEvidence),
             ("tactical terrain telemetry formats bounded row", TacticalTerrainTelemetryFormatsBoundedRow),
             ("tactical terrain telemetry sanitizes unsafe tokens", TacticalTerrainTelemetrySanitizesUnsafeTokens),
+            ("tactical map knowledge telemetry formats inventory row", TacticalMapKnowledgeTelemetryFormatsInventoryRow),
+            ("tactical map knowledge telemetry formats unit context row", TacticalMapKnowledgeTelemetryFormatsUnitContextRow),
             ("tactical terrain rejects water center", TacticalTerrainRejectsWaterCenter),
             ("tactical terrain rejects water footprint", TacticalTerrainRejectsWaterFootprint),
             ("tactical terrain rejects outside deployment zone", TacticalTerrainRejectsOutsideDeploymentZone),
@@ -206,6 +209,7 @@ static class Program
             ("operation director soft aborts before catastrophic loss", OperationDirectorSoftAbortsBeforeCatastrophe),
             ("operation director aborts catastrophic collapse inside commit window", OperationDirectorAbortsCatastrophicCollapseInsideCommitWindow),
             ("operation director preserves active operation when picture is missing", OperationDirectorPreservesActiveOperationWhenPictureMissing),
+            ("operation director matches normalized committed map objective ids", OperationDirectorMatchesNormalizedCommittedMapObjectiveIds),
             ("operation director prefers exposed enemy line over generic objective chain", OperationDirectorPrefersExposedEnemyLineOverGenericObjectiveChain),
             ("tactical decision doctrine classifies contact gates", TacticalDecisionDoctrineClassifiesContactGates),
             ("tactical decision doctrine gates soft abort", TacticalDecisionDoctrineGatesSoftAbort),
@@ -235,6 +239,7 @@ static class Program
             ("scourge division play anchors on best engaged subordinate", ScourgeDivisionPlayAnchorsOnBestEngagedSubordinate),
             ("scourge division play skips ordered non anchor subordinates", ScourgeDivisionPlaySkipsOrderedNonAnchorSubordinates),
             ("scourge courier cadence waits for open timer and idle child", ScourgeCourierCadenceWaitsForOpenTimerAndIdleChild),
+            ("scourge courier cadence allows stalled objective continuation", ScourgeCourierCadenceAllowsStalledObjectiveContinuation),
             ("scourge outbound order ledger suppresses duplicate pending writes", ScourgeOutboundOrderLedgerSuppressesDuplicatePendingWrites),
             ("scourge cavalry follow doctrine filters raid and screens away", ScourgeCavalryFollowDoctrineFiltersRaidAndScreensAway),
             ("grand tactician recon doctrine uses cavalry scout and infantry probe", GrandTacticianReconDoctrineUsesCavalryScoutAndInfantryProbe),
@@ -292,6 +297,7 @@ static class Program
             ("posture executor uses doctrine attack target", PostureExecutorUsesDoctrineAttackTarget),
             ("posture executor uses doctrine assembly target", PostureExecutorUsesDoctrineAssemblyTarget),
             ("posture executor moves scout probe and screen to doctrine target", PostureExecutorMovesScoutProbeAndScreenToDoctrineTarget),
+            ("posture executor probe scout screen require objective progress", PostureExecutorProbeScoutScreenRequireObjectiveProgress),
             ("posture executor close screen breaks off to doctrine fallback", PostureExecutorCloseScreenBreaksOffToDoctrineFallback),
             ("posture executor moves reserve to doctrine rally target", PostureExecutorMovesReserveToDoctrineRallyTarget),
             ("posture executor clears interrupted inactive order", PostureExecutorClearsInterruptedInactiveOrder),
@@ -299,6 +305,8 @@ static class Program
             ("posture executor preserves legal reserve idle", PostureExecutorPreservesLegalReserveIdle),
             ("posture executor retries unmaterialized recent attack order", PostureExecutorRetriesUnmaterializedRecentAttackOrder),
             ("posture executor battle waypoints bypass delayed order queue", PostureExecutorBattleWaypointsBypassDelayedOrderQueue),
+            ("posture executor scout and probe are objective movement tasks", PostureExecutorScoutAndProbeAreObjectiveMovementTasks),
+            ("posture executor retries stalled scout and probe despite recent order", PostureExecutorRetriesStalledScoutAndProbeDespiteRecentOrder),
             ("posture executor long attack uses vanilla blocked movement order", PostureExecutorLongAttackUsesVanillaBlockedMovementOrder),
             ("posture executor group movement flags count as active move", PostureExecutorGroupMovementFlagsCountAsActiveMove),
             ("posture executor duplicate waypoint policy suppresses same target", PostureExecutorDuplicateWaypointPolicySuppressesSameTarget),
@@ -317,6 +325,7 @@ static class Program
             ("doctrine assignment high odds attack weak point attacks", DoctrineAssignmentHighOddsAttackWeakPointAttacks),
             ("doctrine assignment committed visible enemy line attacks at fallback confidence", DoctrineAssignmentCommittedVisibleEnemyLineAttacksAtFallbackConfidence),
             ("doctrine assignment committed fallback enemy line keeps attack when chain replaces objective", DoctrineAssignmentCommittedFallbackEnemyLineKeepsAttackWhenChainReplacesObjective),
+            ("doctrine assignment committed map objective matches normalized ids", DoctrineAssignmentCommittedMapObjectiveMatchesNormalizedIds),
             ("doctrine assignment committed map objective advances without visible enemy", DoctrineAssignmentCommittedMapObjectiveAdvancesWithoutVisibleEnemy),
             ("doctrine assignment probe and screen receive movement targets", DoctrineAssignmentProbeAndScreenReceiveMovementTargets),
             ("doctrine assignment scouting screen orders probe and breakoff targets", DoctrineAssignmentScoutingScreenOrdersProbeAndBreakoffTargets),
@@ -356,6 +365,10 @@ static class Program
             ("command formation correction avoids new path when close engaged", CommandFormationCorrectionAvoidsNewPathWhenCloseEngaged),
             ("command formation correction targets line for committed attack", CommandFormationCorrectionTargetsLineForCommittedAttack),
             ("command formation correction maps flank refusal to vanilla parameter", CommandFormationCorrectionMapsRefuseFlankParameter),
+            ("tactical facing pulse observes division axis without write", TacticalFacingPulseObservesDivisionAxisWithoutWrite),
+            ("tactical facing pulse corrects brigade frontage", TacticalFacingPulseCorrectsBrigadeFrontage),
+            ("tactical facing pulse urgently reforms regiment under visible contact", TacticalFacingPulseUrgentlyReformsRegimentUnderVisibleContact),
+            ("tactical facing pulse defers pending regiment", TacticalFacingPulseDefersPendingRegiment),
             ("urgent recovery formation correction and local fallback on stale Empty snapshot using only allowed live vanilla fields", UrgentRecoveryFormationCorrectionOnStaleSnapshot),
             ("tactical command monitor reserve idle valid", TacticalCommandMonitorReserveIdleValid),
             ("tactical command monitor path interrupted idle illegal", TacticalCommandMonitorPathInterruptedIdleIllegal),
@@ -2142,6 +2155,17 @@ static class Program
         AssertTrue(serious.AllowMainLog, "serious deployment row escalates to main log");
     }
 
+    private static void TelemetryTagPolicyRoutesTacticalMapKnowledgeSidecarOnly()
+    {
+        var route = TelemetryTagPolicy.Route("[TacticalMapKnowledge] surface=inventory objectives=3 entryPoints=2");
+        AssertEqual("TacticalMapKnowledge", route.Tag, "tag");
+        AssertEqual(TelemetryLayer.Tactical, route.Layer, "layer");
+        AssertEqual(TelemetryCategory.Trace, route.Category, "category");
+        AssertEqual("TacticalMapKnowledge", route.EventName, "event");
+        AssertTrue(route.RouteToSidecar, "map knowledge sidecar route");
+        AssertFalse(route.AllowMainLog, "map knowledge main log");
+    }
+
     private static void TelemetryTagPolicyDoesNotPromoteMissingParentsCount()
     {
         var route = TelemetryTagPolicy.Route("[TacticalCommandTree] alliance=1 nodes=9 missingParents=0");
@@ -3839,6 +3863,76 @@ static class Program
         AssertContains(line, "enemyDistance=0.0", "nonfinite enemy distance");
     }
 
+    private static void TacticalMapKnowledgeTelemetryFormatsInventoryRow()
+    {
+        string line = TacticalMapKnowledgeTelemetry.FormatInventory(new TacticalMapKnowledgeInventoryRow(
+            "CheckGlobalAIStrategy",
+            objectives: 3,
+            entryPoints: 2,
+            aiFortifications: 1,
+            fortificationGroups: 4,
+            roads: 12,
+            railroads: 1,
+            sampleObjective: "Oak Ridge",
+            sampleEntryPoint: "CSA Entry",
+            sampleFortification: "Stone Wall"));
+
+        AssertContains(line, "[TacticalMapKnowledge]", "marker");
+        AssertContains(line, "surface=inventory", "surface");
+        AssertContains(line, "source=CheckGlobalAIStrategy", "source");
+        AssertContains(line, "objectives=3", "objective count");
+        AssertContains(line, "entryPoints=2", "entry point count");
+        AssertContains(line, "aiFortifications=1", "ai fortification count");
+        AssertContains(line, "fortificationGroups=4", "fortification group count");
+        AssertContains(line, "sampleObjective=Oak_Ridge", "safe objective sample");
+        AssertContains(line, "sampleEntryPoint=CSA_Entry", "safe entry sample");
+        AssertContains(line, "sampleFortification=Stone_Wall", "safe fort sample");
+        AssertContains(line, "signature=objectives=3|entryPoints=2|fortGroups=4", "signature");
+    }
+
+    private static void TacticalMapKnowledgeTelemetryFormatsUnitContextRow()
+    {
+        string line = TacticalMapKnowledgeTelemetry.FormatUnitContext(new TacticalMapKnowledgeUnitContextRow(
+            unit: "Hampton Legion",
+            alliance: 0,
+            x: 150.25f,
+            z: 210.75f,
+            facing: 45f,
+            aiStance: 2,
+            formation: 1,
+            currentObjective: "Seminary Ridge",
+            nearestObjective: "Oak Ridge",
+            objectiveBearing: 90f,
+            objectiveDistance: 350f,
+            nearestEntryPoint: "Union Entry",
+            entryPointBearing: 180f,
+            entryPointDistance: 1200f,
+            nearestFortification: "Fence Line A",
+            fortificationBearing: 30f,
+            fortificationDistance: 22f,
+            coverValue: 0.35f,
+            coverValueSubordinates: 0.62f,
+            coverObject: 2,
+            threatBearing: 270f,
+            threatDistance: 500f,
+            threatConfidence: "visible-enemy"));
+
+        AssertContains(line, "[TacticalMapKnowledge]", "marker");
+        AssertContains(line, "surface=unit", "surface");
+        AssertContains(line, "unit=Hampton_Legion", "safe unit");
+        AssertContains(line, "pos=(150.3,210.8)", "position");
+        AssertContains(line, "facing=45.0", "facing");
+        AssertContains(line, "stance=2", "stance");
+        AssertContains(line, "formation=1", "formation");
+        AssertContains(line, "currentObjective=Seminary_Ridge", "current objective");
+        AssertContains(line, "nearestEntryPoint=Union_Entry", "entry point");
+        AssertContains(line, "nearestFortification=Fence_Line_A", "fortification");
+        AssertContains(line, "cover=0.35", "cover");
+        AssertContains(line, "coverSubs=0.62", "cover subordinates");
+        AssertContains(line, "threatBearing=270.0", "threat bearing");
+        AssertContains(line, "threatConfidence=visible-enemy", "threat confidence");
+    }
+
     private static TacticalTerrainCandidate TerrainCandidate(
         float x,
         float z,
@@ -4579,6 +4673,27 @@ static class Program
         AssertEqual("ridge-a", missingDecision.Operation.PrimaryObjectiveId, "missing primary preserves objective");
         AssertEqual(TacticalOperationPhase.Committed, missingDecision.Operation.Phase, "missing primary preserves phase");
         AssertEqual("objective-picture-missing", missingDecision.Reason, "missing primary reason");
+    }
+
+    private static void OperationDirectorMatchesNormalizedCommittedMapObjectiveIds()
+    {
+        TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
+            new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "Telegraph Road", 900f),
+            currentTimeSeconds: 1000f,
+            ownStrength: 6000f,
+            reserveFraction: 0.25f,
+            aggression01: 0.8f,
+            caution01: 0.2f,
+            objectives: new[]
+            {
+                new BattlefieldObjectiveEstimate("Telegraph_Road", TacticalObjectiveType.RoadJunction, 0f, 0.9f, false, 0.65f, 1000f, -1400f, 0f, 0f)
+            });
+
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+
+        AssertEqual(TacticalOperationPhase.Committed, decision.Operation.Phase, "phase");
+        AssertEqual("selected", decision.Reason, "reason");
+        AssertEqual("Telegraph_Road", decision.Operation.PrimaryObjectiveId, "primary objective");
     }
 
     private static void OperationDirectorPrefersExposedEnemyLineOverGenericObjectiveChain()
@@ -6614,6 +6729,16 @@ static class Program
         AssertPostureTarget(PostureExecutionTarget.DoctrinePrimaryTarget, false, screen);
     }
 
+    private static void PostureExecutorProbeScoutScreenRequireObjectiveProgress()
+    {
+        AssertFalse(CommandPostureExecutor.IdleCanSatisfyTask(CommandTaskType.Scout), "scout idle must still move to objective");
+        AssertFalse(CommandPostureExecutor.IdleCanSatisfyTask(CommandTaskType.Probe), "probe idle must still move to objective");
+        AssertFalse(CommandPostureExecutor.IdleCanSatisfyTask(CommandTaskType.Screen), "screen idle must still move to objective");
+        AssertFalse(CommandPostureExecutor.IdleCanSatisfyTask(CommandTaskType.FixEnemy), "fix idle must still move to objective");
+        AssertTrue(CommandPostureExecutor.IdleCanSatisfyTask(CommandTaskType.ReserveWait), "reserve idle is legal");
+        AssertTrue(CommandPostureExecutor.IdleCanSatisfyTask(CommandTaskType.HoldObjective), "hold objective idle is legal");
+    }
+
     private static void PostureExecutorCloseScreenBreaksOffToDoctrineFallback()
     {
         var decision = CommandPostureExecutor.Decide(
@@ -6749,6 +6874,56 @@ static class Program
             "non-battle callers should keep vanilla order-delay semantics");
     }
 
+    private static void PostureExecutorScoutAndProbeAreObjectiveMovementTasks()
+    {
+        AssertFalse(
+            CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.Scout, battleActive: true),
+            "scout toward objective needs immediate battle movement");
+        AssertFalse(
+            CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(CommandTaskType.Probe, battleActive: true),
+            "probe toward objective needs immediate battle movement");
+        AssertTrue(
+            CommandWaypointWritePolicy.ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType.Scout),
+            "scout movement must stamp active progress");
+        AssertTrue(
+            CommandWaypointWritePolicy.ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType.Probe),
+            "probe movement must stamp active progress");
+        AssertTrue(
+            CommandWaypointWritePolicy.ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType.Screen),
+            "screen movement must keep existing active progress semantics");
+    }
+
+    private static void PostureExecutorRetriesStalledScoutAndProbeDespiteRecentOrder()
+    {
+        var stalled = new CommandPhysicalState(
+            routed: false,
+            playerProtected: false,
+            pathInterrupted: false,
+            paths: 0,
+            activeMove: false,
+            formation: 3);
+        var moving = new CommandPhysicalState(
+            routed: false,
+            playerProtected: false,
+            pathInterrupted: false,
+            paths: 1,
+            activeMove: true,
+            formation: 3);
+
+        AssertFalse(
+            CommandPostureExecutor.ShouldBlockForRecentOrder(CommandTaskType.Scout, stalled, recentOrder: true),
+            "stalled scout needs a retry if the order did not materialize");
+        AssertFalse(
+            CommandPostureExecutor.ShouldBlockForRecentOrder(CommandTaskType.Probe, stalled, recentOrder: true),
+            "stalled probe needs a retry if the order did not materialize");
+        AssertTrue(
+            CommandPostureExecutor.ShouldBlockForRecentOrder(CommandTaskType.Scout, moving, recentOrder: true),
+            "moving scout should not be reissued");
+        AssertTrue(
+            CommandPostureExecutor.ShouldBlockForRecentOrder(CommandTaskType.Probe, moving, recentOrder: true),
+            "moving probe should not be reissued");
+    }
+
     private static void PostureExecutorLongAttackUsesVanillaBlockedMovementOrder()
     {
         AssertTrue(
@@ -6781,17 +6956,29 @@ static class Program
 
     private static void PostureExecutorGroupMovementFlagsCountAsActiveMove()
     {
-        AssertTrue(
+        AssertFalse(
             CommandWaypointWritePolicy.IsExecutorMovementActive(
                 pathInterrupted: false,
                 regimentPaths: 0,
                 movementMode: 0,
                 groupSubordinatesMoving: 1f,
                 groupSubordinatesMovingNonAi: 0f,
+                hasLastWaypoint: true,
+                distanceToLastWaypoint: 500f,
+                minWaypointDistance: 15f),
+            "stale vanilla group movement flags without any active path should not block objective reissue");
+
+        AssertTrue(
+            CommandWaypointWritePolicy.IsExecutorMovementActive(
+                pathInterrupted: false,
+                regimentPaths: 1,
+                movementMode: 0,
+                groupSubordinatesMoving: 1f,
+                groupSubordinatesMovingNonAi: 0f,
                 hasLastWaypoint: false,
                 distanceToLastWaypoint: 0f,
                 minWaypointDistance: 15f),
-            "vanilla group movement flags mean the command is moving even before command regimentpaths materialize");
+            "vanilla group movement flags with a real group or subordinate path mean the command is moving");
 
         AssertFalse(
             CommandWaypointWritePolicy.IsExecutorMovementActive(
@@ -7237,6 +7424,37 @@ static class Program
         AssertEqual(CommandTaskType.AttackObjective, orders[0].Task, "committed fallback enemy-line operation should keep attacking live vanilla chain objective");
         AssertEqual("vanilla-chain-0", orders[0].ObjectiveId, "doctrine objective should retarget to live chain");
         AssertTrue(orders[0].PrimaryTarget.HasValue, "target");
+    }
+
+    private static void DoctrineAssignmentCommittedMapObjectiveMatchesNormalizedIds()
+    {
+        CommandNodeOperationalState[] nodes =
+        {
+            CommandNodeOperationalState.Create("main", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 800f, -1600f, 0f),
+            CommandNodeOperationalState.Create("support", CommandEchelonKind.BrigadeLike, CommandNodeRole.SupportingAttack, CommandTaskType.FormUp, 780f, -1650f, 0f),
+            CommandNodeOperationalState.Create("fix", CommandEchelonKind.BrigadeLike, CommandNodeRole.FixingForce, CommandTaskType.FormUp, 760f, -1700f, 0f)
+        };
+        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "Telegraph Road", 900f);
+        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
+        {
+            new BattlefieldObjectiveEstimate(
+                "Telegraph_Road",
+                TacticalObjectiveType.RoadJunction,
+                0f,
+                0.9f,
+                false,
+                0.7f,
+                1000f,
+                -1400f,
+                0.4f,
+                0.2f)
+        });
+
+        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(nodes, operation, picture, ownStrength: 6000f, nowSeconds: 100f);
+
+        AssertEqual(CommandTaskType.AttackObjective, orders[0].Task, "normalized committed main should advance to map objective");
+        AssertEqual(CommandTaskType.SupportAttack, orders[1].Task, "normalized committed support should advance to map objective");
+        AssertEqual(CommandTaskType.FixEnemy, orders[2].Task, "normalized committed fix should pressure map objective");
     }
 
     private static void DoctrineAssignmentUnknownPrimaryUsesVanillaChainAssemblyTarget()
@@ -8069,6 +8287,107 @@ static class Program
                 CommandTaskType.AttackObjective,
                 closeEngaged: true),
             "attack movement does not skew formation");
+    }
+
+    private static void TacticalFacingPulseObservesDivisionAxisWithoutWrite()
+    {
+        TacticalFacingPulseDecision decision = TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
+            TacticalFacingPulseScope.Division,
+            CommandTaskType.HoldObjective,
+            currentFormation: 0,
+            targetFormation: 0,
+            currentFacingDegrees: 250f,
+            targetFacingDegrees: 50f,
+            hasThreatBearing: true,
+            threatSource: TacticalFacingThreatSource.Visible,
+            closeEngaged: true,
+            flankRisk: false,
+            playerProtected: false,
+            routed: false,
+            pendingOrder: false,
+            activeMove: false,
+            recentPulse: false,
+            toleranceDegrees: 15f));
+
+        AssertEqual(TacticalFacingPulseAction.ObserveAxis, decision.Action, "division action");
+        AssertFalse(decision.ShouldWrite, "division must not write subordinate formation directly");
+        AssertEqual("division-axis-intent", decision.Reason, "reason");
+    }
+
+    private static void TacticalFacingPulseCorrectsBrigadeFrontage()
+    {
+        TacticalFacingPulseDecision decision = TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
+            TacticalFacingPulseScope.Brigade,
+            CommandTaskType.HoldObjective,
+            currentFormation: 3,
+            targetFormation: 0,
+            currentFacingDegrees: 246f,
+            targetFacingDegrees: 51f,
+            hasThreatBearing: true,
+            threatSource: TacticalFacingThreatSource.Visible,
+            closeEngaged: true,
+            flankRisk: false,
+            playerProtected: false,
+            routed: false,
+            pendingOrder: false,
+            activeMove: false,
+            recentPulse: false,
+            toleranceDegrees: 15f));
+
+        AssertEqual(TacticalFacingPulseAction.CorrectFormationAndFacing, decision.Action, "brigade action");
+        AssertTrue(decision.ShouldWrite, "brigade should correct frontage under visible contact");
+        AssertEqual(0, decision.TargetFormation, "target formation");
+        AssertEqual("formation-and-facing", decision.Reason, "reason");
+    }
+
+    private static void TacticalFacingPulseUrgentlyReformsRegimentUnderVisibleContact()
+    {
+        TacticalFacingPulseDecision decision = TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
+            TacticalFacingPulseScope.Regiment,
+            CommandTaskType.HoldObjective,
+            currentFormation: 3,
+            targetFormation: 0,
+            currentFacingDegrees: 139f,
+            targetFacingDegrees: 45f,
+            hasThreatBearing: true,
+            threatSource: TacticalFacingThreatSource.Visible,
+            closeEngaged: true,
+            flankRisk: false,
+            playerProtected: false,
+            routed: false,
+            pendingOrder: false,
+            activeMove: false,
+            recentPulse: false,
+            toleranceDegrees: 15f));
+
+        AssertEqual(TacticalFacingPulseAction.CorrectFormationAndFacing, decision.Action, "regiment action");
+        AssertTrue(decision.ShouldWrite, "regiment should reform locally");
+        AssertTrue(decision.Urgent, "visible close contact should be urgent");
+    }
+
+    private static void TacticalFacingPulseDefersPendingRegiment()
+    {
+        TacticalFacingPulseDecision decision = TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
+            TacticalFacingPulseScope.Regiment,
+            CommandTaskType.HoldObjective,
+            currentFormation: 3,
+            targetFormation: 0,
+            currentFacingDegrees: 139f,
+            targetFacingDegrees: 45f,
+            hasThreatBearing: true,
+            threatSource: TacticalFacingThreatSource.Visible,
+            closeEngaged: true,
+            flankRisk: false,
+            playerProtected: false,
+            routed: false,
+            pendingOrder: true,
+            activeMove: false,
+            recentPulse: false,
+            toleranceDegrees: 15f));
+
+        AssertEqual(TacticalFacingPulseAction.NoWrite, decision.Action, "pending action");
+        AssertFalse(decision.ShouldWrite, "pending regiment should not be interrupted");
+        AssertEqual("pending-order", decision.Reason, "reason");
     }
 
     private static void UrgentRecoveryFormationCorrectionOnStaleSnapshot()
@@ -10629,6 +10948,41 @@ static class Program
             "parent", "child", 1800f, 800f, false, true, true, false, 900f));
         AssertTrue(allowed.AllowIssue, "open timer and idle child allow courier");
         AssertEqual(TacticalOutboundCourierState.IssueCourier, allowed.State, "issue state");
+    }
+
+    private static void ScourgeCourierCadenceAllowsStalledObjectiveContinuation()
+    {
+        var stalledContinuation = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
+            "parent",
+            "child",
+            nowSeconds: 1200f,
+            lastCourierAtSeconds: 800f,
+            childHasOrders: false,
+            commanderHasOrder: true,
+            commanderHasPlay: true,
+            childIsPlayerControlled: false,
+            courierIntervalSeconds: 900f,
+            allowObjectiveMovementContinuation: true,
+            childActiveMove: false));
+
+        AssertTrue(stalledContinuation.AllowIssue, "stalled objective movement can continue inside courier cooldown");
+        AssertEqual(TacticalOutboundCourierState.ObjectiveContinuation, stalledContinuation.State, "continuation state");
+
+        var movingContinuation = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
+            "parent",
+            "child",
+            nowSeconds: 1200f,
+            lastCourierAtSeconds: 800f,
+            childHasOrders: false,
+            commanderHasOrder: true,
+            commanderHasPlay: true,
+            childIsPlayerControlled: false,
+            courierIntervalSeconds: 900f,
+            allowObjectiveMovementContinuation: true,
+            childActiveMove: true));
+
+        AssertFalse(movingContinuation.AllowIssue, "moving objective continuation still respects courier cooldown");
+        AssertEqual(TacticalOutboundCourierState.Cooldown, movingContinuation.State, "moving cooldown state");
     }
 
     private static void ScourgeDivisionPlaySkipsOrderedNonAnchorSubordinates()

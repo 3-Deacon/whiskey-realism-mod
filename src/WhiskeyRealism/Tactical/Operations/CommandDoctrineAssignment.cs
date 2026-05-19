@@ -309,7 +309,7 @@ namespace WhiskeyRealism.Tactical.Operations
             string objectiveId = operation.PrimaryObjectiveId;
             for (int i = 0; i < objectives.Length; i++)
             {
-                if (string.Equals(objectives[i].ObjectiveId, objectiveId, StringComparison.Ordinal))
+                if (ObjectiveIdMatches(objectives[i].ObjectiveId, objectiveId))
                 {
                     objectiveMatched = !string.Equals(
                         objectives[i].ObjectiveId,
@@ -354,6 +354,27 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             return string.IsNullOrWhiteSpace(objectiveId) ||
                 string.Equals(objectiveId, "objective-unknown", StringComparison.Ordinal);
+        }
+
+        private static bool ObjectiveIdMatches(string left, string right)
+        {
+            if (string.Equals(left, right, StringComparison.Ordinal)) return true;
+            return string.Equals(NormalizeObjectiveId(left), NormalizeObjectiveId(right), StringComparison.Ordinal);
+        }
+
+        private static string NormalizeObjectiveId(string objectiveId)
+        {
+            if (string.IsNullOrWhiteSpace(objectiveId)) return string.Empty;
+            char[] chars = objectiveId.Trim().ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                if (char.IsWhiteSpace(chars[i]) || chars[i] == '|')
+                {
+                    chars[i] = '_';
+                }
+            }
+
+            return new string(chars);
         }
 
         private static float ResolveOdds(float ownStrength, float enemyStrength)

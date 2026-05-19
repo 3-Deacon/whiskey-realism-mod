@@ -11,7 +11,8 @@ namespace WhiskeyRealism.Tactical.Operations
         Cooldown = 2,
         ChildAlreadyOrdered = 3,
         PlayerControlled = 4,
-        NoCommanderOrder = 5
+        NoCommanderOrder = 5,
+        ObjectiveContinuation = 6
     }
 
     public readonly struct TacticalOutboundCourierInput
@@ -25,7 +26,9 @@ namespace WhiskeyRealism.Tactical.Operations
             bool commanderHasOrder,
             bool commanderHasPlay,
             bool childIsPlayerControlled,
-            float courierIntervalSeconds)
+            float courierIntervalSeconds,
+            bool allowObjectiveMovementContinuation = false,
+            bool childActiveMove = false)
         {
             ParentNodeId = string.IsNullOrWhiteSpace(parentNodeId) ? "parent-unknown" : parentNodeId.Trim();
             ChildNodeId = string.IsNullOrWhiteSpace(childNodeId) ? "child-unknown" : childNodeId.Trim();
@@ -36,6 +39,8 @@ namespace WhiskeyRealism.Tactical.Operations
             CommanderHasPlay = commanderHasPlay;
             ChildIsPlayerControlled = childIsPlayerControlled;
             CourierIntervalSeconds = SanitizePositive(courierIntervalSeconds, 900f);
+            AllowObjectiveMovementContinuation = allowObjectiveMovementContinuation;
+            ChildActiveMove = childActiveMove;
         }
 
         public string ParentNodeId { get; }
@@ -47,6 +52,8 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool CommanderHasPlay { get; }
         public bool ChildIsPlayerControlled { get; }
         public float CourierIntervalSeconds { get; }
+        public bool AllowObjectiveMovementContinuation { get; }
+        public bool ChildActiveMove { get; }
 
         private static float SanitizeNonNegative(float value)
         {
@@ -91,6 +98,14 @@ namespace WhiskeyRealism.Tactical.Operations
             if (input.LastCourierAtSeconds > 0f &&
                 input.NowSeconds < input.LastCourierAtSeconds + input.CourierIntervalSeconds)
             {
+                if (input.AllowObjectiveMovementContinuation && !input.ChildActiveMove)
+                {
+                    return new TacticalOutboundCourierDecision(
+                        true,
+                        TacticalOutboundCourierState.ObjectiveContinuation,
+                        "objective-continuation");
+                }
+
                 return new TacticalOutboundCourierDecision(false, TacticalOutboundCourierState.Cooldown, "courier-cooldown");
             }
 
@@ -561,7 +576,12 @@ namespace WhiskeyRealism.Tactical.Operations
             return task == CommandTaskType.Scout ||
                 task == CommandTaskType.Probe ||
                 task == CommandTaskType.Screen ||
-                task == CommandTaskType.AttackObjective ||
+                IsAssaultTask(task);
+        }
+
+        private static bool IsAssaultTask(CommandTaskType task)
+        {
+            return task == CommandTaskType.AttackObjective ||
                 task == CommandTaskType.SupportAttack ||
                 task == CommandTaskType.FixEnemy;
         }

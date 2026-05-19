@@ -58,6 +58,11 @@ namespace WhiskeyRealism.Tactical.Operations
 
         public static bool ShouldCancelCommittedContact(BattlefieldObjectiveEstimate objective)
         {
+            if (IsKnownMapObjective(objective.Type))
+            {
+                return false;
+            }
+
             return objective.EnemyStrength <= 0f;
         }
 
@@ -143,6 +148,17 @@ namespace WhiskeyRealism.Tactical.Operations
         private static float Odds(float ownStrength, float enemyStrength)
         {
             return ownStrength / Max(1f, enemyStrength);
+        }
+
+        private static bool IsKnownMapObjective(TacticalObjectiveType type)
+        {
+            return type == TacticalObjectiveType.VictoryPoint ||
+                type == TacticalObjectiveType.Bridge ||
+                type == TacticalObjectiveType.Ford ||
+                type == TacticalObjectiveType.RoadJunction ||
+                type == TacticalObjectiveType.Town ||
+                type == TacticalObjectiveType.Ridge ||
+                type == TacticalObjectiveType.ChokePoint;
         }
 
         private static float Max(float left, float right)

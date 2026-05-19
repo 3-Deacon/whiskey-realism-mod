@@ -16,6 +16,7 @@
 > - **Agent instructions file:** `AGENTS.md` is the source. `CLAUDE.md` at the repo root is a symlink to it so Claude Code and Codex pick up the same content. Edit `AGENTS.md`; never write into `CLAUDE.md` directly.
 > - **Source-of-truth order:** shipped code > [`docs/patch-catalog.md`](docs/patch-catalog.md) > per-patch design doc > umbrella spec > archived plan
 > - **Master handoff:** [`docs/handoff.md`](docs/handoff.md) — read first at session start
+> - **Tactical/strategic living docs:** [`docs/tactical-orchestrator.md`](docs/tactical-orchestrator.md), [`docs/tactical-operations-ledger.md`](docs/tactical-operations-ledger.md), [`docs/tactical-terrain-facing-discipline.md`](docs/tactical-terrain-facing-discipline.md), [`docs/tactical-brain.md`](docs/tactical-brain.md), [`docs/scourge-of-war-ai-anchors.md`](docs/scourge-of-war-ai-anchors.md), [`docs/strategic-recon-commitment.md`](docs/strategic-recon-commitment.md), [`docs/wl-player-order-doctrine.md`](docs/wl-player-order-doctrine.md), [`docs/telemetry.md`](docs/telemetry.md) — current per-workstream state; consult before archived specs/plans
 > - **Repository memory:** [`MEMORY.md`](MEMORY.md) — short durable state/index; read after `AGENTS.md` when resuming or updating project context
 > - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
 > - **Scourge of War Remastered reference install:** Windows `C:\Program Files (x86)\Steam\steamapps\common\Scourge Of War - Remastered`; WSL `/mnt/c/Program Files (x86)/Steam/steamapps/common/Scourge Of War - Remastered/`. Use this for Scourge-of-War reference/anchor work; do not confuse it with the GTCW vanilla decompile above.
@@ -119,10 +120,10 @@ whiskey-realism-mod/
 │   ├── bug-fixes/                  ← cross-cutting vanilla bug-fix workstream and backlog
 │   └── superpowers/
 │       ├── README.md               ← lifecycle + layout
-│       ├── specs/                  ← active design specs (current/upcoming slices)
-│       │   └── archive/            ← shipped specs (frozen; see archive/README.md)
-│       └── plans/                  ← active implementation plans
-│           └── archive/            ← shipped plans (frozen; see archive/README.md)
+│       ├── specs/                  ← reserved for new approved specs; current state lives in docs/*.md
+│       │   └── archive/            ← archived specs (frozen; see archive/README.md)
+│       └── plans/                  ← reserved for new approved plans; current state lives in docs/*.md
+│           └── archive/            ← archived plans (frozen; see archive/README.md)
 ├── dist/                           ← build output (gitignored)
 └── .claude/settings.json           ← project-local Claude Code permissions
 ```
@@ -180,7 +181,7 @@ Use the relevant Superpowers or repo skill before acting when the task matches i
 - Every Harmony patch class lives under `src/WhiskeyRealism/Patches/`. One concern per file.
 - Wrap reflection lookups in try/catch and log via `Plugin.Log.LogWarning(...)` on failure. **Never throw from a patch.** A single throw on every Postfix tick produces 40k log lines per session.
 - Strategic AND tactical-orchestrator mod state is **read-only** to Harmony patches. Patches read CIC / TheaterCommander / ledger / orchestrator state (`ArmyOrchestrator.GetDirectChildRole`, `TacticalBattleCoordinator.GetSideOrchestrator`, etc.) and steer existing AI methods. State writes happen only on daily strategic review, event-trigger handlers, and the per-battle orchestrator tick cycle.
-- New tactical behavior patches that write vanilla battle state (`macroai`, `ai_stance`, movement, reserves, artillery, fallback, retreat, or charge state) must ship behind explicit default-off config until a focused in-game smoke proves bounded logs, stable Harmony anchors, no repeated exceptions, no player-subordinate retasking, and no unintended side effects, unless the user explicitly approves a named exception and the living docs record the smoke/rollback boundary. Read-only telemetry may be enabled separately. Current named exception: #61 operations-ledger command system releases with `Tactical Commander Mode = Active`, `MonitorOnly` for diagnostics, and `Off` for rollback.
+- New tactical behavior patches that write vanilla battle state (`macroai`, `ai_stance`, movement, reserves, artillery, fallback, retreat, or charge state) **ship default-on** as of 2026-05-18 by user direction. Patches must still: wrap reflection in try/catch + LogWarning, never throw from Harmony, bound their logs (OnceLog / time-bucketed signatures), respect W&L/player-subordinate protection, and document a rollback config flag so the user can flip them off if a smoke session shows unintended side effects. Read-only telemetry/diagnostics may default-off if they're noisy. `Tactical Commander Mode = Active` remains the release default with `MonitorOnly` for diagnostics and `Off` for full rollback.
 - Add a header comment explaining what the vanilla method does and what the patch changes.
 
 ### Build
@@ -207,7 +208,7 @@ When GTCW patches: re-decompile `Assembly-CSharp.dll`, diff our patch sites, reb
 
 ### Doc lifecycle
 
-- **Living docs** churn with shipped state: `docs/handoff.md`, `docs/patch-catalog.md`, `docs/findings.md`, `MEMORY.md`, this `AGENTS.md`, and `README.md`. Update them as work ships.
+- **Living docs** churn with shipped state: `docs/handoff.md`, `docs/patch-catalog.md`, `docs/findings.md`, the per-workstream living docs under `docs/` (`tactical-orchestrator.md`, `tactical-operations-ledger.md`, `tactical-terrain-facing-discipline.md`, `tactical-brain.md`, `scourge-of-war-ai-anchors.md`, `strategic-recon-commitment.md`, `wl-player-order-doctrine.md`, `telemetry.md`), `MEMORY.md`, this `AGENTS.md`, and `README.md`. Update them as work ships.
 - **Specs** under `docs/superpowers/specs/` are point-in-time design artifacts. Move a spec to `docs/superpowers/specs/archive/` once its corresponding patches ship and are smoke-verified. Do not mutate archived specs after shipping; record deltas in `docs/handoff.md` "What just shipped" and the archive `README.md` index.
 - **Plans** under `docs/superpowers/plans/` are execution artifacts. Move them to `docs/superpowers/plans/archive/` once their patches ship.
 - When archiving, rewrite internal `docs/superpowers/{specs,plans}/2026-…` cross-references to the corresponding archive paths so historical traceability stays intact.

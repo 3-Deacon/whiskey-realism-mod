@@ -143,6 +143,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalDeploymentTelemetry.cs" Link="TacticalDeploymentTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalTerrainFacingDiscipline.cs" Link="TacticalTerrainFacingDiscipline.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalTerrainFacingTelemetry.cs" Link="TacticalTerrainFacingTelemetry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalMapKnowledgeTelemetry.cs" Link="TacticalMapKnowledgeTelemetry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\TacticalMapKnowledgeDiagnosticsPatch.cs" Link="Patches\TacticalMapKnowledgeDiagnosticsPatch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalObjectiveContracts.cs" Link="Operations\TacticalObjectiveContracts.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalBattlefieldPicture.cs" Link="Operations\TacticalBattlefieldPicture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalObjectiveSourceModel.cs" Link="Operations\TacticalObjectiveSourceModel.cs" />
@@ -171,6 +173,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandFallbackTargetResolver.cs" Link="Operations\CommandFallbackTargetResolver.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalNavMeshPlanner.cs" Link="Operations\TacticalNavMeshPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandFormationCorrection.cs" Link="Operations\CommandFormationCorrection.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalFacingPulseDoctrine.cs" Link="Operations\TacticalFacingPulseDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalGateHelpers.cs" Link="TacticalGateHelpers.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalScoreCache.cs" Link="TacticalScoreCache.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalUnitType.cs" Link="TacticalUnitType.cs" />
