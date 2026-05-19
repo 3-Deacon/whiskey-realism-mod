@@ -79,6 +79,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
         private static readonly TacticalBattleRuntimeSnapshot[] _lastPublishedSnapshots = { TacticalBattleRuntimeSnapshot.Empty, TacticalBattleRuntimeSnapshot.Empty };
         private static readonly bool[] _hasPendingChange = { false, false };
+        // Per-side last-seen GC.CollectionCount snapshots (gen 0/1/2). Used by
+        // EmitHeavyGateTelemetry to compute per-gate-decision GC pressure delta
+        // so the tuning sidecar shows whether gen-0 allocation churn correlates
+        // with frame hitches at high time compression. Reset per battle in
+        // ResetRuntimeTickState. Pure measurement — no behavior impact.
+        private static readonly int[] _lastGen0CountBySide = { 0, 0 };
+        private static readonly int[] _lastGen1CountBySide = { 0, 0 };
+        private static readonly int[] _lastGen2CountBySide = { 0, 0 };
 
         public static void OnBattleStart(AIBattle battle)
         {
@@ -307,7 +315,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     TacticalBattleRuntimeSnapshot snap;
                     if (dec.ShouldRun)
                     {
-                        snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
+                        using (TelemetryPerf.Scope("tactical.snapshot-build.tick-cycle", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                        {
+                            snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
+                        }
                         _lastHeavyReviewHours[s] = nowH;
                         _lastHeavyReviewRealtimeSeconds[s] = nowReal;
                         _lastSignatures[s] = currSig;
@@ -474,7 +485,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         TacticalBattleRuntimeSnapshot snap;
                         if (dec.ShouldRun)
                         {
-                            snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
+                            using (TelemetryPerf.Scope("tactical.snapshot-build.operations-ledger", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                            {
+                                snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
+                            }
                             _lastHeavyReviewHours[s] = nowH;
                             _lastHeavyReviewRealtimeSeconds[s] = nowReal;
                             _lastSignatures[s] = currSig;
@@ -806,10 +820,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static void AttachDirectChildrenIfReady(TacticalBattleOrchestrator side, AIBattle battle)
         {
+            // Hot-path measurement scope (2026-05-19 hitch investigation).
+            // Wraps the full discovery-snapshot + register flow so the tuning
+            // sidecar shows the dominant cost when probing why 20x compression
+            // hitches on small battles. No behavior change — pure measurement.
+            using (TelemetryPerf.Scope("tactical.attach-direct-children", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             try
             {
                 if (side == null || side.Army == null || !side.Army.HasPlan) return;
-                var snapshots = DirectChildDiscovery.Snapshot(side.AllianceId);
+                IReadOnlyList<DirectChildSnapshot> snapshots;
+                using (TelemetryPerf.Scope("tactical.direct-child-discovery-snapshot", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+                {
+                    snapshots = DirectChildDiscovery.Snapshot(side.AllianceId);
+                }
                 if (snapshots.Count == 0)
                 {
                     if (side.Army.CurrentDirectChildIntents.Count == 0 &&
@@ -849,11 +872,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static void AttachCommandTreeIfReady(TacticalBattleOrchestrator side, AIBattle battle)
         {
+            // Hot-path measurement scope (2026-05-19). See AttachDirectChildrenIfReady for context.
+            using (TelemetryPerf.Scope("tactical.attach-command-tree", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             try
             {
                 if (side == null || side.Army == null || !side.Army.HasPlan) return;
 
-                var tree = CommandTreeRuntime.Snapshot(side.AllianceId);
+                CommandTreeSnapshot tree;
+                using (TelemetryPerf.Scope("tactical.command-tree-runtime-snapshot", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+                {
+                    tree = CommandTreeRuntime.Snapshot(side.AllianceId);
+                }
                 if (!tree.HasNodes) return;
 
                 var current = side.Army.CurrentCommandTree;
@@ -1125,7 +1154,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     TacticalBattleRuntimeSnapshot snap;
                     if (dec.ShouldRun)
                     {
-                        snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
+                        using (TelemetryPerf.Scope("tactical.snapshot-build.direct-child-cycle", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                        {
+                            snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
+                        }
                         _lastHeavyReviewHours[s] = nowH;
                         _lastHeavyReviewRealtimeSeconds[s] = nowReal;
                         _lastSignatures[s] = currSig;
@@ -1314,6 +1346,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _lastPublishedSnapshots[i] = TacticalBattleRuntimeSnapshot.Empty;
                     _hasPendingChange[i] = false;
                     _lastTickBattleHours[i] = -1f;  // sentinel: first tick has no battle-hours reference
+                    _lastGen0CountBySide[i] = 0;
+                    _lastGen1CountBySide[i] = 0;
+                    _lastGen2CountBySide[i] = 0;
                 }
             }
             catch { }
@@ -1340,6 +1375,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
+                // GC pressure delta tracking (2026-05-19 hot-path diagnostic).
+                // Captures per-gate-decision generation counter deltas so the
+                // tuning sidecar shows whether gen-0 churn correlates with
+                // frame hitches at high time compression. Pure measurement.
+                int gen0Now = System.GC.CollectionCount(0);
+                int gen1Now = System.GC.CollectionCount(1);
+                int gen2Now = System.GC.CollectionCount(2);
+                int sideIdx = (side >= 0 && side <= 1) ? side : 0;
+                int gen0Delta = gen0Now - _lastGen0CountBySide[sideIdx];
+                int gen1Delta = gen1Now - _lastGen1CountBySide[sideIdx];
+                int gen2Delta = gen2Now - _lastGen2CountBySide[sideIdx];
+                if (gen0Delta < 0) gen0Delta = 0;
+                if (gen1Delta < 0) gen1Delta = 0;
+                if (gen2Delta < 0) gen2Delta = 0;
+                _lastGen0CountBySide[sideIdx] = gen0Now;
+                _lastGen1CountBySide[sideIdx] = gen1Now;
+                _lastGen2CountBySide[sideIdx] = gen2Now;
+
                 // Time-bucketed input signature (coarse BattleHourBucket changes over time)
                 string inputSig = "TacticalHeavyGate|side=" + side +
                     "|nowH=" + nowH.ToString("F4") +
@@ -1371,7 +1424,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         .WithField("activeUnits", currSig.ActiveUnitCount)
                         .WithField("majorObjAnchorHash", currSig.MajorObjectiveAnchorHash)
                         .WithField("battleHourBucket", currSig.BattleHourBucket)
-                        .WithField("gateReason", dec.Reason));
+                        .WithField("gateReason", dec.Reason)
+                        .WithField("gen0CountAbs", gen0Now)
+                        .WithField("gen1CountAbs", gen1Now)
+                        .WithField("gen2CountAbs", gen2Now)
+                        .WithField("gen0Delta", gen0Delta)
+                        .WithField("gen1Delta", gen1Delta)
+                        .WithField("gen2Delta", gen2Delta));
             }
             catch
             {

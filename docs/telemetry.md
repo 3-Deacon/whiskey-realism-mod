@@ -45,6 +45,28 @@ dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj -- -
 
 Issue bundles contain redacted telemetry files only. They do not contain save files, copied game DLLs, tokens, unrelated plugin logs, or raw Windows usernames.
 
+## Hot-path performance scopes
+
+`TelemetryPerf.Scope` instruments per-Tick cost into `performance.jsonl` (Performance category, gated by profile — `Off` is a noop, `TacticalTuning` / `FullTuning` emit). Permanent diagnostic infrastructure as of 2026-05-19; no separate config flag.
+
+Per-side scopes wrapped around the orchestrator hot path:
+
+| Scope | Threshold | Wraps |
+|---|---|---|
+| `tactical.orchestrator-tick` | 2.0 ms | full `Tick()` body (both sides) |
+| `tactical.operations-ledger` | 2.0 ms | `DriveOperationsLedger` body |
+| `tactical.attach-direct-children` | 2.0 ms | `AttachDirectChildrenIfReady` (full) |
+| `tactical.direct-child-discovery-snapshot` | 2.0 ms | inner `DirectChildDiscovery.Snapshot(alliance)` only |
+| `tactical.attach-command-tree` | 2.0 ms | `AttachCommandTreeIfReady` (full) |
+| `tactical.command-tree-runtime-snapshot` | 2.0 ms | inner `CommandTreeRuntime.Snapshot(alliance)` only |
+| `tactical.snapshot-build.tick-cycle` | 5.0 ms | `TacticalBattleSnapshotBuilder.Build` from `DriveTickCycle` |
+| `tactical.snapshot-build.operations-ledger` | 5.0 ms | `TacticalBattleSnapshotBuilder.Build` from `DriveOperationsLedger` |
+| `tactical.snapshot-build.direct-child-cycle` | 5.0 ms | `TacticalBattleSnapshotBuilder.Build` from `DriveDirectChildCycle` |
+
+Each emission carries `durationMs` plus standard counters. `slow=true` fires when `durationMs >= threshold`.
+
+`TacticalHeavyGate` emissions (Gate category) additionally carry GC pressure deltas per side, captured at every gate decision: `gen0CountAbs` / `gen1CountAbs` / `gen2CountAbs` (absolute generation counters at decision time) and `gen0Delta` / `gen1Delta` / `gen2Delta` (count since last gate decision on this side). Reset per battle in `ResetRuntimeTickState`. Use these to determine whether frame hitches at high compression correlate with gen-0 churn (allocation cost) or with `Build` wall time (algorithmic cost).
+
 ## Smoke Checklist
 
 Task 10 owns deploy, hash verification, and runtime smoke. Do not claim runtime smoke from Task 9 build or harness output.
