@@ -83,6 +83,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalReinforcementOpportunityDoctrine;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
+        public static ConfigEntry<bool> EnableSinglePassObjectiveRecords;
         public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
         public static ConfigEntry<int> TacticalDeploymentTerrainMaxCandidates;
         public static ConfigEntry<float> TacticalDeploymentFacingPreferredDeltaDegrees;
@@ -482,6 +483,16 @@ namespace WhiskeyRealism
                 "SetMovementMode(3) charge initiation. Main charges require favorable local odds; " +
                 "SupportMain requires main-effort support evidence; Fix/Reserve/Fallback/Refuse/Screen " +
                 "roles deny charge initiation unless the Screen routed-target exception is proven.");
+            EnableSinglePassObjectiveRecords = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Single-Pass Objective Records",
+                true,
+                "Single-pass aggregation for ObjectiveRecord building. Walks " +
+                "BattleUnits.completeunitlist once instead of six times. Default ON. " +
+                "Set false to roll back to the legacy per-walk path if a regression " +
+                "appears. Default-on per AGENTS.md tactical policy. Measured " +
+                "performance characteristics are documented in docs/telemetry.md " +
+                "once smoke-verified.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",
