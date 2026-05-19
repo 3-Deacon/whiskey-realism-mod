@@ -110,6 +110,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // Use the promoted helper to preserve parity.
             float visibleEnemyStrength = 0f;
             bool hasVisibleEnemy = false;
+            bool hasVisibleEnemyPosition = false;
+            float visibleEnemyX = 0f, visibleEnemyZ = 0f;
             float fatigue01 = 0.2f;
             float ammo01 = 0.9f;
 
@@ -155,11 +157,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
                 catch { }
 
-                // Visibility (own-side only — never call for enemy units)
+                // Visibility (own-side only — never call for enemy units).
+                // Call ClosestVisibleEnemy(reg) once to obtain both strength and
+                // position, eliminating the redundant HasVisibleEnemy range walk.
+                // Strength uses SafeStrength(enemy); position uses transform.position
+                // wrapped in a separate try so a destroyed component doesn't poison
+                // the strength read. HasVisibleEnemyPosition uses IsDefaultVector's
+                // XZ threshold (< 0.01f absolute) to reject zero-origin positions.
                 try
                 {
-                    visibleEnemyStrength = TacticalVisionRuntimeAdapter.EstimateVisibleEnemyStrength(reg);
-                    hasVisibleEnemy = TacticalFogOfWarContact.HasVisibleEnemy(reg);
+                    var enemy = TacticalFogOfWarContact.ClosestVisibleEnemy(reg);
+                    if (enemy != null)
+                    {
+                        hasVisibleEnemy = true;
+                        try { visibleEnemyStrength = TacticalVisionRuntimeAdapter.SafeStrength(enemy); }
+                        catch { visibleEnemyStrength = 0f; }
+                        try
+                        {
+                            var ego = ((Component)enemy).gameObject;
+                            if (ego != null && ego.transform != null)
+                            {
+                                var p = ego.transform.position;
+                                if (!float.IsNaN(p.x) && !float.IsNaN(p.z) &&
+                                    !float.IsInfinity(p.x) && !float.IsInfinity(p.z) &&
+                                    !(Math.Abs(p.x) < 0.01f && Math.Abs(p.z) < 0.01f))
+                                {
+                                    hasVisibleEnemyPosition = true;
+                                    visibleEnemyX = p.x;
+                                    visibleEnemyZ = p.z;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
                 }
                 catch { }
 
@@ -189,6 +219,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 lastWaypointZ: lastWaypointZ,
                 visibleEnemyStrength: visibleEnemyStrength,
                 hasVisibleEnemy: hasVisibleEnemy,
+                hasVisibleEnemyPosition: hasVisibleEnemyPosition,
+                visibleEnemyX: visibleEnemyX,
+                visibleEnemyZ: visibleEnemyZ,
                 fatigue01: fatigue01,
                 ammo01: ammo01,
                 effectiveCommandLevel: effective);

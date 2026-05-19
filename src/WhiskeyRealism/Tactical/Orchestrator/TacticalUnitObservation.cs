@@ -10,6 +10,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// enemy units get cheap fields (position, strength, unittyp, routed
     /// flag, permanently-detached flag) only. This matches the pre-refactor
     /// cost profile, which never invoked the visibility walk for enemy units.
+    ///
+    /// Own-side-only fields: <see cref="HasCurrentSetObjective"/>,
+    /// <see cref="HasLastWaypoint"/>, <see cref="HasVisibleEnemy"/>,
+    /// <see cref="HasVisibleEnemyPosition"/>, <see cref="VisibleEnemyStrength"/>,
+    /// <see cref="VisibleEnemyX"/>, <see cref="VisibleEnemyZ"/>,
+    /// <see cref="Fatigue01"/>, <see cref="Ammo01"/>.
     /// </summary>
     public readonly struct TacticalUnitObservation
     {
@@ -34,6 +40,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float lastWaypointZ,
             float visibleEnemyStrength,
             bool hasVisibleEnemy,
+            bool hasVisibleEnemyPosition,
+            float visibleEnemyX,
+            float visibleEnemyZ,
             float fatigue01,
             float ammo01,
             int effectiveCommandLevel)
@@ -58,6 +67,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             LastWaypointZ = lastWaypointZ;
             VisibleEnemyStrength = visibleEnemyStrength;
             HasVisibleEnemy = hasVisibleEnemy;
+            HasVisibleEnemyPosition = hasVisibleEnemyPosition;
+            VisibleEnemyX = visibleEnemyX;
+            VisibleEnemyZ = visibleEnemyZ;
             Fatigue01 = fatigue01;
             Ammo01 = ammo01;
             EffectiveCommandLevel = effectiveCommandLevel;
@@ -92,6 +104,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float LastWaypointZ { get; }
         public float VisibleEnemyStrength { get; }
         public bool HasVisibleEnemy { get; }
+        /// <summary>
+        /// <c>true</c> when <see cref="HasVisibleEnemy"/> is true AND the
+        /// closest visible enemy's world position was successfully read and is
+        /// not at the map origin. Separate from <see cref="HasVisibleEnemy"/> to
+        /// handle the edge case where the enemy regiment was found but its
+        /// transform was destroyed or returned a zero-origin position.
+        /// </summary>
+        public bool HasVisibleEnemyPosition { get; }
+        /// <summary>World X position of the closest visible enemy regiment (own-side only).</summary>
+        public float VisibleEnemyX { get; }
+        /// <summary>World Z position of the closest visible enemy regiment (own-side only).</summary>
+        public float VisibleEnemyZ { get; }
         public float Fatigue01 { get; }
         public float Ammo01 { get; }
         public int EffectiveCommandLevel { get; }

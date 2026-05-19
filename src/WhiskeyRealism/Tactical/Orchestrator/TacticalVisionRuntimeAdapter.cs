@@ -1016,16 +1016,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         // Aggregate variant of TryVisibleEnemyLine.
-        // Legacy selection logic: strength-weighted centroid of ALL visible enemy positions
-        // across all own units (each own unit contributes its SafeVisibleEnemy position,
-        // weighted by SafeStrength(enemy)). friendlyStrength = sum of ALL own unit strengths.
-        // Aggregate approximation: centroid of known enemy positions from EnemyIndices
-        // weighted by enemy.Strength (equivalent when the aggregate captures all detected
-        // enemies); friendlyStrength = sum of ALL own unit strengths from AlliedIndices.
-        // NOTE: Per-own-unit enemy linkage is not captured in TacticalUnitObservation
-        // (only VisibleEnemyStrength for closest), so we use EnemyIndices as the visible
-        // enemy set. This is a deliberate approximation documented here for Task 10 parity
-        // testing.
+        // Legacy selection logic: for each own (non-routed, non-detached) unit,
+        //   friendlyStrength += SafeStrength(own) unconditionally,
+        //   then if SafeVisibleEnemy(own) != null and its position is non-default:
+        //     weight = Math.Max(1f, SafeStrength(enemy))
+        //     centroid accumulates enemy's POSITION weighted by that weight
+        //     enemyStrength += SafeStrength(enemy)
+        // This is per-own-unit closest-visible-enemy linkage — NOT all enemies in the scene.
+        // Aggregate variant mirrors this exactly using HasVisibleEnemyPosition / VisibleEnemyX/Z
+        // (captured per own unit in CaptureUnit) and VisibleEnemyStrength (strength of that
+        // closest visible enemy, mirroring SafeStrength(enemy)).
         private static bool TryVisibleEnemyLineFromAggregate(
             IObservationSource source,
             int allianceId,
@@ -1042,28 +1042,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float weightTotal = 0f;
             try
             {
-                // friendlyStrength: sum of ALL own non-routed non-detached units (mirrors legacy).
                 for (int ai = 0; ai < source.AlliedIndices.Count; ai++)
                 {
                     int idx = source.AlliedIndices[ai];
                     var own = source.AllUnits[idx];
                     if (own.IsRouted) continue;
                     if (own.PermanentlyDetached) continue;
-                    friendlyStrength += own.Strength;
-                }
 
-                // Centroid: all known enemy positions weighted by strength.
-                for (int ei = 0; ei < source.EnemyIndices.Count; ei++)
-                {
-                    int idx = source.EnemyIndices[ei];
-                    var enemy = source.AllUnits[idx];
-                    if (enemy.IsRouted) continue;
-                    if (enemy.PermanentlyDetached) continue;
-                    float weight = Math.Max(1f, enemy.Strength);
-                    weightedX += enemy.WorldX * weight;
-                    weightedZ += enemy.WorldZ * weight;
+                    // friendlyStrength: sum of ALL own units (mirrors legacy — accumulates
+                    // before the enemy-linkage check, not just contributing units).
+                    friendlyStrength += own.Strength;
+
+                    // Per-unit closest visible enemy position (captured in CaptureUnit via
+                    // ClosestVisibleEnemy). Skip if no enemy found or position unreadable.
+                    if (!own.HasVisibleEnemy) continue;
+                    if (!own.HasVisibleEnemyPosition) continue;
+
+                    float weight = Math.Max(1f, own.VisibleEnemyStrength);
+                    weightedX += own.VisibleEnemyX * weight;
+                    weightedZ += own.VisibleEnemyZ * weight;
                     weightTotal += weight;
-                    enemyStrength += enemy.Strength;
+                    enemyStrength += own.VisibleEnemyStrength;
                 }
             }
             catch

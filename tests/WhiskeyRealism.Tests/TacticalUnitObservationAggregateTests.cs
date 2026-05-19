@@ -17,7 +17,15 @@ internal static class TacticalUnitObservationAggregateTests
             Console.WriteLine("PASS " + message);
         }
 
-        private static TacticalUnitObservation MakeUnit(int instanceId, int alliance, float worldX = 0f, float worldZ = 0f, bool permanentlyDetached = false)
+        private static TacticalUnitObservation MakeUnit(
+            int instanceId,
+            int alliance,
+            float worldX = 0f,
+            float worldZ = 0f,
+            bool permanentlyDetached = false,
+            bool hasVisibleEnemyPosition = false,
+            float visibleEnemyX = 0f,
+            float visibleEnemyZ = 0f)
         {
             return new TacticalUnitObservation(
                 instanceId: instanceId,
@@ -39,7 +47,10 @@ internal static class TacticalUnitObservationAggregateTests
                 lastWaypointX: 0f,
                 lastWaypointZ: 0f,
                 visibleEnemyStrength: 0f,
-                hasVisibleEnemy: false,
+                hasVisibleEnemy: hasVisibleEnemyPosition,
+                hasVisibleEnemyPosition: hasVisibleEnemyPosition,
+                visibleEnemyX: visibleEnemyX,
+                visibleEnemyZ: visibleEnemyZ,
                 fatigue01: 0.2f,
                 ammo01: 0.9f,
                 effectiveCommandLevel: 0);
