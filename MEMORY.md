@@ -1,6 +1,8 @@
 # Whiskey Realism — Repository Memory
 
-> Last updated: 2026-05-19. Format aligned with Codex project-instruction behavior documented as of April 2026. (Current docs now separate deployed-artifact proof from loaded-runtime proof.)
+> Last updated: 2026-05-19. Format aligned with Codex project-instruction behavior documented as of April 2026.
+>
+> **Latest cumulative deployed build:** SHA-256 `7be7f596e341a548cf6cd590493ee38dd40eeb0fe5cd9e5c85e9f000e2423a6a`. Console harness 1244 PASS / 0 FAIL. Build clean. Local `dist/WhiskeyRealism.dll` and deployed plugin match. The 2026-05-19 cumulative session shipped: depth-agnostic role cascade + envelopment modes, `DirectChildDiscovery` synth-army root cause fix, reinforcement-opportunity doctrine (AttackNow on standing advantage), sector readiness doctrine, phase progression doctrine wired into ArmyTickCycle, sector-driven main-effort shift with hysteresis, offensive replan triggers, 4 new playbooks (Buford, Forrest, MeetingEngagement, Johnston — total catalog 18), faction affinity bias, time-compression-aware heavy-gate cycle scaling, battle-time / real-time decoupled phase age, BUG-TAC-015 CheckOutOfFireRange null guard, IsPlayerProtected blanket-alliance fix (AI now commands player's brigade in W&L play), diagnostic telemetry (TacticalCommandTreeProbeHealth, TacticalPlaybookFactionBias, TacticalPlayerProtected), Plugin.cs description-string sync, AGENTS.md "default-off exception" retirement. Two 2026-05-18 plans archived (SoW-aligned fixes; union role cascade). Living state in `docs/handoff.md` + `docs/tactical-orchestrator.md`.
 
 This file is the project memory index for agents and maintainers. It is intentionally short and durable. Keep detailed history in `docs/handoff.md`, shipped patch facts in `docs/patch-catalog.md`, and implementation details in source/spec/plan files.
 
