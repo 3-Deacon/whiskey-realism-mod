@@ -432,6 +432,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public ReinforcementOpportunityDecision CurrentReinforcementOpportunity => _currentReinforcementOpportunity;
 
         /// <summary>
+        /// Live commander initiative on [0, 1], refreshed by the runtime from
+        /// GameVars.commander[id].GetCommanderInitiative() via the
+        /// bunits.GetCommandingOfficerFromSide pattern. Defaults to 0.5
+        /// (mid-band) until first refresh so the doctrine doesn't act on
+        /// stale or empty data. Distinct from the PersonalityVector — the
+        /// vector is the static historical-figure baseline (Hood = aggressive,
+        /// McClellan = cautious), while LiveCommanderInitiative01 reads the
+        /// vanilla per-commander field that may differ from the vector
+        /// (e.g., wounded/fatigued commander initiative).
+        /// </summary>
+        public float LiveCommanderInitiative01 { get; private set; } = 0.5f;
+
+        /// <summary>
+        /// Update the cached live initiative reading. Caller is responsible
+        /// for the GameVars.commander read + NaN/range guarding; this just
+        /// caches the validated value for the doctrine to consume.
+        /// </summary>
+        public void UpdateLiveCommanderInitiative(float initiative01)
+        {
+            if (float.IsNaN(initiative01) || float.IsInfinity(initiative01)) return;
+            if (initiative01 < 0f) initiative01 = 0f;
+            if (initiative01 > 1f) initiative01 = 1f;
+            LiveCommanderInitiative01 = initiative01;
+        }
+
+        /// <summary>
         /// Refresh the reinforcement-opportunity decision. Runtime passes in a
         /// freshly-built TacticalForceBalanceEvidence (typically from
         /// ArmyEvidenceBuilder.BuildForceBalance). The doctrine is pure; this

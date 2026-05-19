@@ -1957,17 +1957,29 @@ namespace WhiskeyRealism.Patches
                 // Refresh the reinforcement-opportunity decision off the same
                 // Postfix tick as the leaf-map update. Reads BattleUnits.
                 // scheduledarrival + sideinformation; bounded by the doctrine's
-                // own pure deterministic path. Default-off rollback via
+                // own pure deterministic path. Default-on rollback via
                 // Enable Tactical Reinforcement Opportunity Doctrine config flag.
                 if (Plugin.EnableTacticalReinforcementOpportunityDoctrine != null
                     && Plugin.EnableTacticalReinforcementOpportunityDoctrine.Value)
                 {
-                    float commanderInitiative01 = army.CommanderPersonality.Aggression; // proxy until init plumbed here
+                    // Refresh live commander initiative from vanilla using the
+                    // proven pattern from BattleMacroStrategyPatch.CommanderAggression01:
+                    // bunits.GetCommandingOfficerFromSide(side) → GameVars.commander[id]
+                    // .GetCommanderInitiative(). The orchestrator caches the validated
+                    // value; doctrine consumes it via army.LiveCommanderInitiative01.
+                    float liveInitiative01 = ReadLiveCommanderInitiative01(bunits, side);
+                    army.UpdateLiveCommanderInitiative(liveInitiative01);
+
+                    // Aggression remains the PersonalityVector-derived historical
+                    // baseline (Hood vs McClellan etc.) — distinct from live
+                    // initiative which may differ per vanilla state. Map from
+                    // [-1, 1] PersonalityVector range to [0, 1] doctrine domain.
                     float commanderAggression01 = (army.CommanderPersonality.Aggression + 1f) * 0.5f;
                     if (commanderAggression01 < 0f) commanderAggression01 = 0f;
                     if (commanderAggression01 > 1f) commanderAggression01 = 1f;
+
                     var forceBalance = ArmyEvidenceBuilder.BuildForceBalance(
-                        battle, allianceId, commanderInitiative01, commanderAggression01);
+                        battle, allianceId, army.LiveCommanderInitiative01, commanderAggression01);
                     if (forceBalance.HasValue)
                     {
                         army.UpdateReinforcementOpportunity(forceBalance.Value);
@@ -2246,6 +2258,38 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+
+        /// <summary>
+        /// Live commander initiative for the given side, read defensively from
+        /// vanilla. Mirrors the proven BattleMacroStrategyPatch.CommanderAggression01
+        /// pattern: bunits.GetCommandingOfficerFromSide(side) → GameVars.commander[id]
+        /// .GetCommanderInitiative(), with NaN/range guards. Returns 0.5 mid-band
+        /// on any failure so the doctrine degrades gracefully rather than locking
+        /// to a misleading 0 or NaN.
+        /// </summary>
+        private static float ReadLiveCommanderInitiative01(BattleUnits bunits, int side)
+        {
+            try
+            {
+                if (bunits == null || bunits.alliance == null) return 0.5f;
+                if (side < 0 || side >= bunits.alliance.Length) return 0.5f;
+                int commanderId = bunits.GetCommandingOfficerFromSide(side);
+                if (GameVars.commander == null || commanderId < 0 || commanderId >= GameVars.commander.Count) return 0.5f;
+                var commander = GameVars.commander[commanderId];
+                if (commander == null) return 0.5f;
+                float init = commander.GetCommanderInitiative();
+                if (float.IsNaN(init) || float.IsInfinity(init)) return 0.5f;
+                if (init < 0f) return 0f;
+                if (init > 1f) return 1f;
+                return init;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-reinforcement-opportunity:init-read-failed",
+                    "ReadLiveCommanderInitiative01 threw: " + ex.GetType().Name + " " + ex.Message);
+                return 0.5f;
+            }
+        }
 
         private static void EmitReinforcementOpportunityTelemetry(int side, ReinforcementOpportunityDecision decision)
         {

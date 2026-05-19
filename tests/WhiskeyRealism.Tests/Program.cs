@@ -1148,6 +1148,9 @@ static class Program
             ("reinforcement opportunity wait hours scales with aggression", ReinforcementOpportunityWaitHoursScalesWithAggression),
             ("reinforcement opportunity strength at hour accumulates arrivals", ReinforcementOpportunityStrengthAtHourAccumulatesArrivals),
             ("reinforcement opportunity parity hours for own short circuits when already ahead", ReinforcementOpportunityParityHoursForOwnShortCircuitsWhenAlreadyAhead),
+            ("army orchestrator live commander initiative defaults mid band", ArmyOrchestratorLiveCommanderInitiativeDefaultsMidBand),
+            ("army orchestrator live commander initiative clamps to range", ArmyOrchestratorLiveCommanderInitiativeClampsToRange),
+            ("army orchestrator live commander initiative rejects nan and infinity", ArmyOrchestratorLiveCommanderInitiativeRejectsNaNAndInfinity),
             ("historical registry covers Hunter and Beauregard", HistoricalRegistryCoversHunterAndBeauregard),
             ("historical registry normalizes initials and punctuation", HistoricalRegistryNormalizesInitialsAndPunctuation),
             ("historical registry covers major Civil War commanders", HistoricalRegistryCoversMajorCivilWarCommanders),
@@ -24039,6 +24042,42 @@ static class Program
     {
         var ahead = MakeForceBalance(15000f, 10000f);
         AssertEqual(0f, ahead.ParityHoursForOwn(), "already ahead → ParityHoursForOwn is 0");
+    }
+
+    private static void ArmyOrchestratorLiveCommanderInitiativeDefaultsMidBand()
+    {
+        var orch = new ArmyOrchestrator(0,
+            SeedCatalog.AllHistoricalAndGeneric(),
+            new PersonalityVector(0.7f, -0.5f, 0.6f, 0.4f, -0.2f));  // Lee
+        AssertEqual(0.5f, orch.LiveCommanderInitiative01,
+            "live initiative defaults mid-band 0.5 until refresh");
+    }
+
+    private static void ArmyOrchestratorLiveCommanderInitiativeClampsToRange()
+    {
+        var orch = new ArmyOrchestrator(0,
+            SeedCatalog.AllHistoricalAndGeneric(),
+            new PersonalityVector(0.7f, -0.5f, 0.6f, 0.4f, -0.2f));
+        orch.UpdateLiveCommanderInitiative(0.85f);
+        AssertEqual(0.85f, orch.LiveCommanderInitiative01, "in-range value passes through");
+        orch.UpdateLiveCommanderInitiative(-0.3f);
+        AssertEqual(0f, orch.LiveCommanderInitiative01, "negative clamps to 0");
+        orch.UpdateLiveCommanderInitiative(1.5f);
+        AssertEqual(1f, orch.LiveCommanderInitiative01, "above 1 clamps to 1");
+    }
+
+    private static void ArmyOrchestratorLiveCommanderInitiativeRejectsNaNAndInfinity()
+    {
+        var orch = new ArmyOrchestrator(0,
+            SeedCatalog.AllHistoricalAndGeneric(),
+            new PersonalityVector(0.7f, -0.5f, 0.6f, 0.4f, -0.2f));
+        orch.UpdateLiveCommanderInitiative(0.6f);  // set baseline
+        orch.UpdateLiveCommanderInitiative(float.NaN);
+        AssertEqual(0.6f, orch.LiveCommanderInitiative01, "NaN does not overwrite valid value");
+        orch.UpdateLiveCommanderInitiative(float.PositiveInfinity);
+        AssertEqual(0.6f, orch.LiveCommanderInitiative01, "Inf does not overwrite valid value");
+        orch.UpdateLiveCommanderInitiative(float.NegativeInfinity);
+        AssertEqual(0.6f, orch.LiveCommanderInitiative01, "-Inf does not overwrite valid value");
     }
 
     private static void RoleCascadeChooseMainAnchorPicksStrongestNearCenter()
