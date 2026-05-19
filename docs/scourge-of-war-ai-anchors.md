@@ -80,9 +80,9 @@ Use this extraction pass as a source index, not as a replacement for the SDK sou
 
 Whiskey status:
 
-- Implemented analogs: command-node roles, tactical massing cycle, playbook selection, reserve policy, order friction classification, W&L player-order bridge, and now `TacticalDivisionPlayExecutor`.
-- Current conversion: #61 builds side/parent sibling groups at runtime, chooses the best engaged child as the play anchor, assigns complementary support/reserve/screen/fallback sibling tasks, uses courier delivery metadata when doctrine orders are present, and suppresses duplicate pending outbound command signatures while allowing materially changed commands.
-- Still partial: this is a bounded #61 conversion, not a full Scourge play-slot language. It does not import Scourge's left/right play files or create a new movement writer.
+- Implemented analogs: command-node roles, tactical massing cycle, playbook selection, reserve policy, order friction classification, W&L player-order bridge, `TacticalDivisionPlayExecutor`, and now (2026-05-18) **SoW-aligned pre-contact movement** — `TacticalDoctrineScorer.DecideGroupStance` returns `Apply(stance=2, pre-contact-hold)` when sector confidence is between 0.40 and 0.55, instead of skipping silently. Mirrors `offai.cpp:507-546` (brigade marches to tactical objective when no enemy in range). `TacticalGroupSectorEstimator` no-enemy floor lifted from 0.45 to 0.55 to make this branch reachable.
+- Current conversion: #61 builds side/parent sibling groups at runtime, chooses the best engaged child as the play anchor, assigns complementary support/reserve/screen/fallback sibling tasks, uses courier delivery metadata when doctrine orders are present, and suppresses duplicate pending outbound command signatures while allowing materially changed commands. Plus pre-contact movement now flows through the existing role-assigned waypoint executor instead of waiting for line-of-sight contact.
+- Still partial: this is a bounded #61 conversion, not a full Scourge play-slot language. It does not import Scourge's left/right play files or create a new movement writer. SoW's per-side Army/Corps think loops (`offai.cpp:1115` Army think with rectangle-based corps assignment from grand-tactics table) remain partly translated through Whiskey's playbook system but without literal rect-based corps assignment.
 
 ### Artillery limber, target, ammo, and fallback micro-logic
 
