@@ -38,21 +38,26 @@ namespace WhiskeyRealism.Patches
 
         private static void Prefix(AIBattle __instance, out PatchState __state)
         {
-            __state = default(PatchState);
-            if (!MasterEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.player-subordinate-order-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                __state = default(PatchState);
+                if (!MasterEnabled()) return;
 
-            try
-            {
-                __state = new PatchState(Runtime.Snapshot(__instance, forceVanillaProvenance: false));
-            }
-            catch (Exception ex)
-            {
-                Warn("prefix", ex);
+                try
+                {
+                    __state = new PatchState(Runtime.Snapshot(__instance, forceVanillaProvenance: false));
+                }
+                catch (Exception ex)
+                {
+                    Warn("prefix", ex);
+                }
             }
         }
 
         private static void Postfix(AIBattle __instance, PatchState __state)
         {
+            using (TelemetryPerf.Scope("tactical.patch.player-subordinate-order", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
             try
             {
                 if (!MasterEnabled()) return;
@@ -130,6 +135,7 @@ namespace WhiskeyRealism.Patches
             {
                 Warn("postfix", ex);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static bool MasterEnabled()

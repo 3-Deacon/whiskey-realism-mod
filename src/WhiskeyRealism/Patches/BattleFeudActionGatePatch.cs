@@ -5,6 +5,7 @@ using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -26,95 +27,98 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.Last)]
         internal static bool Prefix(AIBattle __instance)
         {
-            if (!Enabled()) return true;
-
-            bool tookOwnership = false;
-            try
+            using (TelemetryPerf.Scope("tactical.patch.feud-action-gate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                var groups = AllGroupsAssigned(__instance);
-                var bunits = BattleUnits(__instance);
-                int? isPlayerAiOrFeud = IsPlayerAiOrFeud(__instance);
-                if (!isPlayerAiOrFeud.HasValue) return true;
-                if (!HasIsGroupStillAbleToFight()) return true;
-                if (groups == null || bunits == null) return true;
+                if (!Enabled()) return true;
 
-                for (int i = 0; i < groups.Count; i++)
+                bool tookOwnership = false;
+                try
                 {
-                    var group = groups[i] as Regiment;
-                    if (group == null) continue;
+                    var groups = AllGroupsAssigned(__instance);
+                    var bunits = BattleUnits(__instance);
+                    int? isPlayerAiOrFeud = IsPlayerAiOrFeud(__instance);
+                    if (!isPlayerAiOrFeud.HasValue) return true;
+                    if (!HasIsGroupStillAbleToFight()) return true;
+                    if (groups == null || bunits == null) return true;
 
-                    bool feudEligible =
-                        group.unittyp > 13 &&
-                        ((group.ai_feudstance >= 0) | (isPlayerAiOrFeud.Value == 2)) &&
-                        group.regimentpaths <= 0 &&
-                        !group.pathinterrupted &&
-                        IsGroupStillAbleToFight(__instance, group);
-
-                    if (!feudEligible) continue;
-
-                    float commanderInitiative = GameVars.commander[group.commander].GetCommanderInitiative();
-                    float probability = Mathf.Pow(commanderInitiative, 2f) * GamePrefs.probfeudgroupmovement;
-                    if (GameVars.commander[group.commander].political)
+                    for (int i = 0; i < groups.Count; i++)
                     {
-                        probability *= GamePrefs.chanceoffeudspoliticalcommanders;
+                        var group = groups[i] as Regiment;
+                        if (group == null) continue;
+
+                        bool feudEligible =
+                            group.unittyp > 13 &&
+                            ((group.ai_feudstance >= 0) | (isPlayerAiOrFeud.Value == 2)) &&
+                            group.regimentpaths <= 0 &&
+                            !group.pathinterrupted &&
+                            IsGroupStillAbleToFight(__instance, group);
+
+                        if (!feudEligible) continue;
+
+                        float commanderInitiative = GameVars.commander[group.commander].GetCommanderInitiative();
+                        float probability = Mathf.Pow(commanderInitiative, 2f) * GamePrefs.probfeudgroupmovement;
+                        if (GameVars.commander[group.commander].political)
+                        {
+                            probability *= GamePrefs.chanceoffeudspoliticalcommanders;
+                        }
+                        if (!GameVars.commander[group.commander].westpoint && !GameVars.commander[group.commander].political)
+                        {
+                            probability *= GamePrefs.chanceoffeudsvolunteercommanders;
+                        }
+
+                        Regiment visibleEnemyRegiment = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
+                        GameObject closestEnemy = visibleEnemyRegiment != null ? visibleEnemyRegiment.gameObject : null;
+                        if (UnityEngine.Random.Range(0f, 1f) > probability || closestEnemy == null) continue;
+
+                        bool attachedUnderCommander = ContainsAttachedUnderCommander(group);
+                        var wlDecision = TacticalWlActionGuard.Decide(
+                            configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
+                            dlcScenarioActive: DLC_WL.dlc_scenarioactive,
+                            action: TacticalWlGuardAction.FeudMovement,
+                            unitUnderCommander: group.dlcw_isundercommander,
+                            groupUnderCommander: group.dlcw_isundercommander,
+                            attachedUnitUnderCommander: attachedUnderCommander);
+
+                        tookOwnership = true;
+                        group.lastfeudactiontime = CurrentBattleHour(bunits);
+
+                        if (!wlDecision.Allow)
+                        {
+                            LogDenied(group, wlDecision.Reason);
+                            continue;
+                        }
+
+                        var orchDecision = DecideDirectChildGate(__instance, bunits, group, closestEnemy, isPlayerAiOrFeud.Value);
+                        if (!orchDecision.Allow)
+                        {
+                            LogDeniedOrch(group, orchDecision);
+                            continue;
+                        }
+
+                        GameVars.DebugOwnLog("AI: group " + ((object)group)?.ToString() +
+                            " is under feud and moving towards closest enemy: " +
+                            ((object)closestEnemy)?.ToString() +
+                            " curr pos:" + ((object)((Component)group).gameObject.transform.position).ToString() +
+                            " enemy pos:" + ((object)closestEnemy.transform.position).ToString() +
+                            " prob:" + probability +
+                            " init:" + commanderInitiative);
+                        bunits.SetWaypoint(group, closestEnemy.transform.position, newpath: true, doublequick: false, -1f, modifylastwaypoint: false, useorderdelay: true, -1f, -1, showmovementoptions: false);
                     }
-                    if (!GameVars.commander[group.commander].westpoint && !GameVars.commander[group.commander].political)
-                    {
-                        probability *= GamePrefs.chanceoffeudsvolunteercommanders;
-                    }
-
-                    Regiment visibleEnemyRegiment = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
-                    GameObject closestEnemy = visibleEnemyRegiment != null ? visibleEnemyRegiment.gameObject : null;
-                    if (UnityEngine.Random.Range(0f, 1f) > probability || closestEnemy == null) continue;
-
-                    bool attachedUnderCommander = ContainsAttachedUnderCommander(group);
-                    var wlDecision = TacticalWlActionGuard.Decide(
-                        configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
-                        dlcScenarioActive: DLC_WL.dlc_scenarioactive,
-                        action: TacticalWlGuardAction.FeudMovement,
-                        unitUnderCommander: group.dlcw_isundercommander,
-                        groupUnderCommander: group.dlcw_isundercommander,
-                        attachedUnitUnderCommander: attachedUnderCommander);
-
-                    tookOwnership = true;
-                    group.lastfeudactiontime = CurrentBattleHour(bunits);
-
-                    if (!wlDecision.Allow)
-                    {
-                        LogDenied(group, wlDecision.Reason);
-                        continue;
-                    }
-
-                    var orchDecision = DecideDirectChildGate(__instance, bunits, group, closestEnemy, isPlayerAiOrFeud.Value);
-                    if (!orchDecision.Allow)
-                    {
-                        LogDeniedOrch(group, orchDecision);
-                        continue;
-                    }
-
-                    GameVars.DebugOwnLog("AI: group " + ((object)group)?.ToString() +
-                        " is under feud and moving towards closest enemy: " +
-                        ((object)closestEnemy)?.ToString() +
-                        " curr pos:" + ((object)((Component)group).gameObject.transform.position).ToString() +
-                        " enemy pos:" + ((object)closestEnemy.transform.position).ToString() +
-                        " prob:" + probability +
-                        " init:" + commanderInitiative);
-                    bunits.SetWaypoint(group, closestEnemy.transform.position, newpath: true, doublequick: false, -1f, modifylastwaypoint: false, useorderdelay: true, -1f, -1, showmovementoptions: false);
                 }
-            }
-            catch (Exception ex)
-            {
-                if (tookOwnership)
+                catch (Exception ex)
                 {
-                    OnceLog.Warning("tactical-feud-guard:failed-owned", "BattleFeudActionGatePatch failed after taking ownership of the vanilla body; skipping vanilla this call to avoid duplicate movement side effects: " + ex.Message);
-                    return false;
+                    if (tookOwnership)
+                    {
+                        OnceLog.Warning("tactical-feud-guard:failed-owned", "BattleFeudActionGatePatch failed after taking ownership of the vanilla body; skipping vanilla this call to avoid duplicate movement side effects: " + ex.Message);
+                        return false;
+                    }
+
+                    OnceLog.Warning("tactical-feud-guard:failed-pre", "BattleFeudActionGatePatch failed before movement ownership; falling back to vanilla: " + ex.Message);
+                    return true;
                 }
 
-                OnceLog.Warning("tactical-feud-guard:failed-pre", "BattleFeudActionGatePatch failed before movement ownership; falling back to vanilla: " + ex.Message);
-                return true;
+                return false;
             }
-
-            return false;
         }
 
         private static bool Enabled()

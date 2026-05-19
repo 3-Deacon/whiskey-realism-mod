@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -35,22 +36,25 @@ namespace WhiskeyRealism.Patches
             object __instance,
             int _alliancewon = -1)
         {
-            if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
-            if (_alliancewon < 0) return;
-
-            try
+            using (TelemetryPerf.Scope("tactical.patch.battle-result-observer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                OnceLog.Info("battle-result", "BattleResultObserverPatch wired");
+                if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
+                if (_alliancewon < 0) return;
 
-                var record = BuildRecord(__instance);
-                if (record == null || !record.IsLandBattle || record.AllianceWon < 0) return;
+                try
+                {
+                    OnceLog.Info("battle-result", "BattleResultObserverPatch wired");
 
-                if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
-                StrategicCoordinator.Instance.RecordBattleOutcome(record);
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogWarning("[BattleResultObserverPatch] " + ex.Message);
+                    var record = BuildRecord(__instance);
+                    if (record == null || !record.IsLandBattle || record.AllianceWon < 0) return;
+
+                    if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
+                    StrategicCoordinator.Instance.RecordBattleOutcome(record);
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogWarning("[BattleResultObserverPatch] " + ex.Message);
+                }
             }
         }
 

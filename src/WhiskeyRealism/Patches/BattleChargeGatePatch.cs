@@ -28,11 +28,13 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.Last)]
         internal static bool Prefix(AIBattle __instance, Regiment aigroup, int restrictunittypes)
         {
-            if (!Enabled()) return true;
-
-            bool tookOwnership = false;
-            try
+            using (TelemetryPerf.Scope("tactical.patch.battle-charge-gate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                if (!Enabled()) return true;
+
+                bool tookOwnership = false;
+                try
+                {
                 if (aigroup == null || aigroup.allattachedunits == null) return true;
 
                 BattleUnits bunits = BattleUnits(__instance);
@@ -168,6 +170,7 @@ namespace WhiskeyRealism.Patches
             }
 
             return false;
+            } // end using TelemetryPerf.Scope
         }
 
         private static bool Enabled()

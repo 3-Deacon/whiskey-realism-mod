@@ -5,6 +5,7 @@ using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -25,6 +26,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         public static void Postfix(AIBattle __instance, Regiment aigroup)
         {
+            using (TelemetryPerf.Scope("tactical.patch.b7-bombardment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+            {
             if (Plugin.EnableTacticalArtilleryDoctrine == null) return;
             if (!Plugin.EnableTacticalArtilleryDoctrine.Value) return;
             if (aigroup == null) return;
@@ -112,6 +115,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("b7-check-ai-bombardment-error", "[B7] CheckAIBombardment Postfix error: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static TacticalArtilleryInputAdapter.Snapshot BuildSnapshot(Regiment unit, Regiment aigroup, int isPlayerAiOrFeud)

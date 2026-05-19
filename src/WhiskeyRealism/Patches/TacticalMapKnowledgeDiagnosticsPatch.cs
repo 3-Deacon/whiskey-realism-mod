@@ -48,22 +48,25 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void CheckGlobalAIStrategyPostfix()
         {
-            try
+            using (TelemetryPerf.Scope("tactical.patch.map-knowledge-diag", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (Plugin.EnableTacticalMapKnowledgeDiagnostics == null || !Plugin.EnableTacticalMapKnowledgeDiagnostics.Value)
-                    return;
-
-                if (!_inventoryEmitted)
+                try
                 {
-                    EmitInventory();
-                    _inventoryEmitted = true;
-                }
+                    if (Plugin.EnableTacticalMapKnowledgeDiagnostics == null || !Plugin.EnableTacticalMapKnowledgeDiagnostics.Value)
+                        return;
 
-                EmitWatchedUnitContexts();
-            }
-            catch (Exception e)
-            {
-                try { Plugin.Log.LogWarning("[TacticalMapKnowledge] failed " + e.GetType().Name + ": " + e.Message); } catch { }
+                    if (!_inventoryEmitted)
+                    {
+                        EmitInventory();
+                        _inventoryEmitted = true;
+                    }
+
+                    EmitWatchedUnitContexts();
+                }
+                catch (Exception e)
+                {
+                    try { Plugin.Log.LogWarning("[TacticalMapKnowledge] failed " + e.GetType().Name + ": " + e.Message); } catch { }
+                }
             }
         }
 

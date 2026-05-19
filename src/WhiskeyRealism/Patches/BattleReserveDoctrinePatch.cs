@@ -5,6 +5,7 @@ using HarmonyLib;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -28,17 +29,20 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.LowerThanNormal)]
         internal static void Postfix(AIBattle __instance)
         {
-            if (!Enabled() || __instance == null) return;
+            using (TelemetryPerf.Scope("tactical.patch.reserve-doctrine", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                if (!Enabled() || __instance == null) return;
 
-            int side = SafeIntField(__instance, ref _sideOfAiField, "sideofai", -1);
-            if (side < 0) return;
+                int side = SafeIntField(__instance, ref _sideOfAiField, "sideofai", -1);
+                if (side < 0) return;
 
-            if (!BattleCommanderIntentObserverPatch.RefreshRuntimeState(__instance, emitTelemetry: false))
-                return;
+                if (!BattleCommanderIntentObserverPatch.RefreshRuntimeState(__instance, emitTelemetry: false))
+                    return;
 
-            IList chain = ObjectiveChain(__instance);
-            if (chain == null || chain.Count == 0) return;
-            LogProtectedReserveDrift(side, chain);
+                IList chain = ObjectiveChain(__instance);
+                if (chain == null || chain.Count == 0) return;
+                LogProtectedReserveDrift(side, chain);
+            }
         }
 
         private static void LogProtectedReserveDrift(int side, IList chain)

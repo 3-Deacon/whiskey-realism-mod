@@ -5,6 +5,7 @@ using UnityEngine;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -31,36 +32,41 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(Regiment aigroup, out ReserveMovementState __state)
         {
-            __state = null;
-
-            if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
-            if (aigroup == null) return;
-
-            try
-            {
-                if (!TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder doctrineOrder)) return;
-
-                DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
-                    doctrineOrder,
-                    BuildOperationalReserveInput(aigroup),
-                    SafeCurrentTimeSeconds());
-                if (doctrineDecision.Action != DoctrineConsumerAction.Deny) return;
-
-                __state = new ReserveMovementState
-                {
-                    DoctrineDecision = doctrineDecision,
-                    Units = SnapshotUnits(aigroup)
-                };
-            }
-            catch
+            using (TelemetryPerf.Scope("tactical.patch.b8-check-reserves-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
                 __state = null;
+
+                if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
+                if (aigroup == null) return;
+
+                try
+                {
+                    if (!TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder doctrineOrder)) return;
+
+                    DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
+                        doctrineOrder,
+                        BuildOperationalReserveInput(aigroup),
+                        SafeCurrentTimeSeconds());
+                    if (doctrineDecision.Action != DoctrineConsumerAction.Deny) return;
+
+                    __state = new ReserveMovementState
+                    {
+                        DoctrineDecision = doctrineDecision,
+                        Units = SnapshotUnits(aigroup)
+                    };
+                }
+                catch
+                {
+                    __state = null;
+                }
             }
         }
 
         [HarmonyPostfix]
         internal static void Postfix(AIBattle __instance, Regiment aigroup, ReserveMovementState __state)
         {
+            using (TelemetryPerf.Scope("tactical.patch.b8-check-reserves", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+            {
             if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
             if (aigroup == null) return;
 
@@ -174,6 +180,7 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Warning("b8-check-reserves-error", "[B8] CheckUseOfReserves Postfix error: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static BattleReserveCommitGatePatch.UnitState[] SnapshotUnits(Regiment group)

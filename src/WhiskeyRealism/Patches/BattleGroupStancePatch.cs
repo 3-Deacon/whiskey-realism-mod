@@ -29,15 +29,18 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.Last)]
         internal static void Postfix(AIBattle __instance)
         {
-            if (!Enabled() || __instance == null) return;
+            using (TelemetryPerf.Scope("tactical.patch.battle-group-stance", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                if (!Enabled() || __instance == null) return;
 
-            try
-            {
-                Apply(__instance);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-group-stance:failed", "Tactical group sector stance failed: " + ex.Message);
+                try
+                {
+                    Apply(__instance);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-group-stance:failed", "Tactical group sector stance failed: " + ex.Message);
+                }
             }
         }
 

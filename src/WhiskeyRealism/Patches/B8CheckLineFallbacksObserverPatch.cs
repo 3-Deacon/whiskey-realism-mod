@@ -2,6 +2,7 @@ using HarmonyLib;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -16,15 +17,18 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         public static void Postfix(Regiment aigroup)
         {
-            try
+            using (TelemetryPerf.Scope("tactical.patch.b8-line-fallbacks-observer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                OnceLog.Info("b8-check-line-fallbacks", "");
-                ReportPlannedFallbackContext(aigroup);
-            }
-            catch (System.Exception ex)
-            {
-                OnceLog.Warning("b8-check-line-fallbacks-error",
-                    "[B8] CheckLineFallbacks observer error: " + ex.Message);
+                try
+                {
+                    OnceLog.Info("b8-check-line-fallbacks", "");
+                    ReportPlannedFallbackContext(aigroup);
+                }
+                catch (System.Exception ex)
+                {
+                    OnceLog.Warning("b8-check-line-fallbacks-error",
+                        "[B8] CheckLineFallbacks observer error: " + ex.Message);
+                }
             }
         }
 

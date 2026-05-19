@@ -36,36 +36,48 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void DoUnitPositioningPrefix(BattleUnits __instance, ref ObservationState __state)
         {
-            if (!Enabled()) return;
-            __state = SafeCaptureState(__instance, "pre-unit-positioning", -1, TacticalDeploymentTelemetry.PhaseInitialPositioning);
+            using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DoUnitPositioning-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                if (!Enabled()) return;
+                __state = SafeCaptureState(__instance, "pre-unit-positioning", -1, TacticalDeploymentTelemetry.PhaseInitialPositioning);
+            }
         }
 
         [HarmonyPatch(typeof(BattleUnits), "DoUnitPositioning")]
         [HarmonyPostfix]
         internal static void DoUnitPositioningPostfix(BattleUnits __instance, ObservationState __state)
         {
-            if (!Enabled()) return;
-            EmitDelta(__instance, "DoUnitPositioning", -1, __state);
+            using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DoUnitPositioning", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                if (!Enabled()) return;
+                EmitDelta(__instance, "DoUnitPositioning", -1, __state);
+            }
         }
 
         [HarmonyPatch(typeof(BattleUnits), "DoPlacementAIUnitsWithinDeploymentzoneNew")]
         [HarmonyPrefix]
         internal static void DoPlacementPrefix(BattleUnits __instance, int foralliance, ref ObservationState __state)
         {
-            if (!Enabled()) return;
-            var skipped = IsDoPlacementSkipped(foralliance);
-            var eod = ReadInt(__instance, EodCycleField, "eodcycle", "eodcycle");
-            var days = ReadInt(__instance, BattlePassedDaysField, "battlepasseddays", "battlepasseddays");
-            var phase = TacticalDeploymentTelemetry.PhaseFromPrefix(skipped, false, eod, days);
-            __state = SafeCaptureState(__instance, "pre-placement", foralliance, phase);
+            using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DoPlacement-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                if (!Enabled()) return;
+                var skipped = IsDoPlacementSkipped(foralliance);
+                var eod = ReadInt(__instance, EodCycleField, "eodcycle", "eodcycle");
+                var days = ReadInt(__instance, BattlePassedDaysField, "battlepasseddays", "battlepasseddays");
+                var phase = TacticalDeploymentTelemetry.PhaseFromPrefix(skipped, false, eod, days);
+                __state = SafeCaptureState(__instance, "pre-placement", foralliance, phase);
+            }
         }
 
         [HarmonyPatch(typeof(BattleUnits), "DoPlacementAIUnitsWithinDeploymentzoneNew")]
         [HarmonyPostfix]
         internal static void DoPlacementPostfix(BattleUnits __instance, int foralliance, ObservationState __state)
         {
-            if (!Enabled()) return;
-            EmitDelta(__instance, "DoPlacementAIUnitsWithinDeploymentzoneNew", foralliance, __state);
+            using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DoPlacement", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                if (!Enabled()) return;
+                EmitDelta(__instance, "DoPlacementAIUnitsWithinDeploymentzoneNew", foralliance, __state);
+            }
         }
 
         [HarmonyPatch(typeof(BattleUI), "SetActiveDeploymentPhase")]
@@ -77,20 +89,23 @@ namespace WhiskeyRealism.Patches
             bool calledfromsave,
             ref ObservationState __state)
         {
-            if (!Enabled()) return;
-            if ((object)__instance == null || __instance.IsCampaign)
+            using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DeploymentPhase-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                __state = new ObservationState { Noop = true };
-                return;
-            }
+                if (!Enabled()) return;
+                if ((object)__instance == null || __instance.IsCampaign)
+                {
+                    __state = new ObservationState { Noop = true };
+                    return;
+                }
 
-            BattleUnits battleUnits = GetBattleUnits(__instance);
-            var eod = ReadInt(battleUnits, EodCycleField, "eodcycle", "eodcycle");
-            var days = ReadInt(battleUnits, BattlePassedDaysField, "battlepasseddays", "battlepasseddays");
-            var phase = TacticalDeploymentTelemetry.PhaseFromPrefix(false, false, eod, days);
-            __state = SafeCaptureState(battleUnits, active ? "pre-open" : "pre-close", -1, phase);
-            if (__state == null) return;
-            __state.SuppressOuterDelta = !active && __state.Before != null && __state.Before.EodCycle > 0;
+                BattleUnits battleUnits = GetBattleUnits(__instance);
+                var eod = ReadInt(battleUnits, EodCycleField, "eodcycle", "eodcycle");
+                var days = ReadInt(battleUnits, BattlePassedDaysField, "battlepasseddays", "battlepasseddays");
+                var phase = TacticalDeploymentTelemetry.PhaseFromPrefix(false, false, eod, days);
+                __state = SafeCaptureState(battleUnits, active ? "pre-open" : "pre-close", -1, phase);
+                if (__state == null) return;
+                __state.SuppressOuterDelta = !active && __state.Before != null && __state.Before.EodCycle > 0;
+            }
         }
 
         [HarmonyPatch(typeof(BattleUI), "SetActiveDeploymentPhase")]
@@ -102,28 +117,31 @@ namespace WhiskeyRealism.Patches
             bool calledfromsave,
             ObservationState __state)
         {
-            if (!Enabled()) return;
-            if (__state == null || __state.Noop || (object)__instance == null || __instance.IsCampaign) return;
-            try
+            using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DeploymentPhase", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                BattleUnits battleUnits = GetBattleUnits(__instance);
-                var before = __state.Before ?? TacticalDeploymentSnapshot.Empty("before", -1, 0, 0, __state.Phase);
-                string action = active ? "open" : "close";
-                LogDeploymentTelemetry("[TacticalDeploymentPhase]" +
-                                       " action=" + action +
-                                       " calledFromSave=" + calledfromsave +
-                                       " eod=" + before.EodCycle +
-                                       " days=" + before.BattlePassedDays +
-                                       " groups=" + before.Groups.Count +
-                                       " outerDeltaSuppressed=" + __state.SuppressOuterDelta);
-                if (!__state.SuppressOuterDelta)
+                if (!Enabled()) return;
+                if (__state == null || __state.Noop || (object)__instance == null || __instance.IsCampaign) return;
+                try
                 {
-                    EmitDelta(battleUnits, "SetActiveDeploymentPhase:" + action, -1, __state);
+                    BattleUnits battleUnits = GetBattleUnits(__instance);
+                    var before = __state.Before ?? TacticalDeploymentSnapshot.Empty("before", -1, 0, 0, __state.Phase);
+                    string action = active ? "open" : "close";
+                    LogDeploymentTelemetry("[TacticalDeploymentPhase]" +
+                                           " action=" + action +
+                                           " calledFromSave=" + calledfromsave +
+                                           " eod=" + before.EodCycle +
+                                           " days=" + before.BattlePassedDays +
+                                           " groups=" + before.Groups.Count +
+                                           " outerDeltaSuppressed=" + __state.SuppressOuterDelta);
+                    if (!__state.SuppressOuterDelta)
+                    {
+                        EmitDelta(battleUnits, "SetActiveDeploymentPhase:" + action, -1, __state);
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-deployment-observer:phase", "TacticalDeploymentObserverPatch deployment-phase observer failed: " + ex.Message);
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-deployment-observer:phase", "TacticalDeploymentObserverPatch deployment-phase observer failed: " + ex.Message);
+                }
             }
         }
 

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -29,51 +30,60 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction)
         {
-            try
+            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-micro-move-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                var faction = AICampaignReflect.GetFaction(_aifaction);
-                if (faction == null) return;
-
-                var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
-                if (offensive == null || offensive.Count == 0) return;
-
-                var removed = new List<RemovedUnit>();
-                for (int i = offensive.Count - 1; i >= 0; i--)
+                try
                 {
-                    var unit = offensive[i] as Regiment;
-                    if (unit == null) continue;
-                    if (CoordinatedOperationRuntime.IsPackageLocked(unit))
-                    {
-                        removed.Add(new RemovedUnit { Index = i, Unit = offensive[i] });
-                        offensive.RemoveAt(i);
-                    }
-                    else
-                    {
-                        CoordinatedOperationRuntime.ClearPackageLock(unit);
-                    }
-                }
+                    var faction = AICampaignReflect.GetFaction(_aifaction);
+                    if (faction == null) return;
 
-                if (removed.Count > 0)
-                    _removedByFaction[_aifaction] = removed;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("coordinated-ops:micro:prefix",
-                    "[CoordinatedOps] micro Prefix failed: " + ex.Message);
+                    var offensive = AccessTools.Field(faction.GetType(), "unitsinoffensiveoperations")?.GetValue(faction) as IList;
+                    if (offensive == null || offensive.Count == 0) return;
+
+                    var removed = new List<RemovedUnit>();
+                    for (int i = offensive.Count - 1; i >= 0; i--)
+                    {
+                        var unit = offensive[i] as Regiment;
+                        if (unit == null) continue;
+                        if (CoordinatedOperationRuntime.IsPackageLocked(unit))
+                        {
+                            removed.Add(new RemovedUnit { Index = i, Unit = offensive[i] });
+                            offensive.RemoveAt(i);
+                        }
+                        else
+                        {
+                            CoordinatedOperationRuntime.ClearPackageLock(unit);
+                        }
+                    }
+
+                    if (removed.Count > 0)
+                        _removedByFaction[_aifaction] = removed;
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("coordinated-ops:micro:prefix",
+                        "[CoordinatedOps] micro Prefix failed: " + ex.Message);
+                }
             }
         }
 
         [HarmonyPostfix]
         internal static void Postfix(int _aifaction)
         {
-            RestoreSnapshot(_aifaction, "postfix");
+            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-micro-move", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                RestoreSnapshot(_aifaction, "postfix");
+            }
         }
 
         [HarmonyFinalizer]
         internal static Exception Finalizer(Exception __exception, int _aifaction)
         {
-            RestoreSnapshot(_aifaction, "finalizer");
-            return __exception;
+            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-micro-move-finalizer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                RestoreSnapshot(_aifaction, "finalizer");
+                return __exception;
+            }
         }
 
         private static void RestoreSnapshot(int aifactionIndex, string source)

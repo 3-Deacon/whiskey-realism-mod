@@ -35,7 +35,10 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.LowerThanNormal)]
         internal static void Postfix(AIBattle __instance)
         {
-            RefreshRuntimeState(__instance, emitTelemetry: true);
+            using (TelemetryPerf.Scope("tactical.patch.battle-commander-intent", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                RefreshRuntimeState(__instance, emitTelemetry: true);
+            }
         }
 
         internal static bool RefreshRuntimeState(AIBattle battle, bool emitTelemetry)

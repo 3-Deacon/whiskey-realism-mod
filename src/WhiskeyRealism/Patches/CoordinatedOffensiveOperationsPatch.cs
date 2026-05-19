@@ -60,6 +60,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction, Regiment unit, float timediff)
         {
+            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-ops-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
             if (!_wiredLogged)
             {
                 _wiredLogged = true;
@@ -180,19 +182,26 @@ namespace WhiskeyRealism.Patches
                         "Patch CoordinatedOps prefix failed before snapshot; vanilla candidate list left unchanged");
                 }
             }
+            } // end using TelemetryPerf.Scope
         }
 
         [HarmonyPostfix]
         internal static void Postfix(int _aifaction)
         {
-            RestoreSnapshot(_aifaction, "postfix");
+            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-ops", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                RestoreSnapshot(_aifaction, "postfix");
+            }
         }
 
         [HarmonyFinalizer]
         internal static Exception Finalizer(Exception __exception, int _aifaction)
         {
-            RestoreSnapshot(_aifaction, "finalizer");
-            return __exception;
+            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-ops-finalizer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                RestoreSnapshot(_aifaction, "finalizer");
+                return __exception;
+            }
         }
 
         private static void RestoreSnapshot(int aifactionIndex, string source)

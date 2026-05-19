@@ -1,5 +1,6 @@
 using HarmonyLib;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -14,45 +15,48 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         public static void Postfix(Regiment aigroup, int restrictunittypes)
         {
-            if (Plugin.MoraleSnapshotLedger == null) return;
-            if (aigroup == null) return;
-
-            try
+            using (TelemetryPerf.Scope("tactical.patch.b8-morale-snapshot", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                OnceLog.Info("b8-morale-snapshot-sampler", "");
+                if (Plugin.MoraleSnapshotLedger == null) return;
+                if (aigroup == null) return;
 
-                var allUnits = aigroup.allattachedunits;
-                if (allUnits == null) return;
-
-                for (int i = 0; i < allUnits.Length; i++)
+                try
                 {
-                    var unit = allUnits[i];
-                    if (unit == null) continue;
-                    if (unit.unittyp > TacticalUnitType.MaxCombat) continue;
-                    if (unit.unittyp == TacticalUnitType.Excluded) continue;
-                    if (unit.permanentlydetached) continue;
+                    OnceLog.Info("b8-morale-snapshot-sampler", "");
 
-                    var key = new TacticalMoraleSnapshotLedger.Key(
-                        unit.GetInstanceID(),
-                        ((UnityEngine.Object)unit).name);
+                    var allUnits = aigroup.allattachedunits;
+                    if (allUnits == null) return;
 
-                    if (unit.isrouted)
+                    for (int i = 0; i < allUnits.Length; i++)
                     {
-                        Plugin.MoraleSnapshotLedger.PruneRouted(key);
-                        continue;
-                    }
+                        var unit = allUnits[i];
+                        if (unit == null) continue;
+                        if (unit.unittyp > TacticalUnitType.MaxCombat) continue;
+                        if (unit.unittyp == TacticalUnitType.Excluded) continue;
+                        if (unit.permanentlydetached) continue;
 
-                    Plugin.MoraleSnapshotLedger.RecordSampleIfNew(
-                        key,
-                        morale: unit.morale,
-                        timeFromStart: GameVars.currenttimefromstart,
-                        vanillaLastMoraleUpdate: unit.lastmoraleupdate);
+                        var key = new TacticalMoraleSnapshotLedger.Key(
+                            unit.GetInstanceID(),
+                            ((UnityEngine.Object)unit).name);
+
+                        if (unit.isrouted)
+                        {
+                            Plugin.MoraleSnapshotLedger.PruneRouted(key);
+                            continue;
+                        }
+
+                        Plugin.MoraleSnapshotLedger.RecordSampleIfNew(
+                            key,
+                            morale: unit.morale,
+                            timeFromStart: GameVars.currenttimefromstart,
+                            vanillaLastMoraleUpdate: unit.lastmoraleupdate);
+                    }
                 }
-            }
-            catch (System.Exception ex)
-            {
-                OnceLog.Warning("b8-morale-snapshot-error",
-                    "[B8] morale snapshot sampler error: " + ex.Message);
+                catch (System.Exception ex)
+                {
+                    OnceLog.Warning("b8-morale-snapshot-error",
+                        "[B8] morale snapshot sampler error: " + ex.Message);
+                }
             }
         }
     }

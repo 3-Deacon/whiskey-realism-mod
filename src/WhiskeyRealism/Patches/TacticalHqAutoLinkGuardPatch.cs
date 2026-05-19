@@ -2,6 +2,7 @@ using System;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -27,54 +28,60 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(Regiment __instance, out LinkState __state)
         {
-            if (!Enabled())
+            using (TelemetryPerf.Scope("tactical.patch.hq-link-guard-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                __state = default;
-                return;
-            }
+                if (!Enabled())
+                {
+                    __state = default;
+                    return;
+                }
 
-            __state = new LinkState(
-                __instance != null ? __instance.unitlinkedto : null,
-                __instance != null ? __instance.linkedposition : 0);
+                __state = new LinkState(
+                    __instance != null ? __instance.unitlinkedto : null,
+                    __instance != null ? __instance.linkedposition : 0);
+            }
         }
 
         [HarmonyPostfix]
         internal static void Postfix(Regiment __instance, LinkState __state)
         {
-            if (!Enabled()) return;
-
-            try
+            using (TelemetryPerf.Scope("tactical.patch.hq-link-guard", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (__instance == null) return;
-                GameObject newLink = __instance.unitlinkedto;
-                bool newlyLinked = __state.PreviousLink == null && newLink != null;
-                Regiment target = newLink != null ? newLink.GetComponent<Regiment>() : null;
+                if (!Enabled()) return;
 
-                bool clear = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
-                    modEnabled: true,
-                    newlyLinked: newlyLinked,
-                    sourceIsGroupUnit: __instance.unittyp > 13,
-                    targetExists: target != null,
-                    sameHierarchy: SameHierarchy(__instance, target),
-                    sameNonRootParent: SameNonRootParent(__instance, target),
-                    sameAiGroup: SameAiGroup(__instance, target));
-                if (!clear) return;
+                try
+                {
+                    if (__instance == null) return;
+                    GameObject newLink = __instance.unitlinkedto;
+                    bool newlyLinked = __state.PreviousLink == null && newLink != null;
+                    Regiment target = newLink != null ? newLink.GetComponent<Regiment>() : null;
 
-                string sourceName = SafeUnitName(__instance);
-                string targetName = SafeUnitName(target);
-                __instance.unitlinkedto = __state.PreviousLink;
-                __instance.linkedposition = __state.PreviousPosition;
+                    bool clear = TacticalHqLinkGuard.ShouldClearAutoGroupLink(
+                        modEnabled: true,
+                        newlyLinked: newlyLinked,
+                        sourceIsGroupUnit: __instance.unittyp > 13,
+                        targetExists: target != null,
+                        sameHierarchy: SameHierarchy(__instance, target),
+                        sameNonRootParent: SameNonRootParent(__instance, target),
+                        sameAiGroup: SameAiGroup(__instance, target));
+                    if (!clear) return;
 
-                OnceLog.Info(
-                    "tactical-hq-link-guard:" + sourceName + ":" + targetName,
-                    "[TacticalHqLinkGuard] cleared cross-command auto group link unit=" +
-                    sourceName + " target=" + targetName);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-hq-link-guard:failed",
-                    "[TacticalHqLinkGuard] failed; preserving vanilla link state: " + ex.Message);
+                    string sourceName = SafeUnitName(__instance);
+                    string targetName = SafeUnitName(target);
+                    __instance.unitlinkedto = __state.PreviousLink;
+                    __instance.linkedposition = __state.PreviousPosition;
+
+                    OnceLog.Info(
+                        "tactical-hq-link-guard:" + sourceName + ":" + targetName,
+                        "[TacticalHqLinkGuard] cleared cross-command auto group link unit=" +
+                        sourceName + " target=" + targetName);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "tactical-hq-link-guard:failed",
+                        "[TacticalHqLinkGuard] failed; preserving vanilla link state: " + ex.Message);
+                }
             }
         }
 

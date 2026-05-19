@@ -3,6 +3,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -17,7 +18,10 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(Regiment __instance, out int __state)
         {
-            __state = SafePathCount(__instance);
+            using (TelemetryPerf.Scope("tactical.patch.pathfinder-discipline-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                __state = SafePathCount(__instance);
+            }
         }
 
         [HarmonyPostfix]
@@ -28,54 +32,57 @@ namespace WhiskeyRealism.Patches
             ref int __result,
             int __state)
         {
-            if (!Enabled()) return;
-
-            try
+            using (TelemetryPerf.Scope("tactical.patch.pathfinder-discipline", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (__instance == null || __instance.calledfromcampaign || __instance.unittyp == 17) return;
-                if (__instance.regimentpath == null || __state < 0) return;
+                if (!Enabled()) return;
 
-                int after = SafePathCount(__instance);
-                int pathIndex = after - 1;
-                NavMeshPath path = pathIndex >= 0 && pathIndex < __instance.regimentpath.Length
-                    ? __instance.regimentpath[pathIndex]
-                    : null;
-                Vector3[] corners = path != null ? path.corners : null;
-                int cornerCount = corners != null ? corners.Length : 0;
-                float finalDistance = cornerCount > 0
-                    ? XzDistance(corners[cornerCount - 1], target)
-                    : 0f;
+                try
+                {
+                    if (__instance == null || __instance.calledfromcampaign || __instance.unittyp == 17) return;
+                    if (__instance.regimentpath == null || __state < 0) return;
 
-                TacticalPathfinderAddPathDecision decision =
-                    TacticalBattlefieldBugDiagnostics.ClassifyAddPathOutcome(
-                        vanillaResult: __result,
-                        pathCountBefore: __state,
-                        pathCountAfter: after,
-                        cornerCount: cornerCount,
-                        navStatus: path != null ? path.status.ToString() : "-",
-                        finalDistanceToTarget: finalDistance,
-                        endpointTolerance: EndpointToleranceMeters);
+                    int after = SafePathCount(__instance);
+                    int pathIndex = after - 1;
+                    NavMeshPath path = pathIndex >= 0 && pathIndex < __instance.regimentpath.Length
+                        ? __instance.regimentpath[pathIndex]
+                        : null;
+                    Vector3[] corners = path != null ? path.corners : null;
+                    int cornerCount = corners != null ? corners.Length : 0;
+                    float finalDistance = cornerCount > 0
+                        ? XzDistance(corners[cornerCount - 1], target)
+                        : 0f;
 
-                if (!decision.IsBehaviorChange) return;
+                    TacticalPathfinderAddPathDecision decision =
+                        TacticalBattlefieldBugDiagnostics.ClassifyAddPathOutcome(
+                            vanillaResult: __result,
+                            pathCountBefore: __state,
+                            pathCountAfter: after,
+                            cornerCount: cornerCount,
+                            navStatus: path != null ? path.status.ToString() : "-",
+                            finalDistanceToTarget: finalDistance,
+                            endpointTolerance: EndpointToleranceMeters);
 
-                if (decision.ShouldRemoveAddedPath)
-                    RemoveAddedPaths(__instance, __state, after);
-                if (decision.ShouldOverrideResult)
-                    __result = decision.OverrideResult;
+                    if (!decision.IsBehaviorChange) return;
 
-                OnceLog.Info(
-                    "tactical-pathfinder-discipline:" + decision.Reason,
-                    "[TacticalPathfinderDiscipline] reason=" + decision.Reason +
-                    " result=" + __result +
-                    " iterations=" + iterations +
-                    " unit=" + SafeUnitName(__instance) +
-                    " " + decision.Signature);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-pathfinder-discipline:failed",
-                    "TacticalPathfinderDisciplinePatch failed; falling back to vanilla AddPath result: " + ex.Message);
+                    if (decision.ShouldRemoveAddedPath)
+                        RemoveAddedPaths(__instance, __state, after);
+                    if (decision.ShouldOverrideResult)
+                        __result = decision.OverrideResult;
+
+                    OnceLog.Info(
+                        "tactical-pathfinder-discipline:" + decision.Reason,
+                        "[TacticalPathfinderDiscipline] reason=" + decision.Reason +
+                        " result=" + __result +
+                        " iterations=" + iterations +
+                        " unit=" + SafeUnitName(__instance) +
+                        " " + decision.Signature);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "tactical-pathfinder-discipline:failed",
+                        "TacticalPathfinderDisciplinePatch failed; falling back to vanilla AddPath result: " + ex.Message);
+                }
             }
         }
 

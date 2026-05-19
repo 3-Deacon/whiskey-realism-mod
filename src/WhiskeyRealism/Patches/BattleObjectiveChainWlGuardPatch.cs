@@ -5,6 +5,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -47,41 +48,44 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.Last)]
         internal static void Prefix(AIBattle __instance, out ObjectiveChainFilterState __state)
         {
-            __state = new ObjectiveChainFilterState();
-            if (!Enabled()) return;
-
-            try
+            using (TelemetryPerf.Scope("tactical.patch.objective-chain-wl-guard-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                IList chain = ObjectiveChain(__instance);
-                if (chain == null || chain.Count <= 0) return;
-                __state.Chain = chain;
+                __state = new ObjectiveChainFilterState();
+                if (!Enabled()) return;
 
-                for (int i = chain.Count - 1; i >= 0; i--)
+                try
                 {
-                    object entry = chain[i];
-                    Regiment center = CenterUnit(entry);
-                    if (center == null) continue;
+                    IList chain = ObjectiveChain(__instance);
+                    if (chain == null || chain.Count <= 0) return;
+                    __state.Chain = chain;
 
-                    int attachedUnderCommander = CountAttachedUnderCommander(center);
-                    var decision = TacticalWlActionGuard.Decide(
-                        configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
-                        dlcScenarioActive: DLC_WL.dlc_scenarioactive,
-                        action: TacticalWlGuardAction.ObjectiveChainAdvance,
-                        unitUnderCommander: center.dlcw_isundercommander,
-                        groupUnderCommander: center.dlcw_isundercommander,
-                        attachedUnitUnderCommander: attachedUnderCommander > 0);
+                    for (int i = chain.Count - 1; i >= 0; i--)
+                    {
+                        object entry = chain[i];
+                        Regiment center = CenterUnit(entry);
+                        if (center == null) continue;
 
-                    if (decision.Allow) continue;
+                        int attachedUnderCommander = CountAttachedUnderCommander(center);
+                        var decision = TacticalWlActionGuard.Decide(
+                            configEnabled: Plugin.Instance.EnableWlTacticalChargeGuard.Value,
+                            dlcScenarioActive: DLC_WL.dlc_scenarioactive,
+                            action: TacticalWlGuardAction.ObjectiveChainAdvance,
+                            unitUnderCommander: center.dlcw_isundercommander,
+                            groupUnderCommander: center.dlcw_isundercommander,
+                            attachedUnitUnderCommander: attachedUnderCommander > 0);
 
-                    __state.Removed.Add(new RemovedObjectiveChain(i, entry, center, attachedUnderCommander, decision.Reason));
-                    chain.RemoveAt(i);
-                    LogDenied(center, i, attachedUnderCommander, decision.Reason);
+                        if (decision.Allow) continue;
+
+                        __state.Removed.Add(new RemovedObjectiveChain(i, entry, center, attachedUnderCommander, decision.Reason));
+                        chain.RemoveAt(i);
+                        LogDenied(center, i, attachedUnderCommander, decision.Reason);
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                Restore(__state);
-                OnceLog.Warning("tactical-objective-chain-guard:failed-pre", "BattleObjectiveChainWlGuardPatch failed before vanilla movement; restored filtered chains and falling back to vanilla: " + ex.Message);
+                catch (Exception ex)
+                {
+                    Restore(__state);
+                    OnceLog.Warning("tactical-objective-chain-guard:failed-pre", "BattleObjectiveChainWlGuardPatch failed before vanilla movement; restored filtered chains and falling back to vanilla: " + ex.Message);
+                }
             }
         }
 
@@ -89,7 +93,10 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.First)]
         internal static void Postfix(ObjectiveChainFilterState __state)
         {
-            Restore(__state);
+            using (TelemetryPerf.Scope("tactical.patch.objective-chain-wl-guard", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                Restore(__state);
+            }
         }
 
         private static bool Enabled()

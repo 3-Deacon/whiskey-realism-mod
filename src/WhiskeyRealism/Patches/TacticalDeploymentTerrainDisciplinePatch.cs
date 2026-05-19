@@ -33,51 +33,54 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(BattleUnits __instance, int foralliance)
         {
-            if (!Enabled()) return;
-
-            try
+            using (TelemetryPerf.Scope("tactical.patch.deployment-terrain", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                if ((object)__instance == null) return;
-                if (GameVars.playeralliance == foralliance && !GameVars.ai_vs_ai) return;
-                if (GameVars.tutorialactive && !Tutorial.engaged) return;
+                if (!Enabled()) return;
 
-                BattleUnits.Grp[] groups = ReadGroups(__instance);
-                if (groups.Length == 0) return;
-
-                if (!TryReadInitialDeployment(__instance, out bool initialDeployment))
-                    return;
-
-                string phase = ReadDeploymentPhase(__instance);
-                ResetAdviceLogForBattle(__instance, phase);
-
-                OnceLog.Info(
-                    "tactical-deployment-terrain-advice",
-                    "TacticalDeploymentTerrainDisciplinePatch advice surface wired.");
-
-                for (int i = 0; i < groups.Length; i++)
+                try
                 {
-                    BattleUnits.Grp group = groups[i];
-                    if (group == null || (object)group.regref == null) continue;
+                    if ((object)__instance == null) return;
+                    if (GameVars.playeralliance == foralliance && !GameVars.ai_vs_ai) return;
+                    if (GameVars.tutorialactive && !Tutorial.engaged) return;
 
-                    Regiment regiment = group.regref;
-                    if (!EligibleForVanillaDeploymentPlacement(
-                            __instance,
-                            group,
-                            regiment,
-                            foralliance,
-                            initialDeployment))
+                    BattleUnits.Grp[] groups = ReadGroups(__instance);
+                    if (groups.Length == 0) return;
+
+                    if (!TryReadInitialDeployment(__instance, out bool initialDeployment))
+                        return;
+
+                    string phase = ReadDeploymentPhase(__instance);
+                    ResetAdviceLogForBattle(__instance, phase);
+
+                    OnceLog.Info(
+                        "tactical-deployment-terrain-advice",
+                        "TacticalDeploymentTerrainDisciplinePatch advice surface wired.");
+
+                    for (int i = 0; i < groups.Length; i++)
                     {
-                        continue;
-                    }
+                        BattleUnits.Grp group = groups[i];
+                        if (group == null || (object)group.regref == null) continue;
 
-                    TryDisciplineGroup(__instance, group, regiment, phase);
+                        Regiment regiment = group.regref;
+                        if (!EligibleForVanillaDeploymentPlacement(
+                                __instance,
+                                group,
+                                regiment,
+                                foralliance,
+                                initialDeployment))
+                        {
+                            continue;
+                        }
+
+                        TryDisciplineGroup(__instance, group, regiment, phase);
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-deployment-terrain:failed",
-                    "TacticalDeploymentTerrainDisciplinePatch failed: " + ex.GetType().Name + ": " + ex.Message);
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "tactical-deployment-terrain:failed",
+                        "TacticalDeploymentTerrainDisciplinePatch failed: " + ex.GetType().Name + ": " + ex.Message);
+                }
             }
         }
 

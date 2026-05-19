@@ -63,49 +63,52 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void CheckGlobalAIStrategyPostfix()
         {
-            try
+            using (TelemetryPerf.Scope("tactical.patch.regiment-diag", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (!Plugin.EnableTacticalRegimentDiagnostics.Value) return;
-                if (_logCount >= MaxLinesPerBattle) return;
-
-                var watchTokens = ResolveWatchTokens();
-                if (watchTokens == null || watchTokens.Length == 0) return;
-
-                var all = BattleUnits.completeunitlist;
-                if (all == null || all.Count == 0) return;
-
-                float now = Time.time;
-
-                for (int i = 0; i < all.Count && _logCount < MaxLinesPerBattle; i++)
+                try
                 {
-                    var r = all[i];
-                    if (r == null) continue;
+                    if (!Plugin.EnableTacticalRegimentDiagnostics.Value) return;
+                    if (_logCount >= MaxLinesPerBattle) return;
 
-                    string name = SafeName(r);
-                    if (string.IsNullOrEmpty(name)) continue;
-                    if (!MatchesAnyToken(name, watchTokens)) continue;
+                    var watchTokens = ResolveWatchTokens();
+                    if (watchTokens == null || watchTokens.Length == 0) return;
 
-                    int key;
-                    try { key = r.GetInstanceID(); } catch { continue; }
+                    var all = BattleUnits.completeunitlist;
+                    if (all == null || all.Count == 0) return;
 
-                    Snapshot prev;
-                    bool isNew = !_last.TryGetValue(key, out prev);
-                    if (!isNew && (now - prev.lastLogSeconds) < MinSecondsBetweenSamples) continue;
+                    float now = Time.time;
 
-                    var current = SnapshotOf(r, now);
-                    if (current == null) continue;
+                    for (int i = 0; i < all.Count && _logCount < MaxLinesPerBattle; i++)
+                    {
+                        var r = all[i];
+                        if (r == null) continue;
 
-                    bool changed = isNew || HasChanged(prev, current);
-                    if (!changed) continue;
+                        string name = SafeName(r);
+                        if (string.IsNullOrEmpty(name)) continue;
+                        if (!MatchesAnyToken(name, watchTokens)) continue;
 
-                    Log(name, key, prev, current, isNew);
-                    _last[key] = current;
-                    _logCount++;
+                        int key;
+                        try { key = r.GetInstanceID(); } catch { continue; }
+
+                        Snapshot prev;
+                        bool isNew = !_last.TryGetValue(key, out prev);
+                        if (!isNew && (now - prev.lastLogSeconds) < MinSecondsBetweenSamples) continue;
+
+                        var current = SnapshotOf(r, now);
+                        if (current == null) continue;
+
+                        bool changed = isNew || HasChanged(prev, current);
+                        if (!changed) continue;
+
+                        Log(name, key, prev, current, isNew);
+                        _last[key] = current;
+                        _logCount++;
+                    }
                 }
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogWarning("[TacticalRegimentDiagnostics] " + e.GetType().Name + ": " + e.Message);
+                catch (Exception e)
+                {
+                    Plugin.Log.LogWarning("[TacticalRegimentDiagnostics] " + e.GetType().Name + ": " + e.Message);
+                }
             }
         }
 

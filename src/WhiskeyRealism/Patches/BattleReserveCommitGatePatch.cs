@@ -290,17 +290,20 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(Regiment aigroup, out ReserveCommitState __state)
         {
-            __state = null;
-            try
+            using (TelemetryPerf.Scope("tactical.patch.reserve-commit-gate-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                if (Enabled())
-                    __state = Snapshot(aigroup);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-reserve-commit-gate:prefix",
-                    "[TacticalReserveCommitGate] Prefix failed; vanilla reserve movement remains active: " + ex.Message);
+                __state = null;
+                try
+                {
+                    if (Enabled())
+                        __state = Snapshot(aigroup);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "tactical-reserve-commit-gate:prefix",
+                        "[TacticalReserveCommitGate] Prefix failed; vanilla reserve movement remains active: " + ex.Message);
+                }
             }
         }
 
@@ -308,47 +311,50 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.High)]
         internal static void Postfix(Regiment aigroup, ReserveCommitState __state)
         {
-            try
+            using (TelemetryPerf.Scope("tactical.patch.reserve-commit-gate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled()) return;
-                if (__state == null || __state.Units == null || aigroup == null) return;
-
-                UnitState[] changed = FindChangedUnits(__state);
-                if (changed.Length == 0)
+                try
                 {
-                    Log(aigroup, TacticalReserveCommitGate.Action.Observe, DirectChildRole.Unknown, "no-vanilla-commit", 0);
-                    return;
+                    if (!Enabled()) return;
+                    if (__state == null || __state.Units == null || aigroup == null) return;
+
+                    UnitState[] changed = FindChangedUnits(__state);
+                    if (changed.Length == 0)
+                    {
+                        Log(aigroup, TacticalReserveCommitGate.Action.Observe, DirectChildRole.Unknown, "no-vanilla-commit", 0);
+                        return;
+                    }
+
+                    CommandIntentResolution resolution = ResolveIntent(aigroup);
+                    var input = new TacticalReserveCommitGate.Input(
+                        vanillaCommitted: true,
+                        resolution: resolution,
+                        playerControlled: HasPlayerOwnership(aigroup),
+                        committedUnitAlreadyEngaged: AnyAlreadyEngaged(changed),
+                        ownStrengthRatio: OwnStrengthRatio(aigroup),
+                        localOdds: LocalOdds(aigroup));
+
+                    TacticalReserveCommitGate.Decision decision = TacticalReserveCommitGate.Decide(input);
+                    if (!AllowsVanillaWrites())
+                    {
+                        Log(aigroup, TacticalReserveCommitGate.Action.Observe, decision.Role, "mode-monitor-only", changed.Length);
+                        return;
+                    }
+
+                    if (decision.Action == TacticalReserveCommitGate.Action.Deny)
+                    {
+                        RollBackChangedUnits(changed);
+                        LogProtectedReserveDrift(aigroup, resolution, decision, changed.Length);
+                    }
+
+                    Log(aigroup, decision.Action, decision.Role, decision.Reason, changed.Length);
                 }
-
-                CommandIntentResolution resolution = ResolveIntent(aigroup);
-                var input = new TacticalReserveCommitGate.Input(
-                    vanillaCommitted: true,
-                    resolution: resolution,
-                    playerControlled: HasPlayerOwnership(aigroup),
-                    committedUnitAlreadyEngaged: AnyAlreadyEngaged(changed),
-                    ownStrengthRatio: OwnStrengthRatio(aigroup),
-                    localOdds: LocalOdds(aigroup));
-
-                TacticalReserveCommitGate.Decision decision = TacticalReserveCommitGate.Decide(input);
-                if (!AllowsVanillaWrites())
+                catch (Exception ex)
                 {
-                    Log(aigroup, TacticalReserveCommitGate.Action.Observe, decision.Role, "mode-monitor-only", changed.Length);
-                    return;
+                    OnceLog.Warning(
+                        "tactical-reserve-commit-gate:postfix",
+                        "[TacticalReserveCommitGate] Postfix failed; vanilla reserve movement remains active: " + ex.Message);
                 }
-
-                if (decision.Action == TacticalReserveCommitGate.Action.Deny)
-                {
-                    RollBackChangedUnits(changed);
-                    LogProtectedReserveDrift(aigroup, resolution, decision, changed.Length);
-                }
-
-                Log(aigroup, decision.Action, decision.Role, decision.Reason, changed.Length);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-reserve-commit-gate:postfix",
-                    "[TacticalReserveCommitGate] Postfix failed; vanilla reserve movement remains active: " + ex.Message);
             }
         }
 

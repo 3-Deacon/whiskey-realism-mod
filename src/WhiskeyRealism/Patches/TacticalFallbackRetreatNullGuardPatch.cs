@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -35,7 +36,10 @@ namespace WhiskeyRealism.Patches
             [HarmonyFinalizer]
             internal static Exception Finalizer(Exception __exception)
             {
-                return Handle("MicroAICheckForRetreats", __exception);
+                using (TelemetryPerf.Scope("tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+                {
+                    return Handle("MicroAICheckForRetreats", __exception);
+                }
             }
         }
 
@@ -45,7 +49,10 @@ namespace WhiskeyRealism.Patches
             [HarmonyFinalizer]
             internal static Exception Finalizer(Exception __exception)
             {
-                return Handle("CheckLineFallbacks", __exception);
+                using (TelemetryPerf.Scope("tactical.patch.fallback-retreat-guard.CheckLineFallbacks", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+                {
+                    return Handle("CheckLineFallbacks", __exception);
+                }
             }
         }
 
@@ -66,7 +73,10 @@ namespace WhiskeyRealism.Patches
             [HarmonyFinalizer]
             internal static Exception Finalizer(Exception __exception)
             {
-                return Handle("CheckOutOfFireRange", __exception);
+                using (TelemetryPerf.Scope("tactical.patch.fallback-retreat-guard.CheckOutOfFireRange", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+                {
+                    return Handle("CheckOutOfFireRange", __exception);
+                }
             }
         }
     }

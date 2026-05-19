@@ -6,6 +6,7 @@ using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
@@ -44,27 +45,32 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(Regiment aigroup, out ReserveState __state)
         {
-            if (!Enabled())
+            using (TelemetryPerf.Scope("tactical.patch.reserve-order-delay-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                __state = null;
-                return;
-            }
+                if (!Enabled())
+                {
+                    __state = null;
+                    return;
+                }
 
-            __state = Snapshot(aigroup);
-            if (TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder order))
-            {
-                __state.HasDoctrineDecision = true;
-                __state.DoctrineOrder = order;
-                __state.DoctrineDecision = DoctrineConsumerDecisions.DecideReserve(
-                    order,
-                    BuildOperationalReserveInput(aigroup),
-                    SafeCurrentTimeSeconds());
+                __state = Snapshot(aigroup);
+                if (TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder order))
+                {
+                    __state.HasDoctrineDecision = true;
+                    __state.DoctrineOrder = order;
+                    __state.DoctrineDecision = DoctrineConsumerDecisions.DecideReserve(
+                        order,
+                        BuildOperationalReserveInput(aigroup),
+                        SafeCurrentTimeSeconds());
+                }
             }
         }
 
         [HarmonyPostfix]
         internal static void Postfix(AIBattle __instance, Regiment aigroup, ReserveState __state)
         {
+            using (TelemetryPerf.Scope("tactical.patch.reserve-order-delay", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
             if (!Enabled()) return;
 
             try
@@ -143,6 +149,7 @@ namespace WhiskeyRealism.Patches
                     "tactical-reserve-delay-guard:failed",
                     "[TacticalReserveOrderDelayGuard] failed; vanilla reserve movement remains active: " + ex.Message);
             }
+            } // end using TelemetryPerf.Scope
         }
 
         private static void TryClearStalledFallbackOrder(

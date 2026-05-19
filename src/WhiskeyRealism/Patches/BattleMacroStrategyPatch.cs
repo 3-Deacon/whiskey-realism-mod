@@ -28,15 +28,18 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void Postfix(AIBattle __instance)
         {
-            if (!Enabled() || __instance == null) return;
+            using (TelemetryPerf.Scope("tactical.patch.battle-macro-strategy", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                if (!Enabled() || __instance == null) return;
 
-            try
-            {
-                Apply(__instance);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-macro:failed", "Tactical macro stance scorer failed: " + ex.Message);
+                try
+                {
+                    Apply(__instance);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-macro:failed", "Tactical macro stance scorer failed: " + ex.Message);
+                }
             }
         }
 
