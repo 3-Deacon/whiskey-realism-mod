@@ -1,6 +1,6 @@
 # Whiskey Realism Telemetry
 
-Default profile is `Off`; customer installs should not create tuning sidecars.
+**Default profile is `TacticalTuning`** as of 2026-05-18 (user direction): battles produce diagnostic sidecars by default. Disk usage is bounded by `Max Tuning Log MB` (default 250) and retention is capped to the newest 2 sessions, so this won't grow without limit. Set `Logging Profile = Off` in `<GTCW>/BepInEx/config/dev.kyle.whiskey-realism.cfg` if you want quiet operation.
 Tuning profiles write under `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session-id>/`.
 
 Profiles:
@@ -25,7 +25,7 @@ Output policy:
 - Tactical and campaign tuning rows route to JSONL sidecars only when a tuning profile is enabled.
 - `TacticalDecisionMatrix`, tactical observer, operations-ledger, campaign operation, and strategic tuning rows should not use `LogOutput.log` as their normal evidence stream after migration.
 - Serious warning/error conditions can still emit bounded `LogOutput.log` warnings where the player or maintainer needs immediate visibility.
-- `Off` should leave customer installs quiet and should not create `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/`.
+- `Off` (opt-in for users who want quiet operation) leaves the install silent and does not create `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/`.
 
 Sidecar files:
 - `tactical.jsonl`

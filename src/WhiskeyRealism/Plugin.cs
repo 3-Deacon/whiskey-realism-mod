@@ -202,8 +202,8 @@ namespace WhiskeyRealism
             TelemetryLoggingProfileRaw = Config.Bind(
                 "Telemetry",
                 "Logging Profile",
-                "Off",
-                "Off, TacticalTuning, CampaignTuning, or FullTuning. Controls structured tuning sidecars only; it does not enable or disable tactical/campaign behavior gates.");
+                "TacticalTuning",
+                "Off, TacticalTuning, CampaignTuning, or FullTuning. Default TacticalTuning per 2026-05-18 user direction so battles produce diagnostic sidecars by default. Set to Off if disk usage is a concern (sidecars under <GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session>/ — bounded by Max Tuning Log MB). This setting controls structured tuning sidecars only; it does not enable or disable tactical/campaign behavior gates.");
             TelemetryMaxTuningLogMb = Config.Bind(
                 "Telemetry",
                 "Max Tuning Log MB",
