@@ -1107,6 +1107,9 @@ static class Program
             ("army replan triggers ignore reserve exhaustion when fraction is unknown sentinel", ArmyReplanTriggersIgnoreReserveExhaustionWhenFractionIsUnknownSentinel),
             ("army replan triggers still fire reserve exhaustion above 0.85 known fraction", ArmyReplanTriggersStillFireReserveExhaustionAbove85PercentKnownFraction),
             ("army replan triggers at sentinel boundary do not trip reserve exhaustion", ArmyReplanTriggersAtSentinelBoundaryDoNotTripReserveExhaustion),
+            ("historical registry covers Hunter and Beauregard", HistoricalRegistryCoversHunterAndBeauregard),
+            ("historical registry normalizes initials and punctuation", HistoricalRegistryNormalizesInitialsAndPunctuation),
+            ("historical registry covers major Civil War commanders", HistoricalRegistryCoversMajorCivilWarCommanders),
             ("army tick cycle no trigger when all conditions normal", ArmyTickCycleNoTriggerWhenAllConditionsNormal),
             ("army tick cycle phase deadline fires", ArmyTickCyclePhaseDeadlineFires),
             ("army tick cycle rate limits replan within min replan seconds", ArmyTickCycleRateLimitsReplanWithinMinReplanSeconds),
@@ -23248,6 +23251,63 @@ static class Program
             enemyMainEffortShiftConfidenceWeighted: 0.0f);
         AssertEqual(ReplanTrigger.ReserveExhaustion, ArmyReplanTriggers.Evaluate(input),
             "known fraction >= 0.85 still fires ReserveExhaustion");
+    }
+
+    private static void HistoricalRegistryCoversHunterAndBeauregard()
+    {
+        // Telemetry showed TacticalCommanderUnknown for Hunter and Beauregard.
+        // Hunter was unregistered. Beauregard was registered but failed name match
+        // because the GTCW combinedname was 'P.G.T. Beauregard'. Both must now resolve.
+        AssertTrue(LookupEntry("Union", "Hunter").HasValue, "Hunter (Union) must be registered");
+        AssertTrue(LookupEntry("Union", "David Hunter").HasValue, "Hunter (full name) must match");
+        AssertTrue(LookupEntry("CSA", "Beauregard").HasValue, "Beauregard (CSA last name) must match");
+        AssertTrue(LookupEntry("CSA", "P.G.T. Beauregard").HasValue, "Beauregard (full name with initials) must match");
+    }
+
+    private static void HistoricalRegistryNormalizesInitialsAndPunctuation()
+    {
+        // NormalizeLastName must strip initials and punctuation when picking the
+        // last meaningful token. Short surnames (3 chars) like "Lee" and "Ord"
+        // must still be preserved.
+        AssertEqual("beauregard", HistoricalFigureRegistry.NormalizeLastNameForTest("P.G.T. Beauregard"), "PGT initials stripped");
+        AssertEqual("hill", HistoricalFigureRegistry.NormalizeLastNameForTest("A.P. Hill"), "AP initials stripped");
+        AssertEqual("lee", HistoricalFigureRegistry.NormalizeLastNameForTest("R.E. Lee"), "RE initials stripped, Lee kept");
+        AssertEqual("ord", HistoricalFigureRegistry.NormalizeLastNameForTest("E.O.C. Ord"), "EOC initials stripped, Ord kept");
+        AssertEqual("hunter", HistoricalFigureRegistry.NormalizeLastNameForTest("David Hunter"), "single first-name + lastname");
+        AssertEqual("forrest", HistoricalFigureRegistry.NormalizeLastNameForTest("Nathan Bedford Forrest"), "three-token name takes last");
+    }
+
+    private static void HistoricalRegistryCoversMajorCivilWarCommanders()
+    {
+        string[] mustCover = new[]
+        {
+            "Lee", "Jackson", "Longstreet", "Stuart", "Hood", "Bragg", "Johnston",
+            "Beauregard", "Forrest", "Polk", "Ewell", "Hill", "Early", "Hardee",
+            "Cleburne", "Pickett", "Wheeler", "Morgan", "Hampton",
+            "Grant", "Sherman", "Sheridan", "Meade", "Thomas", "Hooker", "Burnside",
+            "McClellan", "Pope", "Halleck", "Hunter", "Sigel", "Banks", "Buell",
+            "Rosecrans", "Schofield", "McPherson", "Reynolds", "Hancock", "Sedgwick",
+            "Buford", "Custer",
+        };
+        var missing = new System.Collections.Generic.List<string>();
+        foreach (var last in mustCover)
+        {
+            var union = LookupEntry("Union", last);
+            var csa = LookupEntry("CSA", last);
+            if (!union.HasValue && !csa.HasValue) missing.Add(last);
+        }
+        AssertTrue(missing.Count == 0, "registry missing: " + string.Join(",", missing));
+    }
+
+    private static PersonalityVector? LookupEntry(string allianceTag, string nameOrFull)
+    {
+        string normalized = HistoricalFigureRegistry.NormalizeLastNameForTest(nameOrFull);
+        foreach (var entry in HistoricalFigureRegistry.EntriesForTest)
+        {
+            if (entry.AllianceTag == allianceTag && entry.CanonicalName == normalized)
+                return entry.V;
+        }
+        return null;
     }
 
     private static void ArmyReplanTriggersAtSentinelBoundaryDoNotTripReserveExhaustion()
