@@ -14,8 +14,8 @@
 
 ## Source-of-truth citations
 
-- **Umbrella spec:** `docs/superpowers/specs/2026-05-08-tactical-battle-orchestrator-design.md` — O2 row in §"Phasing", §"Adversarial intent inference + personality", §"Decision flow + cadence".
-- **O2 sketch (precursor):** `docs/superpowers/plans/2026-05-08-tactical-orchestrator-o2-intent-sketch.md` — sketch this plan promotes from.
+- **Umbrella spec:** `docs/superpowers/specs/archive/2026-05-08-tactical-battle-orchestrator-design.md` — O2 row in §"Phasing", §"Adversarial intent inference + personality", §"Decision flow + cadence".
+- **O2 sketch (precursor):** `docs/superpowers/plans/archive/2026-05-08-tactical-orchestrator-o2-intent-sketch.md` — sketch this plan promotes from.
 - **O1 archived plan (foundation):** `docs/superpowers/plans/archive/2026-05-08-tactical-orchestrator-o1-army.md` — defines the entities O2 builds on.
 - **Slice A personality stack:** `docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md` — `PersonalityVector` semantics.
 
@@ -1705,7 +1705,7 @@ Two smoke scenarios. Both should surface `[TacticalIntent]` lines and (over time
 - [ ] **Step 3: Archive this plan.**
 
 ```bash
-git mv docs/superpowers/plans/2026-05-08-tactical-orchestrator-o2-intent.md docs/superpowers/plans/archive/
+git mv docs/superpowers/plans/archive/2026-05-08-tactical-orchestrator-o2-intent.md docs/superpowers/plans/archive/
 ```
 
 - [ ] **Step 4: Append an entry to `docs/superpowers/plans/archive/README.md`.**
@@ -1717,7 +1717,7 @@ git mv docs/superpowers/plans/2026-05-08-tactical-orchestrator-o2-intent.md docs
 - [ ] **Step 5: Optionally remove the O2 sketch** if it's now redundant with the archived full plan.
 
 ```bash
-git rm docs/superpowers/plans/2026-05-08-tactical-orchestrator-o2-intent-sketch.md
+git rm docs/superpowers/plans/archive/2026-05-08-tactical-orchestrator-o2-intent-sketch.md
 ```
 
 - [ ] **Step 6: Commit.**
@@ -1771,7 +1771,7 @@ After implementing through Task 10, before claiming O2 done:
 4. **No placeholders.** Re-grep:
 
 ```bash
-grep -nE "TODO|TBD|similar to Task|implement later" docs/superpowers/plans/2026-05-08-tactical-orchestrator-o2-intent.md
+grep -nE "TODO|TBD|similar to Task|implement later" docs/superpowers/plans/archive/2026-05-08-tactical-orchestrator-o2-intent.md
 ```
 
 Expected: empty output (the only matches are in this self-review checklist text describing what to grep for).

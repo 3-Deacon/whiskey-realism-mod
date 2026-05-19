@@ -64,6 +64,6 @@ For a telemetry smoke run:
 
 ## Evidence Boundary
 
-Task 10 deploy/hash proof was recorded on 2026-05-15 after `telemetry-framework-plan` was fast-forwarded into `main` at `feffbfc`: `dist/WhiskeyRealism.dll` and the deployed BepInEx plugin were both `1245184` bytes and matched SHA-256 `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75`.
+The telemetry framework was merged after `telemetry-framework-plan` fast-forwarded into `main` at `feffbfc`. Current artifact proof is the later deployed `562a61b5cd0cbbedc6d6002a349cd3d68ebf50ea1d60c941e3a5a9deeaafc57a` DLL (1327104 bytes; `1110 PASS`; clean build; matching deployed hash).
 
-Runtime smoke is still pending. The current `LogOutput.log` timestamp (`2026-05-15 07:54:28.457939800 -0500`) predates the `20:20` deploy, no `tuning-logs` directory existed in the read-only check, and new `[Telemetry]` config entries will not be proven until the freshly deployed plugin is launched.
+Runtime proof is partial. The prior loaded `695be770...` TacticalTuning session created tuning sidecars and wrote Active tactical rows without observed queue drops or sink failures, but it did not prove the current `562a61b5...` DLL loaded, the `Off` / `CampaignTuning` / `FullTuning` profile paths, validator output on a real session, cap transition, or production-cap restore. Fresh telemetry smoke must restart GTCW on `562a61b5...` and close those items.

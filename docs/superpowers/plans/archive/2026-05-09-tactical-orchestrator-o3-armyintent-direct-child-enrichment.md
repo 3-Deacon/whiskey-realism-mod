@@ -3062,9 +3062,9 @@ Expected: build succeeds, 624 PASS / 0 FAIL, DLL hashes still match.
 - [ ] **Step 6: Move spec + plan to archive**
 
 ```bash
-git mv docs/superpowers/specs/2026-05-09-tactical-orchestrator-o3-corps-design.md \
+git mv docs/superpowers/specs/archive/2026-05-09-tactical-orchestrator-o3-corps-design.md \
        docs/superpowers/specs/archive/2026-05-09-tactical-orchestrator-o3-corps-design.md
-git mv docs/superpowers/plans/2026-05-09-tactical-orchestrator-o3-armyintent-direct-child-enrichment.md \
+git mv docs/superpowers/plans/archive/2026-05-09-tactical-orchestrator-o3-armyintent-direct-child-enrichment.md \
        docs/superpowers/plans/archive/2026-05-09-tactical-orchestrator-o3-armyintent-direct-child-enrichment.md
 ```
 
@@ -3128,7 +3128,7 @@ Plan is ready for execution.
 
 ## Execution handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-05-09-tactical-orchestrator-o3-armyintent-direct-child-enrichment.md`. Two execution options:
+Plan complete and saved to `docs/superpowers/plans/archive/2026-05-09-tactical-orchestrator-o3-armyintent-direct-child-enrichment.md`. Two execution options:
 
 **1. Subagent-Driven (recommended)** — fresh subagent per task, two-stage review between tasks, fast iteration, parent agent retains oversight without burning context on intermediate code.
 

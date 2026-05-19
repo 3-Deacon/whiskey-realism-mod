@@ -14,8 +14,8 @@
 
 This plan implements one phase of the umbrella spec; do not deviate from the umbrella without amending it.
 
-- **Umbrella spec:** `docs/superpowers/specs/2026-05-08-tactical-battle-orchestrator-design.md` — O1 row in §"Phasing", §"Architecture", §"Playbooks", §"Decision flow + cadence".
-- **O0 scaffold (already merged):** `docs/superpowers/plans/2026-05-08-tactical-orchestrator-o0-scaffold.md` defines the bootstrap + lifecycle detector + empty `TacticalBattleOrchestrator.Echelons` slot O1 fills.
+- **Umbrella spec:** `docs/superpowers/specs/archive/2026-05-08-tactical-battle-orchestrator-design.md` — O1 row in §"Phasing", §"Architecture", §"Playbooks", §"Decision flow + cadence".
+- **O0 scaffold (already merged):** `docs/superpowers/plans/archive/2026-05-08-tactical-orchestrator-o0-scaffold.md` defines the bootstrap + lifecycle detector + empty `TacticalBattleOrchestrator.Echelons` slot O1 fills.
 - **Slice A personality stack:** `docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md` for `PersonalityVector` semantics.
 
 ---
@@ -2063,7 +2063,7 @@ Two scenarios. Record observations before claiming O1 done.
 - [ ] **Step 3:** Move this plan to archive.
 
 ```bash
-git mv docs/superpowers/plans/2026-05-08-tactical-orchestrator-o1-army.md docs/superpowers/plans/archive/
+git mv docs/superpowers/plans/archive/2026-05-08-tactical-orchestrator-o1-army.md docs/superpowers/plans/archive/
 ```
 
 - [ ] **Step 4:** Append an entry to `docs/superpowers/plans/archive/README.md`.
@@ -2117,7 +2117,7 @@ After implementing through Task 17, before claiming O1 done:
 5. **No placeholders.** This plan should contain no "TBD"/"TODO"/"similar to TaskN" — re-grep before declaring done.
 
 ```bash
-grep -nE "TODO|TBD|similar to Task|implement later" docs/superpowers/plans/2026-05-08-tactical-orchestrator-o1-army.md
+grep -nE "TODO|TBD|similar to Task|implement later" docs/superpowers/plans/archive/2026-05-08-tactical-orchestrator-o1-army.md
 ```
 
 Expected: empty output.

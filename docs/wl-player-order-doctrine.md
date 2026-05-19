@@ -7,8 +7,8 @@ Living reference for #62, Whiskey's W&L player-facing current-order doctrine for
 - **Implementation state:** merged to `main` and hash-deployed locally; runtime smoke is still pending.
 - **Patch ordinal:** #62 `PlayerSubordinateOrderPatch`.
 - **Default behavior:** diagnostics are on by default, writes are off by default.
-- **Verification:** console harness exits 0; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `a3c9552b8681ef983d3a9cec7acc3cde1906e4b3f691a5d5bcfcf71b8f775b33` (1260032 bytes).
-- **Lifecycle:** the design spec and implementation plan remain active until fresh in-game smoke proves bounded diagnostics and focused write behavior. Do not archive them yet.
+- **Verification:** console harness exits 0 across `1110` registered tests; `./build.sh` passed with `0 Warning(s)` / `0 Error(s)`; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin match SHA-256 `562a61b5cd0cbbedc6d6002a349cd3d68ebf50ea1d60c941e3a5a9deeaafc57a` (1327104 bytes). Focused #62 runtime smoke is still pending and requires explicitly enabling `Enable Player Order Doctrine`.
+- **Lifecycle:** the design spec and implementation plan are archived for traceability. Fresh in-game smoke still needs to prove bounded diagnostics and focused write behavior before this surface is runtime-smoke-complete.
 
 The doctrine translates existing tactical-orchestrator intent into vanilla W&L current orders for the player when the player is a subordinate in the W&L chain. It does not replace vanilla movement, campaign movement, or the W&L order UI. It asks vanilla `AIBattle.CheckCurrentOrderUpdate(...)` to deliver an order only after Whiskey dedupe and safety gates predict the request is valid.
 
@@ -186,5 +186,5 @@ Enable W&L Player Order Doctrine Diagnostics = false
 - Pure doctrine: `src/WhiskeyRealism/Tactical/PlayerOrders/`
 - Campaign bridge: `src/WhiskeyRealism/Strategic/WlStrategicOrderBridge.cs`
 - Patch catalog: `docs/patch-catalog.md`
-- Spec: `docs/superpowers/specs/2026-05-12-wl-player-order-doctrine-design.md`
-- Plan: `docs/superpowers/plans/2026-05-12-wl-player-order-doctrine-implementation.md`
+- Archived spec: `docs/superpowers/specs/archive/2026-05-12-wl-player-order-doctrine-design.md`
+- Archived plan: `docs/superpowers/plans/archive/2026-05-12-wl-player-order-doctrine-implementation.md`

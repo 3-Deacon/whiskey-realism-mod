@@ -37,8 +37,8 @@ Read these before implementation:
 - `docs/handoff.md`
 - `docs/patch-catalog.md`
 - `docs/superpowers/AGENTS.md`
-- `docs/superpowers/specs/2026-05-05-tactical-brain-design.md`
-- `docs/superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md`
+- `docs/superpowers/specs/archive/2026-05-05-tactical-brain-design.md`
+- `docs/superpowers/specs/archive/2026-05-05-tactical-brain-vanilla-verification.md`
 - `docs/superpowers/plans/archive/2026-05-05-tactical-brain-master-sequencing.md`
 - `src/WhiskeyRealism/Patches/AGENTS.md`
 - `tests/WhiskeyRealism.Tests/AGENTS.md`
@@ -1285,6 +1285,6 @@ B0 is complete only when all are true:
 
 After B0 ships:
 
-- If `[TacticalCharge]` and `[TacticalFeud]` were observed in W&L runtime smoke, write `docs/superpowers/plans/2026-05-05-tactical-b1-wl-feud-charge-guard.md`.
+- If `[TacticalCharge]` and `[TacticalFeud]` were observed in W&L runtime smoke, write `docs/superpowers/plans/archive/2026-05-05-tactical-b1-wl-feud-charge-guard.md`.
 - If they were not observed, run a focused W&L feud/charge reproduction smoke before writing B1 behavior code.
 - Do not start B2/B3 before B0 telemetry proves sector/order extraction quality.

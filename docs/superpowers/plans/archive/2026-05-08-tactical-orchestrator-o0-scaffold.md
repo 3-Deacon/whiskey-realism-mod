@@ -40,8 +40,8 @@ Read these before implementation:
 - `docs/handoff.md`
 - `docs/patch-catalog.md`
 - `docs/superpowers/AGENTS.md`
-- `docs/superpowers/specs/2026-05-08-tactical-battle-orchestrator-design.md` ← THIS PLAN'S SPEC
-- `docs/superpowers/specs/2026-05-05-tactical-brain-design.md` (Slice B umbrella)
+- `docs/superpowers/specs/archive/2026-05-08-tactical-battle-orchestrator-design.md` ← THIS PLAN'S SPEC
+- `docs/superpowers/specs/archive/2026-05-05-tactical-brain-design.md` (Slice B umbrella)
 - `src/WhiskeyRealism/Patches/AGENTS.md`
 - `src/WhiskeyRealism/Strategic/AGENTS.md` (singleton pattern reference: `StrategicCoordinator.cs`)
 - `tests/WhiskeyRealism.Tests/AGENTS.md`

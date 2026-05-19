@@ -20,8 +20,8 @@ Read these before creating any B-slice plan:
 - `docs/handoff.md`
 - `docs/patch-catalog.md`
 - `docs/superpowers/AGENTS.md`
-- `docs/superpowers/specs/2026-05-05-tactical-brain-design.md`
-- `docs/superpowers/specs/2026-05-05-tactical-brain-vanilla-verification.md`
+- `docs/superpowers/specs/archive/2026-05-05-tactical-brain-design.md`
+- `docs/superpowers/specs/archive/2026-05-05-tactical-brain-vanilla-verification.md`
 - `docs/superpowers/specs/archive/2026-05-07-tactical-b6-commander-intent-local-reaction-design.md` before creating any B6 plan
 - `src/WhiskeyRealism/Patches/AGENTS.md`
 - `src/WhiskeyRealism/Strategic/AGENTS.md`
@@ -277,7 +277,7 @@ Update:
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-05-05-tactical-b1-wl-feud-charge-guard.md`
+- Create: `docs/superpowers/plans/archive/2026-05-05-tactical-b1-wl-feud-charge-guard.md`
 - Future create: `src/WhiskeyRealism/Patches/BattleChargeGatePatch.cs`
 - Future create: `src/WhiskeyRealism/Patches/BattleFeudActionGatePatch.cs`
 - Future create or modify: `src/WhiskeyRealism/Tactical/TacticalDoctrineScorer.cs`
@@ -313,7 +313,7 @@ B1 may only add the W&L action guard around the two missing surfaces. It must pr
 - [ ] **Step 4: Commit B1 plan**
 
 ```bash
-git add docs/superpowers/plans/2026-05-05-tactical-b1-wl-feud-charge-guard.md
+git add docs/superpowers/plans/archive/2026-05-05-tactical-b1-wl-feud-charge-guard.md
 git commit -m "docs: plan tactical b1 wl feud charge guard"
 ```
 
@@ -436,7 +436,7 @@ Status update 2026-05-07: B3-B5 were implemented together under `docs/superpower
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-05-05-tactical-b3-odds-doctrine.md`
+- Create: `docs/superpowers/plans/archive/2026-05-05-tactical-b3-odds-doctrine.md`
 - Future create: `src/WhiskeyRealism/Tactical/TacticalContactLedger.cs`
 - Future create: `src/WhiskeyRealism/Tactical/TacticalSectorLedger.cs`
 - Future create: `src/WhiskeyRealism/Tactical/TacticalOddsDoctrine.cs`
@@ -502,7 +502,7 @@ Add `[TacticalOdds]` and `[TacticalSector]` signature summaries. No behavior cha
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-05-05-tactical-b4-macro-stance-scorer.md`
+- Create: `docs/superpowers/plans/archive/2026-05-05-tactical-b4-macro-stance-scorer.md`
 - Future create: `src/WhiskeyRealism/Tactical/TacticalBattlePlan.cs`
 - Future create: `src/WhiskeyRealism/Tactical/TacticalDoctrineScorer.cs`
 - Future create: `src/WhiskeyRealism/Patches/BattleMacroStrategyPatch.cs`
@@ -566,7 +566,7 @@ Smoke meeting engagement and outnumbered defensive battle. Pass requires no inst
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-05-05-tactical-b5-group-sector-stance.md`
+- Create: `docs/superpowers/plans/archive/2026-05-05-tactical-b5-group-sector-stance.md`
 - Future create or modify: `src/WhiskeyRealism/Tactical/TacticalSectorLedger.cs`
 - Future create: `src/WhiskeyRealism/Patches/BattleGroupStancePatch.cs`
 
@@ -812,7 +812,7 @@ Use `CheckLineFallbacks(...)`-style local movement for local fallback and preser
 
 **Files:**
 
-- Create: `docs/superpowers/plans/2026-05-05-tactical-b9-tuning-telemetry-soak.md`
+- Create: `docs/superpowers/plans/archive/2026-05-05-tactical-b9-tuning-telemetry-soak.md`
 - Future modify: tactical scorer files as dictated by smoke evidence
 - Future modify: docs only after measured results
 

@@ -42,6 +42,6 @@ Patch catalog entries:
 
 ## Runtime Evidence
 
-The bridge implementation was build/deploy/hash verified in the historical-operation DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes). Current deployed `main` DLL is `cfdb9018bc0cb7c0fcb7ba1e28acac0b1b119243856ef3a027716f8b9b930e75` (1245184 bytes; 1075 PASS), which includes later tactical orchestrator, deployment, terrain/facing, operations-ledger, and default-off W&L player-subordinate bridge work.
+The bridge implementation was build/deploy/hash verified in the historical-operation DLL `c90a5873e23ad1e7c0ac34e9c9b5cbad5554c0a5a2ee3fcc2aef299394366e0b` (481280 bytes). Current deployed `main` DLL is `562a61b5cd0cbbedc6d6002a349cd3d68ebf50ea1d60c941e3a5a9deeaafc57a` (1327104 bytes; 1110 PASS), which includes later tactical orchestrator, deployment, terrain/facing, operations-ledger, #63 map-knowledge diagnostics, #61 stale active-move hardening, and default-off W&L player-subordinate bridge work.
 
 Fresh gameplay smoke for newly generated `[W&LDispatch]` sanitizer lines, bridge-order lines, and absence of newly generated `"to none"` text remains pending on the current DLL. Do not claim runtime text/order success until `BepInEx/LogOutput.log` comes from a restart after the current deploy.

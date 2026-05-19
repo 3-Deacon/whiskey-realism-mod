@@ -129,7 +129,7 @@ Whiskey status:
 Whiskey status:
 
 - Implemented analogs: historical operation profiles, coordinated operation packages, formation directives, operational probes, defensive packages, supply/logistics pressure, and campaign objective scoring.
-- Spec created: [`docs/superpowers/specs/2026-05-14-scourge-campaign-advance-guard-sandbox-design.md`](superpowers/specs/2026-05-14-scourge-campaign-advance-guard-sandbox-design.md).
+- Current backlog guidance: [`docs/strategic-recon-commitment.md`](strategic-recon-commitment.md). Archived source spec: [`docs/superpowers/specs/archive/2026-05-14-scourge-campaign-advance-guard-sandbox-design.md`](superpowers/specs/archive/2026-05-14-scourge-campaign-advance-guard-sandbox-design.md).
 - Still not runtime-implemented: campaign-map advance-guard/picket/supply-base detachment remains a strategic slice because it needs sidecar persistence, campaign movement API smoke, and W&L/player movement guards before shipping.
 
 ## Additional Transfer Candidates From Lower-Level Gettysburg Pass

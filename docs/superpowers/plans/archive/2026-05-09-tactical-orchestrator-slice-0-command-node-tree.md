@@ -18,7 +18,7 @@
 - Existing army state holder: `src/WhiskeyRealism/Tactical/Orchestrator/ArmyOrchestrator.cs`
 - Test harness registration: `tests/WhiskeyRealism.Tests/Program.cs`
 - Test project explicit compile list: `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj`
-- Slice spec: `docs/superpowers/specs/2026-05-09-tactical-orchestrator-remaining-patches-design.md`
+- Slice spec: `docs/superpowers/specs/archive/2026-05-09-tactical-orchestrator-remaining-patches-design.md`
 
 ## Non-Goals
 
