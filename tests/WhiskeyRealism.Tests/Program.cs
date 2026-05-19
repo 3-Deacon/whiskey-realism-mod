@@ -1096,6 +1096,9 @@ static class Program
             ("army replan triggers reinforcement arrival fires on nonzero delta", ArmyReplanTriggersReinforcementArrivalFiresOnNonzeroDelta),
             ("army replan triggers enemy intent shift fires when confidence weighted exceeds floor", ArmyReplanTriggersEnemyIntentShiftFiresWhenConfidenceWeightedExceedsFloor),
             ("army replan triggers none when all conditions normal", ArmyReplanTriggersNoneWhenAllConditionsNormal),
+            ("army replan triggers ignore reserve exhaustion when fraction is unknown sentinel", ArmyReplanTriggersIgnoreReserveExhaustionWhenFractionIsUnknownSentinel),
+            ("army replan triggers still fire reserve exhaustion above 0.85 known fraction", ArmyReplanTriggersStillFireReserveExhaustionAbove85PercentKnownFraction),
+            ("army replan triggers at sentinel boundary do not trip reserve exhaustion", ArmyReplanTriggersAtSentinelBoundaryDoNotTripReserveExhaustion),
             ("army tick cycle no trigger when all conditions normal", ArmyTickCycleNoTriggerWhenAllConditionsNormal),
             ("army tick cycle phase deadline fires", ArmyTickCyclePhaseDeadlineFires),
             ("army tick cycle rate limits replan within min replan seconds", ArmyTickCycleRateLimitsReplanWithinMinReplanSeconds),
@@ -23061,6 +23064,56 @@ static class Program
     {
         var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, 0f, 0f);
         AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(input), "no trigger fires when conditions normal");
+    }
+
+    private static void ArmyReplanTriggersIgnoreReserveExhaustionWhenFractionIsUnknownSentinel()
+    {
+        // 0.35 is the UnknownReserveCommitSentinel from ArmyEvidenceBuilder/ArmyReplanTriggers.
+        // It must NOT trip ReserveExhaustion. Pre-fix: ArmyEvidenceBuilder returned 1.0
+        // when chains existed but had no reservegroups, which tripped this trigger every
+        // cycle and produced the replan thrash observed in the 695be770... runtime.
+        var input = new ReplanTriggerInput(
+            planAgeSeconds: 10f, currentPhase: BattlePhase.Probe,
+            mainEffortOwnStrength: 1000f, mainEffortHistoryOwnStrength: 1000f,
+            globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
+            armyMoraleCurrent: 0.9f, armyMoraleFloor: 0.4f,
+            reservesCommittedFraction: 0.35f,
+            reinforcementsArrivingDelta: 0f,
+            enemyMainEffortShiftConfidenceWeighted: 0.0f);
+        AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(input),
+            "0.35 unknown sentinel must not trip ReserveExhaustion");
+    }
+
+    private static void ArmyReplanTriggersStillFireReserveExhaustionAbove85PercentKnownFraction()
+    {
+        // Regression: a genuinely high committed fraction (not the sentinel) still fires.
+        var input = new ReplanTriggerInput(
+            planAgeSeconds: 10f, currentPhase: BattlePhase.Probe,
+            mainEffortOwnStrength: 1000f, mainEffortHistoryOwnStrength: 1000f,
+            globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
+            armyMoraleCurrent: 0.9f, armyMoraleFloor: 0.4f,
+            reservesCommittedFraction: 0.90f,
+            reinforcementsArrivingDelta: 0f,
+            enemyMainEffortShiftConfidenceWeighted: 0.0f);
+        AssertEqual(ReplanTrigger.ReserveExhaustion, ArmyReplanTriggers.Evaluate(input),
+            "known fraction >= 0.85 still fires ReserveExhaustion");
+    }
+
+    private static void ArmyReplanTriggersAtSentinelBoundaryDoNotTripReserveExhaustion()
+    {
+        // Boundary: exactly at the sentinel value still treated as unknown.
+        // Values close-but-not-equal (e.g., 0.34 or 0.36) are treated as known
+        // and won't trip because they're below 0.85 anyway.
+        var atSentinel = new ReplanTriggerInput(
+            planAgeSeconds: 10f, currentPhase: BattlePhase.Probe,
+            mainEffortOwnStrength: 1000f, mainEffortHistoryOwnStrength: 1000f,
+            globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
+            armyMoraleCurrent: 0.9f, armyMoraleFloor: 0.4f,
+            reservesCommittedFraction: 0.35f,
+            reinforcementsArrivingDelta: 0f,
+            enemyMainEffortShiftConfidenceWeighted: 0.0f);
+        AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(atSentinel),
+            "at sentinel boundary: no trigger");
     }
 
     private static void ArmyTickCycleNoTriggerWhenAllConditionsNormal()

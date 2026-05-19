@@ -366,16 +366,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static float EstimateReserveCommitFraction(AIBattle battle, BattleUnits bunits, int side, float activeForce)
         {
-            if (!TrySumReservePoolStrength(battle, bunits, side, out float reserveStrength))
+            if (!TrySumReservePoolStrength(battle, bunits, side, out float reserveStrength, out bool hasDesignatedReserves))
+                return UnknownReserveCommitFraction;
+
+            // Chains exist but no reservegroups designated for this side. The army
+            // has no reserve plan; report "unknown" rather than 100% committed.
+            // Otherwise ArmyReplanTriggers.ReserveExhaustion fires every cycle.
+            if (!hasDesignatedReserves)
                 return UnknownReserveCommitFraction;
 
             float committed = 1f - reserveStrength / Math.Max(1f, activeForce);
             return Clamp01OrDefault(committed, UnknownReserveCommitFraction);
         }
 
-        private static bool TrySumReservePoolStrength(AIBattle battle, BattleUnits bunits, int side, out float reserveStrength)
+        private static bool TrySumReservePoolStrength(AIBattle battle, BattleUnits bunits, int side, out float reserveStrength, out bool hasDesignatedReserves)
         {
             reserveStrength = 0f;
+            hasDesignatedReserves = false;
             try
             {
                 var chains = ResolveObjectiveChains(battle);
@@ -404,6 +411,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         int id = SafeInstanceId(group);
                         if (id != 0 && !seen.Add(id)) continue;
 
+                        hasDesignatedReserves = true;
                         reserveStrength += ActiveGroupStrength(group);
                     }
                 }
@@ -413,6 +421,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch
             {
                 reserveStrength = 0f;
+                hasDesignatedReserves = false;
                 return false;
             }
         }

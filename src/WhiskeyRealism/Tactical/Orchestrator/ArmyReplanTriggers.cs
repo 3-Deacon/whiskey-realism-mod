@@ -64,6 +64,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public const float ReservesAlmostSpent = 0.85f;
         public const float EnemyShiftConfidenceFloor = 0.5f;
 
+        // Mirrors ArmyEvidenceBuilder.UnknownReserveCommitFraction. When the
+        // evidence builder cannot determine a real reserve fraction (no chains,
+        // no reservegroups, alliance lookup failed) it returns this sentinel.
+        // The replan trigger must treat the sentinel as "unknown" rather than
+        // letting it drive ReserveExhaustion.
+        public const float UnknownReserveCommitSentinel = 0.35f;
+        private const float SentinelTolerance = 0.0001f;
+
         /// <summary>
         /// Evaluates the 7 replan triggers in priority order — phase deadline
         /// first (hard battlefield clock), intent shift last (soft inference).
@@ -83,11 +91,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return ReplanTrigger.ForceImbalanceShift;
 
             if (i.ArmyMoraleCurrent < i.ArmyMoraleFloor) return ReplanTrigger.CasualtyThreshold;
-            if (i.ReservesCommittedFraction >= ReservesAlmostSpent) return ReplanTrigger.ReserveExhaustion;
+            if (IsReserveCommitFractionKnown(i.ReservesCommittedFraction) &&
+                i.ReservesCommittedFraction >= ReservesAlmostSpent)
+                return ReplanTrigger.ReserveExhaustion;
             if (i.ReinforcementsArrivingDelta > 1f) return ReplanTrigger.ReinforcementArrival;
             if (i.EnemyMainEffortShiftConfidenceWeighted >= EnemyShiftConfidenceFloor) return ReplanTrigger.EnemyIntentShift;
 
             return ReplanTrigger.None;
+        }
+
+        private static bool IsReserveCommitFractionKnown(float fraction)
+        {
+            float diff = fraction - UnknownReserveCommitSentinel;
+            if (diff < 0f) diff = -diff;
+            return diff > SentinelTolerance;
         }
     }
 }
