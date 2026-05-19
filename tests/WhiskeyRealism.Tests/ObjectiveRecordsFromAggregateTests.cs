@@ -10,7 +10,6 @@ internal static class ObjectiveRecordsFromAggregateTests
         VisibleEnemyLineReturnsFalseWhenNoOwnUnitHasVisibleEnemy();
         MovementAnchorComputesWeightedCentroidOfWaypoints();
         MovementAnchorReturnsFalseWhenAllOwnHaveNoWaypoint();
-        ApproachAvenueObservationsExcludeRoutedEnemies();
     }
 
     private static void LogPass(string message)
@@ -143,20 +142,4 @@ internal static class ObjectiveRecordsFromAggregateTests
         LogPass("movement anchor returns false when all own have no waypoint");
     }
 
-    private static void ApproachAvenueObservationsExcludeRoutedEnemies()
-    {
-        var agg = new TacticalUnitObservationAggregate();
-        // Enemy unit 1: non-routed — should produce an observation
-        // Enemy unit 2: routed — should be excluded
-        // Own unit: should not produce enemy-side observations
-        agg.LoadForTest(0, new[]
-        {
-            MakeUnit(1, 1, worldX: 100f, worldZ: 100f, strength: 100f, isRouted: false),
-            MakeUnit(2, 1, worldX: 200f, worldZ: 200f, strength: 200f, isRouted: true),
-            MakeUnit(3, 0, worldX: 50f,  worldZ: 50f,  strength: 50f),
-        });
-        var observations = TacticalVisionRuntimeAdapter.BuildApproachAvenueObservationsFromAggregate_ForTest(agg, 0);
-        TestHarness.AssertEqual(1, observations.Length, "approach avenue observations exclude routed enemies count");
-        LogPass("approach avenue observations exclude routed enemies");
-    }
 }

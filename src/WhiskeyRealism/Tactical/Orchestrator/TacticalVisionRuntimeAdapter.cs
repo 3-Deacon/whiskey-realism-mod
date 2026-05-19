@@ -475,10 +475,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     friendlyStrengths,
                     seenObjectiveIds);
 
+                // ApproachAvenue observations come from BattleUnits.scheduledarrival, NOT
+                // completeunitlist. The legacy walk is already cheap (small arrivals list)
+                // and is the correct data source. Reusing legacy here matches the prior
+                // per-call behavior exactly — aggregate path's only contribution to this
+                // stage is sharing the rest of the function's loop avoidance.
                 ApplyApproachAvenues(
                     observations,
                     allianceId,
-                    BuildApproachAvenueObservationsFromAggregate(source, allianceId));
+                    BuildApproachAvenueObservations(allianceId));
 
                 bool haveVisibleEnemy = TryVisibleEnemyLineFromAggregate(
                     source,
@@ -723,48 +728,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 return Array.Empty<TacticalApproachAvenueObservation>();
             }
-        }
-
-        private static TacticalApproachAvenueObservation[] BuildApproachAvenueObservationsFromAggregate(
-            IObservationSource source,
-            int allianceId)
-        {
-            var observations = new List<TacticalApproachAvenueObservation>();
-            try
-            {
-                // Build avenue observations from known enemy positions.
-                // Uses VisibleEnemyLine source so SelectBest can reason about
-                // approach direction. Each enemy unit contributes one observation
-                // with its world position as both origin and target (single-point
-                // contact with no directional advance information).
-                for (int ei = 0; ei < source.EnemyIndices.Count; ei++)
-                {
-                    int idx = source.EnemyIndices[ei];
-                    var enemy = source.AllUnits[idx];
-                    if (enemy.IsRouted) continue;
-                    if (enemy.PermanentlyDetached) continue;
-                    var p = new TacticalMapPoint(enemy.WorldX, enemy.WorldZ);
-                    if (!IsUsableMapPoint(p)) continue;
-                    observations.Add(new TacticalApproachAvenueObservation(
-                        TacticalApproachAvenueSource.VisibleEnemyLine,
-                        ResolveEnemyAlliance(allianceId),
-                        p.X,
-                        p.Z,
-                        p.X,
-                        p.Z,
-                        0.60f,
-                        roadAnchored: false,
-                        crossingAnchored: false,
-                        "aggregate-enemy-" + ei));
-                }
-            }
-            catch (Exception e)
-            {
-                OnceLog.Warning("tactical-orch:approach-avenue-aggregate",
-                    "BuildApproachAvenueObservationsFromAggregate degraded: "
-                    + e.GetType().Name + " " + e.Message);
-            }
-            return observations.ToArray();
         }
 
         private static void AddEntryPointAvenues(
@@ -1482,10 +1445,5 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return TryMovementAnchorLineFromAggregate(source, allianceId, out point, out friendlyStrength);
         }
 
-        internal static TacticalApproachAvenueObservation[] BuildApproachAvenueObservationsFromAggregate_ForTest(
-            IObservationSource source, int allianceId)
-        {
-            return BuildApproachAvenueObservationsFromAggregate(source, allianceId);
-        }
     }
 }
