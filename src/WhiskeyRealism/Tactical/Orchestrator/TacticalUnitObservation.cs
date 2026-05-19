@@ -25,7 +25,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float groupOwnInRange,
             float groupAiGroup,
             bool hasCurrentSetObjective,
-            int currentSetObjectiveId,
+            string objectiveName,
             float objectiveX,
             float objectiveZ,
             TacticalObjectiveType objectiveType,
@@ -49,7 +49,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             GroupOwnInRange = groupOwnInRange;
             GroupAiGroup = groupAiGroup;
             HasCurrentSetObjective = hasCurrentSetObjective;
-            CurrentSetObjectiveId = currentSetObjectiveId;
+            ObjectiveName = objectiveName ?? string.Empty;
             ObjectiveX = objectiveX;
             ObjectiveZ = objectiveZ;
             ObjectiveType = objectiveType;
@@ -74,7 +74,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float GroupOwnInRange { get; }
         public float GroupAiGroup { get; }
         public bool HasCurrentSetObjective { get; }
-        public int CurrentSetObjectiveId { get; }
+        /// <summary>
+        /// Raw objective name string captured via reflection on <c>objectivename</c>.
+        /// Empty string when the objective is nameless or unreadable. Use
+        /// <see cref="HasCurrentSetObjective"/> as the presence flag — this field
+        /// is empty for both nameless objectives and no-objective cases.
+        /// Task 8's BuildObjectiveRecordsFromAggregate reconstructs the legacy id
+        /// formula (<c>string.IsNullOrWhiteSpace(name) ? "objective-" + observations.Count : name</c>)
+        /// at consumption time to produce bit-identical id streams.
+        /// </summary>
+        public string ObjectiveName { get; }
         public float ObjectiveX { get; }
         public float ObjectiveZ { get; }
         public TacticalObjectiveType ObjectiveType { get; }

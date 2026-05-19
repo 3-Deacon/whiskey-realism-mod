@@ -1014,25 +1014,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Returns a stable integer hash for an objective, suitable for use as
-        /// <see cref="TacticalUnitObservation.CurrentSetObjectiveId"/>. Delegates to
-        /// <see cref="SafeObjectiveId"/> with index 0. For objectives that carry a
-        /// name, the name dominates and parity with the indexed BuildObjectiveRecords
-        /// path holds. For nameless objectives all calls hash to the same constant
-        /// (index 0), which is harmless for per-unit observation equality but would
-        /// diverge from the multi-objective indexed path in Task 10; tracked as a
-        /// known semantic gap in the Task 7 commit.
+        /// Returns the raw objective name string for use as
+        /// <see cref="TacticalUnitObservation.ObjectiveName"/>. Returns
+        /// <see cref="string.Empty"/> when the name is null, empty, whitespace,
+        /// or unreadable. Callers apply their own fallback formula at the right
+        /// point in the iteration (e.g. Task 8's BuildObjectiveRecordsFromAggregate
+        /// replicates the legacy <c>SafeObjectiveId(obj, observations.Count)</c>
+        /// formula at consumption time for bit-identical id streams).
         /// </summary>
-        internal static int SafeObjectiveIdHash(object objective)
+        internal static string SafeObjectiveName(object objective)
         {
             try
             {
-                string id = SafeObjectiveId(objective, 0);
-                return string.IsNullOrEmpty(id) ? 0 : id.GetHashCode();
+                var name = SafeField(objective, "objectivename")?.GetValue(objective) as string;
+                return string.IsNullOrWhiteSpace(name) ? string.Empty : name;
             }
             catch
             {
-                return 0;
+                return string.Empty;
             }
         }
 

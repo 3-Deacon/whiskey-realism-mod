@@ -31,7 +31,7 @@ internal static class TacticalUnitObservationAggregateTests
                 groupOwnInRange: 100f,
                 groupAiGroup: 100f,
                 hasCurrentSetObjective: false,
-                currentSetObjectiveId: 0,
+                objectiveName: "",
                 objectiveX: 0f,
                 objectiveZ: 0f,
                 objectiveType: TacticalObjectiveType.UnknownVanillaObjective,

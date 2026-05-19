@@ -100,7 +100,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float groupAiGroup = SafeAiGroup(reg);
 
             bool hasObj = false;
-            int objId = 0;
+            string objectiveName = string.Empty;
             float objX = 0f, objZ = 0f;
             var objType = TacticalObjectiveType.UnknownVanillaObjective;
             bool hasLastWaypoint = false;
@@ -125,7 +125,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         if (TacticalVisionRuntimeAdapter.IsUsableMapPoint(pt))
                         {
                             hasObj = true;
-                            objId = TacticalVisionRuntimeAdapter.SafeObjectiveIdHash(obj);
+                            objectiveName = TacticalVisionRuntimeAdapter.SafeObjectiveName(obj);
                             objX = pt.X;
                             objZ = pt.Z;
                             objType = TacticalObjectiveType.UnknownVanillaObjective;
@@ -180,7 +180,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 groupOwnInRange: groupOwnInRange,
                 groupAiGroup: groupAiGroup,
                 hasCurrentSetObjective: hasObj,
-                currentSetObjectiveId: objId,
+                objectiveName: objectiveName,
                 objectiveX: objX,
                 objectiveZ: objZ,
                 objectiveType: objType,
