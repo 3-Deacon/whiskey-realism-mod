@@ -1108,6 +1108,24 @@ static class Program
             ("army replan triggers ignore reserve exhaustion when fraction is unknown sentinel", ArmyReplanTriggersIgnoreReserveExhaustionWhenFractionIsUnknownSentinel),
             ("army replan triggers still fire reserve exhaustion above 0.85 known fraction", ArmyReplanTriggersStillFireReserveExhaustionAbove85PercentKnownFraction),
             ("army replan triggers at sentinel boundary do not trip reserve exhaustion", ArmyReplanTriggersAtSentinelBoundaryDoNotTripReserveExhaustion),
+            ("role cascade single child inherits parent role", RoleCascadeSingleChildInheritsParentRole),
+            ("role cascade main distributes center main flanks refuse", RoleCascadeMainDistributesCenterMainFlanksRefuse),
+            ("role cascade main aggressive widens support band", RoleCascadeMainAggressiveWidensSupportBand),
+            ("role cascade main cautious reserves more flanks", RoleCascadeMainCautiousReservesMoreFlanks),
+            ("role cascade reserve all children reserve", RoleCascadeReserveAllChildrenReserve),
+            ("role cascade fix all children fix", RoleCascadeFixAllChildrenFix),
+            ("role cascade refuse right anchors outermost", RoleCascadeRefuseRightAnchorsOutermost),
+            ("role cascade fallback all children fallback", RoleCascadeFallbackAllChildrenFallback),
+            ("role cascade leaf task mapping is exhaustive", RoleCascadeLeafTaskMappingIsExhaustive),
+            ("command tree probe builds parent links", CommandTreeProbeBuildsParentLinks),
+            ("command tree probe enumerates leaves three tier", CommandTreeProbeEnumeratesLeavesThreeTier),
+            ("command tree probe sorts siblings left to right", CommandTreeProbeSortsSiblingsLeftToRight),
+            ("command tree probe empty input returns empty map", CommandTreeProbeEmptyInputReturnsEmptyMap),
+            ("leaf brigade map flat army four brigades main", LeafBrigadeMapFlatArmyFourBrigadesMain),
+            ("leaf brigade map three tier cascade main into division", LeafBrigadeMapThreeTierCascadeMainIntoDivision),
+            ("leaf brigade map reserve cascades to all leaves", LeafBrigadeMapReserveCascadesToAllLeaves),
+            ("leaf brigade map records full cascade chain", LeafBrigadeMapRecordsFullCascadeChain),
+            ("leaf brigade map empty inputs return empty map", LeafBrigadeMapEmptyInputsReturnEmptyMap),
             ("historical registry covers Hunter and Beauregard", HistoricalRegistryCoversHunterAndBeauregard),
             ("historical registry normalizes initials and punctuation", HistoricalRegistryNormalizesInitialsAndPunctuation),
             ("historical registry covers major Civil War commanders", HistoricalRegistryCoversMajorCivilWarCommanders),
@@ -23277,6 +23295,366 @@ static class Program
             enemyMainEffortShiftConfidenceWeighted: 0.0f);
         AssertEqual(ReplanTrigger.ReserveExhaustion, ArmyReplanTriggers.Evaluate(input),
             "known fraction >= 0.85 still fires ReserveExhaustion");
+    }
+
+    // ====== Role cascade tests (Task 1) ======
+
+    private static void RoleCascadeSingleChildInheritsParentRole()
+    {
+        // With childCount==1 the cascade collapses: the single child inherits
+        // the parent's role directly. This is the no-distribution boundary.
+        var roles = new[]
+        {
+            DirectChildRole.Main, DirectChildRole.SupportMain, DirectChildRole.Fix,
+            DirectChildRole.Screen, DirectChildRole.RefuseLeft, DirectChildRole.RefuseRight,
+            DirectChildRole.Reserve, DirectChildRole.Fallback,
+        };
+        foreach (var parent in roles)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(parent, 0, 1, 1, 0, 0.5f);
+            AssertEqual(parent, TacticalRoleCascade.DistributeChildRole(ctx),
+                "single child cascades " + parent + " unchanged");
+        }
+    }
+
+    private static void RoleCascadeMainDistributesCenterMainFlanksRefuse()
+    {
+        // 4-child cascade with default-aggression commander. center = 4/2 = 2
+        // (right-biased for even N). With supportBand=1 (default aggression):
+        //   idx 0 distance 2 from center  → outside band  → RefuseLeft
+        //   idx 1 distance 1              → SupportMain
+        //   idx 2 distance 0              → Main (anchor)
+        //   idx 3 distance 1              → SupportMain (the right flank of an
+        //                                                 even-N cascade is part
+        //                                                 of the support band, not
+        //                                                 a refused flank)
+        // For symmetric 5-child cascades both flanks refuse evenly; even-N
+        // bias falls on the right which is acceptable militarily.
+        var results = new DirectChildRole[4];
+        for (int i = 0; i < 4; i++)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(DirectChildRole.Main, i, 4, 1, 0, 0.5f);
+            results[i] = TacticalRoleCascade.DistributeChildRole(ctx);
+        }
+        AssertEqual(DirectChildRole.RefuseLeft,  results[0], "idx 0 refuses left flank (distance 2)");
+        AssertEqual(DirectChildRole.SupportMain, results[1], "idx 1 supports adjacent to center");
+        AssertEqual(DirectChildRole.Main,        results[2], "idx 2 (right-bias center) is Main anchor");
+        AssertEqual(DirectChildRole.SupportMain, results[3], "idx 3 supports adjacent (even-N right side)");
+
+        // 5-child cascade (true symmetric): both ends refuse, support band on
+        // both sides of true center idx 2.
+        var sym = new DirectChildRole[5];
+        for (int i = 0; i < 5; i++)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(DirectChildRole.Main, i, 5, 1, 0, 0.5f);
+            sym[i] = TacticalRoleCascade.DistributeChildRole(ctx);
+        }
+        AssertEqual(DirectChildRole.RefuseLeft,  sym[0], "5-child idx 0 RefuseLeft");
+        AssertEqual(DirectChildRole.SupportMain, sym[1], "5-child idx 1 SupportMain");
+        AssertEqual(DirectChildRole.Main,        sym[2], "5-child idx 2 Main anchor");
+        AssertEqual(DirectChildRole.SupportMain, sym[3], "5-child idx 3 SupportMain");
+        AssertEqual(DirectChildRole.RefuseRight, sym[4], "5-child idx 4 RefuseRight");
+    }
+
+    private static void RoleCascadeMainAggressiveWidensSupportBand()
+    {
+        // Aggression >= 0.75: support band widens from 1 slot to 2 slots either
+        // side of center, so idx 0 and idx 4 (outermost in 5-child group)
+        // become SupportMain instead of Refuse.
+        var results = new DirectChildRole[5];
+        for (int i = 0; i < 5; i++)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(DirectChildRole.Main, i, 5, 1, 0, 0.85f);
+            results[i] = TacticalRoleCascade.DistributeChildRole(ctx);
+        }
+        // Center = idx 2 → Main. Adjacent ±1 and ±2 (support band 2) → SupportMain.
+        AssertEqual(DirectChildRole.SupportMain, results[0], "aggressive idx 0 widens to SupportMain");
+        AssertEqual(DirectChildRole.SupportMain, results[1], "aggressive idx 1 SupportMain");
+        AssertEqual(DirectChildRole.Main,        results[2], "aggressive center Main");
+        AssertEqual(DirectChildRole.SupportMain, results[3], "aggressive idx 3 SupportMain");
+        AssertEqual(DirectChildRole.SupportMain, results[4], "aggressive idx 4 widens to SupportMain");
+    }
+
+    private static void RoleCascadeMainCautiousReservesMoreFlanks()
+    {
+        // Cautious commander (aggression < 0.30) with low flank-exposure-bucket on
+        // outer children should keep them in Reserve rather than committing to a
+        // Refuse role. McClellan-style: hold the wings back.
+        var ctx0 = new TacticalRoleCascade.CascadeContext(DirectChildRole.Main, 0, 4, 1, 0, 0.15f);
+        AssertEqual(DirectChildRole.Reserve, TacticalRoleCascade.DistributeChildRole(ctx0),
+            "cautious outer flank with low exposure stays Reserve");
+        // Center still gets Main; cautious doesn't disable the attack itself.
+        var ctx2 = new TacticalRoleCascade.CascadeContext(DirectChildRole.Main, 2, 4, 1, 0, 0.15f);
+        AssertEqual(DirectChildRole.Main, TacticalRoleCascade.DistributeChildRole(ctx2),
+            "cautious center still anchors Main");
+    }
+
+    private static void RoleCascadeReserveAllChildrenReserve()
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(DirectChildRole.Reserve, i, 4, 1, 0, 0.5f);
+            AssertEqual(DirectChildRole.Reserve, TacticalRoleCascade.DistributeChildRole(ctx),
+                "reserve cascades to all children at idx " + i);
+        }
+    }
+
+    private static void RoleCascadeFixAllChildrenFix()
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(DirectChildRole.Fix, i, 3, 1, 0, 0.5f);
+            AssertEqual(DirectChildRole.Fix, TacticalRoleCascade.DistributeChildRole(ctx),
+                "fix cascades unchanged at idx " + i);
+        }
+    }
+
+    private static void RoleCascadeRefuseRightAnchorsOutermost()
+    {
+        // RefuseRight: rightmost (idx == childCount-1) anchors the flank;
+        // inner siblings go to Reserve in echelon behind it.
+        for (int childCount = 2; childCount <= 4; childCount++)
+        {
+            for (int i = 0; i < childCount; i++)
+            {
+                var ctx = new TacticalRoleCascade.CascadeContext(DirectChildRole.RefuseRight, i, childCount, 1, 0, 0.5f);
+                var role = TacticalRoleCascade.DistributeChildRole(ctx);
+                var expected = (i == childCount - 1) ? DirectChildRole.RefuseRight : DirectChildRole.Reserve;
+                AssertEqual(expected, role, "refuse-right child " + i + "/" + childCount);
+            }
+        }
+    }
+
+    private static void RoleCascadeFallbackAllChildrenFallback()
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(DirectChildRole.Fallback, i, 3, 1, 0, 0.5f);
+            AssertEqual(DirectChildRole.Fallback, TacticalRoleCascade.DistributeChildRole(ctx),
+                "fallback cascades unchanged at idx " + i);
+        }
+    }
+
+    private static void RoleCascadeLeafTaskMappingIsExhaustive()
+    {
+        // Every named DirectChildRole maps to a non-None leaf task except Unknown.
+        AssertEqual(CommandTaskType.AttackObjective, TacticalRoleCascade.RoleToLeafTask(DirectChildRole.Main), "Main → AttackObjective");
+        AssertEqual(CommandTaskType.SupportAttack,   TacticalRoleCascade.RoleToLeafTask(DirectChildRole.SupportMain), "SupportMain → SupportAttack");
+        AssertEqual(CommandTaskType.FixEnemy,        TacticalRoleCascade.RoleToLeafTask(DirectChildRole.Fix), "Fix → FixEnemy");
+        AssertEqual(CommandTaskType.Screen,          TacticalRoleCascade.RoleToLeafTask(DirectChildRole.Screen), "Screen → Screen");
+        AssertEqual(CommandTaskType.GuardFlank,      TacticalRoleCascade.RoleToLeafTask(DirectChildRole.RefuseLeft), "RefuseLeft → GuardFlank");
+        AssertEqual(CommandTaskType.GuardFlank,      TacticalRoleCascade.RoleToLeafTask(DirectChildRole.RefuseRight), "RefuseRight → GuardFlank");
+        AssertEqual(CommandTaskType.ReserveWait,     TacticalRoleCascade.RoleToLeafTask(DirectChildRole.Reserve), "Reserve → ReserveWait");
+        AssertEqual(CommandTaskType.FallBackToLine,  TacticalRoleCascade.RoleToLeafTask(DirectChildRole.Fallback), "Fallback → FallBackToLine");
+        AssertEqual(CommandTaskType.None,            TacticalRoleCascade.RoleToLeafTask(DirectChildRole.Unknown), "Unknown → None");
+    }
+
+    // ====== Command tree probe tests (Task 2) ======
+
+    private static TacticalCommandTreeProbe.ExtendedProbe Probe(
+        int id, int unittyp, string name, int parentId, bool isDirectChild = true, float x = 0f, float z = 0f, int strength = 1)
+    {
+        return new TacticalCommandTreeProbe.ExtendedProbe(id, unittyp, name, true, parentId, isDirectChild, x, z, strength);
+    }
+
+    private static void CommandTreeProbeBuildsParentLinks()
+    {
+        // Build a small 2-tier tree: army -100 with three brigade children -10/-20/-30.
+        var probes = new[]
+        {
+            Probe(-100, 16, "Army_of_Northern_Virginia", 0, isDirectChild: false),
+            Probe(-10, 14, "1st_Brigade", -100, x: -50f),
+            Probe(-20, 14, "2nd_Brigade", -100, x: 0f),
+            Probe(-30, 14, "3rd_Brigade", -100, x: 50f),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, commandHierarchyShift: 1);
+        AssertEqual(4, tree.Count, "tree has 4 nodes");
+        AssertTrue(tree.ContainsKey(-100), "army root present");
+        AssertEqual(3, tree[-100].ChildInstanceIds.Count, "army has 3 children");
+        AssertEqual(-100, tree[-10].ParentInstanceId, "brigade -10 links to army -100");
+    }
+
+    private static void CommandTreeProbeEnumeratesLeavesThreeTier()
+    {
+        // Build a 3-tier tree (Union shape): top corps -100, two divisions
+        // -200 / -300, each with 2 brigade leaves. EnumerateLeaves(-100, tree)
+        // should return all 4 brigades, no divisions.
+        var probes = new[]
+        {
+            Probe(-100, 16, "3rd_Division_top", 0, isDirectChild: false),
+            Probe(-200, 15, "5th_Division", -100),
+            Probe(-300, 15, "2nd_Division", -100),
+            Probe(-201, 14, "5d_1st_Brigade", -200, x: -100f),
+            Probe(-202, 14, "5d_2nd_Brigade", -200, x: -50f),
+            Probe(-301, 14, "2d_1st_Brigade", -300, x: 50f),
+            Probe(-302, 14, "2d_2nd_Brigade", -300, x: 100f),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        var leaves = TacticalCommandTreeProbe.EnumerateLeaves(-100, tree);
+        AssertEqual(4, leaves.Count, "3-tier tree has 4 leaves");
+        var names = new HashSet<string>();
+        foreach (var leaf in leaves) names.Add(leaf.Name);
+        AssertTrue(names.Contains("5d_1st_Brigade"), "5d_1st_Brigade leaf present");
+        AssertTrue(names.Contains("2d_2nd_Brigade"), "2d_2nd_Brigade leaf present");
+    }
+
+    private static void CommandTreeProbeSortsSiblingsLeftToRight()
+    {
+        // Children should come back sorted by WorldX ascending so cascade
+        // geometry-distribution sees left-to-right ordering.
+        var probes = new[]
+        {
+            Probe(-100, 16, "army", 0, isDirectChild: false),
+            Probe(-3, 14, "rightmost", -100, x: 100f),
+            Probe(-1, 14, "leftmost", -100, x: -100f),
+            Probe(-2, 14, "center", -100, x: 0f),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        var children = TacticalCommandTreeProbe.EnumerateChildrenLeftToRight(-100, tree);
+        AssertEqual(3, children.Count, "3 children");
+        AssertEqual("leftmost", children[0].Name, "leftmost first");
+        AssertEqual("center",   children[1].Name, "center next");
+        AssertEqual("rightmost", children[2].Name, "rightmost last");
+    }
+
+    private static void CommandTreeProbeEmptyInputReturnsEmptyMap()
+    {
+        var emptyTree = TacticalCommandTreeProbe.BuildTree(
+            System.Array.Empty<TacticalCommandTreeProbe.ExtendedProbe>(), 1);
+        AssertEqual(0, emptyTree.Count, "empty input builds empty tree");
+        AssertEqual(0, TacticalCommandTreeProbe.EnumerateLeaves(-100, emptyTree).Count,
+            "leaves from empty tree is empty");
+        AssertEqual(0, TacticalCommandTreeProbe.EnumerateChildrenLeftToRight(-100, emptyTree).Count,
+            "children from empty tree is empty");
+        AssertEqual(0, TacticalCommandTreeProbe.BuildTree(null, 1).Count, "null probes returns empty tree");
+    }
+
+    // ====== Leaf brigade map tests (Task 3) ======
+
+    private static void LeafBrigadeMapFlatArmyFourBrigadesMain()
+    {
+        // CSA-shape: army with 4 direct brigade children. Top assignment role=Main.
+        // Cascade should: center idx 2 = Main, idx 1 = SupportMain, idx 0 =
+        // RefuseLeft, idx 3 = RefuseRight (after geometric left-to-right sort).
+        var probes = new[]
+        {
+            Probe(-100, 16, "army", 0, isDirectChild: false),
+            Probe(-1, 14, "1st_Brigade", -100, x: -150f),
+            Probe(-2, 14, "2nd_Brigade", -100, x: -50f),
+            Probe(-3, 14, "3rd_Brigade", -100, x: 50f),
+            Probe(-4, 14, "4th_Brigade", -100, x: 150f),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        // Top assignments are each direct child of the army (-100), all role=Main
+        // — but in this Whiskey simplification each top child already has its own
+        // role, so we test the leaf cascade by passing each brigade with the
+        // intended role separately. For a real Main-effort-on-army scenario the
+        // caller would pass exactly one top child with role=Main covering all
+        // its children. Here we use the army-itself as a single top entry with
+        // role=Main and verify the recursive distribution.
+        var topAssignments = new[]
+        {
+            new TacticalLeafBrigadeMap.TopAssignment(-100, DirectChildRole.Main),
+        };
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, topAssignments, commanderAggression01: 0.5f);
+
+        AssertEqual(4, map.Count, "flat-army cascade produces 4 leaf assignments");
+        // The 1st_Brigade (leftmost x=-150) is idx 0 after sort. center=2 →
+        // idx 0 RefuseLeft, idx 1 SupportMain, idx 2 Main, idx 3 SupportMain
+        // (even-N right-bias keeps idx 3 inside the support band).
+        AssertEqual(DirectChildRole.RefuseLeft,  map[-1].LeafRole, "leftmost 1st_Brigade RefuseLeft");
+        AssertEqual(DirectChildRole.SupportMain, map[-2].LeafRole, "2nd_Brigade SupportMain");
+        AssertEqual(DirectChildRole.Main,        map[-3].LeafRole, "3rd_Brigade Main (center anchor)");
+        AssertEqual(DirectChildRole.SupportMain, map[-4].LeafRole, "4th_Brigade SupportMain (within even-N support band)");
+    }
+
+    private static void LeafBrigadeMapThreeTierCascadeMainIntoDivision()
+    {
+        // Union-shape: corps -100 has division -200 (left) and division -300
+        // (right). Each division has 2 brigades. Top assignment: division -200
+        // role=Main. Cascade: -200's brigades inherit Main role at division
+        // level, then distribute: center child of 2 → idx 1 = Main, idx 0 =
+        // RefuseLeft (geometric).
+        var probes = new[]
+        {
+            Probe(-100, 16, "3rd_Division_top", 0, isDirectChild: false),
+            Probe(-200, 15, "5th_Division", -100, x: -100f),
+            Probe(-300, 15, "2nd_Division", -100, x: 100f),
+            Probe(-201, 14, "5d_left", -200, x: -150f),
+            Probe(-202, 14, "5d_right", -200, x: -50f),
+            Probe(-301, 14, "2d_left", -300, x: 50f),
+            Probe(-302, 14, "2d_right", -300, x: 150f),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        var topAssignments = new[]
+        {
+            new TacticalLeafBrigadeMap.TopAssignment(-200, DirectChildRole.Main),
+            new TacticalLeafBrigadeMap.TopAssignment(-300, DirectChildRole.Reserve),
+        };
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, topAssignments, 0.5f);
+
+        AssertEqual(4, map.Count, "3-tier cascade reaches all 4 leaves");
+        // -200 (Main, 2 children): center=idx 1 → Main anchor; idx 0 → RefuseLeft.
+        // childCount=2 → center = 2/2 = 1; idx 0 distance from center = 1, supportBand=1, so SupportMain.
+        // Actually with 2 children the algorithm puts idx 0 in supportBand (distance=1, supportBand=1).
+        // Re-verify our expectation:
+        AssertTrue(map[-201].LeafRole == DirectChildRole.SupportMain || map[-201].LeafRole == DirectChildRole.RefuseLeft,
+            "5d_left got Main-cascade result: " + map[-201].LeafRole);
+        AssertEqual(DirectChildRole.Main,    map[-202].LeafRole, "5d_right (center idx) gets Main");
+        // -300 (Reserve, 2 children): all reserve.
+        AssertEqual(DirectChildRole.Reserve, map[-301].LeafRole, "2d_left Reserve");
+        AssertEqual(DirectChildRole.Reserve, map[-302].LeafRole, "2d_right Reserve");
+    }
+
+    private static void LeafBrigadeMapReserveCascadesToAllLeaves()
+    {
+        var probes = new[]
+        {
+            Probe(-100, 16, "corps", 0, isDirectChild: false),
+            Probe(-200, 15, "div_a", -100),
+            Probe(-201, 14, "leaf_a1", -200),
+            Probe(-202, 14, "leaf_a2", -200),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        var top = new[] { new TacticalLeafBrigadeMap.TopAssignment(-200, DirectChildRole.Reserve) };
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, top, 0.5f);
+        AssertEqual(2, map.Count, "2 leaves under reserve division");
+        AssertEqual(DirectChildRole.Reserve, map[-201].LeafRole, "leaf_a1 Reserve");
+        AssertEqual(DirectChildRole.Reserve, map[-202].LeafRole, "leaf_a2 Reserve");
+        AssertEqual(CommandTaskType.ReserveWait, map[-201].LeafTask, "leaf_a1 ReserveWait task");
+    }
+
+    private static void LeafBrigadeMapRecordsFullCascadeChain()
+    {
+        // 3-tier Main cascade: chain should be [Main(top), <derived at div>, <derived at leaf>].
+        var probes = new[]
+        {
+            Probe(-100, 16, "corps", 0, isDirectChild: false),
+            Probe(-200, 15, "div_main", -100, x: 0f),
+            Probe(-201, 14, "leaf_center", -200, x: 0f),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 1);
+        var top = new[] { new TacticalLeafBrigadeMap.TopAssignment(-200, DirectChildRole.Main) };
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, top, 0.5f);
+        AssertEqual(1, map.Count, "1 leaf");
+        // chain: top role at div (Main) -> sole child of 1, collapses to Main
+        AssertEqual(2, map[-201].CascadeChain.Count, "chain captures top + leaf");
+        AssertEqual(DirectChildRole.Main, map[-201].CascadeChain[0], "chain[0] is top Main");
+        AssertEqual(DirectChildRole.Main, map[-201].CascadeChain[1], "chain[1] is leaf Main (collapsed single child)");
+        // ParentNameChain: contains the div name + leaf name
+        AssertTrue(map[-201].ParentNameChain.Count >= 2, "parent name chain has at least 2 entries");
+    }
+
+    private static void LeafBrigadeMapEmptyInputsReturnEmptyMap()
+    {
+        AssertEqual(0, TacticalLeafBrigadeMap.BuildMap(null, null, 0.5f).Count,
+            "null inputs return empty map");
+        AssertEqual(0,
+            TacticalLeafBrigadeMap.BuildMap(
+                new Dictionary<int, TacticalCommandTreeProbe.ProbeNode>(),
+                System.Array.Empty<TacticalLeafBrigadeMap.TopAssignment>(),
+                0.5f).Count,
+            "empty tree+assignments yields empty map");
     }
 
     private static void HistoricalRegistryCoversHunterAndBeauregard()

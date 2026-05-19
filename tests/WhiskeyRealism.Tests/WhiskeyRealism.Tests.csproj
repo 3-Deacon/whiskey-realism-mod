@@ -176,6 +176,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalNavMeshPlanner.cs" Link="Operations\TacticalNavMeshPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandFormationCorrection.cs" Link="Operations\CommandFormationCorrection.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalFacingPulseDoctrine.cs" Link="Operations\TacticalFacingPulseDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalRoleCascade.cs" Link="Orchestrator\TacticalRoleCascade.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalCommandTreeProbe.cs" Link="Orchestrator\TacticalCommandTreeProbe.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalLeafBrigadeMap.cs" Link="Orchestrator\TacticalLeafBrigadeMap.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalGateHelpers.cs" Link="TacticalGateHelpers.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalScoreCache.cs" Link="TacticalScoreCache.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalUnitType.cs" Link="TacticalUnitType.cs" />
