@@ -994,7 +994,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static object SafeCurrentSetObjective(Regiment own)
+        internal static object SafeCurrentSetObjective(Regiment own)
         {
             try { return SafeField(own, "currentsetobjective")?.GetValue(own); }
             catch { return null; }
@@ -1013,7 +1013,30 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static TacticalMapPoint SafeObjectivePoint(object objective)
+        /// <summary>
+        /// Returns a stable integer hash for an objective, suitable for use as
+        /// <see cref="TacticalUnitObservation.CurrentSetObjectiveId"/>. Delegates to
+        /// <see cref="SafeObjectiveId"/> with index 0. For objectives that carry a
+        /// name, the name dominates and parity with the indexed BuildObjectiveRecords
+        /// path holds. For nameless objectives all calls hash to the same constant
+        /// (index 0), which is harmless for per-unit observation equality but would
+        /// diverge from the multi-objective indexed path in Task 10; tracked as a
+        /// known semantic gap in the Task 7 commit.
+        /// </summary>
+        internal static int SafeObjectiveIdHash(object objective)
+        {
+            try
+            {
+                string id = SafeObjectiveId(objective, 0);
+                return string.IsNullOrEmpty(id) ? 0 : id.GetHashCode();
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        internal static TacticalMapPoint SafeObjectivePoint(object objective)
         {
             try
             {
@@ -1049,7 +1072,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static float EstimateVisibleEnemyStrength(Regiment own)
+        internal static float EstimateVisibleEnemyStrength(Regiment own)
         {
             return SafeStrength(SafeVisibleEnemy(own));
         }
@@ -1114,7 +1137,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static bool IsUsableMapPoint(TacticalMapPoint point)
+        internal static bool IsUsableMapPoint(TacticalMapPoint point)
         {
             return !float.IsNaN(point.X) &&
                 !float.IsNaN(point.Z) &&
@@ -1142,7 +1165,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch { return false; }
         }
 
-        private static bool IsDefaultVector(Vector3 value)
+        internal static bool IsDefaultVector(Vector3 value)
         {
             return float.IsNaN(value.x) ||
                 float.IsNaN(value.y) ||
@@ -1160,7 +1183,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return dx * dx + dz * dz;
         }
 
-        private static float SafeStrength(Regiment regiment)
+        internal static float SafeStrength(Regiment regiment)
         {
             try
             {
