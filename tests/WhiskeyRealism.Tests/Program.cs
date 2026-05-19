@@ -418,6 +418,10 @@ static class Program
             ("tactical group retreat macro keeps vanilla", TacticalGroupRetreatMacroKeepsVanilla),
             ("tactical group explicit probe bypasses low confidence skip", TacticalGroupExplicitProbeBypassesLowConfidenceSkip),
             ("tactical group low confidence keeps vanilla", TacticalGroupLowConfidenceKeepsVanilla),
+            ("tactical group sector estimator pre-contact reaches act floor", TacticalGroupSectorEstimatorPreContactReachesActFloor),
+            ("tactical group doctrine issues pre-contact hold when no enemy visible", TacticalGroupDoctrineIssuesPreContactHoldWhenNoEnemyVisible),
+            ("tactical group doctrine still rejects below low-confidence floor", TacticalGroupDoctrineStillRejectsBelowLowConfidenceFloor),
+            ("tactical group doctrine line contact still reaches attack-weak-point", TacticalGroupDoctrineLineContactStillReachesAttackWeakPoint),
             ("tactical group wl player subordinate skips", TacticalGroupWlPlayerSubordinateSkips),
             ("tactical b6b reserve aggregator emits relieve battered line when reserve safe", TacticalB6bReserveAggregatorEmitsRelieveBatteredLineWhenReserveSafe),
             ("tactical b6b reserve no reserve yields none", TacticalB6bReserveNoReserveYieldsNone),
@@ -8993,7 +8997,10 @@ static class Program
 
         AssertTrue(sector.Mission != TacticalSectorMission.AttackWeakPoint, "screen contact must not commit formed regiments");
         AssertEqual(0f, sector.EnemyStrength, "screen-only contact should not become line strength");
-        AssertTrue(sector.Confidence <= 0.50f, "screen-only contact should not become high confidence");
+        // Pre-contact floor was lifted from 0.45 to 0.55 (SoW-aligned). Confidence
+        // must still stay below the weak-point threshold (0.75) and the upper-band
+        // line-contact value (0.65 with enemy). 0.60 is the right upper bound here.
+        AssertTrue(sector.Confidence <= 0.60f, "screen-only contact should not become high confidence");
     }
 
     private static TacticalOddsAssessment Odds(
@@ -9158,6 +9165,96 @@ static class Program
             wlAllowsControl: true));
 
         AssertEqual(TacticalDoctrineDecisionKind.Skip, decision.Kind, "low confidence");
+    }
+
+    private static void TacticalGroupSectorEstimatorPreContactReachesActFloor()
+    {
+        // SoW-aligned floor: no-enemy, no-line-contact now returns 0.55 (was 0.45).
+        // This lets DecideGroupStance apply pre-contact-hold instead of skipping.
+        var sector = TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
+            sectorId: 0,
+            ownStrength: 1000f,
+            enemiesInRangeStrength: 0f,
+            angleEnemyStrength: 0f,
+            closestEnemyStrength: 0f,
+            closestEnemyUnitType: -1,
+            closestEnemyName: "",
+            closestEnemyRouted: false,
+            closestEnemyPermanentlyDetached: false,
+            flankRisk: false,
+            strongPoint: false));
+        AssertTrue(sector.Confidence >= 0.55f, "pre-contact confidence must reach act floor");
+    }
+
+    private static void TacticalGroupDoctrineIssuesPreContactHoldWhenNoEnemyVisible()
+    {
+        // Mid-band confidence (between low-confidence floor 0.40 and act floor 0.55)
+        // now returns Apply(pre-contact-hold) instead of Skip(low-confidence).
+        var sector = new TacticalSectorAssessment(
+            sectorId: 0,
+            source: TacticalSectorSource.AngleSlice,
+            ownStrength: 1000f,
+            enemyStrength: 0f,
+            confidence: 0.50f,
+            strongPoint: false,
+            flankRisk: false,
+            mission: TacticalSectorMission.Hold);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 3,
+            macroAi: 1,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "pre-contact applies hold");
+        AssertEqual(2, decision.GroupStance, "pre-contact stance is defensive-hold (2)");
+        AssertEqual("pre-contact-hold", decision.Reason, "reason");
+    }
+
+    private static void TacticalGroupDoctrineStillRejectsBelowLowConfidenceFloor()
+    {
+        // Strict below-floor still skips (regression coverage for the 0.40 boundary).
+        var sector = new TacticalSectorAssessment(
+            sectorId: 0,
+            source: TacticalSectorSource.AngleSlice,
+            ownStrength: 1000f,
+            enemyStrength: 0f,
+            confidence: 0.30f,
+            strongPoint: false,
+            flankRisk: false,
+            mission: TacticalSectorMission.Hold);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 3,
+            macroAi: 1,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+        AssertEqual(TacticalDoctrineDecisionKind.Skip, decision.Kind, "kind");
+        AssertEqual("low-confidence", decision.Reason, "reason");
+    }
+
+    private static void TacticalGroupDoctrineLineContactStillReachesAttackWeakPoint()
+    {
+        // Regression: line-contact behavior unchanged (high confidence still drives attack).
+        var sector = new TacticalSectorAssessment(
+            sectorId: 0,
+            source: TacticalSectorSource.VisibleLineContact,
+            ownStrength: 1000f,
+            enemyStrength: 400f,
+            confidence: 0.85f,
+            strongPoint: false,
+            flankRisk: false,
+            mission: TacticalSectorMission.AttackWeakPoint);
+        var decision = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+            vanillaStance: 3,
+            macroAi: 1,
+            sector: sector,
+            orderFrictionAllowsChange: true,
+            wlAllowsControl: true));
+
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "kind");
+        AssertEqual(3, decision.GroupStance, "attack-weak-point stance");
+        AssertEqual("attack-weak-point", decision.Reason, "reason");
     }
 
     private static void TacticalGroupWlPlayerSubordinateSkips()

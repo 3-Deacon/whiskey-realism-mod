@@ -57,8 +57,16 @@ namespace WhiskeyRealism.Tactical
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 2, "strongpoint");
             if (input.Sector.Mission == TacticalSectorMission.Probe && input.Sector.Confidence >= 0.35f)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 1, "probe");
-            if (input.Sector.Confidence < 0.55f)
+
+            // SoW-aligned pre-contact path: when sector enemy strength is zero and
+            // confidence sits at the no-enemy floor, return Apply(Hold) so the posture
+            // executor can keep the brigade marching to its role-assigned target.
+            // SoW's brigade-think never goes silent before contact; neither should Whiskey.
+            // Strictly below-floor cases still skip as low-confidence.
+            if (input.Sector.Confidence < 0.40f)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "low-confidence");
+            if (input.Sector.Confidence < 0.55f)
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 2, "pre-contact-hold");
             if (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint &&
                 (input.MacroAi == 0 || input.MacroAi == 1))
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 3, "attack-weak-point");

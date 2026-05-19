@@ -64,9 +64,15 @@ namespace WhiskeyRealism.Tactical
             }
 
             bool hasEnemy = enemy > 0f;
+            // SoW-aligned confidence table. SoW's brigade-think (offai.cpp:507-546)
+            // issues movement orders to a brigade's tactical objective when no enemy
+            // is in range — pre-contact silence is not a SoW pattern. To mirror that,
+            // the no-enemy floor must reach the doctrine's 0.55 "act on it" threshold
+            // so DecideGroupStance can issue a pre-contact Hold/Approach branch
+            // instead of skipping forever.
             float confidence = hasEnemy
-                ? (lineContact ? 0.85f : 0.55f)
-                : (lineContact ? 0.60f : 0.45f);
+                ? (lineContact ? 0.85f : 0.65f)  // line contact / no line contact, with enemy
+                : (lineContact ? 0.70f : 0.55f); // pre-contact (lifted from 0.45 -> 0.55)
 
             var sector = new TacticalSectorAssessment(
                 input.SectorId,
