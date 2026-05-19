@@ -36,8 +36,8 @@ the smoke battle), each with reflection-based per-unit field reads
 
 **Goals**
 
-- Drop `tactical.snapshot-build.objective-records` p99 from ~11 ms to ≤ 3 ms
-- Drop `tactical.snapshot-build.tick-cycle` p99 from ~16 ms to ≤ 7 ms
+- Drop `tactical.snapshot-build.objective-records.aggregate` p99 to ≤ 3 ms (this is the parity-window-immune scope; see §7a). Outer scope drops to ≤ 7 ms post-parity-window.
+- Drop `tactical.snapshot-build.tick-cycle` p99 from ~16 ms to ≤ 7 ms post-parity-window
 - Reduce per-Build allocation count (the five fresh `List<T>` + `HashSet<string>` per call)
 - Preserve the `ObjectiveRecord[]` output exactly — no behavior drift
 - Stay default-on per AGENTS.md tactical default-on policy
@@ -89,7 +89,14 @@ Two-unit split:
 
 ## 4. Aggregate shape
 
-`TacticalUnitObservation` (value struct):
+`TacticalUnitObservation` (value struct). **All capture is alliance-aware
+— visibility fields are populated ONLY for own-alliance units** (matching
+the current code's `IsUsableOwnUnit` filter); enemy units get cheap
+position + strength only. Computing `VisibleEnemyStrength` /
+`HasVisibleEnemy` per unit walks `unit.unitrange.enemyinfirerangereg`
+and `unit.unitrange.enemyinrangereg` and allocates a `HashSet<int>`
+(see `TacticalFogOfWarContact.cs:24-58`); eager per-raw-unit visibility
+would be slower than the current code, not faster.
 
 ```csharp
 public readonly struct TacticalUnitObservation
@@ -105,13 +112,21 @@ public readonly struct TacticalUnitObservation
     public float GroupOwnInRange;   // groupowninrange
     public float GroupAiGroup;      // groupstrengthaigroup
 
-    // Current set objective (if any)
+    // Current set objective (if any) — own-alliance only
     public bool HasCurrentSetObjective;
     public int CurrentSetObjectiveId;
     public float ObjectiveX, ObjectiveZ;
     public TacticalObjectiveType ObjectiveType;  // anchor-resolved at capture
 
-    // Visibility-derived
+    // Last set waypoint (used by TryMovementAnchorLine fallback,
+    // TacticalVisionRuntimeAdapter.cs:1063 — rejects within √625m of
+    // current position). Own-alliance only.
+    public bool HasLastWaypoint;
+    public float LastWaypointX, LastWaypointZ;
+
+    // Visibility-derived — POPULATED ONLY FOR OWN-ALLIANCE UNITS.
+    // Set to zero/false for enemy units; sub-builders that need enemy
+    // visibility (TryVisibleEnemyLine) walk from the own-unit side.
     public float VisibleEnemyStrength;
     public bool HasVisibleEnemy;
 
@@ -123,14 +138,26 @@ public readonly struct TacticalUnitObservation
 }
 ```
 
-Field selection is the union of what each sub-builder currently calls on
-a `Regiment`. If a sub-builder needs a field not in this struct, the
-parity check will fire and we add it. The parity window catches missing
-fields on real 26k-unit data before they ship. The list above reflects
-the audit-as-of-design; final field set is fixed during implementation
-by enumerating every `Regiment` member access inside the six sub-builders
-and ensuring each maps to an aggregate field (or is rederivable from
-fields already captured).
+### 4a. Pre-implementation field audit (mandatory)
+
+Before writing capture code, **enumerate every `Regiment` member access
+inside the six sub-builders** and confirm each maps to an aggregate
+field or is rederivable from captured fields. The implementation plan's
+first task is this audit, recorded as a table in the plan doc. Fields
+known from initial audit:
+
+| Sub-builder | Regiment accesses identified |
+|---|---|
+| Main loop (`for i over units.Count`) | `SafeCurrentSetObjective` (reads regiment objective ref), `EstimateVisibleEnemyStrength` (→ `VisibleEnemyStrength`), `SafeStrength` (→ `groupstrengthactive`), `IsUsableOwnUnit` (alliance + active + non-rout) |
+| `BuildApproachAvenueObservations` | own + enemy iteration with `SafePosition`, `SafeStrength`, visibility derivation |
+| `TryVisibleEnemyLine` | enemy filter + `HasVisibleEnemy` derivation, `SafePosition`, `SafeStrength` |
+| `TryMovementAnchorLine` | own filter + `SafePosition`, `TryLastWaypointPoint` (→ `lastsetwaypointposition`), `SafeStrength` |
+| `AddMapObjectiveObservations` | reads `BattleObjectives` data (not units) — no aggregate dependency |
+| `AddObjectiveChainObservations` | reads `battle.objectivechain` — no aggregate dependency |
+
+Any field discovered during implementation that wasn't in the audit
+gets the same treatment as the `LastWaypoint` fields here: explicit
+add to the struct, documented justification, and a parity-test case.
 
 ## 5. `TacticalUnitObservationAggregate`
 
@@ -172,7 +199,12 @@ public sealed class TacticalUnitObservationAggregate : IObservationSource
         {
             var reg = raw[i] as Regiment;
             if (reg == null) continue;
-            var obs = CaptureUnit(reg);  // ONE reflection burst per unit
+            // CaptureUnit is alliance-aware: visibility + objective +
+            // waypoint fields populated ONLY when reg.alliance == allianceId.
+            // Enemy units get cheap fields (position, strength, unittyp,
+            // routed flag) only, matching the cost profile of the current
+            // code which never calls visibility logic for enemy units.
+            var obs = CaptureUnit(reg, allianceId);
             _units.Add(obs);
             int idx = _units.Count - 1;
             if (obs.Alliance == allianceId) _alliedIndices.Add(idx);
@@ -219,42 +251,78 @@ repeating that.
 
 - `TacticalUnitObservationAggregateTests` — feed `Capture` a stub of `BattleUnits.completeunitlist`; assert field-by-field that the aggregate captures every field the sub-builders read.
 - `ObjectiveRecordsFromAggregateTests` — feed a known synthetic aggregate, assert `ObjectiveRecord[]` output matches an oracle (frozen expected output computed from the same fixtures).
-- Add `<Compile Include>` entries to `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` per AGENTS.md rule (explicit includes, no globs).
+- Test csproj inclusion: new test `.cs` files live physically under `tests/WhiskeyRealism.Tests/` and are picked up by the SDK's default-compile-items behavior — **no explicit `<Compile Include>` entry needed** for them. The explicit `<Compile Include="..\..\src\…" Link="…">` pattern is reserved for production source files referenced from outside the test project directory (the strategic types linked into the test assembly). Adding explicit entries for in-project test files creates duplicate compile items.
 
-**Runtime layer (first 20 Builds per battle — fixed window, not sliding; opt-out config):**
+**Runtime layer (first 20 Builds per *(battleSequence, allianceId)* — fixed window, not sliding; opt-out config):**
 
 ```csharp
 // in BuildObjectiveRecordsFromBattle:
-if (Plugin.SinglePassParityWindowActive && _parityComparesRemaining > 0)
+// Parity counter is keyed by (battleSequence, allianceId). DriveTickCycle
+// builds per-side snapshots (s = side.AllianceId) so each alliance must
+// get its own 20 clean compares; a global counter could let one side eat
+// the window while the other is never verified.
+ParityKey key = new ParityKey(battleSequence, allianceId);
+int remaining = _parityComparesRemaining.TryGetValue(key, out var r) ? r : 20;
+bool mismatchObservedForKey = _parityMismatchObserved.Contains(key);
+
+if (Plugin.SinglePassParityWindowActive && (remaining > 0 || mismatchObservedForKey))
 {
-    var oldResult = BuildObjectiveRecordsFromBattle_Legacy(battle, allianceId);
-    var newResult = BuildObjectiveRecordsFromBattle_Aggregate(source);
+    ObjectiveRecord[] oldResult, newResult;
+    using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records.legacy", ...))
+        oldResult = BuildObjectiveRecordsFromBattle_Legacy(battle, allianceId);
+    using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records.aggregate", ...))
+        newResult = BuildObjectiveRecordsFromBattle_Aggregate(source);
+
     // ObjectiveRecordsEqual: array length + per-element ObjectiveId/Type/Point/StatusCounts/StrengthSums
     // (no float-tolerance for strengths — capture is from the same regiment fields, identical floats expected)
     if (!ObjectiveRecordsEqual(oldResult, newResult))
     {
-        EmitParityMismatch(allianceId, oldResult, newResult);
-        // safety: return legacy result while parity window catches up; do NOT silently drift
+        _parityMismatchObserved.Add(key);
+        EmitParityMismatch(battleSequence, allianceId, oldResult, newResult);
+        // safety: stay on legacy for THIS (battle, alliance) for the rest of the battle.
         return oldResult;
     }
-    _parityComparesRemaining--;
-    return newResult;  // proven equal, save the comparison work going forward
+    _parityComparesRemaining[key] = remaining - 1;
+    return newResult;  // proven equal
 }
-return BuildObjectiveRecordsFromBattle_Aggregate(source);
+
+// Post-window steady-state path — measured by the outer scope
+// `tactical.snapshot-build.objective-records` and additionally by the
+// dedicated `.aggregate` scope so success metrics are derived from
+// aggregate-only timings (not poisoned by parity-window dual-runs).
+using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records.aggregate", ...))
+    return BuildObjectiveRecordsFromBattle_Aggregate(source);
 ```
 
-Parity counter is per-battle (reset in `ResetRuntimeTickState`). Mismatch
-emits a bounded `TacticalObjectiveRecordsParityMismatch` telemetry event
-(Gate category, full diff fields). After 20 clean Builds the window
-closes for the rest of the battle.
+Parity state (counter + mismatch set) is keyed by `(battleSequence, allianceId)`
+and cleared in `ResetRuntimeTickState`. Mismatch on side 0 does **not**
+shut down parity tracking for side 1, and vice versa.
 
 **Telemetry tag registration:** new event name `TacticalObjectiveRecordsParityMismatch` in `TelemetryTagPolicy.cs`.
 
-**Window exit conditions:**
-- 20 clean compares → flip to aggregate-only for this battle, log `"[ObjectiveRecordsParity] window-clean battle=… alliance=… compares=20"`
-- 1 mismatch → continue running both paths, return legacy, alert via telemetry; window stays open all battle so we get a full diff record. Player-visible behavior unchanged because we return legacy.
+**Window exit conditions (per `(battleSequence, allianceId)` key):**
+- 20 clean compares on this key → flip to aggregate-only for this key for the rest of the battle, log `"[ObjectiveRecordsParity] window-clean battle=… alliance=… compares=20"`
+- 1 mismatch on this key → continue running both paths for this key, return legacy, alert via telemetry; window stays open all battle so we get a full diff record. Player-visible behavior unchanged because we return legacy. The OTHER alliance's parity window is unaffected.
 
 After one release cycle (no mismatches observed in normal play), the legacy path + parity-window code is removed.
+
+### 7a. Telemetry scope structure (addresses parity-poisoning of p99)
+
+The current `tactical.snapshot-build.objective-records` scope wraps the
+entire function call (`TacticalBattleSnapshotBuilder.cs:139`). During
+the parity window it would include legacy + aggregate dual-run time,
+which on a 64-sample distribution would *be* the p99 — defeating the
+purpose of the metric. We add three scopes:
+
+| Scope | Wraps | Use |
+|---|---|---|
+| `tactical.snapshot-build.objective-records` | the whole function (existing) | end-to-end ground truth — includes parity overhead when active |
+| `tactical.snapshot-build.objective-records.aggregate` | aggregate path only | **the success metric** — measures steady-state cost |
+| `tactical.snapshot-build.objective-records.legacy` | legacy path only (parity window or rollback) | comparison baseline; drops to zero samples post-window |
+
+The success criteria below reference the `.aggregate` scope, not the
+outer one, so parity dual-run during the first 20 builds doesn't
+poison the headline number.
 
 ## 8. Rollback config flag
 
@@ -263,10 +331,12 @@ EnableSinglePassObjectiveRecords = Config.Bind(
     "Tactical Orchestrator",
     "Enable Single-Pass Objective Records",
     true,
-    "Single-pass ObjectiveRecord aggregation. Cuts BuildObjectiveRecordsFromBattle "
-    + "p99 from ~11ms to ~2ms by walking completeunitlist once instead of 6 times. "
-    + "Default ON. Set false to roll back to the legacy per-walk path. "
-    + "Default-on per AGENTS.md tactical policy.");
+    "Single-pass aggregation for ObjectiveRecord building. Walks "
+    + "BattleUnits.completeunitlist once instead of six times. Default ON. "
+    + "Set false to roll back to the legacy per-walk path if a regression "
+    + "appears. Default-on per AGENTS.md tactical policy. Measured "
+    + "performance characteristics are documented in docs/telemetry.md "
+    + "once smoke-verified.");
 ```
 
 When `false`: `BuildObjectiveRecordsFromBattle` skips the aggregate path entirely and uses the unchanged legacy implementation. Parity window also short-circuits.
@@ -283,7 +353,7 @@ When `false`: `BuildObjectiveRecordsFromBattle` skips the aggregate path entirel
 | `src/WhiskeyRealism/Tactical/Orchestrator/TacticalBattleCoordinatorRuntime.cs` | `ResetRuntimeTickState` calls `TacticalUnitObservationAggregate.Shared.ClearForBattleEnd()` |
 | `src/WhiskeyRealism/Plugin.cs` | new `EnableSinglePassObjectiveRecords` ConfigEntry |
 | `src/WhiskeyRealism/Telemetry/TelemetryTagPolicy.cs` | register `TacticalObjectiveRecordsParityMismatch` event |
-| `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` | explicit `<Compile Include>` for the 3 new source files + 2 new test files |
+| `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` | explicit `<Compile Include Link>` for the 3 new production source files only; new test files are auto-included by SDK default-compile-items |
 | `tests/WhiskeyRealism.Tests/TacticalUnitObservationAggregateTests.cs` | **NEW** harness coverage of capture |
 | `tests/WhiskeyRealism.Tests/ObjectiveRecordsFromAggregateTests.cs` | **NEW** harness coverage of sub-builder parity |
 | `docs/telemetry.md` | document new parity event + (eventually) the steady-state Build p99 drop |
@@ -295,10 +365,10 @@ No new Harmony patches — this is pure orchestrator-internal refactor.
 
 **Harness (build-time, must pass before deploy):**
 
-- All existing 1245 tests still pass
+- All existing tests still pass (baseline at branch creation: 1245 PASS / 0 FAIL; AGENTS.md / handoff.md docs say 1244 — they're one test stale and get refreshed at closeout)
 - New aggregate-capture tests pass
 - New sub-builder parity tests pass
-- Target: ≥ 1252 PASS / 0 FAIL
+- Target: baseline + 5–8 new tests, 0 FAIL
 
 **DLL build/deploy/hash (mandatory per AGENTS.md):**
 
@@ -310,7 +380,7 @@ No new Harmony patches — this is pure orchestrator-internal refactor.
 
 - Same 26k-unit battle that produced session `20260519-173901`
 - 20x compression
-- Look for: `TacticalObjectiveRecordsParityMismatch` count = 0; `tactical.snapshot-build.objective-records` p99 ≤ 3 ms; subjective hitch reduction
+- Look for: `TacticalObjectiveRecordsParityMismatch` count = 0; `tactical.snapshot-build.objective-records.aggregate` p99 ≤ 3 ms (steady-state metric, parity-window-immune); subjective hitch reduction
 
 **Rollback test:**
 
@@ -320,13 +390,14 @@ No new Harmony patches — this is pure orchestrator-internal refactor.
 
 | Metric | Baseline (sha 6407edfc) | Target |
 |---|---|---|
-| `snapshot-build.objective-records` p99 | 11.03 ms | ≤ 3 ms |
-| `snapshot-build.tick-cycle` p99 | 15.81 ms | ≤ 7 ms |
-| `orchestrator-tick` p99 | 12.67 ms | ≤ 5 ms |
+| **`snapshot-build.objective-records.aggregate` p99** | n/a (new scope) | **≤ 3 ms** ← primary success metric, parity-window-immune |
+| `snapshot-build.objective-records` p99 (outer, end-to-end) | 11.03 ms | ≤ 7 ms post-parity-window; up to 2× during window is acceptable |
+| `snapshot-build.tick-cycle` p99 | 15.81 ms | ≤ 7 ms (post-parity-window) |
+| `orchestrator-tick` p99 | 12.67 ms | ≤ 5 ms (post-parity-window) |
 | `gcDelta` p99 | 1 | ≤ 1 (unchanged or lower) |
 | Parity mismatch events | n/a | 0 |
-| Harness PASS | 1245 | ≥ 1252 |
-| Subjective hitch at 20x small-medium battle | present | absent or substantially reduced |
+| Harness PASS | baseline + 5–8 new tests | 0 FAIL, count grows by new test additions |
+| Subjective hitch at 20x small–medium battle | present | absent or substantially reduced |
 
 If `gcDelta` p99 *rises*, the pool design is broken — investigate before
 declaring done.
@@ -348,3 +419,17 @@ declaring done.
 - [x] No transform.parent walks (synth-army bug pattern) — aggregate captures only the data sub-builders need; command hierarchy is not consumed by `BuildObjectiveRecordsFromBattle`
 - [x] Living docs to update on ship: `docs/tactical-orchestrator.md`, `docs/telemetry.md`, `docs/handoff.md`
 - [x] Per-side dedup not applicable (BuildObjectiveRecordsFromBattle is per-alliance; the aggregate is captured fresh per Build call)
+
+## 14. Adversarial review findings + responses (2026-05-19)
+
+Spec went through an adversarial review pass after first commit. All 7 findings accepted; cited code anchors verified.
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 1 | P1 | Parity window poisons the p99 success metric — outer scope sees dual-path cost during first 20 Builds | §7a adds `.aggregate` and `.legacy` sub-scopes; success criteria reference `.aggregate`, parity-immune |
+| 2 | P1 | Aggregate field list missed `Regiment.lastsetwaypointposition` used by `TryMovementAnchorLine` fallback (`TacticalVisionRuntimeAdapter.cs:1063`) | Added `HasLastWaypoint`, `LastWaypointX`, `LastWaypointZ` to `TacticalUnitObservation`; §4a mandates pre-implementation field audit |
+| 3 | P1 | Eager visibility capture for raw `completeunitlist` would make hot path slower (visibility walks `enemyin{fire,}rangereg` + allocates `HashSet<int>` per call, `TacticalFogOfWarContact.cs:24-58`) | §4 + §5 now specify alliance-aware capture: visibility populated only for own-alliance units, matching current code |
+| 4 | P1 | Per-battle parity counter could be exhausted by one alliance, leaving the other unverified | Parity state keyed by `(battleSequence, allianceId)`; mismatch on one alliance does not shut down the other |
+| 5 | P2 | Plan to add `<Compile Include>` for new test files conflicts with SDK-style csproj default-include behavior | §7 corrected: new test `.cs` files in `tests/WhiskeyRealism.Tests/` are auto-included; explicit linked includes are for external production source files only |
+| 6 | P2 | Harness baseline (1245) drifts from AGENTS.md text (1244) | Phrased as "baseline + N new tests" rather than absolute number; closeout refreshes the docs |
+| 7 | P2 | Config description claimed unverified "~2ms" — violates AGENTS.md description-string-sync rule for player-facing text | Rewrote description to describe intent only; performance numbers go in `docs/telemetry.md` after smoke-verification |
