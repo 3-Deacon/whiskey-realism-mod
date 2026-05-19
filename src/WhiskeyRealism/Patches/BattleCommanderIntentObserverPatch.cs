@@ -58,7 +58,7 @@ namespace WhiskeyRealism.Patches
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
             if (side < 0) return false;
 
-            var intentInput = BuildIntentInput(macro);
+            var intentInput = BuildIntentInput(macro, side, battle);
             var intent = TacticalCommanderIntentResolver.Resolve(intentInput);
 
             var sectors = BuildPlaybookSectors(battle);
@@ -127,18 +127,57 @@ namespace WhiskeyRealism.Patches
             return true;
         }
 
-        private static TacticalIntentInput BuildIntentInput(int macro)
+        private static TacticalIntentInput BuildIntentInput(int macro, int side, AIBattle battle)
         {
-            // OperationPosture lookup is wired in B6c when strategic-side state
-            // becomes available per-battle. B6a treats every battle as no-plan
-            // and falls back to the vanilla macro mapping.
+            // Live commander initiative from the side's commanding officer.
+            // Mirrors BattleMacroStrategyPatch.CommanderAggression01: pulls
+            // bunits.GetCommandingOfficerFromSide(side) then GameVars.commander[id]
+            // .GetCommanderInitiative(), with NaN/range guards. Falls back to 0.5f
+            // mid-band only when the lookup fails.
+            float commanderInitiative01 = ResolveLiveCommanderInitiative(side, battle);
+
+            // OperationPosture lookup is wired in a future strategic-tactical bridge
+            // slice (CIC plan → tactical posture mapping). Inherit triggers
+            // ResolveFromMacro which now consults commanderInitiative01 directly
+            // for tempo modulation. oddsConfidence stays at 0.5f mid-band — the
+            // macro layer owns the live odds doctrine.
             return new TacticalIntentInput(
                 operationPosture: OperationPosture.Inherit,
                 hasPlan: false,
                 vanillaMacro: macro,
-                commanderInitiative01: 0.5f,
+                commanderInitiative01: commanderInitiative01,
                 oddsConfidence: 0.5f,
                 weakPointConfirmed: false);
+        }
+
+        private static FieldInfo _bunitsFieldCache;
+
+        private static float ResolveLiveCommanderInitiative(int side, AIBattle battle)
+        {
+            try
+            {
+                if (battle == null) return 0.5f;
+                if (_bunitsFieldCache == null)
+                    _bunitsFieldCache = AccessTools.Field(typeof(AIBattle), "bunits");
+                var bunits = _bunitsFieldCache?.GetValue(battle) as BattleUnits;
+                if (bunits == null) return 0.5f;
+                if (side < 0 || bunits.alliance == null || side >= bunits.alliance.Length) return 0.5f;
+                int commanderId = bunits.GetCommandingOfficerFromSide(side);
+                if (GameVars.commander == null || commanderId < 0 || commanderId >= GameVars.commander.Count) return 0.5f;
+                var commander = GameVars.commander[commanderId];
+                if (commander == null) return 0.5f;
+                float initiative = commander.GetCommanderInitiative();
+                if (float.IsNaN(initiative) || float.IsInfinity(initiative)) return 0.5f;
+                if (initiative < 0f) return 0f;
+                if (initiative > 1f) return 1f;
+                return initiative;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-b6a-observer:initiative-read-failed",
+                    "BattleCommanderIntentObserverPatch live commander initiative read failed: " + ex.Message);
+                return 0.5f;
+            }
         }
 
         private static TacticalPlaybookSectorView[] BuildPlaybookSectors(AIBattle battle)

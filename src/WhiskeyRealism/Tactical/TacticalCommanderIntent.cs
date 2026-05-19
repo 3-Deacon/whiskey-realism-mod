@@ -97,13 +97,33 @@ namespace WhiskeyRealism.Tactical
 
         private static TacticalIntentDecision ResolveFromMacro(TacticalIntentInput input)
         {
+            // Commander initiative modulates intent on the macro-fallback path:
+            // high-initiative commanders (Hood, Jackson, Grant) push attack into
+            // all-out-attack; low-initiative commanders (McClellan, Johnston)
+            // de-escalate macro=attack to probe. Defensive and retreat macros
+            // stay vanilla-owned. Boundaries chosen so the mid-band 0.5 default
+            // produces the same behavior as before (no behavior change for
+            // unmatched commanders).
             switch (input.VanillaMacro)
             {
-                case 0: return new TacticalIntentDecision(CommanderIntent.Attack, true, "macro-assault");
-                case 1: return new TacticalIntentDecision(CommanderIntent.Attack, true, "macro-attack");
-                case 2: return new TacticalIntentDecision(CommanderIntent.Defend, false, "macro-defend");
-                case 3: return new TacticalIntentDecision(CommanderIntent.HoldToLast, false, "macro-retreat-vanilla-owns");
-                default: return new TacticalIntentDecision(CommanderIntent.Hold, false, "macro-dynamic");
+                case 0:
+                    if (input.CommanderInitiative01 < 0.30f)
+                        return new TacticalIntentDecision(CommanderIntent.Attack, true, "macro-assault-cautious-commander");
+                    return new TacticalIntentDecision(CommanderIntent.AllOutAttack, true, "macro-assault");
+                case 1:
+                    if (input.CommanderInitiative01 >= 0.75f)
+                        return new TacticalIntentDecision(CommanderIntent.AllOutAttack, true, "macro-attack-aggressive-commander");
+                    if (input.CommanderInitiative01 < 0.30f)
+                        return new TacticalIntentDecision(CommanderIntent.ProbeIntent, false, "macro-attack-cautious-commander");
+                    return new TacticalIntentDecision(CommanderIntent.Attack, true, "macro-attack");
+                case 2:
+                    if (input.CommanderInitiative01 >= 0.75f && input.OddsConfidence >= 0.6f)
+                        return new TacticalIntentDecision(CommanderIntent.Defend, true, "macro-defend-aggressive-counterstroke");
+                    return new TacticalIntentDecision(CommanderIntent.Defend, false, "macro-defend");
+                case 3:
+                    return new TacticalIntentDecision(CommanderIntent.HoldToLast, false, "macro-retreat-vanilla-owns");
+                default:
+                    return new TacticalIntentDecision(CommanderIntent.Hold, false, "macro-dynamic");
             }
         }
     }

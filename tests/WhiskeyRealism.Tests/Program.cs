@@ -891,6 +891,10 @@ static class Program
             ("tactical b6a recover maps to hold to last", TacticalB6aRecoverMapsToHoldToLast),
             ("tactical b6a no plan falls back to macro", TacticalB6aNoPlanFallsBackToMacro),
             ("tactical b6a macro retreat falls to hold to last", TacticalB6aMacroRetreatFallsToHoldToLast),
+            ("tactical b6a macro attack aggressive commander upgrades to all out", TacticalB6aMacroAttackAggressiveCommanderUpgradesToAllOut),
+            ("tactical b6a macro attack cautious commander deescalates to probe", TacticalB6aMacroAttackCautiousCommanderDeescalatesToProbe),
+            ("tactical b6a macro attack mid initiative preserves attack", TacticalB6aMacroAttackMidInitiativePreservesAttack),
+            ("tactical b6a macro assault cautious commander downgrades", TacticalB6aMacroAssaultCautiousCommanderDowngrades),
             ("tactical b6a probe intent yields probe and fix", TacticalB6aProbeIntentYieldsProbeAndFix),
             ("tactical b6a defend with right flank risk yields refuse right", TacticalB6aDefendRightFlankYieldsRefuseRight),
             ("tactical b6a defend with left flank risk yields refuse left", TacticalB6aDefendLeftFlankYieldsRefuseLeft),
@@ -10225,6 +10229,56 @@ static class Program
             oddsConfidence: 0.0f, weakPointConfirmed: false);
         var d = TacticalCommanderIntentResolver.Resolve(input);
         AssertTrue(d.Intent == CommanderIntent.HoldToLast, "Expected HoldToLast from macro 3, got " + d.Intent);
+    }
+
+    private static void TacticalB6aMacroAttackAggressiveCommanderUpgradesToAllOut()
+    {
+        // Hood-style high-initiative commander on macro=attack: upgrade to all-out.
+        var input = new TacticalIntentInput(
+            WhiskeyRealism.Strategic.OperationPosture.Inherit,
+            hasPlan: false, vanillaMacro: 1, commanderInitiative01: 0.85f,
+            oddsConfidence: 0.5f, weakPointConfirmed: false);
+        var d = TacticalCommanderIntentResolver.Resolve(input);
+        AssertTrue(d.Intent == CommanderIntent.AllOutAttack,
+            "Aggressive commander on macro-attack should escalate to AllOutAttack, got " + d.Intent);
+        AssertTrue(d.AllowsCharge, "AllOutAttack must allow charge");
+    }
+
+    private static void TacticalB6aMacroAttackCautiousCommanderDeescalatesToProbe()
+    {
+        // McClellan-style low-initiative commander on macro=attack: down-shift to probe.
+        var input = new TacticalIntentInput(
+            WhiskeyRealism.Strategic.OperationPosture.Inherit,
+            hasPlan: false, vanillaMacro: 1, commanderInitiative01: 0.15f,
+            oddsConfidence: 0.5f, weakPointConfirmed: false);
+        var d = TacticalCommanderIntentResolver.Resolve(input);
+        AssertTrue(d.Intent == CommanderIntent.ProbeIntent,
+            "Cautious commander on macro-attack should de-escalate to ProbeIntent, got " + d.Intent);
+        AssertTrue(!d.AllowsCharge, "ProbeIntent must not allow charge");
+    }
+
+    private static void TacticalB6aMacroAttackMidInitiativePreservesAttack()
+    {
+        // Regression: mid-band 0.5 initiative on macro=attack → still Attack (unchanged).
+        var input = new TacticalIntentInput(
+            WhiskeyRealism.Strategic.OperationPosture.Inherit,
+            hasPlan: false, vanillaMacro: 1, commanderInitiative01: 0.50f,
+            oddsConfidence: 0.5f, weakPointConfirmed: false);
+        var d = TacticalCommanderIntentResolver.Resolve(input);
+        AssertTrue(d.Intent == CommanderIntent.Attack,
+            "Mid-band initiative on macro-attack should preserve Attack, got " + d.Intent);
+    }
+
+    private static void TacticalB6aMacroAssaultCautiousCommanderDowngrades()
+    {
+        // Macro=assault (0) with very cautious commander: downgrade to Attack (not all-out).
+        var input = new TacticalIntentInput(
+            WhiskeyRealism.Strategic.OperationPosture.Inherit,
+            hasPlan: false, vanillaMacro: 0, commanderInitiative01: 0.15f,
+            oddsConfidence: 0.5f, weakPointConfirmed: false);
+        var d = TacticalCommanderIntentResolver.Resolve(input);
+        AssertTrue(d.Intent == CommanderIntent.Attack,
+            "Cautious commander on macro-assault should downgrade to Attack, got " + d.Intent);
     }
 
     private static void TacticalB6aProbeIntentYieldsProbeAndFix()
