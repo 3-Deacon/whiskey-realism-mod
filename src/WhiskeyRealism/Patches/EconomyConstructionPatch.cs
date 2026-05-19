@@ -23,6 +23,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int alliancerunthrough)
         {
+            using (TelemetryPerf.Scope("campaign.patch.economy-construction", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             try
             {
                 int alliance = alliancerunthrough;
