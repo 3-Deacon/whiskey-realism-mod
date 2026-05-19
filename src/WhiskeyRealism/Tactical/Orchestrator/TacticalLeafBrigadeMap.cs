@@ -89,7 +89,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public static IReadOnlyDictionary<int, LeafAssignment> BuildMap(
             IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree,
             IReadOnlyList<TopAssignment> topLevelAssignments,
-            float commanderAggression01)
+            float commanderAggression01,
+            CascadeEnvelopmentMode envelopmentMode = CascadeEnvelopmentMode.None)
         {
             var result = new Dictionary<int, LeafAssignment>();
             if (tree == null || topLevelAssignments == null) return result;
@@ -110,6 +111,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     i,
                     tree,
                     commanderAggression01,
+                    envelopmentMode,
                     visited,
                     depth: 0,
                     result);
@@ -126,6 +128,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int topLevelChildIndex,
             IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree,
             float commanderAggression01,
+            CascadeEnvelopmentMode envelopmentMode,
             HashSet<int> visited,
             int depth,
             Dictionary<int, LeafAssignment> output)
@@ -184,12 +187,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // using sibling strength buckets. Passing the same anchor to every
             // sibling's distribution call ensures exactly one Main per non-leaf
             // parent (no multi-self-anchor allocations).
+            //
+            // Envelopment is a TOP-LEVEL strategic decision: only apply DoubleWing
+            // at depth==0 (the army's direct children). Deeper tiers cascade
+            // normally so each wing then attacks via standard single-anchor Main
+            // toward its own offset objective. Without this constraint a 3-tier
+            // hierarchy would multiply wings (4 wings instead of 2).
             int anchorIndex = -1;
+            int secondaryAnchorIndex = -1;
+            CascadeEnvelopmentMode activeMode = CascadeEnvelopmentMode.None;
+            bool envelopmentEligibleHere =
+                depth == 0 &&
+                (envelopmentMode == CascadeEnvelopmentMode.DoubleWing ||
+                 envelopmentMode == CascadeEnvelopmentMode.DoubleWingEchelon) &&
+                children.Count >= 3;
             if (nodeRole == DirectChildRole.Main || nodeRole == DirectChildRole.SupportMain)
             {
                 var strengths = new int[children.Count];
                 for (int s = 0; s < children.Count; s++) strengths[s] = children[s].StrengthBucket;
-                anchorIndex = TacticalRoleCascade.ChooseMainAnchorIndex(strengths, nearCenterRadius: 1);
+                if (envelopmentEligibleHere)
+                {
+                    var (lAnchor, rAnchor) = TacticalRoleCascade.ChooseEnvelopmentAnchorIndices(strengths);
+                    anchorIndex = lAnchor;
+                    secondaryAnchorIndex = rAnchor;
+                    activeMode = envelopmentMode;
+                }
+                else
+                {
+                    anchorIndex = TacticalRoleCascade.ChooseMainAnchorIndex(strengths, nearCenterRadius: 1);
+                }
             }
 
             for (int idx = 0; idx < children.Count; idx++)
@@ -202,7 +228,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     childStrengthBucket: child.StrengthBucket,
                     childFlankExposureBucket: 0,
                     commanderAggression01: commanderAggression01,
-                    anchorIndex: anchorIndex);
+                    anchorIndex: anchorIndex,
+                    envelopmentMode: activeMode,
+                    secondaryAnchorIndex: secondaryAnchorIndex);
                 var derived = TacticalRoleCascade.DistributeChildRole(ctx);
 
                 var nextChain = new List<DirectChildRole>(chainSoFar.Count + 1);
@@ -221,6 +249,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     topLevelChildIndex,
                     tree,
                     commanderAggression01,
+                    envelopmentMode,
                     visited,
                     depth + 1,
                     output);

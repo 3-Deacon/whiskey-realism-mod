@@ -47,6 +47,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _catalog = catalog;
             _commanderPersonality = commanderPersonality;
             _planAgeSeconds = 0f;
+            _phaseAgeSeconds = 0f;
             _historyGlobalOdds = 1f;
             _currentIntentModel = UnknownIntentModel();
             HasPlan = false;
@@ -94,23 +95,74 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
+            _phaseAgeSeconds = 0f;
         }
 
         public void AdvancePlanAge(float deltaSeconds)
         {
             if (deltaSeconds <= 0f || float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds)) return;
             _planAgeSeconds += deltaSeconds;
+            // Legacy compat: callers that don't supply a separate battle-time
+            // delta get phase age advanced at real-time too. The preferred
+            // pattern for compression-aware code is to call AdvancePhaseAge
+            // explicitly with a battle-time delta and AdvancePlanAge with a
+            // real-time delta — see ArmyTickCycle.MaybeReplan.
+            _phaseAgeSeconds += deltaSeconds;
+        }
+
+        /// <summary>
+        /// Adds <paramref name="battleDeltaSeconds"/> to phase age in battle-
+        /// time. Use this when the runtime tracks GameVars.currenttimefromstart
+        /// for compression-aware phase budgets (2x/5x/20x time compression
+        /// makes real-time and battle-time diverge — phase budgets should run
+        /// on battle-time, replan rate limits on real-time).
+        ///
+        /// Callers should NOT also pass the same delta to AdvancePlanAge for
+        /// the phase-age component — that would double-count. The new pattern
+        /// is: AdvancePhaseAge(battleDelta) FIRST to set phase age, then a
+        /// real-time-only plan age update (or AdvancePlanAge for legacy).
+        /// </summary>
+        public void AdvancePhaseAge(float battleDeltaSeconds)
+        {
+            if (battleDeltaSeconds <= 0f ||
+                float.IsNaN(battleDeltaSeconds) || float.IsInfinity(battleDeltaSeconds))
+                return;
+            _phaseAgeSeconds += battleDeltaSeconds;
+        }
+
+        /// <summary>
+        /// Real-time-only plan age advance. Use this with AdvancePhaseAge
+        /// to keep the two timers semantically separate: replan rate limits
+        /// run on real-time (wallclock decision cadence), phase budgets run
+        /// on battle-time (commander decision pace).
+        /// </summary>
+        public void AdvancePlanAgeRealtimeOnly(float realDeltaSeconds)
+        {
+            if (realDeltaSeconds <= 0f ||
+                float.IsNaN(realDeltaSeconds) || float.IsInfinity(realDeltaSeconds))
+                return;
+            _planAgeSeconds += realDeltaSeconds;
         }
 
         private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, out TacticalBattlePlan nextPlan)
         {
+            // Envelopment pressure: replan-time read of the latest reinforcement
+            // opportunity decision. AttackNow + ratio>=1.5 biases the catalog
+            // toward Lee/Jackson/Hooker/Sherman envelopment playbooks. Mirrors
+            // SoW's grand-tactics play selection (offai.cpp:1144-1168) but uses
+            // a doctrine flag instead of a pre-battle table.
+            bool envelopmentPressure =
+                _currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.AttackNow &&
+                _currentReinforcementOpportunity.CurrentRatio >= EnvelopmentMinRatio;
             var ctx = new PlaybookContext(
                 _commanderPersonality,
                 evidence.Terrain,
                 evidence.CurrentOdds,
                 opposingCommanderHint,
                 defaultMainEffortSector: evidence.DefaultMainEffortSector,
-                jitterSeed: AllianceId * 31 + 7);
+                jitterSeed: AllianceId * 31 + 7,
+                envelopmentPressure: envelopmentPressure,
+                allianceId: AllianceId);
             var pb = _catalog?.Select(ctx);
             if (pb == null)
             {
@@ -118,15 +170,149 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return false;
             }
             nextPlan = pb.Instantiate(ctx);
+
+            // Envelopment-active tightening: commit reserves sooner when the
+            // doctrine signaled AttackNow + clear advantage. Caps to the
+            // EnvelopmentReserveCommitOddsCap floor so a playbook that already
+            // commits earlier than the cap (e.g., GenericDesperate=0.9) is not
+            // worsened. Sympathetic to SoW's "all engaged" posture under clear
+            // advantage (offai.cpp:947) without going to full commit.
+            if (envelopmentPressure && nextPlan.ReserveCommitTriggerOdds > EnvelopmentReserveCommitOddsCap)
+            {
+                nextPlan = nextPlan.WithReserveCommitTriggerOdds(EnvelopmentReserveCommitOddsCap);
+            }
             return true;
         }
+
+        /// <summary>
+        /// Reserve-commit-trigger-odds cap when envelopment pressure is active.
+        /// At this odds level, reserves release into the wings to keep attack
+        /// pressure up. A defensive playbook (Longstreet=1.5, McClellan=1.6)
+        /// caps here; aggressive playbooks (Hood=1.0, Jackson=1.0, Desperate=0.9)
+        /// keep their playbook default.
+        /// </summary>
+        public const float EnvelopmentReserveCommitOddsCap = 1.1f;
+
+        // Phase-local age: time since the last phase transition. Distinct
+        // from _planAgeSeconds (time since last Replan). Decoupled in
+        // 2026-05-19 so phase progression can reset the phase budget without
+        // also resetting the PhaseDeadline-replan timer (each phase has its
+        // own budget; the overall plan still has an overarching deadline).
+        private float _phaseAgeSeconds = 0f;
+        public float PhaseAgeSeconds => _phaseAgeSeconds;
 
         public void AdvancePhase(BattlePhase next)
         {
             if (!HasPlan) return;
             if (_plan.Phase == next) return;
             _plan = _plan.WithPhase(next);
-            _planAgeSeconds = 0f;
+            _phaseAgeSeconds = 0f;
+            // Note: _planAgeSeconds is NOT reset — that timer measures time
+            // since last Replan, which is independent of phase transitions.
+        }
+
+        /// <summary>
+        /// Sector-driven main-effort shift. Runtime passes in the decisive
+        /// sector id from <see cref="WhiskeyRealism.Tactical.TacticalSectorLedger.Evaluate"/>;
+        /// if it differs from the current plan's MainEffortSector AND we're
+        /// in a phase where shifting makes sense (Probe or MainEffort), the
+        /// plan is updated. Defensive phases (Consolidate, Withdraw) keep
+        /// their established sector so the army doesn't change direction
+        /// while breaking contact.
+        ///
+        /// Returns true iff the main effort shifted. Caller should rebuild
+        /// the leaf-brigade map (signature includes MainEffortSector so this
+        /// is automatic on the next UpdateLeafBrigadeMap call).
+        /// </summary>
+        /// <summary>
+        /// Hysteresis margin for main effort shift: candidate must be at
+        /// least this much better than current. Prevents thrash under 20x
+        /// time compression where sector odds bounce in real-time terms
+        /// (the underlying battle simulation runs faster than human review
+        /// can confirm). 0.25 = candidate must be 25% better in odds.
+        /// Mirrors ArmyReplanTriggers.BreakthroughOpportunityMargin in spirit
+        /// (defensive bias against overreacting to marginal swings).
+        /// </summary>
+        public const float MainEffortShiftMarginRatio = 0.25f;
+
+        /// <summary>
+        /// Considers shifting the main effort sector to the candidate
+        /// decisive sector. Caller passes the candidate sector AND its odds
+        /// AND the current main effort sector's odds; the shift only fires
+        /// if the candidate is materially better (margin = 25% of current).
+        /// Hysteresis prevents flicker at high time compression.
+        /// </summary>
+        public bool ConsiderMainEffortShift(int decisiveSectorId, float decisiveSectorOdds, float currentMainEffortOdds)
+        {
+            if (!HasPlan) return false;
+            if (decisiveSectorId < 0) return false;
+            if (_plan.MainEffortSector == decisiveSectorId) return false;
+            if (_plan.Phase == BattlePhase.Consolidate ||
+                _plan.Phase == BattlePhase.Withdraw)
+                return false;
+            // Hysteresis: only shift if candidate is materially better.
+            // If currentMainEffortOdds <= 0 (no contact in current sector),
+            // any positive candidate wins — there's nothing to lose.
+            if (currentMainEffortOdds > 0f)
+            {
+                float requiredOdds = currentMainEffortOdds * (1f + MainEffortShiftMarginRatio);
+                if (decisiveSectorOdds < requiredOdds) return false;
+            }
+            _plan = _plan.WithMainEffortSector(decisiveSectorId);
+            return true;
+        }
+
+        /// <summary>
+        /// Legacy overload without hysteresis. Used by call sites that
+        /// haven't been updated to pass odds yet. Should be removed once
+        /// the runtime fully migrates to the hysteresis-aware path.
+        /// </summary>
+        public bool ConsiderMainEffortShift(int decisiveSectorId)
+            => ConsiderMainEffortShift(decisiveSectorId, decisiveSectorOdds: float.MaxValue, currentMainEffortOdds: 0f);
+
+        /// <summary>
+        /// Per-tick phase progression evaluator. Runtime calls this after
+        /// updating evidence; the doctrine decides whether to advance
+        /// (Probe -> MainEffort -> Exploit -> Consolidate -> Withdraw)
+        /// based on plan age, global/main-effort odds, morale, and reserves.
+        /// Returns the decision so the runtime can emit telemetry; the
+        /// orchestrator also applies the recommended advance internally.
+        /// </summary>
+        public TacticalPhaseProgressionDoctrine.Decision EvaluateAndAdvancePhase(
+            float globalOddsCurrent,
+            float mainEffortOddsCurrent,
+            float mainEffortOddsHistory,
+            float armyMoraleCurrent,
+            float armyMoraleFloor,
+            float reservesCommittedFraction,
+            TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady)
+        {
+            if (!HasPlan)
+                return new TacticalPhaseProgressionDoctrine.Decision(BattlePhase.Probe, "no-plan");
+
+            float aggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
+            if (aggression01 < 0f) aggression01 = 0f;
+            if (aggression01 > 1f) aggression01 = 1f;
+
+            var input = new TacticalPhaseProgressionDoctrine.Input(
+                currentPhase: _plan.Phase,
+                planAgeSeconds: _phaseAgeSeconds,
+                globalOddsCurrent: globalOddsCurrent,
+                globalOddsHistory: _historyGlobalOdds,
+                mainEffortOddsCurrent: mainEffortOddsCurrent,
+                mainEffortOddsHistory: mainEffortOddsHistory,
+                armyMoraleCurrent: armyMoraleCurrent,
+                armyMoraleFloor: armyMoraleFloor,
+                reservesCommittedFraction: reservesCommittedFraction,
+                commanderAggression01: aggression01,
+                mainEffortReadiness: mainEffortReadiness);
+
+            var decision = TacticalPhaseProgressionDoctrine.Decide(input);
+            if (decision.NextPhase != _plan.Phase)
+            {
+                AdvancePhase(decision.NextPhase);
+            }
+            return decision;
         }
 
         public ArmyIntent EmitArmyIntent()
@@ -166,6 +352,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _currentIntentModel = enemyIntent;
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
+            _phaseAgeSeconds = 0f;
             // Plan changed → MainEffortSector/FixingSectors/ScreeningSectors may have shifted,
             // which would change DirectChildAllocator outputs. Invalidate the direct-child
             // evidence cache so the next signature-equal observe reallocates against the new
@@ -414,9 +601,50 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (aggression01 < 0f) aggression01 = 0f;
             if (aggression01 > 1f) aggression01 = 1f;
 
-            _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(tree, topAssignments, aggression01);
+            // Envelopment mode is gated on a live AttackNow doctrine decision
+            // AND a clear (>=1.5x) standing advantage. Below that threshold the
+            // legacy single-axis cascade is preferred — diluting force across
+            // two wings on a thin margin loses locally. Matches SoW pattern of
+            // selecting multi-rect army plays only when force structure
+            // supports detaching a wing (offai.cpp:1115-1320).
+            //
+            // When envelopment fires, the choice between simultaneous (both
+            // wings as Main / AttackObjective) vs echelon (primary wing as
+            // Main, secondary as SupportMain / SupportAttack — Longstreet Day
+            // 2 sequential template) is driven by commander aggression:
+            //   aggression >= EnvelopmentSimultaneousAggressionThreshold (0.6)
+            //     -> DoubleWing (Lee/Jackson — committed, simultaneous)
+            //   below threshold -> DoubleWingEchelon (Longstreet/Bragg/Hooker
+            //     and methodical commanders — probe with one wing, follow with
+            //     the second once the first finds purchase).
+            CascadeEnvelopmentMode envelopmentMode = CascadeEnvelopmentMode.None;
+            if (_currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.AttackNow &&
+                _currentReinforcementOpportunity.CurrentRatio >= EnvelopmentMinRatio)
+            {
+                envelopmentMode = aggression01 >= EnvelopmentSimultaneousAggressionThreshold
+                    ? CascadeEnvelopmentMode.DoubleWing
+                    : CascadeEnvelopmentMode.DoubleWingEchelon;
+            }
+
+            _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(tree, topAssignments, aggression01, envelopmentMode);
             _leafBrigadeMapSignature = sig;
         }
+
+        /// <summary>
+        /// Minimum CurrentRatio for the cascade to spread Main+SupportMain
+        /// across two lateral wings. Below this, single-axis Main is safer —
+        /// thin advantages get diluted across two axes and lose locally.
+        /// </summary>
+        public const float EnvelopmentMinRatio = 1.5f;
+
+        /// <summary>
+        /// Commander aggression threshold above which envelopment uses
+        /// simultaneous DoubleWing instead of sequential DoubleWingEchelon.
+        /// Lee/Jackson/Hood (>= 0.6) attack both wings simultaneously;
+        /// Longstreet/Bragg/methodical commanders (< 0.6) commit primary
+        /// wing first, secondary wing follows as SupportMain.
+        /// </summary>
+        public const float EnvelopmentSimultaneousAggressionThreshold = 0.6f;
 
         // ---- Reinforcement opportunity doctrine ----
         //
@@ -470,8 +698,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private string ComputeLeafMapSignature(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree)
         {
-            // Signature: count of tree nodes + count + role-string of direct child intents.
-            // Cheap to compute and dedupes the rebuild call between ticks.
+            // Signature: tree-size + role-string of direct child intents +
+            // envelopment-relevant doctrine state. Envelopment is a function
+            // of the AttackNow + ratio>=1.5 gate, so the signature must change
+            // when those flip — otherwise the cached map keeps yesterday's
+            // single-axis layout after the doctrine swings to AttackNow.
             var sb = new System.Text.StringBuilder();
             sb.Append("tree=").Append(tree.Count).Append('|');
             sb.Append("intents=").Append(_directChildIntents.Count).Append('|');
@@ -479,6 +710,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 sb.Append(_directChildIntents[i].ChildId).Append(':').Append(_directChildIntents[i].Role).Append(',');
             }
+            // MainEffortSector is part of the cascade input because role
+            // distribution and offensive geometry depend on it. If the runtime
+            // shifts the main effort to a different sector via
+            // ConsiderMainEffortShift, the cache must invalidate so cascade
+            // rebuilds with new positional priorities.
+            sb.Append("|me=").Append(HasPlan ? _plan.MainEffortSector : -1);
+            sb.Append("|ph=").Append(HasPlan ? (int)_plan.Phase : -1);
+            bool envelopActive =
+                _currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.AttackNow &&
+                _currentReinforcementOpportunity.CurrentRatio >= EnvelopmentMinRatio;
+            // Encode the mode (1 = simultaneous, 2 = echelon, 0 = off) so the
+            // cache invalidates when commander aggression flips us across the
+            // threshold mid-battle — e.g., a wounded aggressive commander
+            // dropping into echelon shouldn't keep the old simultaneous layout.
+            int envCode = 0;
+            if (envelopActive)
+            {
+                float aggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
+                if (aggression01 < 0f) aggression01 = 0f;
+                if (aggression01 > 1f) aggression01 = 1f;
+                envCode = aggression01 >= EnvelopmentSimultaneousAggressionThreshold ? 1 : 2;
+            }
+            sb.Append("|env=").Append(envCode);
             return sb.ToString();
         }
 
@@ -529,6 +783,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _plan = plan;
             HasPlan = true;
             _planAgeSeconds = 0f;
+            _phaseAgeSeconds = 0f;
             _historyGlobalOdds = 1f;
         }
 

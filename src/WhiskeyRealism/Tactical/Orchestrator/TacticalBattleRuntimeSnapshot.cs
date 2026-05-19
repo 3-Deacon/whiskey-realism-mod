@@ -90,8 +90,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             0f,
             Array.Empty<ObjectiveRecord>(),
             CommandTreeSnapshot.Empty,
-            Array.Empty<DirectChildSnapshot>());
+            Array.Empty<DirectChildSnapshot>(),
+            ownAvgFatigue01: 0.2f,
+            ownAvgAmmo01: 0.9f,
+            nearestReinforcementHours: 0f,
+            nearestReinforcementStrength: 0f);
 
+        // Legacy ctor without readiness fields. Defaults to neutral readiness
+        // so existing call sites that haven't been updated still produce a
+        // PushReady decision (preserves pre-readiness behavior).
         public TacticalBattleRuntimeSnapshot(
             TacticalBattleStateSignature signatureAtBuild,
             float buildBattleHours,
@@ -104,6 +111,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<ObjectiveRecord> objectives,
             CommandTreeSnapshot commandTree,
             IReadOnlyList<DirectChildSnapshot> directChildSnapshots)
+            : this(signatureAtBuild, buildBattleHours, ownEvidence, enemyVisible,
+                   ownMainEffortStrength, ownArmyMorale, ownReservesCommittedFraction,
+                   reinforcementsArrivingDelta, objectives, commandTree, directChildSnapshots,
+                   ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
+                   nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f)
+        { }
+
+        public TacticalBattleRuntimeSnapshot(
+            TacticalBattleStateSignature signatureAtBuild,
+            float buildBattleHours,
+            ArmyEvidence ownEvidence,
+            EnemyVisibleState enemyVisible,
+            float ownMainEffortStrength,
+            float ownArmyMorale,
+            float ownReservesCommittedFraction,
+            float reinforcementsArrivingDelta,
+            IReadOnlyList<ObjectiveRecord> objectives,
+            CommandTreeSnapshot commandTree,
+            IReadOnlyList<DirectChildSnapshot> directChildSnapshots,
+            float ownAvgFatigue01,
+            float ownAvgAmmo01,
+            float nearestReinforcementHours,
+            float nearestReinforcementStrength)
         {
             SignatureAtBuild = signatureAtBuild;
             BuildBattleHours = buildBattleHours < 0f || float.IsNaN(buildBattleHours) || float.IsInfinity(buildBattleHours) ? 0f : buildBattleHours;
@@ -116,6 +146,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Objectives = CopyObjectives(objectives);
             CommandTree = commandTree ?? CommandTreeSnapshot.Empty;
             DirectChildSnapshots = CopyDirectChildSnapshots(directChildSnapshots);
+            OwnAvgFatigue01 = Clamp01(ownAvgFatigue01);
+            OwnAvgAmmo01 = Clamp01(ownAvgAmmo01);
+            NearestReinforcementHours = SanitizeNonNegative(nearestReinforcementHours);
+            NearestReinforcementStrength = SanitizeNonNegative(nearestReinforcementStrength);
         }
 
         public TacticalBattleStateSignature SignatureAtBuild { get; }
@@ -129,6 +163,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public IReadOnlyList<ObjectiveRecord> Objectives { get; }
         public CommandTreeSnapshot CommandTree { get; }
         public IReadOnlyList<DirectChildSnapshot> DirectChildSnapshots { get; }
+        // Readiness fields (added 2026-05-19). Army-wide averages for now.
+        public float OwnAvgFatigue01 { get; }
+        public float OwnAvgAmmo01 { get; }
+        public float NearestReinforcementHours { get; }
+        public float NearestReinforcementStrength { get; }
 
         /// <summary>
         /// True if this snapshot carries usable heavy data (objectives, command tree nodes, or direct children).

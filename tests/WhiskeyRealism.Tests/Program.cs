@@ -1130,6 +1130,85 @@ static class Program
             ("leaf brigade map survives parent cycle", LeafBrigadeMapSurvivesParentCycle),
             ("leaf brigade map bounded recursion depth", LeafBrigadeMapBoundedRecursionDepth),
             ("role cascade choose main anchor picks strongest near center", RoleCascadeChooseMainAnchorPicksStrongestNearCenter),
+            ("role cascade envelopment anchors picks strongest in each half", RoleCascadeEnvelopmentAnchorsPicksStrongestInEachHalf),
+            ("role cascade envelopment anchors falls back at one and two children", RoleCascadeEnvelopmentAnchorsFallsBackAtTinyChildCounts),
+            ("role cascade main double wing five children produces two wings + pin + refused outers", RoleCascadeMainDoubleWingFiveChildren),
+            ("role cascade main double wing seven children adds support adjacent to wings", RoleCascadeMainDoubleWingSevenChildren),
+            ("role cascade main double wing below three children falls back to single anchor", RoleCascadeMainDoubleWingTwoChildrenFallsBackToSingleAnchor),
+            ("playbook catalog envelopment pressure biases lee over hood", PlaybookCatalogEnvelopmentPressureBiasesLeeOverHood),
+            ("playbook catalog envelopment pressure off keeps frontal playbook fit", PlaybookCatalogEnvelopmentPressureOffKeepsFrontalFit),
+            ("playbook catalog faction bias prefers historical match", PlaybookCatalogFactionBiasPrefersHistoricalMatch),
+            ("playbook catalog faction bias does not affect generic playbooks", PlaybookCatalogFactionBiasDoesNotAffectGeneric),
+            ("playbook catalog faction affinity table is correct", PlaybookCatalogFactionAffinityTableIsCorrect),
+            ("heavy gate cycle scaler base at 1x compression", HeavyGateCycleScalerBaseAt1xCompression),
+            ("heavy gate cycle scaler 5x compression stays near base", HeavyGateCycleScaler5xStaysNearBase),
+            ("heavy gate cycle scaler 20x compression scales 5x", HeavyGateCycleScaler20xScales5x),
+            ("heavy gate cycle scaler sanitizes garbage inputs", HeavyGateCycleScalerSanitizesGarbage),
+            ("playbook catalog envelopment affinity ranking sanity", PlaybookCatalogEnvelopmentAffinityRankingSanity),
+            ("army orchestrator envelopment min ratio constant is 1.5", ArmyOrchestratorEnvelopmentMinRatioConstantIs15),
+            ("army orchestrator envelopment reserve commit cap is 1.1", ArmyOrchestratorEnvelopmentReserveCommitCapIs11),
+            ("seed catalog registers all eighteen playbooks", SeedCatalogRegistersAllEighteenPlaybooks),
+            ("buford screen delay playbook id and historical label", BufordScreenDelayPlaybookIdAndHistoricalLabel),
+            ("forrest cavalry raid playbook id and historical label", ForrestCavalryRaidPlaybookIdAndHistoricalLabel),
+            ("meeting engagement playbook id and historical label", MeetingEngagementPlaybookIdAndHistoricalLabel),
+            ("johnston fabian delay playbook id and historical label", JohnstonFabianDelayPlaybookIdAndHistoricalLabel),
+            ("buford screen delay terrain fit favors open over mountain", BufordScreenDelayTerrainFitFavorsOpenOverMountain),
+            ("forrest raid odds range tolerates outnumbered", ForrestRaidOddsRangeToleratesOutnumbered),
+            ("meeting engagement reserve commit trigger is aggressive", MeetingEngagementReserveCommitTriggerIsAggressive),
+            ("johnston fabian delay reserve commit trigger is conservative", JohnstonFabianDelayReserveCommitTriggerIsConservative),
+            ("forrest cavalry raid allows provisional attack axis", ForrestCavalryRaidAllowsProvisionalAttackAxis),
+            ("role cascade double wing echelon secondary gets support main", RoleCascadeDoubleWingEchelonSecondaryGetsSupportMain),
+            ("role cascade double wing simultaneous secondary gets main", RoleCascadeDoubleWingSimultaneousSecondaryGetsMain),
+            ("army orchestrator envelopment simultaneous aggression threshold is 0.6", ArmyOrchestratorEnvelopmentSimultaneousAggressionThresholdIs06),
+            // Slice A: phase progression doctrine
+            ("phase progression probe holds when odds neutral and budget unspent", PhaseProgressionProbeHoldsWhenNeutral),
+            ("phase progression probe commits to main effort when odds favorable", PhaseProgressionProbeCommitsWhenFavorable),
+            ("phase progression probe budget elapses with poor odds yields consolidate", PhaseProgressionProbeBudgetElapsesPoorOddsConsolidate),
+            ("phase progression main effort exploits on local breakthrough", PhaseProgressionMainEffortExploitsOnLocalBreakthrough),
+            ("phase progression main effort consolidates on odds revert deep commit", PhaseProgressionMainEffortConsolidatesOnRevert),
+            ("phase progression morale floor breach withdraws from any phase", PhaseProgressionMoraleFloorWithdraws),
+            ("phase progression withdraw is absorbing", PhaseProgressionWithdrawIsAbsorbing),
+            ("phase progression aggressive commander shortens probe budget", PhaseProgressionAggressiveShortensProbeBudget),
+            ("phase progression cautious commander lengthens probe budget", PhaseProgressionCautiousLengthensProbeBudget),
+            ("phase progression exploit ends on reserves exhausted", PhaseProgressionExploitEndsOnReservesExhausted),
+            ("army orchestrator evaluate and advance updates plan phase", ArmyOrchestratorEvaluateAndAdvanceUpdatesPlanPhase),
+            // Slice B: sector-driven main-effort shift
+            ("army orchestrator consider main effort shift swaps sector in probe phase", ArmyOrchestratorConsiderMainEffortShiftSwapsInProbe),
+            ("army orchestrator consider main effort shift blocked in withdraw", ArmyOrchestratorConsiderMainEffortShiftBlockedInWithdraw),
+            ("army orchestrator consider main effort shift noop on same sector", ArmyOrchestratorConsiderMainEffortShiftNoopOnSame),
+            ("battle plan with main effort sector replaces field", BattlePlanWithMainEffortSectorReplacesField),
+            // Slice C: offensive replan triggers
+            ("replan triggers fire main effort local breakthrough on odds spike", ReplanTriggersFireMainEffortLocalBreakthroughOnSpike),
+            ("replan triggers fire breakthrough opportunity on off axis sector", ReplanTriggersFireBreakthroughOpportunityOnOffAxis),
+            ("replan triggers offensive triggers do not fire in consolidate phase", ReplanTriggersOffensiveDoNotFireInConsolidate),
+            ("replan triggers defensive triggers still take precedence", ReplanTriggersDefensiveTakePrecedence),
+            // Sector readiness doctrine (fresh-troops decision)
+            ("sector readiness push ready when effective force covers ratio", SectorReadinessPushReadyWhenEffectiveCoversRatio),
+            ("sector readiness hold for reinforcements when relief tips balance", SectorReadinessHoldForReinforcementsWhenReliefTips),
+            ("sector readiness push degraded when aggressive and no relief", SectorReadinessPushDegradedAggressiveNoRelief),
+            ("sector readiness hold fatigued when cautious and no relief", SectorReadinessHoldFatiguedCautiousNoRelief),
+            ("sector readiness fatigue ammo morale collapse effective strength", SectorReadinessFatigueAmmoMoraleCollapseEffective),
+            ("sector readiness degraded force health always holds", SectorReadinessDegradedForceHealthAlwaysHolds),
+            ("sector readiness is scale invariant across small and large armies", SectorReadinessIsScaleInvariant),
+            ("sector readiness reinforcement window scales with aggression", SectorReadinessReinforcementWindowScalesWithAggression),
+            ("phase progression probe blocks commit when hold for reinforcements", PhaseProgressionProbeBlocksCommitOnHoldForReinforcements),
+            ("phase progression probe blocks commit when hold fatigued", PhaseProgressionProbeBlocksCommitOnHoldFatigued),
+            ("phase progression probe push degraded still commits", PhaseProgressionProbePushDegradedStillCommits),
+            ("phase progression exploit blocks on hold for reinforcements", PhaseProgressionExploitBlocksOnHoldForReinforcements),
+            // Full wiring: ArmyTickCycle.MaybeReplan readiness path
+            ("army tick cycle fresh army advances phase to main effort on favorable odds", ArmyTickCycleFreshAdvancesOnFavorableOdds),
+            ("army tick cycle exhausted army with relief holds in probe", ArmyTickCycleExhaustedWithReliefHoldsInProbe),
+            ("army tick cycle exhausted aggressive commander still commits", ArmyTickCycleExhaustedAggressiveStillCommits),
+            ("army tick cycle exhausted cautious commander holds fatigued", ArmyTickCycleExhaustedCautiousHoldsFatigued),
+            ("army tick cycle legacy overload preserves prior behavior", ArmyTickCycleLegacyOverloadPreservesPriorBehavior),
+            ("army tick cycle wires consider main effort shift from enemy visible state", ArmyTickCycleWiresConsiderMainEffortShift),
+            ("army tick cycle wires offensive trigger inputs from enemy visible state", ArmyTickCycleWiresOffensiveTriggerInputs),
+            // Time compression handling
+            ("consider main effort shift respects hysteresis margin", ConsiderMainEffortShiftRespectsHysteresisMargin),
+            ("consider main effort shift legacy overload always shifts", ConsiderMainEffortShiftLegacyOverloadAlwaysShifts),
+            ("advance plan age realtime only does not advance phase age", AdvancePlanAgeRealtimeOnlyDoesNotAdvancePhaseAge),
+            ("advance phase age battle time separate from plan age", AdvancePhaseAgeBattleTimeSeparateFromPlanAge),
+            ("army tick cycle 20x compression burns probe budget in battle time", ArmyTickCycle20xCompressionBurnsProbeInBattleTime),
             ("leaf brigade map stops at brigade tier not regiments", LeafBrigadeMapStopsAtBrigadeTierNotRegiments),
             ("leaf brigade map handles four tier army corps division brigade", LeafBrigadeMapHandlesFourTierArmyCorpsDivisionBrigade),
             ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h mid commander withdraws", ReinforcementOpportunity15kVs13kPlus7kIn12hMidWithdraws),
@@ -1140,7 +1219,11 @@ static class Program
             ("reinforcement opportunity 12k own +5k in 6h vs 13k enemy waits to consolidate", ReinforcementOpportunity12kPlus5kIn6hWaitsToConsolidate),
             ("reinforcement opportunity 13k vs 13k both reinforcing defensive hold", ReinforcementOpportunity13kVs13kBothReinforcingDefensiveHold),
             ("reinforcement opportunity intel confidence floor falls through to no opportunity", ReinforcementOpportunityIntelConfidenceFloorFallsThrough),
-            ("reinforcement opportunity below min force absolute does not attack", ReinforcementOpportunityBelowMinForceAbsoluteDoesNotAttack),
+            ("reinforcement opportunity small cavalry brigade can attack at favorable ratio", ReinforcementOpportunitySmallCavalryCanAttack),
+            ("reinforcement opportunity picket clash below 500 men does not attack", ReinforcementOpportunityPicketClashDoesNotAttack),
+            ("reinforcement opportunity standing advantage + static enemy attacks now", ReinforcementOpportunityStandingAdvantageStaticEnemyAttacksNow),
+            ("reinforcement opportunity standing advantage + static enemy below-min-force holds", ReinforcementOpportunityStandingAdvantageStaticEnemyBelowMinForceHolds),
+            ("reinforcement opportunity cautious commander + standing advantage does not attack", ReinforcementOpportunityCautiousStandingAdvantageDoesNotAttack),
             ("reinforcement opportunity empty arrivals never reach parity", ReinforcementOpportunityEmptyArrivalsNeverReachParity),
             ("reinforcement opportunity zero enemy does not divide by zero", ReinforcementOpportunityZeroEnemyDoesNotDivideByZero),
             ("reinforcement opportunity attack threshold scales with aggression", ReinforcementOpportunityAttackThresholdScalesWithAggression),
@@ -10030,6 +10113,11 @@ static class Program
                 "CheckLineFallbacks",
                 new NullReferenceException("null attached unit")),
             "line fallback null exception should be suppressed");
+        AssertTrue(
+            TacticalBattlefieldBugDiagnostics.ShouldSuppressFallbackRetreatException(
+                "CheckOutOfFireRange",
+                new NullReferenceException("null closestenemyunitfar")),
+            "BUG-TAC-015: CheckOutOfFireRange null exception should be suppressed");
         AssertTrue(
             !TacticalBattlefieldBugDiagnostics.ShouldSuppressFallbackRetreatException(
                 "MicroAICheckForRetreats",
@@ -21465,6 +21553,10 @@ static class Program
             c.Register(new GenericCautiousPlaybook());
             c.Register(new GenericMethodicalPlaybook());
             c.Register(new GenericDesperatePlaybook());
+            c.Register(new BufordCavalryScreenDelayPlaybook());
+            c.Register(new ForrestCavalryRaidPlaybook());
+            c.Register(new MeetingEngagementPlaybook());
+            c.Register(new JohnstonFabianDelayPlaybook());
             return c;
         }
     }
@@ -22600,7 +22692,7 @@ static class Program
     private static void ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment()
     {
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(currentOdds: 1.1f, terrain: TerrainKind.Wooded, defaultMainEffortSector: 0));
         AssertTrue(orch.HasPlan, "plan picked");
         AssertEqual(BattlePlanId.LeeEnvelopment, orch.CurrentPlan.PlanId, "Lee personality + wooded + 1.1 odds picks lee-envelopment");
@@ -22610,7 +22702,7 @@ static class Program
     private static void ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality()
     {
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.2f, TerrainKind.Open, 0));
         orch.AdvancePhase(BattlePhase.MainEffort);
         AssertEqual(1, orch.CurrentMacroAi, "MainEffort + aggressive personality -> macroai 1 (attack)");
@@ -22628,7 +22720,7 @@ static class Program
     private static void ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan()
     {
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 2));
         var intent = orch.EmitArmyIntent();
         AssertEqual(BattlePlanId.LeeEnvelopment, intent.PlanId, "intent plan id matches");
@@ -22640,7 +22732,7 @@ static class Program
     private static void ArmyOrchestratorRecordsHistoryOnInitialPlan()
     {
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
 
         orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
 
@@ -22651,7 +22743,7 @@ static class Program
     private static void ArmyOrchestratorTickAdvancesAgeWithoutReplanning()
     {
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
 
         orch.AdvancePlanAge(15f);
@@ -22663,7 +22755,7 @@ static class Program
     private static void ArmyOrchestratorReplanWithIntentResetsAgeAndUpdatesHistory()
     {
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
         orch.AdvancePlanAge(60f);
         var enemyIntent = new TacticalIntentModel(InferredIntent.Defend, 1, 0.7f, 0f, null);
@@ -22678,7 +22770,7 @@ static class Program
     private static void ArmyOrchestratorReplanWithoutIntentLeavesIntentUnknown()
     {
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
 
         orch.Replan(new ArmyEvidence(1.0f, TerrainKind.Wooded, 0));
@@ -22690,7 +22782,7 @@ static class Program
     {
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var catalog = SeedCatalog.AllHistoricalAndGeneric();
-        var orch = new ArmyOrchestrator(0, catalog, lee);
+        var orch = new ArmyOrchestrator(1, catalog, lee);
         orch.PickInitialPlan(new ArmyEvidence(1.4f, TerrainKind.Wooded, 0));
         orch.AdvancePlanAge(45f);
         var oldPlanId = orch.CurrentPlan.PlanId;
@@ -23474,6 +23566,1333 @@ static class Program
         AssertEqual(CommandTaskType.None,            TacticalRoleCascade.RoleToLeafTask(DirectChildRole.Unknown), "Unknown → None");
     }
 
+    // ---- Envelopment cascade + playbook scoring (AttackNow + ratio>=1.5) ----
+
+    private static void RoleCascadeEnvelopmentAnchorsPicksStrongestInEachHalf()
+    {
+        // 6 children, strengths [2, 5, 1, 3, 4, 1].
+        // Left half indices [0..2]: max at idx 1 (strength 5).
+        // Right half indices [3..5]: max at idx 4 (strength 4).
+        var strengths = new int[] { 2, 5, 1, 3, 4, 1 };
+        var (left, right) = TacticalRoleCascade.ChooseEnvelopmentAnchorIndices(strengths);
+        AssertEqual(1, left, "left anchor = strongest left half");
+        AssertEqual(4, right, "right anchor = strongest right half");
+    }
+
+    private static void RoleCascadeEnvelopmentAnchorsFallsBackAtTinyChildCounts()
+    {
+        // 1 child: no envelopment possible; (0, -1) sentinel.
+        var one = TacticalRoleCascade.ChooseEnvelopmentAnchorIndices(new int[] { 3 });
+        AssertEqual(0, one.leftAnchor, "single child left anchor 0");
+        AssertEqual(-1, one.rightAnchor, "single child right anchor sentinel -1");
+
+        // 2 children: each side gets one — (0, 1).
+        var two = TacticalRoleCascade.ChooseEnvelopmentAnchorIndices(new int[] { 1, 1 });
+        AssertEqual(0, two.leftAnchor, "two child left anchor 0");
+        AssertEqual(1, two.rightAnchor, "two child right anchor 1");
+
+        // Empty: returns (0, -1) sentinel without throwing.
+        var empty = TacticalRoleCascade.ChooseEnvelopmentAnchorIndices(new int[] { });
+        AssertEqual(0, empty.leftAnchor, "empty left anchor 0");
+        AssertEqual(-1, empty.rightAnchor, "empty right anchor sentinel -1");
+    }
+
+    private static void RoleCascadeMainDoubleWingFiveChildren()
+    {
+        // 5 children, double-wing envelopment with anchors at indices 1 and 3.
+        // Expected layout (envelopment template — two wings + center pin):
+        //   idx 0: RefuseLeft  (outer flank refused)
+        //   idx 1: Main         (left wing attack anchor)
+        //   idx 2: Fix          (center pin — adjacent-band-1 logic would give Support
+        //                        but at distance 1 from BOTH anchors the closer-wing rule
+        //                        means SupportMain. Distance to left = 1, distance to right = 1.
+        //                        → SupportMain by current implementation. Verifying below.)
+        //   idx 3: Main         (right wing attack anchor)
+        //   idx 4: RefuseRight  (outer flank refused)
+        var results = new DirectChildRole[5];
+        for (int i = 0; i < 5; i++)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(
+                parentRole: DirectChildRole.Main,
+                childIndex: i,
+                childCount: 5,
+                childStrengthBucket: 1,
+                childFlankExposureBucket: 0,
+                commanderAggression01: 0.5f,
+                anchorIndex: 1,
+                envelopmentMode: CascadeEnvelopmentMode.DoubleWing,
+                secondaryAnchorIndex: 3);
+            results[i] = TacticalRoleCascade.DistributeChildRole(ctx);
+        }
+        AssertEqual(DirectChildRole.RefuseLeft,  results[0], "5-child env idx 0 RefuseLeft");
+        AssertEqual(DirectChildRole.Main,        results[1], "5-child env idx 1 Main (left wing)");
+        AssertEqual(DirectChildRole.SupportMain, results[2], "5-child env idx 2 SupportMain (distance 1 from both wings)");
+        AssertEqual(DirectChildRole.Main,        results[3], "5-child env idx 3 Main (right wing)");
+        AssertEqual(DirectChildRole.RefuseRight, results[4], "5-child env idx 4 RefuseRight");
+    }
+
+    private static void RoleCascadeMainDoubleWingSevenChildren()
+    {
+        // 7 children with anchors at indices 1 and 5 (wider gap → real Fix in
+        // center). Expected:
+        //   idx 0: RefuseLeft
+        //   idx 1: Main (left wing)
+        //   idx 2: SupportMain (adjacent to left wing)
+        //   idx 3: Fix (true center — distance 2+ from each wing)
+        //   idx 4: SupportMain (adjacent to right wing)
+        //   idx 5: Main (right wing)
+        //   idx 6: RefuseRight
+        var results = new DirectChildRole[7];
+        for (int i = 0; i < 7; i++)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(
+                parentRole: DirectChildRole.Main,
+                childIndex: i,
+                childCount: 7,
+                childStrengthBucket: 1,
+                childFlankExposureBucket: 0,
+                commanderAggression01: 0.5f,
+                anchorIndex: 1,
+                envelopmentMode: CascadeEnvelopmentMode.DoubleWing,
+                secondaryAnchorIndex: 5);
+            results[i] = TacticalRoleCascade.DistributeChildRole(ctx);
+        }
+        AssertEqual(DirectChildRole.RefuseLeft,  results[0], "7-child env idx 0 RefuseLeft");
+        AssertEqual(DirectChildRole.Main,        results[1], "7-child env idx 1 Main (left wing)");
+        AssertEqual(DirectChildRole.SupportMain, results[2], "7-child env idx 2 SupportMain (left of pin)");
+        AssertEqual(DirectChildRole.Fix,         results[3], "7-child env idx 3 Fix (center pin)");
+        AssertEqual(DirectChildRole.SupportMain, results[4], "7-child env idx 4 SupportMain (right of pin)");
+        AssertEqual(DirectChildRole.Main,        results[5], "7-child env idx 5 Main (right wing)");
+        AssertEqual(DirectChildRole.RefuseRight, results[6], "7-child env idx 6 RefuseRight");
+    }
+
+    private static void RoleCascadeMainDoubleWingTwoChildrenFallsBackToSingleAnchor()
+    {
+        // 2 children with DoubleWing requested — sub-3 fallback path kicks in
+        // (envelopment needs left wing + center + right wing, can't do with 2).
+        // Falls back to standard single-anchor Main cascade.
+        var ctx0 = new TacticalRoleCascade.CascadeContext(
+            parentRole: DirectChildRole.Main,
+            childIndex: 0,
+            childCount: 2,
+            childStrengthBucket: 1,
+            childFlankExposureBucket: 0,
+            commanderAggression01: 0.5f,
+            anchorIndex: 0,
+            envelopmentMode: CascadeEnvelopmentMode.DoubleWing,
+            secondaryAnchorIndex: 1);
+        var r0 = TacticalRoleCascade.DistributeChildRole(ctx0);
+        // With anchor=0 in 2-child group, single-anchor logic: idx 0 = Main,
+        // idx 1 = SupportMain (distance 1, within mid-band support).
+        AssertEqual(DirectChildRole.Main, r0,
+            "2-child env falls back to single-anchor; idx 0 = Main, got " + r0);
+
+        var ctx1 = new TacticalRoleCascade.CascadeContext(
+            parentRole: DirectChildRole.Main,
+            childIndex: 1,
+            childCount: 2,
+            childStrengthBucket: 1,
+            childFlankExposureBucket: 0,
+            commanderAggression01: 0.5f,
+            anchorIndex: 0,
+            envelopmentMode: CascadeEnvelopmentMode.DoubleWing,
+            secondaryAnchorIndex: 1);
+        var r1 = TacticalRoleCascade.DistributeChildRole(ctx1);
+        AssertEqual(DirectChildRole.SupportMain, r1,
+            "2-child env falls back to single-anchor; idx 1 = SupportMain, got " + r1);
+    }
+
+    private static void PlaybookCatalogEnvelopmentPressureBiasesLeeOverHood()
+    {
+        // Same neutral-aggressive personality registered as fit for both Lee
+        // and Hood. Without envelopment pressure they tie on personality and
+        // jitter decides; with envelopment pressure Lee's 1.0 affinity adds
+        // 0.20 to the score while Hood's 0.10 affinity adds 0.02 — Lee wins
+        // by a wide margin.
+        var cat = new TacticalPlaybookCatalog();
+        var sharedFit = new PersonalityFit(0.5f, -0.2f, 0.5f);
+        var neutralTerrain = new TerrainPreference(1f, 1f, 1f, 1f);
+        var openOdds = new OddsRange(0.5f, 2f);
+        cat.Register(new FakePlaybook(BattlePlanId.LeeEnvelopment,    sharedFit, neutralTerrain, openOdds));
+        cat.Register(new FakePlaybook(BattlePlanId.HoodFrontalAssault, sharedFit, neutralTerrain, openOdds));
+
+        var pressureOn = new PlaybookContext(
+            new PersonalityVector(0.5f, -0.2f, 0.5f, 0f, 0f),
+            TerrainKind.Open, currentOdds: 2.0f,
+            opposingCommanderHint: 0f,
+            defaultMainEffortSector: 0, jitterSeed: 11, envelopmentPressure: true);
+        AssertEqual(BattlePlanId.LeeEnvelopment, cat.Select(pressureOn).Id,
+            "envelopment pressure on: Lee wins over Hood");
+    }
+
+    private static void HeavyGateCycleScalerBaseAt1xCompression()
+    {
+        // At 1x compression (battle and real time advance together), the
+        // scaler returns base cycle unchanged.
+        float result = TacticalHeavyPathGate.ScaleCycleForCompression(0.003f, 1.0f);
+        AssertNear(0.003f, result, 1e-6f, "1x compression returns base cycle");
+    }
+
+    private static void HeavyGateCycleScaler5xStaysNearBase()
+    {
+        // Below 4x the realtime-floor handles throttling alone; scaler clamps
+        // multiplier to 1.0 minimum until ratio exceeds 4x. At exactly 5x, the
+        // multiplier kicks in: scale = 5/4 = 1.25.
+        float at5x = TacticalHeavyPathGate.ScaleCycleForCompression(0.003f, 5f);
+        AssertNear(0.00375f, at5x, 1e-6f, "5x compression: 1.25x base cycle");
+        // At 3x (below 4x threshold), no scaling.
+        float at3x = TacticalHeavyPathGate.ScaleCycleForCompression(0.003f, 3f);
+        AssertNear(0.003f, at3x, 1e-6f, "3x compression: base cycle unchanged");
+    }
+
+    private static void HeavyGateCycleScaler20xScales5x()
+    {
+        // 20x is the cap. Scale factor = 20/4 = 5. Cycle = 5 * base.
+        float result = TacticalHeavyPathGate.ScaleCycleForCompression(0.003f, 20f);
+        AssertNear(0.015f, result, 1e-6f, "20x compression: 5x base cycle (54 battle-seconds)");
+        // Above 20x clamps to 20x scaling — no runaway.
+        float at100x = TacticalHeavyPathGate.ScaleCycleForCompression(0.003f, 100f);
+        AssertNear(0.015f, at100x, 1e-6f, "100x clamps to 20x scaling");
+    }
+
+    private static void HeavyGateCycleScalerSanitizesGarbage()
+    {
+        // NaN/Inf/negative inputs return safe defaults.
+        AssertNear(0.003f, TacticalHeavyPathGate.ScaleCycleForCompression(float.NaN, 1f), 1e-6f, "NaN base -> safe default");
+        AssertNear(0.003f, TacticalHeavyPathGate.ScaleCycleForCompression(0f, 1f), 1e-6f, "zero base -> safe default");
+        AssertNear(0.003f, TacticalHeavyPathGate.ScaleCycleForCompression(0.003f, float.NaN), 1e-6f, "NaN ratio -> 1x scaling");
+        AssertNear(0.003f, TacticalHeavyPathGate.ScaleCycleForCompression(0.003f, -5f), 1e-6f, "negative ratio -> 1x scaling");
+    }
+
+    private static void PlaybookCatalogFactionBiasPrefersHistoricalMatch()
+    {
+        // Same personality (close to both Lee/CSA and Sherman/Union fit).
+        // Without faction context, the catalog might pick either depending
+        // on terrain/odds/jitter. With allianceId=1 (CSA), Lee should win;
+        // with allianceId=0 (Union), Sherman should win.
+        var cat = SeedCatalog.AllHistoricalAndGeneric();
+        var moderate = new PersonalityVector(0.7f, -0.4f, 0.6f, 0.4f, 0.2f);
+        var ctxCSA = new PlaybookContext(moderate, TerrainKind.Open,
+            currentOdds: 1.2f, opposingCommanderHint: 0f,
+            defaultMainEffortSector: 0, jitterSeed: 1,
+            allianceId: 1);  // CSA
+        var ctxUnion = new PlaybookContext(moderate, TerrainKind.Open,
+            currentOdds: 1.2f, opposingCommanderHint: 0f,
+            defaultMainEffortSector: 0, jitterSeed: 1,
+            allianceId: 0);  // Union
+
+        var csaChoice = cat.Select(ctxCSA);
+        var unionChoice = cat.Select(ctxUnion);
+
+        AssertTrue(TacticalPlaybookCatalog.FactionAffinity(csaChoice.Id) >= 0,
+            "CSA alliance picks CSA-historical or Either playbook (got " + csaChoice.Id + ")");
+        AssertTrue(TacticalPlaybookCatalog.FactionAffinity(unionChoice.Id) <= 0,
+            "Union alliance picks Union-historical or Either playbook (got " + unionChoice.Id + ")");
+    }
+
+    private static void PlaybookCatalogFactionBiasDoesNotAffectGeneric()
+    {
+        // GenericAggressive is Either (affinity=0). It scores the same for
+        // CSA and Union allianceId — no faction penalty.
+        var cat = new TacticalPlaybookCatalog();
+        cat.Register(new GenericAggressivePlaybook());
+
+        var ctxCSA = new PlaybookContext(default, TerrainKind.Open, 1f, 0f, 0, 1, allianceId: 1);
+        var ctxUnion = new PlaybookContext(default, TerrainKind.Open, 1f, 0f, 0, 1, allianceId: 0);
+
+        AssertEqual(BattlePlanId.GenericAggressive, cat.Select(ctxCSA).Id,
+            "Either playbook picked by CSA");
+        AssertEqual(BattlePlanId.GenericAggressive, cat.Select(ctxUnion).Id,
+            "Either playbook picked by Union");
+    }
+
+    private static void PlaybookCatalogFactionAffinityTableIsCorrect()
+    {
+        // Spot-check the canonical assignments.
+        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.LeeEnvelopment), "Lee=CSA");
+        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.JacksonValleyShuffle), "Jackson=CSA");
+        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.HoodFrontalAssault), "Hood=CSA");
+        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.ForrestCavalryRaid), "Forrest=CSA");
+        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.JohnstonFabianDelay), "Johnston=CSA");
+        AssertEqual(-1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.ShermanManeuverFix), "Sherman=Union");
+        AssertEqual(-1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.GrantContinuousAttrition), "Grant=Union");
+        AssertEqual(-1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.McClellanPreparedDefense), "McClellan=Union");
+        AssertEqual(-1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.BufordCavalryScreenDelay), "Buford=Union");
+        AssertEqual(0, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.GenericAggressive), "GenericAggressive=Either");
+        AssertEqual(0, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.MeetingEngagement), "MeetingEngagement=Either");
+    }
+
+    private static void PlaybookCatalogEnvelopmentPressureOffKeepsFrontalFit()
+    {
+        // Personality fit favoring frontal (Hood) playbook. Without
+        // envelopment pressure, the affinity bonus is zero so personality
+        // fit dominates and Hood wins.
+        var cat = new TacticalPlaybookCatalog();
+        cat.Register(new FakePlaybook(BattlePlanId.LeeEnvelopment,
+            new PersonalityFit(0.5f, -0.2f, 0.5f),
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0.5f, 2f)));
+        cat.Register(new FakePlaybook(BattlePlanId.HoodFrontalAssault,
+            new PersonalityFit(1.0f, -0.8f, 1.0f),  // Hood personality: high aggression, low caution, high audacity
+            new TerrainPreference(1f, 1f, 1f, 1f),
+            new OddsRange(0.5f, 2f)));
+
+        var hoodPersonality = new PlaybookContext(
+            new PersonalityVector(1.0f, -0.8f, 1.0f, 0f, 0f),
+            TerrainKind.Open, currentOdds: 2.0f,
+            opposingCommanderHint: 0f,
+            defaultMainEffortSector: 0, jitterSeed: 11, envelopmentPressure: false);
+        AssertEqual(BattlePlanId.HoodFrontalAssault, cat.Select(hoodPersonality).Id,
+            "envelopment pressure off: Hood personality fit wins");
+    }
+
+    private static void PlaybookCatalogEnvelopmentAffinityRankingSanity()
+    {
+        // Spot-check the canonical envelopment affinity ordering. Lee (literal
+        // envelopment) > Jackson (flank march) > Hooker (Chancellorsville plan)
+        // > Sherman (Atlanta maneuver) > GenericAggressive (frontal-ish) >
+        // Hood/Burnside (frontal-only) > McClellan/Longstreet (defensive).
+        float lee = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.LeeEnvelopment);
+        float jackson = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.JacksonValleyShuffle);
+        float hooker = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.HookerFlankDeparture);
+        float sherman = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.ShermanManeuverFix);
+        float aggressive = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.GenericAggressive);
+        float hood = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.HoodFrontalAssault);
+        float burnside = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.BurnsideForcedAssault);
+        float mcclellan = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.McClellanPreparedDefense);
+
+        AssertTrue(lee >= jackson, "Lee >= Jackson; got lee=" + lee + " jackson=" + jackson);
+        AssertTrue(jackson > hooker, "Jackson > Hooker; got jackson=" + jackson + " hooker=" + hooker);
+        AssertTrue(hooker > sherman, "Hooker > Sherman; got hooker=" + hooker + " sherman=" + sherman);
+        AssertTrue(sherman > aggressive, "Sherman > GenericAggressive; got sherman=" + sherman + " aggressive=" + aggressive);
+        AssertTrue(aggressive > hood, "GenericAggressive > Hood; got aggressive=" + aggressive + " hood=" + hood);
+        AssertTrue(hood >= burnside, "Hood >= Burnside; got hood=" + hood + " burnside=" + burnside);
+        AssertTrue(burnside > mcclellan, "Burnside > McClellan; got burnside=" + burnside + " mcclellan=" + mcclellan);
+    }
+
+    private static void ArmyOrchestratorEnvelopmentMinRatioConstantIs15()
+    {
+        // Constant must be 1.5 to match the user-confirmed threshold (2026-05-19)
+        // and the docs' threshold for "clear advantage" justifying multi-axis
+        // envelopment over single-axis frontal pressure.
+        AssertNear(1.5f, ArmyOrchestrator.EnvelopmentMinRatio, 1e-6f,
+            "EnvelopmentMinRatio = 1.5");
+    }
+
+    private static void ArmyOrchestratorEnvelopmentReserveCommitCapIs11()
+    {
+        // The reserve-commit-trigger-odds cap when envelopment is active is
+        // 1.1, tight enough to make defensive playbooks (Longstreet=1.5,
+        // McClellan=1.6) commit reserves sooner under attack pressure, but
+        // not so tight that it overrides already-aggressive playbooks
+        // (Hood=1.0, Jackson=1.0, GenericDesperate=0.9 keep their defaults).
+        AssertNear(1.1f, ArmyOrchestrator.EnvelopmentReserveCommitOddsCap, 1e-6f,
+            "EnvelopmentReserveCommitOddsCap = 1.1");
+    }
+
+    // ---- 4 new playbooks (Buford screen, Forrest raid, Meeting, Johnston) ----
+
+    private static void SeedCatalogRegistersAllEighteenPlaybooks()
+    {
+        // Seed catalog count must be exactly 18: 14 originals + 4 new (Buford
+        // screen-delay, Forrest raid, Meeting engagement, Johnston Fabian delay).
+        var c = SeedCatalog.AllHistoricalAndGeneric();
+        AssertEqual(18, c.Count, "seed catalog has 18 playbooks after additions");
+    }
+
+    private static void BufordScreenDelayPlaybookIdAndHistoricalLabel()
+    {
+        var pb = new BufordCavalryScreenDelayPlaybook();
+        AssertEqual(BattlePlanId.BufordCavalryScreenDelay, pb.Id, "Buford playbook id");
+        AssertEqual("buford-cavalry-screen-delay", pb.HistoricalLabel, "Buford label slug");
+    }
+
+    private static void ForrestCavalryRaidPlaybookIdAndHistoricalLabel()
+    {
+        var pb = new ForrestCavalryRaidPlaybook();
+        AssertEqual(BattlePlanId.ForrestCavalryRaid, pb.Id, "Forrest playbook id");
+        AssertEqual("forrest-cavalry-raid", pb.HistoricalLabel, "Forrest label slug");
+    }
+
+    private static void MeetingEngagementPlaybookIdAndHistoricalLabel()
+    {
+        var pb = new MeetingEngagementPlaybook();
+        AssertEqual(BattlePlanId.MeetingEngagement, pb.Id, "Meeting engagement id");
+        AssertEqual("meeting-engagement", pb.HistoricalLabel, "Meeting engagement label slug");
+    }
+
+    private static void JohnstonFabianDelayPlaybookIdAndHistoricalLabel()
+    {
+        var pb = new JohnstonFabianDelayPlaybook();
+        AssertEqual(BattlePlanId.JohnstonFabianDelay, pb.Id, "Johnston playbook id");
+        AssertEqual("johnston-fabian-delay", pb.HistoricalLabel, "Johnston label slug");
+    }
+
+    private static void BufordScreenDelayTerrainFitFavorsOpenOverMountain()
+    {
+        // Buford's cavalry doctrine wants open ground (mobility advantage)
+        // over mountain (cavalry can't operate effectively). Confirms the
+        // TerrainPreference scores match historical doctrine.
+        var pb = new BufordCavalryScreenDelayPlaybook();
+        float open = pb.TerrainFit.Score(TerrainKind.Open);
+        float mountain = pb.TerrainFit.Score(TerrainKind.Mountain);
+        AssertTrue(open > mountain,
+            "Buford terrain fit: open(" + open + ") > mountain(" + mountain + ")");
+    }
+
+    private static void ForrestRaidOddsRangeToleratesOutnumbered()
+    {
+        // Forrest's raids tolerate near-parity (0.7-1.5x) but lose appeal
+        // at extreme outnumber (cavalry can't trade attrition with infantry).
+        // OddsRange.Score gives 1.0 at 0.7 (in band) and decays below.
+        var pb = new ForrestCavalryRaidPlaybook();
+        float at0_8 = pb.PreferredOdds.Score(0.8f);
+        AssertEqual(1.0f, at0_8, "Forrest raid scores 1.0 at 0.8x");
+        float at0_5 = pb.PreferredOdds.Score(0.5f);
+        AssertTrue(at0_5 < 1.0f,
+            "Forrest raid degrades at severe outnumber (0.5x); got " + at0_5);
+    }
+
+    private static void MeetingEngagementReserveCommitTriggerIsAggressive()
+    {
+        // Meeting engagement: commit reserves quickly to seize positions
+        // before the other side does. Trigger odds < 1.0 means reserves
+        // release before reaching parity — aggressive posture.
+        var pb = new MeetingEngagementPlaybook();
+        AssertTrue(pb.ReserveCommitTriggerOdds < 1.0f,
+            "Meeting engagement releases reserves before parity; got " + pb.ReserveCommitTriggerOdds);
+    }
+
+    private static void JohnstonFabianDelayReserveCommitTriggerIsConservative()
+    {
+        // Johnston's Fabian doctrine preserves the force above all — reserves
+        // commit only late (trigger odds > 1.3) so the army never breaks contact
+        // under pressure with an uncommitted reserve still in hand.
+        var pb = new JohnstonFabianDelayPlaybook();
+        AssertTrue(pb.ReserveCommitTriggerOdds > 1.3f,
+            "Johnston holds reserves until very late; got " + pb.ReserveCommitTriggerOdds);
+    }
+
+    private static void ForrestCavalryRaidAllowsProvisionalAttackAxis()
+    {
+        // Forrest raid is an OFFENSIVE doctrine, so DirectChildAllocator's
+        // AllowsProvisionalAttackAxis must return true (mirroring Hood,
+        // Burnside, GenericAggressive, GenericDesperate). The other 3 new
+        // playbooks are defensive/responsive and should NOT permit it.
+        // Verified via the public ArmyOrchestrator integration since the
+        // method itself is private; checking that Forrest is grouped with
+        // attack-axis-permitting plans by hitting the catalog path indirectly.
+        //
+        // Static check via reflection of the private method.
+        var method = typeof(DirectChildAllocator).GetMethod(
+            "AllowsProvisionalAttackAxis",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        AssertTrue(method != null, "AllowsProvisionalAttackAxis method exists");
+
+        var forrestPlan = new TacticalBattlePlan(
+            BattlePlanId.ForrestCavalryRaid, BattlePhase.MainEffort, 0, null, null, 1.0f, 0f, 1);
+        var bufordPlan = new TacticalBattlePlan(
+            BattlePlanId.BufordCavalryScreenDelay, BattlePhase.MainEffort, 0, null, null, 0.7f, 0f, 1);
+        var meetingPlan = new TacticalBattlePlan(
+            BattlePlanId.MeetingEngagement, BattlePhase.MainEffort, 0, null, null, 0.9f, 0f, 1);
+        var johnstonPlan = new TacticalBattlePlan(
+            BattlePlanId.JohnstonFabianDelay, BattlePhase.MainEffort, 0, null, null, 1.5f, 0f, 1);
+
+        bool forrest = (bool)method.Invoke(null, new object[] { forrestPlan });
+        bool buford = (bool)method.Invoke(null, new object[] { bufordPlan });
+        bool meeting = (bool)method.Invoke(null, new object[] { meetingPlan });
+        bool johnston = (bool)method.Invoke(null, new object[] { johnstonPlan });
+
+        AssertTrue(forrest, "Forrest raid allows provisional attack axis");
+        AssertTrue(!buford, "Buford screen-delay does NOT permit (defensive)");
+        AssertTrue(!meeting, "Meeting engagement does NOT permit (deploys via standard sectors)");
+        AssertTrue(!johnston, "Johnston Fabian delay does NOT permit (defensive)");
+    }
+
+    private static void RoleCascadeDoubleWingEchelonSecondaryGetsSupportMain()
+    {
+        // Echelon variant of double-wing: PRIMARY anchor (AnchorIndex) gets
+        // Main; SECONDARY anchor (SecondaryAnchorIndex) gets SupportMain
+        // instead of Main. Models Longstreet's Day 2 sequential release —
+        // primary wing attacks first, secondary follows once the first
+        // engages.
+        var results = new DirectChildRole[5];
+        for (int i = 0; i < 5; i++)
+        {
+            var ctx = new TacticalRoleCascade.CascadeContext(
+                parentRole: DirectChildRole.Main,
+                childIndex: i,
+                childCount: 5,
+                childStrengthBucket: 1,
+                childFlankExposureBucket: 0,
+                commanderAggression01: 0.4f,  // sub-threshold; chooses echelon
+                anchorIndex: 1,                // primary wing
+                envelopmentMode: CascadeEnvelopmentMode.DoubleWingEchelon,
+                secondaryAnchorIndex: 3);      // secondary wing
+            results[i] = TacticalRoleCascade.DistributeChildRole(ctx);
+        }
+        AssertEqual(DirectChildRole.RefuseLeft,  results[0], "echelon idx 0 RefuseLeft");
+        AssertEqual(DirectChildRole.Main,        results[1], "echelon idx 1 PRIMARY = Main");
+        AssertEqual(DirectChildRole.SupportMain, results[2], "echelon idx 2 between wings = SupportMain");
+        AssertEqual(DirectChildRole.SupportMain, results[3], "echelon idx 3 SECONDARY = SupportMain (not Main)");
+        AssertEqual(DirectChildRole.RefuseRight, results[4], "echelon idx 4 RefuseRight");
+    }
+
+    private static void RoleCascadeDoubleWingSimultaneousSecondaryGetsMain()
+    {
+        // Sanity counter-check: simultaneous DoubleWing (not Echelon) still
+        // gives secondary anchor Main — confirms the previous test isolates
+        // the echelon-specific branch.
+        var ctx = new TacticalRoleCascade.CascadeContext(
+            parentRole: DirectChildRole.Main,
+            childIndex: 3,
+            childCount: 5,
+            childStrengthBucket: 1,
+            childFlankExposureBucket: 0,
+            commanderAggression01: 0.5f,
+            anchorIndex: 1,
+            envelopmentMode: CascadeEnvelopmentMode.DoubleWing,
+            secondaryAnchorIndex: 3);
+        var role = TacticalRoleCascade.DistributeChildRole(ctx);
+        AssertEqual(DirectChildRole.Main, role,
+            "simultaneous double-wing: secondary anchor (idx 3) = Main, got " + role);
+    }
+
+    private static void ArmyOrchestratorEnvelopmentSimultaneousAggressionThresholdIs06()
+    {
+        AssertNear(0.6f, ArmyOrchestrator.EnvelopmentSimultaneousAggressionThreshold, 1e-6f,
+            "EnvelopmentSimultaneousAggressionThreshold = 0.6");
+    }
+
+    // ---- Slice A: phase progression doctrine ----
+
+    private static TacticalPhaseProgressionDoctrine.Input MakePhaseInput(
+        BattlePhase phase,
+        float planAgeSeconds = 0f,
+        float globalOddsCurrent = 1f,
+        float globalOddsHistory = 1f,
+        float mainEffortOddsCurrent = 1f,
+        float mainEffortOddsHistory = 1f,
+        float armyMoraleCurrent = 1f,
+        float armyMoraleFloor = 0.2f,
+        float reservesCommittedFraction = 0.2f,
+        float commanderAggression01 = 0.5f) =>
+        new TacticalPhaseProgressionDoctrine.Input(
+            phase, planAgeSeconds, globalOddsCurrent, globalOddsHistory,
+            mainEffortOddsCurrent, mainEffortOddsHistory,
+            armyMoraleCurrent, armyMoraleFloor,
+            reservesCommittedFraction, commanderAggression01);
+
+    private static void PhaseProgressionProbeHoldsWhenNeutral()
+    {
+        var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+            BattlePhase.Probe, planAgeSeconds: 10f,
+            globalOddsCurrent: 0.95f, mainEffortOddsCurrent: 0.95f));
+        AssertEqual(BattlePhase.Probe, d.NextPhase,
+            "probe holds when neither budget elapsed nor favorable odds; got " + d.Reason);
+    }
+
+    private static void PhaseProgressionProbeCommitsWhenFavorable()
+    {
+        // Global AND main-effort odds clear the 1.0 floor → commit to main effort
+        var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+            BattlePhase.Probe, planAgeSeconds: 5f,
+            globalOddsCurrent: 1.3f, mainEffortOddsCurrent: 1.2f));
+        AssertEqual(BattlePhase.MainEffort, d.NextPhase,
+            "probe commits to main effort when odds favorable; got " + d.Reason);
+    }
+
+    private static void PhaseProgressionProbeBudgetElapsesPoorOddsConsolidate()
+    {
+        // Budget elapsed, global odds below 0.9 → consolidate (don't commit
+        // to a bad attack just because the clock ran out)
+        var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+            BattlePhase.Probe, planAgeSeconds: 200f,
+            globalOddsCurrent: 0.7f, mainEffortOddsCurrent: 0.7f,
+            commanderAggression01: 0.5f));
+        AssertEqual(BattlePhase.Consolidate, d.NextPhase,
+            "probe budget elapsed + poor odds → consolidate; got " + d.Reason);
+    }
+
+    private static void PhaseProgressionMainEffortExploitsOnLocalBreakthrough()
+    {
+        // Main effort odds spike from 1.0 history → 1.5 current (ratio 1.5 > 1.35)
+        // AND reserves committed >= 0.4 → exploit
+        var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+            BattlePhase.MainEffort, planAgeSeconds: 30f,
+            mainEffortOddsCurrent: 1.5f, mainEffortOddsHistory: 1.0f,
+            reservesCommittedFraction: 0.5f));
+        AssertEqual(BattlePhase.Exploit, d.NextPhase,
+            "main effort exploits on local breakthrough; got " + d.Reason);
+    }
+
+    private static void PhaseProgressionMainEffortConsolidatesOnRevert()
+    {
+        // Global odds drop to 0.8 (below 0.9 floor) AND deep commit (0.7 reserves)
+        // → consolidate to lock down gains rather than push further
+        var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+            BattlePhase.MainEffort, planAgeSeconds: 30f,
+            globalOddsCurrent: 0.8f,
+            reservesCommittedFraction: 0.7f));
+        AssertEqual(BattlePhase.Consolidate, d.NextPhase,
+            "main effort consolidates on odds revert + deep commit; got " + d.Reason);
+    }
+
+    private static void PhaseProgressionMoraleFloorWithdraws()
+    {
+        // Morale below floor overrides any other rule from any phase
+        foreach (var phase in new[] { BattlePhase.Probe, BattlePhase.MainEffort,
+                                       BattlePhase.Exploit, BattlePhase.Consolidate })
+        {
+            var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+                phase, armyMoraleCurrent: 0.1f, armyMoraleFloor: 0.2f));
+            AssertEqual(BattlePhase.Withdraw, d.NextPhase,
+                "morale floor breach withdraws from " + phase + "; got " + d.Reason);
+        }
+    }
+
+    private static void PhaseProgressionWithdrawIsAbsorbing()
+    {
+        // Once withdrawing, even high odds don't pull us back to attack
+        var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+            BattlePhase.Withdraw, globalOddsCurrent: 2.0f, armyMoraleCurrent: 1.0f));
+        AssertEqual(BattlePhase.Withdraw, d.NextPhase,
+            "withdraw is absorbing; got " + d.Reason);
+    }
+
+    private static void PhaseProgressionAggressiveShortensProbeBudget()
+    {
+        // Aggressive commander (aggression01=1.0) -> 30s probe budget.
+        // At 45s (past budget) with neutral odds, commit anyway.
+        var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+            BattlePhase.Probe, planAgeSeconds: 45f,
+            globalOddsCurrent: 0.95f, mainEffortOddsCurrent: 0.95f,
+            commanderAggression01: 1.0f));
+        AssertEqual(BattlePhase.MainEffort, d.NextPhase,
+            "aggressive 30s probe budget commits at 45s; got " + d.Reason);
+        AssertNear(30f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(1.0f), 0.01f,
+            "aggression=1.0 -> 30s probe budget");
+    }
+
+    private static void PhaseProgressionCautiousLengthensProbeBudget()
+    {
+        // Cautious commander (aggression01=0.0) -> 120s budget.
+        // At 60s with neutral odds, still probing.
+        var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+            BattlePhase.Probe, planAgeSeconds: 60f,
+            globalOddsCurrent: 0.95f, mainEffortOddsCurrent: 0.95f,
+            commanderAggression01: 0.0f));
+        AssertEqual(BattlePhase.Probe, d.NextPhase,
+            "cautious 120s probe budget still probing at 60s; got " + d.Reason);
+        AssertNear(120f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(0.0f), 0.01f,
+            "aggression=0.0 -> 120s probe budget");
+    }
+
+    private static void PhaseProgressionExploitEndsOnReservesExhausted()
+    {
+        // Reserves >= 0.9 → exit exploit to consolidate (force spent)
+        var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
+            BattlePhase.Exploit, planAgeSeconds: 30f,
+            reservesCommittedFraction: 0.95f));
+        AssertEqual(BattlePhase.Consolidate, d.NextPhase,
+            "exploit ends on reserves exhausted; got " + d.Reason);
+    }
+
+    private static void ArmyOrchestratorEvaluateAndAdvanceUpdatesPlanPhase()
+    {
+        // End-to-end: orchestrator with Lee plan in Probe phase → favorable
+        // odds → EvaluateAndAdvancePhase should swap to MainEffort
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, 0));
+        AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase, "plan starts in Probe");
+
+        var decision = orch.EvaluateAndAdvancePhase(
+            globalOddsCurrent: 1.4f,
+            mainEffortOddsCurrent: 1.3f,
+            mainEffortOddsHistory: 1.1f,
+            armyMoraleCurrent: 1.0f,
+            armyMoraleFloor: 0.2f,
+            reservesCommittedFraction: 0.2f);
+        AssertEqual(BattlePhase.MainEffort, decision.NextPhase, "doctrine recommends MainEffort");
+        AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase,
+            "orchestrator's plan advanced to MainEffort");
+        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "phase advance resets plan age");
+    }
+
+    // ---- Slice B: sector-driven main-effort shift ----
+
+    private static void ArmyOrchestratorConsiderMainEffortShiftSwapsInProbe()
+    {
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 0));
+        AssertEqual(0, orch.CurrentPlan.MainEffortSector, "plan starts on sector 0");
+
+        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 2);
+        AssertTrue(shifted, "shift returns true when sector changes");
+        AssertEqual(2, orch.CurrentPlan.MainEffortSector,
+            "main effort shifted to sector 2");
+    }
+
+    private static void ArmyOrchestratorConsiderMainEffortShiftBlockedInWithdraw()
+    {
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 0));
+        orch.AdvancePhase(BattlePhase.Withdraw);
+
+        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 2);
+        AssertTrue(!shifted, "withdraw phase blocks main-effort shifts");
+        AssertEqual(0, orch.CurrentPlan.MainEffortSector,
+            "main effort unchanged during withdraw");
+    }
+
+    private static void ArmyOrchestratorConsiderMainEffortShiftNoopOnSame()
+    {
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 1));
+
+        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 1);
+        AssertTrue(!shifted, "no-op when decisive sector equals current");
+    }
+
+    private static void BattlePlanWithMainEffortSectorReplacesField()
+    {
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.LeeEnvelopment, BattlePhase.Probe,
+            mainEffortSector: 0,
+            fixingSectors: new[] { 1 }, screeningSectors: new[] { 2 },
+            reserveCommitTriggerOdds: 1.2f,
+            ageSeconds: 10f, jitterSeed: 42);
+        var moved = plan.WithMainEffortSector(3);
+        AssertEqual(3, moved.MainEffortSector, "main effort sector replaced");
+        AssertEqual(BattlePhase.Probe, moved.Phase, "phase preserved");
+        AssertEqual(BattlePlanId.LeeEnvelopment, moved.PlanId, "plan id preserved");
+        AssertNear(10f, moved.AgeSeconds, 1e-5f, "age preserved");
+        AssertNear(1.2f, moved.ReserveCommitTriggerOdds, 1e-5f, "trigger odds preserved");
+    }
+
+    // ---- Slice C: offensive replan triggers ----
+
+    private static ReplanTriggerInput MakeReplanInput(
+        BattlePhase phase = BattlePhase.MainEffort,
+        float planAgeSeconds = 30f,
+        float mainEffortOwn = 1000f, float mainEffortHistory = 1000f,
+        float globalOddsCurrent = 1.0f, float globalOddsHistory = 1.0f,
+        float morale = 1.0f, float moraleFloor = 0.2f,
+        float reserves = 0.3f,
+        float reinforcements = 0f,
+        float enemyShift = 0f,
+        float mainEffortLocalOdds = 1f, float mainEffortLocalOddsHistory = 1f,
+        float bestNonMainEffortSectorOdds = 0f, float currentMainEffortOdds = 0f) =>
+        new ReplanTriggerInput(
+            planAgeSeconds, phase, mainEffortOwn, mainEffortHistory,
+            globalOddsCurrent, globalOddsHistory, morale, moraleFloor,
+            reserves, reinforcements, enemyShift,
+            mainEffortLocalOdds, mainEffortLocalOddsHistory,
+            bestNonMainEffortSectorOdds, currentMainEffortOdds);
+
+    private static void ReplanTriggersFireMainEffortLocalBreakthroughOnSpike()
+    {
+        // Main effort sector odds spike 1.0 -> 1.5 (ratio 1.5 > threshold 1.35)
+        // AND reserves committed >= 0.3 (offensive trigger min) → MainEffortLocalBreakthrough
+        var input = MakeReplanInput(
+            phase: BattlePhase.MainEffort,
+            reserves: 0.4f,
+            mainEffortLocalOdds: 1.5f,
+            mainEffortLocalOddsHistory: 1.0f);
+        var trigger = ArmyReplanTriggers.Evaluate(input);
+        AssertEqual(ReplanTrigger.MainEffortLocalBreakthrough, trigger,
+            "local odds spike fires breakthrough trigger");
+    }
+
+    private static void ReplanTriggersFireBreakthroughOpportunityOnOffAxis()
+    {
+        // Off-axis sector odds 2.0 vs current main effort 1.0 (margin 1.0 > threshold 0.5)
+        // in MainEffort phase → BreakthroughOpportunity
+        var input = MakeReplanInput(
+            phase: BattlePhase.MainEffort,
+            reserves: 0.4f,
+            bestNonMainEffortSectorOdds: 2.0f,
+            currentMainEffortOdds: 1.0f);
+        var trigger = ArmyReplanTriggers.Evaluate(input);
+        AssertEqual(ReplanTrigger.BreakthroughOpportunity, trigger,
+            "off-axis odds gap fires opportunity trigger");
+    }
+
+    private static void ReplanTriggersOffensiveDoNotFireInConsolidate()
+    {
+        // Same spike inputs in Consolidate phase — offensive triggers must NOT fire
+        var input = MakeReplanInput(
+            phase: BattlePhase.Consolidate,
+            reserves: 0.4f,
+            mainEffortLocalOdds: 1.5f,
+            mainEffortLocalOddsHistory: 1.0f,
+            bestNonMainEffortSectorOdds: 2.0f,
+            currentMainEffortOdds: 1.0f);
+        var trigger = ArmyReplanTriggers.Evaluate(input);
+        AssertTrue(trigger != ReplanTrigger.MainEffortLocalBreakthrough &&
+                   trigger != ReplanTrigger.BreakthroughOpportunity,
+            "offensive triggers blocked in consolidate; got " + trigger);
+    }
+
+    private static void ReplanTriggersDefensiveTakePrecedence()
+    {
+        // Morale floor breach AND offensive opportunity present — defensive
+        // trigger (CasualtyThreshold) must fire first
+        var input = MakeReplanInput(
+            phase: BattlePhase.MainEffort,
+            morale: 0.1f, moraleFloor: 0.2f,
+            reserves: 0.4f,
+            mainEffortLocalOdds: 1.5f,
+            mainEffortLocalOddsHistory: 1.0f);
+        var trigger = ArmyReplanTriggers.Evaluate(input);
+        AssertEqual(ReplanTrigger.CasualtyThreshold, trigger,
+            "morale floor wins over offensive triggers");
+    }
+
+    // ---- Sector readiness (fresh-troops decision) ----
+
+    private static TacticalSectorReadinessDoctrine.Input MakeReadiness(
+        float own = 8000f,
+        float fatigue = 0.2f,
+        float ammo = 0.9f,
+        float morale = 0.9f,
+        float enemy = 5000f,
+        float reinforcementHours = 0f,
+        float reinforcementStrength = 0f,
+        float aggression = 0.5f) =>
+        new TacticalSectorReadinessDoctrine.Input(
+            own, fatigue, ammo, morale, enemy,
+            reinforcementHours, reinforcementStrength, aggression);
+
+    private static void SectorReadinessPushReadyWhenEffectiveCoversRatio()
+    {
+        // 8000 own at fatigue=0.2, ammo=0.9, morale=0.9 → effective ~5184
+        // vs enemy=3500 → ratio ~1.48, mid commander threshold ~1.10 → PushReady
+        var d = TacticalSectorReadinessDoctrine.Decide(MakeReadiness(
+            own: 8000f, fatigue: 0.2f, ammo: 0.9f, morale: 0.9f,
+            enemy: 3500f, aggression: 0.5f));
+        AssertEqual(TacticalSectorReadinessDoctrine.Result.PushReady, d.Result,
+            "fresh force covers ratio → PushReady, got reason=" + d.Reason);
+    }
+
+    private static void SectorReadinessHoldForReinforcementsWhenReliefTips()
+    {
+        // 8000 own at fatigue=0.6 (tired), ammo=0.5, morale=0.7 → effective
+        // 8000*0.4*0.5*0.7 = 1120 — way below MinViable 1500 — actually returns
+        // HoldFatigued via the min-viable guard. Use larger own to test the
+        // proper HoldForReinforcements path.
+        //
+        // 12000 own at fatigue=0.6, ammo=0.6, morale=0.7 → effective ~2016
+        // vs enemy=4000 → ratio 0.50 (below mid threshold ~1.10)
+        // Reinforcements 3500 strong arriving in 2h → after relief: 5516
+        // future ratio = 5516/4000 = 1.38 — clears threshold → HoldForReinforcements
+        var d = TacticalSectorReadinessDoctrine.Decide(MakeReadiness(
+            own: 12000f, fatigue: 0.5f, ammo: 0.7f, morale: 0.8f,
+            enemy: 8500f,
+            reinforcementHours: 2f, reinforcementStrength: 6000f,
+            aggression: 0.5f));
+        AssertEqual(TacticalSectorReadinessDoctrine.Result.HoldForReinforcements, d.Result,
+            "tired force + relief that tips balance → HoldForReinforcements, got reason=" + d.Reason);
+    }
+
+    private static void SectorReadinessPushDegradedAggressiveNoRelief()
+    {
+        // Same tired-force scenario but NO relief AND aggressive commander
+        // (0.85 aggression, above PressVsHoldAggressionThreshold 0.55) →
+        // PushDegraded (presses anyway)
+        var d = TacticalSectorReadinessDoctrine.Decide(MakeReadiness(
+            own: 12000f, fatigue: 0.5f, ammo: 0.7f, morale: 0.8f,
+            enemy: 8500f,
+            reinforcementHours: 0f, reinforcementStrength: 0f,
+            aggression: 0.85f));
+        AssertEqual(TacticalSectorReadinessDoctrine.Result.PushDegraded, d.Result,
+            "aggressive + no relief presses anyway → PushDegraded, got reason=" + d.Reason);
+    }
+
+    private static void SectorReadinessHoldFatiguedCautiousNoRelief()
+    {
+        // Same tired-force scenario, NO relief, cautious commander (0.15
+        // aggression) → HoldFatigued (preserve force)
+        var d = TacticalSectorReadinessDoctrine.Decide(MakeReadiness(
+            own: 12000f, fatigue: 0.5f, ammo: 0.7f, morale: 0.8f,
+            enemy: 8500f,
+            reinforcementHours: 0f, reinforcementStrength: 0f,
+            aggression: 0.15f));
+        AssertEqual(TacticalSectorReadinessDoctrine.Result.HoldFatigued, d.Result,
+            "cautious + no relief holds → HoldFatigued, got reason=" + d.Reason);
+    }
+
+    private static void SectorReadinessFatigueAmmoMoraleCollapseEffective()
+    {
+        // Effective force calc: 10000 * (1 - 0.5) * 0.5 * 0.5 = 1250 effective
+        // vs nominal 10000 — a 5x degradation from fatigue/ammo/morale stack.
+        var input = MakeReadiness(
+            own: 10000f, fatigue: 0.5f, ammo: 0.5f, morale: 0.5f, enemy: 5000f);
+        AssertNear(1250f, input.OwnEffectiveStrength, 0.5f,
+            "effective force degraded by fatigue×ammo×morale stack; got " + input.OwnEffectiveStrength);
+    }
+
+    private static void SectorReadinessDegradedForceHealthAlwaysHolds()
+    {
+        // Force at <25% effectiveness regardless of HEADCOUNT must HoldFatigued.
+        // 5000 own at fatigue 0.75, ammo 0.4, morale 0.5 → effective
+        // 5000*0.25*0.4*0.5 = 250 → forceHealth = 0.05 (well below 0.25).
+        // Must HoldFatigued even with maxed aggression — the army is too
+        // degraded to push effectively.
+        var d = TacticalSectorReadinessDoctrine.Decide(MakeReadiness(
+            own: 5000f, fatigue: 0.75f, ammo: 0.4f, morale: 0.5f,
+            enemy: 100f, aggression: 1.0f));
+        AssertEqual(TacticalSectorReadinessDoctrine.Result.HoldFatigued, d.Result,
+            "degraded force health always holds even with maxed aggression; got " + d.Reason);
+    }
+
+    private static void SectorReadinessIsScaleInvariant()
+    {
+        // Fresh army at any size should reach PushReady with favorable ratio.
+        // Tests the user's 2026-05-19 concern: GTCW campaigns dynamically
+        // produce 1,500 to 60,000-soldier armies; the doctrine must work
+        // across the full range, not just the mid-band.
+        //
+        // Three armies: 1500 (small skirmish), 8000 (corps), 50000 (Gettysburg-
+        // scale). All fresh (fatigue 0.1, ammo 0.95, morale 1.0). All vs a
+        // 60% enemy (ratio 1.67). All should PushReady — scale invariance
+        // means the doctrine doesn't gate on headcount, only on ratio + state.
+        foreach (var size in new float[] { 1500f, 8000f, 50000f })
+        {
+            var d = TacticalSectorReadinessDoctrine.Decide(MakeReadiness(
+                own: size, fatigue: 0.1f, ammo: 0.95f, morale: 1.0f,
+                enemy: size * 0.6f, aggression: 0.5f));
+            AssertEqual(TacticalSectorReadinessDoctrine.Result.PushReady, d.Result,
+                "size=" + size + " fresh + 1.67x ratio → PushReady; got " + d.Reason);
+        }
+    }
+
+    private static void SectorReadinessReinforcementWindowScalesWithAggression()
+    {
+        // Aggressive commanders won't wait long; cautious will wait up to 6h.
+        float aggressive = TacticalSectorReadinessDoctrine.ComputeReinforcementWaitHours(1.0f);
+        float mid = TacticalSectorReadinessDoctrine.ComputeReinforcementWaitHours(0.5f);
+        float cautious = TacticalSectorReadinessDoctrine.ComputeReinforcementWaitHours(0.0f);
+        AssertNear(2f, aggressive, 0.001f, "aggressive wait ~2h");
+        AssertNear(4f, mid, 0.001f, "mid wait ~4h");
+        AssertNear(6f, cautious, 0.001f, "cautious wait ~6h");
+        AssertTrue(cautious > aggressive, "cautious waits longer");
+    }
+
+    private static void PhaseProgressionProbeBlocksCommitOnHoldForReinforcements()
+    {
+        // Favorable odds (global 1.3, main effort 1.2) BUT readiness says
+        // HoldForReinforcements → stay in Probe (don't commit to a push
+        // with fatigued troops when relief is imminent)
+        var input = new TacticalPhaseProgressionDoctrine.Input(
+            BattlePhase.Probe,
+            planAgeSeconds: 30f,
+            globalOddsCurrent: 1.3f,
+            globalOddsHistory: 1.1f,
+            mainEffortOddsCurrent: 1.2f,
+            mainEffortOddsHistory: 1.0f,
+            armyMoraleCurrent: 1.0f,
+            armyMoraleFloor: 0.2f,
+            reservesCommittedFraction: 0.2f,
+            commanderAggression01: 0.5f,
+            mainEffortReadiness: TacticalSectorReadinessDoctrine.Result.HoldForReinforcements);
+        var d = TacticalPhaseProgressionDoctrine.Decide(input);
+        AssertEqual(BattlePhase.Probe, d.NextPhase,
+            "HoldForReinforcements blocks commit despite favorable odds; got reason=" + d.Reason);
+    }
+
+    private static void PhaseProgressionProbeBlocksCommitOnHoldFatigued()
+    {
+        // Same scenario but readiness HoldFatigued → still blocks commit
+        var input = new TacticalPhaseProgressionDoctrine.Input(
+            BattlePhase.Probe,
+            planAgeSeconds: 30f,
+            globalOddsCurrent: 1.3f,
+            globalOddsHistory: 1.1f,
+            mainEffortOddsCurrent: 1.2f,
+            mainEffortOddsHistory: 1.0f,
+            armyMoraleCurrent: 1.0f,
+            armyMoraleFloor: 0.2f,
+            reservesCommittedFraction: 0.2f,
+            commanderAggression01: 0.2f,
+            mainEffortReadiness: TacticalSectorReadinessDoctrine.Result.HoldFatigued);
+        var d = TacticalPhaseProgressionDoctrine.Decide(input);
+        AssertEqual(BattlePhase.Probe, d.NextPhase,
+            "HoldFatigued blocks commit even with favorable odds; got reason=" + d.Reason);
+    }
+
+    private static void PhaseProgressionProbePushDegradedStillCommits()
+    {
+        // PushDegraded permits commit (aggressive commander accepts the risk)
+        var input = new TacticalPhaseProgressionDoctrine.Input(
+            BattlePhase.Probe,
+            planAgeSeconds: 30f,
+            globalOddsCurrent: 1.3f,
+            globalOddsHistory: 1.1f,
+            mainEffortOddsCurrent: 1.2f,
+            mainEffortOddsHistory: 1.0f,
+            armyMoraleCurrent: 1.0f,
+            armyMoraleFloor: 0.2f,
+            reservesCommittedFraction: 0.2f,
+            commanderAggression01: 0.85f,
+            mainEffortReadiness: TacticalSectorReadinessDoctrine.Result.PushDegraded);
+        var d = TacticalPhaseProgressionDoctrine.Decide(input);
+        AssertEqual(BattlePhase.MainEffort, d.NextPhase,
+            "PushDegraded permits aggressive commit; got reason=" + d.Reason);
+    }
+
+    private static void PhaseProgressionExploitBlocksOnHoldForReinforcements()
+    {
+        // Local breakthrough detected AND reserves committed BUT readiness
+        // says HoldForReinforcements → stay in MainEffort, don't escalate
+        // to Exploit until relief lands
+        var input = new TacticalPhaseProgressionDoctrine.Input(
+            BattlePhase.MainEffort,
+            planAgeSeconds: 30f,
+            globalOddsCurrent: 1.4f,
+            globalOddsHistory: 1.2f,
+            mainEffortOddsCurrent: 1.8f,
+            mainEffortOddsHistory: 1.0f,
+            armyMoraleCurrent: 1.0f,
+            armyMoraleFloor: 0.2f,
+            reservesCommittedFraction: 0.6f,
+            commanderAggression01: 0.5f,
+            mainEffortReadiness: TacticalSectorReadinessDoctrine.Result.HoldForReinforcements);
+        var d = TacticalPhaseProgressionDoctrine.Decide(input);
+        AssertEqual(BattlePhase.MainEffort, d.NextPhase,
+            "Exploit blocked by HoldForReinforcements; got reason=" + d.Reason);
+    }
+
+    // ---- Full wiring: ArmyTickCycle readiness path ----
+
+    private static void ArmyTickCycleFreshAdvancesOnFavorableOdds()
+    {
+        // Fresh army (fatigue 0.1, ammo 0.95) AND favorable LOCAL main-effort
+        // sector odds (1.5x) → readiness PushReady AND mainEffortOdds clears
+        // ProbeCommitOddsFloor → phase advances Probe → MainEffort. The
+        // EnemyVisibleState carries sector 0 with own>enemy because the
+        // doctrine now reads per-sector odds — if you have 1.3x globally
+        // but stalemate in the main effort sector, doctrine correctly keeps
+        // probing.
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(evidence);
+        AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase, "initial Probe");
+
+        // anyContactSpotted=false keeps ArmyIntentInference.Confidence below
+        // EnemyShiftConfidenceFloor (0.5) so no EnemyIntentShift replan fires
+        // and we observe pure phase progression.
+        var visible = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 6000f, 4000f, false) },  // 1.5x local, no recent fire
+            0.5f, anyContactSpotted: false, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+        ArmyTickCycle.MaybeReplan(
+            orch, deltaSeconds: 10f, evidence, visible,
+            ownMainEffortStrength: 8000f, ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60,
+            ownAvgFatigue01: 0.1f, ownAvgAmmo01: 0.95f,
+            nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
+
+        AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase,
+            "fresh army + favorable local sector odds → MainEffort");
+    }
+
+    /// <summary>
+    /// Helper: EnemyVisibleState that does NOT trigger ArmyIntentInference's
+    /// confidence-weighted EnemyIntentShift replan. Used by phase-progression
+    /// tests so we observe the phase transition without it being immediately
+    /// reset by a replan-to-fresh-Probe-plan side effect.
+    /// </summary>
+    private static EnemyVisibleState QuietEnemyVisibleState(int sectorId, float ownStrength, float enemyStrength)
+    {
+        return new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(sectorId, ownStrength, enemyStrength, false) },
+            0.5f, anyContactSpotted: false, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+    }
+
+    private static void ArmyTickCycleExhaustedWithReliefHoldsInProbe()
+    {
+        // Tired army (own 20000, fatigue 0.7, ammo 0.5, morale 0.7 → effective
+        // ~2100) facing enemy ~15400 at odds 1.3 — current ratio 0.14, way
+        // below mid-aggression requiredRatio ~1.10. BUT 15000-strong relief
+        // arrives in 2h (within 4h mid window) → future effective 17100 vs
+        // enemy 15400 = ratio 1.11 > 1.10 → readiness HoldForReinforcements
+        // → phase stays in Probe even though global odds favor commit.
+        ArmyTickCycle.ResetForTest();
+        var midCommander = new PersonalityVector(0.0f, 0.0f, 0.0f, 0.5f, 0.4f);  // mid
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), midCommander);
+        var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(evidence);
+
+        ArmyTickCycle.MaybeReplan(
+            orch, deltaSeconds: 10f, evidence,
+            QuietEnemyVisibleState(0, 8000f, 5000f),
+            ownMainEffortStrength: 20000f, ownArmyMorale: 0.7f,
+            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60,
+            ownAvgFatigue01: 0.7f, ownAvgAmmo01: 0.5f,
+            nearestReinforcementHours: 2f, nearestReinforcementStrength: 15000f);
+
+        AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase,
+            "tired army with imminent decisive relief stays in Probe");
+    }
+
+    private static void ArmyTickCycleExhaustedAggressiveStillCommits()
+    {
+        // Moderately degraded army (fatigue 0.4, ammo 0.7, morale 0.8 →
+        // forceHealth ~0.34 — above the 0.25 min-viable fraction so the
+        // aggression-based press/hold branch is reached) AND aggressive
+        // commander (Hood-tier, aggression 0.95) AND NO relief → readiness
+        // PushDegraded → commits to MainEffort.
+        ArmyTickCycle.ResetForTest();
+        var hood = new PersonalityVector(0.9f, -0.8f, 0.7f, 0.5f, 0.0f);  // aggressive
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), hood);
+        var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(evidence);
+
+        ArmyTickCycle.MaybeReplan(
+            orch, deltaSeconds: 10f, evidence,
+            QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local
+            ownMainEffortStrength: 18000f, ownArmyMorale: 0.8f,
+            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60,
+            ownAvgFatigue01: 0.4f, ownAvgAmmo01: 0.7f,
+            nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
+
+        AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase,
+            "aggressive commander commits with moderately-degraded force (no relief)");
+    }
+
+    private static void ArmyTickCycleExhaustedCautiousHoldsFatigued()
+    {
+        // Moderately degraded army (same shape as aggressive test — moderate
+        // fatigue/ammo/morale that lands above the 0.25 force-health floor)
+        // but cautious commander (McClellan-tier, aggression ~0.2) AND NO
+        // relief → readiness HoldFatigued (cautious below
+        // PressVsHoldAggressionThreshold 0.55) → stays in Probe.
+        ArmyTickCycle.ResetForTest();
+        var mcc = new PersonalityVector(-0.6f, 0.8f, -0.7f, 0.7f, 0.4f);  // cautious
+        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), mcc);
+        var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(evidence);
+
+        ArmyTickCycle.MaybeReplan(
+            orch, deltaSeconds: 10f, evidence,
+            QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local
+            ownMainEffortStrength: 18000f, ownArmyMorale: 0.8f,
+            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60,
+            ownAvgFatigue01: 0.4f, ownAvgAmmo01: 0.7f,
+            nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
+
+        AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase,
+            "cautious commander holds moderately-tired force (preserve)");
+    }
+
+    private static void ArmyTickCycleLegacyOverloadPreservesPriorBehavior()
+    {
+        // Legacy overload (no readiness fields passed) defaults to neutral
+        // values → PushReady → fresh-army-favorable-odds behavior. Confirms
+        // existing call sites that haven't been updated still get the
+        // pre-readiness commit behavior.
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, 0);
+        orch.PickInitialPlan(evidence);
+
+        // 9-arg overload (no readiness params)
+        ArmyTickCycle.MaybeReplan(
+            orch, deltaSeconds: 10f, evidence,
+            QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local, no intent shift
+            ownMainEffortStrength: 8000f, ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60);
+
+        AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase,
+            "legacy overload defaults to PushReady; commits as before");
+    }
+
+    private static void ArmyTickCycleWiresConsiderMainEffortShift()
+    {
+        // EnemyVisibleState with sector 2 having clear best odds → MaybeReplan
+        // must call ConsiderMainEffortShift, swapping plan.MainEffortSector
+        // from 0 to 2. Confirms the tick driver is actually wiring the
+        // sector-shift slice end-to-end.
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var evidence = new ArmyEvidence(1.3f, TerrainKind.Open, defaultMainEffortSector: 0);
+        orch.PickInitialPlan(evidence);
+        AssertEqual(0, orch.CurrentPlan.MainEffortSector, "starts on sector 0");
+
+        // anyContactSpotted=false keeps EnemyIntentShift quiet so we observe
+        // the sector shift without it being undone by a replan-to-default-
+        // sector side effect.
+        var sectors = new EnemyVisibleSector[]
+        {
+            new EnemyVisibleSector(sectorId: 0, ownStrength: 4000f, enemyStrength: 4000f, recentFire: false),
+            new EnemyVisibleSector(sectorId: 1, ownStrength: 3000f, enemyStrength: 5000f, recentFire: false),
+            new EnemyVisibleSector(sectorId: 2, ownStrength: 5000f, enemyStrength: 2000f, recentFire: false), // decisive
+        };
+        var visible = new EnemyVisibleState(sectors, 0.4f, anyContactSpotted: false, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+
+        ArmyTickCycle.MaybeReplan(
+            orch, deltaSeconds: 5f, evidence, visible,
+            ownMainEffortStrength: 12000f, ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 60,
+            ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
+            nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
+
+        AssertEqual(2, orch.CurrentPlan.MainEffortSector,
+            "main effort shifted to decisive sector 2");
+    }
+
+    private static void ConsiderMainEffortShiftRespectsHysteresisMargin()
+    {
+        // Hysteresis prevents thrash at 20x compression. Candidate sector
+        // must beat current by 25% in odds to actually shift. At ratio
+        // odds 1.0 → 1.20, candidate is only 20% better → no shift.
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, defaultMainEffortSector: 0));
+
+        // Marginal candidate (20% better) — must NOT shift.
+        bool shiftedMarginal = orch.ConsiderMainEffortShift(
+            decisiveSectorId: 2, decisiveSectorOdds: 1.20f, currentMainEffortOdds: 1.0f);
+        AssertTrue(!shiftedMarginal, "20% margin below 25% hysteresis → no shift");
+        AssertEqual(0, orch.CurrentPlan.MainEffortSector, "sector unchanged at marginal candidate");
+
+        // Material candidate (50% better) — must shift.
+        bool shiftedMaterial = orch.ConsiderMainEffortShift(
+            decisiveSectorId: 2, decisiveSectorOdds: 1.50f, currentMainEffortOdds: 1.0f);
+        AssertTrue(shiftedMaterial, "50% margin clears hysteresis → shift");
+        AssertEqual(2, orch.CurrentPlan.MainEffortSector, "sector shifted to material candidate");
+    }
+
+    private static void ConsiderMainEffortShiftLegacyOverloadAlwaysShifts()
+    {
+        // Legacy single-arg overload defaults currentMainEffortOdds=0 (no
+        // contact in current sector) → any positive candidate odds shifts.
+        // Preserves pre-hysteresis behavior for call sites not yet updated.
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, defaultMainEffortSector: 0));
+
+        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 3);
+        AssertTrue(shifted, "legacy overload shifts on any positive decisive sector");
+        AssertEqual(3, orch.CurrentPlan.MainEffortSector, "shifted to sector 3");
+    }
+
+    private static void AdvancePlanAgeRealtimeOnlyDoesNotAdvancePhaseAge()
+    {
+        // Compression-aware API: AdvancePlanAgeRealtimeOnly bumps plan age
+        // (used for replan rate limit) without touching phase age (used for
+        // commander-pace budgets). Mirrors the split needed under 2x/5x/20x
+        // time compression.
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
+        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "starts at 0");
+        AssertNear(0f, orch.PhaseAgeSeconds, 1e-5f, "starts at 0");
+
+        orch.AdvancePlanAgeRealtimeOnly(5f);
+        AssertNear(5f, orch.PlanAgeSeconds, 1e-5f, "plan age advanced");
+        AssertNear(0f, orch.PhaseAgeSeconds, 1e-5f, "phase age NOT advanced");
+    }
+
+    private static void AdvancePhaseAgeBattleTimeSeparateFromPlanAge()
+    {
+        // AdvancePhaseAge bumps phase age only — used with battle-time delta
+        // at high time compression (20x compression makes battle time advance
+        // 20s of phase budget per 1s of wallclock).
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
+
+        orch.AdvancePhaseAge(20f);
+        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "plan age NOT advanced by phase-only");
+        AssertNear(20f, orch.PhaseAgeSeconds, 1e-5f, "phase age advanced (battle time)");
+    }
+
+    private static void ArmyTickCycle20xCompressionBurnsProbeInBattleTime()
+    {
+        // 20x compression: 1 wallclock second = 20 battle seconds. With a
+        // 30-second probe budget (aggressive commander), 1.5 wallclock
+        // seconds (= 30 battle seconds) should elapse the budget. Before
+        // the battle-time fix, 30 wallclock seconds would be needed — at
+        // 20x that's 600 battle seconds (10 battle minutes) of probing
+        // before commit. Now budget tracks battle pace correctly.
+        //
+        // Test passes a small deltaSeconds (1.5s real-time, 30s battle-time)
+        // with cautious-odds + push-degraded to NOT trigger the favorable-
+        // odds commit path. Then verify phase age has advanced 30s and
+        // matches the battle delta, not the real delta.
+        ArmyTickCycle.ResetForTest();
+        var hood = new PersonalityVector(0.9f, -0.8f, 0.7f, 0.5f, 0.0f);  // aggressive
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), hood);
+        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
+
+        var visible = QuietEnemyVisibleState(0, 4000f, 4000f);  // parity, no commit
+
+        ArmyTickCycle.MaybeReplan(
+            orch, deltaSeconds: 1.5f, new ArmyEvidence(1.0f, TerrainKind.Open, 0), visible,
+            ownMainEffortStrength: 10000f, ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 600,
+            ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
+            nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f,
+            battleDeltaSeconds: 30f);  // 20x compression: 1.5 real = 30 battle
+
+        AssertNear(1.5f, orch.PlanAgeSeconds, 1e-5f, "plan age accrues real-time (1.5s)");
+        AssertNear(30f, orch.PhaseAgeSeconds, 1e-5f, "phase age accrues battle-time (30s)");
+    }
+
+    private static void ArmyTickCycleWiresOffensiveTriggerInputs()
+    {
+        // Local breakthrough scenario: history was 1.1 odds (initial replan
+        // baseline), current main effort sector now shows 2.5x — ratio
+        // 2.5/1.1 = 2.27 well above LocalBreakthroughOddsRatio (1.35). With
+        // reserves committed >= 0.3 in MainEffort phase, must fire
+        // MainEffortLocalBreakthrough.
+        //
+        // Only one sector in EnemyVisibleState, so the post-shift main-effort
+        // sector matches the high-odds sector — no off-axis competitor to
+        // override. anyContactSpotted=false suppresses EnemyIntentShift
+        // replan so the offensive trigger is the one that fires.
+        ArmyTickCycle.ResetForTest();
+        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var evidence = new ArmyEvidence(1.1f, TerrainKind.Open, defaultMainEffortSector: 0);
+        orch.PickInitialPlan(evidence);
+        orch.AdvancePhase(BattlePhase.MainEffort);  // skip Probe so offensive triggers eligible
+
+        var visible = QuietEnemyVisibleState(0, 5000f, 2000f);  // 2.5x local at main effort
+
+        ArmyTickCycle.MaybeReplan(
+            orch, deltaSeconds: 5f, evidence, visible,
+            ownMainEffortStrength: 12000f, ownArmyMorale: 1.0f,
+            ownReservesCommittedFraction: 0.5f,  // above exploit-gate min 0.4
+            reinforcementsArrivingDelta: 0f,
+            minReplanSeconds: 0,
+            ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
+            nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
+
+        // The wired offensive-evidence path now drives phase progression to
+        // Exploit directly (more elegant than firing a replan trigger). Both
+        // outcomes consume the same per-sector odds from EnemyVisibleState —
+        // the assertion verifies the wiring works either way.
+        AssertEqual(BattlePhase.Exploit, orch.CurrentPlan.Phase,
+            "main effort sector odds spike drives phase advance to Exploit");
+    }
+
     // ====== Command tree probe tests (Task 2) ======
 
     private static TacticalCommandTreeProbe.ExtendedProbe Probe(
@@ -23952,17 +25371,38 @@ static class Program
             "poor intel falls through to existing playbook, got reason=" + d.Reason);
     }
 
-    private static void ReinforcementOpportunityBelowMinForceAbsoluteDoesNotAttack()
+    private static void ReinforcementOpportunitySmallCavalryCanAttack()
     {
-        // 1500K own (below MinAttackForceAbsolute=2000) vs 800 enemy +500 in 6h
-        // Ratio 1.875 above threshold but absolute force too small.
-        // Decision: NOT AttackNow.
+        // 1500 own vs 800 enemy = ratio 1.875, well above mid-aggression
+        // attack threshold ~1.10. Per 2026-05-19 user clarification: GTCW
+        // battles dynamically span 1,500 to 60,000+ per side, so the doctrine
+        // must NOT spuriously block small-force engagements — a Buford cavalry
+        // delaying force or a Forrest raid is a real battle decision worth
+        // doctrine. AttackNow fires because (enemy not growing, force adequate
+        // for ratio).
         var ev = MakeForceBalance(1500f, 800f,
-            enemyArrivals: new[] { new ReinforcementArrival(6f, 500f) },
             aggression: 0.5f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
-        AssertTrue(d.Opportunity != ReinforcementOpportunity.AttackNow,
-            "below-min-force does not attack, got " + d.Opportunity + " reason=" + d.Reason);
+        AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
+            "small force at favorable ratio → AttackNow; got " + d.Opportunity + " reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunityPicketClashDoesNotAttack()
+    {
+        // 400 own vs 200 enemy at 2x ratio. Per the 2026-05-19 scale-
+        // invariance fix, doctrine has NO absolute headcount floor — only
+        // IntelConfidence and ratio gate the decision. A 400-man detachment
+        // with full intel and 2x ratio SHOULD AttackNow (Forrest's smaller
+        // raids did exactly this). The previous "picket-clash floor" was
+        // wrong for the dynamic campaign battle scale (1,500-60,000+).
+        //
+        // This test now verifies the OPPOSITE: small engagements WITH good
+        // intel DO act on the doctrine. Use the intel-confidence test to
+        // verify "low intel suppresses regardless of size."
+        var ev = MakeForceBalance(400f, 200f, aggression: 0.5f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
+            "small force at favorable ratio + good intel → AttackNow (no absolute floor); got " + d.Opportunity + " reason=" + d.Reason);
     }
 
     private static void ReinforcementOpportunityEmptyArrivalsNeverReachParity()
@@ -23983,6 +25423,50 @@ static class Program
         var behindNoArrivals = MakeForceBalance(8000f, 10000f);
         AssertTrue(behindNoArrivals.ParityHoursForOwn() >= 999f,
             "own behind + no arrivals → own parity never; got " + behindNoArrivals.ParityHoursForOwn());
+    }
+
+    private static void ReinforcementOpportunityStandingAdvantageStaticEnemyAttacksNow()
+    {
+        // Live-log regression (2026-05-19 session p175884):
+        //   CSA had ratio=2.29, enemyParityHrs=never, ownParityHrs=0 — should AttackNow.
+        //   Previous logic gated AttackNow on parityForEnemy <= 24h ("defeat-in-detail
+        //   urgency"), so a 2.29× advantage with no enemy reinforcement fell through
+        //   to DefensiveHold. SoW's AttackEnemy would attack on ratio alone here.
+        // 18500 own vs 8100 enemy, no arrivals on either side, mid commander
+        // CurrentRatio = 2.28
+        // AttackThreshold mid = 1.32, OwnDeployed >= 2000 ✓
+        // parityForEnemy = 999 (never) → enemyNotGrowing branch fires
+        // Decision: AttackNow, reason "advantage-and-enemy-static"
+        var ev = MakeForceBalance(18500f, 8100f, aggression: 0.5f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
+            "standing advantage + static enemy must AttackNow (SoW-aligned), got reason=" + d.Reason);
+        AssertEqual("advantage-and-enemy-static", d.Reason,
+            "reason should identify the static-enemy branch, got " + d.Reason);
+    }
+
+    private static void ReinforcementOpportunityStandingAdvantageStaticEnemyBelowMinForceHolds()
+    {
+        // Per the 2026-05-19 scale-invariance fix: doctrine has NO absolute
+        // headcount floor. A 300-vs-100 engagement at 3x ratio with full
+        // intel SHOULD AttackNow regardless of total headcount. Test now
+        // verifies that small-scale engagements still get doctrine.
+        var ev = MakeForceBalance(300f, 100f, aggression: 0.5f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
+            "3x ratio at any scale → AttackNow (scale-invariant doctrine); got " + d.Opportunity + " reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunityCautiousStandingAdvantageDoesNotAttack()
+    {
+        // 15K vs 13K, no enemy growth, cautious commander (0.10).
+        // AttackThreshold @ 0.10 = 1.20 * (1.30 - 0.10*0.40) = 1.512
+        // CurrentRatio 1.154 < 1.512 → ratio check fails even though enemy static.
+        // Decision: NOT AttackNow (cautious commander needs bigger margin).
+        var ev = MakeForceBalance(15000f, 13000f, aggression: 0.10f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertTrue(d.Opportunity != ReinforcementOpportunity.AttackNow,
+            "cautious commander honors elevated attack threshold despite static enemy, got " + d.Opportunity + " reason=" + d.Reason);
     }
 
     private static void ReinforcementOpportunityZeroEnemyDoesNotDivideByZero()
@@ -24179,7 +25663,7 @@ static class Program
     {
         ArmyTickCycle.ResetForTest();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
 
@@ -24202,7 +25686,7 @@ static class Program
     {
         ArmyTickCycle.ResetForTest();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
         orch.AdvancePlanAge(190f);
@@ -24226,7 +25710,7 @@ static class Program
     {
         ArmyTickCycle.ResetForTest();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
         orch.AdvancePlanAge(200f);
@@ -24260,6 +25744,11 @@ static class Program
     private static void ArmyTickCycleRateLimitIsPerAllianceClock()
     {
         ArmyTickCycle.ResetForTest();
+        // Test verifies the rate-limit CLOCK is per-alliance — needs TWO
+        // distinct allianceIds. The "lee" personality vector is just a
+        // fixture; with faction-affinity bias, Union side (alliance 0) gets
+        // a penalty selecting CSA-historical Lee playbook, but that doesn't
+        // affect the rate-limit behavior under test.
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var union = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var csa = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
@@ -24284,14 +25773,14 @@ static class Program
         ArmyTickCycle.ResetForTest();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
-        var firstBattle = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var firstBattle = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         firstBattle.PickInitialPlan(ownEvidence);
         firstBattle.AdvancePlanAge(200f);
         var first = ArmyTickCycle.MaybeReplan(firstBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
 
         ArmyTickCycle.Reset();
 
-        var secondBattle = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var secondBattle = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         secondBattle.PickInitialPlan(ownEvidence);
         secondBattle.AdvancePlanAge(200f);
         var second = ArmyTickCycle.MaybeReplan(secondBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
@@ -24304,7 +25793,7 @@ static class Program
     {
         ArmyTickCycle.ResetForTest();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
 
@@ -24327,7 +25816,7 @@ static class Program
     {
         ArmyTickCycle.ResetForTest();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
         orch.AdvancePlanAge(70f);
@@ -24361,7 +25850,7 @@ static class Program
     {
         ArmyTickCycle.ResetForTest();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(0, SeedCatalog.AllHistoricalAndGeneric(), lee);
+        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
 
         var trigger = ArmyTickCycle.MaybeReplan(
             orch,

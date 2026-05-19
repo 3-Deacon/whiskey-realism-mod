@@ -23,6 +23,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         internal readonly struct Bundle
         {
+            // Legacy ctor (kept for call sites that don't yet pass readiness
+            // data). Defaults the new readiness fields to neutral values so
+            // TacticalSectorReadinessDoctrine.Decide returns PushReady (current
+            // behavior preserved). The synthesized-from-snapshot path in
+            // DriveTickCycle still hits this until the snapshot also carries
+            // the new fields.
             public Bundle(
                 ArmyEvidence ownEvidence,
                 EnemyVisibleState enemyVisible,
@@ -30,6 +36,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float ownArmyMorale,
                 float ownReservesCommittedFraction,
                 float reinforcementsArrivingDelta)
+                : this(ownEvidence, enemyVisible, ownMainEffortStrength,
+                       ownArmyMorale, ownReservesCommittedFraction,
+                       reinforcementsArrivingDelta,
+                       ownAvgFatigue01: 0.2f,
+                       ownAvgAmmo01: 0.9f,
+                       nearestReinforcementHours: 0f,
+                       nearestReinforcementStrength: 0f)
+            { }
+
+            public Bundle(
+                ArmyEvidence ownEvidence,
+                EnemyVisibleState enemyVisible,
+                float ownMainEffortStrength,
+                float ownArmyMorale,
+                float ownReservesCommittedFraction,
+                float reinforcementsArrivingDelta,
+                float ownAvgFatigue01,
+                float ownAvgAmmo01,
+                float nearestReinforcementHours,
+                float nearestReinforcementStrength)
             {
                 OwnEvidence = ownEvidence;
                 EnemyVisible = enemyVisible;
@@ -37,6 +63,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 OwnArmyMorale = ownArmyMorale;
                 OwnReservesCommittedFraction = ownReservesCommittedFraction;
                 ReinforcementsArrivingDelta = reinforcementsArrivingDelta;
+                OwnAvgFatigue01 = ClampUnit(ownAvgFatigue01, 0.2f);
+                OwnAvgAmmo01 = ClampUnit(ownAvgAmmo01, 0.9f);
+                NearestReinforcementHours = SanitizeNonNeg(nearestReinforcementHours);
+                NearestReinforcementStrength = SanitizeNonNeg(nearestReinforcementStrength);
             }
 
             public ArmyEvidence OwnEvidence { get; }
@@ -45,6 +75,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public float OwnArmyMorale { get; }
             public float OwnReservesCommittedFraction { get; }
             public float ReinforcementsArrivingDelta { get; }
+            // Readiness fields (added 2026-05-19 for fresh-troops decision).
+            // Army-wide averages, not sector-specific — first cut. Future
+            // refinement: aggregate by main-effort-sector brigade membership.
+            public float OwnAvgFatigue01 { get; }
+            public float OwnAvgAmmo01 { get; }
+            public float NearestReinforcementHours { get; }
+            public float NearestReinforcementStrength { get; }
+
+            private static float ClampUnit(float v, float fallback)
+            {
+                if (float.IsNaN(v) || float.IsInfinity(v)) return fallback;
+                if (v < 0f) return 0f;
+                if (v > 1f) return 1f;
+                return v;
+            }
+
+            private static float SanitizeNonNeg(float v)
+            {
+                if (float.IsNaN(v) || float.IsInfinity(v) || v < 0f) return 0f;
+                return v;
+            }
         }
 
         internal static Bundle Build(AIBattle battle, int allianceId)
@@ -74,13 +125,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float enemyReinforcements = SanitizeNonNegative(
                     SafeSideInfoFloat(bunits, OppositeSide(side), "reinforcementarrivalswithin24hrs"));
 
+                // Readiness data: army-wide avg fatigue + ammo (for now; future
+                // refinement will aggregate per-sector) + nearest reinforcement
+                // arrival for this side from the scheduledarrival queue.
+                EstimateOwnAverages(bunits, side, out float ownAvgFatigue, out float ownAvgAmmo);
+                FindNearestReinforcement(bunits, side, out float nearestHours, out float nearestStrength);
+
                 return new Bundle(
                     ownEvidence,
                     enemyVisible,
                     Math.Max(1f, ownActive),
                     ownMorale,
                     ownReservesCommitted,
-                    ownReinforcements - enemyReinforcements);
+                    ownReinforcements - enemyReinforcements,
+                    ownAvgFatigue01: ownAvgFatigue,
+                    ownAvgAmmo01: ownAvgAmmo,
+                    nearestReinforcementHours: nearestHours,
+                    nearestReinforcementStrength: nearestStrength);
             }
             catch (Exception e)
             {
@@ -88,6 +149,101 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + e.GetType().Name + " " + e.Message);
                 return fallback;
             }
+        }
+
+        /// <summary>
+        /// Walks BattleUnits.completeunitlist filtered to the given side and
+        /// returns the average fatigue and ammo01 across combat regiments.
+        /// Officer/HQ units are skipped (they have noisy values). Defaults to
+        /// 0.2 fatigue (fresh) and 0.9 ammo (well-supplied) on any reflection
+        /// failure to avoid spurious HoldFatigued decisions.
+        /// </summary>
+        private static void EstimateOwnAverages(BattleUnits bunits, int side, out float avgFatigue01, out float avgAmmo01)
+        {
+            avgFatigue01 = 0.2f;
+            avgAmmo01 = 0.9f;
+            try
+            {
+                int sideAlliance = SafeAlliance(bunits, side);
+                if (sideAlliance < 0) return;
+
+                var units = SafeGetCompleteUnitList();
+                if (units == null || units.Count == 0) return;
+
+                float fatigueSum = 0f;
+                float ammoSum = 0f;
+                int sampled = 0;
+
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var unit = units[i] as Regiment;
+                    if (unit == null) continue;
+                    if (unit.alliance != sideAlliance) continue;
+                    // Skip officers/HQ — they have noisy fatigue/ammo. Combat
+                    // units (Infantry=0, Cavalry=1, Artillery=2, Skirmisher=3)
+                    // are the meaningful sample.
+                    if (unit.unittyp > 3) continue;
+                    // Skip dead/empty regiments — they'd skew the average toward
+                    // 0 fatigue / 0 ammo, falsely reporting "fresh and well-supplied."
+                    float groupActive = SafeRegimentFloat(unit, "groupstrengthactive");
+                    if (groupActive <= 0f) continue;
+
+                    float fatigue = SafeRegimentFloat(unit, "fatigue");
+                    float ammo = SafeRegimentFloat(unit, "ammo");
+                    if (fatigue < 0f) fatigue = 0f;
+                    if (fatigue > 1f) fatigue = 1f;
+                    if (ammo < 0f) ammo = 0f;
+                    if (ammo > 1f) ammo = 1f;
+
+                    fatigueSum += fatigue;
+                    ammoSum += ammo;
+                    sampled++;
+                }
+
+                if (sampled == 0) return;
+                avgFatigue01 = fatigueSum / sampled;
+                avgAmmo01 = ammoSum / sampled;
+            }
+            catch
+            {
+                avgFatigue01 = 0.2f;
+                avgAmmo01 = 0.9f;
+            }
+        }
+
+        /// <summary>
+        /// Returns the nearest scheduled arrival for the given side: hours
+        /// until landing + the regiment's estimated strength. Reuses
+        /// BuildArrivalsForSide which already filters by alliance and reads
+        /// scheduledarrival durationleft / regiment strength. Returns (0, 0)
+        /// when no arrivals queued.
+        /// </summary>
+        private static void FindNearestReinforcement(BattleUnits bunits, int side, out float hours, out float strength)
+        {
+            hours = 0f;
+            strength = 0f;
+            try
+            {
+                var arrivals = BuildArrivalsForSide(bunits, side);
+                if (arrivals == null || arrivals.Count == 0) return;
+                float bestHours = float.MaxValue;
+                float bestStrength = 0f;
+                for (int i = 0; i < arrivals.Count; i++)
+                {
+                    var a = arrivals[i];
+                    if (a.HoursUntilArrival < bestHours)
+                    {
+                        bestHours = a.HoursUntilArrival;
+                        bestStrength = a.EstimatedStrength;
+                    }
+                }
+                if (bestHours < float.MaxValue)
+                {
+                    hours = bestHours;
+                    strength = bestStrength;
+                }
+            }
+            catch { }
         }
 
         private static Bundle NoEvidence()

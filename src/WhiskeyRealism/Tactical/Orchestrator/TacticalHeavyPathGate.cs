@@ -135,6 +135,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return new Decision(Action.Skip, "stable-under-max");
         }
 
+        /// <summary>
+        /// Scales the base cycle-hours by observed time compression so that
+        /// at 5x/20x compression we don't force a heavy rebuild every couple
+        /// real seconds. At 1x compression: returns baseCycle unchanged. At
+        /// 20x: returns ~5x baseCycle (54 battle-seconds instead of 10.8).
+        /// Capped at 20x to prevent runaway scaling on noisy ratios.
+        ///
+        /// Rationale: the existing realtime-floor (2s default) already throttles
+        /// frequency in wallclock terms, but at high compression the cycle
+        /// fires the moment the floor lifts because battle-hours elapsed
+        /// dominates. Scaling stretches the battle-hours threshold to match
+        /// the wallclock pacing the realtime-floor already enforces.
+        /// </summary>
+        public static float ScaleCycleForCompression(float baseCycleHours, float compressionRatio)
+        {
+            if (float.IsNaN(baseCycleHours) || float.IsInfinity(baseCycleHours) || baseCycleHours <= 0f)
+                return 0.003f;  // safe default
+            if (float.IsNaN(compressionRatio) || float.IsInfinity(compressionRatio) || compressionRatio < 1f)
+                compressionRatio = 1f;
+            if (compressionRatio > 20f) compressionRatio = 20f;
+            // Scale factor: 1x -> 1, 5x -> 1.25, 10x -> 2.5, 20x -> 5.
+            // Below 4x, the realtime-floor handles throttling alone; above,
+            // we need to extend the battle-hours cycle proportionally.
+            float scale = compressionRatio / 4f;
+            if (scale < 1f) scale = 1f;
+            return baseCycleHours * scale;
+        }
+
         private static bool IsUnderRealtimeFloor(Input input)
         {
             float minRealtime = input.MinRealtimeSeconds;

@@ -181,6 +181,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalLeafBrigadeMap.cs" Link="Orchestrator\TacticalLeafBrigadeMap.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalForceBalanceEvidence.cs" Link="Orchestrator\TacticalForceBalanceEvidence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalReinforcementOpportunityDoctrine.cs" Link="Orchestrator\TacticalReinforcementOpportunityDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalPhaseProgressionDoctrine.cs" Link="Orchestrator\TacticalPhaseProgressionDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalSectorReadinessDoctrine.cs" Link="Orchestrator\TacticalSectorReadinessDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalGateHelpers.cs" Link="TacticalGateHelpers.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalScoreCache.cs" Link="TacticalScoreCache.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalUnitType.cs" Link="TacticalUnitType.cs" />
@@ -279,6 +281,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\HoodFrontalAssaultPlaybook.cs" Link="Orchestrator\Playbooks\HoodFrontalAssaultPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\BurnsideForcedAssaultPlaybook.cs" Link="Orchestrator\Playbooks\BurnsideForcedAssaultPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\BraggIndecisiveCommitPlaybook.cs" Link="Orchestrator\Playbooks\BraggIndecisiveCommitPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\BufordCavalryScreenDelayPlaybook.cs" Link="Orchestrator\Playbooks\BufordCavalryScreenDelayPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\ForrestCavalryRaidPlaybook.cs" Link="Orchestrator\Playbooks\ForrestCavalryRaidPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\MeetingEngagementPlaybook.cs" Link="Orchestrator\Playbooks\MeetingEngagementPlaybook.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\JohnstonFabianDelayPlaybook.cs" Link="Orchestrator\Playbooks\JohnstonFabianDelayPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\BuiltInPlaybooks.cs" Link="Orchestrator\BuiltInPlaybooks.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\OnceLog.cs" Link="Util\OnceLog.cs" />
   </ItemGroup>

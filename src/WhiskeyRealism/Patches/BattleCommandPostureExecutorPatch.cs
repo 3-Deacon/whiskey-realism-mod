@@ -2400,10 +2400,22 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (group == null) return true;
-                if (group.alliance == GameVars.playeralliance && !GameVars.ai_vs_ai) return true;
-                if (!WlOwnershipSafe(group)) return true;
-                if (IsWlCurrentCommandOrChain(group)) return true;
-                if (SafeDlcTakenOver(group)) return true;
+                // Removed 2026-05-19: the prior blanket alliance check
+                // `group.alliance == GameVars.playeralliance && !ai_vs_ai`
+                // returned true for EVERY unit on the player's alliance,
+                // not just the player's directly-commanded unit. Symptom:
+                // in W&L play the AI could not issue orders to any brigade
+                // on the player's side because the protection fired on
+                // every group — the player's own brigade just sat at
+                // vanilla "hold" with no orchestrator activity.
+                //
+                // W&L scope is the player's specific commanded unit +
+                // ancestors/descendants of it (via transform chain) +
+                // any DLC-taken-over unit. The three checks below capture
+                // that scope correctly.
+                if (!WlOwnershipSafe(group)) { EmitPlayerProtectedDiagnostic(group, "wl-ownership"); return true; }
+                if (IsWlCurrentCommandOrChain(group)) { EmitPlayerProtectedDiagnostic(group, "wl-current-command"); return true; }
+                if (SafeDlcTakenOver(group)) { EmitPlayerProtectedDiagnostic(group, "dlc-taken-over"); return true; }
                 return false;
             }
             catch
@@ -2411,6 +2423,42 @@ namespace WhiskeyRealism.Patches
                 return true;
             }
         }
+
+        /// <summary>
+        /// Signature-deduped diagnostic emit: which W&amp;L protection check
+        /// flagged a given group as player-protected. Lets smoke verify the
+        /// right scope (only the player's directly-commanded unit + chain
+        /// + DLC-takenover, NOT the whole player alliance).
+        /// </summary>
+        private static void EmitPlayerProtectedDiagnostic(Regiment group, string reason)
+        {
+            try
+            {
+                if (group == null) return;
+                float nowSeconds = System.Environment.TickCount * 0.001f;
+                string name = SafeName(group);
+                int alliance;
+                try { alliance = group.alliance; } catch { alliance = -1; }
+                string sig = "alliance=" + alliance + "|name=" + name + "|reason=" + reason;
+                string key = "tactical-player-protected:" + alliance + ":" + name;
+                if (!WhiskeyRealism.Tactical.TacticalTelemetry.ShouldEmit(_lastPlayerProtectedTelemetryAt, key, sig, nowSeconds, PlayerProtectedTelemetrySeconds, false))
+                    return;
+                WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                    WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                    WhiskeyRealism.Telemetry.TelemetryCategory.Gate,
+                    "TacticalPlayerProtected",
+                    WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalPlayerProtected", reason, sig)
+                        .WithUnit(name)
+                        .WithField("alliance", alliance)
+                        .WithField("reason", reason));
+            }
+            catch { }
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<string, float> _lastPlayerProtectedTelemetryAt = new System.Collections.Generic.Dictionary<string, float>();
+        private const float PlayerProtectedTelemetrySeconds = 30f;
 
         private static bool WlOwnershipSafe(Regiment group)
         {

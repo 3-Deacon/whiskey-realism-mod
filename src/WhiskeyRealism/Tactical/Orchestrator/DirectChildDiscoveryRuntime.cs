@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -128,7 +129,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return Array.Empty<TacticalCommandTreeProbe.ExtendedProbe>();
                 int effectiveCommandMin = ClampShiftedMin(shift);
 
+                // Walk the vanilla command hierarchy via GetAttachedUnitsReg
+                // to build TWO maps in one pass:
+                //   directChildren — set of GameObject instance ids that
+                //     are a direct child of SOME command parent (used by
+                //     DirectChildDiscovery.Snapshot to identify army-tier
+                //     subordinates).
+                //   directChildToParent — reverse map (child id -> parent
+                //     id) so we can populate parentInstanceId from the
+                //     vanilla command hierarchy. The prior code used
+                //     go.transform.parent which is the Unity scene-graph
+                //     parent, NOT the command parent — corps/divisions in
+                //     vanilla GTCW are typically siblings in the scene
+                //     graph (under a common units root) with the command
+                //     hierarchy expressed only through allattachedunits
+                //     lists. That made parentInstanceId 0 for most units,
+                //     which caused DirectChildDiscovery.Snapshot to fall
+                //     through to synth-army placeholders for armies with
+                //     no transform-parent-matched direct children. The
+                //     symptom was cascade Main role never propagating to
+                //     real combat brigades — no attack-objective writes
+                //     even when AttackNow doctrine fired.
                 var directChildren = new HashSet<int>();
+                var directChildToParent = new Dictionary<int, int>();
                 for (int i = 0; i < units.Count; i++)
                 {
                     var reg = units[i] as Regiment;
@@ -136,6 +159,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var regGo = ((Component)reg).gameObject;
                     if (regGo == null) continue;
                     if (reg.unittyp < effectiveCommandMin) continue;
+                    int regInstanceId = regGo.GetInstanceID();
                     Regiment[] kids;
                     try { kids = reg.GetAttachedUnitsReg(true, true, -1, true, false, false, false, false); }
                     catch { kids = null; }
@@ -146,9 +170,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         if (kid == null) continue;
                         var kidGo = ((Component)kid).gameObject;
                         if (kidGo == null) continue;
-                        directChildren.Add(kidGo.GetInstanceID());
+                        int kidId = kidGo.GetInstanceID();
+                        directChildren.Add(kidId);
+                        // Record the FIRST command parent that claims this
+                        // child. If the same unit appears under multiple
+                        // command parents (which shouldn't happen in valid
+                        // vanilla data but we guard anyway), the first one
+                        // wins. Walks in unit-list order so an Army that
+                        // contains a Corps will record Corps→Army before
+                        // any nested walks try to claim it.
+                        if (!directChildToParent.ContainsKey(kidId))
+                            directChildToParent[kidId] = regInstanceId;
                     }
                 }
+
+                // Verification counters for the BUG-TAC-2026-05-19 synth-army
+                // root cause fix. Tracks how often parentInstanceId resolved
+                // via the vanilla command hierarchy (new path) vs the legacy
+                // transform-parent fallback. After the fix, vanilla resolution
+                // should dominate for any army with corps/division subordinates.
+                int probesVanillaParent = 0;
+                int probesTransformParent = 0;
+                int probesNoParent = 0;
 
                 var result = new List<TacticalCommandTreeProbe.ExtendedProbe>(units.Count);
                 for (int i = 0; i < units.Count; i++)
@@ -158,13 +201,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var go = ((Component)reg).gameObject;
                     if (go == null) continue;
                     int instanceId = go.GetInstanceID();
-                    var parentTransform = go.transform != null ? go.transform.parent : null;
+                    // Use vanilla command hierarchy parent first; fall back
+                    // to transform parent only if no command parent claimed
+                    // this unit (degenerate top-level army case).
                     int parentInstanceId = 0;
-                    if (parentTransform != null)
+                    bool resolvedVanilla = directChildToParent.TryGetValue(instanceId, out parentInstanceId);
+                    bool resolvedTransform = false;
+                    if (!resolvedVanilla)
                     {
-                        var parentReg = parentTransform.GetComponent<Regiment>();
-                        if (parentReg != null) parentInstanceId = ((Component)parentReg).gameObject.GetInstanceID();
+                        parentInstanceId = 0;
+                        var parentTransform = go.transform != null ? go.transform.parent : null;
+                        if (parentTransform != null)
+                        {
+                            var parentReg = parentTransform.GetComponent<Regiment>();
+                            if (parentReg != null)
+                            {
+                                parentInstanceId = ((Component)parentReg).gameObject.GetInstanceID();
+                                resolvedTransform = true;
+                            }
+                        }
                     }
+                    if (resolvedVanilla) probesVanillaParent++;
+                    else if (resolvedTransform) probesTransformParent++;
+                    else probesNoParent++;
                     float worldX = 0f, worldZ = 0f;
                     try
                     {
@@ -184,6 +243,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         worldZ: worldZ,
                         strengthBucket: strengthBucket));
                 }
+                EmitProbeHealthTelemetry(allianceId, probesVanillaParent, probesTransformParent, probesNoParent);
                 return result;
             }
             catch (Exception e)
@@ -194,6 +254,50 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return Array.Empty<TacticalCommandTreeProbe.ExtendedProbe>();
             }
         }
+
+        /// <summary>
+        /// Emits a signature-deduped health event reporting how the parent-id
+        /// resolution distributed across the three paths. After BUG-TAC-2026-05-19
+        /// (synth-army root cause fix), vanilla-parent should dominate any army
+        /// with corps/division subordinates. Transform-fallback should occur
+        /// only for true top-level army nodes that no other unit claims.
+        /// Dedup signature is the integer trio so repeated identical
+        /// distributions emit only once per session.
+        /// </summary>
+        private static void EmitProbeHealthTelemetry(int allianceId, int vanillaParent, int transformParent, int noParent)
+        {
+            // Environment.TickCount (mscorlib) instead of UnityEngine.Time.realtimeSinceStartup
+            // — Unity Time is an ECall whose JIT-time verification throws
+            // SecurityException in pure-.NET test environments. TickCount
+            // works in tests and Unity; wraps every ~25 days which is
+            // irrelevant for a battle session.
+            float nowSeconds = System.Environment.TickCount * 0.001f;
+            try
+            {
+                string sig = "alliance=" + allianceId
+                    + "|vanilla=" + vanillaParent
+                    + "|transform=" + transformParent
+                    + "|noParent=" + noParent;
+                string key = "tactical-probe-health:" + allianceId + ":" + sig;
+                if (!TacticalTelemetry.ShouldEmit(_lastProbeHealthTelemetryAt, key, sig, nowSeconds, ProbeHealthTelemetrySeconds, false))
+                    return;
+                TelemetryRouter.Emit(
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Health,
+                    "TacticalCommandTreeProbeHealth",
+                    TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalCommandTreeProbeHealth", "summary", sig)
+                        .WithField("alliance", allianceId)
+                        .WithField("vanillaParent", vanillaParent)
+                        .WithField("transformParent", transformParent)
+                        .WithField("noParent", noParent));
+            }
+            catch { }
+        }
+
+        private static readonly Dictionary<string, float> _lastProbeHealthTelemetryAt = new Dictionary<string, float>();
+        private const float ProbeHealthTelemetrySeconds = 30f;
 
         private static int SafeStrengthBucket(Regiment reg)
         {

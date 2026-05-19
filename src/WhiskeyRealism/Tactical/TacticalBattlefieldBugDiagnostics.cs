@@ -333,7 +333,9 @@ namespace WhiskeyRealism.Tactical
         public static bool ShouldSuppressFallbackRetreatException(string methodName, Exception exception)
         {
             if (!(exception is NullReferenceException)) return false;
-            return methodName == "MicroAICheckForRetreats" || methodName == "CheckLineFallbacks";
+            return methodName == "MicroAICheckForRetreats" ||
+                   methodName == "CheckLineFallbacks" ||
+                   methodName == "CheckOutOfFireRange";
         }
 
         public static TacticalBugDiagnosticDecision ClassifyPathShape(

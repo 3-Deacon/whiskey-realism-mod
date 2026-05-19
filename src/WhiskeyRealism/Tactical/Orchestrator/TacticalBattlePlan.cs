@@ -19,6 +19,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         GenericCautious,
         GenericMethodical,
         GenericDesperate,
+        // Cavalry-as-main-effort playbooks. Existing CavalryFollowDoctrine
+        // handles per-unit guard/scout/screen/raid behavior; these playbooks
+        // make cavalry the army's decisive arm rather than a supporting one.
+        BufordCavalryScreenDelay,
+        ForrestCavalryRaid,
+        // Meeting engagement: both sides arrive piecemeal, neither set up.
+        // Distinct from Probe (Probe assumes deploy-from-march; meeting
+        // engagement is collide-while-moving). McPherson's Ridge Day 1.
+        MeetingEngagement,
+        // Joseph Johnston's Atlanta-campaign Fabian doctrine. Uses existing
+        // CommandTaskType.Delay + WithdrawalDoctrine to thread disciplined
+        // fight-yield-fight-yield rather than Fallback (panic) or
+        // GenericDesperate (last stand).
+        JohnstonFabianDelay,
     }
 
     public enum BattlePhase
@@ -84,6 +98,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public TacticalBattlePlan WithAge(float ageSeconds) =>
             new TacticalBattlePlan(PlanId, Phase, MainEffortSector, FixingSectors, ScreeningSectors, ReserveCommitTriggerOdds, ageSeconds, JitterSeed);
+
+        public TacticalBattlePlan WithReserveCommitTriggerOdds(float reserveCommitTriggerOdds) =>
+            new TacticalBattlePlan(PlanId, Phase, MainEffortSector, FixingSectors, ScreeningSectors, reserveCommitTriggerOdds, AgeSeconds, JitterSeed);
+
+        public TacticalBattlePlan WithMainEffortSector(int mainEffortSector) =>
+            new TacticalBattlePlan(PlanId, Phase, mainEffortSector, FixingSectors, ScreeningSectors, ReserveCommitTriggerOdds, AgeSeconds, JitterSeed);
 
         private static float Sanitize(float v)
         {

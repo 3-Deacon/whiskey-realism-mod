@@ -70,6 +70,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly Dictionary<int, float> _lastProcessedSideStatUpdateByBunitsId = new Dictionary<int, float>();
         private static readonly float[] _lastHeavyReviewHours = { 0f, 0f };
         private static readonly float[] _lastHeavyReviewRealtimeSeconds = { 0f, 0f };
+        // Per-side last-seen battle hours (game-clock time, scales with
+        // 2x/5x/20x compression). Used to derive a battle-time delta for
+        // phase progression so phase budgets track commander pace, not
+        // wallclock pace. Distinct from _lastHeavyReviewHours (the heavy-
+        // throttle gate's last review time).
+        private static readonly float[] _lastTickBattleHours = { -1f, -1f };
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
         private static readonly TacticalBattleRuntimeSnapshot[] _lastPublishedSnapshots = { TacticalBattleRuntimeSnapshot.Empty, TacticalBattleRuntimeSnapshot.Empty };
         private static readonly bool[] _hasPendingChange = { false, false };
@@ -293,7 +299,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     float lastReal = _lastHeavyReviewRealtimeSeconds[s];
                     var lastS = _lastSignatures[s];
                     bool hasP = _hasPendingChange[s];
-                    float cycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
+                    float cycle = ComputeCompressionAdjustedCycle(s, nowH, nowReal, lastReal);
                     float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
                     var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
                     var dec = TacticalHeavyPathGate.Decide(input);
@@ -316,19 +322,48 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                             _hasPendingChange[s] = true;
                         }
                     }
-                    // Synthesize bundle-like data from snapshot (reuses the expensive data built only when gate allowed)
+                    // Synthesize bundle-like data from snapshot (reuses the expensive data built only when gate allowed).
+                    // Readiness fields propagate so the throttled tick keeps the
+                    // same fresh-troops decision as the direct path.
                     bundleForReplan = new ArmyEvidenceBuilder.Bundle(
                         snap.OwnEvidence,
                         snap.EnemyVisible,
                         snap.OwnMainEffortStrength,
                         snap.OwnArmyMorale,
                         snap.OwnReservesCommittedFraction,
-                        snap.ReinforcementsArrivingDelta);
+                        snap.ReinforcementsArrivingDelta,
+                        ownAvgFatigue01: snap.OwnAvgFatigue01,
+                        ownAvgAmmo01: snap.OwnAvgAmmo01,
+                        nearestReinforcementHours: snap.NearestReinforcementHours,
+                        nearestReinforcementStrength: snap.NearestReinforcementStrength);
                 }
 
                 int minReplanSeconds = (Plugin.TacticalOrchestratorMinReplanSeconds != null)
                     ? Plugin.TacticalOrchestratorMinReplanSeconds.Value
                     : 60;
+
+                // Battle-time delta: compute from GameVars.currenttimefromstart
+                // diff vs last tick. At 2x/5x/20x compression, this advances
+                // proportionally faster than wallclock deltaSeconds. Drives
+                // phase progression budgets so commander decisions track
+                // battle pace, not wallclock pace. Hours→seconds conversion.
+                int sideIdx = side.AllianceId;
+                if (sideIdx < 0 || sideIdx > 1) sideIdx = 0;
+                float nowBattleHours = SafeCurrentBattleHours();
+                float lastBattleHours = _lastTickBattleHours[sideIdx];
+                float battleDeltaSeconds;
+                if (lastBattleHours < 0f)
+                {
+                    battleDeltaSeconds = 0f;  // first tick — no prior reference
+                }
+                else
+                {
+                    float deltaHours = nowBattleHours - lastBattleHours;
+                    if (deltaHours < 0f) deltaHours = 0f;          // battle reset / clock rollback
+                    if (deltaHours > 1f) deltaHours = 1f;          // cap at 1 battle hour per tick
+                    battleDeltaSeconds = deltaHours * 3600f;
+                }
+                _lastTickBattleHours[sideIdx] = nowBattleHours;
 
                 var trigger = ArmyTickCycle.MaybeReplan(
                     side.Army,
@@ -339,7 +374,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ownArmyMorale: bundleForReplan.OwnArmyMorale,
                     ownReservesCommittedFraction: bundleForReplan.OwnReservesCommittedFraction,
                     reinforcementsArrivingDelta: bundleForReplan.ReinforcementsArrivingDelta,
-                    minReplanSeconds: minReplanSeconds);
+                    minReplanSeconds: minReplanSeconds,
+                    ownAvgFatigue01: bundleForReplan.OwnAvgFatigue01,
+                    ownAvgAmmo01: bundleForReplan.OwnAvgAmmo01,
+                    nearestReinforcementHours: bundleForReplan.NearestReinforcementHours,
+                    nearestReinforcementStrength: bundleForReplan.NearestReinforcementStrength,
+                    battleDeltaSeconds: battleDeltaSeconds);
 
                 var intent = side.Army.CurrentIntentModel;
                 if (intent.PrimaryIntent != InferredIntent.Unknown)
@@ -426,7 +466,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         float lastReal = _lastHeavyReviewRealtimeSeconds[s];
                         var lastS = _lastSignatures[s];
                         bool hasP = _hasPendingChange[s];
-                        float cycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
+                        float cycle = ComputeCompressionAdjustedCycle(s, nowH, nowReal, lastReal);
                         float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
                         var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
                         var dec = TacticalHeavyPathGate.Decide(input);
@@ -477,6 +517,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     WarnTickCycleOnce(side, e);
                 }
             }
+        }
+
+        /// <summary>
+        /// Computes the compression-adjusted heavy-gate cycle for a given
+        /// side, using the side's last-tick battle-hours and last-heavy
+        /// realtime as the ratio source. At 1x compression returns base
+        /// cycle unchanged; at 20x returns ~5x base (54 battle-seconds).
+        /// </summary>
+        private static float ComputeCompressionAdjustedCycle(int sideIdx, float nowBattleHours, float nowRealtime, float lastRealtime)
+        {
+            float baseCycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
+            if (sideIdx < 0 || sideIdx > 1) return baseCycle;
+            float lastBattleH = _lastTickBattleHours[sideIdx];
+            float observedRatio = 1f;
+            if (lastBattleH > 0f && lastRealtime > 0f && nowRealtime > lastRealtime && nowBattleHours > lastBattleH)
+            {
+                float battleDelta = (nowBattleHours - lastBattleH) * 3600f;
+                float realDelta = nowRealtime - lastRealtime;
+                if (realDelta > 0.01f) observedRatio = battleDelta / realDelta;
+            }
+            return TacticalHeavyPathGate.ScaleCycleForCompression(baseCycle, observedRatio);
         }
 
         private static float SafeRealtimeSeconds()
@@ -1056,7 +1117,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     float lastReal = _lastHeavyReviewRealtimeSeconds[s];
                     var lastS = _lastSignatures[s];
                     bool hasP = _hasPendingChange[s];
-                    float cycle = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewCycleHours : 0.003f);
+                    float cycle = ComputeCompressionAdjustedCycle(s, nowH, nowReal, lastReal);
                     float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
                     var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
                     var dec = TacticalHeavyPathGate.Decide(input);
@@ -1252,6 +1313,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _lastSignatures[i] = default(TacticalBattleStateSignature);
                     _lastPublishedSnapshots[i] = TacticalBattleRuntimeSnapshot.Empty;
                     _hasPendingChange[i] = false;
+                    _lastTickBattleHours[i] = -1f;  // sentinel: first tick has no battle-hours reference
                 }
             }
             catch { }

@@ -134,7 +134,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // Direct children discovery (uses completeunitlist + GetAttachedUnitsReg)
                 IReadOnlyList<DirectChildSnapshot> directChildren = DirectChildDiscovery.Snapshot(battle);
 
-                // The snapshot performs its own defensive copies
+                // The snapshot performs its own defensive copies. Readiness
+                // fields (fatigue/ammo/reinforcement timing) flow from bundle
+                // through the snapshot so the throttled DriveTickCycle path
+                // gets the same data as the direct path.
                 return new TacticalBattleRuntimeSnapshot(
                     signatureAtBuild,
                     buildBattleHours,
@@ -146,7 +149,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     bundle.ReinforcementsArrivingDelta,
                     objectives,
                     commandTree,
-                    directChildren);
+                    directChildren,
+                    bundle.OwnAvgFatigue01,
+                    bundle.OwnAvgAmmo01,
+                    bundle.NearestReinforcementHours,
+                    bundle.NearestReinforcementStrength);
             }
             catch (Exception e)
             {

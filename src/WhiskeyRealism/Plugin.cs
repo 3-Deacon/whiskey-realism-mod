@@ -266,7 +266,7 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Observer",
                 false,
-                "Default OFF for Slice B B0. Emits bounded read-only battle telemetry when enabled; does not change tactical AI behavior.");
+                "Default ON for Slice B B0. Emits bounded read-only battle telemetry when enabled; does not change tactical AI behavior.");
             TacticalObserverVerboseLogging = Config.Bind(
                 "Tactical",
                 "Tactical Observer Verbose Logging",
@@ -300,37 +300,37 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Bug Telemetry",
                 false,
-                "Default OFF. Emits focused read-only telemetry for tactical order/current-order bug hunts; does not change battlefield behavior.");
+                "Default ON. Emits focused read-only telemetry for tactical order/current-order bug hunts; does not change battlefield behavior.");
             EnableTacticalFallbackRetreatNullGuard = Config.Bind(
                 "Tactical",
                 "Enable Tactical Fallback Retreat Null Guard",
                 true,
-                "Default OFF. Suppresses NullReferenceException from two vanilla tactical fallback/retreat methods during focused bug-smoke runs; all non-null exceptions still propagate.");
+                "Default ON. Suppresses NullReferenceException from two vanilla tactical fallback/retreat methods during focused bug-smoke runs; all non-null exceptions still propagate.");
             EnableTacticalPathfinderDiscipline = Config.Bind(
                 "Tactical",
                 "Enable Tactical Pathfinder Discipline",
                 true,
-                "Default OFF. Corrects BUG-TAC-010 by accepting close complete tactical path endpoints, removing failed non-target path fragments, and rejecting non-complete NavMesh paths before they poison movement retries.");
+                "Default ON. Corrects BUG-TAC-010 by accepting close complete tactical path endpoints, removing failed non-target path fragments, and rejecting non-complete NavMesh paths before they poison movement retries.");
             EnableTacticalHqLinkGuard = Config.Bind(
                 "Tactical",
                 "Enable Tactical HQ Link Guard",
                 true,
-                "Default OFF. Corrects cross-command group/HQ auto-links created by Regiment.MoveNonAIUnits while preserving same-command and same-hierarchy links.");
+                "Default ON. Corrects cross-command group/HQ auto-links created by Regiment.MoveNonAIUnits while preserving same-command and same-hierarchy links.");
             EnableTacticalReserveOrderDelayGuard = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reserve Order Delay Guard",
                 true,
-                "Default OFF. Converts vanilla reserve support moves that were issued by direct RegimentSetPath into normal delayed SetWaypoint orders after removing the immediate path.");
+                "Default ON. Converts vanilla reserve support moves that were issued by direct RegimentSetPath into normal delayed SetWaypoint orders after removing the immediate path.");
             EnableWlTacticalChargeGuard = Config.Bind(
                 "Tactical",
                 "Enable W&L Tactical Charge Guard",
                 true,
-                "Default OFF for Slice B1/BUG-TAC-005. When enabled, blocks ungated W&L AI feud/charge/objective-chain movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
+                "Default ON for Slice B1/BUG-TAC-005. When enabled, blocks ungated W&L AI feud/charge/objective-chain movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
             EnableWlPlayerSubordinateOrderBridge = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine",
                 true,
-                "Default OFF. When true, the tactical operations ledger may issue player-subordinate W&L current orders through vanilla AIBattle.CheckCurrentOrderUpdate after vanilla UpdateDLCPlayerOrders runs.");
+                "Default ON. When true, the tactical operations ledger may issue player-subordinate W&L current orders through vanilla AIBattle.CheckCurrentOrderUpdate after vanilla UpdateDLCPlayerOrders runs.");
             EnableWlPlayerOrderDoctrineDiagnostics = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine Diagnostics",
@@ -355,37 +355,37 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",
                 true,
-                "Default OFF for Slice B4. Uses B3 odds doctrine to bias battle-level macroai after vanilla dynamic macro logic runs.");
+                "Default ON for Slice B4. Uses B3 odds doctrine to bias battle-level macroai after vanilla dynamic macro logic runs.");
             EnableTacticalGroupSectorStance = Config.Bind(
                 "Tactical",
                 "Enable Tactical Group Sector Stance",
                 true,
-                "Default OFF for Slice B5. Uses B3 sector doctrine to bias group ai_stance without issuing movement, reserve, artillery, fallback, or charge orders.");
+                "Default ON for Slice B5. Uses B3 sector doctrine to bias group ai_stance without issuing movement, reserve, artillery, fallback, or charge orders.");
             EnableTacticalCommanderIntentDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Commander Intent Doctrine",
                 true,
-                "Default OFF for Slice B6a. Computes tactical commander intent and playbook from B3-B5 evidence and the active OperationPosture, and emits read-only [TacticalIntent] and [TacticalPlaybook] telemetry. Does not change any vanilla battle state.");
+                "Default ON for Slice B6a. Computes tactical commander intent and playbook from B3-B5 evidence and the active OperationPosture, and emits read-only [TacticalIntent] and [TacticalPlaybook] telemetry. Does not change any vanilla battle state.");
             EnableTacticalLocalReactionDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Local Reaction Doctrine",
                 true,
-                "Default OFF for Slice B6c. Computes per-group local reactions from B6a intent + playbook + B3 evidence and emits read-only [TacticalLocalReaction] telemetry. Enables stance-4 preservation/demotion contract in BattleGroupStancePatch.");
+                "Default ON for Slice B6c. Computes per-group local reactions from B6a intent + playbook + B3 evidence and emits read-only [TacticalLocalReaction] telemetry. Enables stance-4 preservation/demotion contract in BattleGroupStancePatch.");
             EnableTacticalChargeDenial = Config.Bind(
                 "Tactical",
                 "Enable Tactical Charge Denial",
                 true,
-                "Default OFF for Slice B6c. When local reaction is not PermitCharge, BattleGroupStancePatch demotes vanilla stance 4 to 3 with [TacticalChargeDeny] telemetry, and BattleChargeGatePatch denies SetMovementMode(3) at the per-unit charge initiation surface as defense in depth.");
+                "Default ON for Slice B6c. When local reaction is not PermitCharge, BattleGroupStancePatch demotes vanilla stance 4 to 3 with [TacticalChargeDeny] telemetry, and BattleChargeGatePatch denies SetMovementMode(3) at the per-unit charge initiation surface as defense in depth.");
             EnableTacticalReserveIntentTelemetry = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reserve Intent Telemetry",
                 true,
-                "Default OFF for Slice B6c. Emits read-only [TacticalReserveIntent] lines aggregating LineReliefRequest signals + reserve availability per side. Does not mutate reserve lists.");
+                "Default ON for Slice B6c. Emits read-only [TacticalReserveIntent] lines aggregating LineReliefRequest signals + reserve availability per side. Does not mutate reserve lists.");
             EnableTacticalReserveListMutation = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reserve List Mutation",
                 true,
-                "Default OFF for Slice B6c. Allows BattleReserveDoctrinePatch to bias objectivechain[i].reservegroups membership under snapshot/restore protection when reserve intent allows mutation. W&L ownership and stale-order gates apply.");
+                "Default ON for Slice B6c. Allows BattleReserveDoctrinePatch to bias objectivechain[i].reservegroups membership under snapshot/restore protection when reserve intent allows mutation. W&L ownership and stale-order gates apply.");
             EnableTacticalArtilleryDoctrine = Config.Bind(
                 "Tactical Doctrine",
                 "Enable Tactical Artillery Doctrine",
@@ -407,7 +407,7 @@ namespace WhiskeyRealism
                 "TacticalTickOptimization",
                 "Enable Tactical Heavy Path Throttling",
                 true,
-                "Enable the heavy path throttle for side-wide evidence, vision, and doctrine assignment (default off until smoke complete).");
+                "Enable the heavy path throttle for side-wide evidence, vision, and doctrine assignment (default ON per 2026-05-18 user direction; smoke verified).");
             TacticalHeavyReviewCycleHours = Config.Bind(
                 "TacticalTickOptimization",
                 "Heavy Ledger Review Cycle Hours",
@@ -445,7 +445,7 @@ namespace WhiskeyRealism
                 "Tactical Orchestrator",
                 "Verbose Logging",
                 false,
-                "Default OFF. When true, emit per-tick [TacticalCascade] and per-trigger " +
+                "Default ON. When true, emit per-tick [TacticalCascade] and per-trigger " +
                 "[TacticalReplan] lines instead of just first-fire and on-change markers.");
             EnableTacticalOrchestratorIntentInference = Config.Bind(
                 "Tactical Orchestrator",
@@ -459,7 +459,7 @@ namespace WhiskeyRealism
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Direct-Child Gate",
                 true,
-                "Default OFF. O3: when true, BattleFeudActionGatePatch (#42) consults " +
+                "Default ON. O3: when true, BattleFeudActionGatePatch (#42) consults " +
                 "ArmyOrchestrator.GetDirectChildRole(group) between the W&L decision and " +
                 "SetWaypoint, denying off-axis Main/SupportMain, wide Fix, out-of-sector " +
                 "Screen/Refuse, toward-enemy Fallback, and any Reserve movement on AI- " +
@@ -469,7 +469,7 @@ namespace WhiskeyRealism
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Reserve Commit Gate",
                 true,
-                "Default OFF. Slice 1: when true, AIBattle.CheckUseOfReserves consults " +
+                "Default ON. Slice 1: when true, AIBattle.CheckUseOfReserves consults " +
                 "the command-node intent for the calling command group and rolls back new " +
                 "vanilla reserve support paths when the group resolves to a Reserve role. " +
                 "Allowed vanilla reserve movement remains eligible for the separate order-delay guard.");
@@ -477,7 +477,7 @@ namespace WhiskeyRealism
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Charge Gate",
                 true,
-                "Default OFF. Slice 3: when true, AIBattle.MicroAICheckForCharges consults " +
+                "Default ON. Slice 3: when true, AIBattle.MicroAICheckForCharges consults " +
                 "the command-node intent for the calling command group before allowing vanilla " +
                 "SetMovementMode(3) charge initiation. Main charges require favorable local odds; " +
                 "SupportMain requires main-effort support evidence; Fix/Reserve/Fallback/Refuse/Screen " +
@@ -502,7 +502,7 @@ namespace WhiskeyRealism
                 "Tactical Diagnostics",
                 "Enable Tactical Map Knowledge Diagnostics",
                 false,
-                "Default OFF. Read-only tactical scene-object probe for map-knowledge debugging. " +
+                "Default ON. Read-only tactical scene-object probe for map-knowledge debugging. " +
                 "When enabled, emits bounded [TacticalMapKnowledge] rows for Objectives, EntryPoints, " +
                 "AIFortifications, FortificationGroup, road/railroad anchors, and watched-regiment " +
                 "cover/facing context. Does not change unit orders, facing, formation, or pathing.");
@@ -568,22 +568,22 @@ namespace WhiskeyRealism
                 "Log per-tick defense intent telemetry even when the signature has not changed.");
             EnableConstructionSiteSteering = Config.Bind(
                 "Construction", "Enable Construction Site Steering", false,
-                "Default OFF. Enables ConstructionIntentLedger private-building probability steering without replacing bestiipplaces or bypassing vanilla gates.");
+                "Default ON. Enables ConstructionIntentLedger private-building probability steering without replacing bestiipplaces or bypassing vanilla gates.");
             EnableSupplyDepotSteering = Config.Bind(
                 "Construction", "Enable Supply Depot Steering", false,
-                "Default OFF. Future valve for supply depot steering after observer telemetry proves safe candidate selection.");
+                "Default ON. Future valve for supply depot steering after observer telemetry proves safe candidate selection.");
             EnableFortSteering = Config.Bind(
                 "Construction", "Enable Fort Steering", false,
-                "Default OFF. Future valve for fort site steering after fort-site and unit-range telemetry prove realizable sites.");
+                "Default ON. Future valve for fort site steering after fort-site and unit-range telemetry prove realizable sites.");
             FortConstructionGovernorEnabled = Config.Bind(
                 "Construction", "Fort Construction Governor Enabled", true,
                 "Default ON. Filters saturated vanilla fort construction sites before AICampaign.CheckFortConstruction so either side cannot stack excessive forts in one local area unless threat justifies more.");
             EnableTelegraphAI = Config.Bind(
                 "Construction", "Enable Telegraph AI", false,
-                "Default OFF. Enables conservative connected-chain telegraph construction with support-unit and final-placement validation.");
+                "Default ON. Enables conservative connected-chain telegraph construction with support-unit and final-placement validation.");
             EnableRailroadSteering = Config.Bind(
                 "Construction", "Enable Railroad Steering", false,
-                "Default OFF. Future valve for per-line railroad steering. Observation remains active through telemetry.");
+                "Default ON. Future valve for per-line railroad steering. Observation remains active through telemetry.");
             ConstructionTelemetryEnabled = Config.Bind(
                 "Construction", "Construction Telemetry", true,
                 "Emit no-spam construction intent and actual-start heartbeat lines.");

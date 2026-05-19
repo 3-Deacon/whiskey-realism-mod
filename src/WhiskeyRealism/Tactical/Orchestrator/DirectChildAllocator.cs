@@ -227,6 +227,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 case BattlePlanId.BurnsideForcedAssault:
                 case BattlePlanId.GenericAggressive:
                 case BattlePlanId.GenericDesperate:
+                case BattlePlanId.ForrestCavalryRaid:
                     return true;
                 default:
                     return false;

@@ -97,13 +97,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // no near-term relief is a recipe for piecemeal destruction.
         public const float WithdrawalRatioThreshold = 0.85f;
 
-        // Below this absolute force, attack is too risky regardless of ratio
-        // (a 2-brigade vs 1-brigade matchup is not a defeat-in-detail
-        // opportunity — too easy for the enemy to escape or get help).
-        public const float MinAttackForceAbsolute = 2000f;
-
         // Confidence floor — if intel quality is below this, fall back to
-        // existing behavior (don't act on bad data).
+        // existing behavior (don't act on bad data). This is the ONLY gate
+        // that can block AttackNow regardless of ratio; everything else is
+        // dimensionless (ratios, fractions, hours) and scale-invariant.
+        //
+        // Per 2026-05-19 user direction: GTCW campaigns produce dynamic battle
+        // sizes from 1,500 to 60,000+ per side, so the doctrine must NOT carry
+        // any absolute headcount threshold. A 200-man cavalry detachment
+        // screening a major army's flank is a real tactical decision; telling
+        // it "you're too small to matter" is wrong. Small forces with poor
+        // intel naturally drop to NoOpportunity via this confidence gate.
         public const float MinIntelConfidenceForAction = 0.5f;
 
         public static ReinforcementOpportunityDecision Decide(TacticalForceBalanceEvidence ev)
@@ -128,20 +132,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     attackThreshold, attackWindowHours);
             }
 
-            // ATTACK NOW: current advantage clears threshold AND we have enough
-            // force absolutely AND a reasonable window exists to complete the
-            // attack before enemy parity. parityForEnemy < 999 (never) gates
-            // this to scenarios where the enemy IS growing — if enemy will
-            // never catch up the urgency is gone and we should just attack
-            // through whichever standard playbook fits.
-            if (currentRatio >= attackThreshold &&
-                ev.OwnDeployedStrength >= MinAttackForceAbsolute &&
-                parityForEnemy <= 24f &&            // enemy parity coming within next day
-                parityForEnemy >= attackWindowHours) // but not so soon we can't finish
+            // ATTACK NOW: two valid sub-cases, both require ratio clears
+            // threshold AND absolute force is sufficient:
+            //   (a) defeat-in-detail window: enemy IS growing within 24h but
+            //       not so soon we cannot finish before parity arrives.
+            //   (b) standing advantage with static enemy: enemy will not
+            //       reach parity at all (parityForEnemy >= 999 sentinel).
+            //       SoW's AttackEnemy attacks on ratio alone here; we mirror
+            //       that — there's no urgency but there's also no reason to
+            //       sit on a 1.5×+ advantage and wait for it to erode.
+            // Scale-invariant: only the ratio matters. Whether you have a 500-
+            // man cavalry detachment or a 60,000-man field army, the question
+            // is "do I have a clear advantage right now."
+            bool ratioAndForceOk = currentRatio >= attackThreshold;
+            bool enemyNotGrowing = parityForEnemy >= 999f;
+            bool defeatInDetailWindowOpen =
+                parityForEnemy <= 24f &&
+                parityForEnemy >= attackWindowHours;
+            if (ratioAndForceOk && (defeatInDetailWindowOpen || enemyNotGrowing))
             {
+                string reason = enemyNotGrowing
+                    ? "advantage-and-enemy-static"
+                    : "defeat-in-detail-window-open";
                 return new ReinforcementOpportunityDecision(
                     ReinforcementOpportunity.AttackNow,
-                    "defeat-in-detail-window-open",
+                    reason,
                     currentRatio, parityForEnemy, parityForOwn,
                     attackThreshold, attackWindowHours);
             }

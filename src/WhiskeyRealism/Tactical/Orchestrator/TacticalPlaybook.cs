@@ -117,7 +117,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float currentOdds,
             float opposingCommanderHint,
             int defaultMainEffortSector,
-            int jitterSeed)
+            int jitterSeed,
+            bool envelopmentPressure = false,
+            int allianceId = -1)
         {
             CommanderPersonality = commanderPersonality;
             Terrain = terrain;
@@ -125,6 +127,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             OpposingCommanderHint = opposingCommanderHint;
             DefaultMainEffortSector = defaultMainEffortSector;
             JitterSeed = jitterSeed;
+            EnvelopmentPressure = envelopmentPressure;
+            AllianceId = allianceId;
         }
 
         public PersonalityVector CommanderPersonality { get; }
@@ -133,6 +137,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float OpposingCommanderHint { get; }
         public int DefaultMainEffortSector { get; }
         public int JitterSeed { get; }
+
+        /// <summary>
+        /// Set by the orchestrator when the reinforcement-opportunity doctrine
+        /// returns AttackNow with a clear (>=1.5x) standing advantage. Biases
+        /// the catalog toward envelopment-affinity playbooks (Lee, Jackson,
+        /// Hooker, Sherman) and away from frontal-only ones (Hood, Burnside).
+        /// </summary>
+        public bool EnvelopmentPressure { get; }
+
+        /// <summary>
+        /// Commander's alliance (0=Union, 1=CSA in HistoricalFigureRegistry
+        /// convention). Used by the catalog's FactionMismatchPenalty to
+        /// prefer historically-matching playbooks. Default -1 = unknown,
+        /// which disables the penalty (preserves pre-2026-05-19 behavior
+        /// for call sites that haven't been updated).
+        /// </summary>
+        public int AllianceId { get; }
     }
 
     /// <summary>
