@@ -1294,6 +1294,9 @@ static class Program
             Console.WriteLine("PASS " + test.name);
         }
 
+        // External test suites
+        TacticalUnitObservationAggregateTests.Run();
+
         return 0;
     }
 
