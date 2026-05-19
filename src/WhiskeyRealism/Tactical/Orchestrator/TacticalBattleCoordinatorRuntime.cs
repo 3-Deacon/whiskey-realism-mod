@@ -93,7 +93,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int playerCicAllianceId = aiVsAi ? -1 : ResolvePlayerCicAllianceId();
                 int suppressedAllianceId = aiVsAi ? -1 : playerAllianceId;
                 var commanders = DiscoverCommandersFromVanilla(battle);
-                var roster = TacticalCommanderRoster.BuildFromSynthetic(commanders);
+                // 2026-05-18: prior code called BuildFromSynthetic here, which was a stub path
+                // that bypassed HistoricalFigureRegistry entirely and silently degraded every
+                // commander to faction defaults (the source of the persistent TacticalCommanderUnknown
+                // lines for Hood/Jackson/Beauregard/Hunter despite registry coverage). BuildFromVanilla
+                // routes through HistoricalFigureRegistry.Resolve(commanderObj, allianceId, nameHint)
+                // so registered figures pick up their personality vector.
+                var roster = TacticalCommanderRoster.BuildFromVanilla(commanders);
                 BuildAndActivate(suppressedAllianceId, roster);
                 _playerAllianceId = playerAllianceId;
                 _battleSequence++;
@@ -604,9 +610,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static IEnumerable<SyntheticCommanderInput> DiscoverCommandersFromVanilla(AIBattle battle)
+        private static IEnumerable<VanillaCommanderInput> DiscoverCommandersFromVanilla(AIBattle battle)
         {
-            var inputs = new List<SyntheticCommanderInput>();
+            var inputs = new List<VanillaCommanderInput>();
             try
             {
                 var bunits = ResolveBattleUnits(battle);
@@ -621,9 +627,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         continue;
                     }
                     int commanderId = SafeCommanderId(bunits, side);
+                    object commanderObj = SafeCommanderObject(commanderId);
                     string name = SafeCommanderName(commanderId);
                     if (string.IsNullOrEmpty(name)) name = "ArmyCO_side" + side;
-                    inputs.Add(new SyntheticCommanderInput(name, EchelonKind.Army, allianceId));
+                    inputs.Add(new VanillaCommanderInput(commanderObj, name, EchelonKind.Army, allianceId));
                 }
             }
             catch (Exception e)
@@ -632,6 +639,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + e.GetType().Name + " " + e.Message);
             }
             return inputs;
+        }
+
+        private static object SafeCommanderObject(int commanderId)
+        {
+            try
+            {
+                if (commanderId < 0) return null;
+                if (GameVars.commander == null || commanderId >= GameVars.commander.Count) return null;
+                return GameVars.commander[commanderId];
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static BattleUnits ResolveBattleUnits(AIBattle battle)

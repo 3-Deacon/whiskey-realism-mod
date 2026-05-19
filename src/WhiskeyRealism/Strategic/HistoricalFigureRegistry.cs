@@ -105,18 +105,40 @@ namespace WhiskeyRealism.Strategic
         internal static IReadOnlyList<Entry> EntriesForTest => _entries;
         internal static string NormalizeLastNameForTest(string combinedName) => NormalizeLastName(combinedName);
 
-        internal static (PersonalityVector vector, bool isHistorical) Resolve(object commanderObj, int allianceId)
+        internal static (PersonalityVector vector, bool isHistorical) Resolve(object commanderObj, int allianceId, string nameHint = null)
         {
             try
             {
-                var combinedName = Reflection.GetField<string>(commanderObj, "combinedname") ?? "";
                 var allianceTag = (allianceId == 1) ? "CSA" : "Union";
 
-                var key = NormalizeLastName(combinedName);
-                foreach (var e in _entries)
+                // Primary: vanilla `combinedname` (typically full historical name with rank/title).
+                var combinedName = Reflection.GetField<string>(commanderObj, "combinedname") ?? "";
+                if (!string.IsNullOrWhiteSpace(combinedName))
                 {
-                    if (e.AllianceTag == allianceTag && e.CanonicalName == key)
-                        return (e.V, true);
+                    var key = NormalizeLastName(combinedName);
+                    foreach (var e in _entries)
+                    {
+                        if (e.AllianceTag == allianceTag && e.CanonicalName == key)
+                            return (e.V, true);
+                    }
+                }
+
+                // Fallback: caller-supplied nameHint (typically GameVars.commander[id].name).
+                // Vanilla doesn't always populate combinedname during early lifecycle, and the
+                // shorter .name field is what the roster discovery already used for the display
+                // name (e.g., "Hunter", "Beauregard"). Trying both means the registry matches
+                // whichever vanilla field is populated.
+                if (!string.IsNullOrWhiteSpace(nameHint))
+                {
+                    var hintKey = NormalizeLastName(nameHint);
+                    if (!string.IsNullOrEmpty(hintKey))
+                    {
+                        foreach (var e in _entries)
+                        {
+                            if (e.AllianceTag == allianceTag && e.CanonicalName == hintKey)
+                                return (e.V, true);
+                        }
+                    }
                 }
 
                 return (Derive(commanderObj), false);

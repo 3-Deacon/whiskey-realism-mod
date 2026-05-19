@@ -23,6 +23,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int AllianceId { get; }
     }
 
+    public readonly struct VanillaCommanderInput
+    {
+        public VanillaCommanderInput(object commanderObj, string nameHint, EchelonKind echelon, int allianceId)
+        {
+            CommanderObj = commanderObj;
+            NameHint = nameHint;
+            Echelon = echelon;
+            AllianceId = allianceId;
+        }
+        public object CommanderObj { get; }
+        public string NameHint { get; }
+        public EchelonKind Echelon { get; }
+        public int AllianceId { get; }
+    }
+
     /// <summary>
     /// Maintains a per-battle roster of commander entries partitioned by name and
     /// alliance. Two construction paths are supported:
