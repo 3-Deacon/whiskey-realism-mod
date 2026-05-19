@@ -288,10 +288,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 aggregateResult = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromAggregate(source, battle, allianceId);
             }
 
-            if (!ObjectiveRecordsEqual(legacyResult, aggregateResult))
+            var diff = ObjectiveRecordsEqual(legacyResult, aggregateResult);
+            if (!diff.IsEqual)
             {
                 _parityMismatchObserved.Add(key);
-                EmitParityMismatch(battleSeq, allianceId, legacyResult, aggregateResult);
+                EmitParityMismatch(battleSeq, allianceId, legacyResult, aggregateResult, diff);
                 return legacyResult;  // safety: never publish drifted output
             }
 
@@ -299,22 +300,56 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return aggregateResult;
         }
 
-        private static bool ObjectiveRecordsEqual(ObjectiveRecord[] a, ObjectiveRecord[] b)
+        /// <summary>
+        /// Carries the first-diverging-field detail for a parity comparison.
+        /// IsEqual == true means arrays are identical; all other fields are empty/default.
+        /// </summary>
+        private readonly struct ParityDiff
         {
-            if (ReferenceEquals(a, b)) return true;
-            if (a == null || b == null) return false;
-            if (a.Length != b.Length) return false;
+            public readonly bool IsEqual;
+            public readonly int FirstDifferingIndex;     // -1 when equal or count differs
+            public readonly string FirstDifferingField;  // "" when equal or count differs
+            public readonly string LegacyValue;          // safe-truncated string repr
+            public readonly string AggregateValue;       // safe-truncated string repr
+
+            public ParityDiff(bool isEqual, int idx, string field, string legacyVal, string aggregateVal)
+            {
+                IsEqual = isEqual;
+                FirstDifferingIndex = idx;
+                FirstDifferingField = field ?? string.Empty;
+                LegacyValue = legacyVal ?? string.Empty;
+                AggregateValue = aggregateVal ?? string.Empty;
+            }
+
+            public static ParityDiff Equal => new ParityDiff(true, -1, string.Empty, string.Empty, string.Empty);
+            public static ParityDiff CountDifference => new ParityDiff(false, -1, "Length", string.Empty, string.Empty);
+        }
+
+        // Truncates a string to 64 chars for safe telemetry payload.
+        private static string Trunc(string s)
+        {
+            if (s == null) return "(null)";
+            return s.Length > 64 ? s.Substring(0, 64) : s;
+        }
+
+        private static ParityDiff ObjectiveRecordsEqual(ObjectiveRecord[] a, ObjectiveRecord[] b)
+        {
+            if (ReferenceEquals(a, b)) return ParityDiff.Equal;
+            if (a == null || b == null) return ParityDiff.CountDifference;
+            if (a.Length != b.Length) return ParityDiff.CountDifference;
             for (int i = 0; i < a.Length; i++)
             {
-                if (!ObjectiveRecordEqualsItem(a[i], b[i])) return false;
+                var itemDiff = ObjectiveRecordEqualsItem(a[i], b[i], i);
+                if (!itemDiff.IsEqual) return itemDiff;
             }
-            return true;
+            return ParityDiff.Equal;
         }
 
         /// <summary>
         /// Compares every field of two ObjectiveRecord values that could diverge
         /// between the legacy (BuildObjectiveRecordsFromBattle) and aggregate
-        /// (BuildObjectiveRecordsFromAggregate) paths.
+        /// (BuildObjectiveRecordsFromAggregate) paths. Returns a ParityDiff naming
+        /// the first field that differs so smoke sessions can identify the root cause.
         ///
         /// Fields compared (exhaustive per ObjectiveRecord struct definition):
         ///   Observation.ObjectiveId       — string, ordinal
@@ -338,45 +373,78 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         ///   FriendlyAssignedStrength      — float, exact
         ///   HasUsableStrengthEvidence     — bool (derived from the two floats above)
         /// </summary>
-        private static bool ObjectiveRecordEqualsItem(ObjectiveRecord x, ObjectiveRecord y)
+        private static ParityDiff ObjectiveRecordEqualsItem(ObjectiveRecord x, ObjectiveRecord y, int recordIndex)
         {
             // Observation identity
             var xo = x.Observation;
             var yo = y.Observation;
-            if (!string.Equals(xo.ObjectiveId, yo.ObjectiveId, StringComparison.Ordinal)) return false;
-            if (xo.Type != yo.Type) return false;
-            if (xo.Source != yo.Source) return false;
-            if (xo.Location.X != yo.Location.X || xo.Location.Z != yo.Location.Z) return false;
-            if (xo.SourceConfidence != yo.SourceConfidence) return false;
-            if (xo.Value != yo.Value) return false;
-            if (xo.TypeAnchorVerified != yo.TypeAnchorVerified) return false;
+            if (!string.Equals(xo.ObjectiveId, yo.ObjectiveId, StringComparison.Ordinal))
+                return new ParityDiff(false, recordIndex, "ObjectiveId", Trunc(xo.ObjectiveId), Trunc(yo.ObjectiveId));
+            if (xo.Type != yo.Type)
+                return new ParityDiff(false, recordIndex, "Type", xo.Type.ToString(), yo.Type.ToString());
+            if (xo.Source != yo.Source)
+                return new ParityDiff(false, recordIndex, "Source", xo.Source.ToString(), yo.Source.ToString());
+            if (xo.Location.X != yo.Location.X)
+                return new ParityDiff(false, recordIndex, "Location.X", xo.Location.X.ToString("R"), yo.Location.X.ToString("R"));
+            if (xo.Location.Z != yo.Location.Z)
+                return new ParityDiff(false, recordIndex, "Location.Z", xo.Location.Z.ToString("R"), yo.Location.Z.ToString("R"));
+            if (xo.SourceConfidence != yo.SourceConfidence)
+                return new ParityDiff(false, recordIndex, "SourceConfidence", xo.SourceConfidence.ToString("R"), yo.SourceConfidence.ToString("R"));
+            if (xo.Value != yo.Value)
+                return new ParityDiff(false, recordIndex, "Value", xo.Value.ToString("R"), yo.Value.ToString("R"));
+            if (xo.TypeAnchorVerified != yo.TypeAnchorVerified)
+                return new ParityDiff(false, recordIndex, "TypeAnchorVerified", xo.TypeAnchorVerified.ToString(), yo.TypeAnchorVerified.ToString());
 
             // Approach avenue (nested struct)
             var xa = xo.ApproachAvenue;
             var ya = yo.ApproachAvenue;
-            if (xa.HasAvenue != ya.HasAvenue) return false;
+            if (xa.HasAvenue != ya.HasAvenue)
+                return new ParityDiff(false, recordIndex, "ApproachAvenue.HasAvenue", xa.HasAvenue.ToString(), ya.HasAvenue.ToString());
             if (xa.HasAvenue) // only compare populated fields when both have an avenue
             {
-                if (xa.Origin.X != ya.Origin.X || xa.Origin.Z != ya.Origin.Z) return false;
-                if (xa.Objective.X != ya.Objective.X || xa.Objective.Z != ya.Objective.Z) return false;
-                if (xa.AxisX != ya.AxisX || xa.AxisZ != ya.AxisZ) return false;
-                if (xa.Source != ya.Source) return false;
-                if (xa.Confidence01 != ya.Confidence01) return false;
-                if (xa.RoadAnchored != ya.RoadAnchored) return false;
-                if (xa.CrossingAnchored != ya.CrossingAnchored) return false;
-                if (!string.Equals(xa.Reason, ya.Reason, StringComparison.Ordinal)) return false;
+                if (xa.Origin.X != ya.Origin.X)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Origin.X", xa.Origin.X.ToString("R"), ya.Origin.X.ToString("R"));
+                if (xa.Origin.Z != ya.Origin.Z)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Origin.Z", xa.Origin.Z.ToString("R"), ya.Origin.Z.ToString("R"));
+                if (xa.Objective.X != ya.Objective.X)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Objective.X", xa.Objective.X.ToString("R"), ya.Objective.X.ToString("R"));
+                if (xa.Objective.Z != ya.Objective.Z)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Objective.Z", xa.Objective.Z.ToString("R"), ya.Objective.Z.ToString("R"));
+                if (xa.AxisX != ya.AxisX)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.AxisX", xa.AxisX.ToString("R"), ya.AxisX.ToString("R"));
+                if (xa.AxisZ != ya.AxisZ)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.AxisZ", xa.AxisZ.ToString("R"), ya.AxisZ.ToString("R"));
+                if (xa.Source != ya.Source)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Source", xa.Source.ToString(), ya.Source.ToString());
+                if (xa.Confidence01 != ya.Confidence01)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Confidence01", xa.Confidence01.ToString("R"), ya.Confidence01.ToString("R"));
+                if (xa.RoadAnchored != ya.RoadAnchored)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.RoadAnchored", xa.RoadAnchored.ToString(), ya.RoadAnchored.ToString());
+                if (xa.CrossingAnchored != ya.CrossingAnchored)
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.CrossingAnchored", xa.CrossingAnchored.ToString(), ya.CrossingAnchored.ToString());
+                if (!string.Equals(xa.Reason, ya.Reason, StringComparison.Ordinal))
+                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Reason", Trunc(xa.Reason), Trunc(ya.Reason));
             }
 
             // Derived fields — most likely to diverge if aggregate misses a unit
-            if (x.Status != y.Status) return false;
-            if (x.EnemyStrength != y.EnemyStrength) return false;
-            if (x.FriendlyAssignedStrength != y.FriendlyAssignedStrength) return false;
-            if (x.HasUsableStrengthEvidence != y.HasUsableStrengthEvidence) return false;
+            if (x.Status != y.Status)
+                return new ParityDiff(false, recordIndex, "Status", x.Status.ToString(), y.Status.ToString());
+            if (x.EnemyStrength != y.EnemyStrength)
+                return new ParityDiff(false, recordIndex, "EnemyStrength", x.EnemyStrength.ToString("R"), y.EnemyStrength.ToString("R"));
+            if (x.FriendlyAssignedStrength != y.FriendlyAssignedStrength)
+                return new ParityDiff(false, recordIndex, "FriendlyAssignedStrength", x.FriendlyAssignedStrength.ToString("R"), y.FriendlyAssignedStrength.ToString("R"));
+            if (x.HasUsableStrengthEvidence != y.HasUsableStrengthEvidence)
+                return new ParityDiff(false, recordIndex, "HasUsableStrengthEvidence", x.HasUsableStrengthEvidence.ToString(), y.HasUsableStrengthEvidence.ToString());
 
-            return true;
+            return ParityDiff.Equal;
         }
 
-        private static void EmitParityMismatch(int battleSeq, int allianceId, ObjectiveRecord[] legacy, ObjectiveRecord[] aggregate)
+        private static void EmitParityMismatch(
+            int battleSeq,
+            int allianceId,
+            ObjectiveRecord[] legacy,
+            ObjectiveRecord[] aggregate,
+            ParityDiff diff)
         {
             try
             {
@@ -391,7 +459,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         .WithField("legacyCount", legacy?.Length ?? -1)
                         .WithField("aggregateCount", aggregate?.Length ?? -1)
                         .WithField("battleSequence", battleSeq)
-                        .WithField("allianceId", allianceId));
+                        .WithField("allianceId", allianceId)
+                        .WithField("diffIndex", diff.FirstDifferingIndex)
+                        .WithField("diffField", diff.FirstDifferingField)
+                        .WithField("legacyValue", diff.LegacyValue)
+                        .WithField("aggregateValue", diff.AggregateValue));
             }
             catch { }
         }
