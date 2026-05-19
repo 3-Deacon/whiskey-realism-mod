@@ -17,13 +17,14 @@ internal static class TacticalUnitObservationAggregateTests
             Console.WriteLine("PASS " + message);
         }
 
-        private static TacticalUnitObservation MakeUnit(int instanceId, int alliance, float worldX = 0f, float worldZ = 0f)
+        private static TacticalUnitObservation MakeUnit(int instanceId, int alliance, float worldX = 0f, float worldZ = 0f, bool permanentlyDetached = false)
         {
             return new TacticalUnitObservation(
                 instanceId: instanceId,
                 unittyp: 0,
                 alliance: alliance,
                 isRouted: false,
+                permanentlyDetached: permanentlyDetached,
                 worldX: worldX,
                 worldZ: worldZ,
                 strength: 100f,

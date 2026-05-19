@@ -8,8 +8,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// visibility / objective / waypoint fields are populated only when the
     /// captured unit's alliance matches the capture's <c>allianceId</c>;
     /// enemy units get cheap fields (position, strength, unittyp, routed
-    /// flag) only. This matches the pre-refactor cost profile, which never
-    /// invoked the visibility walk for enemy units.
+    /// flag, permanently-detached flag) only. This matches the pre-refactor
+    /// cost profile, which never invoked the visibility walk for enemy units.
     /// </summary>
     public readonly struct TacticalUnitObservation
     {
@@ -18,6 +18,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int unittyp,
             int alliance,
             bool isRouted,
+            bool permanentlyDetached,
             float worldX,
             float worldZ,
             float strength,
@@ -41,6 +42,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Unittyp = unittyp;
             Alliance = alliance;
             IsRouted = isRouted;
+            PermanentlyDetached = permanentlyDetached;
             WorldX = worldX;
             WorldZ = worldZ;
             Strength = strength;
@@ -65,6 +67,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int Unittyp { get; }
         public int Alliance { get; }
         public bool IsRouted { get; }
+        public bool PermanentlyDetached { get; }
         public float WorldX { get; }
         public float WorldZ { get; }
         public float Strength { get; }
