@@ -58,15 +58,23 @@ namespace WhiskeyRealism.Tactical
             if (input.Sector.Mission == TacticalSectorMission.Probe && input.Sector.Confidence >= 0.35f)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 1, "probe");
 
-            // SoW-aligned pre-contact path: when sector enemy strength is zero and
-            // confidence sits at the no-enemy floor, return Apply(Hold) so the posture
-            // executor can keep the brigade marching to its role-assigned target.
-            // SoW's brigade-think never goes silent before contact; neither should Whiskey.
+            // SoW-aligned pre-contact path: when sector confidence sits between
+            // the low-confidence floor and the act floor, preserve vanilla's stance
+            // choice (Apply with vanillaStance) instead of forcing stance=2 (defensive).
+            // The movement order for the brigade still flows through #61 posture
+            // executor's role assignment + TacticalNavMeshPlanner — independent of
+            // this stance write. SoW's brigade-think marches to objective via
+            // movement orders, not stance changes; we mirror that by leaving
+            // vanilla's stance unchanged here and letting #61 own the waypoint.
+            // The decision is Apply (not Skip) so it surfaces in telemetry as
+            // "pre-contact-preserve-vanilla", but BattleGroupStancePatch:109
+            // short-circuits when decision.GroupStance == vanillaOrdered, so no
+            // actual write happens — exactly what we want.
             // Strictly below-floor cases still skip as low-confidence.
             if (input.Sector.Confidence < 0.40f)
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, input.VanillaStance, "low-confidence");
             if (input.Sector.Confidence < 0.55f)
-                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 2, "pre-contact-hold");
+                return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, input.VanillaStance, "pre-contact-preserve-vanilla");
             if (input.Sector.Mission == TacticalSectorMission.AttackWeakPoint &&
                 (input.MacroAi == 0 || input.MacroAi == 1))
                 return new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Apply, 3, "attack-weak-point");

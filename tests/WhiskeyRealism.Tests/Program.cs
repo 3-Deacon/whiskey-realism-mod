@@ -420,6 +420,7 @@ static class Program
             ("tactical group low confidence keeps vanilla", TacticalGroupLowConfidenceKeepsVanilla),
             ("tactical group sector estimator pre-contact reaches act floor", TacticalGroupSectorEstimatorPreContactReachesActFloor),
             ("tactical group doctrine issues pre-contact hold when no enemy visible", TacticalGroupDoctrineIssuesPreContactHoldWhenNoEnemyVisible),
+            ("tactical group doctrine pre-contact preserves any vanilla stance", TacticalGroupDoctrinePreContactPreservesAnyVanillaStance),
             ("tactical group doctrine still rejects below low-confidence floor", TacticalGroupDoctrineStillRejectsBelowLowConfidenceFloor),
             ("tactical group doctrine line contact still reaches attack-weak-point", TacticalGroupDoctrineLineContactStillReachesAttackWeakPoint),
             ("tactical group wl player subordinate skips", TacticalGroupWlPlayerSubordinateSkips),
@@ -9196,7 +9197,10 @@ static class Program
     private static void TacticalGroupDoctrineIssuesPreContactHoldWhenNoEnemyVisible()
     {
         // Mid-band confidence (between low-confidence floor 0.40 and act floor 0.55)
-        // now returns Apply(pre-contact-hold) instead of Skip(low-confidence).
+        // returns Apply(vanillaStance, "pre-contact-preserve-vanilla") instead of
+        // Skip(low-confidence). BattleGroupStancePatch:109 short-circuits when
+        // decision.GroupStance == vanillaOrdered, so no actual stance write happens —
+        // movement orders flow through #61 / TacticalNavMeshPlanner independently.
         var sector = new TacticalSectorAssessment(
             sectorId: 0,
             source: TacticalSectorSource.AngleSlice,
@@ -9213,9 +9217,31 @@ static class Program
             orderFrictionAllowsChange: true,
             wlAllowsControl: true));
 
-        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "pre-contact applies hold");
-        AssertEqual(2, decision.GroupStance, "pre-contact stance is defensive-hold (2)");
-        AssertEqual("pre-contact-hold", decision.Reason, "reason");
+        AssertEqual(TacticalDoctrineDecisionKind.Apply, decision.Kind, "pre-contact emits Apply");
+        AssertEqual(3, decision.GroupStance, "preserves vanilla stance (3 in, 3 out)");
+        AssertEqual("pre-contact-preserve-vanilla", decision.Reason, "reason");
+    }
+
+    private static void TacticalGroupDoctrinePreContactPreservesAnyVanillaStance()
+    {
+        // Regression: preserves whatever vanilla wanted (1, 2, or 3) for the
+        // mid-band confidence range. The Apply-with-vanillaStance pattern means
+        // #45 BattleGroupStancePatch short-circuits the write since the new value
+        // equals the existing value.
+        var sector = new TacticalSectorAssessment(
+            sectorId: 0, source: TacticalSectorSource.AngleSlice,
+            ownStrength: 1000f, enemyStrength: 0f, confidence: 0.50f,
+            strongPoint: false, flankRisk: false,
+            mission: TacticalSectorMission.Hold);
+        foreach (int vanilla in new[] { 1, 2, 3 })
+        {
+            var d = TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
+                vanillaStance: vanilla, macroAi: 1, sector: sector,
+                orderFrictionAllowsChange: true, wlAllowsControl: true));
+            AssertEqual(TacticalDoctrineDecisionKind.Apply, d.Kind, "kind for vanilla=" + vanilla);
+            AssertEqual(vanilla, d.GroupStance, "preserves vanilla stance for input " + vanilla);
+            AssertEqual("pre-contact-preserve-vanilla", d.Reason, "reason for vanilla=" + vanilla);
+        }
     }
 
     private static void TacticalGroupDoctrineStillRejectsBelowLowConfidenceFloor()

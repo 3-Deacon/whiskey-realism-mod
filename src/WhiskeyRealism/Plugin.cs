@@ -343,8 +343,8 @@ namespace WhiskeyRealism
             EnablePlayerOrderDoctrine = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine",
-                true,
-                "Default-off write valve for Whiskey-authored player-facing W&L orders. Diagnostics can run while this is disabled.");
+                false,
+                "Default-off write valve for Whiskey-authored player-facing W&L orders. Per AGENTS.md named-exception scope, #62 PlayerSubordinateOrderPatch stays default-off until focused smoke proves no player-subordinate retasking. Diagnostics can run while this is disabled.");
             EnablePlayerOrderDoctrineDiagnostics = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine Diagnostics",
