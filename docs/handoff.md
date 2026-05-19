@@ -4,6 +4,38 @@
 
 ---
 
+## 🚧 Resume from cold context (2026-05-19, IN FLIGHT)
+
+A hot-path optimization workstream is in flight on branch `feat/hotpath-measurement` (HEAD: `b215a00`, not on main yet). If you're a fresh agent picking this up cold, read in this order:
+
+| Step | Path | Why |
+|---|---|---|
+| 1 | `docs/superpowers/specs/2026-05-19-tactical-objective-records-single-pass-design.md` | **Slice 1 (shipped on branch, NOT on main).** Single-pass aggregate refactor of `BuildObjectiveRecordsFromBattle`. Reduces that scope p99 from 11ms → 5.86ms. Parity test = 0 mismatches. Includes adversarial-review findings §14. |
+| 2 | `docs/superpowers/specs/2026-05-19-tactical-orchestrator-worker-thread-design.md` | **Slice 2 (designed, plan written, NOT IMPLEMENTED YET).** Moves orchestrator analysis to a dedicated background `Thread` (matching `TelemetryWriter` pattern). Drops main-thread `orchestrator-tick` p99 from 67ms → ≤10ms target. |
+| 3 | `docs/superpowers/plans/2026-05-19-tactical-orchestrator-worker-thread-implementation.md` | **The plan to execute.** 17 bite-sized tasks with full code in every step. Self-reviewed for spec coverage + type consistency. Begin with subagent-driven-development. |
+
+**Current state:**
+- Branch: `feat/hotpath-measurement` at `b215a00` (12+ commits since main `4036aaa`)
+- Deployed DLL: SHA-256 `601aa125655f0d2c17cf37df8fc7d86ae7080542929ed00141337e7ed260d56b` (batch-1 patch-scope instrumentation only — user is mid-session on this build)
+- Local `dist/WhiskeyRealism.dll`: SHA-256 `8d029a7ba4906fcacfd80f12cdfa432a803a87e4ae73c579610822b8b3ca100f` (HEAD `b215a00` build — includes Slice 1 fully, plus batches 2-3 of diagnostic coverage, plus parity-diag enrichment). Not deployed yet; user said "don't keep restarting."
+- Harness: **1253 PASS / 0 FAIL** (baseline 1244 + Slice 1 additions; the +5 ObjectiveRecords-from-aggregate test was removed in commit `9ad16c8` along with the wrong-data-set ApproachAvenue sub-builder).
+- Branch not pushed to remote.
+
+**Critical context that ISN'T in code or docs:**
+- User's empirical claim: vanilla GTCW does NOT exhibit the 5-7 second hitches at 20× compression; the mod does. This invalidated an earlier hypothesis that vanilla AI was the culprit. **The hitches are in our code.**
+- Diagnostic completeness pass shipped 2026-05-19: 67 of 67 Harmony patches now have `TelemetryPerf.Scope` wrappers (was 2 of 67). New AGENTS.md hygiene rule makes this non-negotiable for future patches.
+- The `tactical.patch.battle-group-stance` scope at p99=20ms is suspected to be one of several per-tick contributors. Slice 2's worker refactor restructures the cost profile by moving analysis off the main thread entirely; the wall-time-gate alternative was considered and rejected per the spec §2 "non-goals".
+- `TacticalUnitObservationAggregate` (built by Slice 1) is already a thread-safe immutable snapshot — Slice 2 builds on it.
+
+**Immediate next action (when resuming):**
+1. Read the Slice 2 plan, then dispatch subagent-driven-development to execute it.
+2. After the plan completes: build → deploy → user smokes → analyze → either close Slice 2 or open Slice 3 (per-frame visibility cache for any remaining heavy patches).
+3. Then merge `feat/hotpath-measurement` to `main` (Slice 1 + Slice 2 ship together).
+
+**If you must reproduce the smoke data:** session `20260519-222744-843-p188588-601aa125655f` under `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/` is the baseline that shows `orchestrator-tick` p99=67ms, `battle-group-stance` p99=20.6ms, `telemetry.flush` p99=203ms.
+
+---
+
 ## At a glance
 
 | | |

@@ -1,5 +1,15 @@
 # Tactical Orchestrator Worker-Thread Refactor — Implementation Plan
 
+> **🚧 RESUMING FROM COLD?** Before executing, you need to know:
+> - You should be on branch `feat/hotpath-measurement` in worktree `.worktrees/feat-hotpath-measurement/`. If not, see `docs/handoff.md` § "Resume from cold context."
+> - **Predecessor:** Slice 1 (single-pass ObjectiveRecords aggregate) is already shipped on this branch. Its types — `TacticalUnitObservation`, `TacticalUnitObservationAggregate`, `IObservationSource` — are the foundation Slice 2 builds on.
+> - **Harness baseline:** 1253 PASS / 0 FAIL on this branch (commit `b215a00`).
+> - **Deployed DLL on user's machine:** `601aa125…` (batch-1 patch-scope instrumentation only — does NOT include Slice 1). Local `dist` DLL `8d029a7b…` has Slice 1 + all batches, not deployed yet.
+> - **Why this slice exists:** user reports 5-7s hitches at 20× compression that don't appear in vanilla GTCW. Slice 1 reduced one cost center 47% but the structural issue (single-threaded analysis) remains. This slice moves analysis off the Unity main thread.
+> - **Refs symlink check:** worktree may have `refs/` missing per AGENTS.md `using-git-worktrees` notes. Verify with `ls refs/Assembly-CSharp.dll`. If broken: `cd .worktrees/feat-hotpath-measurement && ln -s ../../refs refs`.
+> - **Build/deploy/hash flow:** `./build.sh` → `cp dist/WhiskeyRealism.dll <GTCW>/BepInEx/plugins/` → `sha256sum` both → confirm match. Game must be closed for the copy. See `AGENTS.md` Quick reference.
+> - **Workflow:** dispatch one subagent per task; spec + quality review after each task before moving to the next. Per `superpowers:subagent-driven-development`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move tactical-orchestrator analysis (scoring, intent inference, plan/replan, role allocation, operations ledger) off the Unity main thread onto a dedicated worker `Thread`, leaving only cheap state-capture and decision-apply on main. Drop `tactical.orchestrator-tick` main-thread p99 from 67ms to ≤ 10ms steady-state.
