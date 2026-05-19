@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -409,6 +410,116 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        internal static ObjectiveRecord[] BuildObjectiveRecordsFromAggregate(
+            IObservationSource source,
+            AIBattle battle,
+            int allianceId)
+        {
+            try
+            {
+                if (source == null) return Array.Empty<ObjectiveRecord>();
+
+                var observations = new List<ObjectiveObservationInput>();
+                var statuses = new List<TacticalObjectiveStatus>();
+                var enemyStrengths = new List<float>();
+                var friendlyStrengths = new List<float>();
+                var seenObjectiveIds = new HashSet<string>(StringComparer.Ordinal);
+
+                AddObjectiveChainObservations(
+                    battle,
+                    observations,
+                    statuses,
+                    enemyStrengths,
+                    friendlyStrengths,
+                    seenObjectiveIds);
+
+                // Main loop — own units with current-set objective.
+                // Mirrors IsUsableOwnUnit (alliance implicit via AlliedIndices,
+                // !IsRouted covers isrouted||markedforrout, !PermanentlyDetached)
+                // plus the HasCurrentSetObjective gate and IsUsableMapPoint check.
+                // Objective id formula matches legacy SafeObjectiveId:
+                //   string.IsNullOrWhiteSpace(name) ? "objective-" + observations.Count : name
+                for (int ai = 0; ai < source.AlliedIndices.Count; ai++)
+                {
+                    int idx = source.AlliedIndices[ai];
+                    var own = source.AllUnits[idx];
+                    if (own.IsRouted) continue;
+                    if (own.PermanentlyDetached) continue;
+                    if (!own.HasCurrentSetObjective) continue;
+                    var point = new TacticalMapPoint(own.ObjectiveX, own.ObjectiveZ);
+                    if (!IsUsableMapPoint(point)) continue;
+
+                    string objectiveId = string.IsNullOrWhiteSpace(own.ObjectiveName)
+                        ? "objective-" + observations.Count
+                        : own.ObjectiveName;
+                    if (!seenObjectiveIds.Add(objectiveId)) continue;
+
+                    observations.Add(new ObjectiveObservationInput(
+                        objectiveId,
+                        TacticalObjectiveType.UnknownVanillaObjective,
+                        TacticalObjectiveSource.CurrentSetObjective,
+                        point,
+                        sourceConfidence: 0.65f,
+                        value: 0.5f,
+                        typeAnchorVerified: false));
+                    statuses.Add(TacticalObjectiveStatus.Scouting);
+                    enemyStrengths.Add(own.VisibleEnemyStrength);
+                    friendlyStrengths.Add(own.Strength);
+                }
+
+                AddMapObjectiveObservations(
+                    allianceId,
+                    observations,
+                    statuses,
+                    enemyStrengths,
+                    friendlyStrengths,
+                    seenObjectiveIds);
+
+                ApplyApproachAvenues(
+                    observations,
+                    allianceId,
+                    BuildApproachAvenueObservationsFromAggregate(source, allianceId));
+
+                bool haveVisibleEnemy = TryVisibleEnemyLineFromAggregate(
+                    source,
+                    allianceId,
+                    out TacticalMapPoint visibleEnemyPoint,
+                    out float visibleEnemyStrength,
+                    out float visibleFriendlyStrength);
+                TacticalMapPoint? visibleEnemyLine = haveVisibleEnemy
+                    ? visibleEnemyPoint
+                    : (TacticalMapPoint?)null;
+
+                bool haveMovementAnchor = TryMovementAnchorLineFromAggregate(
+                    source,
+                    allianceId,
+                    out TacticalMapPoint movementAnchorPoint,
+                    out float movementAnchorFriendlyStrength);
+                TacticalMapPoint? movementAnchor = haveMovementAnchor
+                    ? movementAnchorPoint
+                    : (TacticalMapPoint?)null;
+
+                return BuildObjectiveRecordsWithMovementFallback(
+                    observations,
+                    statuses,
+                    enemyStrengths,
+                    friendlyStrengths,
+                    visibleEnemyLine,
+                    visibleEnemyStrength,
+                    visibleFriendlyStrength,
+                    movementAnchor,
+                    movementAnchorFriendlyStrength,
+                    allianceId);
+            }
+            catch (Exception e)
+            {
+                OnceLog.Warning("tactical-orch:objective-records-aggregate",
+                    "BuildObjectiveRecordsFromAggregate degraded: "
+                    + e.GetType().Name + " " + e.Message);
+                return Array.Empty<ObjectiveRecord>();
+            }
+        }
+
         private static void CopyObjectiveInputs(
             IReadOnlyList<ObjectiveObservationInput> sourceObservations,
             IReadOnlyList<TacticalObjectiveStatus> sourceStatuses,
@@ -612,6 +723,48 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 return Array.Empty<TacticalApproachAvenueObservation>();
             }
+        }
+
+        private static TacticalApproachAvenueObservation[] BuildApproachAvenueObservationsFromAggregate(
+            IObservationSource source,
+            int allianceId)
+        {
+            var observations = new List<TacticalApproachAvenueObservation>();
+            try
+            {
+                // Build avenue observations from known enemy positions.
+                // Uses VisibleEnemyLine source so SelectBest can reason about
+                // approach direction. Each enemy unit contributes one observation
+                // with its world position as both origin and target (single-point
+                // contact with no directional advance information).
+                for (int ei = 0; ei < source.EnemyIndices.Count; ei++)
+                {
+                    int idx = source.EnemyIndices[ei];
+                    var enemy = source.AllUnits[idx];
+                    if (enemy.IsRouted) continue;
+                    if (enemy.PermanentlyDetached) continue;
+                    var p = new TacticalMapPoint(enemy.WorldX, enemy.WorldZ);
+                    if (!IsUsableMapPoint(p)) continue;
+                    observations.Add(new TacticalApproachAvenueObservation(
+                        TacticalApproachAvenueSource.VisibleEnemyLine,
+                        ResolveEnemyAlliance(allianceId),
+                        p.X,
+                        p.Z,
+                        p.X,
+                        p.Z,
+                        0.60f,
+                        roadAnchored: false,
+                        crossingAnchored: false,
+                        "aggregate-enemy-" + ei));
+                }
+            }
+            catch (Exception e)
+            {
+                OnceLog.Warning("tactical-orch:approach-avenue-aggregate",
+                    "BuildApproachAvenueObservationsFromAggregate degraded: "
+                    + e.GetType().Name + " " + e.Message);
+            }
+            return observations.ToArray();
         }
 
         private static void AddEntryPointAvenues(
@@ -860,6 +1013,119 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (weightTotal <= 0f) return false;
             point = new TacticalMapPoint(weightedX / weightTotal, weightedZ / weightTotal);
             return IsUsableMapPoint(point);
+        }
+
+        // Aggregate variant of TryVisibleEnemyLine.
+        // Legacy selection logic: strength-weighted centroid of ALL visible enemy positions
+        // across all own units (each own unit contributes its SafeVisibleEnemy position,
+        // weighted by SafeStrength(enemy)). friendlyStrength = sum of ALL own unit strengths.
+        // Aggregate approximation: centroid of known enemy positions from EnemyIndices
+        // weighted by enemy.Strength (equivalent when the aggregate captures all detected
+        // enemies); friendlyStrength = sum of ALL own unit strengths from AlliedIndices.
+        // NOTE: Per-own-unit enemy linkage is not captured in TacticalUnitObservation
+        // (only VisibleEnemyStrength for closest), so we use EnemyIndices as the visible
+        // enemy set. This is a deliberate approximation documented here for Task 10 parity
+        // testing.
+        private static bool TryVisibleEnemyLineFromAggregate(
+            IObservationSource source,
+            int allianceId,
+            out TacticalMapPoint point,
+            out float enemyStrength,
+            out float friendlyStrength)
+        {
+            point = default;
+            enemyStrength = 0f;
+            friendlyStrength = 0f;
+
+            float weightedX = 0f;
+            float weightedZ = 0f;
+            float weightTotal = 0f;
+            try
+            {
+                // friendlyStrength: sum of ALL own non-routed non-detached units (mirrors legacy).
+                for (int ai = 0; ai < source.AlliedIndices.Count; ai++)
+                {
+                    int idx = source.AlliedIndices[ai];
+                    var own = source.AllUnits[idx];
+                    if (own.IsRouted) continue;
+                    if (own.PermanentlyDetached) continue;
+                    friendlyStrength += own.Strength;
+                }
+
+                // Centroid: all known enemy positions weighted by strength.
+                for (int ei = 0; ei < source.EnemyIndices.Count; ei++)
+                {
+                    int idx = source.EnemyIndices[ei];
+                    var enemy = source.AllUnits[idx];
+                    if (enemy.IsRouted) continue;
+                    if (enemy.PermanentlyDetached) continue;
+                    float weight = Math.Max(1f, enemy.Strength);
+                    weightedX += enemy.WorldX * weight;
+                    weightedZ += enemy.WorldZ * weight;
+                    weightTotal += weight;
+                    enemyStrength += enemy.Strength;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (weightTotal <= 0f) return false;
+            var p = new TacticalMapPoint(weightedX / weightTotal, weightedZ / weightTotal);
+            if (!IsUsableMapPoint(p)) return false;
+            point = p;
+            return true;
+        }
+
+        // Aggregate variant of TryMovementAnchorLine.
+        // Legacy selection logic: strength-weighted centroid of last-waypoint positions
+        // for own units that have a usable waypoint (>25m from current position, already
+        // filtered during capture into HasLastWaypoint/LastWaypointX/Z).
+        // friendlyStrength = sum of ALL own unit strengths (not just those with waypoints).
+        // Weight per unit = Math.Max(1f, strength).
+        private static bool TryMovementAnchorLineFromAggregate(
+            IObservationSource source,
+            int allianceId,
+            out TacticalMapPoint point,
+            out float friendlyStrength)
+        {
+            point = default;
+            friendlyStrength = 0f;
+
+            float weightedX = 0f;
+            float weightedZ = 0f;
+            float weightTotal = 0f;
+            try
+            {
+                for (int ai = 0; ai < source.AlliedIndices.Count; ai++)
+                {
+                    int idx = source.AlliedIndices[ai];
+                    var own = source.AllUnits[idx];
+                    if (own.IsRouted) continue;
+                    if (own.PermanentlyDetached) continue;
+
+                    float strength = own.Strength;
+                    friendlyStrength += strength;
+
+                    if (!own.HasLastWaypoint) continue;
+
+                    float weight = Math.Max(1f, strength);
+                    weightedX += own.LastWaypointX * weight;
+                    weightedZ += own.LastWaypointZ * weight;
+                    weightTotal += weight;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (weightTotal <= 0f) return false;
+            var p = new TacticalMapPoint(weightedX / weightTotal, weightedZ / weightTotal);
+            if (!IsUsableMapPoint(p)) return false;
+            point = p;
+            return true;
         }
 
         private static IList SafeObjectiveChains(AIBattle battle)
