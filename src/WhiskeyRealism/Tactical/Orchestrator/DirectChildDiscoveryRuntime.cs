@@ -113,6 +113,107 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return result;
         }
 
+        /// <summary>
+        /// Same alliance walk as BuildProbesForAlliance, but emits richer probes
+        /// (world X/Z, strength bucket) for TacticalCommandTreeProbe. Used by
+        /// the role-cascade leaf-brigade map.
+        /// </summary>
+        public static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> BuildExtendedProbesForAlliance(int allianceId)
+        {
+            try
+            {
+                int shift = ReadCommandHierarchyShift();
+                var units = BattleUnits.completeunitlist as System.Collections.IList;
+                if (units == null || units.Count == 0)
+                    return Array.Empty<TacticalCommandTreeProbe.ExtendedProbe>();
+                int effectiveCommandMin = ClampShiftedMin(shift);
+
+                var directChildren = new HashSet<int>();
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var reg = units[i] as Regiment;
+                    if (reg == null || reg.alliance != allianceId) continue;
+                    var regGo = ((Component)reg).gameObject;
+                    if (regGo == null) continue;
+                    if (reg.unittyp < effectiveCommandMin) continue;
+                    Regiment[] kids;
+                    try { kids = reg.GetAttachedUnitsReg(true, true, -1, true, false, false, false, false); }
+                    catch { kids = null; }
+                    if (kids == null) continue;
+                    for (int k = 0; k < kids.Length; k++)
+                    {
+                        var kid = kids[k];
+                        if (kid == null) continue;
+                        var kidGo = ((Component)kid).gameObject;
+                        if (kidGo == null) continue;
+                        directChildren.Add(kidGo.GetInstanceID());
+                    }
+                }
+
+                var result = new List<TacticalCommandTreeProbe.ExtendedProbe>(units.Count);
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var reg = units[i] as Regiment;
+                    if (reg == null || reg.alliance != allianceId) continue;
+                    var go = ((Component)reg).gameObject;
+                    if (go == null) continue;
+                    int instanceId = go.GetInstanceID();
+                    var parentTransform = go.transform != null ? go.transform.parent : null;
+                    int parentInstanceId = 0;
+                    if (parentTransform != null)
+                    {
+                        var parentReg = parentTransform.GetComponent<Regiment>();
+                        if (parentReg != null) parentInstanceId = ((Component)parentReg).gameObject.GetInstanceID();
+                    }
+                    float worldX = 0f, worldZ = 0f;
+                    try
+                    {
+                        var pos = go.transform != null ? go.transform.position : default(Vector3);
+                        worldX = pos.x; worldZ = pos.z;
+                    }
+                    catch { }
+                    int strengthBucket = SafeStrengthBucket(reg);
+                    result.Add(new TacticalCommandTreeProbe.ExtendedProbe(
+                        instanceId: instanceId,
+                        unittyp: reg.unittyp,
+                        name: ((UnityEngine.Object)go).name,
+                        active: IsOperationallyPresent(reg, go, shift),
+                        parentInstanceId: parentInstanceId,
+                        isDirectChild: directChildren.Contains(instanceId),
+                        worldX: worldX,
+                        worldZ: worldZ,
+                        strengthBucket: strengthBucket));
+                }
+                return result;
+            }
+            catch (Exception e)
+            {
+                OnceLog.Warning("o3-extended-probes:exception",
+                    "DirectChildDiscovery.BuildExtendedProbesForAlliance failed: "
+                    + e.GetType().Name + " " + e.Message);
+                return Array.Empty<TacticalCommandTreeProbe.ExtendedProbe>();
+            }
+        }
+
+        private static int SafeStrengthBucket(Regiment reg)
+        {
+            try
+            {
+                // Approximate strength bucket: 0 (weak), 1 (normal), 2 (strong).
+                // Uses groupstrengthaigroup if available, else groupowninrange.
+                float strength = 0f;
+                try { strength = Math.Max(reg.groupowninrange, reg.groupstrengthaigroup); }
+                catch { }
+                if (strength >= 3000f) return 2;
+                if (strength >= 1000f) return 1;
+                return 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
         private static bool IsOperationallyPresent(Regiment reg, GameObject go, int commandHierarchyShift)
         {
             if (reg == null || go == null) return false;

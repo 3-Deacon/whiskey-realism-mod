@@ -83,12 +83,24 @@ namespace WhiskeyRealism.Patches
             if (isPlayerAiOrFeud != 0 && !GameVars.ai_vs_ai) return;
 
             Dictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders = BuildRuntimeDivisionPlayOrders(units);
+            var iteratedInstanceIds = new HashSet<int>();
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i] as Regiment;
                 if (!IsEligibleCommandGroup(group)) continue;
+                int unitInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                if (unitInstanceId != 0) iteratedInstanceIds.Add(unitInstanceId);
                 TryApplyGroup(battle, bunits, side, group, runtimePlayOrders);
             }
+
+            // Second pass: walk leaf brigades nested inside divisions that
+            // vanilla excluded from unitsused. These are the Union-AI-doesn't-
+            // move case — the orchestrator assigns a role to the parent division
+            // (which appears in unitsused) but never to the brigades nested
+            // under it. This pass uses the depth-agnostic TacticalLeafBrigadeMap
+            // cascade to derive per-leaf-brigade tasks from the parent division's
+            // role and writes posture per leaf.
+            TryApplyNestedLeafBrigades(battle, bunits, side, iteratedInstanceIds, runtimePlayOrders);
         }
 
         private static void TryApplyGroup(
@@ -1859,6 +1871,283 @@ namespace WhiskeyRealism.Patches
             catch { }
 
             return false;
+        }
+
+        /// <summary>
+        /// Second pass that writes posture decisions for leaf brigades nested
+        /// inside division-tier nodes. Builds the depth-agnostic leaf brigade
+        /// map (TacticalLeafBrigadeMap) keyed by the alliance's nested probe
+        /// tree, then iterates BattleUnits.completeunitlist filtered by alliance
+        /// and brigade tier (unittyp == TacticalUnitType.BattleGroupBrigade) to
+        /// apply per-leaf posture writes for any brigade NOT already iterated
+        /// in the unitsused loop.
+        ///
+        /// Translates SoW's CUnitDivThink → SubBrigade iteration pattern to
+        /// GTCW's flat-unitsused surface. Better than SoW because the cascade
+        /// is hierarchy-depth-agnostic and personality-modulated.
+        /// </summary>
+        private static void TryApplyNestedLeafBrigades(
+            AIBattle battle,
+            BattleUnits bunits,
+            int side,
+            HashSet<int> alreadyIterated,
+            IReadOnlyDictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders)
+        {
+            try
+            {
+                int allianceId = bunits != null && bunits.alliance != null && side >= 0 && side < bunits.alliance.Length
+                    ? bunits.alliance[side]
+                    : -1;
+                if (allianceId < 0 || allianceId >= 2) return;
+
+                var sideOrch = TacticalBattleCoordinator.GetSideOrchestrator(allianceId);
+                ArmyOrchestrator army = sideOrch?.Army;
+                if (army == null) return;
+
+                var extendedProbes = DirectChildDiscovery.BuildExtendedProbesForAlliance(allianceId);
+                if (extendedProbes == null || extendedProbes.Count == 0) return;
+
+                var tree = TacticalCommandTreeProbe.BuildTree(extendedProbes, 0);
+                army.UpdateLeafBrigadeMap(tree);
+                var leafMap = army.CurrentLeafBrigadeMap;
+                if (leafMap == null || leafMap.Count == 0) return;
+
+                var units = BattleUnits.completeunitlist as System.Collections.IList;
+                if (units == null) return;
+
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var group = units[i] as Regiment;
+                    if (group == null) continue;
+                    if (group.alliance != allianceId) continue;
+                    if (group.unittyp != TacticalUnitType.BattleGroupBrigade) continue;
+                    if (!IsEligibleCommandGroup(group)) continue;
+                    int instanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                    if (instanceId == 0) continue;
+                    if (alreadyIterated.Contains(instanceId)) continue;
+                    if (!leafMap.TryGetValue(instanceId, out var leafAssignment)) continue;
+                    if (leafAssignment.LeafTask == CommandTaskType.None) continue;
+
+                    // The brigade has a cascaded role/task but no ledger state.
+                    // Synthesize a CommandNodeOperationalState for it and reuse
+                    // the existing TryApplyGroup logic — which understands
+                    // doctrine orders + courier delivery + posture write paths.
+                    TryApplyLeafBrigade(battle, bunits, side, group, leafAssignment, runtimePlayOrders);
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-leaf-cascade:apply-failed",
+                    "TryApplyNestedLeafBrigades failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        private static void TryApplyLeafBrigade(
+            AIBattle battle,
+            BattleUnits bunits,
+            int side,
+            Regiment group,
+            TacticalLeafBrigadeMap.LeafAssignment leafAssignment,
+            IReadOnlyDictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders)
+        {
+            // Synthesize an operational state from the leaf assignment. The
+            // NodeId follows the same "child-<instanceId>" pattern used by
+            // DirectChildAllocator for direct children so downstream resolvers
+            // can still pattern-match.
+            int instanceId = TacticalPatchIds.GameObjectInstanceId(group);
+            var synthesizedState = new CommandNodeOperationalState(
+                nodeId: "leaf-" + instanceId,
+                echelon: CommandEchelonKind.BrigadeLike,
+                role: MapDirectChildRoleToNodeRole(leafAssignment.LeafRole),
+                task: leafAssignment.LeafTask,
+                taskState: CommandTaskState.Planning);
+
+            // Reuse the same physical/eligibility/decision pipeline as the
+            // primary unitsused iteration, but with the synthesized leaf state.
+            // The TryApplyGroup signature requires resolving ledger state; for
+            // nested brigades we don't have ledger state, so we replicate the
+            // minimal posture flow inline.
+            ApplyLeafBrigadePosture(battle, bunits, side, group, synthesizedState, leafAssignment, runtimePlayOrders);
+        }
+
+        private static void ApplyLeafBrigadePosture(
+            AIBattle battle,
+            BattleUnits bunits,
+            int side,
+            Regiment group,
+            CommandNodeOperationalState state,
+            TacticalLeafBrigadeMap.LeafAssignment leafAssignment,
+            IReadOnlyDictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders)
+        {
+            // Minimal posture write path for a leaf brigade that doesn't carry
+            // its own ledger state. Reuses the same player-protected, routed,
+            // recent-order, and active-move gates as the primary flow, but
+            // simplifies the doctrine-order resolution (we synthesize the
+            // doctrine order from the leaf assignment task).
+            try
+            {
+                bool playerProtected = IsPlayerProtected(group);
+                if (playerProtected) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "player-protected", false); return; }
+                if (SafeRouted(group)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "routed", false); return; }
+
+                int instanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                if (HasRecentExecutorOrder(instanceId)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "recent-order", false); return; }
+                if (group.regimentpaths > 0 || group.movementmode > 0)
+                {
+                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "movement-in-progress", false);
+                    return;
+                }
+
+                // Emit the cascade telemetry BEFORE attempting the write, so we
+                // always see "what task was derived for this brigade" even if
+                // the actual write is gated.
+                EmitLeafCascadeTelemetry(side, group, leafAssignment, "considering", false);
+
+                // For the actual movement write, we use vanilla SetWaypoint via
+                // the existing flow. Build a minimal CommandDoctrineOrder so the
+                // executor can pick a target.
+                if (TryResolveLeafMovementTarget(group, leafAssignment, out Vector3 target))
+                {
+                    bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(state.Task, battleActive: true);
+                    bunits.SetWaypoint(
+                        group,
+                        target,
+                        newpath: true,
+                        doublequick: false,
+                        manualfinalrotation: -1f,
+                        modifylastwaypoint: false,
+                        useorderdelay: useOrderDelay,
+                        timetomove: -1f,
+                        direction: -1,
+                        showmovementoptions: false,
+                        ignorebattlemonuments: false,
+                        groupmoveonly: false,
+                        ignoredisabledships: false,
+                        checkforreadiness: true,
+                        clearinterruptionpaths: true);
+                    _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "applied-" + leafAssignment.LeafTask.ToString(), true);
+                }
+                else
+                {
+                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "no-target", false);
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-leaf-cascade:posture-failed",
+                    "ApplyLeafBrigadePosture failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        private static CommandNodeRole MapDirectChildRoleToNodeRole(DirectChildRole role)
+        {
+            switch (role)
+            {
+                case DirectChildRole.Main:        return CommandNodeRole.MainEffort;
+                case DirectChildRole.SupportMain: return CommandNodeRole.SupportingAttack;
+                case DirectChildRole.Fix:         return CommandNodeRole.FixingForce;
+                case DirectChildRole.Screen:      return CommandNodeRole.ScreeningForce;
+                case DirectChildRole.RefuseLeft:  return CommandNodeRole.FlankMarch;
+                case DirectChildRole.RefuseRight: return CommandNodeRole.FlankMarch;
+                case DirectChildRole.Reserve:     return CommandNodeRole.Reserve;
+                case DirectChildRole.Fallback:    return CommandNodeRole.FallbackGuard;
+                case DirectChildRole.Unknown:
+                default:                          return CommandNodeRole.Unknown;
+            }
+        }
+
+        private static bool TryResolveLeafMovementTarget(
+            Regiment group,
+            TacticalLeafBrigadeMap.LeafAssignment leafAssignment,
+            out Vector3 target)
+        {
+            target = default(Vector3);
+            try
+            {
+                // Pick a movement target based on the leaf task. For now use the
+                // group's current waypoint as a baseline; future enhancements can
+                // pull objective positions from the orchestrator's parent intent.
+                if (group == null) return false;
+                Vector3 own = SafePosition(group);
+                if (IsDefaultVector(own)) return false;
+
+                // Use the parent division's last waypoint if available so the
+                // brigade follows the division's movement direction. This is the
+                // SoW pattern: brigade-think queries its parent's TACOBJLoc and
+                // moves toward it.
+                try
+                {
+                    var parentTransform = ((Component)group).gameObject.transform != null
+                        ? ((Component)group).gameObject.transform.parent
+                        : null;
+                    if (parentTransform != null)
+                    {
+                        var parentReg = parentTransform.GetComponent<Regiment>();
+                        if (parentReg != null && !IsDefaultVector(parentReg.lastsetwaypointposition))
+                        {
+                            target = parentReg.lastsetwaypointposition;
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+
+                // Fallback: nudge the group forward in its current facing direction.
+                try
+                {
+                    var tf = ((Component)group).gameObject.transform;
+                    if (tf == null) return false;
+                    Vector3 forward = tf.forward;
+                    target = new Vector3(own.x + forward.x * 75f, own.y, own.z + forward.z * 75f);
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+            catch
+            {
+                target = default(Vector3);
+                return false;
+            }
+        }
+
+        private static void EmitLeafCascadeTelemetry(
+            int side,
+            Regiment group,
+            TacticalLeafBrigadeMap.LeafAssignment leafAssignment,
+            string outcome,
+            bool applied)
+        {
+            try
+            {
+                string unit = SafeName(group);
+                string chain = leafAssignment.CascadeChainString;
+                string parents = string.Join(">", new List<string>(leafAssignment.ParentNameChain));
+                string sig = "TacticalLeafCascade|side=" + side
+                    + "|leaf=" + unit
+                    + "|role=" + leafAssignment.LeafRole
+                    + "|task=" + leafAssignment.LeafTask
+                    + "|outcome=" + outcome
+                    + "|applied=" + applied;
+                TelemetryRouter.Emit(
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Decision,
+                    "TacticalLeafCascade",
+                    TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(side)
+                        .WithUnit(unit)
+                        .WithDecision("TacticalLeafCascade", outcome, sig)
+                        .WithField("role", leafAssignment.LeafRole.ToString())
+                        .WithField("task", leafAssignment.LeafTask.ToString())
+                        .WithField("chain", chain)
+                        .WithField("parents", parents)
+                        .WithField("applied", applied));
+            }
+            catch { }
         }
 
         private static bool IsEligibleCommandGroup(Regiment group)

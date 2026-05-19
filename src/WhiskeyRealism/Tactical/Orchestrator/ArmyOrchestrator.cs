@@ -362,6 +362,76 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return null;
         }
 
+        // ---- Leaf brigade map (depth-agnostic role cascade) ----
+        //
+        // Maintained by the runtime via UpdateLeafBrigadeMap(tree) per Postfix
+        // call when the tree shape or intent allocation changes. Provides
+        // per-leaf-brigade role/task assignments for the posture executor to
+        // iterate brigades nested inside divisions (the Union-AI-doesn't-move
+        // case that motivated the cascade).
+
+        private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _leafBrigadeMap =
+            new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+        private string _leafBrigadeMapSignature = string.Empty;
+
+        public IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> CurrentLeafBrigadeMap
+            => _leafBrigadeMap;
+
+        public TacticalLeafBrigadeMap.LeafAssignment? GetLeafBrigadeAssignment(int instanceId)
+        {
+            if (_leafBrigadeMap == null) return null;
+            return _leafBrigadeMap.TryGetValue(instanceId, out var assignment) ? assignment : (TacticalLeafBrigadeMap.LeafAssignment?)null;
+        }
+
+        /// <summary>
+        /// Refresh the leaf brigade map. Caller passes the full nested tree built
+        /// from extended probes; we use the current DirectChildIntent role
+        /// assignments as the top-tier seeds and cascade roles down to leaves
+        /// via TacticalLeafBrigadeMap.BuildMap. Caches by signature so repeated
+        /// calls with no changes are O(1).
+        /// </summary>
+        public void UpdateLeafBrigadeMap(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree)
+        {
+            if (tree == null)
+            {
+                _leafBrigadeMap = new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+                _leafBrigadeMapSignature = string.Empty;
+                return;
+            }
+
+            string sig = ComputeLeafMapSignature(tree);
+            if (sig == _leafBrigadeMapSignature && _leafBrigadeMap.Count > 0) return;
+
+            var topAssignments = new List<TacticalLeafBrigadeMap.TopAssignment>(_directChildIntents.Count);
+            for (int i = 0; i < _directChildIntents.Count; i++)
+            {
+                int instanceId = TacticalBattleCoordinator.ParseInstanceIdFromChildId(_directChildIntents[i].ChildId);
+                if (instanceId == 0) continue;
+                topAssignments.Add(new TacticalLeafBrigadeMap.TopAssignment(instanceId, _directChildIntents[i].Role));
+            }
+
+            float aggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
+            if (aggression01 < 0f) aggression01 = 0f;
+            if (aggression01 > 1f) aggression01 = 1f;
+
+            _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(tree, topAssignments, aggression01);
+            _leafBrigadeMapSignature = sig;
+        }
+
+        private string ComputeLeafMapSignature(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree)
+        {
+            // Signature: count of tree nodes + count + role-string of direct child intents.
+            // Cheap to compute and dedupes the rebuild call between ticks.
+            var sb = new System.Text.StringBuilder();
+            sb.Append("tree=").Append(tree.Count).Append('|');
+            sb.Append("intents=").Append(_directChildIntents.Count).Append('|');
+            for (int i = 0; i < _directChildIntents.Count; i++)
+            {
+                sb.Append(_directChildIntents[i].ChildId).Append(':').Append(_directChildIntents[i].Role).Append(',');
+            }
+            return sb.ToString();
+        }
+
         public void ApplyTacticalCommanderMode(TacticalCommanderMode mode)
         {
             _commanderMode = mode;
