@@ -418,6 +418,30 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _leafBrigadeMapSignature = sig;
         }
 
+        // ---- Reinforcement opportunity doctrine ----
+        //
+        // Latest force-balance evaluation + decision. Refreshed by the runtime
+        // each tick via UpdateReinforcementOpportunity. Consumers read via the
+        // CurrentReinforcementOpportunity property; default is NoOpportunity so
+        // existing behavior is preserved when the doctrine is disabled or the
+        // evidence build fails.
+
+        private ReinforcementOpportunityDecision _currentReinforcementOpportunity = new ReinforcementOpportunityDecision(
+            ReinforcementOpportunity.NoOpportunity, "not-evaluated", 1f, 999f, 999f, 1f, 1f);
+
+        public ReinforcementOpportunityDecision CurrentReinforcementOpportunity => _currentReinforcementOpportunity;
+
+        /// <summary>
+        /// Refresh the reinforcement-opportunity decision. Runtime passes in a
+        /// freshly-built TacticalForceBalanceEvidence (typically from
+        /// ArmyEvidenceBuilder.BuildForceBalance). The doctrine is pure; this
+        /// just caches its output so consumers don't re-run it per tick.
+        /// </summary>
+        public void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence)
+        {
+            _currentReinforcementOpportunity = TacticalReinforcementOpportunityDoctrine.Decide(evidence);
+        }
+
         private string ComputeLeafMapSignature(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree)
         {
             // Signature: count of tree nodes + count + role-string of direct child intents.

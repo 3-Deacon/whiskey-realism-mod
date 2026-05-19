@@ -600,5 +600,189 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
             return value < 0f ? 0f : value;
         }
+
+        // ---------- Reinforcement Opportunity force balance ----------
+
+        /// <summary>
+        /// Builds TacticalForceBalanceEvidence for the given alliance by reading
+        /// vanilla BattleUnits.sideinformation (current strength), BattleUnits.scheduledarrival
+        /// (per-arrival timing + strength), and commander personality fields. Returns null
+        /// on any failure so callers can fall through to existing behavior.
+        /// </summary>
+        internal static TacticalForceBalanceEvidence? BuildForceBalance(
+            AIBattle battle,
+            int allianceId,
+            float commanderInitiative01,
+            float commanderAggression01)
+        {
+            try
+            {
+                var bunits = ResolveBattleUnits(battle);
+                if (bunits == null) return null;
+                int side = ResolveSideFromAlliance(bunits, allianceId);
+                if (side < 0) return null;
+                int enemySide = OppositeSide(side);
+
+                float ownDeployed = Math.Max(0f, SafeSideInfoFloat(bunits, side, "totalactiveforce"));
+                float enemyDeployed = Math.Max(0f, SafeSideInfoFloat(bunits, enemySide, "totalactiveforce"));
+
+                var ownArrivals = BuildArrivalsForSide(bunits, side);
+                var enemyArrivals = BuildArrivalsForSide(bunits, enemySide);
+
+                // Intel confidence: with no visible enemy contact at all, drop
+                // to 0.4 so the doctrine falls through to NoOpportunity (it
+                // refuses to act on pure deployment-list strength estimates).
+                // Otherwise 0.8 baseline so the doctrine engages.
+                float intelConfidence = enemyDeployed > 0f ? 0.8f : 0.4f;
+
+                return new TacticalForceBalanceEvidence(
+                    ownDeployed,
+                    enemyDeployed,
+                    ownArrivals,
+                    enemyArrivals,
+                    commanderInitiative01,
+                    commanderAggression01,
+                    intelConfidence);
+            }
+            catch (Exception e)
+            {
+                OnceLog.Warning("tactical-orch:force-balance",
+                    "[TacticalOrchestrator] ArmyEvidenceBuilder.BuildForceBalance degraded: "
+                    + e.GetType().Name + " " + e.Message);
+                return null;
+            }
+        }
+
+        private static IReadOnlyList<ReinforcementArrival> BuildArrivalsForSide(BattleUnits bunits, int side)
+        {
+            try
+            {
+                int sideAlliance = -1;
+                if (bunits != null && bunits.alliance != null && side >= 0 && side < bunits.alliance.Length)
+                    sideAlliance = bunits.alliance[side];
+                if (sideAlliance < 0) return Array.Empty<ReinforcementArrival>();
+
+                var arrivalsList = ResolveScheduledArrivals(bunits);
+                if (arrivalsList == null || arrivalsList.Count == 0) return Array.Empty<ReinforcementArrival>();
+
+                var result = new List<ReinforcementArrival>();
+                for (int i = 0; i < arrivalsList.Count; i++)
+                {
+                    object arrival = arrivalsList[i];
+                    if (arrival == null) continue;
+                    var regiment = SafeRegimentField(arrival, ref _arrivalRegimentField, "regimentrefreg");
+                    if (regiment == null) continue;
+                    if (regiment.alliance != sideAlliance) continue;
+                    float durationSeconds = SafeFloatField(arrival, ref _arrivalDurationField, "durationleft");
+                    if (durationSeconds < 0f) durationSeconds = 0f;
+                    float hours = durationSeconds / 3600f;
+                    float strength = EstimateReinforcementStrength(regiment);
+                    if (strength <= 0f) continue;
+                    result.Add(new ReinforcementArrival(hours, strength));
+                }
+                return result;
+            }
+            catch
+            {
+                return Array.Empty<ReinforcementArrival>();
+            }
+        }
+
+        private static FieldInfo _scheduledArrivalsField;
+        private static FieldInfo _arrivalRegimentField;
+        private static FieldInfo _arrivalDurationField;
+
+        private static IList ResolveScheduledArrivals(BattleUnits bunits)
+        {
+            try
+            {
+                if (bunits == null) return null;
+                if (_scheduledArrivalsField == null)
+                    _scheduledArrivalsField = AccessTools.Field(typeof(BattleUnits), "scheduledarrival");
+                return _scheduledArrivalsField?.GetValue(bunits) as IList;
+            }
+            catch { return null; }
+        }
+
+        private static Regiment SafeRegimentField(object instance, ref FieldInfo cached, string name)
+        {
+            try
+            {
+                if (instance == null) return null;
+                if (cached == null) cached = AccessTools.Field(instance.GetType(), name);
+                return cached?.GetValue(instance) as Regiment;
+            }
+            catch { return null; }
+        }
+
+        private static float SafeFloatField(object instance, ref FieldInfo cached, string name)
+        {
+            try
+            {
+                if (instance == null) return 0f;
+                if (cached == null) cached = AccessTools.Field(instance.GetType(), name);
+                if (cached == null) return 0f;
+                object v = cached.GetValue(instance);
+                if (v is float f) return f;
+                return 0f;
+            }
+            catch { return 0f; }
+        }
+
+        /// <summary>
+        /// Estimates the strength a reinforcement Regiment will bring when it
+        /// activates. Tries groupstrengthaigroup first (works for already-
+        /// constructed reinforcements); falls back to summing the attached
+        /// units' numofmenoriginal so even not-yet-spawned forces report a
+        /// sensible estimate.
+        /// </summary>
+        private static float EstimateReinforcementStrength(Regiment regiment)
+        {
+            if (regiment == null) return 0f;
+            try
+            {
+                float aiGroup = SafeRegimentFloat(regiment, "groupstrengthaigroup");
+                if (aiGroup > 0f) return aiGroup;
+            }
+            catch { }
+
+            try
+            {
+                float total = 0f;
+                var units = regiment.allattachedunits;
+                if (units != null)
+                {
+                    for (int i = 0; i < units.Length; i++)
+                    {
+                        var unit = units[i];
+                        if (unit == null) continue;
+                        // numofmenoriginal is the rostered strength; fall back
+                        // to current strength fields if missing.
+                        float men = TryReadFloatField(unit, "numofmenoriginal");
+                        if (men <= 0f) men = TryReadFloatField(unit, "groupowninrange");
+                        total += Math.Max(0f, men);
+                    }
+                }
+                return total;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float TryReadFloatField(Regiment regiment, string name)
+        {
+            try
+            {
+                var field = AccessTools.Field(regiment.GetType(), name);
+                if (field == null) return 0f;
+                object v = field.GetValue(regiment);
+                if (v is float f) return f;
+                if (v is int i) return i;
+                return 0f;
+            }
+            catch { return 0f; }
+        }
     }
 }

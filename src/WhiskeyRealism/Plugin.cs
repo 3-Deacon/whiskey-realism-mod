@@ -80,6 +80,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalMapKnowledgeDiagnostics;
         public static ConfigEntry<bool> EnableTacticalContactFacingPulse;
+        public static ConfigEntry<bool> EnableTacticalReinforcementOpportunityDoctrine;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
         public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
@@ -514,6 +515,14 @@ namespace WhiskeyRealism
                 "Division scope only publishes/logs axis intent; brigade scope may correct command-group " +
                 "frontage; regiment scope may reform and face attached combat regiments under visible " +
                 "contact. Disable this flag for rollback without turning off Tactical Commander Mode.");
+            EnableTacticalReinforcementOpportunityDoctrine = Config.Bind(
+                "Tactical",
+                "Enable Tactical Reinforcement Opportunity Doctrine",
+                true,
+                "Default ON. Refreshes a per-army reinforcement-opportunity decision (AttackNow / WaitAndConsolidate / DefensiveHold / WithdrawalToFightLater) " +
+                "from BattleUnits.scheduledarrival + sideinformation.totalactiveforce. Considers current force ratio, per-arrival timing, and commander " +
+                "aggression. Telemetry: TacticalReinforcementOpportunity events with currentRatio, enemyParityHours, ownParityHours, threshold, window. " +
+                "Disable to fall back to the previous purely-current-strength playbook selection.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",

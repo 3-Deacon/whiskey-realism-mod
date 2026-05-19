@@ -96,6 +96,7 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalRegimentTrace", TelemetryCategory.Trace);
             AddTactical("TacticalMapKnowledge", TelemetryCategory.Trace);
             AddTactical("TacticalLeafCascade", TelemetryCategory.Decision);
+            AddTactical("TacticalReinforcementOpportunity", TelemetryCategory.Decision);
             AddTactical("TacticalObjectiveGuard", TelemetryCategory.Gate);
             AddTactical("TacticalObjectiveMove", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveMutation", TelemetryCategory.Write);

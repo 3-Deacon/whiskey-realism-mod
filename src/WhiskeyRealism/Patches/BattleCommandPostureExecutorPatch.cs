@@ -1953,6 +1953,28 @@ namespace WhiskeyRealism.Patches
 
                 var tree = TacticalCommandTreeProbe.BuildTree(extendedProbes, 0);
                 army.UpdateLeafBrigadeMap(tree);
+
+                // Refresh the reinforcement-opportunity decision off the same
+                // Postfix tick as the leaf-map update. Reads BattleUnits.
+                // scheduledarrival + sideinformation; bounded by the doctrine's
+                // own pure deterministic path. Default-off rollback via
+                // Enable Tactical Reinforcement Opportunity Doctrine config flag.
+                if (Plugin.EnableTacticalReinforcementOpportunityDoctrine != null
+                    && Plugin.EnableTacticalReinforcementOpportunityDoctrine.Value)
+                {
+                    float commanderInitiative01 = army.CommanderPersonality.Aggression; // proxy until init plumbed here
+                    float commanderAggression01 = (army.CommanderPersonality.Aggression + 1f) * 0.5f;
+                    if (commanderAggression01 < 0f) commanderAggression01 = 0f;
+                    if (commanderAggression01 > 1f) commanderAggression01 = 1f;
+                    var forceBalance = ArmyEvidenceBuilder.BuildForceBalance(
+                        battle, allianceId, commanderInitiative01, commanderAggression01);
+                    if (forceBalance.HasValue)
+                    {
+                        army.UpdateReinforcementOpportunity(forceBalance.Value);
+                        EmitReinforcementOpportunityTelemetry(side, army.CurrentReinforcementOpportunity);
+                    }
+                }
+
                 var leafMap = army.CurrentLeafBrigadeMap;
                 if (leafMap == null || leafMap.Count == 0) return;
 
@@ -2224,6 +2246,45 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+
+        private static void EmitReinforcementOpportunityTelemetry(int side, ReinforcementOpportunityDecision decision)
+        {
+            try
+            {
+                string sig = "TacticalReinforcementOpportunity|side=" + side
+                    + "|outcome=" + decision.Opportunity
+                    + "|reason=" + decision.Reason
+                    + "|ratio=" + decision.CurrentRatio.ToString("0.00")
+                    + "|enemyParityHrs=" + (decision.ParityHoursForEnemy >= 999f ? "never" : decision.ParityHoursForEnemy.ToString("0.0"))
+                    + "|ownParityHrs=" + (decision.ParityHoursForOwn >= 999f ? "never" : decision.ParityHoursForOwn.ToString("0.0"))
+                    + "|threshold=" + decision.AttackThreshold.ToString("0.00")
+                    + "|window=" + decision.AttackWindowHours.ToString("0.0");
+                string key = "tactical-reinforcement-opportunity:" + side;
+                if (!TacticalTelemetry.ShouldEmit(_lastTelemetryAt, key, sig, Time.realtimeSinceStartup, TelemetrySeconds, false))
+                    return;
+
+                TelemetryRouter.Emit(
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Decision,
+                    "TacticalReinforcementOpportunity",
+                    TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(side)
+                        .WithDecision("TacticalReinforcementOpportunity", decision.Opportunity.ToString(), sig)
+                        .WithField("outcome", decision.Opportunity.ToString())
+                        .WithField("reason", decision.Reason)
+                        .WithField("currentRatio", decision.CurrentRatio)
+                        .WithField("enemyParityHours", decision.ParityHoursForEnemy >= 999f ? -1f : decision.ParityHoursForEnemy)
+                        .WithField("ownParityHours", decision.ParityHoursForOwn >= 999f ? -1f : decision.ParityHoursForOwn)
+                        .WithField("attackThreshold", decision.AttackThreshold)
+                        .WithField("attackWindowHours", decision.AttackWindowHours));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-reinforcement-opportunity:telemetry-failed",
+                    "EmitReinforcementOpportunityTelemetry threw: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
 
         private static void EmitLeafCascadeTelemetry(
             int side,
