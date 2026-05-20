@@ -1559,6 +1559,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // before the NEXT side's Build() overwrites it. The arrays own
                 // their copies so the worker is immune to mid-cycle singleton
                 // mutation.
+                //
+                // Stale-aggregate guard: if EnableSinglePassObjectiveRecords
+                // is OFF, BuildObjectiveRecordsWithParityWindow's flagOff
+                // branch skips the Capture call. Without invalidation the
+                // singleton could carry data from a prior cycle (when the
+                // flag was last ON) tagged with whichever side was captured
+                // last. Clear-before-build ensures stale data never bleeds
+                // into the worker input: each side's CapturedForAlliance must
+                // match the expected alliance to count, and ClearForBattleEnd
+                // sets it to -1.
+                try { TacticalUnitObservationAggregate.Shared.ClearForBattleEnd(); } catch { }
                 var snap0 = CaptureSideSnapshotForWorker(battle, allianceA, nowH);
                 var obs0 = SnapshotAggregateForWorker(allianceA);
                 var snap1 = CaptureSideSnapshotForWorker(battle, allianceB, nowH);
