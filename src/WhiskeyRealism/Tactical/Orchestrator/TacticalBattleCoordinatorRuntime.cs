@@ -87,6 +87,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // time compression. Reset per battle in ResetRuntimeTickState.
         private static readonly int[] _lastGen0CountBySide = { 0, 0 };
 
+        // Slice 2 parity window: compare worker-published decisions against the
+        // synchronous orchestrator state for the first N cycles per (battleSeq,
+        // alliance). After N clean compares, the window logs "window-clean" and
+        // subsequent cycles no longer touch the comparator path. On any mismatch:
+        // emit TacticalOrchestratorParityMismatch (registered in Task 6) and stop
+        // comparing for that key to avoid log spam.
+        // Key formula: _battleSequence * 10 + allianceId.
+        private static readonly Dictionary<int, int> _workerParityComparesRemaining = new Dictionary<int, int>();
+        private static readonly HashSet<int> _workerParityMismatchObserved = new HashSet<int>();
+        private const int WorkerParityCompareBudget = 20;
+
         // Slice 2: dedicated worker thread for tactical orchestrator analysis.
         // Started in OnBattleStart, joined in OnBattleEnd. Disabled when
         // EnableTacticalOrchestratorWorker is false. Currently runs as a non-skipping
@@ -289,6 +300,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                     DriveTacticalCommanderSide(side0, battle, aiVsAi, deltaSeconds);
                     DriveTacticalCommanderSide(side1, battle, aiVsAi, deltaSeconds);
+
+                    // Slice 2 parity window: compare worker-published vs synchronous
+                    // state for the first N cycles per (battleSeq, alliance). The
+                    // sync path above has already run ArmyTickCycle (which calls
+                    // ObserveIntent), so side.Army.CurrentIntentModel now reflects
+                    // the synchronous tick — safe to snapshot here for comparison.
+                    if (workerActive)
+                    {
+                        try
+                        {
+                            if (side0 != null && side0.Army != null)
+                            {
+                                var sync0 = SnapshotSideDecisionForParity(side0);
+                                CompareWorkerVsSynchronous(side0.AllianceId, sync0);
+                            }
+                            if (side1 != null && side1.Army != null)
+                            {
+                                var sync1 = SnapshotSideDecisionForParity(side1);
+                                CompareWorkerVsSynchronous(side1.AllianceId, sync1);
+                            }
+                        }
+                        catch (Exception pe)
+                        {
+                            Plugin.Log.LogWarning("[TacticalOrchestrator] parity compare failed: "
+                                + pe.GetType().Name + " " + pe.Message);
+                        }
+                    }
 
                     // Mark as processed for this vanilla side-stat cycle (using the value the vanilla set before calling CheckGlobal)
                     if (battleKey != 0 && vanillaLastSideStat > 0f)
@@ -752,6 +790,119 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
             if (value < 0f) return 0f;
             return value > 1f ? 1f : value;
+        }
+
+        // ---- Slice 2 parity window: worker vs synchronous decision compare ----
+        //
+        // Snapshot the live (post-sync-tick) orchestrator state into a
+        // TacticalSideDecision so it can be compared against the worker's
+        // published decision. We mirror only the worker-populated fields:
+        //   AllianceId, CurrentIntent (via Army.CurrentIntentModel, set by
+        //   ArmyTickCycle.ObserveIntent during the sync tick), CommandTree,
+        //   CommanderPersonality (via FindArmyEntry).
+        //
+        // Skipped fields (worker doesn't populate, comparator skips):
+        //   HasPlan, LastReplanTrigger, CurrentPlan, StrategicIntent text.
+        //
+        // Skipped field — ForceAvailability: ArmyOrchestrator does NOT cache the
+        // last ArmyEvidenceBuilder.Bundle that the worker used for its force
+        // computation. Recomputing ArmyEvidenceBuilder.Build per parity cycle
+        // would double the sync path's heaviest call (it already builds once in
+        // DriveOperationsLedger). Intent divergence catches the same bug class
+        // (stale input / ordering / config drift), so we accept the gap.
+        private static TacticalSideDecision SnapshotSideDecisionForParity(TacticalBattleOrchestrator side)
+        {
+            try
+            {
+                if (side == null || side.Army == null) return TacticalSideDecision.Empty;
+
+                var entry = FindArmyEntry(side);
+                PersonalityVector personality = entry != null
+                    ? entry.PersonalityVector
+                    : side.Army.CommanderPersonality;
+
+                return new TacticalSideDecision(
+                    allianceId: side.AllianceId,
+                    currentPlan: default,                                      // skipped
+                    currentIntent: side.Army.CurrentIntentModel,
+                    commandTree: side.Army.CurrentCommandTree ?? CommandTreeSnapshot.Empty,
+                    strategicIntent: default,                                  // skipped (text fields)
+                    forceAvailability: new ForceAvailabilitySnapshot(0f, 0f),  // skipped (see note above)
+                    commanderPersonality: personality,
+                    lastReplanTrigger: ReplanTrigger.None,                     // skipped
+                    hasPlan: false);                                            // skipped
+            }
+            catch
+            {
+                return TacticalSideDecision.Empty;
+            }
+        }
+
+        private static void CompareWorkerVsSynchronous(int allianceId, TacticalSideDecision synchronous)
+        {
+            var current = TacticalDecisionSnapshot.Current;
+            if (current == null || current == TacticalDecisionSnapshot.Empty) return;
+            var workerDecision = current.GetSide(allianceId);
+
+            int key = _battleSequence * 10 + allianceId;
+            if (_workerParityMismatchObserved.Contains(key)) return;
+
+            if (!SideDecisionsEqual(synchronous, workerDecision))
+            {
+                _workerParityMismatchObserved.Add(key);
+                EmitWorkerParityMismatch(allianceId, synchronous, workerDecision);
+                return;
+            }
+
+            int remaining;
+            if (!_workerParityComparesRemaining.TryGetValue(key, out remaining)) remaining = WorkerParityCompareBudget;
+            if (remaining > 0)
+            {
+                _workerParityComparesRemaining[key] = remaining - 1;
+                if (remaining == 1)
+                {
+                    OnceLog.Info("orch-worker-parity:" + key,
+                        "[TacticalOrchestratorWorkerParity] window-clean battleSeq="
+                        + _battleSequence + " alliance=" + allianceId
+                        + " compares=" + WorkerParityCompareBudget);
+                }
+            }
+        }
+
+        private static bool SideDecisionsEqual(TacticalSideDecision a, TacticalSideDecision b)
+        {
+            if (a.AllianceId != b.AllianceId) return false;
+            // CurrentIntent: compare PrimaryIntent + InferredMainEffort — the
+            // substantive fields both sides derive from ArmyIntentInference.Build.
+            // Confidence/age skipped because floating-point ordering may drift.
+            if (a.CurrentIntent.PrimaryIntent != b.CurrentIntent.PrimaryIntent) return false;
+            if (a.CurrentIntent.InferredMainEffort != b.CurrentIntent.InferredMainEffort) return false;
+            // Skipped (worker doesn't populate yet — gap-fill follow-up):
+            //   HasPlan, LastReplanTrigger, CurrentPlan, StrategicIntent text fields,
+            //   ForceAvailability (Army doesn't cache the bundle; see SnapshotSideDecisionForParity).
+            return true;
+        }
+
+        private static void EmitWorkerParityMismatch(int allianceId, TacticalSideDecision synchronous, TacticalSideDecision worker)
+        {
+            try
+            {
+                TelemetryRouter.Emit(
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Gate,
+                    "TacticalOrchestratorParityMismatch",
+                    TelemetrySeverity.Warning,
+                    ev => ev
+                        .WithSide(allianceId)
+                        .WithDecision("mismatch", "side-decision", "battleSeq=" + _battleSequence + "|alliance=" + allianceId)
+                        .WithField("allianceId", allianceId)
+                        .WithField("battleSequence", _battleSequence)
+                        .WithField("syncIntent", synchronous.CurrentIntent.PrimaryIntent.ToString())
+                        .WithField("workerIntent", worker.CurrentIntent.PrimaryIntent.ToString())
+                        .WithField("syncMainEffort", synchronous.CurrentIntent.InferredMainEffort)
+                        .WithField("workerMainEffort", worker.CurrentIntent.InferredMainEffort));
+            }
+            catch { }
         }
 
         private static int ResolvePlayerCicAllianceId()
@@ -1588,6 +1739,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // Slice 2: reset the worker decision snapshot so stale per-cycle data
             // from the previous battle never leaks to readers in the next one.
             try { TacticalDecisionSnapshot.ResetForBattleEnd(); } catch { }
+            // Slice 2 parity window: reset per-battle compare counters so the
+            // next battle starts a fresh 20-cycle window per side.
+            try
+            {
+                _workerParityComparesRemaining.Clear();
+                _workerParityMismatchObserved.Clear();
+            }
+            catch { }
         }
 
         /// <summary>
