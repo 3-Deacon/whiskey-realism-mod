@@ -84,6 +84,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
         public static ConfigEntry<bool> EnableSinglePassObjectiveRecords;
+        public static ConfigEntry<bool> EnableTacticalOrchestratorWorker;
         public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
         public static ConfigEntry<int> TacticalDeploymentTerrainMaxCandidates;
         public static ConfigEntry<float> TacticalDeploymentFacingPreferredDeltaDegrees;
@@ -493,6 +494,16 @@ namespace WhiskeyRealism
                 "appears. Default-on per AGENTS.md tactical policy. Measured " +
                 "performance characteristics are documented in docs/telemetry.md " +
                 "once smoke-verified.");
+            EnableTacticalOrchestratorWorker = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Tactical Orchestrator Worker",
+                true,
+                "Background-thread orchestrator analysis. Main thread captures a "
+                + "snapshot and reads pre-computed decisions; analysis runs on a "
+                + "dedicated worker thread. Default ON per AGENTS.md tactical policy. "
+                + "Set false to roll back to synchronous on-main-thread analysis if "
+                + "a regression appears. Performance characteristics documented in "
+                + "docs/telemetry.md once smoke-verified.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",
