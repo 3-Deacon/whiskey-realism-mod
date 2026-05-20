@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -25,6 +26,15 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _unitsUsedField;
         private static FieldInfo _orderedStanceField;
 
+        // Compiled-expression getter for the per-tick-per-group
+        // Regiment.ai_stanceordered read. The legacy SafeIntField path uses
+        // FieldInfo.GetValue which boxes + reflects on every call; this
+        // delegate compiles down to a direct field load. Initialized lazily
+        // on first use; degrades to the legacy SafeIntField path on
+        // compile failure.
+        private static Func<Regiment, int> _aiStanceOrderedGetter;
+        private static bool _aiStanceOrderedGetterTried;
+
         [HarmonyPostfix]
         [HarmonyPriority(Priority.Last)]
         internal static void Postfix(AIBattle __instance)
@@ -46,12 +56,20 @@ namespace WhiskeyRealism.Patches
 
         private static void Apply(AIBattle battle)
         {
-            // Worker-thread snapshot read path. Gated on EnableTacticalOrchestratorWorker
-            // and a non-Empty snapshot. While the worker's PopulateGroupDecisions remains
-            // a no-op (Task 11 partial), TryGetGroupStance will miss for every group, so
-            // this method returns false and the legacy decide-and-write path below runs
-            // unchanged. The plumbing is in place so the gap-fill follow-up can flip the
-            // worker to start producing real decisions without touching this patch again.
+            // Three-tier read path (see TryApplyFromDecisionSnapshot for
+            // detail): "cheap per-group" resolved cache → worker snapshot →
+            // legacy ApplyGroup. The cache is populated on every
+            // heavy-gate fire by
+            // TacticalBattleCoordinatorRuntime.PopulateResolvedDecisionsForSide,
+            // so the dominant per-tick cost collapses to a dict lookup
+            // plus the cheap safety gates that need live Regiment state.
+            //
+            // Worst case (no orchestrator state, worker off, gate hasn't
+            // fired yet): the fallback below runs ApplyGroup for every
+            // commandable Regiment — the legacy pre-refactor path. We
+            // keep this fallback intact so suppressed-side / pre-bootstrap
+            // / config-flipped sessions still behave identically to the
+            // pre-refactor build.
             if (TryApplyFromDecisionSnapshot(battle)) return;
 
             int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
@@ -68,26 +86,29 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // Pre-computed decision read path (gap-fill chunk 1, 2026-05-19).
-        // Returns true only when we owned the iteration (touched at least one
-        // group). On hit, ApplyCachedDecision drives doctrine + ledger branches
-        // from the worker-built sector and skips the live BuildGroupSector +
-        // DecideGroupStance recompute. Doctrine/ledger overrides remain on
-        // main so the worker's default-scorer decision is the fallthrough only
-        // — preserving parity with the live-path branches.
-        // Misses (no cached decision OR no cached sector) fall through to the
-        // legacy decide-and-write path so suppressed-side/pre-bootstrap units
-        // continue to work.
+        // Pre-computed decision read path.
+        //
+        // Three-tier lookup per Regiment:
+        //   1. _resolvedDecisionsBySide (TacticalBattleCoordinatorRuntime
+        //      cache, populated at heavy-gate-fire) — full doctrine + ledger
+        //      + charge + scorer resolution baked in. Apply path is O(1):
+        //      dict lookup + a few cheap safety gates + one ChangeStance.
+        //      This is the "cheap per-group" hot path.
+        //   2. Worker snapshot (TacticalDecisionSnapshot.Current) — partial
+        //      pre-compute from the worker thread. Still calls the doctrine
+        //      and ledger resolvers on main at apply time, but skips the
+        //      live BuildGroupSector + DecideGroupStance recompute.
+        //   3. ApplyGroup (legacy) — full resolver + sector rebuild + scorer
+        //      call. Runs on cache miss (worker disabled, pre-bootstrap,
+        //      gate hasn't fired yet, suppressed side, etc).
+        //
+        // Returns true whenever we owned the iteration (touched at least
+        // one group); the postfix then short-circuits because the caller
+        // already iterated all groups via one of the three branches.
         private static bool TryApplyFromDecisionSnapshot(AIBattle battle)
         {
             try
             {
-                if (Plugin.EnableTacticalOrchestratorWorker == null
-                    || !Plugin.EnableTacticalOrchestratorWorker.Value) return false;
-
-                var snapshot = TacticalDecisionSnapshot.Current;
-                if (snapshot == null || snapshot == TacticalDecisionSnapshot.Empty) return false;
-
                 int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
                 int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
                 var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
@@ -97,8 +118,12 @@ namespace WhiskeyRealism.Patches
                 int allianceId = SafeAllianceForSide(bunits, side);
                 if (allianceId < 0 || allianceId >= 2) return false;
 
-                bool ownedAny = false;
-                bool legacyAny = false;
+                bool workerOn = Plugin.EnableTacticalOrchestratorWorker != null
+                    && Plugin.EnableTacticalOrchestratorWorker.Value;
+                TacticalDecisionSnapshot snapshot = workerOn ? TacticalDecisionSnapshot.Current : null;
+                bool snapshotHasData = snapshot != null && snapshot != TacticalDecisionSnapshot.Empty;
+
+                bool touchedAny = false;
                 for (int i = 0; i < units.Count; i++)
                 {
                     var group = units[i] as Regiment;
@@ -109,37 +134,157 @@ namespace WhiskeyRealism.Patches
                     try { instanceId = group.GetInstanceID(); }
                     catch { continue; }
 
-                    TacticalGroupStanceDecision cachedDecision;
-                    TacticalSectorAssessment cachedSector;
-                    bool hasDecision = snapshot.TryGetGroupStance(allianceId, instanceId, out cachedDecision);
-                    bool hasSector = snapshot.TryGetGroupSector(allianceId, instanceId, out cachedSector);
-                    if (hasDecision && hasSector)
+                    // Tier 1: cheap per-group cache. Populated on every
+                    // heavy-gate fire in DriveTickCycle; covers every
+                    // commandable Regiment for the firing side.
+                    TacticalResolvedGroupDecision resolved;
+                    if (TacticalBattleCoordinator.TryGetResolvedGroupDecision(allianceId, instanceId, out resolved))
                     {
-                        ApplyCachedDecision(bunits, side, macro, group, cachedDecision, cachedSector);
-                        ownedAny = true;
+                        ApplyResolvedDecisionFast(bunits, side, group, resolved);
+                        touchedAny = true;
+                        continue;
                     }
-                    else
+
+                    // Tier 2: worker snapshot — partial pre-compute.
+                    if (snapshotHasData)
                     {
-                        // Worker didn't produce a decision for this group
-                        // (suppressed side, bootstrap, or filter mismatch).
-                        // Run the legacy path so behavior is identical to the
-                        // no-worker case for this specific group.
-                        ApplyGroup(bunits, side, macro, group, i);
-                        legacyAny = true;
+                        TacticalGroupStanceDecision cachedDecision;
+                        TacticalSectorAssessment cachedSector;
+                        if (snapshot.TryGetGroupStance(allianceId, instanceId, out cachedDecision)
+                            && snapshot.TryGetGroupSector(allianceId, instanceId, out cachedSector))
+                        {
+                            ApplyCachedDecision(bunits, side, macro, group, cachedDecision, cachedSector);
+                            touchedAny = true;
+                            continue;
+                        }
                     }
+
+                    // Tier 3: legacy decide-and-write path.
+                    ApplyGroup(bunits, side, macro, group, i);
+                    touchedAny = true;
                 }
 
-                // We claim full ownership of the iteration when we cached AT
-                // LEAST ONE group. Mixed (some cached, some legacy) is still
-                // covered above because we already ran ApplyGroup for the
-                // legacy slice. So returning true is safe whenever we touched
-                // any group via either branch.
-                return ownedAny || legacyAny;
+                return touchedAny;
             }
             catch
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// "Cheap per-group" apply path (2026-05-20). Hot path: dict lookup
+        /// already happened; here we only enforce the per-tick safety gates
+        /// that depend on live Regiment state, then dispatch the cached
+        /// action. No resolver walks, no sector rebuild, no
+        /// DecideGroupStance recompute — those ran once at the
+        /// heavy-gate-fire boundary in
+        /// <c>TacticalBattleCoordinatorRuntime.PopulateResolvedDecisionsForSide</c>.
+        /// </summary>
+        private static void ApplyResolvedDecisionFast(
+            BattleUnits bunits,
+            int side,
+            Regiment group,
+            TacticalResolvedGroupDecision resolved)
+        {
+            // Per-tick safety gates. WL/order-friction live on the apply
+            // path because they consume Regiment state that can change
+            // every vanilla tick (player control toggle, fresh queued
+            // orders, path interrupts). All are cheap relative to the
+            // resolver walks they replace.
+            if (!WlAllowsControl(group)) return;
+            if (!OrderFrictionAllowsChange(group)) return;
+
+            int vanillaOrdered = ReadAiStanceOrdered(group);
+
+            // Charge-override branch. Cache decided WHETHER to demote at
+            // gate-fire time; live reaction context is consulted here only
+            // for the demote telemetry detail. If vanilla raced from 4 to
+            // something else, fall through to FinalStance (the cached
+            // charge override no longer applies).
+            if (resolved.IsChargeOverride && vanillaOrdered == 4)
+            {
+                switch (resolved.ChargeAction)
+                {
+                    case ChargeOverrideAction.PreserveVanilla:
+                    case ChargeOverrideAction.DenyExplicit:
+                    case ChargeOverrideAction.None:
+                        LogChargePreserved(side, group, resolved.Reason);
+                        return;
+                    case ChargeOverrideAction.DemoteToHold:
+                        if (!AllowsVanillaWrites())
+                        {
+                            LogChargePreserved(side, group, "mode-monitor-only");
+                            return;
+                        }
+                        var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
+                        DemoteCharge(bunits, group, side, reaction);
+                        return;
+                }
+                return;
+            }
+
+            // If vanilla raced INTO charge (vanillaOrdered == 4) but the
+            // cache didn't flag this group as a charge override (because
+            // it wasn't at 4 at gate-fire time), preserve vanilla's
+            // charge. The cached FinalStance would write a non-charge
+            // value over the fresh vanilla write, which is wrong.
+            if (vanillaOrdered == 4)
+            {
+                LogChargePreserved(side, group, "vanilla-charge-preserved");
+                return;
+            }
+
+            // Non-charge branch — write cached FinalStance.
+            if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;
+            if (resolved.FinalStance < 0) return;
+            if (resolved.FinalStance == vanillaOrdered) return;
+            if (resolved.FinalStance == 4) return;
+            if (resolved.FinalStance > 3) return;
+            if (!AllowsVanillaWrites()) return;
+
+            var gameObject = UnityObject(group);
+            if (gameObject == null || !gameObject.activeInHierarchy) return;
+
+            bunits.ChangeStance(gameObject, resolved.FinalStance, immediate: false, overwriteaigroups: false);
+            group.ai_stance = resolved.FinalStance;
+            group.ai_stanceordered = resolved.FinalStance;
+            group.lastaistancechangetime = GameVars.currenttimefromstart;
+            LogResolvedDecision(side, group, resolved);
+        }
+
+        private static int ReadAiStanceOrdered(Regiment group)
+        {
+            if (group == null) return 0;
+
+            if (!_aiStanceOrderedGetterTried)
+            {
+                _aiStanceOrderedGetterTried = true;
+                try
+                {
+                    var field = AccessTools.Field(typeof(Regiment), "ai_stanceordered");
+                    if (field != null)
+                    {
+                        var p = Expression.Parameter(typeof(Regiment), "r");
+                        var body = Expression.Field(p, field);
+                        _aiStanceOrderedGetter = Expression.Lambda<Func<Regiment, int>>(body, p).Compile();
+                    }
+                }
+                catch (Exception e)
+                {
+                    Plugin.Log.LogWarning("[BattleGroupStancePatch] ai_stanceordered getter compile failed: "
+                        + e.GetType().Name + " " + e.Message);
+                }
+            }
+
+            var getter = _aiStanceOrderedGetter;
+            if (getter != null)
+            {
+                try { return getter(group); }
+                catch { /* fall through to reflection fallback */ }
+            }
+
+            return SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
         }
 
         /// <summary>
@@ -304,7 +449,7 @@ namespace WhiskeyRealism.Patches
             TacticalSectorAssessment sector)
         {
             if (macro == 3) return false;
-            if (!TryResolveDoctrineOrder(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture)) return false;
+            if (!TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture)) return false;
 
             DoctrineStanceDecision decision = DoctrineConsumerDecisions.DecideStance(
                 order,
@@ -330,7 +475,7 @@ namespace WhiskeyRealism.Patches
         private static bool TryApplyLedgerTaskStance(BattleUnits bunits, int side, int macro, Regiment group, int vanillaOrdered, TacticalSectorAssessment sector)
         {
             if (macro == 3) return true;
-            if (!TryResolveLedgerState(group, out CommandNodeOperationalState state)) return false;
+            if (!TacticalLedgerStateResolver.TryResolve(group, out CommandNodeOperationalState state)) return false;
 
             int stance = StanceForTask(state.Task, vanillaOrdered, sector);
             if (stance < 0) return true;
@@ -371,67 +516,6 @@ namespace WhiskeyRealism.Patches
                 default:
                     return -1;
             }
-        }
-
-        private static bool TryResolveLedgerState(Regiment group, out CommandNodeOperationalState state)
-        {
-            state = default;
-            try
-            {
-                if (group == null) return false;
-                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
-                var operations = side?.Army?.CurrentCommandOperations;
-                if (operations == null || operations.Count == 0) return false;
-
-                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
-                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
-                for (int i = 0; i < operations.Count; i++)
-                {
-                    if (TacticalPatchIds.NodeIdMatches(operations[i].NodeId, gameObjectInstanceId, componentInstanceId))
-                    {
-                        state = operations[i];
-                        return true;
-                    }
-                }
-            }
-            catch { }
-
-            return false;
-        }
-
-        private static bool TryResolveDoctrineOrder(
-            Regiment group,
-            out CommandDoctrineOrder order,
-            out BattlefieldPictureSnapshot picture)
-        {
-            order = default(CommandDoctrineOrder);
-            picture = new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>());
-            try
-            {
-                if (group == null) return false;
-                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
-                ArmyOrchestrator army = side?.Army;
-                var orders = army?.CurrentDoctrineOrders;
-                if (orders == null || orders.Count == 0) return false;
-
-                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
-                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
-                for (int i = 0; i < orders.Count; i++)
-                {
-                    CommandDoctrineOrder candidate = orders[i];
-                    if (!TacticalPatchIds.NodeIdMatches(candidate.NodeId, gameObjectInstanceId, componentInstanceId))
-                        continue;
-                    if (!candidate.HasPurpose) return false;
-
-                    order = candidate;
-                    if (side?.OperationsLedger != null)
-                        picture = side.OperationsLedger.CurrentBattlefieldPicture;
-                    return true;
-                }
-            }
-            catch { }
-
-            return false;
         }
 
         private static void LogDoctrineStanceDecision(
@@ -603,6 +687,20 @@ namespace WhiskeyRealism.Patches
         {
             try { return group != null && group.orderqueue != null ? group.orderqueue.Count : 0; }
             catch { return 1; }
+        }
+
+        private static void LogResolvedDecision(int side, Regiment group, TacticalResolvedGroupDecision resolved)
+        {
+            string signature = side + "|" + SafeInstanceId(group) + "|" + resolved.FinalStance + "|" + resolved.Reason;
+            if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "group-resolved", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
+
+            TelemetryRouter.LegacyInfo("[TacticalGroupDecision] side=" + side +
+                " group=" + SafeInstanceId(group) +
+                " stance=" + resolved.FinalStance +
+                " reason=" + resolved.Reason +
+                " doctrine=" + resolved.FromDoctrine +
+                " ledger=" + resolved.FromLedger, TelemetryLayer.Tactical);
         }
 
         private static void LogDecision(

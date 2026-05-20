@@ -1298,6 +1298,7 @@ static class Program
         TacticalUnitObservationAggregateTests.Run();
         ObjectiveRecordsFromAggregateTests.Run();
         TacticalDecisionSnapshotTests.Run();
+        TacticalResolvedGroupDecisionTests.Run();
 
         return 0;
     }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
@@ -79,6 +80,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
         private static readonly TacticalBattleRuntimeSnapshot[] _lastPublishedSnapshots = { TacticalBattleRuntimeSnapshot.Empty, TacticalBattleRuntimeSnapshot.Empty };
         private static readonly bool[] _hasPendingChange = { false, false };
+
+        // "Cheap per-group" cache (2026-05-20). Populated in DriveTickCycle on
+        // every heavy-gate-fire — one entry per commandable Regiment in
+        // bunits.unitsused for the firing side. Read by BattleGroupStancePatch's
+        // ApplyResolvedDecisionFast so the per-tick patch becomes O(1) per
+        // group: dict lookup + a few cheap field reads + a single ChangeStance
+        // call. Doctrine/ledger resolver walks, sector rebuild, and
+        // DecideGroupStance recompute all move to the gate-fire boundary.
+        //
+        // Keyed by Regiment.GetInstanceID() — same key the worker-thread
+        // group-stance dicts use, so cache misses route to the legacy
+        // ApplyGroup path identically.
+        //
+        // Indexed by allianceId (0/1). Reset in ResetRuntimeTickState so
+        // stale entries never leak between battles.
+        private static readonly Dictionary<int, TacticalResolvedGroupDecision>[] _resolvedDecisionsBySide =
+        {
+            new Dictionary<int, TacticalResolvedGroupDecision>(),
+            new Dictionary<int, TacticalResolvedGroupDecision>()
+        };
         // Per-side last-seen GC.CollectionCount snapshot. Mono is Boehm
         // (non-generational) so a single counter suffices; gen0/gen1/gen2
         // return identical values. Used by EmitHeavyGateTelemetry to compute
@@ -114,6 +135,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public static int BattleSequenceForParity
         {
             get { return _battleSequence; }
+        }
+
+        /// <summary>
+        /// "Cheap per-group" cache lookup. Returns the pre-resolved
+        /// doctrine/ledger/charge decision for a Regiment when the most
+        /// recent heavy-gate fire pre-computed one for the given alliance.
+        /// Returns false on miss; callers (currently
+        /// <c>BattleGroupStancePatch</c>) fall through to the legacy
+        /// resolver-driven apply path. Indexed by alliance id (0/1);
+        /// alliances &gt; 1 always miss.
+        /// </summary>
+        internal static bool TryGetResolvedGroupDecision(int allianceId, int instanceId, out TacticalResolvedGroupDecision resolved)
+        {
+            resolved = default(TacticalResolvedGroupDecision);
+            if (allianceId < 0 || allianceId >= _resolvedDecisionsBySide.Length) return false;
+            var dict = _resolvedDecisionsBySide[allianceId];
+            return dict != null && dict.TryGetValue(instanceId, out resolved);
         }
 
         public static void OnBattleStart(AIBattle battle)
@@ -457,6 +495,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         _lastSignatures[s] = currSig;
                         _lastPublishedSnapshots[s] = snap;
                         _hasPendingChange[s] = false;
+
+                        // "Cheap per-group" pre-compute (2026-05-20). Build
+                        // resolved per-Regiment decisions for every commandable
+                        // group in bunits.unitsused for this side. The patch
+                        // reads from _resolvedDecisionsBySide via
+                        // TryGetResolvedGroupDecision so per-tick work
+                        // collapses to dict lookup + cheap safety gates.
+                        using (TelemetryPerf.Scope("tactical.resolved-group-decisions.build", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                        {
+                            PopulateResolvedDecisionsForSide(side, battle);
+                        }
                     }
                     else
                     {
@@ -1955,6 +2004,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _hasPendingChange[i] = false;
                     _lastTickBattleHours[i] = -1f;  // sentinel: first tick has no battle-hours reference
                     _lastGen0CountBySide[i] = 0;
+                    // "Cheap per-group" cache: clear so stale Regiment ids
+                    // from the prior battle never poison the next one.
+                    // Critical — Unity GameObject InstanceIDs are recycled
+                    // and a leaked entry would route to ApplyResolvedDecisionFast
+                    // with the wrong group's cached action.
+                    try { _resolvedDecisionsBySide[i]?.Clear(); } catch { }
                 }
             }
             catch { }
@@ -2055,6 +2110,356 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             side1 = null;
             _playerAllianceId = -1;
             active = false;
+        }
+
+        // ---- "Cheap per-group" pre-compute (2026-05-20) ----
+        //
+        // PopulateResolvedDecisionsForSide is called from DriveTickCycle on
+        // every heavy-gate fire for a non-suppressed side. It rebuilds the
+        // per-alliance _resolvedDecisionsBySide dict from scratch (Clear +
+        // walk + Add) so the patch never sees a half-populated state. The
+        // pre-compute mirrors BattleGroupStancePatch.ApplyGroup's branch
+        // order — doctrine first, charge override (vanillaOrdered==4) next,
+        // ledger task third, default scorer last — so the cached final-stance
+        // answer matches what the legacy path would have written.
+        //
+        // All reflection/Unity-API calls are try/catch guarded; on any
+        // failure the per-group entry is skipped, and the patch falls
+        // through to ApplyGroup for that Regiment.
+
+        private static void PopulateResolvedDecisionsForSide(TacticalBattleOrchestrator side, AIBattle battle)
+        {
+            try
+            {
+                if (side == null) return;
+                int allianceId = side.AllianceId;
+                if (allianceId < 0 || allianceId >= _resolvedDecisionsBySide.Length) return;
+
+                var cache = _resolvedDecisionsBySide[allianceId];
+                cache.Clear();
+
+                var bunits = ResolveBattleUnits(battle);
+                if (bunits == null) return;
+
+                // unitsused is a field on AIBattle, not BattleUnits — the
+                // same one BattleGroupStancePatch reads via reflection.
+                IList units = ResolveUnitsUsedFromAIBattle(battle);
+                if (units == null || units.Count == 0) return;
+
+                // Macro is per-side state used by the default scorer.
+                // BattleGroupStancePatch.ApplyGroup reads AIBattle.macroai;
+                // mirror that here. AIBattle.macroai is public; -99
+                // fallback matches the patch's SafeIntField default for
+                // macro.
+                int macro = SafeMacroAiFromAIBattle(battle);
+                if (macro <= -90) macro = SafeMacroAiForSideByAlliance(bunits, allianceId);
+
+                bool chargeDenialOn = false;
+                bool localReactionsOn = false;
+                bool groupSectorStanceOn = false;
+                try
+                {
+                    var p = Plugin.Instance;
+                    if (p != null)
+                    {
+                        chargeDenialOn = p.EnableTacticalChargeDenial != null && p.EnableTacticalChargeDenial.Value;
+                        localReactionsOn = p.EnableTacticalObserver != null && p.EnableTacticalObserver.Value
+                            && p.EnableTacticalCommanderIntentDoctrine != null && p.EnableTacticalCommanderIntentDoctrine.Value
+                            && p.EnableTacticalLocalReactionDoctrine != null && p.EnableTacticalLocalReactionDoctrine.Value;
+                        groupSectorStanceOn = p.EnableTacticalGroupSectorStance != null && p.EnableTacticalGroupSectorStance.Value;
+                    }
+                }
+                catch { }
+
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var group = units[i] as Regiment;
+                    if (group == null) continue;
+                    if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)) continue;
+
+                    int instanceId;
+                    try { instanceId = group.GetInstanceID(); }
+                    catch { continue; }
+                    if (instanceId == 0) continue;
+
+                    int vanillaOrdered;
+                    try { vanillaOrdered = group.ai_stanceordered; }
+                    catch { continue; }
+
+                    var sector = BuildSectorForGroup(group, i);
+
+                    // 1) Doctrine. When doctrine produces Allow/Deny, that's
+                    //    the final answer for this Regiment — overrides
+                    //    charge AND ledger AND default scorer.
+                    if (macro != 3 && TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture))
+                    {
+                        DoctrineStanceDecision dDec = DoctrineConsumerDecisions.DecideStance(
+                            order,
+                            DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture),
+                            sector.Odds);
+                        if (dDec.Action != DoctrineConsumerAction.Observe)
+                        {
+                            int dStance = dDec.Action == DoctrineConsumerAction.Allow ? 3 : 2;
+                            cache[instanceId] = new TacticalResolvedGroupDecision(
+                                finalStance: dStance,
+                                kind: TacticalDoctrineDecisionKind.Apply,
+                                reason: "doctrine-" + dDec.Reason,
+                                fromDoctrine: true,
+                                fromLedger: false,
+                                isChargeOverride: false,
+                                chargeAction: ChargeOverrideAction.None);
+                            continue;
+                        }
+                    }
+
+                    // 2) Charge override. Mirrors BattleGroupStancePatch's
+                    //    vanillaOrdered==4 branch. Cache freezes WHETHER to
+                    //    demote; the apply path re-reads the live reaction
+                    //    only to fill the demote-telemetry detail.
+                    if (vanillaOrdered == 4)
+                    {
+                        ChargeOverrideAction action;
+                        string reason;
+                        if (!chargeDenialOn || !localReactionsOn)
+                        {
+                            action = ChargeOverrideAction.PreserveVanilla;
+                            reason = "vanilla-charge-preserved";
+                        }
+                        else
+                        {
+                            TacticalLocalReactionDecision reaction;
+                            try { reaction = TacticalReactionContext.Shared.GetReaction(instanceId); }
+                            catch { reaction = new TacticalLocalReactionDecision(LocalReaction.MaintainLine, false, 0f, "no-decision"); }
+                            bool explicitDeny = reaction.Reason != "no-decision" && reaction.Reaction == LocalReaction.DenyCharge;
+                            if (explicitDeny)
+                            {
+                                action = ChargeOverrideAction.DemoteToHold;
+                                reason = "charge-demote";
+                            }
+                            else
+                            {
+                                action = ChargeOverrideAction.PreserveVanilla;
+                                reason = "vanilla-charge-preserved";
+                            }
+                        }
+
+                        cache[instanceId] = new TacticalResolvedGroupDecision(
+                            finalStance: -1,
+                            kind: TacticalDoctrineDecisionKind.Skip,
+                            reason: reason,
+                            fromDoctrine: false,
+                            fromLedger: false,
+                            isChargeOverride: true,
+                            chargeAction: action);
+                        continue;
+                    }
+
+                    // 3) Ledger task stance.
+                    if (macro != 3 && TacticalLedgerStateResolver.TryResolve(group, out CommandNodeOperationalState state))
+                    {
+                        int lStance = StanceForLedgerTask(state.Task, sector);
+                        // BattleGroupStancePatch.TryApplyLedgerTaskStance
+                        // claims ownership whenever the ledger resolves
+                        // (return true) — even when stance is invalid or
+                        // equals vanillaOrdered. Mirror that: write a Skip
+                        // with stance=-1 so the apply path treats this
+                        // group as "ledger had an opinion, no write
+                        // needed" and DOESN'T fall through to the default
+                        // scorer.
+                        if (lStance < 0 || lStance > 3 || lStance == 4)
+                        {
+                            cache[instanceId] = new TacticalResolvedGroupDecision(
+                                finalStance: -1,
+                                kind: TacticalDoctrineDecisionKind.Skip,
+                                reason: "ledger-no-opinion",
+                                fromDoctrine: false,
+                                fromLedger: true,
+                                isChargeOverride: false,
+                                chargeAction: ChargeOverrideAction.None);
+                        }
+                        else
+                        {
+                            cache[instanceId] = new TacticalResolvedGroupDecision(
+                                finalStance: lStance,
+                                kind: TacticalDoctrineDecisionKind.Apply,
+                                reason: "ledger-" + state.Task,
+                                fromDoctrine: false,
+                                fromLedger: true,
+                                isChargeOverride: false,
+                                chargeAction: ChargeOverrideAction.None);
+                        }
+                        continue;
+                    }
+
+                    // 4) Default scorer. Only writes when group-sector
+                    //    stance is on; otherwise emit a Skip so the apply
+                    //    path no-ops without rebuilding the sector.
+                    if (!groupSectorStanceOn)
+                    {
+                        cache[instanceId] = new TacticalResolvedGroupDecision(
+                            finalStance: -1,
+                            kind: TacticalDoctrineDecisionKind.Skip,
+                            reason: "group-sector-stance-off",
+                            fromDoctrine: false,
+                            fromLedger: false,
+                            isChargeOverride: false,
+                            chargeAction: ChargeOverrideAction.None);
+                        continue;
+                    }
+
+                    var scorerInput = new TacticalGroupStanceDecisionInput(
+                        vanillaOrdered,
+                        macro,
+                        sector,
+                        true,
+                        true);
+                    TacticalGroupStanceDecision dec = TacticalDoctrineScorer.DecideGroupStance(scorerInput);
+
+                    cache[instanceId] = new TacticalResolvedGroupDecision(
+                        finalStance: dec.GroupStance,
+                        kind: dec.Kind,
+                        reason: "scorer-" + dec.Reason,
+                        fromDoctrine: false,
+                        fromLedger: false,
+                        isChargeOverride: false,
+                        chargeAction: ChargeOverrideAction.None);
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] PopulateResolvedDecisionsForSide degraded side="
+                    + (side == null ? "null" : side.AllianceId.ToString())
+                    + ": " + e.GetType().Name + " " + e.Message);
+            }
+        }
+
+        private static TacticalSectorAssessment BuildSectorForGroup(Regiment group, int index)
+        {
+            try
+            {
+                Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
+                return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
+                    index,
+                    group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
+                    group != null ? group.groupenemiesinrange : 0f,
+                    SumEnemyStrengthWithinAngleSafe(group),
+                    closest != null ? closest.strength : 0f,
+                    closest != null ? closest.unittyp : -1,
+                    closest != null ? SafeRegimentName(closest) : string.Empty,
+                    closest != null && closest.isrouted,
+                    closest != null && closest.permanentlydetached,
+                    group != null && (group.flanksthreated > 0f || group.outflanked > 0),
+                    group != null && (group.covervalue > 0.5f || group.fortinrange)));
+            }
+            catch
+            {
+                return default(TacticalSectorAssessment);
+            }
+        }
+
+        private static float SumEnemyStrengthWithinAngleSafe(Regiment group)
+        {
+            try
+            {
+                if (group == null ||
+                    group.unitrange == null ||
+                    group.unitrange.enemystrengthwithinangle == null ||
+                    !TacticalFogOfWarContact.HasVisibleEnemy(group))
+                    return 0f;
+
+                float total = 0f;
+                for (int i = 0; i < group.unitrange.enemystrengthwithinangle.Length; i++)
+                    total += Math.Max(0f, group.unitrange.enemystrengthwithinangle[i]);
+                return total;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static string SafeRegimentName(Regiment group)
+        {
+            try { return group != null ? ((Component)group).gameObject.name : string.Empty; }
+            catch { return string.Empty; }
+        }
+
+        private static int StanceForLedgerTask(CommandTaskType task, TacticalSectorAssessment sector)
+        {
+            // Mirrors BattleGroupStancePatch.StanceForTask. Returns -1 when
+            // the task has no stance opinion (default scorer would have
+            // been consulted in the legacy path, but ledger claims
+            // ownership when it resolves).
+            if ((task == CommandTaskType.HoldObjective ||
+                 task == CommandTaskType.HoldChoke ||
+                 task == CommandTaskType.FixEnemy) &&
+                TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector))
+                return 3;
+
+            switch (task)
+            {
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                    return 3;
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.HoldObjective:
+                case CommandTaskType.HoldChoke:
+                case CommandTaskType.ReserveWait:
+                case CommandTaskType.FallBackToLine:
+                    return 2;
+                default:
+                    return -1;
+            }
+        }
+
+        private static IList ResolveUnitsUsedFromAIBattle(AIBattle battle)
+        {
+            try
+            {
+                if (battle == null) return null;
+                // AIBattle.unitsused is List<Regiment> and public; IList
+                // cast works directly without reflection. Mirrors how
+                // BattleGroupStancePatch reads it (via reflected field
+                // cache, but the same underlying member).
+                return battle.unitsused as IList;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int SafeMacroAiFromAIBattle(AIBattle battle)
+        {
+            try
+            {
+                if (battle == null) return -99;
+                return battle.macroai;
+            }
+            catch
+            {
+                return -99;
+            }
+        }
+
+        private static int SafeMacroAiForSideByAlliance(BattleUnits bunits, int allianceId)
+        {
+            try
+            {
+                if (bunits == null || bunits.alliance == null || bunits.sideinformation == null) return -1;
+                for (int side = 0; side < bunits.alliance.Length && side < bunits.sideinformation.Length; side++)
+                {
+                    if (bunits.alliance[side] != allianceId) continue;
+                    var info = bunits.sideinformation[side];
+                    if (info == null) return -1;
+                    return info.macroai;
+                }
+                return -1;
+            }
+            catch
+            {
+                return -1;
+            }
         }
     }
 }
