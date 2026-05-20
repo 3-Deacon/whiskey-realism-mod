@@ -260,7 +260,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IObservationSource source;
             using (TelemetryPerf.Scope("tactical.snapshot-build.aggregate-capture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                source = TacticalUnitObservationAggregate.Shared.Capture(allianceId);
+                // Pass BattleUnits so the aggregate walks aibattle[side].unitsused
+                // (active set) rather than completeunitlist. Resolves via the
+                // same cached AIBattle.bunits FieldInfo we use elsewhere; passes
+                // null on resolve failure and the aggregate falls back to the
+                // legacy completeunitlist walk.
+                var bunits = ResolveBattleUnits(battle);
+                source = TacticalUnitObservationAggregate.Shared.Capture(allianceId, bunits);
             }
 
             if (!inWindow)
