@@ -140,7 +140,7 @@ namespace WhiskeyRealism.Patches
                     TacticalResolvedGroupDecision resolved;
                     if (TacticalBattleCoordinator.TryGetResolvedGroupDecision(allianceId, instanceId, out resolved))
                     {
-                        ApplyResolvedDecisionFast(bunits, side, group, resolved);
+                        ApplyResolvedDecisionFast(bunits, side, macro, group, resolved);
                         touchedAny = true;
                         continue;
                     }
@@ -184,6 +184,7 @@ namespace WhiskeyRealism.Patches
         private static void ApplyResolvedDecisionFast(
             BattleUnits bunits,
             int side,
+            int macro,
             Regiment group,
             TacticalResolvedGroupDecision resolved)
         {
@@ -234,6 +235,17 @@ namespace WhiskeyRealism.Patches
                 LogChargePreserved(side, group, "vanilla-charge-preserved");
                 return;
             }
+
+            // Vanilla-retreat live check: macro can flip to 3 between
+            // gate fires when morale collapses. The pre-compute skips
+            // doctrine and ledger when macro==3 (mirroring the legacy
+            // path), so the cached FinalStance for a now-retreating side
+            // is whatever the scorer would have written PRE-retreat. We
+            // must not overwrite vanilla's retreat with that stale
+            // decision. Charge override above is intentionally not
+            // gated on this — charge demote/preserve telemetry still
+            // matters during retreat.
+            if (macro == 3) return;
 
             // Non-charge branch — write cached FinalStance.
             if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;

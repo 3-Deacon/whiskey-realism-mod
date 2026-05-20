@@ -2141,18 +2141,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var bunits = ResolveBattleUnits(battle);
                 if (bunits == null) return;
 
-                // unitsused is a field on AIBattle, not BattleUnits — the
-                // same one BattleGroupStancePatch reads via reflection.
-                IList units = ResolveUnitsUsedFromAIBattle(battle);
+                // Walk BattleUnits.completeunitlist filtered by alliance —
+                // NOT AIBattle.unitsused. Tick() is debounced per vanilla
+                // CalculateSideStats cycle and drives both side0 and side1
+                // with whichever AIBattle fired first. That AIBattle's
+                // unitsused only contains its own side's regiments. Using
+                // completeunitlist + alliance filter gives us the right
+                // Regiment population for whichever side we're populating
+                // regardless of which AIBattle triggered Tick (mirrors
+                // BuildInstanceToSectorIndexMap above).
+                var units = BattleUnits.completeunitlist as IList;
                 if (units == null || units.Count == 0) return;
 
-                // Macro is per-side state used by the default scorer.
-                // BattleGroupStancePatch.ApplyGroup reads AIBattle.macroai;
-                // mirror that here. AIBattle.macroai is public; -99
-                // fallback matches the patch's SafeIntField default for
-                // macro.
-                int macro = SafeMacroAiFromAIBattle(battle);
-                if (macro <= -90) macro = SafeMacroAiForSideByAlliance(bunits, allianceId);
+                // Macro is per-side; AIBattle.macroai belongs to the
+                // AIBattle that fired Tick, which may not match the side
+                // we're pre-computing. Pull from bunits.sideinformation
+                // indexed by the side whose alliance == allianceId.
+                // Mirrors CaptureWorkerInputOnMain's SafeMacroAiForSide.
+                int macro = SafeMacroAiForSideByAlliance(bunits, allianceId);
 
                 bool chargeDenialOn = false;
                 bool localReactionsOn = false;
@@ -2171,10 +2177,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
                 catch { }
 
+                int sectorIndex = 0;
                 for (int i = 0; i < units.Count; i++)
                 {
                     var group = units[i] as Regiment;
                     if (group == null) continue;
+                    // Alliance filter — completeunitlist is global, so we
+                    // skip Regiments belonging to other sides.
+                    if (group.alliance != allianceId) continue;
                     if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)) continue;
 
                     int instanceId;
@@ -2186,7 +2196,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     try { vanillaOrdered = group.ai_stanceordered; }
                     catch { continue; }
 
-                    var sector = BuildSectorForGroup(group, i);
+                    // sectorIndex is the post-filter index for this side
+                    // (mirrors BuildInstanceToSectorIndexMap's accounting).
+                    // It's used as TacticalSectorAssessment.SectorId; the
+                    // scorers ignore the value, it just shows up in logs.
+                    var sector = BuildSectorForGroup(group, sectorIndex);
+                    sectorIndex++;
 
                     // 1) Doctrine. When doctrine produces Allow/Deny, that's
                     //    the final answer for this Regiment — overrides
@@ -2409,36 +2424,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return 2;
                 default:
                     return -1;
-            }
-        }
-
-        private static IList ResolveUnitsUsedFromAIBattle(AIBattle battle)
-        {
-            try
-            {
-                if (battle == null) return null;
-                // AIBattle.unitsused is List<Regiment> and public; IList
-                // cast works directly without reflection. Mirrors how
-                // BattleGroupStancePatch reads it (via reflected field
-                // cache, but the same underlying member).
-                return battle.unitsused as IList;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static int SafeMacroAiFromAIBattle(AIBattle battle)
-        {
-            try
-            {
-                if (battle == null) return -99;
-                return battle.macroai;
-            }
-            catch
-            {
-                return -99;
             }
         }
 
