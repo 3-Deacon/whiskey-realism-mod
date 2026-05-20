@@ -2123,6 +2123,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // ledger task third, default scorer last — so the cached final-stance
         // answer matches what the legacy path would have written.
         //
+        // **PERFORMANCE COUPLING:** the cache only repopulates when the
+        // heavy-gate fires. That gate is gated by `Enable Tactical Heavy
+        // Path Throttling` (default true). If a user disables throttling,
+        // this populate is never called, _resolvedDecisionsBySide stays
+        // empty, BattleGroupStancePatch always falls through to legacy
+        // ApplyGroup, and the per-tick p99 returns to pre-refactor levels
+        // (~13-15ms). This is by design — the throttle is what enables the
+        // cache cadence — but it is not obvious from outside.
+        //
         // All reflection/Unity-API calls are try/catch guarded; on any
         // failure the per-group entry is skipped, and the patch falls
         // through to ApplyGroup for that Regiment.
