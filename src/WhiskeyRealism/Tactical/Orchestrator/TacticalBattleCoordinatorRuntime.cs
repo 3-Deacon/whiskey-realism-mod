@@ -87,6 +87,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // time compression. Reset per battle in ResetRuntimeTickState.
         private static readonly int[] _lastGen0CountBySide = { 0, 0 };
 
+        // Slice 2: dedicated worker thread for tactical orchestrator analysis.
+        // Started in OnBattleStart, joined in OnBattleEnd. Disabled when
+        // EnableTacticalOrchestratorWorker is false. Currently runs as a non-skipping
+        // shadow — sync path still owns behavior; worker produces partial decisions
+        // that patches don't yet consume (Task 14 will wire fallback-to-legacy lookups).
+        private static TacticalOrchestratorWorker _worker;
+
         /// <summary>
         /// Battle sequence integer used as the parity-window key in
         /// TacticalBattleSnapshotBuilder. Increments on each OnBattleStart;
@@ -161,6 +168,37 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + e.GetType().Name + " " + e.Message);
                 ClearForFailure();
             }
+
+            // Slice 2: start the worker thread once bootstrap has settled.
+            // If bootstrap above failed ClearForFailure already nulled state out;
+            // we still attempt worker start (Tick won't dispatch if !active).
+            try
+            {
+                if (IsWorkerEnabled())
+                {
+                    _worker = new TacticalOrchestratorWorker();
+                    _worker.Start();
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] worker start failed: "
+                    + ex.GetType().Name + " " + ex.Message);
+                _worker = null;
+            }
+        }
+
+        private static bool IsWorkerEnabled()
+        {
+            try
+            {
+                return Plugin.EnableTacticalOrchestratorWorker != null
+                    && Plugin.EnableTacticalOrchestratorWorker.Value;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public static void OnBattleEnd()
@@ -168,6 +206,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (!active) return;
             try
             {
+                // Slice 2: stop the worker before tearing down orchestrator state.
+                // RequestStop + bounded Join so we don't block teardown if the worker
+                // is wedged. Background thread will die on AppDomain unload regardless.
+                try
+                {
+                    if (_worker != null)
+                    {
+                        _worker.RequestStop();
+                        _worker.Join(250);
+                        _worker = null;
+                    }
+                }
+                catch (Exception we)
+                {
+                    Plugin.Log.LogWarning("[TacticalOrchestrator] worker stop failed: "
+                        + we.GetType().Name + " " + we.Message);
+                }
+
                 ClearLedgersBetweenBattles();
                 ResetRuntimeTickState();
                 _directChildDeferLogged.Clear();
@@ -211,6 +267,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     OnceLog.Info("orch-coordinator", "[TacticalOrchestrator] coordinator first tick");
                     bool aiVsAi = SafeAiVsAi();
                     float deltaSeconds = ComputeTickDeltaSeconds();
+
+                    // Slice 2: capture worker input and enqueue. Non-skipping —
+                    // the sync DriveTacticalCommanderSide calls below still run.
+                    // Worker produces partial decisions in shadow until Task 11's
+                    // deferred gaps (replan trigger + per-group stance) ship.
+                    bool workerActive = IsWorkerEnabled() && _worker != null;
+                    if (workerActive)
+                    {
+                        try
+                        {
+                            var workerInput = CaptureWorkerInputOnMain(battle, deltaSeconds);
+                            if (workerInput != null) _worker.Enqueue(workerInput);
+                        }
+                        catch (Exception ce)
+                        {
+                            Plugin.Log.LogWarning("[TacticalOrchestrator] worker capture skipped: "
+                                + ce.GetType().Name + " " + ce.Message);
+                        }
+                    }
+
                     DriveTacticalCommanderSide(side0, battle, aiVsAi, deltaSeconds);
                     DriveTacticalCommanderSide(side1, battle, aiVsAi, deltaSeconds);
 
@@ -1298,6 +1374,151 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return map;
         }
 
+        // ---- Slice 2: worker input capture (runs on main thread) ----
+
+        /// <summary>
+        /// Builds a TacticalOrchestratorWorkerInput from live vanilla state. All
+        /// reflection / Unity API touches happen here on the main thread; the worker
+        /// only reads the resulting immutable container. Returns null on failure so
+        /// the caller can skip enqueue without breaking the sync drive path.
+        /// </summary>
+        private static TacticalOrchestratorWorkerInput CaptureWorkerInputOnMain(AIBattle battle, float deltaSeconds)
+        {
+            try
+            {
+                var bunits = ResolveBattleUnits(battle);
+                if (bunits == null) return null;
+
+                int allianceA = SafeAllianceForSide(bunits, 0);
+                int allianceB = SafeAllianceForSide(bunits, 1);
+                if (allianceA < 0 || allianceB < 0) return null;
+
+                float nowH = SafeCurrentBattleHours();
+                float nowReal = SafeRealtimeSeconds();
+                // Worker-input battleDeltaSeconds: kept at 0 in Slice 2. The per-side
+                // _lastTickBattleHours scratch state used by DriveTickCycle is owned
+                // by the sync path; threading a battle-time delta through here without
+                // disturbing it is a Task 14+ concern.
+                float battleDelta = 0f;
+
+                var snap0 = CaptureSideSnapshotForWorker(battle, allianceA, nowH);
+                var snap1 = CaptureSideSnapshotForWorker(battle, allianceB, nowH);
+
+                var bundle0 = ArmyEvidenceBuilder.Build(battle, allianceA);
+                var bundle1 = ArmyEvidenceBuilder.Build(battle, allianceB);
+
+                CommandTreeSnapshot tree0 = SafeCommandTreeSnapshot(allianceA);
+                CommandTreeSnapshot tree1 = SafeCommandTreeSnapshot(allianceB);
+                IReadOnlyList<DirectChildSnapshot> dc0 = SafeDirectChildSnapshot(allianceA);
+                IReadOnlyList<DirectChildSnapshot> dc1 = SafeDirectChildSnapshot(allianceB);
+
+                var sectorMap0 = BuildInstanceToSectorIndexMap(battle, allianceA);
+                var sectorMap1 = BuildInstanceToSectorIndexMap(battle, allianceB);
+
+                CommanderRosterEntry entry0 = FindArmyEntry(side0);
+                CommanderRosterEntry entry1 = FindArmyEntry(side1);
+
+                var config = BuildWorkerConfigSnapshot();
+
+                return new TacticalOrchestratorWorkerInput(
+                    battleSequence: _battleSequence,
+                    playerAllianceId: _playerAllianceId,
+                    aiVsAi: SafeAiVsAi(),
+                    battleHours: nowH,
+                    realtimeSeconds: nowReal,
+                    deltaSeconds: deltaSeconds,
+                    battleDeltaSeconds: battleDelta,
+                    side0Snapshot: snap0,
+                    side1Snapshot: snap1,
+                    side0Bundle: bundle0,
+                    side1Bundle: bundle1,
+                    side0CommandTree: tree0,
+                    side1CommandTree: tree1,
+                    side0DirectChildren: dc0,
+                    side1DirectChildren: dc1,
+                    side0CommanderEntry: entry0,
+                    side1CommanderEntry: entry1,
+                    side0InstanceToSectorMap: sectorMap0,
+                    side1InstanceToSectorMap: sectorMap1,
+                    config: config);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] CaptureWorkerInputOnMain failed: "
+                    + e.GetType().Name + " " + e.Message);
+                return null;
+            }
+        }
+
+        private static TacticalBattleRuntimeSnapshot CaptureSideSnapshotForWorker(AIBattle battle, int allianceId, float nowH)
+        {
+            try
+            {
+                var sig = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(battle, nowH);
+                return TacticalBattleSnapshotBuilder.Build(battle, allianceId, sig, nowH);
+            }
+            catch
+            {
+                return TacticalBattleRuntimeSnapshot.Empty;
+            }
+        }
+
+        private static CommandTreeSnapshot SafeCommandTreeSnapshot(int allianceId)
+        {
+            try { return CommandTreeRuntime.Snapshot(allianceId); }
+            catch { return CommandTreeSnapshot.Empty; }
+        }
+
+        private static IReadOnlyList<DirectChildSnapshot> SafeDirectChildSnapshot(int allianceId)
+        {
+            try { return DirectChildDiscovery.Snapshot(allianceId); }
+            catch { return Array.Empty<DirectChildSnapshot>(); }
+        }
+
+        private static TacticalOrchestratorWorkerConfigSnapshot BuildWorkerConfigSnapshot()
+        {
+            try
+            {
+                var p = Plugin.Instance;
+                bool heavy = false;
+                float heavyMin = 0f;
+                float heavyCycle = 0f;
+                TacticalCommanderMode mode = default;
+                if (p != null)
+                {
+                    try { heavy = p.EnableTacticalHeavyPathThrottling != null && p.EnableTacticalHeavyPathThrottling.Value; } catch { }
+                    try { heavyMin = p.HeavyReviewMinRealtimeSeconds; } catch { }
+                    try { heavyCycle = p.HeavyReviewCycleHours; } catch { }
+                    try { mode = p.TacticalCommanderModeValue; } catch { }
+                }
+
+                return new TacticalOrchestratorWorkerConfigSnapshot(
+                    enableHeavyPathThrottling: heavy,
+                    enableIntentInference: SafeStaticBool(Plugin.EnableTacticalOrchestratorIntentInference),
+                    heavyReviewMinRealtimeSeconds: heavyMin,
+                    heavyReviewCycleHours: heavyCycle,
+                    minReplanSeconds: SafeStaticInt(Plugin.TacticalOrchestratorMinReplanSeconds, 60),
+                    enableSinglePassObjectiveRecords: SafeStaticBool(Plugin.EnableSinglePassObjectiveRecords),
+                    commanderMode: mode);
+            }
+            catch
+            {
+                return TacticalOrchestratorWorkerConfigSnapshot.Empty;
+            }
+        }
+
+        private static bool SafeStaticBool(BepInEx.Configuration.ConfigEntry<bool> e)
+        {
+            try { return e != null && e.Value; }
+            catch { return false; }
+        }
+
+        private static int SafeStaticInt(BepInEx.Configuration.ConfigEntry<int> e, int fallback)
+        {
+            try { return e != null ? e.Value : fallback; }
+            catch { return fallback; }
+        }
+
         private static ArmyEvidence BuildArmyEvidenceForSide(int allianceId, AIBattle battle)
         {
             var bunits = ResolveBattleUnits(battle);
@@ -1364,6 +1585,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // (global singletons — outside per-side loop)
             try { TacticalUnitObservationAggregate.Shared.ClearForBattleEnd(); } catch { }
             try { TacticalBattleSnapshotBuilder.ClearParityState(); } catch { }
+            // Slice 2: reset the worker decision snapshot so stale per-cycle data
+            // from the previous battle never leaks to readers in the next one.
+            try { TacticalDecisionSnapshot.ResetForBattleEnd(); } catch { }
         }
 
         /// <summary>
