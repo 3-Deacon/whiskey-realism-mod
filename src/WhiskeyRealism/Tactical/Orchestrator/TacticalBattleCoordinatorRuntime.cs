@@ -79,6 +79,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
         private static readonly TacticalBattleRuntimeSnapshot[] _lastPublishedSnapshots = { TacticalBattleRuntimeSnapshot.Empty, TacticalBattleRuntimeSnapshot.Empty };
         private static readonly bool[] _hasPendingChange = { false, false };
+        // Gap-fill chunk 2: cache the last evidence bundle per side so worker
+        // capture can reuse it across heavy-gate-skip ticks. Bundle is a
+        // readonly struct (value-typed) so the array stores copies. Reset in
+        // ResetRuntimeTickState per battle. _hasLastEvidenceBundle gates
+        // first-tick fallback because default(Bundle) carries zeroed evidence
+        // that would silently masquerade as a valid quiet snapshot.
+        private static readonly ArmyEvidenceBuilder.Bundle[] _lastEvidenceBundles = new ArmyEvidenceBuilder.Bundle[2];
+        private static readonly bool[] _hasLastEvidenceBundle = new bool[2];
         // Per-side last-seen GC.CollectionCount snapshot. Mono is Boehm
         // (non-generational) so a single counter suffices; gen0/gen1/gen2
         // return identical values. Used by EmitHeavyGateTelemetry to compute
@@ -1569,14 +1577,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // into the worker input: each side's CapturedForAlliance must
                 // match the expected alliance to count, and ClearForBattleEnd
                 // sets it to -1.
+                //
+                // Gap-fill chunk 2: route capture through TacticalHeavyPathGate.
+                // CaptureSideForWorker consults the same per-side gate state
+                // DriveTickCycle uses, builds fresh snapshot+bundle only when
+                // ShouldRun, otherwise reuses _lastPublishedSnapshots /
+                // _lastEvidenceBundles. Option (a) from the gap-fill spec:
+                // capture reads the previous tick's gate state but does NOT
+                // write the timing fields (_lastHeavyReviewHours etc.) — those
+                // remain owned by the Drive* functions. Only the
+                // snapshot/bundle caches are updated by capture. Net effect:
+                // on a gate-fire tick both capture and Drive* build (2x), and
+                // intervening ticks reuse (0 extra) — amortization is per
+                // cycle window, not per call.
                 try { TacticalUnitObservationAggregate.Shared.ClearForBattleEnd(); } catch { }
-                var snap0 = CaptureSideSnapshotForWorker(battle, allianceA, nowH);
+                TacticalBattleRuntimeSnapshot snap0;
+                ArmyEvidenceBuilder.Bundle bundle0;
+                CaptureSideForWorker(battle, allianceA, nowH, out snap0, out bundle0);
                 var obs0 = SnapshotAggregateForWorker(allianceA);
-                var snap1 = CaptureSideSnapshotForWorker(battle, allianceB, nowH);
+                TacticalBattleRuntimeSnapshot snap1;
+                ArmyEvidenceBuilder.Bundle bundle1;
+                CaptureSideForWorker(battle, allianceB, nowH, out snap1, out bundle1);
                 var obs1 = SnapshotAggregateForWorker(allianceB);
-
-                var bundle0 = ArmyEvidenceBuilder.Build(battle, allianceA);
-                var bundle1 = ArmyEvidenceBuilder.Build(battle, allianceB);
 
                 // Per-side macroAI snapshot — sourced from bunits.sideinformation
                 // so the worker's DecideGroupStance sees the same vanilla state
@@ -1633,16 +1655,106 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static TacticalBattleRuntimeSnapshot CaptureSideSnapshotForWorker(AIBattle battle, int allianceId, float nowH)
+        /// <summary>
+        /// Gap-fill chunk 2: gate-aware capture of (snapshot, bundle) pair for
+        /// a single side. Consults <see cref="TacticalHeavyPathGate.Decide"/>
+        /// using the per-side gate timing state owned by the Drive* functions
+        /// (option (a) — read-only on timing; write-only on snapshot/bundle
+        /// caches). When the gate says <c>ShouldRun</c>, builds fresh via
+        /// <see cref="TacticalBattleSnapshotBuilder.Build"/> and
+        /// <see cref="ArmyEvidenceBuilder.Build"/>, then updates
+        /// <c>_lastPublishedSnapshots</c> / <c>_lastEvidenceBundles</c>. When
+        /// the gate says <c>Skip</c>, reuses the cached snapshot/bundle.
+        ///
+        /// First-tick fallback: if no cached bundle exists yet
+        /// (<c>_hasLastEvidenceBundle[s] == false</c>) and the gate decides
+        /// to skip (shouldn't happen because <c>last &lt;= 0</c> triggers
+        /// "first-tick" Run, but defended-against), we build fresh anyway —
+        /// the worker can't operate on a default-zeroed Bundle.
+        ///
+        /// Heavy throttling disabled (<c>!IsHeavyThrottlingEnabled()</c>):
+        /// falls through to direct build — matches the pre-gap-fill capture
+        /// behavior on hosts where the user has disabled throttling.
+        /// </summary>
+        private static void CaptureSideForWorker(
+            AIBattle battle,
+            int allianceId,
+            float nowH,
+            out TacticalBattleRuntimeSnapshot snap,
+            out ArmyEvidenceBuilder.Bundle bundle)
         {
             try
             {
-                var sig = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(battle, nowH);
-                return TacticalBattleSnapshotBuilder.Build(battle, allianceId, sig, nowH);
+                int s = allianceId;
+                if (s < 0 || s > 1)
+                {
+                    // Out-of-range alliance: don't touch caches, build fresh
+                    // for the worker and return. Matches the pre-gap-fill
+                    // behavior for alliance > 1 (Europe / unmapped).
+                    var sigOob = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(battle, nowH);
+                    using (TelemetryPerf.Scope("tactical.snapshot-build.worker-capture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                    {
+                        snap = TacticalBattleSnapshotBuilder.Build(battle, allianceId, sigOob, nowH);
+                    }
+                    bundle = ArmyEvidenceBuilder.Build(battle, allianceId);
+                    return;
+                }
+
+                if (!IsHeavyThrottlingEnabled())
+                {
+                    // Throttling disabled — preserve pre-gap-fill behavior.
+                    var sigUnthrottled = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(battle, nowH);
+                    using (TelemetryPerf.Scope("tactical.snapshot-build.worker-capture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                    {
+                        snap = TacticalBattleSnapshotBuilder.Build(battle, allianceId, sigUnthrottled, nowH);
+                    }
+                    bundle = ArmyEvidenceBuilder.Build(battle, allianceId);
+                    _lastPublishedSnapshots[s] = snap;
+                    _lastEvidenceBundles[s] = bundle;
+                    _hasLastEvidenceBundle[s] = true;
+                    return;
+                }
+
+                // Heavy-gate path: build the same Decide input DriveTickCycle uses.
+                var currSig = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(battle, nowH);
+                float lastH = _lastHeavyReviewHours[s];
+                float nowReal = SafeRealtimeSeconds();
+                float lastReal = _lastHeavyReviewRealtimeSeconds[s];
+                var lastS = _lastSignatures[s];
+                bool hasP = _hasPendingChange[s];
+                float cycle = ComputeCompressionAdjustedCycle(s, nowH, nowReal, lastReal);
+                float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
+                var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
+                var dec = TacticalHeavyPathGate.Decide(input);
+
+                bool needsBuild = dec.ShouldRun
+                    || _lastPublishedSnapshots[s].HasData == false
+                    || !_hasLastEvidenceBundle[s];
+
+                if (needsBuild)
+                {
+                    using (TelemetryPerf.Scope("tactical.snapshot-build.worker-capture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                    {
+                        snap = TacticalBattleSnapshotBuilder.Build(battle, allianceId, currSig, nowH);
+                    }
+                    bundle = ArmyEvidenceBuilder.Build(battle, allianceId);
+                    // Cache update — note we do NOT touch _lastHeavyReviewHours /
+                    // _lastSignatures / _lastHeavyReviewRealtimeSeconds /
+                    // _hasPendingChange. Those are owned by Drive*. Option (a).
+                    _lastPublishedSnapshots[s] = snap;
+                    _lastEvidenceBundles[s] = bundle;
+                    _hasLastEvidenceBundle[s] = true;
+                }
+                else
+                {
+                    snap = _lastPublishedSnapshots[s];
+                    bundle = _lastEvidenceBundles[s];
+                }
             }
             catch
             {
-                return TacticalBattleRuntimeSnapshot.Empty;
+                snap = TacticalBattleRuntimeSnapshot.Empty;
+                bundle = default(ArmyEvidenceBuilder.Bundle);
             }
         }
 
@@ -1808,6 +1920,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _hasPendingChange[i] = false;
                     _lastTickBattleHours[i] = -1f;  // sentinel: first tick has no battle-hours reference
                     _lastGen0CountBySide[i] = 0;
+                    // Gap-fill chunk 2: clear bundle cache per battle so a
+                    // prior battle's evidence never bleeds into the next.
+                    _lastEvidenceBundles[i] = default(ArmyEvidenceBuilder.Bundle);
+                    _hasLastEvidenceBundle[i] = false;
                 }
             }
             catch { }
