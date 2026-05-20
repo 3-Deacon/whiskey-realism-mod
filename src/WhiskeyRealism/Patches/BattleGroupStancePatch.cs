@@ -180,6 +180,17 @@ namespace WhiskeyRealism.Patches
         /// DecideGroupStance recompute — those ran once at the
         /// heavy-gate-fire boundary in
         /// <c>TacticalBattleCoordinatorRuntime.PopulateResolvedDecisionsForSide</c>.
+        ///
+        /// Perf reorder (2026-05-20): the cached FinalStance matches the
+        /// live vanilla ordered stance ~99.98% of the time (smoke: 2 writes
+        /// in 13,050 group-iterations). The old structure paid the full
+        /// WlAllowsControl + OrderFrictionAllowsChange safety-gate cost
+        /// (~250us/group, dominated by WL iterating group.allattachedunits)
+        /// before checking whether a write was needed at all. We now run
+        /// the cheap value-compares first so the no-write fast path skips
+        /// the safety gates entirely. Gates still run on the (rare) write
+        /// path — same behavior, just deferred until a write is actually
+        /// in play.
         /// </summary>
         private static void ApplyResolvedDecisionFast(
             BattleUnits bunits,
@@ -188,15 +199,49 @@ namespace WhiskeyRealism.Patches
             Regiment group,
             TacticalResolvedGroupDecision resolved)
         {
+            // Cheap read — direct field access via compiled delegate.
+            int vanillaOrdered = ReadAiStanceOrdered(group);
+
+            // EARLY-OUT FAST PATH (no-write case, ~99.98% of iterations).
+            //
+            // When this isn't a charge override AND vanilla isn't currently
+            // racing into charge, the only way a write happens is through
+            // the non-charge branch — and that branch already screens for
+            // (Kind != Apply | FinalStance invalid | FinalStance ==
+            // vanillaOrdered | macro == 3). All of those are pure value
+            // compares over `resolved` + `vanillaOrdered` + `macro`. Hoist
+            // them here so we can bail before paying the safety-gate cost
+            // (WlAllowsControl iterates ~50-100 attached units per group;
+            // OrderFrictionAllowsChange touches a handful of live fields).
+            //
+            // Correctness: these are the exact same predicates the original
+            // non-charge branch enforces below. If they would have caused a
+            // bail there, they cause an equivalent bail here — the safety
+            // gates were never going to write anything anyway. We do NOT
+            // include AllowsVanillaWrites() / activeInHierarchy / gameObject
+            // null checks here because those need to happen AFTER the
+            // safety gates to keep MonitorOnly telemetry counting attempts
+            // gated by WL/order-friction (the original ordering).
+            if (!resolved.IsChargeOverride && vanillaOrdered != 4)
+            {
+                if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;
+                if (resolved.FinalStance < 0) return;
+                if (resolved.FinalStance == vanillaOrdered) return;
+                if (resolved.FinalStance == 4) return;
+                if (resolved.FinalStance > 3) return;
+                if (macro == 3) return;
+                // Falls through to the safety gates + non-charge write.
+            }
+            // Else: charge-override path, vanilla-raced-into-charge path,
+            // or non-charge write — all still need the safety gates.
+
             // Per-tick safety gates. WL/order-friction live on the apply
             // path because they consume Regiment state that can change
             // every vanilla tick (player control toggle, fresh queued
-            // orders, path interrupts). All are cheap relative to the
-            // resolver walks they replace.
+            // orders, path interrupts). Reached only when a write or
+            // charge-preserved telemetry log is actually likely.
             if (!WlAllowsControl(group)) return;
             if (!OrderFrictionAllowsChange(group)) return;
-
-            int vanillaOrdered = ReadAiStanceOrdered(group);
 
             // Charge-override branch. Cache decided WHETHER to demote at
             // gate-fire time; live reaction context is consulted here only
@@ -236,23 +281,20 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            // Vanilla-retreat live check: macro can flip to 3 between
-            // gate fires when morale collapses. The pre-compute skips
-            // doctrine and ledger when macro==3 (mirroring the legacy
-            // path), so the cached FinalStance for a now-retreating side
-            // is whatever the scorer would have written PRE-retreat. We
-            // must not overwrite vanilla's retreat with that stale
-            // decision. Charge override above is intentionally not
-            // gated on this — charge demote/preserve telemetry still
-            // matters during retreat.
-            if (macro == 3) return;
-
-            // Non-charge branch — write cached FinalStance.
+            // Non-charge write branch. When we entered via the early-out
+            // fast path (the common case), Kind/FinalStance/macro were
+            // already screened — these re-checks are cheap no-ops. When we
+            // entered via the IsChargeOverride && vanillaOrdered != 4
+            // fall-through (cache flagged charge override but vanilla
+            // raced out of charge), the early-out block was SKIPPED, so
+            // we must screen the same predicates the original non-charge
+            // branch enforced before writing the cached FinalStance.
             if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return;
             if (resolved.FinalStance < 0) return;
             if (resolved.FinalStance == vanillaOrdered) return;
             if (resolved.FinalStance == 4) return;
             if (resolved.FinalStance > 3) return;
+            if (macro == 3) return;
             if (!AllowsVanillaWrites()) return;
 
             var gameObject = UnityObject(group);
