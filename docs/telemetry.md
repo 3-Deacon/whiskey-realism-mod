@@ -64,10 +64,23 @@ Per-side scopes wrapped around the orchestrator hot path:
 | `tactical.snapshot-build.direct-child-cycle` | 5.0 ms | `TacticalBattleSnapshotBuilder.Build` from `DriveDirectChildCycle` |
 | `tactical.snapshot-build.evidence-bundle` | 5.0 ms | `ArmyEvidenceBuilder.Build` inside `Build` (walks `completeunitlist`) |
 | `tactical.snapshot-build.objective-records` | 5.0 ms | `BuildObjectiveRecordsFromBattle` inside `Build` (walks `completeunitlist`) |
+| `tactical.worker.cycle` | 50.0 ms | Full `TacticalOrchestratorWorkerAnalysis.Analyze` body on the worker thread (off main). Wide threshold because worker time doesn't affect frame budget — only flags genuinely-pathological cycles. |
+| `tactical.worker.cycle.publish` | 1.0 ms | Atomic `Interlocked.Exchange` decision-snapshot publish from worker. Should be sub-millisecond; any spike here indicates contention on the static `_current` field. |
 
 Each emission carries `durationMs` plus standard counters. `slow=true` fires when `durationMs >= threshold`.
 
 `TacticalHeavyGate` emissions (Gate category) additionally carry GC pressure data per side, captured at every gate decision: `gcCountAbs` (absolute `GC.CollectionCount(0)` at decision time) and `gcDelta` (collections since last gate decision on this side). Mono uses Boehm (non-generational) so a single counter suffices; if the runtime ever migrates, restore per-generation tracking. Reset per battle in `ResetRuntimeTickState`. Use `gcDelta` correlated with `snapshot-build.*` `durationMs` to determine whether frame hitches at high compression are allocation churn (high `gcDelta`) or algorithmic cost (high `durationMs` with low `gcDelta`).
+
+## Worker-thread events
+
+The Slice 2 orchestrator worker (see [`docs/tactical-orchestrator.md`](tactical-orchestrator.md) § "Threading architecture (2026-05-19)") emits two tactical event tags:
+
+| Event | Category | When it fires | Fields |
+|---|---|---|---|
+| `TacticalOrchestratorParityMismatch` | Gate | Worker-published `TacticalSideDecision` diverges from the synchronous orchestrator state for one of the first 20 cycles per `(battleSeq, alliance)`. Emits once per key, then comparator stops for that key. | `allianceId`, `battleSequence`, `syncIntent`, `workerIntent`, `syncMainEffort`, `workerMainEffort` |
+| `TacticalOrchestratorWorkerFault` | Health | Worker loop body caught an exception. Bounded to ≤64 emissions per session. | `exceptionType`, `message`, `cyclesProcessed` |
+
+`[TacticalOrchestratorWorkerParity] window-clean` is a non-event `OnceLog.Info` line written to `LogOutput.log` (not telemetry) when a side passes 20 clean comparisons.
 
 ## Smoke Checklist
 

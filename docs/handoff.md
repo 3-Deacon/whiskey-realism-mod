@@ -4,37 +4,58 @@
 
 ---
 
-## 🚧 Resume from cold context (2026-05-19)
+## 🚧 Resume from cold context (2026-05-19, updated)
 
-Hot-path optimization workstream — **Slice 1 + diagnostic completeness merged to main** at `6b9a410` (origin/main `6b9a410`). Slice 2 designed + planned but **not yet implemented**. If you're a fresh agent picking this up cold, read in this order:
+Hot-path optimization workstream — **Slice 1 + Slice 2 shadow both shipped.** Slice 1 is on `main`. Slice 2 lives on `feat/orchestrator-worker-thread` (13 commits, **not yet merged**); the worker shadow validates the threading machinery without realizing the p99 drop yet — see "Known gaps" below.
 
-| Step | Path | Why |
-|---|---|---|
-| 1 | `docs/superpowers/specs/2026-05-19-tactical-objective-records-single-pass-design.md` | **Slice 1 (shipped on main).** Single-pass aggregate refactor of `BuildObjectiveRecordsFromBattle`. Reduces that scope p99 from 11ms → 5.86ms. Parity test = 0 mismatches. Adversarial-review findings §14. |
-| 2 | `docs/superpowers/specs/2026-05-19-tactical-orchestrator-worker-thread-design.md` | **Slice 2 (designed, plan written, NOT IMPLEMENTED YET).** Moves orchestrator analysis to a dedicated background `Thread` (matching `TelemetryWriter` pattern). Drops main-thread `orchestrator-tick` p99 from 67ms → ≤10ms target. |
-| 3 | `docs/superpowers/plans/2026-05-19-tactical-orchestrator-worker-thread-implementation.md` | **The plan to execute next.** 17 bite-sized tasks with full code in every step. Self-reviewed for spec coverage + type consistency. Begin with `superpowers:subagent-driven-development` on a new branch off main. |
+**Slice status:**
 
-**Current state:**
-- Main: `6b9a410` = origin/main (in sync). Slice 1 (12 commits) + diagnostic completeness (3 commits) + Slice 2 spec/plan + fresh-context handoff prep all merged via fast-forward.
-- Local `dist/WhiskeyRealism.dll`: SHA-256 `d73f269041db6b8c94ff7e6f191a11eff2d919cbbbb3065ea4ed5e2e47ecda10` (built from `6b9a410` on main).
-- Deployed DLL on user's machine: SHA-256 `601aa125655f0d2c17cf37df8fc7d86ae7080542929ed00141337e7ed260d56b` (batch-1 instrumentation only — one revision BEHIND main; user wanted to avoid restarts). Redeploy from `dist/` when convenient.
-- Harness: **1253 PASS / 0 FAIL** on main.
-- No active feature branches. The `feat/hotpath-measurement` worktree and branch were cleaned up after the merge.
+| Slice | Status | Branch | Archived spec / plan + living doc |
+|---|---|---|---|
+| 1 — Single-pass objective records | Shipped on `main` at `6b9a410` (12 implementation + 3 diagnostic-completeness commits) | merged | Spec: [`superpowers/specs/archive/2026-05-19-tactical-objective-records-single-pass-design.md`](superpowers/specs/archive/2026-05-19-tactical-objective-records-single-pass-design.md). Plan: [`superpowers/plans/archive/2026-05-19-tactical-objective-records-single-pass-implementation.md`](superpowers/plans/archive/2026-05-19-tactical-objective-records-single-pass-implementation.md). |
+| 2 — Worker thread shadow | Shipped on `feat/orchestrator-worker-thread` (13 commits) | not yet merged | Spec: [`superpowers/specs/archive/2026-05-19-tactical-orchestrator-worker-thread-design.md`](superpowers/specs/archive/2026-05-19-tactical-orchestrator-worker-thread-design.md). Plan: [`superpowers/plans/archive/2026-05-19-tactical-orchestrator-worker-thread-implementation.md`](superpowers/plans/archive/2026-05-19-tactical-orchestrator-worker-thread-implementation.md). Living doc: [`tactical-orchestrator.md`](tactical-orchestrator.md) § "Threading architecture (2026-05-19)". |
 
-**Critical context that ISN'T in code or docs:**
-- User's empirical claim: vanilla GTCW does NOT exhibit the 5-7 second hitches at 20× compression; the mod does. This invalidated an earlier hypothesis that vanilla AI was the culprit. **The hitches are in our code.**
-- Diagnostic completeness pass shipped 2026-05-19: 67 of 67 Harmony patches now have `TelemetryPerf.Scope` wrappers (was 2 of 67). New AGENTS.md hygiene rule makes this non-negotiable for future patches.
-- The `tactical.patch.battle-group-stance` scope at p99=20ms is suspected to be one of several per-tick contributors. Slice 2's worker refactor restructures the cost profile by moving analysis off the main thread entirely; the wall-time-gate alternative was considered and rejected per the spec §2 "non-goals".
-- `TacticalUnitObservationAggregate` (built by Slice 1) is already a thread-safe immutable snapshot — Slice 2 builds on it.
+**Current artifact state:**
+- Branch `feat/orchestrator-worker-thread` deployed DLL SHA-256 `aedb75520756e0a90cf5da8becac87c207d0a5f976dad59aebe4a1e9dc6c1731` (1,437,696 bytes). `dist/` and BepInEx plugin copy match.
+- `main` HEAD `262a50d` at SHA-256 `d73f269041db6b8c94ff7e6f191a11eff2d919cbbbb3065ea4ed5e2e47ecda10` (Slice 1 + diagnostics post-merge).
+- Harness: **1258 PASS / 0 FAIL** on `feat/orchestrator-worker-thread` (+5 over 1253 baseline for `TacticalDecisionSnapshotTests`).
+- Slice 2 spec + plan archived to `docs/superpowers/{specs,plans}/archive/` on this branch.
 
-**Immediate next action (when resuming):**
-1. Branch off main: `git checkout -b feat/orchestrator-worker-thread main`.
-2. Set up worktree per `superpowers:using-git-worktrees` (and re-link `refs/` symlink — see `AGENTS.md`).
-3. Read the Slice 2 plan, then dispatch `superpowers:subagent-driven-development` to execute it.
-4. After plan completes: build → deploy → user smokes → analyze → either close Slice 2 or open Slice 3 (per-frame visibility cache for any remaining heavy patches).
-5. Merge to main when smoke confirms targets are met.
+**What Slice 2 actually shipped (non-skipping shadow):**
+- Worker thread (`TacticalOrchestratorWorker`) starts in `OnBattleStart`, stops in `OnBattleEnd`. Default-on behind `Enable Tactical Orchestrator Worker`.
+- Main thread captures `TacticalOrchestratorWorkerInput` each `Tick` and atomically enqueues to the worker via single-slot drop-old `Interlocked.Exchange`. Frozen `TacticalOrchestratorWorkerConfigSnapshot` prevents runtime config-flag races.
+- Worker runs `TacticalOrchestratorWorkerAnalysis.Analyze`, builds an immutable `TacticalDecisionSnapshot` (per-cycle alloc — pool dropped to avoid `Dictionary.Clear` / `TryGetValue` race), publishes via `Interlocked.Exchange` on a static `_current` field.
+- `BattleGroupStancePatch` calls `TacticalDecisionSnapshot.Current.TryGetGroupStance(...)` first; falls back to legacy decide-and-write path on miss.
+- Parity comparator (20-cycle window per side, intent-only — `CurrentIntent.PrimaryIntent` + `CurrentIntent.InferredMainEffort` + `AllianceId`) emits `TacticalOrchestratorParityMismatch` (Gate) on divergence and `[TacticalOrchestratorWorkerParity] window-clean` `OnceLog.Info` on a clean window.
+- Telemetry surfaces added: `tactical.worker.cycle` (50ms), `tactical.worker.cycle.publish` (1ms), `TacticalOrchestratorWorkerFault` (Health, bounded ≤64/session). See [`telemetry.md`](telemetry.md) § "Worker-thread events".
 
-**If you must reproduce the smoke data:** session `20260519-222744-843-p188588-601aa125655f` under `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/` is the baseline that shows `orchestrator-tick` p99=67ms, `battle-group-stance` p99=20.6ms, `telemetry.flush` p99=203ms.
+**Known gaps deferred to a follow-up gap-fill slice (critical for the p99 drop):**
+1. **Per-group stance** — `PopulateGroupDecisions` is a no-op because `TacticalUnitObservation` lacks the 7 vanilla `Regiment` fields `BattleGroupStancePatch.BuildGroupSector` reads (`groupowninrange`, `groupenemiesinrange`, `unitrange.enemystrengthwithinangle[]`, `flanksthreated`, `outflanked`, `covervalue`, `fortinrange`, `ClosestVisibleEnemy`). `TryGetGroupStance` always misses; legacy runs every tick. **No `battle-group-stance` p99 drop.**
+2. **Replan trigger** — `ArmyTickCycle.MaybeReplan` is heavily stateful and reads `ArmyOrchestrator.PlanAgeSeconds` / `CurrentPlan` / `Phase` / `HistoryGlobalOdds` / `MainEffortSector` — none in `TacticalOrchestratorWorkerInput`. Worker's `LastReplanTrigger` stays `ReplanTrigger.None`.
+3. **Skip-sync after parity window** — only safe once both above are populated. Until then `DriveTacticalCommanderSide(side0)` / `DriveTacticalCommanderSide(side1)` run every tick. **No `orchestrator-tick` p99 drop yet; per-tick CPU actually rises slightly because main double-captures.**
+
+**Slice 2 smoke checklist (Task 16, pending user run):**
+1. Close GTCW if running.
+2. Launch the same 26k-unit battle that produced baseline session `20260519-222744-843-p188588-601aa125655f` (the baseline showed `orchestrator-tick` p99=67ms, `battle-group-stance` p99=20.6ms, `telemetry.flush` p99=203ms).
+3. Keep `Logging Profile = TacticalTuning` (default).
+4. Play at 20× compression for 60-120s.
+5. Watch `BepInEx/LogOutput.log` for:
+   - `[TacticalOrchestrator] worker start failed` (should NOT appear)
+   - `[TacticalOrchestratorWorkerFault]` events (should NOT appear)
+   - `[TacticalOrchestratorParityMismatch]` (should be 0 — intent should match sync)
+   - `[TacticalOrchestratorWorkerParity] window-clean` (should appear once per side around tick 20)
+6. Pull the session sidecar (`<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session>/performance.jsonl`) and extract p50/p95/p99 for `tactical.worker.cycle`, `tactical.worker.cycle.publish`, `tactical.orchestrator-tick`, `tactical.patch.battle-group-stance`. First two are new. Last two are expected to be roughly unchanged or slightly higher than baseline because the shadow doesn't skip sync.
+
+**Critical context not in code:**
+- User's empirical claim: vanilla GTCW does NOT exhibit 5-7s hitches at 20× compression; the mod does. **The hitches are in our code.** Slice 2 shadow validates threading machinery; the eventual p99 drop awaits the gap-fill.
+- Diagnostic completeness pass shipped 2026-05-19: 67 of 67 Harmony patches now have `TelemetryPerf.Scope` wrappers. AGENTS.md hygiene rule makes this non-negotiable for future patches.
+- `TacticalUnitObservationAggregate` (Slice 1) is a thread-safe immutable snapshot — Slice 2's worker capture reuses it.
+
+**Next actions:**
+1. User runs the Slice 2 smoke checklist above.
+2. If smoke is clean: merge `feat/orchestrator-worker-thread` to `main`.
+3. Plan the gap-fill slice — extend `TacticalUnitObservation` with the 7 per-group sector fields, snapshot `ArmyOrchestrator` plan-state into the worker input, add a stateless `ArmyTickCycle.EvaluateReplanTrigger` overload, populate `PopulateGroupDecisions`, enable skip-sync after a clean parity window per side. That's where the actual `orchestrator-tick` p99 drop arrives.
+4. If smoke surfaces parity mismatches or worker faults: triage with the diagnostic fields on the relevant event, fix on `feat/orchestrator-worker-thread`, redeploy, re-smoke.
 
 ---
 
@@ -43,8 +64,8 @@ Hot-path optimization workstream — **Slice 1 + diagnostic completeness merged 
 | | |
 |---|---|
 | **Current shipped version** | **v0.2.2** — Slice A enrichment through #22 verified, tagged, and released on 2026-05-04. |
-| **Latest deployed main build** | Post-v0.2.2 plus the **2026-05-19 cumulative session** which shipped: depth-agnostic role cascade (`TacticalRoleCascade` + `TacticalLeafBrigadeMap`), `DirectChildDiscovery` synth-army root cause fix (vanilla command hierarchy via `GetAttachedUnitsReg` reverse-map — prior code used `transform.parent` which returned 0 for corps/divisions that are scene-graph siblings, causing the cascade to silently degrade to synthetic placeholders), envelopment cascade modes (`DoubleWing` + `DoubleWingEchelon`), reinforcement-opportunity doctrine + AttackNow standing-advantage fix, sector readiness doctrine (`TacticalSectorReadinessDoctrine`), phase progression doctrine (`TacticalPhaseProgressionDoctrine`) wired into `ArmyTickCycle`, sector-driven main-effort shift with 25% hysteresis, offensive replan triggers (`BreakthroughOpportunity` + `MainEffortLocalBreakthrough`), 4 new playbooks (BufordCavalryScreenDelay, ForrestCavalryRaid, MeetingEngagement, JohnstonFabianDelay — total catalog is now 18), playbook scoring envelopment bias + faction affinity bias (CSA commanders prefer CSA playbooks, Union prefer Union, Either/Generic playbooks unaffected), time-compression-aware heavy-gate cycle scaling (5x at 20x compression), battle-time / real-time decoupled phase age, BUG-TAC-015 `CheckOutOfFireRange` null guard, `IsPlayerProtected` blanket-alliance fix (so AI commands the player's brigade in W&L play), diagnostic telemetry (`TacticalCommandTreeProbeHealth`, `TacticalPlaybookFactionBias`, `TacticalPlayerProtected`), Plugin.cs description strings synchronized to actual default-on state, AGENTS.md retired the prior "default-off exception" for `#62 Enable Player Order Doctrine`. **Current deployed verification (2026-05-19):** console harness exits 0 with **1244 PASS / 0 FAIL**; `./build.sh` passes with 0 warnings / 0 errors; local `dist/WhiskeyRealism.dll` and deployed BepInEx plugin both match SHA-256 `7be7f596e341a548cf6cd590493ee38dd40eeb0fe5cd9e5c85e9f000e2423a6a`. |
-| **Active workstream** | **Fresh runtime smoke for `7be7f596…`: probe-then-exploit doctrine + faction bias + synth-army fix + W&L brigade-command unblock.** Verify in next session log: (a) `TacticalCommandTreeProbeHealth` reports `vanillaParent` count dominating `transformParent`/`noParent` (proves synth-army fix engages), (b) `TacticalPlayerProtected` fires only for player's directly-commanded unit + chain, NOT every CSA brigade (proves IsPlayerProtected fix), (c) `TacticalPlaybookFactionBias` shows `match=true` for both sides (CSA picks Lee/Jackson/Hood etc.; Union picks Sherman/Grant/McClellan), (d) `TacticalCommandPosture` writes finally include `attack-objective` reason (not just probe/screen/guard-flank) — proves phase progression advancing past Probe and cascade producing Main role to real brigades, (e) at 20x compression the `tactical.orchestrator-tick` p99 drops vs prior session's 45ms and the `max-interval-force` heavy-gate inter-arrival stretches per the cycle scaler. |
+| **Latest deployed main build** | `main` HEAD `262a50d` at SHA-256 `d73f269041db6b8c94ff7e6f191a11eff2d919cbbbb3065ea4ed5e2e47ecda10` (Slice 1 single-pass objective records + diagnostic-completeness pass; harness 1253 PASS / 0 FAIL post-merge). The pre-Slice 1 cumulative build `7be7f596…` (1244 PASS) shipped: depth-agnostic role cascade + envelopment modes (DoubleWing / DoubleWingEchelon), `DirectChildDiscovery` synth-army root cause fix (vanilla command hierarchy via `GetAttachedUnitsReg` reverse-map, not `transform.parent`), reinforcement-opportunity doctrine + AttackNow standing-advantage fix, sector readiness doctrine, phase progression doctrine wired into `ArmyTickCycle`, sector-driven main-effort shift with 25% hysteresis, offensive replan triggers (`BreakthroughOpportunity` / `MainEffortLocalBreakthrough`), 4 new playbooks (catalog now 18), playbook envelopment + faction-affinity bias, time-compression-aware heavy-gate cycle scaling, battle-time / real-time decoupled phase age, BUG-TAC-015 `CheckOutOfFireRange` null guard, `IsPlayerProtected` blanket-alliance fix (AI commands the player's brigade in W&L play), diagnostic telemetry (`TacticalCommandTreeProbeHealth`, `TacticalPlaybookFactionBias`, `TacticalPlayerProtected`). |
+| **Active workstream** | Slice 2 worker-thread shadow on `feat/orchestrator-worker-thread` at SHA-256 `aedb75520756e0a90cf5da8becac87c207d0a5f976dad59aebe4a1e9dc6c1731` (1,437,696 bytes; harness 1258 PASS / 0 FAIL). See [`tactical-orchestrator.md`](tactical-orchestrator.md) § "Threading architecture (2026-05-19)" for the architecture, "Known gaps" for the deferred work that gates the p99 drop, and the "Resume from cold context (2026-05-19, updated)" section above for the smoke checklist. |
 | **Tactical living docs** | [`docs/tactical-orchestrator.md`](tactical-orchestrator.md) covers orchestrator architecture, shipped slices, #61 current state, remaining command-role consumers, and the Tactical Tick Optimization section (heavy path throttling). [`docs/tactical-operations-ledger.md`](tactical-operations-ledger.md) covers the active operations-ledger command system, config contract, anchors, telemetry, smoke checklist, rollback, and ## Tactical Tick Optimization section. [`docs/tactical-terrain-facing-discipline.md`](tactical-terrain-facing-discipline.md) covers #60 behavior, config, smoke checklist, and rollback. [`docs/tactical-brain.md`](tactical-brain.md) preserves the old Slice B vanilla/evidence/weapons backlog. [`docs/scourge-of-war-ai-anchors.md`](scourge-of-war-ai-anchors.md) records the Scourge SDK comparison and tactical conversion state (now includes the 2026-05-18 SoW-aligned pre-contact movement translation); [`docs/strategic-recon-commitment.md`](strategic-recon-commitment.md) preserves the campaign recon/advance-guard backlog. Use these before archived specs/plans when answering "what is live now?" |
 | **Bug-fix workstream** | Cross-cutting vanilla bug fixes live under [`docs/bug-fixes/`](bug-fixes/). Tactical battlefield status changed: `BUG-TAC-005` has #46 guard implemented with denial smoke pending restart; `BUG-TAC-006` has runtime proof plus #56 reserve delay guard behind `Enable Tactical Reserve Order Delay Guard`; `BUG-TAC-010` has #53 pathfinder discipline and live first-fire markers; `BUG-TAC-011` has #54 default-on W&L operation null guard; `BUG-TAC-012` has #55 HQ auto-link guard behind `Enable Tactical HQ Link Guard`; `BUG-TAC-015` (added 2026-05-19) extends the existing `TacticalFallbackRetreatNullGuardPatch` to also Finalize `AIBattle.CheckOutOfFireRange` — that method has the same unguarded `unitrange.closestenemyunitfar` (GameObject) dereference pattern; default-on under the shared `Enable Tactical Fallback Retreat Null Guard` flag. |
 | **Repo** | [`3-Deacon/whiskey-realism-mod`](https://github.com/3-Deacon/whiskey-realism-mod) (public, MIT) |
