@@ -9,9 +9,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// produced by the worker thread. Read by main-thread Harmony patches
     /// via <see cref="Current"/>. Atomic publish via Interlocked.Exchange.
     ///
-    /// Pooled at the worker layer (TacticalOrchestratorWorker) to bound
-    /// per-cycle allocations. The previously-published snapshot stays in
-    /// _current until the worker swaps in the next one.
+    /// All fields are immutable after construction. Each worker cycle constructs
+    /// a fresh snapshot and atomically publishes it; the prior snapshot becomes
+    /// garbage once no reader holds a reference. This eliminates the mutable-pool
+    /// race where a reader's TryGetGroupStance could overlap a worker's Clear().
     ///
     /// Accessibility is internal because it composes internal types
     /// (TacticalSideDecision, CommandTreeSnapshot). All consumers live
@@ -19,41 +20,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     internal sealed class TacticalDecisionSnapshot
     {
+        // Note: _current = Empty evaluates to null at static-init time because the
+        // Empty property initializer hasn't run yet; Current.get's `?? Empty` papers
+        // over that race window until the static ctor completes.
         private static TacticalDecisionSnapshot _current = Empty;
 
         // Per-side global state
-        public TacticalSideDecision Side0 { get; private set; }
-        public TacticalSideDecision Side1 { get; private set; }
+        public TacticalSideDecision Side0 { get; }
+        public TacticalSideDecision Side1 { get; }
 
         // Cycle metadata
-        public int BattleSequence { get; private set; }
-        public long CycleId { get; private set; }
-        public float CapturedAtBattleHours { get; private set; }
-        public float CapturedAtRealtimeSeconds { get; private set; }
+        public int BattleSequence { get; }
+        public long CycleId { get; }
+        public float CapturedAtBattleHours { get; }
+        public float CapturedAtRealtimeSeconds { get; }
 
         // Per-unit lookup tables — separate dict per alliance for index density.
+        // Ownership transferred from constructor caller; never mutated after construction.
         private readonly Dictionary<int, TacticalGroupStanceDecision> _groupStance0;
         private readonly Dictionary<int, TacticalGroupStanceDecision> _groupStance1;
 
-        private TacticalDecisionSnapshot(int initialCapacity)
-        {
-            _groupStance0 = new Dictionary<int, TacticalGroupStanceDecision>(initialCapacity);
-            _groupStance1 = new Dictionary<int, TacticalGroupStanceDecision>(initialCapacity);
-        }
-
-        public static TacticalDecisionSnapshot Empty { get; } = new TacticalDecisionSnapshot(0);
-
         /// <summary>
-        /// Worker-thread-only: clear + repopulate this snapshot's contents from
-        /// fresh decisions. Followed by <see cref="Publish"/> to make it current.
+        /// Constructs an immutable snapshot. Caller transfers ownership of the
+        /// two dictionaries; they must not be mutated after this constructor returns.
+        /// Pass null for either dict to get an empty one allocated internally.
         /// </summary>
-        internal void PopulateForWorker(
+        public TacticalDecisionSnapshot(
             int battleSequence,
             long cycleId,
             float capturedAtBattleHours,
             float capturedAtRealtimeSeconds,
             TacticalSideDecision side0,
-            TacticalSideDecision side1)
+            TacticalSideDecision side1,
+            Dictionary<int, TacticalGroupStanceDecision> groupStance0,
+            Dictionary<int, TacticalGroupStanceDecision> groupStance1)
         {
             BattleSequence = battleSequence;
             CycleId = cycleId;
@@ -61,15 +61,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             CapturedAtRealtimeSeconds = capturedAtRealtimeSeconds;
             Side0 = side0;
             Side1 = side1;
-            _groupStance0.Clear();
-            _groupStance1.Clear();
+            _groupStance0 = groupStance0 ?? new Dictionary<int, TacticalGroupStanceDecision>(0);
+            _groupStance1 = groupStance1 ?? new Dictionary<int, TacticalGroupStanceDecision>(0);
         }
 
-        internal void SetGroupStance(int allianceId, int instanceId, TacticalGroupStanceDecision decision)
-        {
-            if (allianceId == 0) _groupStance0[instanceId] = decision;
-            else if (allianceId == 1) _groupStance1[instanceId] = decision;
-        }
+        public static TacticalDecisionSnapshot Empty { get; } = new TacticalDecisionSnapshot(
+            battleSequence: 0,
+            cycleId: 0,
+            capturedAtBattleHours: 0f,
+            capturedAtRealtimeSeconds: 0f,
+            side0: TacticalSideDecision.Empty,
+            side1: TacticalSideDecision.Empty,
+            groupStance0: null,
+            groupStance1: null);
 
         public bool TryGetGroupStance(int allianceId, int instanceId, out TacticalGroupStanceDecision decision)
         {
@@ -95,7 +99,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Atomic publish. Called from worker thread. Returns the prior snapshot
-        /// so the worker can put it back into the pool for reuse.
+        /// (which is now eligible for GC once no reader holds a reference).
         /// </summary>
         internal static TacticalDecisionSnapshot Publish(TacticalDecisionSnapshot next)
         {
@@ -104,18 +108,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Test-and-worker constructor — bypasses Empty to allow instantiation.
-        /// </summary>
-        internal static TacticalDecisionSnapshot CreateForPool(int initialCapacity)
-        {
-            return new TacticalDecisionSnapshot(initialCapacity);
-        }
-
-        /// <summary>
         /// Resets the static Current to Empty. Called from
         /// TacticalBattleCoordinator.ResetRuntimeTickState on battle end.
         /// </summary>
-        public static void ResetForBattleEnd()
+        internal static void ResetForBattleEnd()
         {
             Interlocked.Exchange(ref _current, Empty);
         }
