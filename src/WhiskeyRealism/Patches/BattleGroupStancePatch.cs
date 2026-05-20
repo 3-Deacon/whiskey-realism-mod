@@ -46,6 +46,14 @@ namespace WhiskeyRealism.Patches
 
         private static void Apply(AIBattle battle)
         {
+            // Worker-thread snapshot read path. Gated on EnableTacticalOrchestratorWorker
+            // and a non-Empty snapshot. While the worker's PopulateGroupDecisions remains
+            // a no-op (Task 11 partial), TryGetGroupStance will miss for every group, so
+            // this method returns false and the legacy decide-and-write path below runs
+            // unchanged. The plumbing is in place so the gap-fill follow-up can flip the
+            // worker to start producing real decisions without touching this patch again.
+            if (TryApplyFromDecisionSnapshot(battle)) return;
+
             int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
             var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
@@ -57,6 +65,78 @@ namespace WhiskeyRealism.Patches
                 var group = units[i] as Regiment;
                 if (group == null || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)) continue;
                 ApplyGroup(bunits, side, macro, group, i);
+            }
+        }
+
+        // Pre-computed decision read path. Returns true only when we owned the
+        // iteration (touched at least one group); otherwise legacy decide-and-write
+        // runs in full. Today (Task 11 partial) the worker produces no group
+        // decisions, so every TryGetGroupStance misses and this returns false.
+        // The apply branch still calls ApplyGroup -- the cached decision is not
+        // yet used to short-circuit the legacy decide step. That switch is the
+        // gap-fill follow-up once the worker emits meaningful decisions.
+        private static bool TryApplyFromDecisionSnapshot(AIBattle battle)
+        {
+            try
+            {
+                if (Plugin.EnableTacticalOrchestratorWorker == null
+                    || !Plugin.EnableTacticalOrchestratorWorker.Value) return false;
+
+                var snapshot = TacticalDecisionSnapshot.Current;
+                if (snapshot == null || snapshot == TacticalDecisionSnapshot.Empty) return false;
+
+                int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
+                int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
+                var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
+                var units = SafeList(battle, ref _unitsUsedField, "unitsused");
+                if (side < 0 || macro < 0 || bunits == null || units == null) return false;
+
+                int allianceId = SafeAllianceForSide(bunits, side);
+                if (allianceId < 0 || allianceId >= 2) return false;
+
+                bool appliedAny = false;
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var group = units[i] as Regiment;
+                    if (group == null) continue;
+                    if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)) continue;
+
+                    int instanceId;
+                    try { instanceId = group.GetInstanceID(); }
+                    catch { continue; }
+
+                    if (!snapshot.TryGetGroupStance(allianceId, instanceId, out _)) continue;
+
+                    // On hit: still run the full legacy ApplyGroup. The cached
+                    // decision is not yet consumed to skip the decide step --
+                    // gap-fill follow-up will switch this to an apply-only path
+                    // once the worker is producing real decisions.
+                    ApplyGroup(bunits, side, macro, group, i);
+                    appliedAny = true;
+                }
+
+                // Only claim ownership of the iteration if we actually touched a
+                // group. If no decisions matched (typical today), let the legacy
+                // path own the iteration so behavior is identical.
+                return appliedAny;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static int SafeAllianceForSide(BattleUnits bunits, int side)
+        {
+            try
+            {
+                if (bunits == null || bunits.alliance == null) return -1;
+                if (side < 0 || side >= bunits.alliance.Length) return -1;
+                return bunits.alliance[side];
+            }
+            catch
+            {
+                return -1;
             }
         }
 
