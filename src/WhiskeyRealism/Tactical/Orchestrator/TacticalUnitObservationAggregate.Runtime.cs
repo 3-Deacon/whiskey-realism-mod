@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -29,126 +28,37 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static FieldInfo _unitRangeField;
         private static int _captureFailureLogged;  // OnceLog gate
 
-        // Active-set scoping: rotating-bucket refresh for inactive own-side units.
-        // After each Capture, _bucketCounter advances so the next call walks the
-        // next 1/8th of the inactive remainder. At 20× compression and ~10s
-        // heavy-gate intervals, each inactive own-side unit refreshes roughly
-        // every 80 seconds of game time — plenty fresh for reserves.
-        private const int InactiveBucketCount = 8;
-        private static int _bucketCounter;
-
-        // Scratch hashset for active-set membership lookup. Held as a field so
-        // we don't allocate on every Capture; cleared at the top of each call.
-        private readonly HashSet<int> _activeSetIds = new HashSet<int>();
-
         /// <summary>
-        /// Legacy entry — resolves the per-side AIBattle via static lookup
-        /// (BattleUnits singleton) and forwards to the AIBattle-aware overload.
+        /// Single-walk capture. Walks <c>BattleUnits.completeunitlist</c>
+        /// once, populating allied-specific fields (visibility, objective,
+        /// waypoint, fatigue/ammo) only when the candidate's
+        /// <c>reg.alliance == allianceId</c>. Enemy units get cheap
+        /// fields (position, strength, unittyp, routed flag,
+        /// permanently-detached flag) only — matching the pre-refactor
+        /// cost profile where visibility logic was gated by
+        /// <c>IsUsableOwnUnit</c>.
         /// </summary>
         public IObservationSource Capture(int allianceId)
-        {
-            return Capture(allianceId, ResolveBattleUnitsSingleton());
-        }
-
-        /// <summary>
-        /// Active-set-scoped capture. Replaces the O(N) walk of
-        /// <c>BattleUnits.completeunitlist</c> with two-tier iteration:
-        ///   (1) Walk <c>AIBattle.unitsused</c> for the side that matches
-        ///       <paramref name="allianceId"/>. This is vanilla's own active
-        ///       set per cycle — units actively giving/receiving AI orders.
-        ///       These get a fresh observation every Capture.
-        ///   (2) Walk a rotating 1/<see cref="InactiveBucketCount"/> slice of
-        ///       <c>BattleUnits.completeunitlist</c> for own-side units NOT in
-        ///       the active set. These reserves / inactive units get refreshed
-        ///       on a slower cadence so a steady-state inactive brigade is
-        ///       observed roughly every <see cref="InactiveBucketCount"/>
-        ///       heavy-gate fires.
-        ///
-        /// Enemy units are no longer captured — <see cref="EnemyIndices"/> has
-        /// zero runtime consumers (all per-own-unit enemy state is captured
-        /// inline via <c>ClosestVisibleEnemy(reg)</c>). The aggregate-path's
-        /// own-side observations still carry <c>VisibleEnemy*</c> fields, so
-        /// downstream consumers (<see cref="TacticalVisionRuntimeAdapter"/>,
-        /// <see cref="TacticalOrchestratorWorkerAnalysis"/>) see no change.
-        ///
-        /// Fallback: when <c>unitsused</c> is null/empty (e.g. deployment or
-        /// a degenerate state), the implementation falls through to the legacy
-        /// single-walk of <c>completeunitlist</c> for own-side units so we
-        /// never publish an empty aggregate when units exist.
-        /// </summary>
-        public IObservationSource Capture(int allianceId, BattleUnits bunits)
         {
             _units.Clear();
             _alliedIndices.Clear();
             _enemyIndices.Clear();
-            _activeSetIds.Clear();
             _capturedForAlliance = allianceId;
             try
             {
                 int shift = ReadCommandHierarchyShift();
-                var unitsUsed = ResolveUnitsUsedForAlliance(bunits, allianceId);
-                var complete = BattleUnits.completeunitlist as IList;
-
-                if (unitsUsed != null && unitsUsed.Count > 0)
+                var raw = BattleUnits.completeunitlist as IList;
+                if (raw == null) return this;
+                for (int i = 0; i < raw.Count; i++)
                 {
-                    // (1) Active set — fresh every Capture.
-                    for (int i = 0; i < unitsUsed.Count; i++)
-                    {
-                        var reg = unitsUsed[i] as Regiment;
-                        if (reg == null) continue;
-                        // unitsused for a given AIBattle is alliance-scoped by
-                        // construction; double-check defensively.
-                        if (reg.alliance != allianceId) continue;
-                        int instanceId = SafeInstanceId(reg);
-                        if (instanceId != 0)
-                        {
-                            if (!_activeSetIds.Add(instanceId)) continue;  // duplicate guard
-                        }
-                        var obs = CaptureUnit(reg, isOwn: true, commandHierarchyShift: shift);
-                        _units.Add(obs);
-                        _alliedIndices.Add(_units.Count - 1);
-                    }
-
-                    // (2) Rotating bucket — refresh 1/Nth of inactive own-side
-                    // remainder so reserves still get periodic observations.
-                    if (complete != null && complete.Count > 0)
-                    {
-                        int bucketIndex = (int)((uint)_bucketCounter % InactiveBucketCount);
-                        for (int i = bucketIndex; i < complete.Count; i += InactiveBucketCount)
-                        {
-                            var reg = complete[i] as Regiment;
-                            if (reg == null) continue;
-                            if (reg.alliance != allianceId) continue;
-                            int instanceId = SafeInstanceId(reg);
-                            // Already captured above? Skip.
-                            if (instanceId != 0 && _activeSetIds.Contains(instanceId)) continue;
-                            var obs = CaptureUnit(reg, isOwn: true, commandHierarchyShift: shift);
-                            _units.Add(obs);
-                            _alliedIndices.Add(_units.Count - 1);
-                            if (instanceId != 0) _activeSetIds.Add(instanceId);
-                        }
-                        // Advance the bucket pointer with wrap-around. uint cast
-                        // makes the modulo work cleanly even after long sessions.
-                        _bucketCounter = unchecked(_bucketCounter + 1);
-                    }
-                }
-                else
-                {
-                    // Fallback: unitsused unavailable (deployment edge case, or
-                    // reflection couldn't resolve the per-side AIBattle). Walk
-                    // completeunitlist once for own-side units — matches the
-                    // pre-refactor behavior so we never publish an empty
-                    // aggregate when units exist.
-                    if (complete == null) return this;
-                    for (int i = 0; i < complete.Count; i++)
-                    {
-                        var reg = complete[i] as Regiment;
-                        if (reg == null) continue;
-                        if (reg.alliance != allianceId) continue;
-                        var obs = CaptureUnit(reg, isOwn: true, commandHierarchyShift: shift);
-                        _units.Add(obs);
-                        _alliedIndices.Add(_units.Count - 1);
-                    }
+                    var reg = raw[i] as Regiment;
+                    if (reg == null) continue;
+                    bool isOwn = reg.alliance == allianceId;
+                    var obs = CaptureUnit(reg, isOwn, shift);
+                    _units.Add(obs);
+                    int idx = _units.Count - 1;
+                    if (isOwn) _alliedIndices.Add(idx);
+                    else _enemyIndices.Add(idx);
                 }
             }
             catch (Exception e)
@@ -161,133 +71,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
             return this;
-        }
-
-        // ---- Active-set resolution ----
-
-        private static FieldInfo _aibattleArrayField;
-        private static FieldInfo _allianceArrayField;
-        private static FieldInfo _unitsUsedField;
-
-        /// <summary>
-        /// Resolves <c>BattleUnits.aibattle[side].unitsused</c> for the side
-        /// whose <c>bunits.alliance[side] == allianceId</c>. Returns null on
-        /// any reflection / null-traversal failure so Capture falls back to
-        /// the legacy completeunitlist walk.
-        /// </summary>
-        private static IList ResolveUnitsUsedForAlliance(BattleUnits bunits, int allianceId)
-        {
-            try
-            {
-                if (bunits == null) return null;
-                if (_aibattleArrayField == null)
-                    _aibattleArrayField = AccessTools.Field(typeof(BattleUnits), "aibattle");
-                if (_allianceArrayField == null)
-                    _allianceArrayField = AccessTools.Field(typeof(BattleUnits), "alliance");
-                if (_aibattleArrayField == null || _allianceArrayField == null) return null;
-
-                var alliance = _allianceArrayField.GetValue(bunits) as int[];
-                var aibattleArray = _aibattleArrayField.GetValue(bunits) as Array;
-                if (alliance == null || aibattleArray == null) return null;
-
-                int side = -1;
-                for (int s = 0; s < alliance.Length && s < aibattleArray.Length; s++)
-                {
-                    if (alliance[s] == allianceId) { side = s; break; }
-                }
-                if (side < 0) return null;
-
-                var aib = aibattleArray.GetValue(side) as AIBattle;
-                if (aib == null) return null;
-
-                if (_unitsUsedField == null)
-                    _unitsUsedField = AccessTools.Field(typeof(AIBattle), "unitsused");
-                if (_unitsUsedField == null) return null;
-                return _unitsUsedField.GetValue(aib) as IList;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static BattleUnits _cachedBattleUnits;
-
-        private static FieldInfo _aibattleBunitsField;
-
-        /// <summary>
-        /// BattleUnits is a singleton component on the GameController
-        /// GameObject (decompile line 79142 / 188815). Reach it through
-        /// the static completeunitlist's owning regiment as a side path
-        /// (Regiment.aiassignedref → AIBattle.bunits), or via
-        /// UnityEngine.Object.FindObjectOfType as the fallback. Cached
-        /// because GameController persists for the battle lifetime.
-        /// </summary>
-        private static BattleUnits ResolveBattleUnitsSingleton()
-        {
-            try
-            {
-                if (_cachedBattleUnits != null) return _cachedBattleUnits;
-                // Cheapest: walk the first non-null regiment's aiassignedref
-                // (decompile line 110778: public AIBattle aiassignedref on
-                // Regiment) and read its .bunits. Many regiments don't carry
-                // an aiassignedref (only those AI-assigned to a battle do), so
-                // we may have to walk a few entries before finding one.
-                var list = BattleUnits.completeunitlist;
-                if (list != null)
-                {
-                    if (_aibattleBunitsField == null)
-                        _aibattleBunitsField = AccessTools.Field(typeof(AIBattle), "bunits");
-                    if (_aibattleBunitsField != null)
-                    {
-                        for (int i = 0; i < list.Count; i++)
-                        {
-                            var reg = list[i];
-                            if (reg == null) continue;
-                            try
-                            {
-                                var aibRef = reg.aiassignedref;
-                                if (aibRef == null) continue;
-                                var bunits = _aibattleBunitsField.GetValue(aibRef) as BattleUnits;
-                                if (bunits != null) { _cachedBattleUnits = bunits; return bunits; }
-                            }
-                            catch { }
-                        }
-                    }
-                }
-                // Fallback — slower but reliable.
-                var found = UnityEngine.Object.FindObjectOfType<BattleUnits>();
-                if (found != null) _cachedBattleUnits = found;
-                return found;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static int SafeInstanceId(Regiment reg)
-        {
-            try
-            {
-                if (reg == null) return 0;
-                var go = ((Component)reg).gameObject;
-                return go != null ? go.GetInstanceID() : 0;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        /// <summary>
-        /// Clears the cached BattleUnits singleton. Called from
-        /// <c>TacticalBattleCoordinator.ResetRuntimeTickState</c> on battle
-        /// end so the next battle resolves a fresh BattleUnits instance.
-        /// </summary>
-        internal static void ResetBattleUnitsCache()
-        {
-            _cachedBattleUnits = null;
         }
 
         private TacticalUnitObservation CaptureUnit(Regiment reg, bool isOwn, int commandHierarchyShift)

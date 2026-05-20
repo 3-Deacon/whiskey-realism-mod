@@ -1961,9 +1961,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // Tasks 10/11: clear aggregate pool and parity window state for new battle
             // (global singletons — outside per-side loop)
             try { TacticalUnitObservationAggregate.Shared.ClearForBattleEnd(); } catch { }
-            // Active-set scoping: drop the cached BattleUnits singleton so the
-            // next battle's Capture resolves a fresh instance via aibattleref.
-            try { TacticalUnitObservationAggregate.ResetBattleUnitsCache(); } catch { }
             try { TacticalBattleSnapshotBuilder.ClearParityState(); } catch { }
             // Slice 2: reset the worker decision snapshot so stale per-cycle data
             // from the previous battle never leaks to readers in the next one.
