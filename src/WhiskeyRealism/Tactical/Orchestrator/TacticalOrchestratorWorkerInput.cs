@@ -95,6 +95,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // config-flag mutation.
         public TacticalOrchestratorWorkerConfigSnapshot Config { get; }
 
+        // Gap-fill chunk 3 (2026-05-19): per-side ArmyOrchestrator plan-state
+        // snapshot, captured on main. Worker reads HasPlan / CurrentPlan
+        // into TacticalSideDecision instead of leaving them at defaults. The
+        // worker still does NOT replan — LastReplanTrigger stays
+        // ReplanTrigger.None — but the worker's published decisions now
+        // expose whatever plan the synchronous tick has fielded.
+        public TacticalArmyPlanStateSnapshot Side0PlanState { get; }
+        public TacticalArmyPlanStateSnapshot Side1PlanState { get; }
+
         public TacticalOrchestratorWorkerInput(
             int battleSequence,
             int playerAllianceId,
@@ -121,7 +130,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int side0AllianceId = -1,
             int side1AllianceId = -1,
             int side0MacroAi = -1,
-            int side1MacroAi = -1)
+            int side1MacroAi = -1,
+            TacticalArmyPlanStateSnapshot side0PlanState = default,
+            TacticalArmyPlanStateSnapshot side1PlanState = default)
         {
             BattleSequence = battleSequence;
             PlayerAllianceId = playerAllianceId;
@@ -149,6 +160,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Side1AllianceId = side1AllianceId;
             Side0MacroAi = side0MacroAi;
             Side1MacroAi = side1MacroAi;
+            Side0PlanState = side0PlanState;
+            Side1PlanState = side1PlanState;
         }
 
         private static readonly IReadOnlyDictionary<int, int> EmptyInstanceToSectorMap =

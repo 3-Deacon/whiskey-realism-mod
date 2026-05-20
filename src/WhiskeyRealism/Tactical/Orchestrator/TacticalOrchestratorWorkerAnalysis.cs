@@ -111,6 +111,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             CommandTreeSnapshot commandTree = sideIdx == 0
                 ? input.Side0CommandTree
                 : input.Side1CommandTree;
+            // Gap-fill chunk 3: captured plan state from main. When HasPlan is
+            // false, the snapshot is Empty (default plan, sector=-1) and the
+            // worker publishes hasPlan=false / currentPlan=default — same as
+            // pre-chunk-3 behavior. When HasPlan is true, the worker forwards
+            // the sync-tick's plan into TacticalSideDecision.
+            TacticalArmyPlanStateSnapshot planState = sideIdx == 0
+                ? input.Side0PlanState
+                : input.Side1PlanState;
 
             // Alliance resolution: prefer the roster entry's recorded alliance
             // (authoritative — set when commanders are discovered from vanilla
@@ -176,14 +184,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             return new TacticalSideDecision(
                 allianceId: allianceId,
-                currentPlan: default,                        // deferred: needs plan-state in input
+                currentPlan: planState.CurrentPlan,            // chunk 3: captured from ArmyOrchestrator
                 currentIntent: intent,
                 commandTree: commandTree,
                 strategicIntent: strategicIntent,
                 forceAvailability: force,
                 commanderPersonality: personality,
-                lastReplanTrigger: ReplanTrigger.None,        // deferred: needs plan-state + replan clock
-                hasPlan: false);                              // deferred: needs plan-state in input
+                lastReplanTrigger: ReplanTrigger.None,        // deferred: needs stateless EvaluateReplanTrigger
+                hasPlan: planState.HasPlan);                  // chunk 3: captured from ArmyOrchestrator
         }
 
         /// <summary>

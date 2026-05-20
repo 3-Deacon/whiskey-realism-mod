@@ -810,7 +810,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         //   CommanderPersonality (via FindArmyEntry).
         //
         // Skipped fields (worker doesn't populate, comparator skips):
-        //   HasPlan, LastReplanTrigger, CurrentPlan, StrategicIntent text.
+        //   LastReplanTrigger, StrategicIntent text.
+        //   (Gap-fill chunk 3 (2026-05-19): HasPlan + CurrentPlan now populated
+        //   on both sides; comparator covers HasPlan + CurrentPlan.MainEffortSector
+        //   when HasPlan is true. PlanAgeSeconds drifts continuously and stays
+        //   out of the comparator.)
         //
         // Skipped field — ForceAvailability: ArmyOrchestrator does NOT cache the
         // last ArmyEvidenceBuilder.Bundle that the worker used for its force
@@ -829,16 +833,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ? entry.PersonalityVector
                     : side.Army.CommanderPersonality;
 
+                // Gap-fill chunk 3: capture sync-side plan state so the
+                // comparator's two inputs populate HasPlan + CurrentPlan
+                // identically. Without this the worker's chunk-3 population
+                // would fire a parity mismatch on every cycle for any side
+                // with a plan.
+                bool syncHasPlan = side.Army.HasPlan;
+                var syncPlan = syncHasPlan ? side.Army.CurrentPlan : default(TacticalBattlePlan);
+
                 return new TacticalSideDecision(
                     allianceId: side.AllianceId,
-                    currentPlan: default,                                      // skipped
+                    currentPlan: syncPlan,                                     // chunk 3
                     currentIntent: side.Army.CurrentIntentModel,
                     commandTree: side.Army.CurrentCommandTree ?? CommandTreeSnapshot.Empty,
                     strategicIntent: default,                                  // skipped (text fields)
                     forceAvailability: new ForceAvailabilitySnapshot(0f, 0f),  // skipped (see note above)
                     commanderPersonality: personality,
                     lastReplanTrigger: ReplanTrigger.None,                     // skipped
-                    hasPlan: false);                                            // skipped
+                    hasPlan: syncHasPlan);                                     // chunk 3
             }
             catch
             {
@@ -885,8 +897,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // Confidence/age skipped because floating-point ordering may drift.
             if (a.CurrentIntent.PrimaryIntent != b.CurrentIntent.PrimaryIntent) return false;
             if (a.CurrentIntent.InferredMainEffort != b.CurrentIntent.InferredMainEffort) return false;
-            // Skipped (worker doesn't populate yet — gap-fill follow-up):
-            //   HasPlan, LastReplanTrigger, CurrentPlan, StrategicIntent text fields,
+            // Gap-fill chunk 3 (2026-05-19): plan-state parity coverage.
+            // HasPlan must match; when both are HasPlan==true we also compare
+            // the plan's MainEffortSector (stable, integer-valued). PlanId /
+            // Phase / AgeSeconds intentionally skipped — phase progression and
+            // age drift on the sync side every tick, and PlanId is set on
+            // replan which the worker doesn't drive (LastReplanTrigger still
+            // deferred).
+            if (a.HasPlan != b.HasPlan) return false;
+            if (a.HasPlan && b.HasPlan)
+            {
+                if (a.CurrentPlan.MainEffortSector != b.CurrentPlan.MainEffortSector) return false;
+            }
+            // Skipped (worker doesn't populate yet — remaining gap-fills):
+            //   LastReplanTrigger, StrategicIntent text fields,
             //   ForceAvailability (Army doesn't cache the bundle; see SnapshotSideDecisionForParity).
             return true;
         }
@@ -1617,6 +1641,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 CommanderRosterEntry entry0 = FindArmyEntry(side0);
                 CommanderRosterEntry entry1 = FindArmyEntry(side1);
 
+                // Gap-fill chunk 3: snapshot ArmyOrchestrator plan state for
+                // each side. Each side may be null (suppressed). Plan state is
+                // value-typed; default() == Empty when no plan is fielded.
+                var planState0 = CaptureArmyPlanState(side0);
+                var planState1 = CaptureArmyPlanState(side1);
+
                 var config = BuildWorkerConfigSnapshot();
 
                 return new TacticalOrchestratorWorkerInput(
@@ -1645,7 +1675,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     side0AllianceId: allianceA,
                     side1AllianceId: allianceB,
                     side0MacroAi: macro0,
-                    side1MacroAi: macro1);
+                    side1MacroAi: macro1,
+                    side0PlanState: planState0,
+                    side1PlanState: planState1);
             }
             catch (Exception e)
             {
@@ -1755,6 +1787,43 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 snap = TacticalBattleRuntimeSnapshot.Empty;
                 bundle = default(ArmyEvidenceBuilder.Bundle);
+            }
+        }
+
+        /// <summary>
+        /// Gap-fill chunk 3: snapshot the current <see cref="ArmyOrchestrator"/>
+        /// plan-state for a side into an immutable
+        /// <see cref="TacticalArmyPlanStateSnapshot"/>. Reads happen on the
+        /// main thread (Plugin/Unity safe), then the worker reads the snapshot
+        /// later off-thread.
+        ///
+        /// Returns <see cref="TacticalArmyPlanStateSnapshot.Empty"/> when the
+        /// side is null/suppressed or has no plan. All reads are try/catch
+        /// guarded per runtime safety; reflection-style failures degrade to
+        /// Empty rather than throwing from the capture path.
+        /// </summary>
+        private static TacticalArmyPlanStateSnapshot CaptureArmyPlanState(TacticalBattleOrchestrator side)
+        {
+            try
+            {
+                if (side == null || side.Army == null) return TacticalArmyPlanStateSnapshot.Empty;
+                var army = side.Army;
+                bool hasPlan = army.HasPlan;
+                if (!hasPlan) return TacticalArmyPlanStateSnapshot.Empty;
+                var plan = army.CurrentPlan;
+                return new TacticalArmyPlanStateSnapshot(
+                    hasPlan: true,
+                    currentPlan: plan,
+                    planAgeSeconds: army.PlanAgeSeconds,
+                    phaseAgeSeconds: army.PhaseAgeSeconds,
+                    historyGlobalOdds: army.HistoryGlobalOdds,
+                    mainEffortSector: plan.MainEffortSector);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] CaptureArmyPlanState failed: "
+                    + e.GetType().Name + " " + e.Message);
+                return TacticalArmyPlanStateSnapshot.Empty;
             }
         }
 
