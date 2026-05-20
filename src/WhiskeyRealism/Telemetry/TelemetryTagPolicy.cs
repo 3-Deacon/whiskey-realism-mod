@@ -104,6 +104,8 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalObjectiveMove", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveMutation", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveRecordsParityMismatch", TelemetryCategory.Gate);
+            AddTactical("TacticalOrchestratorParityMismatch", TelemetryCategory.Gate);
+            AddTactical("TacticalOrchestratorWorkerFault", TelemetryCategory.Health);
             AddTactical("TacticalOrchestrator", TelemetryCategory.State);
             AddTactical("TacticalPathfinderDiscipline", TelemetryCategory.Gate);
             AddTactical("TacticalHqLinkGuard", TelemetryCategory.Gate);
