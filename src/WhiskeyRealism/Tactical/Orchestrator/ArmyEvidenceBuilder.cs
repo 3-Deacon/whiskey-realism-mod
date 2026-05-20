@@ -152,18 +152,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Walks the per-side active set (<c>AIBattle.unitsused</c>) and
+        /// Walks BattleUnits.completeunitlist filtered to the given side and
         /// returns the average fatigue and ammo01 across combat regiments.
-        /// Active-set scoping (was a full completeunitlist walk): the readiness
-        /// signal that feeds HoldFatigued is about the units actively engaged
-        /// or moving, not deep reserves still parked off-map. Inactive reserves
-        /// would only dilute the average toward "fresh/well-supplied" anyway.
-        /// Falls back to <c>completeunitlist</c> on any reflection failure or
-        /// when <c>unitsused</c> is empty (e.g. deployment edge cases) so the
-        /// signal is never lost. Officer/HQ units are skipped (noisy values);
-        /// dead/empty regiments are skipped (would dilute toward 0/0). Defaults
-        /// to 0.2 fatigue (fresh) and 0.9 ammo (well-supplied) on failure to
-        /// avoid spurious HoldFatigued decisions.
+        /// Officer/HQ units are skipped (they have noisy values). Defaults to
+        /// 0.2 fatigue (fresh) and 0.9 ammo (well-supplied) on any reflection
+        /// failure to avoid spurious HoldFatigued decisions.
         /// </summary>
         private static void EstimateOwnAverages(BattleUnits bunits, int side, out float avgFatigue01, out float avgAmmo01)
         {
@@ -174,15 +167,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int sideAlliance = SafeAlliance(bunits, side);
                 if (sideAlliance < 0) return;
 
-                // Prefer per-side active set; fall back to completeunitlist if
-                // unitsused is null/empty or reflection fails.
-                IList units = SafeGetUnitsUsedForSide(bunits, side);
-                bool unitsUsedAvailable = units != null && units.Count > 0;
-                if (!unitsUsedAvailable)
-                {
-                    units = SafeGetCompleteUnitList();
-                    if (units == null || units.Count == 0) return;
-                }
+                var units = SafeGetCompleteUnitList();
+                if (units == null || units.Count == 0) return;
 
                 float fatigueSum = 0f;
                 float ammoSum = 0f;
@@ -192,8 +178,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     var unit = units[i] as Regiment;
                     if (unit == null) continue;
-                    // unitsused is alliance-scoped by construction; the
-                    // completeunitlist fallback still needs the alliance filter.
                     if (unit.alliance != sideAlliance) continue;
                     // Skip officers/HQ — they have noisy fatigue/ammo. Combat
                     // units (Infantry=0, Cavalry=1, Artillery=2, Skirmisher=3)
@@ -224,35 +208,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 avgFatigue01 = 0.2f;
                 avgAmmo01 = 0.9f;
-            }
-        }
-
-        // Active-set scoping: per-side AIBattle.unitsused accessor. Resolves
-        // bunits.aibattle[side].unitsused via reflection (caches FieldInfo).
-        // Returns null on any failure so callers fall back to completeunitlist.
-        private static FieldInfo _aibattleArrayFieldCache;
-        private static FieldInfo _unitsUsedFieldCache;
-
-        private static IList SafeGetUnitsUsedForSide(BattleUnits bunits, int side)
-        {
-            try
-            {
-                if (bunits == null || side < 0) return null;
-                if (_aibattleArrayFieldCache == null)
-                    _aibattleArrayFieldCache = AccessTools.Field(typeof(BattleUnits), "aibattle");
-                if (_aibattleArrayFieldCache == null) return null;
-                var arr = _aibattleArrayFieldCache.GetValue(bunits) as Array;
-                if (arr == null || side >= arr.Length) return null;
-                var aib = arr.GetValue(side) as AIBattle;
-                if (aib == null) return null;
-                if (_unitsUsedFieldCache == null)
-                    _unitsUsedFieldCache = AccessTools.Field(typeof(AIBattle), "unitsused");
-                if (_unitsUsedFieldCache == null) return null;
-                return _unitsUsedFieldCache.GetValue(aib) as IList;
-            }
-            catch
-            {
-                return null;
             }
         }
 
