@@ -19,6 +19,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static FieldInfo _commandHierarchyShiftField;
         private static FieldInfo _fatigueField;
         private static FieldInfo _ammoField;
+        private static FieldInfo _groupEnemiesInRangeField;
+        private static FieldInfo _flanksThreatedField;
+        private static FieldInfo _outflankedField;
+        private static FieldInfo _coverValueField;
+        private static FieldInfo _fortInRangeField;
+        private static FieldInfo _stanceOrderedField;
+        private static FieldInfo _unitRangeField;
         private static int _captureFailureLogged;  // OnceLog gate
 
         /// <summary>
@@ -112,8 +119,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool hasVisibleEnemy = false;
             bool hasVisibleEnemyPosition = false;
             float visibleEnemyX = 0f, visibleEnemyZ = 0f;
+            int visibleEnemyUnittyp = -1;
+            string visibleEnemyName = string.Empty;
+            bool visibleEnemyRouted = false;
+            bool visibleEnemyPermanentlyDetached = false;
             float fatigue01 = 0.2f;
             float ammo01 = 0.9f;
+            // Gap-fill chunk 1: per-group sector fields (own-side only).
+            float groupEnemiesInRange = 0f;
+            float groupAngleEnemyStrength = 0f;
+            bool groupFlankRisk = false;
+            bool groupStrongPoint = false;
+            int groupVanillaStanceOrdered = -1;
 
             if (isOwn)
             {
@@ -172,19 +189,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         hasVisibleEnemy = true;
                         try { visibleEnemyStrength = TacticalVisionRuntimeAdapter.SafeStrength(enemy); }
                         catch { visibleEnemyStrength = 0f; }
+                        // Gap-fill chunk 1: closest-enemy metadata for
+                        // TacticalGroupSectorEstimator.IsVisibleLineContact.
+                        // unittyp gates formed-line detection; name carries the
+                        // "skirm" substring that rejects skirmisher contact;
+                        // routed/permanentlydetached also gate line contact.
+                        try { visibleEnemyUnittyp = enemy.unittyp; }
+                        catch { visibleEnemyUnittyp = -1; }
+                        try { visibleEnemyRouted = enemy.isrouted || enemy.markedforrout; }
+                        catch { visibleEnemyRouted = false; }
+                        try { visibleEnemyPermanentlyDetached = enemy.permanentlydetached; }
+                        catch { visibleEnemyPermanentlyDetached = false; }
                         try
                         {
                             var ego = ((Component)enemy).gameObject;
-                            if (ego != null && ego.transform != null)
+                            if (ego != null)
                             {
-                                var p = ego.transform.position;
-                                if (!float.IsNaN(p.x) && !float.IsNaN(p.z) &&
-                                    !float.IsInfinity(p.x) && !float.IsInfinity(p.z) &&
-                                    !(Math.Abs(p.x) < 0.01f && Math.Abs(p.z) < 0.01f))
+                                try
                                 {
-                                    hasVisibleEnemyPosition = true;
-                                    visibleEnemyX = p.x;
-                                    visibleEnemyZ = p.z;
+                                    string nm = ego.name;
+                                    visibleEnemyName = nm ?? string.Empty;
+                                }
+                                catch { visibleEnemyName = string.Empty; }
+                                if (ego.transform != null)
+                                {
+                                    var p = ego.transform.position;
+                                    if (!float.IsNaN(p.x) && !float.IsNaN(p.z) &&
+                                        !float.IsInfinity(p.x) && !float.IsInfinity(p.z) &&
+                                        !(Math.Abs(p.x) < 0.01f && Math.Abs(p.z) < 0.01f))
+                                    {
+                                        hasVisibleEnemyPosition = true;
+                                        visibleEnemyX = p.x;
+                                        visibleEnemyZ = p.z;
+                                    }
                                 }
                             }
                         }
@@ -195,6 +232,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 fatigue01 = ClampUnit(SafeFloat(reg, ref _fatigueField, "fatigue"), 0.2f);
                 ammo01 = ClampUnit(SafeFloat(reg, ref _ammoField, "ammo"), 0.9f);
+
+                // Gap-fill chunk 1: per-group sector fields (own-side only).
+                // BuildGroupSector reads: groupenemiesinrange, unitrange.enemystrengthwithinangle[],
+                // flanksthreated, outflanked, covervalue, fortinrange, ai_stanceordered.
+                // FlankRisk / StrongPoint are precomputed here to keep the worker
+                // pure (avoid passing raw float/int signals it would have to re-threshold).
+                groupEnemiesInRange = SafeFloat(reg, ref _groupEnemiesInRangeField, "groupenemiesinrange");
+                if (float.IsNaN(groupEnemiesInRange) || float.IsInfinity(groupEnemiesInRange) || groupEnemiesInRange < 0f)
+                    groupEnemiesInRange = 0f;
+                groupAngleEnemyStrength = SafeAngleEnemyStrength(reg);
+                float flanksThreated = SafeFloat(reg, ref _flanksThreatedField, "flanksthreated");
+                int outflanked = SafeInt(reg, ref _outflankedField, "outflanked");
+                groupFlankRisk = flanksThreated > 0f || outflanked > 0;
+                float coverValue = SafeFloat(reg, ref _coverValueField, "covervalue");
+                bool fortInRange = SafeBool(reg, ref _fortInRangeField, "fortinrange");
+                groupStrongPoint = coverValue > 0.5f || fortInRange;
+                groupVanillaStanceOrdered = SafeInt(reg, ref _stanceOrderedField, "ai_stanceordered", -1);
             }
 
             int effective = unittyp - commandHierarchyShift;
@@ -224,7 +278,52 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 visibleEnemyZ: visibleEnemyZ,
                 fatigue01: fatigue01,
                 ammo01: ammo01,
-                effectiveCommandLevel: effective);
+                effectiveCommandLevel: effective,
+                visibleEnemyUnittyp: visibleEnemyUnittyp,
+                visibleEnemyName: visibleEnemyName,
+                visibleEnemyRouted: visibleEnemyRouted,
+                visibleEnemyPermanentlyDetached: visibleEnemyPermanentlyDetached,
+                groupEnemiesInRange: groupEnemiesInRange,
+                groupAngleEnemyStrength: groupAngleEnemyStrength,
+                groupFlankRisk: groupFlankRisk,
+                groupStrongPoint: groupStrongPoint,
+                groupVanillaStanceOrdered: groupVanillaStanceOrdered);
+        }
+
+        /// <summary>
+        /// Mirrors BattleGroupStancePatch.SumEnemyStrengthWithinAngle. Walks
+        /// the per-angle slice and sums non-negative entries. Gated on
+        /// TacticalFogOfWarContact.HasVisibleEnemy to match the patch's
+        /// short-circuit. Wraps everything in try/catch with bounded warn so
+        /// reflection/Unity failure degrades to 0f rather than throwing.
+        /// </summary>
+        private static float SafeAngleEnemyStrength(Regiment reg)
+        {
+            try
+            {
+                if (reg == null) return 0f;
+                if (_unitRangeField == null)
+                    _unitRangeField = AccessTools.Field(typeof(Regiment), "unitrange");
+                // unitrange is a public field on Regiment; if reflection fails
+                // we still try direct property access via reg.unitrange below.
+                var unitrange = _unitRangeField != null ? _unitRangeField.GetValue(reg) : reg.unitrange;
+                if (unitrange == null) return 0f;
+                var slice = reg.unitrange != null ? reg.unitrange.enemystrengthwithinangle : null;
+                if (slice == null) return 0f;
+                if (!TacticalFogOfWarContact.HasVisibleEnemy(reg)) return 0f;
+                float total = 0f;
+                for (int i = 0; i < slice.Length; i++)
+                {
+                    float v = slice[i];
+                    if (float.IsNaN(v) || float.IsInfinity(v) || v <= 0f) continue;
+                    total += v;
+                }
+                return total;
+            }
+            catch
+            {
+                return 0f;
+            }
         }
 
         private static int SafeUnittyp(Regiment reg) { try { return reg.unittyp; } catch { return 0; } }
@@ -255,6 +354,38 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch
             {
                 return 0f;
+            }
+        }
+
+        private static int SafeInt(Regiment reg, ref FieldInfo cache, string fieldName, int fallback = 0)
+        {
+            try
+            {
+                if (cache == null) cache = AccessTools.Field(typeof(Regiment), fieldName);
+                if (cache == null) return fallback;
+                var v = cache.GetValue(reg);
+                if (v is int i) return i;
+                if (v == null) return fallback;
+                return Convert.ToInt32(v);
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        private static bool SafeBool(Regiment reg, ref FieldInfo cache, string fieldName)
+        {
+            try
+            {
+                if (cache == null) cache = AccessTools.Field(typeof(Regiment), fieldName);
+                if (cache == null) return false;
+                var v = cache.GetValue(reg);
+                return v is bool b && b;
+            }
+            catch
+            {
+                return false;
             }
         }
 

@@ -1552,11 +1552,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // disturbing it is a Task 14+ concern.
                 float battleDelta = 0f;
 
+                // Gap-fill chunk 1: per-side observation snapshots. The heavy
+                // snapshot builder mutates TacticalUnitObservationAggregate.Shared
+                // (line 263 of TacticalBattleSnapshotBuilder); snapshot the
+                // singleton's contents immediately after each side's Build()
+                // before the NEXT side's Build() overwrites it. The arrays own
+                // their copies so the worker is immune to mid-cycle singleton
+                // mutation.
                 var snap0 = CaptureSideSnapshotForWorker(battle, allianceA, nowH);
+                var obs0 = SnapshotAggregateForWorker(allianceA);
                 var snap1 = CaptureSideSnapshotForWorker(battle, allianceB, nowH);
+                var obs1 = SnapshotAggregateForWorker(allianceB);
 
                 var bundle0 = ArmyEvidenceBuilder.Build(battle, allianceA);
                 var bundle1 = ArmyEvidenceBuilder.Build(battle, allianceB);
+
+                // Per-side macroAI snapshot — sourced from bunits.sideinformation
+                // so the worker's DecideGroupStance sees the same vanilla state
+                // BattleGroupStancePatch reads from AIBattle.macroai for the side.
+                int macro0 = SafeMacroAiForSide(bunits, 0);
+                int macro1 = SafeMacroAiForSide(bunits, 1);
 
                 CommandTreeSnapshot tree0 = SafeCommandTreeSnapshot(allianceA);
                 CommandTreeSnapshot tree1 = SafeCommandTreeSnapshot(allianceB);
@@ -1591,7 +1606,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     side1CommanderEntry: entry1,
                     side0InstanceToSectorMap: sectorMap0,
                     side1InstanceToSectorMap: sectorMap1,
-                    config: config);
+                    config: config,
+                    side0Observations: obs0,
+                    side1Observations: obs1,
+                    side0AllianceId: allianceA,
+                    side1AllianceId: allianceB,
+                    side0MacroAi: macro0,
+                    side1MacroAi: macro1);
             }
             catch (Exception e)
             {
@@ -1611,6 +1632,53 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch
             {
                 return TacticalBattleRuntimeSnapshot.Empty;
+            }
+        }
+
+        /// <summary>
+        /// Snapshots TacticalUnitObservationAggregate.Shared into an immutable
+        /// per-side array. Called immediately after each side's heavy-snapshot
+        /// Build so the next side's Build doesn't overwrite our observations.
+        /// Filters to units captured for the requested alliance — defends
+        /// against the singleton holding a stale capture from a prior cycle.
+        /// </summary>
+        private static IReadOnlyList<TacticalUnitObservation> SnapshotAggregateForWorker(int allianceId)
+        {
+            try
+            {
+                var agg = TacticalUnitObservationAggregate.Shared;
+                if (agg == null || agg.CapturedForAlliance != allianceId)
+                    return Array.Empty<TacticalUnitObservation>();
+                var src = agg.AllUnits;
+                if (src == null || src.Count == 0)
+                    return Array.Empty<TacticalUnitObservation>();
+                var copy = new TacticalUnitObservation[src.Count];
+                for (int i = 0; i < src.Count; i++) copy[i] = src[i];
+                return copy;
+            }
+            catch
+            {
+                return Array.Empty<TacticalUnitObservation>();
+            }
+        }
+
+        /// <summary>
+        /// Reads bunits.sideinformation[side].macroai with defensive guards.
+        /// Returns -1 on failure (matches BattleGroupStancePatch's fallback).
+        /// </summary>
+        private static int SafeMacroAiForSide(BattleUnits bunits, int side)
+        {
+            try
+            {
+                if (bunits == null || bunits.sideinformation == null) return -1;
+                if (side < 0 || side >= bunits.sideinformation.Length) return -1;
+                var info = bunits.sideinformation[side];
+                if (info == null) return -1;
+                return info.macroai;
+            }
+            catch
+            {
+                return -1;
             }
         }
 

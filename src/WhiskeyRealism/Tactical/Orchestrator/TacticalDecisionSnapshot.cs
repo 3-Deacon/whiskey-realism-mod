@@ -40,6 +40,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private readonly Dictionary<int, TacticalGroupStanceDecision> _groupStance0;
         private readonly Dictionary<int, TacticalGroupStanceDecision> _groupStance1;
 
+        // Parallel per-unit sector cache. Gap-fill chunk 1: stored so the
+        // main-thread apply-cached fast path can drive TryApplyDoctrineStance
+        // and TryApplyLedgerTaskStance from the worker-built sector instead of
+        // rebuilding it from live Regiment state. Missing entry = no cached
+        // sector for that instance id (caller should not consume the
+        // doctrine/ledger branches in that case — falls back to the default
+        // legacy path). Same alliance-keyed ownership transfer as
+        // _groupStanceN; null in the constructor allocates an empty dict.
+        private readonly Dictionary<int, TacticalSectorAssessment> _groupSector0;
+        private readonly Dictionary<int, TacticalSectorAssessment> _groupSector1;
+
         /// <summary>
         /// Constructs an immutable snapshot. Caller transfers ownership of the
         /// two dictionaries; they must not be mutated after this constructor returns.
@@ -53,7 +64,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             TacticalSideDecision side0,
             TacticalSideDecision side1,
             Dictionary<int, TacticalGroupStanceDecision> groupStance0,
-            Dictionary<int, TacticalGroupStanceDecision> groupStance1)
+            Dictionary<int, TacticalGroupStanceDecision> groupStance1,
+            Dictionary<int, TacticalSectorAssessment> groupSector0 = null,
+            Dictionary<int, TacticalSectorAssessment> groupSector1 = null)
         {
             BattleSequence = battleSequence;
             CycleId = cycleId;
@@ -63,6 +76,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Side1 = side1;
             _groupStance0 = groupStance0 ?? new Dictionary<int, TacticalGroupStanceDecision>(0);
             _groupStance1 = groupStance1 ?? new Dictionary<int, TacticalGroupStanceDecision>(0);
+            _groupSector0 = groupSector0 ?? new Dictionary<int, TacticalSectorAssessment>(0);
+            _groupSector1 = groupSector1 ?? new Dictionary<int, TacticalSectorAssessment>(0);
         }
 
         public static TacticalDecisionSnapshot Empty { get; } = new TacticalDecisionSnapshot(
@@ -82,6 +97,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                      : null;
             if (dict != null && dict.TryGetValue(instanceId, out decision)) return true;
             decision = default;
+            return false;
+        }
+
+        /// <summary>
+        /// Returns the worker-built sector for a given group, when present.
+        /// Used by BattleGroupStancePatch's apply-cached fast path to drive
+        /// TryApplyDoctrineStance / TryApplyLedgerTaskStance without rebuilding
+        /// the sector from live Regiment state.
+        /// </summary>
+        public bool TryGetGroupSector(int allianceId, int instanceId, out TacticalSectorAssessment sector)
+        {
+            var dict = allianceId == 0 ? _groupSector0
+                     : allianceId == 1 ? _groupSector1
+                     : null;
+            if (dict != null && dict.TryGetValue(instanceId, out sector)) return true;
+            sector = default;
             return false;
         }
 

@@ -65,6 +65,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public IReadOnlyDictionary<int, int> Side0InstanceToSectorMap { get; }
         public IReadOnlyDictionary<int, int> Side1InstanceToSectorMap { get; }
 
+        // Gap-fill chunk 1: per-side observation arrays for worker-thread
+        // group-stance decisions. Snapshotted from TacticalUnitObservationAggregate.Shared
+        // immediately after each side's heavy snapshot Build (which is the
+        // singleton's last write for that alliance). Worker reads observation
+        // fields (GroupOwnInRange/GroupAiGroup/GroupEnemiesInRange/GroupAngleEnemyStrength/
+        // GroupFlankRisk/GroupStrongPoint/GroupVanillaStanceOrdered/VisibleEnemy*) to
+        // rebuild TacticalGroupContactInput without touching live vanilla state.
+        // Arrays (not pooled list refs) so the worker is immune to next-cycle
+        // singleton overwrites.
+        public IReadOnlyList<TacticalUnitObservation> Side0Observations { get; }
+        public IReadOnlyList<TacticalUnitObservation> Side1Observations { get; }
+
+        // Authoritative alliance ids — captured from bunits.alliance[0/1] at
+        // dispatch time. Worker uses these to route per-side group-stance
+        // decisions into the alliance-keyed dicts on TacticalDecisionSnapshot.
+        public int Side0AllianceId { get; }
+        public int Side1AllianceId { get; }
+
+        // Per-side AIBattle.macroai at dispatch time. Sourced from
+        // bunits.sideinformation[side].macroai (vanilla state for vanilla side 0/1).
+        // Worker feeds these into TacticalDoctrineScorer.DecideGroupStance so the
+        // captured-data decision stream matches the patch's live macro read.
+        public int Side0MacroAi { get; }
+        public int Side1MacroAi { get; }
+
         // Frozen config-flag snapshot captured at dispatch time. Worker reads
         // these instead of Plugin.Instance.* to avoid races against runtime
         // config-flag mutation.
@@ -90,7 +115,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             CommanderRosterEntry side1CommanderEntry,
             IReadOnlyDictionary<int, int> side0InstanceToSectorMap,
             IReadOnlyDictionary<int, int> side1InstanceToSectorMap,
-            TacticalOrchestratorWorkerConfigSnapshot config)
+            TacticalOrchestratorWorkerConfigSnapshot config,
+            IReadOnlyList<TacticalUnitObservation> side0Observations = null,
+            IReadOnlyList<TacticalUnitObservation> side1Observations = null,
+            int side0AllianceId = -1,
+            int side1AllianceId = -1,
+            int side0MacroAi = -1,
+            int side1MacroAi = -1)
         {
             BattleSequence = battleSequence;
             PlayerAllianceId = playerAllianceId;
@@ -112,6 +143,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Side0InstanceToSectorMap = side0InstanceToSectorMap ?? EmptyInstanceToSectorMap;
             Side1InstanceToSectorMap = side1InstanceToSectorMap ?? EmptyInstanceToSectorMap;
             Config = config ?? TacticalOrchestratorWorkerConfigSnapshot.Empty;
+            Side0Observations = side0Observations ?? Array.Empty<TacticalUnitObservation>();
+            Side1Observations = side1Observations ?? Array.Empty<TacticalUnitObservation>();
+            Side0AllianceId = side0AllianceId;
+            Side1AllianceId = side1AllianceId;
+            Side0MacroAi = side0MacroAi;
+            Side1MacroAi = side1MacroAi;
         }
 
         private static readonly IReadOnlyDictionary<int, int> EmptyInstanceToSectorMap =

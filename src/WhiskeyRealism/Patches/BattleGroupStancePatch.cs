@@ -68,13 +68,16 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        // Pre-computed decision read path. Returns true only when we owned the
-        // iteration (touched at least one group); otherwise legacy decide-and-write
-        // runs in full. Today (Task 11 partial) the worker produces no group
-        // decisions, so every TryGetGroupStance misses and this returns false.
-        // The apply branch still calls ApplyGroup -- the cached decision is not
-        // yet used to short-circuit the legacy decide step. That switch is the
-        // gap-fill follow-up once the worker emits meaningful decisions.
+        // Pre-computed decision read path (gap-fill chunk 1, 2026-05-19).
+        // Returns true only when we owned the iteration (touched at least one
+        // group). On hit, ApplyCachedDecision drives doctrine + ledger branches
+        // from the worker-built sector and skips the live BuildGroupSector +
+        // DecideGroupStance recompute. Doctrine/ledger overrides remain on
+        // main so the worker's default-scorer decision is the fallthrough only
+        // — preserving parity with the live-path branches.
+        // Misses (no cached decision OR no cached sector) fall through to the
+        // legacy decide-and-write path so suppressed-side/pre-bootstrap units
+        // continue to work.
         private static bool TryApplyFromDecisionSnapshot(AIBattle battle)
         {
             try
@@ -94,7 +97,8 @@ namespace WhiskeyRealism.Patches
                 int allianceId = SafeAllianceForSide(bunits, side);
                 if (allianceId < 0 || allianceId >= 2) return false;
 
-                bool appliedAny = false;
+                bool ownedAny = false;
+                bool legacyAny = false;
                 for (int i = 0; i < units.Count; i++)
                 {
                     var group = units[i] as Regiment;
@@ -105,25 +109,112 @@ namespace WhiskeyRealism.Patches
                     try { instanceId = group.GetInstanceID(); }
                     catch { continue; }
 
-                    if (!snapshot.TryGetGroupStance(allianceId, instanceId, out _)) continue;
-
-                    // On hit: still run the full legacy ApplyGroup. The cached
-                    // decision is not yet consumed to skip the decide step --
-                    // gap-fill follow-up will switch this to an apply-only path
-                    // once the worker is producing real decisions.
-                    ApplyGroup(bunits, side, macro, group, i);
-                    appliedAny = true;
+                    TacticalGroupStanceDecision cachedDecision;
+                    TacticalSectorAssessment cachedSector;
+                    bool hasDecision = snapshot.TryGetGroupStance(allianceId, instanceId, out cachedDecision);
+                    bool hasSector = snapshot.TryGetGroupSector(allianceId, instanceId, out cachedSector);
+                    if (hasDecision && hasSector)
+                    {
+                        ApplyCachedDecision(bunits, side, macro, group, cachedDecision, cachedSector);
+                        ownedAny = true;
+                    }
+                    else
+                    {
+                        // Worker didn't produce a decision for this group
+                        // (suppressed side, bootstrap, or filter mismatch).
+                        // Run the legacy path so behavior is identical to the
+                        // no-worker case for this specific group.
+                        ApplyGroup(bunits, side, macro, group, i);
+                        legacyAny = true;
+                    }
                 }
 
-                // Only claim ownership of the iteration if we actually touched a
-                // group. If no decisions matched (typical today), let the legacy
-                // path own the iteration so behavior is identical.
-                return appliedAny;
+                // We claim full ownership of the iteration when we cached AT
+                // LEAST ONE group. Mixed (some cached, some legacy) is still
+                // covered above because we already ran ApplyGroup for the
+                // legacy slice. So returning true is safe whenever we touched
+                // any group via either branch.
+                return ownedAny || legacyAny;
             }
             catch
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Apply-cached fast path (gap-fill chunk 1). Replicates
+        /// <see cref="ApplyGroup"/>'s sequence but reads the sector +
+        /// default-scorer decision from the worker snapshot:
+        /// 1. WlAllowsControl + OrderFrictionAllowsChange enforced on main
+        ///    (require live Regiment state).
+        /// 2. TryApplyDoctrineStance using cached sector.
+        /// 3. Charge (vanillaOrdered == 4) branch — unchanged.
+        /// 4. TryApplyLedgerTaskStance using cached sector.
+        /// 5. Fallthrough: write cached default-scorer decision.
+        /// </summary>
+        private static void ApplyCachedDecision(
+            BattleUnits bunits,
+            int side,
+            int macro,
+            Regiment group,
+            TacticalGroupStanceDecision decision,
+            TacticalSectorAssessment sector)
+        {
+            if (!WlAllowsControl(group)) return;
+            if (!OrderFrictionAllowsChange(group)) return;
+
+            int vanillaOrdered = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
+
+            if (TryApplyDoctrineStance(bunits, side, macro, group, vanillaOrdered, sector))
+                return;
+
+            if (vanillaOrdered == 4)
+            {
+                if (!Plugin.Instance.EnableTacticalChargeDenial.Value || !LocalReactionProducerEnabled())
+                {
+                    LogChargePreserved(side, group, "vanilla-charge-preserved");
+                    return;
+                }
+
+                var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
+                if (IsExplicitChargeDenial(reaction))
+                {
+                    if (!AllowsVanillaWrites())
+                    {
+                        LogChargePreserved(side, group, "mode-monitor-only");
+                        return;
+                    }
+
+                    DemoteCharge(bunits, group, side, reaction);
+                    return;
+                }
+
+                LogChargePreserved(side, group, "vanilla-charge-preserved");
+                return;
+            }
+
+            if (TryApplyLedgerTaskStance(bunits, side, macro, group, vanillaOrdered, sector))
+                return;
+
+            // Fallthrough — apply the worker's default-scorer decision.
+            // We do NOT call DecideGroupStance here; the worker already
+            // produced this decision on its thread.
+            if (!Plugin.Instance.EnableTacticalGroupSectorStance.Value) return;
+            if (decision.Kind != TacticalDoctrineDecisionKind.Apply) return;
+            if (decision.GroupStance == vanillaOrdered) return;
+            if (decision.GroupStance == 4) return;
+            if (decision.GroupStance < 0 || decision.GroupStance > 3) return;
+            if (!AllowsVanillaWrites()) return;
+
+            var gameObject = UnityObject(group);
+            if (gameObject == null || !gameObject.activeInHierarchy) return;
+
+            bunits.ChangeStance(gameObject, decision.GroupStance, immediate: false, overwriteaigroups: false);
+            group.ai_stance = decision.GroupStance;
+            group.ai_stanceordered = decision.GroupStance;
+            group.lastaistancechangetime = GameVars.currenttimefromstart;
+            LogDecision(side, group, sector, decision);
         }
 
         private static int SafeAllianceForSide(BattleUnits bunits, int side)

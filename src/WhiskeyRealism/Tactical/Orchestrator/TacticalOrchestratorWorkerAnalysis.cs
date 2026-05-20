@@ -33,9 +33,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// snapshot of <c>ArmyOrchestrator</c> plan state (PlanAgeSeconds,
     /// CurrentPlan, Phase, HistoryGlobalOdds, MainEffortSector). Wiring those
     /// is a follow-up; see commit message for details.
-    /// PopulateGroupDecisions remains empty: the captured per-unit
-    /// observations don't expose the per-group sector inputs
-    /// <c>TacticalDoctrineScorer.DecideGroupStance</c> needs.
+    /// Gap-fill chunk 1 (2026-05-19): PopulateGroupDecisions now iterates the
+    /// per-side captured observations, rebuilds <see cref="TacticalGroupContactInput"/>
+    /// from the augmented <see cref="TacticalUnitObservation"/> fields, and
+    /// stores per-unit <see cref="TacticalGroupStanceDecision"/> values keyed
+    /// by GameObject InstanceID. <see cref="BattleGroupStancePatch"/>'s
+    /// TryApplyFromDecisionSnapshot hits route to an apply-only fast path that
+    /// skips the per-tick DecideGroupStance recompute.
     /// </summary>
     internal static class TacticalOrchestratorWorkerAnalysis
     {
@@ -50,8 +54,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 var groupStance0 = new Dictionary<int, TacticalGroupStanceDecision>(0);
                 var groupStance1 = new Dictionary<int, TacticalGroupStanceDecision>(0);
-                PopulateGroupDecisions(0, input, groupStance0);
-                PopulateGroupDecisions(1, input, groupStance1);
+                var groupSector0 = new Dictionary<int, TacticalSectorAssessment>(0);
+                var groupSector1 = new Dictionary<int, TacticalSectorAssessment>(0);
+                // Route by alliance id, not by side index — _groupStance0 holds
+                // alliance-0 decisions, _groupStance1 holds alliance-1 decisions.
+                // input.SideNAllianceId is sourced from bunits.alliance[N] so it
+                // matches the patch's allianceId lookup at read time.
+                PopulateGroupDecisions(
+                    input.Side0Observations,
+                    input.Side0AllianceId,
+                    input.Side0MacroAi,
+                    groupStance0,
+                    groupStance1,
+                    groupSector0,
+                    groupSector1);
+                PopulateGroupDecisions(
+                    input.Side1Observations,
+                    input.Side1AllianceId,
+                    input.Side1MacroAi,
+                    groupStance0,
+                    groupStance1,
+                    groupSector0,
+                    groupSector1);
 
                 return new TacticalDecisionSnapshot(
                     battleSequence: input.BattleSequence,
@@ -61,7 +85,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     side0: side0,
                     side1: side1,
                     groupStance0: groupStance0,
-                    groupStance1: groupStance1);
+                    groupStance1: groupStance1,
+                    groupSector0: groupSector0,
+                    groupSector1: groupSector1);
             }
             catch (Exception e)
             {
@@ -160,24 +186,115 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 hasPlan: false);                              // deferred: needs plan-state in input
         }
 
+        /// <summary>
+        /// Walks the per-side captured observations and emits a
+        /// <see cref="TacticalGroupStanceDecision"/> for every commandable
+        /// group whose alliance matches <paramref name="allianceId"/>. The
+        /// decision is routed into <paramref name="groupStance0"/> when
+        /// <paramref name="allianceId"/> is 0 or <paramref name="groupStance1"/>
+        /// when 1; other alliances are dropped (matches
+        /// <see cref="TacticalDecisionSnapshot.TryGetGroupStance"/>'s
+        /// alliance-keyed dict layout).
+        ///
+        /// Pure: reads only the captured observation fields, calls
+        /// <see cref="TacticalGroupSectorEstimator.BuildSector"/> +
+        /// <see cref="TacticalDoctrineScorer.DecideGroupStance"/> (both
+        /// documented pure — no static state, no Unity API). The
+        /// WlAllowsControl / OrderFrictionAllowsChange gates from
+        /// BattleGroupStancePatch.ApplyGroup are NOT replicated here — they
+        /// remain on the main-thread apply path so the patch's W&L/order-friction
+        /// guards are the source of truth. The worker pre-computes the decision
+        /// assuming gates would have allowed it; the apply path enforces them
+        /// at apply time. (Both gates require live Regiment state the
+        /// observation doesn't carry.)
+        /// </summary>
         private static void PopulateGroupDecisions(
-            int sideIdx,
-            TacticalOrchestratorWorkerInput input,
-            Dictionary<int, TacticalGroupStanceDecision> output)
+            IReadOnlyList<TacticalUnitObservation> observations,
+            int allianceId,
+            int macroAi,
+            Dictionary<int, TacticalGroupStanceDecision> groupStance0,
+            Dictionary<int, TacticalGroupStanceDecision> groupStance1,
+            Dictionary<int, TacticalSectorAssessment> groupSector0,
+            Dictionary<int, TacticalSectorAssessment> groupSector1)
         {
-            // Deferred — see class-level summary. Today's captured per-unit
-            // observations (TacticalUnitObservation in
-            // TacticalUnitObservationAggregate) carry position/strength/
-            // fatigue/ammo/visibility, but NOT the per-group sector signals
-            // BattleGroupStancePatch.BuildGroupSector reads:
-            //   - Regiment.groupowninrange / groupenemiesinrange / groupstrengthaigroup
-            //   - Regiment.unitrange.enemystrengthwithinangle[]
-            //   - Regiment.flanksthreated / outflanked / covervalue / fortinrange
-            //   - TacticalFogOfWarContact.ClosestVisibleEnemy(group) — live walk
-            // Until those are added to the captured snapshot (or the per-unit
-            // observation grows the necessary fields), TryGetGroupStance keeps
-            // returning false and Task 14's main-thread patch retains the
-            // legacy per-group computation path. Wiring this is a follow-up.
+            if (observations == null || observations.Count == 0) return;
+            // Route only into the alliance-matching dict (0 or 1). Drop
+            // alliance > 1 (Europe / unmapped) so it never poisons either
+            // bucket — matches TacticalDecisionSnapshot's [0, 1] domain.
+            Dictionary<int, TacticalGroupStanceDecision> output;
+            Dictionary<int, TacticalSectorAssessment> sectorOutput;
+            if (allianceId == 0) { output = groupStance0; sectorOutput = groupSector0; }
+            else if (allianceId == 1) { output = groupStance1; sectorOutput = groupSector1; }
+            else return;
+
+            int sectorIndex = 0;
+            for (int i = 0; i < observations.Count; i++)
+            {
+                TacticalUnitObservation obs = observations[i];
+                if (obs.Alliance != allianceId) continue;
+                if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(obs.Unittyp)) continue;
+
+                // OwnStrength = max(groupowninrange, groupstrengthaigroup) —
+                // mirrors BattleGroupStancePatch.BuildGroupSector line 426.
+                float ownStrength = obs.GroupOwnInRange;
+                if (obs.GroupAiGroup > ownStrength) ownStrength = obs.GroupAiGroup;
+
+                // Closest-enemy fields default to neutral values when the
+                // observation has no visible enemy. IsVisibleLineContact's
+                // gate (Strength > 0 + formed-line unittyp + non-skirm name +
+                // non-routed + non-permanently-detached) rejects empty input
+                // naturally, so default-zero observations land in the
+                // AngleSlice branch with the right confidence floor.
+                float closestStrength = obs.HasVisibleEnemy ? obs.VisibleEnemyStrength : 0f;
+                int closestUnittyp = obs.HasVisibleEnemy ? obs.VisibleEnemyUnittyp : -1;
+                string closestName = obs.HasVisibleEnemy ? obs.VisibleEnemyName : string.Empty;
+                bool closestRouted = obs.HasVisibleEnemy && obs.VisibleEnemyRouted;
+                bool closestPermDetached = obs.HasVisibleEnemy && obs.VisibleEnemyPermanentlyDetached;
+
+                var sectorInput = new TacticalGroupContactInput(
+                    sectorIndex,
+                    ownStrength,
+                    obs.GroupEnemiesInRange,
+                    obs.GroupAngleEnemyStrength,
+                    closestStrength,
+                    closestUnittyp,
+                    closestName,
+                    closestRouted,
+                    closestPermDetached,
+                    obs.GroupFlankRisk,
+                    obs.GroupStrongPoint);
+                TacticalSectorAssessment sector = TacticalGroupSectorEstimator.BuildSector(sectorInput);
+
+                // vanillaStance must come from the captured ai_stanceordered.
+                // If the observation didn't capture it (-1), fall back to 2
+                // (hold) so DecideGroupStance still produces a usable decision —
+                // the main-thread apply path re-reads vanilla state and treats
+                // any mismatch (stance == vanillaOrdered) as a no-op write.
+                int vanillaStance = obs.GroupVanillaStanceOrdered >= 0
+                    ? obs.GroupVanillaStanceOrdered
+                    : 2;
+
+                // WlAllowsControl + OrderFrictionAllowsChange enforced on main
+                // at apply time; assume true here so the cached decision is
+                // ready when the apply path's live gates pass.
+                var input = new TacticalGroupStanceDecisionInput(
+                    vanillaStance,
+                    macroAi,
+                    sector,
+                    true,   // WlAllowsControl — re-checked on main
+                    true);  // OrderFrictionAllowsChange — re-checked on main
+                TacticalGroupStanceDecision decision = TacticalDoctrineScorer.DecideGroupStance(input);
+
+                // Store every decision, including Skip — the apply path needs
+                // to know the worker considered the unit (TryGetGroupStance
+                // returning true claims iteration ownership for this group).
+                // Last-writer-wins on duplicate instance ids; observation
+                // capture walks completeunitlist linearly so collisions are
+                // not expected for valid GameObject ids.
+                output[obs.InstanceId] = decision;
+                sectorOutput[obs.InstanceId] = sector;
+                sectorIndex++;
+            }
         }
 
         private static float Clamp01(float value)
