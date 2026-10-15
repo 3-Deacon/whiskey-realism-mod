@@ -26,8 +26,9 @@ namespace WhiskeyRealism.Tactical.Battle
     // only while the player still holds the order the last dispatch produced
     // (PlayerOrderDedupeState.IsDuplicateDispatch). A call vanilla rejects costs its
     // tooltip lookups and a terrain sample, not a Debug.Log (only on accept, 8666).
-    // Today only #62 calls Emit, bounded by its signature check and 120-tick
-    // throttle; a per-tick caller needs its own throttle.
+    // Callers: #62 (bounded by its signature check and 120-tick throttle) and the
+    // order executor's ancestor dispatch (Move winners only, behind the move dedupe,
+    // the 180 battle-second recent-order cooldown and at most one retry).
     internal static class TacticalPlayerDispatchRuntime
     {
         internal static readonly PlayerOrderDedupeState Dedupe = new PlayerOrderDedupeState();
@@ -51,7 +52,8 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 try
                 {
-                    if ((UnityEngine.Object)ancestorOrPlayerCommand == null || vanillaType < 0) return false;
+                    if ((UnityEngine.Object)ancestorOrPlayerCommand == null || vanillaType < 0
+                        || !TacticalWriteGuard.ModeAllowsWrites()) return false;
 
                     int before = DLC_WL.GivenOrders.givenorderssession;
                     if (Dedupe.IsDuplicateDispatch(vanillaType, x, z, CurrentGivenOrder(before), DispatchDedupeMeters)) return false;

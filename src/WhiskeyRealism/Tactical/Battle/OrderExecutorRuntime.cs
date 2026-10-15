@@ -124,7 +124,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 else
                 {
-                    wrote = IssueOther(bunits, unit, winner, nowHours);
+                    wrote = IssueOther(bunits, unit, winner, feudReplay, nowHours);
                 }
 
                 if (wrote) executed++;
@@ -227,7 +227,7 @@ namespace WhiskeyRealism.Tactical.Battle
             return true;
         }
 
-        private static bool IssueOther(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, double nowHours)
+        private static bool IssueOther(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, bool feudReplay, double nowHours)
         {
             switch (w.Channel)
             {
@@ -238,7 +238,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 case OrderChannel.Formation:
                     return IssueFormation(bunits, unit, w.Value, nowHours);
                 case OrderChannel.Facing:
-                    return IssueFacing(bunits, unit, w.Heading, nowHours);
+                    return IssueFacing(bunits, unit, w.Heading, feudReplay, nowHours);
                 case OrderChannel.Stop:
                     GameObject go = ((Component)unit).gameObject;
                     if (go == null) return false;
@@ -278,7 +278,7 @@ namespace WhiskeyRealism.Tactical.Battle
             return true;
         }
 
-        private static bool IssueFacing(BattleUnits bunits, Regiment unit, float heading, double nowHours)
+        private static bool IssueFacing(BattleUnits bunits, Regiment unit, float heading, bool feudReplay, double nowHours)
         {
             if (heading < 0f) return false;
             if (unit.unittyp <= TacticalUnitType.MaxCombat) return RotateInPlace(unit, heading);
@@ -307,6 +307,10 @@ namespace WhiskeyRealism.Tactical.Battle
                         if (child == null || child.unittyp > TacticalUnitType.MaxCombat) continue;
                         if (child.unittyp == TacticalUnitType.Artillery) continue;
                         if (child.permanentlydetached) continue;
+                        // allattachedunits holds every descendant (129574), and a
+                        // detached player command shields only its own node, so each
+                        // rotated regiment passes the guard itself (BC3 136b445).
+                        if (!TacticalWriteGuard.CanWrite(child, feudReplay)) continue;
                         if (RotateInPlace(child, heading)) rotated++;
                     }
                     return rotated > 0;

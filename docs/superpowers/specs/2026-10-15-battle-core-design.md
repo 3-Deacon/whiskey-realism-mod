@@ -45,7 +45,7 @@ Computed once per tick into `UnitRecord.Flags`:
 - `PlayerOwned` = `dlcw_isundercommander` (player's command + descendants, take-overs, CIC/army-group cases per 91168) or DLC take-over, or player-alliance unit outside W&L when not `ai_vs_ai`.
 - `AncestorOfPlayerCommand` = the player's current command is a descendant in the vanilla command tree (vanilla's own ancestry test 8272/91203).
 - `PlayerCommandDetached` = the player's command has `permanentlydetached`.
-- Feud instance (`isplayeraiorfeud == 2`) and `ai_feudstance >= 0` units are never commanded.
+- Feud instance (`isplayeraiorfeud == 2`) and `ai_feudstance >= 0` units are never commanded directly: no Whiskey write targets them, and Whiskey's own per-descendant loops skip them; only #42's inline `FeudReplay` (vanilla's own feud move) is exempt. A Whiskey order to an AI parent group still reaches feuding descendants through vanilla's own cascades (`SetGroupFormation` 91988-91999, `PerformActionForGroupForAllUnitsOnLevel` 92572-92628), exactly as vanilla's own AI group orders do (integration verify 2026-10-15, F5: W&L behaves as vanilla allows).
 `TacticalWriteGuard` becomes a thin reader of these flags (ancestors are NOT protected); `PlayerCommandProbeFilter` and per-patch W&L checks are deleted.
 
 ### 4. `OrderArbiter` + `OrderExecutor`

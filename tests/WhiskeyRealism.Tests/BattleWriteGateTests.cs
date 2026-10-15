@@ -22,7 +22,7 @@ internal static class BattleWriteGateTests
     }
 
     private static readonly Regex VanillaBattleWrite = new Regex(
-        @"\.(ChangeStance|ChangeCombatBehavior|SetWaypoint|DeleteOrderQueue|AddToOrderQueue|ChangeRegimentFormation|SetGroupFormation|MountUnits|RotateRegiment)\(|\.macroai\s*=(?!=)");
+        @"\.(ChangeStance|ChangeCombatBehavior|SetWaypoint|DeleteOrderQueue|AddToOrderQueue|ChangeRegimentFormation|SetGroupFormation|SetFormation|RegimentSetPath|PerformActionForGroupForAllUnitsOnLevel|CheckCurrentOrderUpdate|MountUnits|RotateRegiment)\(|\.macroai\s*=(?!=)");
 
     private static readonly Regex CommanderModeGate = new Regex(
         @"TacticalWriteGuard\.(CanWrite|ModeAllowsWrites)\(|TacticalCommanderModePolicy\.AllowsWrites\(");
@@ -39,6 +39,9 @@ internal static class BattleWriteGateTests
     {
         TestHarness.AssertTrue(IsUngatedWriter("bunits.ChangeStance(go, 2);"), "stance write");
         TestHarness.AssertTrue(IsUngatedWriter("battle.macroai = write;"), "macroai write");
+        TestHarness.AssertTrue(IsUngatedWriter("bunits.SetFormation(go, 2, true);"), "formation write");
+        TestHarness.AssertTrue(IsUngatedWriter("bunits.PerformActionForGroupForAllUnitsOnLevel(go, -1, \"StopRegiment\", p);"), "group action write");
+        TestHarness.AssertTrue(IsUngatedWriter("bunits.CheckCurrentOrderUpdate(reg, 3, p);"), "player dispatch write");
     }
 
     private static void AcceptsGatedWriter()
