@@ -55,6 +55,14 @@ namespace WhiskeyRealism.Strategic
             return false;
         }
 
+        private static bool HasAssignments(int allianceId)
+        {
+            if (!_assignedByThreat.TryGetValue(allianceId, out var bySignature)) return false;
+            foreach (var units in bySignature.Values)
+                if (units != null && units.Count > 0) return true;
+            return false;
+        }
+
         internal static void Run(int allianceId, DefenseIntentLedgerOutput output)
         {
             try
@@ -63,7 +71,10 @@ namespace WhiskeyRealism.Strategic
                 // defensive movement orders. Our per-alliance state structures are sized
                 // for Union=0 and CSA=1 only; reject anything outside that range.
                 if (allianceId < 0 || allianceId > 1) return;
-                if (output == null || output.Responses == null || output.Responses.Count == 0) return;
+                var responses = output?.Responses ?? new List<DefenseResponse>();
+                // With no responses there is nothing to issue, but units held from
+                // earlier ticks must still be released below.
+                if (responses.Count == 0 && !HasAssignments(allianceId)) return;
 
                 int aifactionIndex = ResolveAifactionIndex(allianceId);
                 if (aifactionIndex < 0) return;
@@ -85,7 +96,7 @@ namespace WhiskeyRealism.Strategic
                 // Populated during the assignment loop below; used afterwards for release tracking.
                 var thisTick = new Dictionary<string, HashSet<int>>();
 
-                foreach (var response in output.Responses)
+                foreach (var response in responses)
                 {
                     if (response?.SelectedPackage == null || response.SelectedPackage.Count == 0) continue;
                     if (!DefenseCustomOrderPolicy.RequiresCustomOrder(response)) continue;
@@ -171,7 +182,7 @@ namespace WhiskeyRealism.Strategic
                 // Also record threat signatures present this tick even when no
                 // custom order was issued (Recovered responses with empty SelectedPackage
                 // keep units assigned — do NOT release while the threat is still in output).
-                foreach (var response in output.Responses)
+                foreach (var response in responses)
                 {
                     string sig = response?.Threat?.Signature;
                     if (string.IsNullOrEmpty(sig)) continue;
@@ -179,10 +190,17 @@ namespace WhiskeyRealism.Strategic
                         thisTick[sig] = new HashSet<int>(); // empty sentinel — signature is still active
                 }
 
-                // Release units for threat signatures that have fully disappeared
-                // from this tick's output (not present in thisTick at all).
+                // Carry units committed on earlier ticks (still in defensive ops) under
+                // their live signatures, then release units for threat signatures that
+                // have fully disappeared from this tick's output.
                 if (_assignedByThreat.TryGetValue(allianceId, out var prior))
                 {
+                    CampaignMilitaryGates.CarryForwardCustomOrders(prior, thisTick, id =>
+                    {
+                        var held = FindUnitByInstanceId(ownUnits, id);
+                        return held != null && defOps.Contains(held);
+                    });
+
                     foreach (var kv in prior)
                     {
                         if (thisTick.ContainsKey(kv.Key)) continue; // signature still active — keep units assigned

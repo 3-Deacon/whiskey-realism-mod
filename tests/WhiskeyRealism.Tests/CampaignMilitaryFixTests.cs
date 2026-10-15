@@ -32,6 +32,7 @@ internal static class CampaignMilitaryFixTests
         AreaOrderSkipsEveryVanillaBusyAssignment();
         CoastalInterceptKeepsEnemyInsideBugleRange();
         CoastalInterceptHoldsAnchorWhenEnemyAlreadyClose();
+        CoastalAssignmentsCarryForwardWhileHeld();
         CoordinatedSingleLeadNeedsReinforceRatio();
         CoordinatedOffensiveMirrorsVanillaEarlyOuts();
         CoordinatedOffensiveTempoGateMatchesVanilla();
@@ -527,5 +528,26 @@ internal static class CampaignMilitaryFixTests
             CommanderAssignmentGuard.ResolveReplacementAppointment(false, false, true, true),
             "not pickable for another reason -> defer");
         LogPass("c2a succession reseats the replacement's old army group");
+    }
+
+    // M1: a committed unit skips re-issue (already in unitsindefensiveoperations)
+    // and fell out of the per-signature tracking on tick 2, so IsCustomOrdered
+    // was only true on the commit tick and the release never saw it.
+    private static void CoastalAssignmentsCarryForwardWhileHeld()
+    {
+        var prior = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<int>>
+        {
+            { "sig-a", new System.Collections.Generic.HashSet<int> { 1, 2 } },
+            { "sig-gone", new System.Collections.Generic.HashSet<int> { 3 } },
+        };
+        var thisTick = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<int>>
+        {
+            { "sig-a", new System.Collections.Generic.HashSet<int>() },
+        };
+        CampaignMilitaryGates.CarryForwardCustomOrders(prior, thisTick, id => id != 2);
+        TestHarness.AssertTrue(thisTick["sig-a"].Contains(1), "held unit stays tracked under its live signature");
+        TestHarness.AssertFalse(thisTick["sig-a"].Contains(2), "unit no longer held (vanilla dropped it) is not carried");
+        TestHarness.AssertFalse(thisTick.ContainsKey("sig-gone"), "vanished signature is not resurrected (release path handles it)");
+        LogPass("c2a coastal assignments carry forward while held");
     }
 }

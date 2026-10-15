@@ -239,6 +239,25 @@ namespace WhiskeyRealism.Strategic
             z = enemyZ + dz / d * reach;
         }
 
+        internal static void CarryForwardCustomOrders(
+            System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<int>> prior,
+            System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<int>> thisTick,
+            Func<int, bool> stillHeld)
+        {
+            // Units committed on an earlier tick are skipped by the assignment loop
+            // (already in unitsindefensiveoperations), so they must be carried into
+            // this tick's map for every signature that is still live; otherwise the
+            // runner forgets them on tick 2 and can never release them.
+            if (prior == null || thisTick == null) return;
+            foreach (var kv in prior)
+            {
+                if (kv.Value == null || !thisTick.TryGetValue(kv.Key, out var current)) continue;
+                foreach (var id in kv.Value)
+                    if (stillHeld == null || stillHeld(id))
+                        current.Add(id);
+            }
+        }
+
         internal static float Clamp(float value, float min, float max)
         {
             if (value < min) return min;
