@@ -65,8 +65,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// Inputs that change the approach-avenue picture: scheduledarrival shrinks when
     /// a column arrives (RemoveAt 87620) and grows on new arrivals (Add 87834);
     /// EntryPoint.owner is written at arrival / redeployment (87601, 87691,
-    /// 87891-87927, 94743); deployment groups are re-placed when a new battle day
-    /// starts (battlepasseddays, 85754-85816).
+    /// 87891-87927, 94743); deployment groups can be re-placed when a new day's
+    /// deployment panel closes (DoPlacementAIUnitsWithinDeploymentzoneNew 85524 via
+    /// 164879-164880), which follows the battlepasseddays increment (86384).
     /// </summary>
     public readonly struct TacticalAvenueSourceSignature : IEquatable<TacticalAvenueSourceSignature>
     {

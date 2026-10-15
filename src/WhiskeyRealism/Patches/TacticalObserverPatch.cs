@@ -358,8 +358,9 @@ namespace WhiskeyRealism.Patches
         /// <summary>
         /// Reads the battle identity for the lifecycle detector. completeunitlist is null
         /// once BattleUnits.OnDestroy (79207-79219) ran; GameVars.currenttimefromstart is the
-        /// battle clock (SetTimeVariables 93545); battlepasseddays (78860) advances at the
-        /// night rollover (86384). Degrades to an empty observation on any exception.
+        /// battle clock (SetTimeVariables 93545). The calendar day (BattleUnits.uniStormSystem
+        /// 78968) separates a midnight wrap of that clock from a reload. Degrades to an empty
+        /// observation on any exception.
         /// </summary>
         private static BattleLifecycleObservation BuildLifecycleObservation(AIBattle battle)
         {
@@ -370,9 +371,8 @@ namespace WhiskeyRealism.Patches
                 var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
                 _observedBattleUnits = bunits;
                 int bunitsId = bunits != null ? bunits.GetInstanceID() : 0;
-                int days = bunits != null ? bunits.battlepasseddays : 0;
                 int sceneHash = SceneIdentityHash();
-                return new BattleLifecycleObservation(bunitsId, days, sceneHash, GameVars.currenttimefromstart, units);
+                return new BattleLifecycleObservation(bunitsId, sceneHash, CalendarDayIndex(bunits), GameVars.currenttimefromstart, units);
             }
             catch (Exception e)
             {
@@ -380,6 +380,13 @@ namespace WhiskeyRealism.Patches
                     + e.GetType().Name + " " + e.Message);
                 return new BattleLifecycleObservation(0, 0, 0, 0f, 0);
             }
+        }
+
+        private static int CalendarDayIndex(BattleUnits bunits)
+        {
+            var clock = bunits != null ? bunits.uniStormSystem : null;
+            if (clock == null) return 0;
+            return clock.yearCounter * 400 + clock.monthCounter * 32 + clock.dayCounter;
         }
 
         // SceneManagement.currentoperation is deliberately excluded: vanilla flips 8 -> 3

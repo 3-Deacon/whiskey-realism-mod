@@ -88,8 +88,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Operations-ledger clock (T8): battle seconds from GameVars.currenttimefromstart
-        /// (battle hours = Hour + battlepasseddays*24, SetTimeVariables 93545), so the
+        /// Operations-ledger clock (T8): battle seconds from the doctrine clock
+        /// (TacticalDoctrineClock over GameVars.currenttimefromstart = Hour +
+        /// battlepasseddays*24, SetTimeVariables 93545; frozen overnight), so the
         /// director's commit windows (420/900/1200 s) span the same battle time at any
         /// time compression. Previously realtimeSinceStartup: 15 battle-minutes at 1x
         /// but ~5 battle-hours at 20x.

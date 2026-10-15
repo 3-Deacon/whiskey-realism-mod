@@ -17,8 +17,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // Approach avenues:
     //   cached  — the avenue array, keyed by a TacticalAvenueSourceSignature
     //             (scheduledarrival count: RemoveAt 87620 / Add 87834; EntryPoint.owner
-    //             hash: 87601, 87691, 87891-87927, 94743; battlepasseddays: AI groups are
-    //             redeployed for a new day 85754-85816). Any change rebuilds the array.
+    //             hash: 87601, 87691, 87891-87927, 94743; battlepasseddays: deployment groups can
+    //             be re-placed when a new day's deployment panel closes,
+    //             DoPlacementAIUnitsWithinDeploymentzoneNew 85524 via 164879-164880).
+    //             Any change rebuilds the array.
     //   BattleUnits reference is kept from Populate instead of FindObjectOfType per scan.
     //
     // Lifecycle: Populate() from TacticalBattleCoordinator.OnBattleStart, Clear() from

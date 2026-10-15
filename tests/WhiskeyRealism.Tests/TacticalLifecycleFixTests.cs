@@ -12,7 +12,11 @@ internal static class TacticalLifecycleFixTests
         Pass("t9 lifecycle steady ticks report none", T9SteadyTicksReportNone);
         Pass("t9 lifecycle new battle units id restarts", T9NewBattleUnitsIdRestarts);
         Pass("t9 lifecycle clock rewind on same battle restarts", T9ClockRewindRestarts);
-        Pass("t9 lifecycle battle day advance restarts", T9BattleDayAdvanceRestarts);
+        Pass("t9 lifecycle night rollover keeps battle", T9NightRolloverKeepsBattle);
+        Pass("t9 lifecycle midnight wrap without day count is not a reload", T9MidnightWrapIsNotReload);
+        Pass("t9 end-of-day gate suspends then resumes once", T9EndOfDayGateSuspendsThenResumes);
+        Pass("t9 doctrine clock frozen overnight and monotonic", T9DoctrineClockFrozenOvernight);
+        Pass("t9 doctrine clock ignores midnight wrap", T9DoctrineClockIgnoresMidnightWrap);
         Pass("t9 lifecycle battle units destroyed ends battle", T9BattleUnitsDestroyedEndsBattle);
         Pass("t9 lifecycle destroy of other battle units ignored", T9DestroyOfOtherBattleUnitsIgnored);
         Pass("t9 lifecycle zero units still ends after two ticks", T9ZeroUnitsStillEndsAfterTwoTicks);
@@ -51,9 +55,9 @@ internal static class TacticalLifecycleFixTests
         Console.WriteLine("PASS " + name);
     }
 
-    private static BattleLifecycleObservation Obs(int bunitsId, int days, float clock, int units = 100, int scene = 7)
+    private static BattleLifecycleObservation Obs(int bunitsId, int calendarDay, float clock, int units = 100, int scene = 7)
     {
-        return new BattleLifecycleObservation(bunitsId, days, scene, clock, units);
+        return new BattleLifecycleObservation(bunitsId, scene, calendarDay, clock, units);
     }
 
     // ---- T9 lifecycle ----
@@ -96,15 +100,53 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertEqual("battle-clock-rewound", r.Reason, "reason");
     }
 
-    private static void T9BattleDayAdvanceRestarts()
+    private static void T9NightRolloverKeepsBattle()
     {
-        // CheckTimeIssues 86384 increments battlepasseddays; AI redeploys at day start
-        // (85754-85816), so the orchestrator re-bootstraps against the new deployment.
+        // CheckTimeIssues 86384 increments battlepasseddays mid-night (eodcycle 2->3);
+        // vanilla keeps all AI state, so the orchestrator must too.
         var d = new TacticalBattleLifecycleDetector();
-        d.Observe(Obs(11, 0, 23.9f));
-        var r = d.Observe(Obs(11, 1, 24.2f));
-        TestHarness.AssertEqual(BattleLifecycleTransition.Restart, r.Transition, "restart");
-        TestHarness.AssertEqual("battle-day-changed", r.Reason, "reason");
+        d.Observe(Obs(11, 10, 23.9f));
+        TestHarness.AssertEqual(BattleLifecycleTransition.None, d.Observe(Obs(11, 11, 24.2f)).Transition, "same battle");
+    }
+
+    private static void T9MidnightWrapIsNotReload()
+    {
+        // Midnight passing while eodcycle != 2 skips battlepasseddays++, so
+        // currenttimefromstart (Hour + days*24) drops ~24h; the calendar day advanced.
+        var d = new TacticalBattleLifecycleDetector();
+        d.Observe(Obs(11, 10, 23.9f));
+        TestHarness.AssertEqual(BattleLifecycleTransition.None, d.Observe(Obs(11, 11, 0.1f)).Transition, "wrap");
+        TestHarness.AssertEqual(BattleLifecycleTransition.None, d.Observe(Obs(11, 11, 0.2f)).Transition, "after wrap");
+    }
+
+    private static void T9EndOfDayGateSuspendsThenResumes()
+    {
+        var g = new TacticalEndOfDayGate();
+        TestHarness.AssertEqual(EndOfDayPhase.Fighting, g.Observe(0), "day");
+        TestHarness.AssertEqual(EndOfDayPhase.Suspended, g.Observe(1), "eat");
+        TestHarness.AssertEqual(EndOfDayPhase.Suspended, g.Observe(2), "night");
+        TestHarness.AssertEqual(EndOfDayPhase.Suspended, g.Observe(5), "deployment");
+        // SetActiveDeploymentPhase(false) sets eodcycle = 0 (164874-164882).
+        TestHarness.AssertEqual(EndOfDayPhase.Resumed, g.Observe(0), "morning");
+        TestHarness.AssertEqual(EndOfDayPhase.Fighting, g.Observe(0), "once");
+    }
+
+    private static void T9DoctrineClockFrozenOvernight()
+    {
+        var c = new TacticalDoctrineClock();
+        TestHarness.AssertEqual(8.0f, c.Advance(8.0f, suspended: false), "start");
+        TestHarness.AssertEqual(10.0f, c.Advance(10.0f, suspended: false), "day");
+        TestHarness.AssertEqual(10.0f, c.Advance(20.0f, suspended: true), "evening");
+        TestHarness.AssertEqual(10.0f, c.Advance(31.0f, suspended: true), "night");
+        TestHarness.AssertEqual(10.5f, c.Advance(31.5f, suspended: false), "next morning resumes without a jump");
+    }
+
+    private static void T9DoctrineClockIgnoresMidnightWrap()
+    {
+        var c = new TacticalDoctrineClock();
+        c.Advance(23.5f, suspended: false);
+        TestHarness.AssertEqual(23.5f, c.Advance(0.1f, suspended: false), "no rewind");
+        TestHarness.AssertTrue(Math.Abs(c.Advance(0.2f, suspended: false) - 23.6f) < 0.0001f, "keeps advancing");
     }
 
     private static void T9BattleUnitsDestroyedEndsBattle()
