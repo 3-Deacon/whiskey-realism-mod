@@ -307,6 +307,8 @@ internal static class BattlePerceptionProbe { // runtime
   - `PerceptionUpdateAllocatesNothingAfterWarmup`
 - [ ] Implement. Scope `tactical.perception` (2.0 ms) around probe + update + slice build. Emit telemetry row `[BattlePerception] alliance=<a> mode=<FogGrid|RangeOnly|OwnSideWithinFog> reason=<…> visible=<n> remembered=<n>` once per mode change per side. Use OnceLog key `tactical.battle-perception:mode:<mode>` (static per mode; the `tactical` prefix lets `OnceLog.ResetTactical` re-arm it each battle); the per-side counts go through the `BattlePerception` Decision telemetry row.
 
+PROVE-MODE: harness for this slice; in-game at BC7. Per-slice proof is the console harness (`BattlePerceptionTests`, exit code 0; a failing assertion throws, exit 134): mode decision order, memory hide/remember/decay/drop at 90 min, routed and reinforcement handling, publish summaries, vanilla slice binning, flank and closest-visible pressure, the per-side painted-grid latch, and zero allocation over 300 own × 300 enemy after warm-up. Mutation evidence (verify r2): five plants each turned a named test red with exit 134 — the round-1 0.05-floor drop rule, `HideConfirmTicks = 1`, reinforcements counted in the enemy summary, full remembered pressure weight, and a closest-enemy search ignoring visibility. Runtime proof of `BattlePerceptionProbe.Probe` is the BC7 in-game smoke (the `[once:tactical.battle-perception:mode:…]` lines), because nothing calls the probe before BC4 wires it after `BattleSnapshotBuilder.Build` in `BattleCoreTick.EnsureSnapshot`.
+
 **Steps BC2b (after BC1 merges):**
 - [ ] Tests first:
   - `EvidenceSectorStrengthFromObservationsNotVanillaSlices`
