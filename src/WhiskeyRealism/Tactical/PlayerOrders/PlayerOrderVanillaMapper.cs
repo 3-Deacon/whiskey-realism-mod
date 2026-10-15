@@ -21,12 +21,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                     return new PlayerOrderVanillaMapping(5, intent);
                 case PlayerOrderIntent.AdvanceToAssemblyArea:
                     return new PlayerOrderVanillaMapping(1, intent);
-                case PlayerOrderIntent.DefendCapital:
-                    return new PlayerOrderVanillaMapping(8, intent);
-                case PlayerOrderIntent.BuildFort:
-                    return new PlayerOrderVanillaMapping(9, intent);
-                case PlayerOrderIntent.BuildSupplyDepot:
-                    return new PlayerOrderVanillaMapping(10, intent);
                 case PlayerOrderIntent.RecoverFromCombat:
                     return new PlayerOrderVanillaMapping(13, intent);
                 case PlayerOrderIntent.ClearHoldTransition:

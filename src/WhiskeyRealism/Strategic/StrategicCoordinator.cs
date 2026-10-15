@@ -1698,15 +1698,10 @@ namespace WhiskeyRealism.Strategic
             if (allianceId != playerAlliance) return false;
             try
             {
-                var dlcType = AccessTools.TypeByName("DLC_WL");
-                if (dlcType == null) return false;
-                var scenarioActive = (bool)AccessTools.Field(dlcType, "dlc_scenarioactive").GetValue(null);
-                if (!scenarioActive) return false;
-                // Vanilla signature: public static bool IsCommanderInChief(int manualcommander = -1)
-                // (decompile line 47475). Pass -1 to use the default behavior (check dlc_chosencommander).
-                var isCIC = AccessTools.Method(dlcType, "IsCommanderInChief", new[] { typeof(int) });
-                if (isCIC == null) return false;
-                return (bool)isCIC.Invoke(null, new object[] { -1 });
+                // Direct reads (no reflection: this runs on many per-call paths). Vanilla
+                // DLC_WL.IsCommanderInChief(manualcommander = -1) (decompile 47475) checks
+                // dlc_chosencommander.
+                return DLC_WL.dlc_scenarioactive && DLC_WL.IsCommanderInChief();
             }
             catch (Exception ex)
             {
@@ -1912,6 +1907,7 @@ namespace WhiskeyRealism.Strategic
             snap.LastSeenMonth = LastSeenMonth;
             snap.LastSeenYear = LastSeenYear;
             snap.SaveSequence = ++_saveSequence;
+            snap.PlayerCompliance = PlayerComplianceRuntime.Export();
             var written = PickCampaignObjectivePatch.SnapshotWrittenByMod();
             for (int a = 0; a < written.Length && a < snap.ModWrittenObjective.Length; a++)
                 snap.ModWrittenObjective[a] = written[a];
@@ -1949,6 +1945,7 @@ namespace WhiskeyRealism.Strategic
             LastSeenMonth = snap.LastSeenMonth;
             LastSeenYear = snap.LastSeenYear;
             _saveSequence = snap.SaveSequence;
+            PlayerComplianceRuntime.Restore(snap.PlayerCompliance);
             var written = new int[2];
             for (int a = 0; a < written.Length; a++)
             {

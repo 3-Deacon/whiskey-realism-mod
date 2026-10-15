@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Util;
 
@@ -481,6 +482,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
                 MeanFlankThreatByGroup(s, _flankThreatMean, _flankThreatCount);
 
+                // W&L: the player's regiments count at his order reliability (chain-of-command
+                // spec §E): a player who ignores his dispatches is an unreliable executor, so the
+                // sectors he holds get less weight for Main/SupportMain and draw reserve relief.
+                float playerReliability = PlayerComplianceRuntime.Reliability;
                 UnitRecord[] own = s.Own;
                 for (int i = 0; i < s.OwnCount; i++)
                 {
@@ -508,7 +513,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     Regiment live = BattleSnapshotBuilder.UnitAt(s, i, enemy: false);
                     bool fire = HasReceivedFire(live);
                     if (fire) anyRecentFire = true;
-                    ownCombat.Add(new FrontUnitSample(u.InstanceId, u.X, u.Z, u.Strength, fire));
+                    float weight = PlayerComplianceLedger.StrengthWeight((u.Flags & UnitFlags.PlayerOwned) != 0, playerReliability);
+                    ownCombat.Add(new FrontUnitSample(u.InstanceId, u.X, u.Z, u.Strength * weight, fire));
                     AddFireRangeIds(live);
                     if (!entryPointsChecked) MarkVisibleEntryPoints(u.UnitTyp, u.X, u.Z, enemyEntries, visibleEntries);
                     entryPointsChecked = enemyEntries.Count > 0 && visibleEntries.Count == enemyEntries.Count;

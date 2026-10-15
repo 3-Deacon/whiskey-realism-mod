@@ -28,6 +28,8 @@ campaign.patch.dispatch-sanitizer                  # Messages.Message.GenerateMe
 campaign.patch.wl-buy-supplies.*                   # DLC_WL.Get/AddSuppliesSubordinates: W&L attribute 24 (Buy Supplies, its conditions) only
 campaign.patch.wl-action-once-effects              # DLC_WL.UpdateCumulativeEffects: W&L career only (UpdateAllianceData 81821, staff changes)
 campaign.patch.wl-staff-panel-scope.*              # CampaignArmyPanel.UpdateStats: only while a campaign group panel is open
+campaign.patch.cic-faction-ai-guard.is-cic         # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
+campaign.patch.cic-faction-ai-guard.is-cic.prefix  # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
 
 # Campaign events that need not happen in a short session.
 campaign.patch.commander-prev-command.*            # Commander.AssignCommando: only when a commander is assigned to a unit
