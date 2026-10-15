@@ -45,7 +45,7 @@ namespace WhiskeyRealism.Strategic
         internal readonly List<BattleHistoryRecord> BattleHistory = new List<BattleHistoryRecord>();
         internal readonly DirectorMemory[] DirectorMemories = new DirectorMemory[2] { new DirectorMemory(), new DirectorMemory() };
         private readonly OperationDecisionMemory[] OperationMemories = new OperationDecisionMemory[2] { new OperationDecisionMemory(), new OperationDecisionMemory() };
-        private readonly DirectorPublishClamp _directorClamp = new DirectorPublishClamp();
+        private DirectorPublishClamp _directorClamp = new DirectorPublishClamp();
         private readonly string[] _directorPostureSignatures = new string[2];
         private readonly CollapseRisk[] _directorRiskLevels = new CollapseRisk[2] { CollapseRisk.Low, CollapseRisk.Low };
         private readonly FiscalStateMemory[] _fiscalMemory = new FiscalStateMemory[2]
@@ -65,7 +65,9 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _constructionSourceSignatures = new string[2];
         private string _campaignMapSignature;
         private string _campaignMapDynamicSignature;
-        private readonly DailyCadence _operationalCadence = new DailyCadence();
+        private DailyCadence _operationalCadence = new DailyCadence();
+        private bool _erasSeededFromSave;
+        internal static readonly CampaignEpochTracker Epoch = new CampaignEpochTracker();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
         private bool _dailyOpsAnnounced;
@@ -114,6 +116,70 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
+        // R15/H3: clears ALL per-campaign state. Called at the start of the AICampaign.Load
+        // Postfix (before a sidecar is applied, or when a save has none) and when a new
+        // campaign scene appears without a load (CampaignEpochTracker via MonthlyTickHookPatch).
+        // The singleton survives scene changes (DontDestroyOnLoad), so without this the previous
+        // campaign's plans, era, battle history and succession ids leaked into the next one.
+        public void ResetAll(string reason)
+        {
+            for (int a = 0; a < 2; a++)
+            {
+                CICs[a] = null;
+                Eras[a] = new EraStageManager { Stage = EraStage.Amateur1861 };
+                Fronts[a] = null;
+                ArmyAreas[a] = null;
+                FormationDirectives[a] = null;
+                OperationalProbes[a] = null;
+                FiscalIntents[a] = null;
+                ConstructionIntents[a] = null;
+                DefenseIntents[a] = null;
+                _defenseCooldowns[a] = new DefenseCooldownTable();
+                _defenseIntentSignatures[a] = null;
+                _previousSifSignatures[a] = new HashSet<string>();
+                DirectorMemories[a] = new DirectorMemory();
+                OperationMemories[a] = new OperationDecisionMemory();
+                _directorPostureSignatures[a] = null;
+                _directorRiskLevels[a] = CollapseRisk.Low;
+                _fiscalMemory[a] = new FiscalStateMemory();
+                _frontSignatures[a] = null;
+                _armyAreaSignatures[a] = null;
+                _formationDirectiveSignatures[a] = null;
+                _operationalProbeSignatures[a] = null;
+                _operationalProbeStates[a] = null;
+                _fiscalSignatures[a] = null;
+                _constructionSignatures[a] = null;
+                _formationSourceSignatures[a] = null;
+                _armyAreaSourceSignatures[a] = null;
+                _constructionSourceSignatures[a] = null;
+                _playerCicAnnounced[a] = false;
+            }
+            CampaignMap = CampaignMapLedger.Build(null);
+            ConstructionTelemetry = new ConstructionTelemetry();
+            Succession = new SuccessionScheduler();
+            MinorOfficerProfiles.Clear();
+            BattleHistory.Clear();
+            _directorClamp = new DirectorPublishClamp();
+            _campaignMapSignature = null;
+            _campaignMapDynamicSignature = null;
+            _operationalCadence = new DailyCadence();
+            _operationalRuntimeDeferredLogged = false;
+            _wlCareerStartDeferredLogged = false;
+            _dailyOpsAnnounced = false;
+            _forcedAllSuccession = false;
+            _erasSeededFromSave = false;
+            _lastSnapshot = default(WarStateObserver.Snapshot);
+            _lastSnapshotDay = _lastSnapshotMonth = _lastSnapshotYear = -1;
+            _loggedVicksburg = _loggedChattanooga = _loggedAtlanta = false;
+            LastSeenMonth = -1;
+            LastSeenYear = -1;
+            Initialized = false;
+            PickCampaignObjectivePatch.ResetForNewCampaign();
+            MonthlyTickHookPatch.ResetCadence();
+            OnceLog.Reset();
+            EmitCampaignInfoToMainLogIfAllowed("[Coordinator] strategic state reset (" + reason + ")");
+        }
+
         private CIC BuildCICForAlliance(int allianceId)
         {
             var cic = new CIC { AllianceId = allianceId };
@@ -141,6 +207,12 @@ namespace WhiskeyRealism.Strategic
 
             bool firstCall = (LastSeenMonth < 0);
             bool rollover  = !firstCall && ((gameMonth != LastSeenMonth) || (gameYear != LastSeenYear));
+            if (firstCall && !_erasSeededFromSave)
+            {
+                // Fresh campaign state (reset or no sidecar era): derive the era from the date.
+                for (int a = 0; a < Eras.Length; a++)
+                    (Eras[a] ?? (Eras[a] = new EraStageManager())).ResetToDate(gameMonth, gameYear);
+            }
 
             // Fire on first valid call (campaign just started / save just loaded)
             // AND on every subsequent month rollover. The first heartbeat gives
@@ -1621,6 +1693,7 @@ namespace WhiskeyRealism.Strategic
             {
                 CICs[alliance] = snap.Cics[alliance];
                 Eras[alliance] = new EraStageManager { Stage = snap.Eras[alliance] ?? EraStage.Amateur1861 };
+                if (snap.Eras[alliance].HasValue) _erasSeededFromSave = true;
                 DirectorMemories[alliance] = snap.DirectorMemories[alliance] ?? new DirectorMemory();
                 OperationMemories[alliance] = new OperationDecisionMemory();
                 OperationMemories[alliance].RestoreRecentReplans(snap.RecentReplans[alliance]);

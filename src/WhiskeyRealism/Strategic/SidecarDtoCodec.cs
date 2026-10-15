@@ -28,6 +28,44 @@ namespace WhiskeyRealism.Strategic
         public static SidecarSnapshot Empty() => new SidecarSnapshot();
     }
 
+    // R15/H3: decides when strategic state must be reset for a new campaign. Vanilla only
+    // calls AICampaign.Load when SceneManagement.currentoperation is 5 (return from battle)
+    // or 6 (load save) (CampaignController 30003-30023), so a brand-new campaign never hits
+    // the load hook. Each campaign scene has its own AICampaign MonoBehaviour, so a new
+    // instance seen in AICampaign.Update without a load for it means a new campaign.
+    // The load path resets + applies the sidecar itself and marks its scene here, whichever
+    // of Load / first Update happens first.
+    internal sealed class CampaignEpochTracker
+    {
+        private object _lastInstance;
+        private bool _loadPendingUnknownInstance;
+
+        internal void NoteLoad(object aiCampaignInstance)
+        {
+            if (aiCampaignInstance != null)
+            {
+                _lastInstance = aiCampaignInstance;
+                _loadPendingUnknownInstance = false;
+            }
+            else
+            {
+                _loadPendingUnknownInstance = true;
+            }
+        }
+
+        internal bool ShouldResetOnUpdate(object aiCampaignInstance)
+        {
+            if (aiCampaignInstance == null || ReferenceEquals(aiCampaignInstance, _lastInstance)) return false;
+            _lastInstance = aiCampaignInstance;
+            if (_loadPendingUnknownInstance)
+            {
+                _loadPendingUnknownInstance = false;
+                return false;
+            }
+            return true;
+        }
+    }
+
     // Pure sidecar codec (no Unity / BepInEx): JSON <-> SidecarDto <-> SidecarSnapshot, plus
     // the atomic file write. Harness-covered.
     internal static class SidecarDtoCodec

@@ -56,6 +56,13 @@ internal static class CampaignLifecycleFixTests
         Check("c1 per newer sidecar version is rejected", PerNewerVersionIsRejected);
         Check("c1 per forced succession ids are not persisted", PerForcedSuccessionIdsAreNotPersisted);
         Check("c1 per atomic write keeps bak and leaves no temp", PerAtomicWriteKeepsBakAndNoTemp);
+
+        // R15/H3 — reset between campaigns
+        Check("c1 r15 new campaign scene without load resets", R15NewCampaignSceneWithoutLoadResets);
+        Check("c1 r15 load before first update keeps loaded state", R15LoadBeforeFirstUpdateKeepsLoadedState);
+        Check("c1 r15 same campaign scene never resets twice", R15SameSceneNeverResetsTwice);
+        Check("c1 r15 era derives from date in both directions", R15EraDerivesFromDateBothDirections);
+        Check("c1 r15 era transition stays monotonic within a campaign", R15EraTransitionStaysMonotonic);
     }
 
     private static void Check(string name, Action test)
@@ -644,6 +651,64 @@ internal static class CampaignLifecycleFixTests
         {
             System.IO.Directory.Delete(dir, true);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // R15
+    // ------------------------------------------------------------------
+
+    private static void R15NewCampaignSceneWithoutLoadResets()
+    {
+        var tracker = new CampaignEpochTracker();
+        var sceneA = new object();
+        var sceneB = new object();
+        TestHarness.AssertTrue(tracker.ShouldResetOnUpdate(sceneA), "first campaign scene resets");
+        TestHarness.AssertTrue(tracker.ShouldResetOnUpdate(sceneB), "new campaign scene (no AICampaign.Load) resets");
+    }
+
+    private static void R15LoadBeforeFirstUpdateKeepsLoadedState()
+    {
+        var tracker = new CampaignEpochTracker();
+        var sceneA = new object();
+        tracker.ShouldResetOnUpdate(sceneA);
+        var sceneB = new object();
+        tracker.NoteLoad(sceneB);
+        TestHarness.AssertFalse(tracker.ShouldResetOnUpdate(sceneB), "load already reset + applied for this scene");
+
+        var sceneC = new object();
+        tracker.NoteLoad(null);
+        TestHarness.AssertFalse(tracker.ShouldResetOnUpdate(sceneC), "load with unknown instance adopts the next scene");
+        var sceneD = new object();
+        TestHarness.AssertTrue(tracker.ShouldResetOnUpdate(sceneD), "pending marker consumed once");
+    }
+
+    private static void R15SameSceneNeverResetsTwice()
+    {
+        var tracker = new CampaignEpochTracker();
+        var scene = new object();
+        TestHarness.AssertTrue(tracker.ShouldResetOnUpdate(scene), "first sight");
+        TestHarness.AssertFalse(tracker.ShouldResetOnUpdate(scene), "same scene");
+        TestHarness.AssertFalse(tracker.ShouldResetOnUpdate(null), "no instance");
+    }
+
+    private static void R15EraDerivesFromDateBothDirections()
+    {
+        TestHarness.AssertEqual(EraStage.TotalWar1864, EraStageManager.ForDate(6, 1864, false, false), "1864");
+        TestHarness.AssertEqual(EraStage.Amateur1861, EraStageManager.ForDate(6, 1861, false, false), "back to 1861");
+        TestHarness.AssertEqual(EraStage.Decisive1863, EraStageManager.ForDate(3, 1863, true, false), "Vicksburg early keeps 1863");
+        TestHarness.AssertEqual(EraStage.TotalWar1864, EraStageManager.ForDate(3, 1864, false, true), "Atlanta early");
+        var era = new EraStageManager { Stage = EraStage.TotalWar1864 };
+        era.ResetToDate(6, 1861);
+        TestHarness.AssertEqual(EraStage.Amateur1861, era.Stage, "reset re-derives the era backwards");
+    }
+
+    private static void R15EraTransitionStaysMonotonic()
+    {
+        var era = new EraStageManager { Stage = EraStage.Decisive1863 };
+        era.CheckTransition(6, 1862, false, false);
+        TestHarness.AssertEqual(EraStage.Decisive1863, era.Stage, "CheckTransition never regresses");
+        era.CheckTransition(1, 1864, false, false);
+        TestHarness.AssertEqual(EraStage.TotalWar1864, era.Stage, "advances");
     }
 
     // ------------------------------------------------------------------
