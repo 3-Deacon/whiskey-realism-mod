@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using static WhiskeyRealism.Strategic.Planner.ReserveRules;
 
 namespace WhiskeyRealism.Strategic.Planner
 {
@@ -87,7 +88,8 @@ namespace WhiskeyRealism.Strategic.Planner
         public const float CapitalThreatRelease = 0.4f;   // the latch re-arms below this (F2)
         public const int MaxTraceCandidates = 12;
         private const float VanillaThreatMinDistance = 10f, VanillaThreatExponent = 0.3f, VanillaThreatScale = 0.5f; // 11735
-        private const FormationFlags Busy = FormationFlags.InBattle | FormationFlags.OnRetreat | FormationFlags.RaidForce | FormationFlags.SeaInvasion
+        // The flags that keep a formation out of the massable set (ForceAllocator keeps them in place).
+        internal const FormationFlags Busy = FormationFlags.InBattle | FormationFlags.OnRetreat | FormationFlags.RaidForce | FormationFlags.SeaInvasion
             | FormationFlags.Embarked | FormationFlags.FortBuilder | FormationFlags.VanillaDepotBuilder | FormationFlags.InTransfer;
 
         internal struct Candidate
@@ -97,7 +99,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public int SectorId;
             public int Force;          // own formation index, -1 none
             public float Value, Balance, Reach, March, Exposure, Capital, PriorTerm, Score;
-            public float Ratio, Required, Mass;
+            public float Ratio, Required, Mass, Enemy;
             public bool Eligible, InReach, Retained;
             public string PriorId;
         }
@@ -162,6 +164,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 plan.MainSectorId = m.SectorId;
                 plan.MainRequiredRatio = m.Required;
                 plan.PriorId = m.PriorId;
+                plan.MainEnemyStrength = m.Enemy;
                 plan.MassStrength = MassFor(inputs, m.X, m.Z, m.SectorId, inputs.Scratch);
                 for (int k = 0; k < inputs.Scratch.Count; k++) plan.MassInstanceIds.Add(s.Own[inputs.Scratch[k]].InstanceId);
                 axisFromX = force.X;
@@ -218,6 +221,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
                 float enemy = LandThreatNear(c, o.X, o.Z, range);
                 float own = cand.Mass;
+                cand.Enemy = enemy;
                 cand.Ratio = enemy > 0f ? own / enemy : (cand.Force >= 0 ? float.MaxValue : 0f);
                 float balance = own + enemy > 0f ? own / (own + enemy) : 0f;
                 cand.Balance = SnapshotRules.Clamp01(balance * (1f + AttackBiasBalanceScale * profile.AttackBias));
@@ -526,12 +530,6 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        private static int SectorOf(SectorModel sectors, in FormationRecord f)
-        {
-            int sector = f.AreaIndex >= 0 ? sectors.SectorOfArea(f.AreaIndex) : -1;
-            return sector >= 0 ? sector : sectors.SectorAt(f.X, f.Z);
-        }
-
         // ---- terms ----
 
         internal static bool Movable(in FormationRecord f)
@@ -630,7 +628,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var f = s.Own[i];
                 int sector = SectorOf(c.Sectors, f);
                 if (sector < 0 || sector >= n) continue;
-                x.Own[sector] += Math.Max(0f, f.Strength);
+                if (WlChainRules.CountsAsCommittedDefender(f.Chain)) x.Own[sector] += Math.Max(0f, f.Strength); // C4: a player's formation never holds a sector
                 x.Count[sector]++;
                 x.Supply[sector] += f.Supply01;
                 x.Morale[sector] += f.Morale;
@@ -661,99 +659,24 @@ namespace WhiskeyRealism.Strategic.Planner
             return LandThreatNear(c, cx, cz, sectorRadius + c.S.RelocationRange);
         }
 
-        private static int NearestLandBelief(CampaignSnapshot s, float x, float z)
-        {
-            int best = -1;
-            float bestDistance = float.MaxValue;
-            for (int i = 0; i < s.Beliefs.Count; i++)
-            {
-                var b = s.Beliefs[i];
-                if (Live(b) <= 0f || Afloat(b)) continue;
-                float d = DistanceSq(b.X, b.Z, x, z);
-                if (d >= bestDistance) continue;
-                bestDistance = d;
-                best = i;
-            }
-            return best;
-        }
-
-        // G4's own pick rules, applied before massing: the capital reserve (the massable formations
-        // nearest the capital until CapitalFloorStrength), then each threatened sector's hold reserve
-        // (what holds there anyway, busy, not massable or in the capital reserve, then its massable
-        // formations nearest the sector's believed army until HoldNeed). A sector's hold is released
-        // for a target its own threat sits at (HoldThreatAtTarget).
+        // G4's own pick rules, applied before massing (ReserveRules, shared with ForceAllocator): the
+        // capital reserve (the massable formations nearest the capital until CapitalFloorStrength),
+        // then each threatened sector's hold reserve (what holds there anyway, busy, not massable or in
+        // the capital reserve, then its massable formations nearest the sector's believed army until
+        // HoldNeed). A sector's hold is released for a target its own threat sits at (HoldThreatAtTarget).
         private static void Reserve(Inputs c)
         {
-            var s = c.S;
-            int n = s.Own.Count;
+            int n = c.S.Own.Count;
             c.CapitalReserved = new bool[n];
             c.HoldReserved = new int[n];
-            for (int i = 0; i < n; i++) c.HoldReserved[i] = -1;
-            var order = new List<int>();
-            if (s.HasCapital && c.CapitalFloor > 0f)
-            {
-                for (int i = 0; i < n; i++)
-                    if (MassEligible(s.Own[i], s.MinMoraleForMovement)) order.Add(i);
-                SortByDistance(s, order, s.CapitalX, s.CapitalZ);
-                float held = 0f;
-                for (int k = 0; k < order.Count && held < c.CapitalFloor; k++)
-                {
-                    c.CapitalReserved[order[k]] = true;
-                    held += Math.Max(0f, s.Own[order[k]].Strength);
-                }
-            }
-            var x = c.Facts;
-            for (int sector = 0; sector < c.Sectors.Count; sector++)
-            {
-                if (x.Need[sector] <= 0f) continue;
-                float held = 0f;
-                order.Clear();
-                for (int i = 0; i < n; i++)
-                {
-                    var f = s.Own[i];
-                    if (SectorOf(c.Sectors, f) != sector) continue;
-                    if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i]) held += Math.Max(0f, f.Strength);
-                    else order.Add(i);
-                }
-                SortByDistance(s, order, x.NearX[sector], x.NearZ[sector]);
-                for (int k = 0; k < order.Count && held < x.Need[sector]; k++)
-                {
-                    c.HoldReserved[order[k]] = sector;
-                    held += Math.Max(0f, s.Own[order[k]].Strength);
-                }
-            }
-        }
-
-        private static void SortByDistance(CampaignSnapshot s, List<int> order, float x, float z)
-        {
-            order.Sort((a, b) =>
-            {
-                int d = DistanceSq(s.Own[a].X, s.Own[a].Z, x, z).CompareTo(DistanceSq(s.Own[b].X, s.Own[b].Z, x, z));
-                return d != 0 ? d : a.CompareTo(b);
-            });
+            ReserveRules.Capital(c.S, c.CapitalFloor, c.CapitalReserved);
+            ReserveRules.Hold(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalReserved, c.HoldReserved);
         }
 
         private static CommanderProfile ProfileOf(Inputs c, int formation)
         {
             if (formation < 0 || c.Profile == null) return default(CommanderProfile);
             return c.Profile(c.S.Own[formation].CommanderId);
-        }
-
-        private static float DistanceSq(float ax, float az, float bx, float bz)
-        {
-            float dx = ax - bx;
-            float dz = az - bz;
-            return dx * dx + dz * dz;
-        }
-
-        private static float Live(in EnemyBelief b)
-        {
-            return b.Confidence01 > 0f ? Math.Max(0f, b.Strength) * Math.Min(1f, b.Confidence01) : 0f;
-        }
-
-        private static bool Afloat(in EnemyBelief b)
-        {
-            return (b.Traits & EnemyTraits.Embarked) != 0;
         }
 
         // Believed land enemy within radius (straight), each weighted min(1, radius / river distance).
@@ -818,7 +741,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var f = s.Own[i];
                 if (RiverLines.Distance(f.X, f.Z, s.CapitalX, s.CapitalZ) >= range) continue;
-                own += Math.Max(0f, Math.Min(f.Strength, f.Strength * f.Morale));
+                if (WlChainRules.CountsAsCommittedDefender(f.Chain)) own += Math.Max(0f, Math.Min(f.Strength, f.Strength * f.Morale));
             }
             threat01 = SnapshotRules.Clamp01(floor / Math.Max(1f, own));
         }

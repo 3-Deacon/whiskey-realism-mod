@@ -179,6 +179,7 @@ namespace WhiskeyRealism.Strategic.Planner
         private long _map;
         private bool _hasMap;
         private int _next;
+        private string _scenario; // SceneManagement.currentcampaignscenario when the queue was prepared (null: none)
 
         internal int Lines { get; private set; }
         internal int Rivers => _queue.Count - Lines;
@@ -189,10 +190,28 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             _queue.Clear();
             _ranges.Clear();
+            _scenario = null;
             _hasMap = false;
             _next = 0;
             Lines = 0;
             Oversize = false;
+        }
+
+        // Records the scenario the queue belongs to (the runtime calls it after Prepare).
+        internal void NoteScenario(string scenario)
+        {
+            if (_hasMap) _scenario = scenario ?? "";
+        }
+
+        // A load onto another scenario: the queue (and the map identity) belong to the old map, so they go
+        // at the load instead of at the next review's Prepare, and the next frames do not probe the old
+        // map's questions against the new one. Returns true when it dropped (the caller drops its memo too).
+        // A save of the same scenario, or a return from a campaign battle, keeps everything.
+        internal bool DropForScenario(string scenario)
+        {
+            if (!_hasMap || _scenario == null || string.Equals(_scenario, scenario ?? "", StringComparison.Ordinal)) return false;
+            Clear();
+            return true;
         }
 
         // Enumerates the area pairs on the first call for a map (mapChanged: the caller clears its memo

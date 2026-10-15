@@ -424,12 +424,13 @@ namespace WhiskeyRealism.Strategic
         // Every campaign frame (MonthlyTickHookPatch): continue an in-flight review. A frame with
         // no review day in flight goes to the campaign planner's terrain memo drain instead
         // (TerrainLineRuntime.DrainTick, its own 0.9 ms budget), so the two never share a frame
+        // (ReviewFrameGate also covers a review finished earlier in the frame by the save drain)
         // and the drain stops while a day is being reviewed.
         internal void PumpDailyReview()
         {
             if (!_review.InFlight)
             {
-                TerrainLineRuntime.DrainTick();
+                if (_reviewFrames.MayDrain(Time.frameCount)) TerrainLineRuntime.DrainTick();
                 return;
             }
             try
@@ -542,8 +543,12 @@ namespace WhiskeyRealism.Strategic
             return true;
         }
 
+        // Frames that ran review work (RunReviewSlice); the terrain drain skips them.
+        private readonly ReviewFrameGate _reviewFrames = new ReviewFrameGate();
+
         private void RunReviewSlice(long budgetTicks)
         {
+            _reviewFrames.MarkWork(Time.frameCount);
             var day = _day;
             long start = ReviewClock();
             if (_runReviewJob == null) _runReviewJob = RunReviewJob;
@@ -595,7 +600,7 @@ namespace WhiskeyRealism.Strategic
                     d.PolicyMs += Measure(() => UpdatePolicyPlan(alliance, a.Era.Stage, d.CalendarDay));
                 // G1: detection is bookkeeping; the planner itself stands down for this alliance.
                 else if (job.Kind == DailyReviewJobKind.Plan)
-                    d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture));
+                    d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused));
                 return;
             }
             if (a.Mode != AllianceReviewMode.Ai) return;
@@ -615,7 +620,7 @@ namespace WhiskeyRealism.Strategic
 
                 case DailyReviewJobKind.Plan:
                     if (ready)
-                        d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture));
+                        d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewPlan(alliance, d.Day, d.Month, d.Year, _work.DirectorMemories[alliance]?.LastPosture, d.JobMachinePaused));
                     break;
 
                 case DailyReviewJobKind.Front:
@@ -638,7 +643,7 @@ namespace WhiskeyRealism.Strategic
 
                 case DailyReviewJobKind.Execute:
                     if (ready && !paused)
-                        d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewExecute(alliance));
+                        d.PlannerMs += Measure(() => CampaignPlannerRuntime.ReviewExecute(alliance, d.JobMachinePaused));
                     break;
 
                 case DailyReviewJobKind.Formation:

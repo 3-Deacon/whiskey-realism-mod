@@ -792,7 +792,11 @@ internal static class TheaterPlannerTests
         AssertContains(src, "CampaignScope.Register(\"campaign-planner-terrain-probe\"", "per-campaign reset");
         // M2b: a CampaignScope reset keeps the map's memo; only a new map identity clears it.
         string reset = MethodBody(src, "private static void Reset(");
-        AssertFalse(reset.Contains("LineMemo") || reset.Contains("RiverMemo") || reset.Contains("Partials") || reset.Contains("Drain.") || reset.Contains("ClearMap"), "the reset keeps the memo, partial lines and drain");
+        // F3 (integration verify): the one exception is a load onto another scenario, dropped at the load.
+        string guarded = "if (Drain.DropForScenario(SceneManagement.currentcampaignscenario)) ClearMap();";
+        AssertContains(reset, guarded, "a load onto another scenario drops the old map's queue and memo");
+        string rest = reset.Replace(guarded, "");
+        AssertFalse(rest.Contains("LineMemo") || rest.Contains("RiverMemo") || rest.Contains("Partials") || rest.Contains("Drain.") || rest.Contains("ClearMap"), "otherwise the reset keeps the memo, partial lines and drain");
         string prepare = MethodBody(src, "internal static void PrepareDrain(");
         AssertContains(prepare, "TerrainMemoDrain.MapIdentity(SceneManagement.currentcampaignscenario, snapshot.Areas)", "map identity: scenario and area geometry");
         AssertContains(prepare, "if (mapChanged) ClearMap();", "cleared on a new map only");
@@ -1283,7 +1287,7 @@ internal static class TheaterPlannerTests
         AssertFalse(MethodBody(plugin, "private void Update(").Contains("DrainTick"), "not a bare Plugin.Update tick");
         string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
         string pump = System.Text.RegularExpressions.Regex.Replace(MethodBody(coordinator, "internal void PumpDailyReview("), @"\s+", " ");
-        AssertContains(pump, "if (!_review.InFlight) { TerrainLineRuntime.DrainTick(); return; }", "drained by the review's frame pump between review days");
+        AssertContains(pump, "if (!_review.InFlight) { if (_reviewFrames.MayDrain(Time.frameCount)) TerrainLineRuntime.DrainTick(); return; }", "drained by the review's frame pump between review days, on a frame without review work (F4)");
         AssertEqual(1, coordinator.Split(new[] { "TerrainLineRuntime.DrainTick();" }, StringSplitOptions.None).Length - 1, "one drain call site");
         string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
         string review = MethodBody(runtime, "internal static void ReviewPlan(");
