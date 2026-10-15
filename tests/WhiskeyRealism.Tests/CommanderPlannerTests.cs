@@ -665,6 +665,13 @@ internal static class CommanderPlannerTests
         AssertContains(successor, "id == DLC_WL.dlc_chosencommander) continue;", "never the player as successor");
         string execute0 = MethodBody(src, "internal static void Execute(");
         AssertContains(execute0, "(intent.ReseatGroupInstanceId < 0 || Reseat(alliance, intent, out reseated)) &&", "reseat before appointing");
+        string reseatBody = MethodBody(src, "private static bool Reseat(");
+        int appointed = reseatBody.IndexOf("ArmyGroup.AppointCommander(group, successor,", StringComparison.Ordinal);
+        int verifiedReseat = reseatBody.IndexOf("if (group.GetCommanderID() != successor) return false;", StringComparison.Ordinal);
+        AssertTrue(appointed >= 0 && verifiedReseat > appointed, "the reseat is verified before the figure is appointed");
+        AssertContains(execute0, "if (reseated != null) EmitAppointment(s, alliance, intent, unitName, reseated, \"appoint-failed-after-reseat\");",
+            "a reseat followed by a failed appointment is recorded");
+        AssertContains(execute0, "EmitAppointment(s, alliance, intent, unitName, reseated, \"appointed\");", "a verified appointment is recorded");
 
         string unit = MethodBody(src, "private static bool AppointToUnit(");
         int replace = unit.IndexOf("BattleUnits.ReplaceCommanderOfUnit(", StringComparison.Ordinal);

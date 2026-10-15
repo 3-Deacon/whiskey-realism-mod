@@ -105,20 +105,16 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (!done)
                     {
                         OnceLog.Warning("campaign-planner:appointment-failed",
-                            "[CampaignPlanner] an appointment vanilla allowed did not take effect; nothing recorded");
+                            "[CampaignPlanner] an appointment vanilla allowed did not take effect; nothing protected or marked applied");
+                        // The reseat already moved the figure off his group: record that partial state.
+                        // He is idle now, so the next review sees him as an ordinary pool candidate.
+                        if (reseated != null) EmitAppointment(s, alliance, intent, unitName, reseated, "appoint-failed-after-reseat");
                         return;
                     }
 
                     protection.Protect(intent.CommanderId, s.DaySerial);
                     if (intent.SuccessionEventId >= 0 && succession != null) succession.MarkApplied(intent.SuccessionEventId);
-                    TelemetryRouter.LegacyInfo(
-                        "[Appointment] alliance=" + alliance +
-                        " commander=" + NameOf(s, intent.CommanderId) +
-                        " unit=" + unitName +
-                        " reason=" + intent.Reason +
-                        " displaced=" + NameOf(s, intent.DisplacedId) +
-                        (reseated != null ? " reseated=" + reseated : ""),
-                        TelemetryLayer.Campaign);
+                    EmitAppointment(s, alliance, intent, unitName, reseated, "appointed");
                 }
                 catch (Exception ex)
                 {
@@ -126,6 +122,19 @@ namespace WhiskeyRealism.Strategic.Planner
                         "[CampaignPlanner] appointment step failed, no appointment today: " + ex.Message);
                 }
             }
+        }
+
+        private static void EmitAppointment(CampaignSnapshot s, int alliance, AppointmentIntent intent, string unitName, string reseated, string outcome)
+        {
+            TelemetryRouter.LegacyInfo(
+                "[Appointment] alliance=" + alliance +
+                " commander=" + NameOf(s, intent.CommanderId) +
+                " unit=" + unitName +
+                " reason=" + intent.Reason +
+                " displaced=" + NameOf(s, intent.DisplacedId) +
+                (reseated != null ? " reseated=" + reseated : "") +
+                " outcome=" + outcome,
+                TelemetryLayer.Campaign);
         }
 
         private static bool VanillaAllows(int alliance, AppointmentIntent intent)
