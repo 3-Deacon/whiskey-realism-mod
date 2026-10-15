@@ -25,6 +25,7 @@ internal static class CampaignMilitaryFixTests
         SuccessionRoleNeverTargetsPlayerOrWrongFront();
         SuccessionGeneralInChiefIsNotAnArmyGroup();
         StalePreviousCommandIsRefilledNotOrphaned();
+        SuccessionReseatsReplacementsOldArmyGroup();
         CapitalNeedMatchesVanillaFormula();
         CapitalPrePledgeOnlyWhenVanillaAlsoNeedsDefenders();
         CapitalPersonalityNeedDoesNotDoubleCountPledgedDefenders();
@@ -499,5 +500,32 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertTrue(CoordinatedOperationRuntime.PackageLockLive(3), "path still running keeps lock");
         TestHarness.AssertFalse(CoordinatedOperationRuntime.PackageLockLive(0), "path consumed expires lock");
         LogPass("c2a coordinated package lock only for direct commits");
+    }
+
+    // Vanilla seats historical figures on auto-created army groups early
+    // (CreateNewArmyGroup 75653 -> GetSuitableCommander includeofficerswithcommand),
+    // and CanBePickedForAIReplacement (60748) rejects any sitting army-group
+    // commander - so Lee/Johnston/Grant would never be "pickable". A sitting
+    // AG commander who is otherwise free moves after his old group is reseated
+    // from vanilla's own pool (GetAvailableArmyGroupCommanders 75546);
+    // AppointCommander never clears the old group's commanderid.
+    private static void SuccessionReseatsReplacementsOldArmyGroup()
+    {
+        TestHarness.AssertEqual(ReplacementAppointment.AppointDirect,
+            CommanderAssignmentGuard.ResolveReplacementAppointment(vanillaPickable: true, leadsOtherArmyGroup: false, freeApartFromArmyGroup: true, successorAvailable: false),
+            "pickable replacement appointed directly");
+        TestHarness.AssertEqual(ReplacementAppointment.ReseatThenAppoint,
+            CommanderAssignmentGuard.ResolveReplacementAppointment(false, true, true, true),
+            "sitting AG commander moves after his old group is reseated");
+        TestHarness.AssertEqual(ReplacementAppointment.Defer,
+            CommanderAssignmentGuard.ResolveReplacementAppointment(false, true, true, false),
+            "no successor -> never leave one man on two groups");
+        TestHarness.AssertEqual(ReplacementAppointment.Defer,
+            CommanderAssignmentGuard.ResolveReplacementAppointment(false, true, false, true),
+            "wounded/captured/staff/CIC/player-subordinate stays put");
+        TestHarness.AssertEqual(ReplacementAppointment.Defer,
+            CommanderAssignmentGuard.ResolveReplacementAppointment(false, false, true, true),
+            "not pickable for another reason -> defer");
+        LogPass("c2a succession reseats the replacement's old army group");
     }
 }

@@ -17,7 +17,10 @@ namespace WhiskeyRealism.Patches
     //   1. Replacement = the catalogued historical figure (exact combinedname for
     //      ambiguous surnames, ArmyGroupDoctrine.CommanderNameMatches), filtered by
     //      Commander.CanBePickedForAIReplacement(alliance, includeofficerswithcommand:
-    //      true) (60748) and never the W&L avatar.
+    //      true) (60748) and never the W&L avatar. Vanilla often seats him on an
+    //      auto-created group first (CreateNewArmyGroup 75653), which that filter
+    //      rejects; such a commander moves only if otherwise free and his old group
+    //      is reseated from GetAvailableArmyGroupCommanders (75546) beforehand.
     //   2. Target army group = resolved from Event.ReplacedRole + theater
     //      (CommanderAssignmentGuard.ResolveRoleTargetGroup), never the W&L
     //      player's group. GeneralInChief is GameVars.alliance.commanderinchief,
@@ -115,11 +118,19 @@ namespace WhiskeyRealism.Patches
                     ArmyGroupDoctrine.CommanderNameMatches(allianceId, e.ReplacementName, commanders[displacedId]?.combinedname))
                     return true;
 
-                int replacementId = FindReplacementId(commanders, allianceId, e.ReplacementName);
-                if (replacementId < 0)
+                int replacementId = FindReplacementId(commanders, allianceId, e.ReplacementName, out var plan, out var oldGroup, out int successorId);
+                if (replacementId < 0 || plan == ReplacementAppointment.Defer)
                 {
                     Defer(e, allianceId, "no-available-replacement", "replacement=" + e.ReplacementName);
                     return false;
+                }
+
+                if (plan == ReplacementAppointment.ReseatThenAppoint)
+                {
+                    // Vanilla AppointCommander does not clear the old group's commanderid;
+                    // reseat it first from vanilla's own pool so nobody commands two groups.
+                    ArmyGroup.AppointCommander(oldGroup, successorId, usefeudmechanism: false, resetcoordinationtime: true, ignoreprestige: true);
+                    if (oldGroup.GetCommanderID() != successorId) return false;
                 }
 
                 ArmyGroup.AppointCommander(group, replacementId, usefeudmechanism: false, resetcoordinationtime: true, ignoreprestige: true);
@@ -197,8 +208,17 @@ namespace WhiskeyRealism.Patches
             return DLC_WL.dlc_scenarioactive && group.GetCommanderID() == DLC_WL.dlc_chosencommander;
         }
 
-        private static int FindReplacementId(List<GameVars.Commander> commanders, int allianceId, string replacementName)
+        private static int FindReplacementId(
+            List<GameVars.Commander> commanders,
+            int allianceId,
+            string replacementName,
+            out ReplacementAppointment plan,
+            out ArmyGroup oldGroup,
+            out int successorId)
         {
+            plan = ReplacementAppointment.Defer;
+            oldGroup = null;
+            successorId = -1;
             for (int i = 0; i < commanders.Count; i++)
             {
                 var commander = commanders[i];
@@ -209,9 +229,78 @@ namespace WhiskeyRealism.Patches
                 bool pickable;
                 try { pickable = commander.CanBePickedForAIReplacement(allianceId, includeofficerswithcommand: true); }
                 catch { pickable = false; }
-                if (pickable) return i;
+
+                ArmyGroup current = pickable ? null : GroupCommandedBy(i);
+                int successor = (UnityEngine.Object)(object)current != (UnityEngine.Object)null
+                    ? PickSuccessor(allianceId, i)
+                    : -1;
+
+                var decision = CommanderAssignmentGuard.ResolveReplacementAppointment(
+                    pickable,
+                    (UnityEngine.Object)(object)current != (UnityEngine.Object)null,
+                    FreeApartFromArmyGroup(commander, allianceId, i),
+                    successor >= 0);
+                if (decision == ReplacementAppointment.Defer) continue;
+
+                plan = decision;
+                oldGroup = current;
+                successorId = successor;
+                return i;
             }
             return -1;
+        }
+
+        // CanBePickedForAIReplacement (60748) minus its army-group-commander test.
+        private static bool FreeApartFromArmyGroup(GameVars.Commander commander, int allianceId, int commanderId)
+        {
+            try
+            {
+                if (!commander.IsAvailable()) return false;
+                if (commander.IsServingUnderPlayer()) return false;
+                if (commander.IsMemberOfStaff() || commander.IsMemberOfStaff(1)) return false;
+                var alliance = GameVars.alliance[allianceId];
+                return alliance.commanderinchief != commanderId;
+            }
+            catch { return false; }
+        }
+
+        private static ArmyGroup GroupCommandedBy(int commanderId)
+        {
+            var all = BattleUnits.armygroups;
+            if (all == null) return null;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var group = all[i];
+                if ((UnityEngine.Object)(object)group != (UnityEngine.Object)null && group.GetCommanderID() == commanderId)
+                    return group;
+            }
+            return null;
+        }
+
+        // Best-rated officer from vanilla's own army-group pool (75546: available,
+        // no command, not refreshing, rank suitable for level 18).
+        private static int PickSuccessor(int allianceId, int excludeId)
+        {
+            List<int> pool;
+            try { pool = ArmyGroup.GetAvailableArmyGroupCommanders(allianceId); }
+            catch { return -1; }
+            if (pool == null) return -1;
+
+            int best = -1;
+            float bestValue = float.MinValue;
+            for (int i = 0; i < pool.Count; i++)
+            {
+                int id = pool[i];
+                if (id == excludeId || id < 0 || id >= GameVars.commander.Count) continue;
+                if (DLC_WL.dlc_scenarioactive && id == DLC_WL.dlc_chosencommander) continue;
+                float value = GameVars.commander[id].GetAverageAttributeValue();
+                if (value > bestValue)
+                {
+                    bestValue = value;
+                    best = id;
+                }
+            }
+            return best;
         }
 
         private static bool IsForceAllSuccessionEnabled()
