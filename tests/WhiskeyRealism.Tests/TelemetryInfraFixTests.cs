@@ -16,7 +16,6 @@ internal static class TelemetryInfraFixTests
         NodeIdMatchesNegativeIds();
         NodeIdMatchesRejectsMalformedIds();
         NodeIdMatchesDoesNotAllocate();
-        OnceLogClaimReturnsTrueOnlyOnce();
         OnceLogFiredKeySkipsMessageWork();
         OnceLogBoundsFiredKeys();
         OnceLogWarningsAreNeverSuppressedByCap();
@@ -118,21 +117,6 @@ internal static class TelemetryInfraFixTests
     }
 
     // ---------------------------------------------------------------- OnceLog
-
-    private static void OnceLogClaimReturnsTrueOnlyOnce()
-    {
-        OnceLog.Reset();
-        TestHarness.AssertTrue(OnceLog.Claim("p-test:claim"), "first claim wins");
-        TestHarness.AssertFalse(OnceLog.Claim("p-test:claim"), "second claim loses");
-        int infoBefore = WhiskeyRealism.Plugin.Log.InfoCount;
-        OnceLog.Info("p-test:claim", "[PTest] should not log; key already claimed");
-        TestHarness.AssertEqual(infoBefore, WhiskeyRealism.Plugin.Log.InfoCount, "claimed key suppresses Info");
-        TestHarness.AssertTrue(OnceLog.Claim("p-test:claim-other"), "independent key claims");
-        OnceLog.Reset();
-        TestHarness.AssertTrue(OnceLog.Claim("p-test:claim"), "reset releases claims");
-        OnceLog.Reset();
-        LogPass("oncelog claim returns true only once");
-    }
 
     private static void OnceLogFiredKeySkipsMessageWork()
     {

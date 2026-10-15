@@ -51,30 +51,6 @@ namespace WhiskeyRealism.Util
             TryLog(key, message, warning: true);
         }
 
-        // Returns true exactly once per key (and marks it fired); false when the key has
-        // already fired or the fired set is at MaxKeys. Callers that log through Claim own
-        // their own output.
-        internal static bool Claim(string key)
-        {
-            try
-            {
-                string firedKey = key ?? string.Empty;
-                lock (Gate)
-                {
-                    if (_fired.Contains(firedKey))
-                        return false;
-                    if (!HasCapacityLocked())
-                        return false;
-                    _fired.Add(firedKey);
-                    return true;
-                }
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         // Battle-end hook: forget every key starting with TacticalKeyPrefix.
         internal static void ResetTactical()
         {
