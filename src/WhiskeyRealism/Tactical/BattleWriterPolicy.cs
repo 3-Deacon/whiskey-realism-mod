@@ -517,6 +517,17 @@ namespace WhiskeyRealism.Tactical
             return unitTyp <= 1 && regimentPaths <= 0 && !routed && outflanked <= 0 && !inEngagement;
         }
 
+        // #56: BattleUnits.SetWaypoint only queues a courier order for a unit
+        // with a groupposition (91449 forces useorderdelay = false otherwise;
+        // groupposition is built only by SetGroupFormation 92006-92030, for the
+        // formed group and the units attached to it), that is not a unittyp 5
+        // and has no parentregiment (91463). For any other unit the "delayed"
+        // re-issue is just another immediate path, so it is skipped.
+        public static bool ReserveDelayConversionApplies(bool hasGroupPosition, int unitTyp, bool hasParentRegiment)
+        {
+            return hasGroupPosition && unitTyp != 5 && !hasParentRegiment;
+        }
+
         // Vanilla's RegimentSetPath(newpath: true) (6170 -> 130836) runs
         // StopRegiment(manualstop: true), which removes the unit from pontoon /
         // obstacle construction and re-forms it out of march column through

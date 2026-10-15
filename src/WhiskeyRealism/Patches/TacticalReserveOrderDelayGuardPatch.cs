@@ -16,7 +16,10 @@ namespace WhiskeyRealism.Patches
     // immune to order delay there). When order delays are enabled, this Postfix
     // removes the immediate path and reissues the same target through
     // BattleUnits.SetWaypoint(useorderdelay: true) (91232, courier queue
-    // 91455-91487). It also re-issues a stalled doctrine fallback for the group.
+    // 91455-91487) - only for units SetWaypoint actually queues (it forces
+    // the delay off without a groupposition, 91449, or for unittyp 5 / a
+    // parentregiment, 91463; BattleWriterPolicy.ReserveDelayConversionApplies).
+    // It also re-issues a stalled doctrine fallback for the group.
     // No stance is written: the reserve is an attached sub-unit (ChangeStance
     // 90772 would set permanentlydetached), and vanilla's own group retreat
     // (CheckIfOutflanked 6235) moves without a stance change either.
@@ -103,6 +106,11 @@ namespace WhiskeyRealism.Patches
                     UnitState before = __state.Units[i];
                     Regiment unit = before.Unit;
                     if (unit == null) continue;
+                    if (!BattleWriterPolicy.ReserveDelayConversionApplies(
+                            unit.groupposition != null,
+                            unit.unittyp,
+                            (UnityEngine.Object)unit.parentregiment != null))
+                        continue;
 
                     int afterPaths = SafePathCount(unit);
                     int afterQueue = SafeQueueCount(unit);

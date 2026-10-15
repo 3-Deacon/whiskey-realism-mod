@@ -26,6 +26,7 @@ internal static class BattleWriterFixTests
         ReserveGateMirrorsVanillaEndangeredFilter();
         ReserveGateSnapshotsOnlyPossibleSupportUnits();
         ReserveGateRollbackOnlyWhenStopRegimentIsReversible();
+        ReserveDelayConversionOnlyWhereSetWaypointQueues();
         PathfinderNeverRemovesAddedPaths();
         PathfinderEndsRetryLoopOnlyWithinTolerance();
         VetoSkipsPlayerUiOrdersAndNonAiUnits();
@@ -310,6 +311,18 @@ internal static class BattleWriterFixTests
         TestHarness.AssertFalse(BattleWriterPolicy.ReserveRollbackIsSafe(false, true, 0, 0), "obstacle builder");
         TestHarness.AssertFalse(BattleWriterPolicy.ReserveRollbackIsSafe(false, false, 2, 0), "formation change pending");
         Pass("battle writers: #59 rolls back only when StopRegiment side effects are reversible");
+    }
+
+    // SetWaypoint 91449/91463: no groupposition, unittyp 5 or a
+    // parentregiment force useorderdelay = false, so #56's conversion would
+    // only replace vanilla's path with another immediate one.
+    private static void ReserveDelayConversionOnlyWhereSetWaypointQueues()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.ReserveDelayConversionApplies(true, 0, false), "regiment of a formed group");
+        TestHarness.AssertFalse(BattleWriterPolicy.ReserveDelayConversionApplies(false, 0, false), "no groupposition");
+        TestHarness.AssertFalse(BattleWriterPolicy.ReserveDelayConversionApplies(true, 5, false), "unittyp 5");
+        TestHarness.AssertFalse(BattleWriterPolicy.ReserveDelayConversionApplies(true, 0, true), "has parentregiment");
+        Pass("battle writers: #56 converts only where SetWaypoint queues a courier order");
     }
 
     private static ObjectiveChainMovementProbe Chain(
