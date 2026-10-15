@@ -284,44 +284,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
 
-        internal static EnemyContactReport[] BuildContactReportsFromBattle(
-            AIBattle battle,
-            int allianceId,
-            float staleAfterSeconds)
-        {
-            try
-            {
-                var units = BattleUnits.completeunitlist as IList;
-                if (units == null) return Array.Empty<EnemyContactReport>();
-
-                var observations = new List<ContactObservationInput>();
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var own = units[i] as Regiment;
-                    if (!IsUsableOwnUnit(own, allianceId)) continue;
-
-                    var visibleEnemy = SafeVisibleEnemy(own);
-                    bool visible = visibleEnemy != null;
-                    bool recentFire = HasRecentFire(own);
-                    if (!visible && !recentFire) continue;
-
-                    observations.Add(new ContactObservationInput(
-                        visible ? TacticalContactSource.VisualContact : TacticalContactSource.RecentFire,
-                        visible ? SafeStrength(visibleEnemy) : 0f,
-                        visible ? 0f : 30f,
-                        currentlyVisible: visible,
-                        objectiveLinked: false,
-                        scoutTaskLinked: false));
-                }
-
-                return BuildContactReports(observations, staleAfterSeconds);
-            }
-            catch
-            {
-                return Array.Empty<EnemyContactReport>();
-            }
-        }
-
         internal static ObjectiveRecord[] BuildObjectiveRecordsFromBattle(AIBattle battle, int allianceId)
         {
             try
@@ -1299,18 +1261,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch
             {
                 return null;
-            }
-        }
-
-        private static bool HasRecentFire(Regiment own)
-        {
-            try
-            {
-                return own != null && own.receivedfire != null && own.receivedfire.Count > 0;
-            }
-            catch
-            {
-                return false;
             }
         }
 
