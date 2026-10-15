@@ -21,8 +21,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //   - BattleUnits.completeunitlist (78920), replaced by UpdateUnitList (79974).
     //   - Regiment.GetPosition (140398): transform position cached per GameVars.frame.
     //   - Regiment.allattachedunits (110988), filled by UpdateAllAttachedUnits
-    //     (129572-129615) with GetComponentsInChildren(true) — self included. Read only
-    //     when the roster signature changes (BattleSnapshotAssembler, plan D5).
+    //     (129572-129615) with GetComponentsInChildren(true) — self included. Its Length
+    //     is summed every build (roster signature); the ids are read only when the roster
+    //     signature changes (BattleSnapshotAssembler, plan D5).
     //   - Regiment.unitrange.enemyinrangereg (109450), assigned from the unsorted temp list
     //     at the end of UpdateUnitRangeFast (122840); [0] is range-only, not nearest.
     //   - Regiment.ammo (111498) through ArmyEvidenceBuilder.NormalizeAmmo01 (T1 rule).
@@ -145,6 +146,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
             var ownUnits = _ownUnits[alliance];
             var enemyUnits = _enemyUnits[alliance];
+            int attachedLengthSum = 0;
             for (int i = 0; i < units.Count; i++)
             {
                 var reg = units[i];
@@ -157,6 +159,11 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (snapshot.OwnCount == ownUnits.Length) _ownUnits[alliance] = ownUnits = Grow(ownUnits);
                     ownUnits[snapshot.OwnCount] = reg;
                     snapshot.AddOwn(in record);
+                    if ((record.Flags & UnitFlags.IsGroup) != 0)
+                    {
+                        var attached = reg.allattachedunits;
+                        if (attached != null) attachedLengthSum += attached.Length;
+                    }
                 }
                 else
                 {
@@ -169,6 +176,7 @@ namespace WhiskeyRealism.Tactical.Battle
             int playerCommandId = wl ? PlayerCommandId(alliance) : 0;
             if (playerCommandId != 0) snapshot.SetPlayerCommand(snapshot.IndexOfOwn(playerCommandId));
 
+            scratch.AttachedLengthSum = attachedLengthSum;
             int count = snapshot.OwnCount;
             if (BattleSnapshotAssembler.RosterChanged(snapshot.Own, count, scratch))
                 RefreshAttachedAndNames(alliance, snapshot, scratch);
@@ -284,8 +292,8 @@ namespace WhiskeyRealism.Tactical.Battle
             return go != null ? go.GetInstanceID() : 0;
         }
 
-        // Re-reads allattachedunits ids of every own group and the names of every own
-        // unit. Only on a roster change: Unity's name getter allocates.
+        // Re-reads allattachedunits ids of every own group, and names of own units not seen
+        // before. Only on a roster change: Unity's name getter allocates.
         private static void RefreshAttachedAndNames(int alliance, BattleSnapshot snapshot, BattleSnapshotScratch scratch)
         {
             int count = snapshot.OwnCount;
@@ -298,13 +306,13 @@ namespace WhiskeyRealism.Tactical.Battle
             var counts = _attachedCounts[alliance];
             var units = _ownUnits[alliance];
             var names = scratch.NameById;
-            names.Clear();
             for (int i = 0; i < count; i++)
             {
                 counts[i] = 0;
                 var reg = units[i];
                 if (reg == null) continue;
-                names[snapshot.Own[i].InstanceId] = reg.gameObject.name;
+                int id = snapshot.Own[i].InstanceId;
+                if (!names.ContainsKey(id)) names[id] = reg.gameObject.name;
                 if ((snapshot.Own[i].Flags & UnitFlags.IsGroup) == 0) continue;
                 var attached = reg.allattachedunits;
                 if (attached == null) continue;

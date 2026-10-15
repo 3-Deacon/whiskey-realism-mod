@@ -38,7 +38,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (own[i].InstanceId != 0) indexById[own[i].InstanceId] = i;
             }
 
-            var roster = BattleRosterSignature.Of(own, count, scratch.SourceListIdentity);
+            var roster = BattleRosterSignature.Of(own, count, scratch.SourceListIdentity, scratch.AttachedLengthSum);
             if (scratch.HasTree && roster.Equals(scratch.Roster))
             {
                 var parentIdById = scratch.ParentIdById;
@@ -62,7 +62,7 @@ namespace WhiskeyRealism.Tactical.Battle
         internal static bool RosterChanged(UnitRecord[] own, int count, BattleSnapshotScratch scratch)
         {
             if (scratch == null || !scratch.HasTree) return true;
-            return !BattleRosterSignature.Of(own, count, scratch.SourceListIdentity).Equals(scratch.Roster);
+            return !BattleRosterSignature.Of(own, count, scratch.SourceListIdentity, scratch.AttachedLengthSum).Equals(scratch.Roster);
         }
 
         private static void RebuildParents(UnitRecord[] own, int count, int[][] attachedIds, int[] attachedCounts, BattleSnapshotScratch scratch)
@@ -333,58 +333,62 @@ namespace WhiskeyRealism.Tactical.Battle
         }
     }
 
-    // Roster identity the parent map is cached against: own unit count, routed count,
-    // sum of instance ids, and the identity of the vanilla list it was read from
-    // (BattleUnits.UpdateUnitList 79974 replaces completeunitlist on DetachUnits 90239 /
-    // ReattachCompany 90609 / CreateUnitDefault 89670, which can re-parent units without
-    // changing the id set).
+    // Roster identity the parent map is cached against. Every input is a field read the
+    // runtime does each build without allocating:
+    //   - own unit count and sum of instance ids (units created or deleted);
+    //   - identity of the vanilla list (BattleUnits.UpdateUnitList 79974 replaces
+    //     completeunitlist on DetachUnits 90239 / ReattachCompany 90609 /
+    //     CreateUnitDefault 89670, which can re-parent units without changing the id set);
+    //   - sum of allattachedunits.Length over own groups: a re-parent goes through
+    //     UpdateAllAttachedUnits (129572), which re-reads the group's descendants;
+    //     MoveUnit always refreshes the destination (93136), so its list grows.
+    // Rout is not in it: Regiment.Rout returns for groups (unittyp > 13, 123547) and
+    // writes no transform for a leaf (123537-123683), so it never re-parents; routed and
+    // active flags are re-read from the snapshot every tick by the tree consumers.
     internal readonly struct BattleRosterSignature : IEquatable<BattleRosterSignature>
     {
-        private BattleRosterSignature(int count, int routedCount, long idSum, int listIdentity)
+        private BattleRosterSignature(int count, long idSum, int listIdentity, int attachedLengthSum)
         {
             Count = count;
-            RoutedCount = routedCount;
             IdSum = idSum;
             ListIdentity = listIdentity;
+            AttachedLengthSum = attachedLengthSum;
         }
 
         internal int Count { get; }
-        internal int RoutedCount { get; }
         internal long IdSum { get; }
         internal int ListIdentity { get; }
+        internal int AttachedLengthSum { get; }
 
-        internal static BattleRosterSignature Of(UnitRecord[] own, int count, int listIdentity)
+        internal static BattleRosterSignature Of(UnitRecord[] own, int count, int listIdentity, int attachedLengthSum)
         {
-            int routed = 0;
             long idSum = 0;
-            for (int i = 0; i < count; i++)
-            {
-                idSum += own[i].InstanceId;
-                if ((own[i].Flags & UnitFlags.Routed) != 0) routed++;
-            }
-            return new BattleRosterSignature(count, routed, idSum, listIdentity);
+            for (int i = 0; i < count; i++) idSum += own[i].InstanceId;
+            return new BattleRosterSignature(count, idSum, listIdentity, attachedLengthSum);
         }
 
         public bool Equals(BattleRosterSignature other)
         {
-            return Count == other.Count && RoutedCount == other.RoutedCount
-                && IdSum == other.IdSum && ListIdentity == other.ListIdentity;
+            return Count == other.Count && IdSum == other.IdSum
+                && ListIdentity == other.ListIdentity && AttachedLengthSum == other.AttachedLengthSum;
         }
 
         public override bool Equals(object obj) => obj is BattleRosterSignature other && Equals(other);
 
         public override int GetHashCode()
         {
-            unchecked { return ((Count * 397) ^ RoutedCount) * 397 ^ IdSum.GetHashCode() ^ ListIdentity; }
+            unchecked { return ((Count * 397) ^ AttachedLengthSum) * 397 ^ IdSum.GetHashCode() ^ ListIdentity; }
         }
     }
 
     // Per-alliance pooled state behind the assembler: the cached parent map, its roster
-    // signature, and the name cache the runtime fills on roster change (GameObject.name
-    // allocates, so it is never read per tick).
+    // signature and inputs (SourceListIdentity, AttachedLengthSum: set by the runtime
+    // before each assembly), and the name cache the runtime fills for ids it has not seen
+    // (GameObject.name allocates, so it is never read per tick).
     internal sealed class BattleSnapshotScratch
     {
         internal int SourceListIdentity;
+        internal int AttachedLengthSum;
         internal BattleRosterSignature Roster;
         internal bool HasTree;
         internal int TreeGeneration;
@@ -397,6 +401,7 @@ namespace WhiskeyRealism.Tactical.Battle
         internal void Reset()
         {
             SourceListIdentity = 0;
+            AttachedLengthSum = 0;
             Roster = default(BattleRosterSignature);
             HasTree = false;
             AncestryMismatchCount = 0;

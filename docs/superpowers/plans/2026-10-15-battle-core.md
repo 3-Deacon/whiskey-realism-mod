@@ -186,7 +186,8 @@ internal static class BattleSnapshotBuilder { // runtime
   - `DirectChildrenMatchesParentMap`
   - `IsAncestorOfWalksParentChain`
   - `IndexOfOwnReturnsMinusOneForUnknown`
-  - `AssemblerRebuildsTreeOnlyOnRosterChange`, using the roster signature (count, routed count, sum of instance ids)
+  - `AssemblerRebuildsTreeOnlyOnRosterChange`, using the roster signature: own unit count, sum of instance ids, identity of the vanilla `completeunitlist`, and the sum of `allattachedunits.Length` over own groups. All are field reads with no allocation; `gameObject.name` is loaded only for ids missing from the name cache
+  - `RoutDoesNotBumpTreeGeneration`: rout never re-parents (`Rout` returns for groups at 123547 and writes no transform for a leaf), so a leaf rout keeps the parent map and `TreeGeneration`, and `CommandTreeRuntime` serves it from its cache or the `RefreshLiveFlags` path, never a rebuild
   - `SnapshotAssemblyAllocatesNothingAfterWarmup`: a 300-unit fixture, assemble twice, the second call allocates 0 bytes
   - `FrontAxisStabilizedAcrossTicks`
   - `StrengthBucketReadsAiGroupAndInRangeStrength`: the extended probe keeps the shipped bucket source `max(groupowninrange, groupstrengthaigroup)` (vanilla 120297, 120559-120564), so `ChooseEnvelopmentAnchorIndices` sees unchanged strengths; a non-AI-group division out of contact stays bucket 0

@@ -22,6 +22,7 @@ internal static class BattleSnapshotTests
             ("battle snapshot is-ancestor-of walks parent chain", IsAncestorOfWalksParentChain),
             ("battle snapshot index of own returns -1 for unknown", IndexOfOwnReturnsMinusOneForUnknown),
             ("battle snapshot assembler rebuilds tree only on roster change", AssemblerRebuildsTreeOnlyOnRosterChange),
+            ("battle snapshot rout does not bump tree generation", RoutDoesNotBumpTreeGeneration),
             ("battle snapshot assembly allocates nothing after warm-up", SnapshotAssemblyAllocatesNothingAfterWarmup),
             ("battle snapshot front axis stabilized across ticks", FrontAxisStabilizedAcrossTicks),
             ("battle snapshot direct-child and command-tree probes agree on parents", DirectChildAndCommandTreeAgreeOnParents),
@@ -74,12 +75,17 @@ internal static class BattleSnapshotTests
                 AttachedIds = new int[Records.Count][];
                 AttachedCounts = new int[Records.Count];
             }
+            // The runtime reads allattachedunits.Length of every own group each build (a
+            // field read); the id lists themselves only on a roster change.
+            int lengthSum = 0;
             for (int i = 0; i < Records.Count; i++)
             {
                 var ids = Attached[Records[i].InstanceId];
                 AttachedIds[i] = ids;
                 AttachedCounts[i] = ids.Length;
+                if ((Records[i].Flags & UnitFlags.IsGroup) != 0) lengthSum += ids.Length;
             }
+            Scratch.AttachedLengthSum = lengthSum;
         }
 
         internal void Assemble()
@@ -189,23 +195,31 @@ internal static class BattleSnapshotTests
         AssertEqual(Brig1, f.Parent(R1), "same roster keeps the cached parent");
         AssertEqual(Army, f.Parent(Div2), "same roster keeps the cached parent (group)");
 
-        // Routed count changes the roster signature: rebuild from the (empty) lists.
-        int r2 = f.Records.FindIndex(r => r.InstanceId == R2);
-        var routed = f.Records[r2];
-        routed.Flags |= UnitFlags.Routed;
-        f.Records[r2] = routed;
+        // A group's allattachedunits length changes (UpdateAllAttachedUnits refreshed it,
+        // 129572): rebuild from the (empty) lists.
+        f.Attached[Brig1] = new[] { Brig1, R1 };
         f.Load(tickId: 3);
         Array.Clear(f.AttachedCounts, 0, f.AttachedCounts.Length);
         f.Assemble();
-        AssertEqual(0, f.Parent(R1), "routed count change rebuilds the map");
+        AssertEqual(0, f.Parent(R1), "attached-length change rebuilds the map");
+        f.Attached[Brig1] = new[] { Brig1, R1, R2 };
+
+        // A replaced completeunitlist (UpdateUnitList 79974) rebuilds too.
+        f.Load(tickId: 4);
+        f.Assemble();
+        int generation = f.Scratch.TreeGeneration;
+        f.Load(tickId: 5);
+        f.Scratch.SourceListIdentity = 4242;
+        f.Assemble();
+        AssertEqual(generation + 1, f.Scratch.TreeGeneration, "list identity change rebuilds the map");
 
         // Count change rebuilds too, now with real lists again.
         f.Records.RemoveAt(f.Records.FindIndex(r => r.InstanceId == Loose));
-        f.Load(tickId: 4);
+        f.Load(tickId: 6);
         f.Assemble();
         AssertEqual(Brig1, f.Parent(R1), "count change rebuilds the map");
 
-        // Sum of instance ids: same count, same routed count, different unit.
+        // Sum of instance ids: same count, different unit.
         int r4 = f.Records.FindIndex(r => r.InstanceId == R4);
         var swapped = f.Records[r4];
         swapped.InstanceId = 5;
@@ -214,9 +228,28 @@ internal static class BattleSnapshotTests
         f.Attached[Brig3] = new[] { Brig3, 5 };
         f.Attached[Div2] = new[] { Div2, Brig3, 5 };
         f.Attached[Army] = new[] { Army, Div1, Div2, Brig1, Brig2, Brig3, R1, R2, R3, 5 };
-        f.Load(tickId: 5);
+        f.Load(tickId: 7);
         f.Assemble();
         AssertEqual(Brig3, f.Parent(5), "id-sum change rebuilds the map");
+    }
+
+    // Rout never re-parents: Regiment.Rout returns for groups (unittyp > 13, 123547) and
+    // writes no transform for a leaf (123537-123683). A leaf rout keeps the cached parent
+    // map, so CommandTreeRuntime sees the same TreeGeneration and takes its cheap path.
+    private static void RoutDoesNotBumpTreeGeneration()
+    {
+        var f = SmallArmy();
+        int generation = f.Snapshot.TreeGeneration;
+        int r2 = f.Records.FindIndex(r => r.InstanceId == R2);
+        var routed = f.Records[r2];
+        routed.Flags |= UnitFlags.Routed;
+        routed.Flags &= ~UnitFlags.Active;
+        f.Records[r2] = routed;
+        f.Load(tickId: 2);
+        AssertFalse(BattleSnapshotAssembler.RosterChanged(f.Snapshot.Own, f.Snapshot.OwnCount, f.Scratch), "a rout is no roster change");
+        f.Assemble();
+        AssertEqual(generation, f.Snapshot.TreeGeneration, "a leaf rout keeps the tree generation");
+        AssertEqual(Brig1, f.Parent(R2), "the routed regiment keeps its parent");
     }
 
     // 300 units: 1 army, 4 divisions, 20 brigades, 275 regiments.
@@ -272,14 +305,14 @@ internal static class BattleSnapshotTests
         long reuse = GC.GetAllocatedBytesForCurrentThread() - before;
         AssertEqual(0L, reuse, "second assembly (same roster) allocated bytes");
 
-        // A roster change (one regiment routs) rebuilds the tree from pooled buffers.
-        var r = f.Records[0];
-        r.Flags |= UnitFlags.Routed;
-        f.Records[0] = r;
+        // A roster change (vanilla replaced completeunitlist) rebuilds the tree from
+        // pooled buffers.
+        int generation = f.Scratch.TreeGeneration;
         before = GC.GetAllocatedBytesForCurrentThread();
-        f.Load(4); f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
+        f.Load(4); f.Scratch.SourceListIdentity = 4242; f.Assemble(); SeeEnemy(f.Snapshot, in seen); previous = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, previous);
         long rebuild = GC.GetAllocatedBytesForCurrentThread() - before;
         AssertEqual(0L, rebuild, "roster-change rebuild allocated bytes");
+        AssertEqual(generation + 1, f.Scratch.TreeGeneration, "the measured pass was a rebuild");
         AssertTrue(previous.IsValid, "front axis fitted");
         AssertTrue(previous.HasEnemyExtent, "visible-enemy branch and enemy extent were measured");
         AssertEqual(f.Snapshot.IndexOfOwn(100000), f.Snapshot.Own[f.Snapshot.IndexOfOwn(200000)].ParentIndex, "large tree parent");
