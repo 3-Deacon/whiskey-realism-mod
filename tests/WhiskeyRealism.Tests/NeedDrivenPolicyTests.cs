@@ -93,6 +93,7 @@ internal static class NeedDrivenPolicyTests
             ("need-policy ledger restores a saved pick", LedgerRestore),
             ("need-policy ledger describes its top candidates", LedgerDescribeTop),
             ("need-policy emergency protects only in-progress research", EmergencyProtectedIds),
+            ("need-policy emergency restore removes exactly the appended tail", EmergencyRestoreRemovesTail),
         });
     }
 
@@ -832,5 +833,22 @@ internal static class NeedDrivenPolicyTests
         float Total(int id) => PolicyNeedScorer.Score(Facts(id, 1), need, CsaHistorical, profile, 3, 7, NoDependents).Total;
         AssertTrue(Total(142) > Total(135), "Organized Blockade Running over Civilian Ships");
         AssertTrue(Total(115) > Total(135), "Diplomacy over Civilian Ships");
+    }
+
+    private static void EmergencyRestoreRemovesTail()
+    {
+        var list = new List<int> { 20, 21, 22 };
+        int original = list.Count;
+        list.AddRange(PolicyEmergencyProtection.ProtectedIds(new[] { 12, 40 }, new[] { 0.3f, 0.5f }, list));
+        AssertEqual(5, list.Count, "appended");
+        PolicyEmergencyProtection.Restore(list, original);
+        AssertEqual(3, list.Count, "restored length");
+        AssertEqual(20, list[0], "vanilla order kept");
+        AssertEqual(22, list[2], "vanilla order kept");
+        PolicyEmergencyProtection.Restore(list, original);
+        AssertEqual(3, list.Count, "second restore is a no-op");
+        PolicyEmergencyProtection.Restore(list, 5);
+        AssertEqual(3, list.Count, "count beyond the list is a no-op");
+        PolicyEmergencyProtection.Restore(null, 0);
     }
 }

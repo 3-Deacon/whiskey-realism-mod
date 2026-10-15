@@ -28,5 +28,13 @@ namespace WhiskeyRealism.Strategic.Policies
             }
             return result;
         }
+
+        // Finalizer side: removes exactly the appended tail, leaving the first originalCount
+        // entries (vanilla's own list). No-op when nothing was appended.
+        public static void Restore(List<int> list, int originalCount)
+        {
+            if (list == null || originalCount < 0 || list.Count <= originalCount) return;
+            list.RemoveRange(originalCount, list.Count - originalCount);
+        }
     }
 }

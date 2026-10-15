@@ -59,7 +59,7 @@ namespace WhiskeyRealism.Patches
                     if (personality.id == GamePrefs.emergencyaipolicycredit || personality.id == GamePrefs.emergencyaipolicyrecruiting)
                     {
                         if (alliance == playerAlliance)
-                            __state = ProtectPlayerResearch(alliance, state, personality);
+                            ProtectPlayerResearch(alliance, state, personality, out __state);
                         return true;
                     }
 
@@ -81,8 +81,7 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("campaign.patch.policy-selection.finalizer");
                 try
                 {
-                    if (__state != null && __state.List != null && __state.List.Count > __state.OriginalCount)
-                        __state.List.RemoveRange(__state.OriginalCount, __state.List.Count - __state.OriginalCount);
+                    if (__state != null) PolicyEmergencyProtection.Restore(__state.List, __state.OriginalCount);
                 }
                 catch (Exception ex)
                 {
@@ -92,10 +91,14 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static ProtectedTail ProtectPlayerResearch(int alliance, GameVars.Alliance state, GameVars.Alliance.AIPersonality personality)
+        // The restore handle is published through the out parameter (Harmony's __state)
+        // before the vanilla list is touched, so the Finalizer restores it even when anything
+        // after the append throws.
+        private static void ProtectPlayerResearch(int alliance, GameVars.Alliance state, GameVars.Alliance.AIPersonality personality, out ProtectedTail tail)
         {
+            tail = null;
             var research = state.activatedpolicies;
-            if (research == null || research.Count == 0) return null;
+            if (research == null || research.Count == 0) return;
             var ids = new int[research.Count];
             var progress = new float[research.Count];
             for (int i = 0; i < research.Count; i++)
@@ -104,21 +107,29 @@ namespace WhiskeyRealism.Patches
                 progress[i] = research[i] != null ? research[i].researchprogress : 1f;
             }
             var protectedIds = PolicyEmergencyProtection.ProtectedIds(ids, progress, personality.policies);
-            if (protectedIds.Count == 0) return null;
+            if (protectedIds.Count == 0) return;
 
-            var tail = new ProtectedTail { List = personality.policies, OriginalCount = personality.policies.Count };
+            tail = new ProtectedTail { List = personality.policies, OriginalCount = personality.policies.Count };
             personality.policies.AddRange(protectedIds);
-            OnceLog.Info("policy-selection:emergency-protect",
-                "PolicySelectionPatch kept the player's research through vanilla's emergency cancel alliance=" + alliance + " protected=" + protectedIds.Count);
-            string signature = "source=PolicySelection|alliance=" + alliance + "|protected=" + string.Join(",", protectedIds) + "|reason=emergency-protect";
-            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "FiscalIntent", TelemetrySeverity.Info, ev => ev
-                .WithAlliance(alliance)
-                .WithDecision("emergency-protect", "player-research", signature)
-                .WithField("source", "PolicySelection")
-                .WithField("personality", personality.id)
-                .WithField("protected", protectedIds.Count)
-                .WithField("protectedIds", string.Join(",", protectedIds)));
-            return tail;
+
+            try
+            {
+                OnceLog.Info("policy-selection:emergency-protect",
+                    "PolicySelectionPatch kept the player's research through vanilla's emergency cancel alliance=" + alliance + " protected=" + protectedIds.Count);
+                string joined = string.Join(",", protectedIds);
+                string signature = "source=PolicySelection|alliance=" + alliance + "|protected=" + joined + "|reason=emergency-protect";
+                TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "FiscalIntent", TelemetrySeverity.Info, ev => ev
+                    .WithAlliance(alliance)
+                    .WithDecision("emergency-protect", "player-research", signature)
+                    .WithField("source", "PolicySelection")
+                    .WithField("personality", personality.id)
+                    .WithField("protected", protectedIds.Count)
+                    .WithField("protectedIds", joined));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("policy-selection:emergency-telemetry", "[Patch:PolicySelection] emergency-protect telemetry failed: " + ex.Message);
+            }
         }
 
         // True when Whiskey started research (vanilla is skipped).
