@@ -1,4 +1,7 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic.BugFixes;
@@ -33,8 +36,19 @@ namespace WhiskeyRealism.Patches
     // vessels' models, 18230), so while this patch creates a fogged unit's model the Prefix
     // returns one remembered array index per SoundEngine instead of adding another 20
     // (a Prefix that skips vanilla, limited to that purpose inside this patch's call).
+    //
+    // BUG-LOG-015, transport sounds: RegimentMove plays the train loop and whistle or the
+    // steamboat loop for any campaign land unit with a model (133623-133649) with no fog
+    // test, and SoundEngine has none either (UpdateSoundObject/ChangeClip 146421-146667:
+    // distance to the camera and the unit GameObject's activeInHierarchy only). Those
+    // sound objects sit on the unit's own GameObject (InitCampaignSounds 124179-124205),
+    // not on the hidden model, so a hidden embarked AI unit would be heard. The Finalizer
+    // detaches the unit's four transport sound objects (go = null: off and out of the
+    // nearest-source pick, 146438-146513) while the player cannot see it with a model, and
+    // reattaches them (oldgo, vanilla's own restore 146765) otherwise. The unit's other
+    // sounds are vanilla's (RegimentMove turns its foot loop off while it has a model).
     // Rollback: Campaign Bug Fixes / Enable Fogged AI Embarkation Fix (models are still
-    // re-shown for visible units when the flag is off).
+    // re-shown and sounds reattached for visible units when the flag is off).
     internal static class FoggedEmbarkationPatch
     {
         private static readonly UnitFogFlip<Regiment, object> Flip = new UnitFogFlip<Regiment, object>(
@@ -42,6 +56,49 @@ namespace WhiskeyRealism.Patches
             (unit, fog) => unit.iswithinfog = fog);
 
         private static readonly SharedArrayIndex FiringSounds = new SharedArrayIndex();
+
+        private static readonly int[] TransportSounds =
+        {
+            Regiment.csound_unitmovingtrain,
+            Regiment.csound_trainwhistle,
+            Regiment.csound_steamshiprivermoving,
+            Regiment.csound_steamshipseamoving,
+        };
+
+        // Units whose transport sound objects are detached; one set lookup per call.
+        private static readonly HashSet<Regiment> Silenced = new HashSet<Regiment>();
+
+        // SoundEngine.soundobject (private List<SoundObject>) and SoundObject.go / oldgo,
+        // resolved once on the first detach.
+        private static FieldInfo _soundObjects;
+        private static FieldInfo _soundGo;
+        private static FieldInfo _soundOldGo;
+        private static bool _soundFieldsResolved;
+        private static bool _soundFieldsMissing;
+        private static readonly Func<object, object> GetSoundGo = o => _soundGo.GetValue(o);
+        private static readonly Func<object, object> GetSoundOldGo = o => _soundOldGo.GetValue(o);
+        private static readonly Action<object, object> SetSoundGo = (o, go) => _soundGo.SetValue(o, go);
+
+        // First-log flags: OnceLog.Info takes a lock and a set lookup, so each line is
+        // formatted once per campaign instead of on every call.
+        private static bool _keptLogged;
+        private static bool _hiddenLogged;
+        private static bool _shownLogged;
+        private static bool _sharedSoundsLogged;
+        private static bool _silencedLogged;
+
+        static FoggedEmbarkationPatch()
+        {
+            CampaignScope.Register("fogged-embarkation", () =>
+            {
+                Silenced.Clear();
+                _keptLogged = false;
+                _hiddenLogged = false;
+                _shownLogged = false;
+                _sharedSoundsLogged = false;
+                _silencedLogged = false;
+            });
+        }
 
         [HarmonyPatch(typeof(Regiment), "CheckModelReplacement")]
         internal static class ModelReplacement
@@ -90,8 +147,11 @@ namespace WhiskeyRealism.Patches
                         if (failure != null)
                             OnceLog.Warning("fogged-embarkation:restore", "[Patch:FoggedEmbarkation] restoring the fog flag failed: " + failure);
                         if (__instance == null) return;
-                        if (flipped && hasModel)
+                        if (flipped && hasModel && !_keptLogged)
+                        {
+                            _keptLogged = true;
                             OnceLog.Info("fogged-embarkation:kept", "[Patch:FoggedEmbarkation] a fogged AI unit is embarked (transport model hidden from the player)");
+                        }
 
                         bool isPlayerAlliance = __instance.alliance == GameVars.playeralliance;
                         if (isPlayerAlliance || __instance.unittyp == 17) return;
@@ -101,10 +161,20 @@ namespace WhiskeyRealism.Patches
                             m => ((Component)m).gameObject.activeSelf,
                             (m, on) => ((Component)m).gameObject.SetActive(on),
                             !FoggedModelRule.ShouldHideModels(isPlayerAlliance, __instance.iswithinfog));
-                        if (change < 0)
+                        if (change < 0 && !_hiddenLogged)
+                        {
+                            _hiddenLogged = true;
                             OnceLog.Info("fogged-embarkation:hidden", "[Patch:FoggedEmbarkation] hid the transport model of an AI unit the player cannot see");
-                        else if (change > 0)
+                        }
+                        else if (change > 0 && !_shownLogged)
+                        {
+                            _shownLogged = true;
                             OnceLog.Info("fogged-embarkation:shown", "[Patch:FoggedEmbarkation] re-showed the transport model of an AI unit the player now sees");
+                        }
+
+                        bool silence = FoggedModelRule.ShouldDetachTransportSounds(isPlayerAlliance, __instance.iswithinfog, hasModel, __instance.unittyp == 17);
+                        if (silence != Silenced.Contains(__instance))
+                            SyncTransportSounds(__instance, silence);
                     }
                     catch (Exception ex)
                     {
@@ -128,7 +198,11 @@ namespace WhiskeyRealism.Patches
                         if (!FoggedModelRule.ShouldShareFiringSounds(Flip.Active, soundpurposeid, Regiment.csound_shipfiring)) return true;
                         if (!FiringSounds.TryGet(__instance, out int index)) return true;
                         __result = index;
-                        OnceLog.Info("fogged-embarkation:shared-sounds", "[Patch:FoggedEmbarkation] a hidden AI transport model reuses one ship-firing sound array");
+                        if (!_sharedSoundsLogged)
+                        {
+                            _sharedSoundsLogged = true;
+                            OnceLog.Info("fogged-embarkation:shared-sounds", "[Patch:FoggedEmbarkation] a hidden AI transport model reuses one ship-firing sound array");
+                        }
                         return false;
                     }
                     catch (Exception ex)
@@ -158,6 +232,53 @@ namespace WhiskeyRealism.Patches
                     }
                 }
             }
+        }
+
+        // Detaches (silence) or reattaches the unit's own transport sound objects and
+        // records the state; called only when the state changes.
+        private static void SyncTransportSounds(Regiment unit, bool silence)
+        {
+            if (!ResolveSoundFields() || (UnityEngine.Object)unit.soundengine == null) return;
+            int changed = SoundObjectDetach.Apply(
+                _soundObjects.GetValue(unit.soundengine) as IList,
+                unit.sound_objectref,
+                TransportSounds,
+                ((Component)unit).gameObject,
+                silence,
+                GetSoundGo,
+                GetSoundOldGo,
+                SetSoundGo);
+            if (silence) Silenced.Add(unit);
+            else Silenced.Remove(unit);
+            if (silence && changed > 0 && !_silencedLogged)
+            {
+                _silencedLogged = true;
+                OnceLog.Info("fogged-embarkation:silenced", "[Patch:FoggedEmbarkation] silenced the train or steamboat sounds of an AI unit the player cannot see");
+            }
+        }
+
+        private static bool ResolveSoundFields()
+        {
+            if (_soundFieldsResolved) return true;
+            if (_soundFieldsMissing) return false;
+            try
+            {
+                _soundObjects = AccessTools.Field(typeof(SoundEngine), "soundobject");
+                Type soundObject = AccessTools.Inner(typeof(SoundEngine), "SoundObject");
+                _soundGo = soundObject == null ? null : AccessTools.Field(soundObject, "go");
+                _soundOldGo = soundObject == null ? null : AccessTools.Field(soundObject, "oldgo");
+                _soundFieldsResolved = _soundObjects != null && _soundGo != null && _soundOldGo != null;
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("fogged-embarkation:sound-fields-failed", "[Patch:FoggedEmbarkation] SoundEngine field lookup failed (hidden transport sounds stay audible): " + ex.Message);
+            }
+            if (!_soundFieldsResolved)
+            {
+                _soundFieldsMissing = true;
+                OnceLog.Warning("fogged-embarkation:sound-fields", "[Patch:FoggedEmbarkation] SoundEngine.soundobject or SoundObject.go/oldgo not found (hidden transport sounds stay audible)");
+            }
+            return _soundFieldsResolved;
         }
 
         private static bool Enabled()
