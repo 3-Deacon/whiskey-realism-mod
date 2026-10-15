@@ -29,6 +29,11 @@ internal static class CampaignEconomyFixTests
         ConstructionBiasReordersWithoutInflatingRolledRate();
         ConstructionBiasLeavesSubsidyGroupUncapped();
         ConstructionBiasRestoreSkipsSlotsVanillaConsumed();
+
+        ConstructionSupplyCorridorMatchesAreaKeyAgainstAreaKey();
+        ConstructionSupplyCorridorMatchesTheaterAgainstTheater();
+        ConstructionCapitalThreatIsPerSiteTheater();
+        ConstructionCapitalThreatPeakIsNotDilutedByQuietSectors();
     }
 
     private static void LogPass(string message)
@@ -345,5 +350,50 @@ internal static class CampaignEconomyFixTests
         TestHarness.AssertFalse(ConstructionProbabilityBias.ShouldRestore(0f, 0.35f, samePlace: false), "vanilla built it: slot cleared");
         TestHarness.AssertFalse(ConstructionProbabilityBias.ShouldRestore(0.5f, 0.35f, samePlace: true), "vanilla refreshed value: keep");
         LogPass("c2b construction bias restore skips slots vanilla consumed");
+    }
+
+    // ---------------------------------------------------------------- C-ConstrRuntime
+
+    private static void ConstructionSupplyCorridorMatchesAreaKeyAgainstAreaKey()
+    {
+        TestHarness.AssertTrue(
+            ConstructionSupplyCorridor.Matches("", "ShenandoahValley", Theater.East, "ShenandoahValley"),
+            "area key compared with the site's area key");
+        TestHarness.AssertFalse(
+            ConstructionSupplyCorridor.Matches("", "ShenandoahValley", Theater.East, "OhioValley"),
+            "different area");
+        LogPass("c2b construction supply corridor matches area key against area key");
+    }
+
+    private static void ConstructionSupplyCorridorMatchesTheaterAgainstTheater()
+    {
+        TestHarness.AssertTrue(
+            ConstructionSupplyCorridor.Matches("West", null, Theater.West, "OhioValley"),
+            "fiscal theater name compared with the site's theater");
+        TestHarness.AssertFalse(ConstructionSupplyCorridor.Matches("", null, Theater.West, "OhioValley"), "nothing to match");
+        LogPass("c2b construction supply corridor matches theater against theater");
+    }
+
+    private static readonly ConstructionSectorThreat[] Sectors =
+    {
+        new ConstructionSectorThreat { Theater = Theater.East, Threat = 0.9f },
+        new ConstructionSectorThreat { Theater = Theater.West, Threat = 0f },
+        new ConstructionSectorThreat { Theater = Theater.River, Threat = 0f },
+        new ConstructionSectorThreat { Theater = Theater.Coast, Threat = 0f },
+        new ConstructionSectorThreat { Theater = Theater.TransMiss, Threat = 0f },
+        new ConstructionSectorThreat { Theater = Theater.Unknown, Threat = 0f }
+    };
+
+    private static void ConstructionCapitalThreatIsPerSiteTheater()
+    {
+        TestHarness.AssertEqual(0.9f, ConstructionThreat.ForTheater(Sectors, Theater.East), "threatened theater site");
+        TestHarness.AssertEqual(0f, ConstructionThreat.ForTheater(Sectors, Theater.West), "quiet theater site");
+        LogPass("c2b construction capital threat is per site theater");
+    }
+
+    private static void ConstructionCapitalThreatPeakIsNotDilutedByQuietSectors()
+    {
+        TestHarness.AssertEqual(0.9f, ConstructionThreat.Peak(Sectors), "peak, not 0.9/6");
+        LogPass("c2b construction capital threat peak is not diluted by quiet sectors");
     }
 }

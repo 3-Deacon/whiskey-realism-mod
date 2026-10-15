@@ -55,6 +55,8 @@ namespace WhiskeyRealism.Strategic.Construction
         public bool LogisticsExpansion;
         public bool ForceCapWarning;
         public string TopSupplyTheater = "";
+        public string TopSupplyAreaKey = "";
+        public List<ConstructionSectorThreat> SectorThreats = new List<ConstructionSectorThreat>();
         public int LowSupplyFormationCount;
         public int LowAmmoFormationCount;
         public float SupplyPressure;
@@ -128,5 +130,59 @@ namespace WhiskeyRealism.Strategic.Construction
         public int Year;
         public int Month;
         public int Day;
+    }
+}
+
+namespace WhiskeyRealism.Strategic.Construction
+{
+    // Fiscal supply priority is a Theater name (FrontSector.Theater); formation
+    // pressure is an ArmyAreaClassifier key. Compare each with its own kind.
+    public static class ConstructionSupplyCorridor
+    {
+        public static bool Matches(string topTheater, string topAreaKey, Theater siteTheater, string siteAreaKey)
+        {
+            if (!string.IsNullOrEmpty(topAreaKey) && !string.IsNullOrEmpty(siteAreaKey) &&
+                string.Equals(topAreaKey, siteAreaKey, System.StringComparison.OrdinalIgnoreCase))
+                return true;
+            return !string.IsNullOrEmpty(topTheater) &&
+                siteTheater != Theater.Unknown &&
+                string.Equals(topTheater, siteTheater.ToString(), System.StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    public struct ConstructionSectorThreat
+    {
+        public Theater Theater;
+        public float Threat;
+    }
+
+    public static class ConstructionThreat
+    {
+        // Threat of the sector(s) covering a site's theater; quiet theaters stay 0.
+        public static float ForTheater(System.Collections.Generic.IEnumerable<ConstructionSectorThreat> sectors, Theater theater)
+        {
+            float peak = 0f;
+            if (sectors == null || theater == Theater.Unknown) return peak;
+            foreach (var sector in sectors)
+            {
+                if (sector.Theater == theater && sector.Threat > peak)
+                    peak = sector.Threat;
+            }
+            return peak;
+        }
+
+        // Alliance-level capital threat is the most threatened sector, not an average
+        // diluted by every quiet theater.
+        public static float Peak(System.Collections.Generic.IEnumerable<ConstructionSectorThreat> sectors)
+        {
+            float peak = 0f;
+            if (sectors == null) return peak;
+            foreach (var sector in sectors)
+            {
+                if (sector.Threat > peak)
+                    peak = sector.Threat;
+            }
+            return peak;
+        }
     }
 }
