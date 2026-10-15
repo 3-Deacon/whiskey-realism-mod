@@ -12,15 +12,30 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // B4 tactical macro stance scorer. Vanilla owns retreat timers and the
-    // dynamic macro path; this Postfix only biases macroai after safe vanilla
-    // paths have run and only when the default-off config is enabled.
+    // #44 — single owner of the AIBattle instance macroai (WS T3 / R2, BR-C1,
+    // BR-H2, T10). Postfix on AIBattle.CheckGlobalAIStrategy (decompile 6314).
+    //
+    // Vanilla anchors (build 14703111):
+    //   6339-6359  victory-bar retreat: vanilla stamps startoffallback only on
+    //              its own transition to 3 (6355);
+    //   6362       macroai == 3 ends the battle (SetEndOfBattle 8/12) once
+    //              currenttimefromstart >= startoffallback + timetostartairetreattimer
+    //              -> a Whiskey-written 3 with startoffallback == 0 ends the battle
+    //              on the next cycle, so Whiskey never writes 3;
+    //   6374       macroai == 3 returns before anything else;
+    //   6378/6383  GameVars.aistrategy >= 0 / sideinformation[side].macroai >= 0
+    //              are scripted overrides -> no Whiskey opinion;
+    //   5857       UpdateAITasks runs CheckGlobalAIStrategy then AdjustGroupAIStance,
+    //              so the value written here drives this cycle's group stances.
+    // The instance macroai is not persisted (only sideinformation.macroai is,
+    // sideinfo.dat 74819/74689), so re-asserting it each cycle leaves no trace
+    // in saves. The former BattleMacroAIOverridePatch wrote the persisted
+    // sideinformation.macroai and is gone; its reinforcement-opportunity opinion
+    // is consumed here as the fallback when the operations ledger has none.
     [HarmonyPatch(typeof(AIBattle), "CheckGlobalAIStrategy")]
     internal static class BattleMacroStrategyPatch
     {
         private static readonly Dictionary<string, float> _lastLoggedAt = new Dictionary<string, float>();
-        private static FieldInfo _macroAiField;
-        private static FieldInfo _sideOfAiField;
         private static FieldInfo _bunitsField;
         private static FieldInfo _unitsUsedField;
         private static FieldInfo _receivedFireField;
@@ -45,77 +60,118 @@ namespace WhiskeyRealism.Patches
 
         private static void Apply(AIBattle battle)
         {
-            int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
-            int vanillaMacro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
+            int side = battle.sideofai;
+            int vanillaMacro = battle.macroai;
             var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
-            var units = SafeList(battle, ref _unitsUsedField, "unitsused");
-            if (side < 0 || bunits == null) return;
+            if (side < 0 || side > 1 || bunits == null) return;
+
+            bool modeAllowsWrites = TacticalWriteGuard.ModeAllowsWrites();
+            bool feudInstance = TacticalWriteGuard.IsFeudInstance(battle);
+            bool scriptedAiStrategy = GameVars.aistrategy >= 0;
+            bool scriptedSideMacro = SideInfoMacro(bunits, side) >= 0;
+            bool endBattle = EndBattleActive(bunits);
+            if (!BattleWriterPolicy.MacroAiMayHaveOpinion(
+                    modeAllowsWrites, feudInstance, scriptedAiStrategy, scriptedSideMacro, endBattle, vanillaMacro))
+                return;
 
             int allianceId = ResolveAllianceId(bunits, side);
-            if (TryApplyOrchestrator(battle, bunits, vanillaMacro, allianceId)) return;
+            int ledgerOpinion;
+            int doctrineOpinion = -1;
+            string source;
+            if (Plugin.EnableTacticalOrchestratorArmy != null && Plugin.EnableTacticalOrchestratorArmy.Value)
+            {
+                // A null side orchestrator is a suppressed (player-CIC) or not yet
+                // bootstrapped side: no opinion, never the legacy scorer.
+                if (allianceId < 0 || allianceId >= 2) return;
+                var army = TacticalBattleCoordinator.GetSideOrchestrator(allianceId)?.Army;
+                if (army == null) return;
+                ledgerOpinion = OrchestratorMacroOpinion(army);
+                doctrineOpinion = DoctrineMacroOpinion(army);
+                source = "orchestrator";
+            }
+            else
+            {
+                ledgerOpinion = ScorerMacroOpinion(bunits, side, vanillaMacro, scriptedAiStrategy, scriptedSideMacro, endBattle, battle);
+                source = "scorer";
+            }
 
-            // Fallback: existing scorer path preserved verbatim for regression triage.
+            if (ledgerOpinion == 3 || doctrineOpinion == 3)
+                OnceLog.Info("tactical-macro:retreat-opinion-ignored",
+                    "[TacticalMacroDecision] retreat (3) opinion ignored; vanilla owns army retreat (CheckGlobalAIStrategy 6355/6362).");
+
+            int write = BattleWriterPolicy.ResolveMacroAiWrite(new MacroAiWriteInput(
+                modeAllowsWrites,
+                feudInstance,
+                scriptedAiStrategy,
+                scriptedSideMacro,
+                endBattle,
+                vanillaMacro,
+                ledgerOpinion,
+                doctrineOpinion));
+            if (write == BattleWriterPolicy.NoMacroWrite) return;
+
+            battle.macroai = write;
+            LogWrite(allianceId, vanillaMacro, write, ledgerOpinion, doctrineOpinion, source);
+        }
+
+        private static int OrchestratorMacroOpinion(ArmyOrchestrator army)
+        {
+            if (army.CommanderMode == TacticalCommanderMode.Off)
+                return army.HasPlan ? army.CurrentMacroAi : -1;
+
+            return TacticalOperationsLedgerModel.OperationMacroAi(army.CurrentOperation);
+        }
+
+        // Former BattleMacroAIOverridePatch opinion (Enable Vanilla Macro AI Sync).
+        private static int DoctrineMacroOpinion(ArmyOrchestrator army)
+        {
+            if (Plugin.EnableVanillaMacroAiSync == null || !Plugin.EnableVanillaMacroAiSync.Value) return -1;
+            if (!army.HasPlan) return -1;
+
+            var opportunity = army.CurrentReinforcementOpportunity;
+            float aggression01 = (army.CommanderPersonality.Aggression + 1f) * 0.5f;
+            if (aggression01 < 0f) aggression01 = 0f;
+            if (aggression01 > 1f) aggression01 = 1f;
+            int? mapped = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+                opportunity.Opportunity, opportunity.CurrentRatio, aggression01);
+            return mapped.HasValue ? mapped.Value : -1;
+        }
+
+        private static int ScorerMacroOpinion(
+            BattleUnits bunits,
+            int side,
+            int vanillaMacro,
+            bool scriptedAiStrategy,
+            bool scriptedSideMacro,
+            bool endBattle,
+            AIBattle battle)
+        {
+            var units = SafeList(battle, ref _unitsUsedField, "unitsused");
             var odds = BuildRuntimeOdds(bunits, side, units);
             var decision = TacticalDoctrineScorer.DecideMacro(new TacticalMacroDecisionInput(
                 vanillaMacro,
-                GameVars.aistrategy >= 0,
-                SideInfoMacro(bunits, side) >= 0,
-                vanillaMacro == 3 || EndBattleActive(bunits),
+                scriptedAiStrategy,
+                scriptedSideMacro,
+                vanillaMacro == 3 || endBattle,
                 CommanderAggression01(bunits, side),
                 odds));
-
-            if (decision.Kind != TacticalDoctrineDecisionKind.Apply) return;
-            if (decision.MacroAi == vanillaMacro) return;
-            if (decision.MacroAi < -1 || decision.MacroAi > 3) return;
-            if (_macroAiField == null) return;
-            if (!AllowsVanillaWrites()) return;
-
-            _macroAiField.SetValue(battle, decision.MacroAi);
+            if (decision.Kind != TacticalDoctrineDecisionKind.Apply) return -1;
             LogDecision(side, vanillaMacro, decision, odds);
+            return decision.MacroAi;
         }
 
-        private static bool TryApplyOrchestrator(AIBattle battle, BattleUnits bunits, int vanillaMacro, int allianceId)
+        private static void LogWrite(int allianceId, int previous, int written, int ledger, int doctrine, string source)
         {
-            if (Plugin.EnableTacticalOrchestratorArmy == null || !Plugin.EnableTacticalOrchestratorArmy.Value) return false;
-            if (allianceId < 0 || allianceId >= 2) return false;
-            if (vanillaMacro == 3 || EndBattleActive(bunits)) return true;
+            string signature = allianceId + "|" + previous + "|" + written + "|" + source;
+            if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "macro-write", signature, Time.realtimeSinceStartup, 30f, false))
+                return;
 
-            var sideOrch = TacticalBattleCoordinator.GetSideOrchestrator(allianceId);
-            if (sideOrch?.Army == null) return false;
-
-            int macro = OperationMacroAi(sideOrch.Army);
-            if (macro == int.MinValue && !sideOrch.Army.HasPlan) return false;
-            if (macro == int.MinValue)
-                macro = sideOrch.Army.CurrentMacroAi;
-
-            // -1 means "let vanilla decide" -- return true so we DON'T fall through to the scorer.
-            // The orchestrator/ledger has spoken; its choice is "no opinion this tick."
-            if (macro < -1 || macro > 3) return true;
-            if (macro == -1) return true;
-            if (macro == vanillaMacro) return true;        // already aligned; no write needed
-            if (_macroAiField == null) return true;
-            if (!AllowsVanillaWrites()) return true;
-
-            _macroAiField.SetValue(battle, macro);
-            string planId = sideOrch.Army.HasPlan ? sideOrch.Army.CurrentPlan.PlanId.ToString() : "no-plan";
-            string planPhase = sideOrch.Army.HasPlan ? sideOrch.Army.CurrentPlan.Phase.ToString() : "no-plan";
-            OnceLog.Info("orch-macro-write:" + allianceId + ":" + vanillaMacro + "->" + macro,
-                "[TacticalMacroDecision] side=" + allianceId
-                + " old=" + TacticalTelemetry.MacroName(vanillaMacro)
-                + " orchestrator=" + TacticalTelemetry.MacroName(macro)
-                + " operation=" + sideOrch.Army.CurrentOperation.Shape
-                + " opPhase=" + sideOrch.Army.CurrentOperation.Phase
-                + " plan=" + planId
-                + " phase=" + planPhase);
-            return true;
-        }
-
-        private static int OperationMacroAi(ArmyOrchestrator army)
-        {
-            if (army == null || army.CommanderMode == TacticalCommanderMode.Off)
-                return int.MinValue;
-
-            return TacticalOperationsLedgerModel.OperationMacroAi(army.CurrentOperation);
+            TelemetryRouter.LegacyInfo("[TacticalMacroDecision] side=" + allianceId
+                + " old=" + TacticalTelemetry.MacroName(previous)
+                + " whiskey=" + TacticalTelemetry.MacroName(written)
+                + " ledger=" + ledger
+                + " doctrine=" + doctrine
+                + " source=" + source, TelemetryLayer.Tactical);
         }
 
         private static int ResolveAllianceId(BattleUnits bunits, int side)
@@ -130,10 +186,10 @@ namespace WhiskeyRealism.Patches
 
         private static TacticalOddsAssessment BuildRuntimeOdds(BattleUnits bunits, int side, IList units)
         {
-            float own = Math.Max(1f, SafeSideInfoFloat(bunits, side, "totalactiveforce"));
+            float own = Math.Max(1f, SideInfoTotalActiveForce(bunits, side));
             float confirmedEnemy = EstimateVisibleEnemyStrength(units);
             float inferredEnemy = EstimateInferredEnemyStrength(units);
-            float reinforcements = SafeSideInfoFloat(bunits, side, "reinforcementarrivalswithin24hrs");
+            float reinforcements = SideInfoReinforcementsWithin24Hours(bunits, side);
             var contact = TacticalContactLedger.Classify(new TacticalContactInput(
                 confirmedEnemy,
                 confirmedEnemy,
@@ -178,34 +234,6 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null &&
                 Plugin.Instance.Enabled.Value &&
                 Plugin.Instance.EnableTacticalMacroStanceScorer.Value;
-        }
-
-        private static bool AllowsVanillaWrites()
-        {
-            try
-            {
-                return Plugin.Instance != null &&
-                    TacticalCommanderModePolicy.AllowsWrites(Plugin.Instance.TacticalCommanderModeValue);
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)
-        {
-            try
-            {
-                if (instance == null) return fallback;
-                if (cache == null) cache = AccessTools.Field(instance.GetType(), name);
-                if (cache == null) return fallback;
-                return Convert.ToInt32(cache.GetValue(instance));
-            }
-            catch
-            {
-                return fallback;
-            }
         }
 
         private static T SafeField<T>(object instance, ref FieldInfo cache, string name) where T : class
@@ -326,17 +354,27 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        private static float SafeSideInfoFloat(BattleUnits bunits, int side, string fieldName)
+        private static float SideInfoTotalActiveForce(BattleUnits bunits, int side)
         {
             try
             {
                 if (bunits == null || bunits.sideinformation == null) return 0f;
                 if (side < 0 || side >= bunits.sideinformation.Length) return 0f;
-                var info = bunits.sideinformation[side];
-                var field = AccessTools.Field(info.GetType(), fieldName);
-                if (field == null) return 0f;
-                object value = field.GetValue(info);
-                return value == null ? 0f : Convert.ToSingle(value);
+                return bunits.sideinformation[side].totalactiveforce;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static float SideInfoReinforcementsWithin24Hours(BattleUnits bunits, int side)
+        {
+            try
+            {
+                if (bunits == null || bunits.sideinformation == null) return 0f;
+                if (side < 0 || side >= bunits.sideinformation.Length) return 0f;
+                return bunits.sideinformation[side].reinforcementarrivalswithin24hrs;
             }
             catch
             {
