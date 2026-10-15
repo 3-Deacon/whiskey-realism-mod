@@ -137,7 +137,8 @@ namespace WhiskeyRealism.Tactical
             };
         }
 
-        private static UnitFlags OwnershipFlags(Regiment unit, in PlayerOwnershipInput input)
+        // PlayerOwned / Feud for one unit; the snapshot builder captures the same bits.
+        internal static UnitFlags OwnershipFlags(Regiment unit, in PlayerOwnershipInput input)
         {
             bool takenOver = input.WlActive && DLC_WL.IsUnitTakenOver(unit);
             return PlayerOwnership.Compute(input, unit.alliance, unit.dlcw_isundercommander, takenOver, unit.ai_feudstance);
@@ -190,7 +191,9 @@ namespace WhiskeyRealism.Tactical
         private static bool HasValidChosenCommander()
         {
             int chosen = DLC_WL.dlc_chosencommander;
-            return chosen >= 0 && GameVars.commander != null && chosen < GameVars.commander.Count;
+            // A null entry would throw in the snapshot builder and empty the snapshot.
+            return chosen >= 0 && GameVars.commander != null && chosen < GameVars.commander.Count &&
+                GameVars.commander[chosen] != null;
         }
     }
 }

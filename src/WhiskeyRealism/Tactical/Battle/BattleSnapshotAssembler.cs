@@ -185,8 +185,8 @@ namespace WhiskeyRealism.Tactical.Battle
         // Samples are the shipped ones (ArmyEvidenceBuilder 615b672, ~665-690). "Routed" is
         // isrouted || markedforrout for both (Routed | MarkedForRout). Groups: unittyp at
         // or above the shifted command level (ClampShiftedMin), not under the W&L player's
-        // command, read as UnitFlags.PlayerOwned (BattleSnapshotBuilder.OwnershipFlags;
-        // BC3's PlayerOwnership.Compute at its merge) instead of dlcw_isundercommander.
+        // command, read as UnitFlags.PlayerOwned (PlayerOwnership.Compute) instead of
+        // dlcw_isundercommander.
         internal static TacticalFrontAxis FitFrontAxis(BattleSnapshot s, TacticalFrontAxis previous, int commandHierarchyShift)
         {
             if (s == null) return previous;

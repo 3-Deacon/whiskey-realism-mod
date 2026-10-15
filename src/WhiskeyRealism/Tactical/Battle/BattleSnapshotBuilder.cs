@@ -34,7 +34,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //     BattleUnits.IsUnitUnderCommander 91168-91222), DLC_WL.IsUnitTakenOver (45840),
     //     ai_feudstance (111248), permanentlydetached (111222; deployment detach
     //     85318-85336 sets it on the player's command and, outside ai_vs_ai, on every
-    //     player-alliance unit).
+    //     player-alliance unit). PlayerOwnership.Compute turns them into PlayerOwned /
+    //     Feud per unit, and ApplyChainFlags marks the player's command and its
+    //     ancestors once the parent map is assembled.
     //   - Vanilla's own ancestry test for the player's command is Transform.IsChildOf
     //     (CheckCurrentOrderUpdate 8272, IsUnitUnderCommander 91203); the parent map is
     //     compared against it for the player chain only and disagreements are counted.
@@ -139,10 +141,9 @@ namespace WhiskeyRealism.Tactical.Battle
             snapshot.SetSliceCount(GamePrefs.aidefensiveslices);
             scratch.SourceListIdentity = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(units);
 
-            bool wl = DLC_WL.dlc_scenarioactive;
-            int playerAlliance = GameVars.playeralliance;
-            bool aiVsAi = GameVars.ai_vs_ai;
-            bool debugAllAi = GameVars.debug_allarmiesai;
+            // One ownership context per build; the same one TacticalWriteGuard's Regiment
+            // overloads read, so snapshot flags and direct-writer checks cannot disagree.
+            PlayerOwnershipInput ownership = TacticalWriteGuard.ReadOwnershipInput();
 
             var ownUnits = _ownUnits[alliance];
             var enemyUnits = _enemyUnits[alliance];
@@ -153,7 +154,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (reg == null) continue;
                 var go = reg.gameObject;
                 if (go == null) continue;
-                var record = Capture(reg, go, wl, playerAlliance, aiVsAi, debugAllAi);
+                var record = Capture(reg, go, in ownership);
                 if (reg.alliance == alliance)
                 {
                     if (snapshot.OwnCount == ownUnits.Length) _ownUnits[alliance] = ownUnits = Grow(ownUnits);
@@ -173,7 +174,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
             }
 
-            int playerCommandId = wl ? PlayerCommandId(alliance) : 0;
+            int playerCommandId = ownership.WlActive ? PlayerCommandId(alliance) : 0;
             if (playerCommandId != 0) snapshot.SetPlayerCommand(snapshot.IndexOfOwn(playerCommandId));
 
             scratch.AttachedLengthSum = attachedLengthSum;
@@ -182,6 +183,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 RefreshAttachedAndNames(alliance, snapshot, scratch);
             int generation = scratch.TreeGeneration;
             BattleSnapshotAssembler.AssembleCommandTree(snapshot.Own, count, _attachedIds[alliance], _attachedCounts[alliance], scratch);
+            // Chain flags walk ParentIndex, so they follow the tree just assembled.
+            PlayerOwnership.ApplyChainFlags(snapshot, in ownership);
             if (generation != scratch.TreeGeneration || playerCommandId != _lastPlayerCommandId[alliance])
             {
                 _lastPlayerCommandId[alliance] = playerCommandId;
@@ -213,7 +216,7 @@ namespace WhiskeyRealism.Tactical.Battle
             snapshot.SetFrontAxis(axis);
         }
 
-        private static UnitRecord Capture(Regiment reg, GameObject go, bool wl, int playerAlliance, bool aiVsAi, bool debugAllAi)
+        private static UnitRecord Capture(Regiment reg, GameObject go, in PlayerOwnershipInput ownership)
         {
             var record = new UnitRecord();
             record.InstanceId = go.GetInstanceID();
@@ -261,27 +264,9 @@ namespace WhiskeyRealism.Tactical.Battle
             else if (reg.unittyp == TacticalUnitType.Infantry) flags |= UnitFlags.IsInfantry;
             else if (reg.unittyp == TacticalUnitType.Cavalry) flags |= UnitFlags.IsCavalry;
             else if (reg.unittyp == TacticalUnitType.Artillery) flags |= UnitFlags.IsArtillery;
-            flags |= OwnershipFlags(reg, wl, playerAlliance, aiVsAi, debugAllAi);
+            flags |= TacticalWriteGuard.OwnershipFlags(reg, in ownership);
             record.Flags = flags;
             return record;
-        }
-
-        // Ownership seam. BC3 replaces this body with
-        //   PlayerOwnership.Compute(in input, reg.alliance, reg.dlcw_isundercommander,
-        //       wl && DLC_WL.IsUnitTakenOver(reg), reg.ai_feudstance)
-        // (input = PlayerOwnershipInput built once per Build) and adds ApplyChainFlags after
-        // AssembleCommandTree. Until then it applies the same rule inline: PlayerOwned =
-        // dlcw_isundercommander, or a W&L take-over, or the player's alliance outside
-        // ai_vs_ai / debug_allarmiesai; Feud = ai_feudstance >= 0.
-        private static UnitFlags OwnershipFlags(Regiment reg, bool wl, int playerAlliance, bool aiVsAi, bool debugAllAi)
-        {
-            var flags = UnitFlags.None;
-            bool owned = reg.dlcw_isundercommander
-                || (wl && DLC_WL.IsUnitTakenOver(reg))
-                || (reg.alliance == playerAlliance && !aiVsAi && !debugAllAi);
-            if (owned) flags |= UnitFlags.PlayerOwned;
-            if (reg.ai_feudstance >= 0) flags |= UnitFlags.Feud;
-            return flags;
         }
 
         private static int FirstEnemyInRangeId(Regiment reg)
