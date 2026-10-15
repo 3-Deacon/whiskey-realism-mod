@@ -12,9 +12,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly Dictionary<int, float> _lastReplanByAlliance = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _clockByAlliance = new Dictionary<int, float>();
 
-        /// <summary>Minimum battle seconds between replans of one army (10 battle-minutes).</summary>
-        public const float MinReplanBattleSeconds = 600f;
-
         public static void Reset()
         {
             _lastReplanByAlliance.Clear();
@@ -281,10 +278,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             float now;
             _clockByAlliance.TryGetValue(allianceId, out now);
-            // On the battle clock the "Min Replan Seconds" config is battle
-            // seconds with a 10 battle-minute floor (its 60 s default would be
-            // 10 wall-clock seconds at 1x).
-            float cooldown = battleClock ? Math.Max(minReplanSeconds, MinReplanBattleSeconds) : minReplanSeconds;
+            // "Min Replan Seconds" is measured on the same clock as plan age:
+            // battle seconds when the caller supplies the battle clock.
+            float cooldown = minReplanSeconds;
             if (_lastReplanByAlliance.TryGetValue(allianceId, out var lastReplan) &&
                 now - lastReplan < cooldown)
             {

@@ -1027,11 +1027,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // Battle clock ran backwards (reload): treat as long ago.
             if (sinceLastChange < 0f) sinceLastChange = float.MaxValue;
 
-            float minHold = TacticalOpportunityHysteresis.DefaultMinHoldBattleSeconds;
-            if (Plugin.OpportunityHysteresisMinHoldSeconds != null)
-            {
-                minHold = Plugin.OpportunityHysteresisMinHoldSeconds.Value * 60f;
-            }
+            // Config value is battle MINUTES (default bound to
+            // TacticalOpportunityHysteresis.DefaultMinHoldBattleMinutes).
+            float minHold = Plugin.OpportunityHysteresisMinHoldSeconds != null
+                ? Plugin.OpportunityHysteresisMinHoldSeconds.Value * 60f
+                : TacticalOpportunityHysteresis.DefaultMinHoldBattleSeconds;
             var smoothed = TacticalOpportunityHysteresis.Smooth(
                 raw, _currentReinforcementOpportunity, sinceLastChange, minHold);
             if (smoothed.Changed || !_hasOpportunityChange)

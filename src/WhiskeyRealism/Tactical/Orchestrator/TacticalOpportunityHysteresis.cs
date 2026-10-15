@@ -32,7 +32,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // GameVars.currenttimefromstart, so the hold means the same amount of
         // battle at 1x and 50x compression (the old 6 wall-clock seconds were
         // 36 battle-seconds at 1x and 5 battle-minutes at 50x).
-        public const float DefaultMinHoldBattleSeconds = 600f;
+        //
+        // Single source of the default: the "Opportunity Hysteresis Min Hold"
+        // config entry is in battle MINUTES and should bind its default to
+        // DefaultMinHoldBattleMinutes; the doctrine works in seconds.
+        public const float DefaultMinHoldBattleMinutes = 10f;
+        public const float DefaultMinHoldBattleSeconds = DefaultMinHoldBattleMinutes * 60f;
 
         // Decisive-transition shortcut: even within MinHoldSeconds, allow a
         // transition if the new decision is a strong upgrade in danger

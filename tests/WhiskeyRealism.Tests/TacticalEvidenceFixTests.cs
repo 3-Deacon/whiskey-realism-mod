@@ -70,6 +70,7 @@ internal static class TacticalEvidenceFixTests
         Run("reserve is released at the plan's reserve-commit odds", ReserveReleasedAtCommitOdds);
         Run("reserve reinforces an adjacent sector in crisis", ReserveReinforcesCrisisSector);
         Run("main role needs a challenger to win three cycles running", MainRoleHysteresis);
+        Run("replan cooldown is the configured battle seconds, no hidden floor", ReplanCooldownIsConfiguredValue);
     }
 
     private static void Run(string name, Action test)
@@ -891,5 +892,18 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(DirectChildRole.Main, Role(third, "b").Role, "third consecutive win hands over Main");
         var fallback = DirectChildAllocator.StabilizeMain(new[] { DI("a", DirectChildRole.Main, 2), DI("b", DirectChildRole.Fallback, 3) }, state);
         TestHarness.AssertEqual(DirectChildRole.Main, Role(fallback, "a").Role, "incumbent falling back loses Main at once");
+    }
+
+    // ---- Review round 2 ----
+
+    private static void ReplanCooldownIsConfiguredValue()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+        var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
+        var first = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 10f);
+        TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, first, "first replan");
+        var second = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.9f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 100f);
+        TestHarness.AssertEqual(ReplanTrigger.ReserveExhaustion, second, "100 battle-s later a configured 60 s cooldown has passed");
     }
 }
