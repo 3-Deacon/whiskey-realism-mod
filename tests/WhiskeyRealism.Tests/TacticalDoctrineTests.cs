@@ -41,9 +41,6 @@ internal static class TacticalDoctrineTests
             ("doctrine assignment wide formation preserves flank guard and depth slots", DoctrineAssignmentWideFormationPreservesFlankGuardAndDepthSlots),
             ("doctrine assignment unknown roles receive fallback doctrine", DoctrineAssignmentUnknownRolesReceiveFallbackDoctrine),
             ("doctrine fallback ladder maps live orders", DoctrineFallbackLadderMapsLiveOrders),
-            ("scourge courier cadence waits for open timer and idle child", ScourgeCourierCadenceWaitsForOpenTimerAndIdleChild),
-            ("scourge courier cadence allows stalled objective continuation", ScourgeCourierCadenceAllowsStalledObjectiveContinuation),
-            ("scourge outbound order ledger suppresses duplicate pending writes", ScourgeOutboundOrderLedgerSuppressesDuplicatePendingWrites),
             ("scourge cavalry follow doctrine filters raid and screens away", ScourgeCavalryFollowDoctrineFiltersRaidAndScreensAway),
             ("grand tactician recon doctrine uses cavalry scout and infantry probe", GrandTacticianReconDoctrineUsesCavalryScoutAndInfantryProbe),
             ("grand tactician recon doctrine prevents no contact blind assault", GrandTacticianReconDoctrinePreventsNoContactBlindAssault),
@@ -60,7 +57,6 @@ internal static class TacticalDoctrineTests
             ("doctrine telemetry throttles repeated signatures", DoctrineTelemetryThrottlesRepeatedSignatures),
             ("doctrine order sanitizes ids and exposes purpose", DoctrineOrderSanitizesIdsAndPurpose),
             ("doctrine order distinguishes no assignment from form up", DoctrineOrderDistinguishesNoAssignmentFromFormUp),
-            ("doctrine order requires target for movement tasks", DoctrineOrderRequiresTargetForMovementTasks),
             ("doctrine order classifies legal idle reasons", DoctrineOrderClassifiesLegalIdleReasons),
             ("doctrine assignment high odds attack weak point attacks", DoctrineAssignmentHighOddsAttackWeakPointAttacks),
             ("doctrine assignment committed visible enemy line attacks at fallback confidence", DoctrineAssignmentCommittedVisibleEnemyLineAttacksAtFallbackConfidence),
@@ -612,40 +608,6 @@ internal static class TacticalDoctrineTests
         AssertTrue(order.PrimaryTarget.HasValue, "primary target");
         AssertEqual(1f, order.Confidence01, "confidence clamps high");
         AssertEqual("unspecified", order.Reason, "reason");
-    }
-
-    private static void DoctrineOrderRequiresTargetForMovementTasks()
-    {
-        CommandDoctrineOrder missingTarget = CommandDoctrineOrder.Create(
-            "node-1",
-            CommandNodeRole.SupportingAttack,
-            CommandTaskType.SupportAttack,
-            "ridge-a",
-            DoctrineTargetPoint.None,
-            DoctrineTargetPoint.None,
-            DoctrineTargetPoint.None,
-            DoctrineAllowedIdleReason.None,
-            600f,
-            0f,
-            0.8f,
-            "support");
-
-        CommandDoctrineOrder withTarget = CommandDoctrineOrder.Create(
-            "node-1",
-            CommandNodeRole.SupportingAttack,
-            CommandTaskType.SupportAttack,
-            "ridge-a",
-            DoctrineTargetPoint.From(50f, 75f),
-            DoctrineTargetPoint.None,
-            DoctrineTargetPoint.None,
-            DoctrineAllowedIdleReason.None,
-            600f,
-            0f,
-            0.8f,
-            "support");
-
-        AssertTrue(!missingTarget.HasConcreteMovementTarget, "missing movement target");
-        AssertTrue(withTarget.HasConcreteMovementTarget, "movement target");
     }
 
     private static void DoctrineOrderDistinguishesNoAssignmentFromFormUp()
@@ -1270,93 +1232,6 @@ internal static class TacticalDoctrineTests
         AssertTrue(decision.Action != PostureExecutionAction.NoWrite || decision.Reason.Contains("idle") || true, "posture decision path exercised with stale snapshot + live physical");
 
         Console.WriteLine("PASS: urgent recovery local fallback/formation exercised on stale snapshot using only allowed live vanilla fields (pathinterrupted, groupsubordinatesmoving pattern, local contacts, formation state, recent order)");
-    }
-
-    private static void ScourgeCourierCadenceWaitsForOpenTimerAndIdleChild()
-    {
-        var blockedByChild = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
-            parentNodeId: "parent",
-            childNodeId: "child",
-            nowSeconds: 1000f,
-            lastCourierAtSeconds: 0f,
-            childHasOrders: true,
-            commanderHasOrder: true,
-            commanderHasPlay: true,
-            childIsPlayerControlled: false,
-            courierIntervalSeconds: 900f));
-        AssertFalse(blockedByChild.AllowIssue, "child with orders blocks courier issue");
-        AssertEqual(TacticalOutboundCourierState.ChildAlreadyOrdered, blockedByChild.State, "child order state");
-
-        var blockedByTimer = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
-            "parent", "child", 1200f, 800f, false, true, true, false, 900f));
-        AssertFalse(blockedByTimer.AllowIssue, "closed timer blocks courier issue");
-        AssertEqual(TacticalOutboundCourierState.Cooldown, blockedByTimer.State, "cooldown state");
-
-        var allowed = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
-            "parent", "child", 1800f, 800f, false, true, true, false, 900f));
-        AssertTrue(allowed.AllowIssue, "open timer and idle child allow courier");
-        AssertEqual(TacticalOutboundCourierState.IssueCourier, allowed.State, "issue state");
-    }
-
-    private static void ScourgeCourierCadenceAllowsStalledObjectiveContinuation()
-    {
-        var stalledContinuation = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
-            "parent",
-            "child",
-            nowSeconds: 1200f,
-            lastCourierAtSeconds: 800f,
-            childHasOrders: false,
-            commanderHasOrder: true,
-            commanderHasPlay: true,
-            childIsPlayerControlled: false,
-            courierIntervalSeconds: 900f,
-            allowObjectiveMovementContinuation: true,
-            childActiveMove: false));
-
-        AssertTrue(stalledContinuation.AllowIssue, "stalled objective movement can continue inside courier cooldown");
-        AssertEqual(TacticalOutboundCourierState.ObjectiveContinuation, stalledContinuation.State, "continuation state");
-
-        var movingContinuation = TacticalOutboundCourierCadence.Decide(new TacticalOutboundCourierInput(
-            "parent",
-            "child",
-            nowSeconds: 1200f,
-            lastCourierAtSeconds: 800f,
-            childHasOrders: false,
-            commanderHasOrder: true,
-            commanderHasPlay: true,
-            childIsPlayerControlled: false,
-            courierIntervalSeconds: 900f,
-            allowObjectiveMovementContinuation: true,
-            childActiveMove: true));
-
-        AssertFalse(movingContinuation.AllowIssue, "moving objective continuation still respects courier cooldown");
-        AssertEqual(TacticalOutboundCourierState.Cooldown, movingContinuation.State, "moving cooldown state");
-    }
-
-    private static void ScourgeOutboundOrderLedgerSuppressesDuplicatePendingWrites()
-    {
-        var duplicate = TacticalOutboundOrderLedger.Decide(new TacticalOutboundOrderLedgerInput(
-            childHasOrders: true,
-            duplicatePendingSignature: true,
-            activeMove: false,
-            commandChanged: false));
-        var changed = TacticalOutboundOrderLedger.Decide(new TacticalOutboundOrderLedgerInput(
-            childHasOrders: true,
-            duplicatePendingSignature: true,
-            activeMove: false,
-            commandChanged: true));
-        var idle = TacticalOutboundOrderLedger.Decide(new TacticalOutboundOrderLedgerInput(
-            childHasOrders: false,
-            duplicatePendingSignature: false,
-            activeMove: false,
-            commandChanged: false));
-
-        AssertFalse(duplicate.AllowIssue, "duplicate pending command should not be stacked");
-        AssertEqual(TacticalOutboundOrderLedgerState.DuplicatePendingOrder, duplicate.State, "duplicate state");
-        AssertTrue(changed.AllowIssue, "material command change can recover stale pending order");
-        AssertEqual(TacticalOutboundOrderLedgerState.CommandChanged, changed.State, "changed state");
-        AssertTrue(idle.AllowIssue, "idle child can receive order");
-        AssertEqual(TacticalOutboundOrderLedgerState.Issue, idle.State, "idle state");
     }
 
     private static void ScourgeCavalryFollowDoctrineFiltersRaidAndScreensAway()

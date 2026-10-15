@@ -90,40 +90,18 @@ namespace WhiskeyRealism.Tactical.Battle
             return true;
         }
 
-        // A move was issued when the group (or a subordinate) gained paths or a
-        // courier order was queued (SetWaypoint → AddToOrderQueue, 91470-91500).
-        public static bool MovementIssued(int movingPathsBefore, int movingPathsAfter, int queuedBefore, int queuedAfter)
-        {
-            return movingPathsAfter > movingPathsBefore || queuedAfter > queuedBefore;
-        }
+        // Vanilla AIBattle line-group moves farther than this go through
+        // BlockedMovingOrder with this obstacle range (6953-6956).
+        public const float BlockedMoveDistanceMeters = 150f;
 
-        // M3: a write that did not materialize backs off on battle time instead
-        // of retrying every macro cycle.
-        public const float FailedWriteBackoffHours = 0.05f;
-
-        public static float FailedWriteBackoffUntil(float nowHours)
+        // Shipped #61 TryQueueBlockedMovingOrder: an objective-type group move
+        // farther than 150 m avoids the crossings the enemy covers, as vanilla's
+        // own line-group move does. Whether the side has crossing data is the
+        // executor runtime's check (blockedcrossings stays null on a map without
+        // river crossings, UpdateBlockedCrossings 7919-7920).
+        public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(CommandTaskType task, float distance)
         {
-            return nowHours + FailedWriteBackoffHours;
-        }
-
-        public static bool IsBackedOff(float nowHours, float backoffUntilHours)
-        {
-            if (backoffUntilHours <= 0f) return false;
-            if (nowHours < backoffUntilHours - FailedWriteBackoffHours) return false;
-            return nowHours < backoffUntilHours;
-        }
-
-        public static bool ShouldUseBlockedMovingOrderForExecutorWaypoint(
-            CommandTaskType task,
-            float distance,
-            float threshold,
-            bool hasBlockedCrossingData,
-            bool battleActive)
-        {
-            if (!battleActive) return false;
-            if (!hasBlockedCrossingData) return false;
-            if (!IsFinite(distance) || !IsFinite(threshold)) return false;
-            if (threshold <= 0f || distance <= threshold) return false;
+            if (!IsFinite(distance) || distance <= BlockedMoveDistanceMeters) return false;
 
             switch (task)
             {
@@ -135,11 +113,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 default:
                     return false;
             }
-        }
-
-        public static bool ShouldStampGroupMovementForExecutorWaypoint(CommandTaskType task)
-        {
-            return IsExecutorMovementTask(task);
         }
 
         public static bool IsMovementTask(CommandTaskType task)
@@ -358,6 +331,73 @@ namespace WhiskeyRealism.Tactical.Battle
         // (BattleCommandPostureExecutorPatch.cs:30). Spans ~3 macro cycles
         // (sidestatupdatecycle 0.015 h); 30 battle-s would expire inside one.
         public const float RecentOrderBattleSeconds = 180f;
+        // Per-channel recent-order windows, #61's shipped values in battle seconds
+        // (RealSecondsAtOneXToHours: 600 real s at 1x per battle hour):
+        //   Move, Stance, Stop: RecentOrderBattleSeconds (#61 RecentOrderHours).
+        //   Facing: #61 RegimentFacingPulseCooldownHours = RealSecondsAtOneXToHours(5)
+        //     = 5/600 h = 30 battle-s.
+        //   Formation: CommandFormationWritePolicy.CooldownHours 0.05 h = 180 battle-s;
+        //     the policy's own 0.1 h under fire still applies at execution
+        //     (OrderExecutorRuntime feeds it the last formation/facing write).
+        //   CombatBehavior: #61 FireControlOrderCooldownHours =
+        //     RealSecondsAtOneXToHours(45) = 0.075 h = 270 battle-s.
+        public const float FacingRecentOrderBattleSeconds = 30f;
+        public const float FormationRecentOrderBattleSeconds = CommandFormationWritePolicy.CooldownHours * TacticalBattleClock.BattleSecondsPerHour;
+        public const float CombatBehaviorRecentOrderBattleSeconds = 270f;
+
+        // Per-source overrides (0 = no executor window): the artillery doctrine
+        // holds each battery itself on the doctrine clock
+        // (Plugin.ArtilleryAuditMinHoldSeconds, BC5b), so its combat behavior,
+        // formation and facing carry no executor window; the charge doctrine's
+        // charge/revert is stateful (BC6a deferred disarm, refusal back-off) and
+        // must not wait the fire-control window to revert.
+        public static float RecentOrderBattleSecondsFor(OrderChannel channel, IntentSource source)
+        {
+            switch (source)
+            {
+                case IntentSource.ArtilleryDoctrine:
+                case IntentSource.ArtilleryPointBlank:
+                    if (channel == OrderChannel.CombatBehavior || channel == OrderChannel.Formation || channel == OrderChannel.Facing)
+                        return 0f;
+                    break;
+                case IntentSource.ChargeDoctrine:
+                    if (channel == OrderChannel.CombatBehavior) return 0f;
+                    break;
+            }
+
+            switch (channel)
+            {
+                case OrderChannel.Facing: return FacingRecentOrderBattleSeconds;
+                case OrderChannel.Formation: return FormationRecentOrderBattleSeconds;
+                case OrderChannel.CombatBehavior: return CombatBehaviorRecentOrderBattleSeconds;
+                default: return RecentOrderBattleSeconds;
+            }
+        }
+
+        /// <summary>
+        /// A flagged move goes through vanilla BlockedMovingOrder only without heading
+        /// or double-quick (UpdateOrders' SetWaypoint carries neither, 3139) and when
+        /// the side's blockedcrossings lists at least one crossing: the order carves
+        /// obstacles only over listed crossings (3071-3083), so with none it would only
+        /// drop the courier delay. An empty or missing list (7919-7949) is a plain
+        /// SetWaypoint.
+        /// </summary>
+        public static bool TakesBlockedMovingOrder(in BattleOrderIntent w, int crossingCount)
+        {
+            return (w.Flags & IntentFlags.AvoidCoveredCrossings) != 0 && w.Heading < 0f &&
+                (w.Flags & IntentFlags.DoubleQuick) == 0 && crossingCount > 0;
+        }
+
+        /// <summary>SetGroupFormation's refuseflank: -1 none, 0 left, 1 right.</summary>
+        public static int VanillaRefuseFlank(RefuseFlank refuse)
+        {
+            switch (refuse)
+            {
+                case RefuseFlank.Left: return 0;
+                case RefuseFlank.Right: return 1;
+                default: return -1;
+            }
+        }
         public const float CourierIntervalBattleHours = 0.25f;      // was #61 OutboundCourierIntervalSeconds 900
         public const float FailedWriteBackoffHours = 0.05f;
         public const float RetryBearingDegrees = 30f;
@@ -386,6 +426,9 @@ namespace WhiskeyRealism.Tactical.Battle
         private readonly Dictionary<int, double> _courierAt = new Dictionary<int, double>(128);
         private readonly Dictionary<int, double> _backoffUntil = new Dictionary<int, double>(128);
         private readonly Dictionary<long, OrderOutcome> _lastOutcome = new Dictionary<long, OrderOutcome>(256);
+        // The flank each group's children were last refused on by an executed write
+        // (absent = unskewed). Read by the leaf slot (LeafSlotTarget).
+        private readonly Dictionary<int, RefuseFlank> _refuseByGroup = new Dictionary<int, RefuseFlank>(64);
         private PendingMove[] _pending = new PendingMove[32];
         // Parallel to _pending, pooled per slot: the units each pending move went
         // to, and the units whose waypoint was already on their target before it.
@@ -554,7 +597,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _pending[p] = new PendingMove
             {
                 Intent = i, PathsBefore = pathsBefore, MovedAtCall = pathsAfter > pathsBefore, Retries = retries,
-                TargetCount = count, AlreadyThereCount = thereCount,
+                TargetCount = count, AlreadyThereCount = thereCount, IssuedAtHours = nowHours,
             };
         }
 
@@ -585,6 +628,14 @@ namespace WhiskeyRealism.Tactical.Battle
                     RemovePending(p);
                     continue;
                 }
+
+                // A move through BlockedMovingOrder (the recorded intent keeps
+                // AvoidCoveredCrossings only then) gets its SetWaypoint two frames
+                // after the call (UpdateOrders 3382). The next side-stat cycle is
+                // far later, but vanilla's override calls re-run it on the same
+                // battle clock (84021, 218963+): too early to judge.
+                if ((pm.Intent.Flags & IntentFlags.AvoidCoveredCrossings) != 0 && !pm.MovedAtCall && nowHours <= pm.IssuedAtHours)
+                    continue;
 
                 IssuedTarget[] targets = _pendingTargets[p];
                 if (pm.MovedAtCall ||
@@ -627,6 +678,24 @@ namespace WhiskeyRealism.Tactical.Battle
                 _tickets[t].Handed = true;
             }
             return n;
+        }
+
+        /// <summary>
+        /// A write re-laid the group's children through SetGroupFormation: the
+        /// refuse wheel with its refuseflank (92095-92101), or a move or courier
+        /// formation change with none (SetWaypoint passes direction -1, 91559). An
+        /// in-place rotation lays out nothing and is not noted.
+        /// </summary>
+        public void NoteChildLayout(int groupId, RefuseFlank refuse)
+        {
+            if (refuse == RefuseFlank.None) _refuseByGroup.Remove(groupId);
+            else _refuseByGroup[groupId] = refuse;
+        }
+
+        /// <summary>The flank the executor last refused on the group's children, or None.</summary>
+        public RefuseFlank LastIssuedRefuse(int groupId)
+        {
+            return _refuseByGroup.TryGetValue(groupId, out RefuseFlank refuse) ? refuse : RefuseFlank.None;
         }
 
         public bool TryGetLastOutcome(int groupId, OrderChannel channel, out OrderOutcome outcome)
@@ -681,13 +750,13 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     // #61's rule (ShouldSkipDuplicateWaypoint at the 60 m
                     // MinWaypointDistance): same target while the group moves, or
-                    // while it already stands there. Its wider radius for an
-                    // interrupted path (InterruptedReissueDistance 60 m) equals the
-                    // base radius since the 60 m bump, and the snapshot carries no
-                    // pathinterrupted, so the interrupted flag is false here.
+                    // while it already stands there. An interrupted path
+                    // (UnitFlags.PathInterrupted, vanilla pathinterrupted 111012)
+                    // widens the radius to InterruptedReissueDistance, which equals
+                    // DedupeMeters (60 m) since the 60 m bump.
                     if (CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
                             rec.LastWaypointX, rec.LastWaypointZ, x, z, OrderArbiter.DedupeMeters,
-                            pathInterrupted: false, rec.RegimentPaths, IsMoving(rec), rec.X, rec.Z))
+                            (rec.Flags & UnitFlags.PathInterrupted) != 0, rec.RegimentPaths, IsMoving(rec), rec.X, rec.Z))
                         return true;
                     int p = FindPending(w.GroupId);
                     return p >= 0 &&
@@ -699,12 +768,15 @@ namespace WhiskeyRealism.Tactical.Battle
                     // skips while vanilla's 4264 stamp is live, its full pass
                     // claims and re-stamps a lapsed one (the #45 agreement path).
                     return false;
+                // A refused flank is a write of its own (the skewed slots), even
+                // with the formation or facing already right.
                 case OrderChannel.Formation:
-                    return rec.Formation == w.Value;
+                    return rec.Formation == w.Value && w.Refuse == RefuseFlank.None;
                 case OrderChannel.CombatBehavior:
                     return rec.CombatBehaviorOrdered == w.Value;
                 case OrderChannel.Facing:
-                    return w.Heading >= 0f && AngleDifference(rec.RotationY, w.Heading) <= FacingToleranceDegrees;
+                    return w.Heading >= 0f && AngleDifference(rec.RotationY, w.Heading) <= FacingToleranceDegrees &&
+                        w.Refuse == RefuseFlank.None;
                 case OrderChannel.Stop:
                     return !IsMoving(rec);
                 default:
@@ -724,7 +796,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (w.Priority != IntentPriority.Safety && !stanceRefresh)
             {
                 if (_lastOrderAt.TryGetValue(Key(w.GroupId, w.Channel), out double last) &&
-                    Within(now, last, RecentOrderBattleSeconds / TacticalBattleClock.BattleSecondsPerHour))
+                    Within(now, last, RecentOrderBattleSecondsFor(w.Channel, w.Source) / TacticalBattleClock.BattleSecondsPerHour))
                     return true;
                 if (move && TaskHoldHours > 0f && w.Task != CommandTaskType.None &&
                     _taskHold.TryGetValue(w.GroupId, out TaskStamp stamp) && stamp.Task == w.Task &&
@@ -900,6 +972,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _courierAt.Clear();
             _backoffUntil.Clear();
             _lastOutcome.Clear();
+            _refuseByGroup.Clear();
             _pendingCount = 0;
             _ticketCount = 0;
         }
@@ -965,6 +1038,7 @@ namespace WhiskeyRealism.Tactical.Battle
             // The targets' moving-unit count rose during the vanilla call.
             public bool MovedAtCall;
             public int Retries;
+            public double IssuedAtHours;
         }
 
         private struct RetryTicket

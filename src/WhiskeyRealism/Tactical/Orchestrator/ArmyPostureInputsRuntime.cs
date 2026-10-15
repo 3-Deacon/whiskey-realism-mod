@@ -1,21 +1,29 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Battle.Producers;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
-    // B-61state (2026-10-14): orchestrator inputs that #61
-    // (BattleCommandPostureExecutorPatch) consumes, refreshed on the
-    // coordinator tick instead of from the Harmony Postfix (read-only contract
-    // for patches). Call Refresh once per side per coordinator tick, before
-    // the next AIBattle.UpdateAITasks for that side:
+    // B-61state (2026-10-14): orchestrator inputs the posture producers
+    // (Tactical/Battle/Producers, plan BC5a) read, refreshed on the coordinator
+    // tick (CheckGlobalAIStrategy, 5866) before the same UpdateAITasks reaches the
+    // arbiter (AdjustGroupFormations, 5870). Call Refresh once per side per
+    // coordinator tick:
+    //   - producer registration: PostureProducers.EnsureRegistered runs the
+    //     producers' static constructors before the arbiter's first tick;
     //   - leaf brigade map: ArmyOrchestrator.UpdateLeafBrigadeMap(tree) from the
-    //     alliance's extended probe tree (cached per roster signature, not per
-    //     frame);
+    //     alliance's extended probe tree, cached per snapshot roster signature,
+    //     without the snapshot's PlayerOwned units (PostureProbeFilter);
+    //   - the AI pool: the side's AIBattle.unitsused (85227-85262, the groups
+    //     vanilla's own AI orders), which splits #61's group pass from its
+    //     leaf-brigade pass;
+    //   - defending: GetBattleType(alliance, usereadinesswhendraw) == 2 (86095,
+    //     as AdjustGroupAIStance 4252 reads it), for the division play;
     //   - live commander initiative: UpdateLiveCommanderInitiative;
     //   - reinforcement opportunity: UpdateReinforcementOpportunity from
     //     ArmyEvidenceBuilder.BuildForceBalance (gated by
@@ -52,6 +60,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int allianceId = bunits.alliance[side];
                 if (allianceId < 0 || allianceId >= 2) return;
 
+                PostureProducers.EnsureRegistered();
+                RefreshAiPool(battle, allianceId);
+                _defending[allianceId] = bunits.GetBattleType(allianceId, usereadinesswhendraw: true) == 2;
+
                 var probes = ExtendedProbes(bunits, allianceId);
                 if (probes != null && probes.Count > 0)
                     army.UpdateLeafBrigadeMap(TacticalCommandTreeProbe.BuildTree(probes, 0));
@@ -83,59 +95,87 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        /// <summary>True when the group is in the side's AI pool (AIBattle.unitsused) this tick.</summary>
+        public static bool InAiPool(int allianceId, int instanceId)
+        {
+            return allianceId >= 0 && allianceId < _aiPool.Length && _aiPool[allianceId].Contains(instanceId);
+        }
+
+        /// <summary>The side holds the objectives (GetBattleType == 2, 86095).</summary>
+        public static bool SideDefending(int allianceId)
+        {
+            return allianceId >= 0 && allianceId < _defending.Length && _defending[allianceId];
+        }
+
         // Battle end (BattleScope).
         public static void ResetForBattleEnd()
         {
             _probeCache.Clear();
             _lastTelemetryAt.Clear();
+            for (int a = 0; a < _aiPool.Length; a++)
+            {
+                _aiPool[a].Clear();
+                _defending[a] = false;
+            }
         }
 
-        // The W&L player's command subtree is left out of the probe tree, so
-        // the role cascade / leaf map never assigns it a role and no AI
-        // brigade waits on it as support (PlayerCommandProbeFilter).
+        private static readonly HashSet<int>[] _aiPool = { new HashSet<int>(), new HashSet<int>() };
+        private static readonly bool[] _defending = new bool[2];
+
+        // UnitRecord.InstanceId is the GameObject instance id (BattleSnapshotBuilder).
+        private static void RefreshAiPool(AIBattle battle, int allianceId)
+        {
+            HashSet<int> pool = _aiPool[allianceId];
+            pool.Clear();
+            var units = battle.unitsused;
+            if (units == null) return;
+            for (int i = 0; i < units.Count; i++)
+            {
+                Regiment group = units[i];
+                if ((UnityEngine.Object)group == null) continue;
+                GameObject go = ((Component)group).gameObject;
+                if (go != null) pool.Add(go.GetInstanceID());
+            }
+        }
+
+        // Player-owned units (the W&L player's command and descendants,
+        // take-overs, the player side outside W&L) are left out of the probe tree
+        // by the snapshot's PlayerOwned flag, so the role cascade / leaf map never
+        // assigns them a role and no AI brigade waits on them as support. The
+        // player's AI ancestors stay.
         private static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> ExtendedProbes(BattleUnits bunits, int allianceId)
         {
-            var playerCommand = new HashSet<int>();
-            ProbeRosterSignature signature = RosterSignature(bunits, allianceId, playerCommand);
+            if (!BattleCore.TryGetSnapshot(allianceId, out BattleSnapshot snapshot)) return null;
+            ProbeRosterSignature signature = RosterSignature(snapshot, bunits.GetInstanceID());
             if (_probeCache.TryGetValue(allianceId, out CachedProbes cached) &&
                 cached.Probes != null &&
                 cached.Signature.Equals(signature))
                 return cached.Probes;
 
-            var probes = PlayerCommandProbeFilter.Without(
+            var probes = PostureProbeFilter.WithoutPlayerOwned(
                 DirectChildDiscovery.BuildExtendedProbesForAlliance(allianceId),
-                playerCommand);
+                snapshot);
             // An empty list means no snapshot was built for the side yet (or the
             // build degraded); cached, it would stand until the roster changed.
             if (probes != null && probes.Count > 0) _probeCache[allianceId] = new CachedProbes(signature, probes);
             return probes;
         }
 
-        // Counts only units outside the player's command, so a change in the
+        // The snapshot roster without player-owned units, so a change in the
         // W&L command set also invalidates the probe cache.
-        private static ProbeRosterSignature RosterSignature(BattleUnits bunits, int allianceId, ISet<int> playerCommand)
+        private static ProbeRosterSignature RosterSignature(BattleSnapshot snapshot, int battleKey)
         {
             int count = 0;
             int routed = 0;
-            bool wl = DLC_WL.dlc_scenarioactive;
-            var units = BattleUnits.completeunitlist as IList;
-            if (units != null)
+            UnitRecord[] own = snapshot.Own;
+            for (int i = 0; i < snapshot.OwnCount; i++)
             {
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var unit = units[i] as Regiment;
-                    if (unit == null || unit.alliance != allianceId) continue;
-                    if (wl && unit.dlcw_isundercommander)
-                    {
-                        playerCommand.Add(((Component)unit).gameObject.GetInstanceID());
-                        continue;
-                    }
-                    count++;
-                    if (unit.isrouted || unit.markedforrout) routed++;
-                }
+                if ((own[i].Flags & UnitFlags.PlayerOwned) != 0) continue;
+                count++;
+                if (PostureSense.Routed(own[i])) routed++;
             }
 
-            return new ProbeRosterSignature(allianceId, count, routed, bunits.GetInstanceID());
+            return new ProbeRosterSignature(snapshot.Alliance, count, routed, battleKey);
         }
 
         /// <summary>

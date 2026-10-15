@@ -3,6 +3,10 @@ using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using static TestHarness;
+using VanillaMapBounds = WhiskeyRealism.Tactical.Battle.VanillaMapBounds;
+using VanillaPathAreaCosts = WhiskeyRealism.Tactical.Battle.VanillaPathAreaCosts;
+using TacticalBattleClock = WhiskeyRealism.Tactical.Battle.TacticalBattleClock;
+using CommandWaypointWritePolicy = WhiskeyRealism.Tactical.Battle.CommandWaypointWritePolicy;
 
 // WS T4 (2026-10-14 remediation): #61 posture executor + single ai_stance owner.
 internal static class PostureStanceFixTests
@@ -67,8 +71,6 @@ internal static class PostureStanceFixTests
         // B-61clock / M3 retry
         Pass("executor movement uses courier order delay like vanilla AI group moves", ExecutorMovementUsesCourierDelay);
         Pass("in-contact withdrawal skips order delay like CheckIfOutflanked", InContactWithdrawalSkipsOrderDelay);
-        Pass("queued courier order counts as an issued move", QueuedCourierOrderCountsAsIssuedMove);
-        Pass("failed write backs off on battle time", FailedWriteBacksOffOnBattleTime);
         Pass("real seconds at 1x convert to battle hours", RealSecondsAtOneXConvertToBattleHours);
 
         // BR-M1
@@ -80,12 +82,10 @@ internal static class PostureStanceFixTests
         Pass("leaf brigade moves only for movement tasks", LeafBrigadeMovesOnlyForMovementTasks);
         Pass("leaf brigade defers to an active parent order", LeafBrigadeDefersToActiveParentOrder);
         Pass("leaf brigade keeps executor safety gates", LeafBrigadeKeepsExecutorSafetyGates);
-        Pass("formation slot mirrors vanilla GetAngleTerrainPosXY math", FormationSlotMirrorsVanillaMath);
         Pass("waypoint clamp mirrors vanilla RegimentSetPath map bounds", WaypointClampMirrorsVanillaMapBounds);
 
         // B-61state / perf: probe cache keyed on roster, not frame
         Pass("roster signature changes with roster not with frame", RosterSignatureChangesWithRosterOnly);
-        Pass("extended probes drop the W&L player's command subtree", ExtendedProbesDropPlayerCommandSubtree);
 
         // Perf
         Pass("friendly spatial grid matches brute-force front blocker", FriendlySpatialGridMatchesBruteForce);
@@ -521,22 +521,6 @@ internal static class PostureStanceFixTests
             "only withdrawals skip the courier");
     }
 
-    private static void QueuedCourierOrderCountsAsIssuedMove()
-    {
-        AssertTrue(CommandWaypointWritePolicy.MovementIssued(0, 2, 0, 0), "paths appeared");
-        AssertTrue(CommandWaypointWritePolicy.MovementIssued(0, 0, 0, 1), "courier queued");
-        AssertFalse(CommandWaypointWritePolicy.MovementIssued(1, 1, 2, 2), "nothing changed");
-    }
-
-    private static void FailedWriteBacksOffOnBattleTime()
-    {
-        float until = CommandWaypointWritePolicy.FailedWriteBackoffUntil(2f);
-        AssertTrue(until > 2f, "backoff in the future");
-        AssertTrue(CommandWaypointWritePolicy.IsBackedOff(2.01f, until), "inside backoff");
-        AssertFalse(CommandWaypointWritePolicy.IsBackedOff(until + 0.001f, until), "after backoff");
-        AssertFalse(CommandWaypointWritePolicy.IsBackedOff(0.5f, until), "clock reset clears backoff");
-    }
-
     private static void RealSecondsAtOneXConvertToBattleHours()
     {
         // Macro cycle 0.015 game-hours ≈ 9 s real at 1x ⇒ 1 game-hour ≈ 600 s real.
@@ -640,21 +624,6 @@ internal static class PostureStanceFixTests
         AssertFalse(Leaf(CommandTaskType.AttackObjective, activeMove: true).Move, "already moving");
     }
 
-    private static void FormationSlotMirrorsVanillaMath()
-    {
-        // Vanilla 26945-26949: angle -= 90; x' = x - cos(a)*dz - cos(a+90)*dx; z' = z + sin(a)*dz + sin(a+90)*dx.
-        double a = (30.0 - 90.0) * Math.PI / 180.0;
-        double b = 30.0 * Math.PI / 180.0;
-        float ex = (float)(100.0 - Math.Cos(a) * 40.0 - Math.Cos(b) * (-25.0));
-        float ez = (float)(-200.0 + Math.Sin(a) * 40.0 + Math.Sin(b) * (-25.0));
-        LeafFormationSlot.OffsetXZ(100f, -200f, 30f, -25f, 40f, out float x, out float z);
-        AssertTrue(Math.Abs(ex - x) < 0.001f, "x");
-        AssertTrue(Math.Abs(ez - z) < 0.001f, "z");
-        LeafFormationSlot.OffsetXZ(100f, -200f, 77f, 0f, 0f, out float x0, out float z0);
-        AssertEqual(100f, x0, "zero offset x");
-        AssertEqual(-200f, z0, "zero offset z");
-    }
-
     private static void RosterSignatureChangesWithRosterOnly()
     {
         var a = new ProbeRosterSignature(1, 120, 3, 7);
@@ -664,27 +633,6 @@ internal static class PostureStanceFixTests
         AssertFalse(a.Equals(new ProbeRosterSignature(1, 120, 4, 7)), "unit routed");
         AssertFalse(a.Equals(new ProbeRosterSignature(1, 120, 3, 8)), "new battle (BattleUnits instance)");
         AssertFalse(a.Equals(new ProbeRosterSignature(0, 120, 3, 7)), "other alliance");
-    }
-
-    private static TacticalCommandTreeProbe.ExtendedProbe Probe(int id, int parent, int typ = 14)
-    {
-        return new TacticalCommandTreeProbe.ExtendedProbe(id, typ, "u" + id, true, parent, parent != 0, 0f, 0f, 1);
-    }
-
-    private static void ExtendedProbesDropPlayerCommandSubtree()
-    {
-        // AI corps 1 → AI brigades 2, 3 and the W&L player's brigade 4 with its
-        // regiments 5, 6 (AppointCommand 44269 / 45827 mark the whole subtree).
-        var probes = new[] { Probe(1, 0, 16), Probe(2, 1), Probe(3, 1), Probe(4, 1), Probe(5, 4, 0), Probe(6, 4, 0) };
-        var filtered = PlayerCommandProbeFilter.Without(probes, new System.Collections.Generic.HashSet<int> { 4, 5, 6 });
-        AssertEqual(3, filtered.Count, "player subtree removed");
-        var tree = TacticalCommandTreeProbe.BuildTree(filtered, 0);
-        AssertTrue(tree.ContainsKey(1), "AI parent kept (IsPlayerProtected would also flag it via the attached player brigade)");
-        AssertEqual(2, tree[1].ChildInstanceIds.Count, "AI parent keeps only its AI brigades");
-        AssertFalse(tree.ContainsKey(4), "player brigade gets no cascade role");
-
-        var none = PlayerCommandProbeFilter.Without(probes, new System.Collections.Generic.HashSet<int>());
-        AssertTrue(ReferenceEquals(probes, none), "nothing protected: same list, no copy");
     }
 
     // Reference: the pre-grid EstimateFriendlyFrontBlocker walk (corridor 30 m

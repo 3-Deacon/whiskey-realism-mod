@@ -30,6 +30,10 @@ namespace WhiskeyRealism.Tactical.Battle
         LiedDown = 65536,
         MarkedForRout = 131072, // vanilla markedforrout: a cavalry leaf mounting up to rout (Rout 123555-123559)
         PathInterrupted = 262144, // vanilla pathinterrupted (111012): contact stopped the move (117330), restored at 117195
+        // BC5a, additive: SlotOffsetX/Z hold this unit's entry in its command parent's
+        // layout (groupposition.unitoffsetposition, 78378; the layout group is the
+        // plan-D5 parent).
+        HasLayoutSlot = 524288,
     }
 
     public struct UnitRecord
@@ -45,6 +49,13 @@ namespace WhiskeyRealism.Tactical.Battle
         public float Morale, BattleStartMorale, Ammo01, Fatigue, Experience;
         public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
         public float LastWaypointX, LastWaypointZ;
+        // BC5a, additive (the leaf slot, shipped #61 TryFormationSlot): a group's
+        // lastsetwaypointrotation (SetGroupFormation stores it with the waypoint,
+        // 92067-92068), its own groupposition.groupwidth / groupdepth (78380-78382),
+        // and, with UnitFlags.HasLayoutSlot, its entry in its parent's layout.
+        public float LastWaypointRotation;
+        public float GroupWidth, GroupDepth;
+        public float SlotOffsetX, SlotOffsetZ;
         // Own-side state vanilla's fallback rules read (CheckLineFallbacks 5167):
         // covervalue (111404) and coverobject (111408; "no cover" = covervalue <= 0 or
         // coverobject 3), friendlyroutednear (111158; <= 0, clamped to [-1, 0] at 128253).
@@ -146,6 +157,22 @@ namespace WhiskeyRealism.Tactical.Battle
         Limber = 32,
         Unlimber = 64,
         PerRegiment = 128,
+        // BC5a, additive: route the move through vanilla AIBattle.BlockedMovingOrder
+        // (3054-3150: NavMeshObstacles over the enemy-covered crossings of the
+        // side's blockedcrossings, then SetWaypoint two frames later, UpdateOrders
+        // 3382), as vanilla's own line-group moves over 150 m do (6953-6956).
+        AvoidCoveredCrossings = 256,
+    }
+
+    // Refused flank of a group's formation or facing order (BC5a, additive).
+    // None is the default so an intent built without it refuses nothing;
+    // OrderExecutor.VanillaRefuseFlank maps it to SetGroupFormation's refuseflank
+    // (-1 none, 0 left, 1 right; SkewedPosition 92095-92097).
+    public enum RefuseFlank : byte
+    {
+        None = 0,
+        Left = 1,
+        Right = 2,
     }
 
     public struct BattleOrderIntent
@@ -161,6 +188,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public IntentFlags Flags;
         public WhiskeyRealism.Tactical.Operations.CommandTaskType Task;
         public string Reason;     // static literal only
+        public RefuseFlank Refuse; // Formation / Facing on a group (BC5a)
     }
 
     public interface IIntentSink
