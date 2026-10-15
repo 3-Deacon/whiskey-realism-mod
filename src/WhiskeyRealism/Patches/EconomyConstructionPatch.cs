@@ -18,8 +18,9 @@ namespace WhiskeyRealism.Patches
     // beats the STORED value.
     //
     // This Prefix biases valid candidates for vanilla's selection only (rolled group is
-    // rescaled so the top value never exceeds vanilla's own best: no build-rate
-    // inflation) and the Finalizer restores the raw values for every slot vanilla did
+    // capped at vanilla's own best: no build-rate inflation; each subsidy type keeps its
+    // raw max so the un-reset num threshold between the loops stays vanilla's) and the
+    // Finalizer restores the raw values for every slot vanilla did
     // not consume, so stale inflated probabilities never block better sites.
     [HarmonyPatch(typeof(AICampaign), "UpdateCompanyFoundations")]
     internal static class EconomyConstructionPatch
@@ -60,12 +61,13 @@ namespace WhiskeyRealism.Patches
 
                 var raw = new float[slots];
                 var mult = new float[slots];
-                var rolled = new bool[slots];
+                var groups = new int[slots];
                 var reasons = new string[slots];
 
                 for (int buildingType = 0; buildingType < slots; buildingType++)
                 {
                     mult[buildingType] = 1f;
+                    groups[buildingType] = ConstructionProbabilityBias.NotCandidate;
                     float oldProb = state.bestiipplacesprob[buildingType];
                     var oldStatus = ConstructionProbabilitySanitizer.Classify(oldProb);
                     if (oldStatus == ConstructionProbabilityStatus.Invalid)
@@ -82,9 +84,14 @@ namespace WhiskeyRealism.Patches
                     if (place == null) continue;
 
                     var type = GameVars.buildingtypes[buildingType];
-                    // Mirrors the 15046/15049 filter of vanilla's rolled (non-subsidy) loop.
-                    rolled[buildingType] = type != null && type.aiplacement && type.subsidytype < 0 &&
-                        !type.needsunitforplacement && place.allianceowner == alliance;
+                    // Mirrors vanilla's candidate filters: subsidy loop 15022, rolled loop 15046/15049.
+                    if (type != null && type.aiplacement && place.allianceowner == alliance)
+                    {
+                        if (type.subsidytype >= 0)
+                            groups[buildingType] = type.subsidytype;
+                        else if (!type.needsunitforplacement)
+                            groups[buildingType] = ConstructionProbabilityBias.RolledGroup;
+                    }
 
                     if (!CandidateEligibleForVanillaPath(alliance, state, place, type)) continue;
 
@@ -110,7 +117,7 @@ namespace WhiskeyRealism.Patches
                     reasons[buildingType] = constructionReason;
                 }
 
-                var biased = ConstructionProbabilityBias.Bias(raw, mult, rolled);
+                var biased = ConstructionProbabilityBias.Bias(raw, mult, groups);
                 for (int buildingType = 0; buildingType < slots; buildingType++)
                 {
                     float rawProb = raw[buildingType];

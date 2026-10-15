@@ -27,7 +27,7 @@ internal static class CampaignEconomyFixTests
         PolicySelectorPicksClearScoreWin();
 
         ConstructionBiasReordersWithoutInflatingRolledRate();
-        ConstructionBiasLeavesSubsidyGroupUncapped();
+        ConstructionBiasNormalisesEachSubsidyTypeToItsRawMax();
         ConstructionBiasRestoreSkipsSlotsVanillaConsumed();
 
         ConstructionSupplyCorridorMatchesAreaKeyAgainstAreaKey();
@@ -327,21 +327,28 @@ internal static class CampaignEconomyFixTests
     {
         var raw = new[] { 0.40f, 0.30f };
         var mult = new[] { 1.0f, 2.0f };
-        var rolled = new[] { true, true };
-        var biased = ConstructionProbabilityBias.Bias(raw, mult, rolled);
+        var groups = new[] { ConstructionProbabilityBias.RolledGroup, ConstructionProbabilityBias.RolledGroup };
+        var biased = ConstructionProbabilityBias.Bias(raw, mult, groups);
         TestHarness.AssertTrue(biased[1] > biased[0], "bias reorders selection toward candidate 1");
         TestHarness.AssertTrue(biased[1] <= 0.40f + 1e-6f, "top biased value never exceeds vanilla's best raw (no rate inflation)");
         LogPass("c2b construction bias reorders without inflating rolled rate");
     }
 
-    private static void ConstructionBiasLeavesSubsidyGroupUncapped()
+    // Vanilla does not reset num between the subsidy loop and the rolled loop
+    // (15012-15049): the last subsidy type's best prob becomes the rolled loop's entry
+    // threshold. Each subsidy type is therefore normalised so its max equals its raw
+    // max (argmax unchanged, threshold unchanged).
+    private static void ConstructionBiasNormalisesEachSubsidyTypeToItsRawMax()
     {
-        var raw = new[] { 0.40f, 0.30f, 0.20f };
-        var mult = new[] { 1.0f, 2.0f, 1.5f };
-        var rolled = new[] { true, true, false };
-        var biased = ConstructionProbabilityBias.Bias(raw, mult, rolled);
-        TestHarness.AssertTrue(Math.Abs(biased[2] - 0.30f) < 1e-6f, "subsidy-path candidate (no roll) gets plain raw*mult");
-        LogPass("c2b construction bias leaves subsidy group uncapped");
+        var raw = new[] { 0.40f, 0.20f, 0.10f, 0.30f };
+        var mult = new[] { 1.0f, 1.0f, 3.0f, 0.5f };
+        var groups = new[] { ConstructionProbabilityBias.RolledGroup, 2, 2, 5 };
+        var biased = ConstructionProbabilityBias.Bias(raw, mult, groups);
+        TestHarness.AssertTrue(biased[2] > biased[1], "bias reorders inside subsidy type 2");
+        TestHarness.AssertTrue(Math.Abs(Math.Max(biased[1], biased[2]) - 0.20f) < 1e-6f, "type 2 max stays at raw max 0.20");
+        TestHarness.AssertTrue(Math.Abs(biased[3] - 0.30f) < 1e-6f, "single dampened candidate keeps raw max (threshold preserved)");
+        TestHarness.AssertTrue(Math.Abs(biased[0] - 0.40f) < 1e-6f, "rolled group untouched by subsidy groups");
+        LogPass("c2b construction bias normalises each subsidy type to its raw max");
     }
 
     private static void ConstructionBiasRestoreSkipsSlotsVanillaConsumed()

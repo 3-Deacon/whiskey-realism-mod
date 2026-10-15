@@ -29,39 +29,59 @@ namespace WhiskeyRealism.Strategic.Construction
     // always compares new sites against the raw stored probability.
     public static class ConstructionProbabilityBias
     {
-        // raw[k] * multiplier[k]. Candidates in vanilla's rolled (non-subsidy) loop are
-        // then scaled by a common factor so the largest biased value never exceeds the
-        // largest raw value: ordering changes, the Random < prob*timediff*50 build roll
-        // (15056) does not get more likely than vanilla's own best candidate.
-        public static float[] Bias(float[] raw, float[] multiplier, bool[] rolled)
+        // Group ids mirror vanilla's two candidate loops: RolledGroup = non-subsidy
+        // candidates (15044-15055, build roll Random < prob*timediff*50 at 15056);
+        // subsidytype >= 0 = one per-subsidy-type argmax (15016-15028); NotCandidate =
+        // ignored by vanilla this call (value irrelevant, left raw).
+        public const int RolledGroup = -1;
+        public const int NotCandidate = -2;
+
+        // raw[k] * multiplier[k], then rescaled per group with one common factor (argmax
+        // within a group is unchanged by uniform scaling):
+        //  - rolled group: capped so max(biased) <= max(raw) -> ordering changes, the
+        //    build roll never gets likelier than vanilla's own best (dampening allowed);
+        //  - each subsidy type: normalised so max(biased) == max(raw). Vanilla does not
+        //    reset num after the subsidy loop (15018 vs 15042), so the last type's best
+        //    prob is the rolled loop's entry threshold; keeping each type's max raw keeps
+        //    that threshold exactly vanilla's.
+        public static float[] Bias(float[] raw, float[] multiplier, int[] group)
         {
             if (raw == null) return null;
             var biased = new float[raw.Length];
-            float maxRaw = 0f;
-            float maxBiased = 0f;
+            var maxRaw = new System.Collections.Generic.Dictionary<int, float>();
+            var maxBiased = new System.Collections.Generic.Dictionary<int, float>();
             for (int i = 0; i < raw.Length; i++)
             {
+                int g = GroupOf(group, i);
+                if (g == NotCandidate)
+                {
+                    biased[i] = raw[i];
+                    continue;
+                }
                 float m = multiplier != null && i < multiplier.Length && IsFinite(multiplier[i]) && multiplier[i] >= 0f
                     ? multiplier[i]
                     : 1f;
                 biased[i] = raw[i] * m;
-                if (rolled != null && i < rolled.Length && rolled[i])
-                {
-                    if (raw[i] > maxRaw) maxRaw = raw[i];
-                    if (biased[i] > maxBiased) maxBiased = biased[i];
-                }
+                maxRaw[g] = maxRaw.TryGetValue(g, out float r) && r > raw[i] ? r : raw[i];
+                maxBiased[g] = maxBiased.TryGetValue(g, out float b) && b > biased[i] ? b : biased[i];
             }
 
-            if (maxBiased > maxRaw && maxBiased > 0f)
+            for (int i = 0; i < biased.Length; i++)
             {
-                float scale = maxRaw / maxBiased;
-                for (int i = 0; i < biased.Length; i++)
-                {
-                    if (rolled != null && i < rolled.Length && rolled[i])
-                        biased[i] *= scale;
-                }
+                int g = GroupOf(group, i);
+                if (g == NotCandidate) continue;
+                float top = maxBiased[g];
+                if (top <= 0f) continue;
+                float target = maxRaw[g];
+                if (g == RolledGroup && top <= target) continue;
+                biased[i] *= target / top;
             }
             return biased;
+        }
+
+        private static int GroupOf(int[] group, int index)
+        {
+            return group != null && index < group.Length ? group[index] : NotCandidate;
         }
 
         // Restore the raw value only if vanilla left the slot as we biased it. If vanilla
