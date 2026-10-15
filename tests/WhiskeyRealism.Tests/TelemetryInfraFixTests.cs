@@ -19,6 +19,12 @@ internal static class TelemetryInfraFixTests
         OnceLogClaimReturnsTrueOnlyOnce();
         OnceLogFiredKeySkipsMessageWork();
         OnceLogBoundsFiredKeys();
+        QueueProtectedRowDoesNotEvictDetailRows();
+        QueuePerformanceDoesNotEvictDecisionOrState();
+        QueueEvictsTraceBeforePerformance();
+        QueueDrainPreservesFifoAcrossCategories();
+        QueueCountersStayExactUnderChurn();
+        QueueEnqueueIsConstantTimeWhenFull();
     }
 
     private static void LogPass(string message)
@@ -131,5 +137,128 @@ internal static class TelemetryInfraFixTests
         OnceLog.Reset();
         TestHarness.AssertEqual(0, OnceLog.FiredCount, "reset clears fired set");
         LogPass("oncelog bounds fired keys");
+    }
+
+    // ---------------------------------------------------------------- TEL-queue / TEL-prio
+
+    private static TelemetryEvent Ev(TelemetryCategory category, string name)
+    {
+        return TelemetryEvent.Create("s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical, category, name, TelemetrySeverity.Info);
+    }
+
+    private static void QueueProtectedRowDoesNotEvictDetailRows()
+    {
+        var queue = new TelemetryQueue(capacity: 2);
+        queue.Enqueue(Ev(TelemetryCategory.Trace, "trace-a"));
+        queue.Enqueue(Ev(TelemetryCategory.State, "state-a"));
+        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Health, "health-a")), "health enqueued");
+        TestHarness.AssertEqual(0L, queue.DroppedCount, "protected row uses its own reserve; no detail eviction");
+        var drained = queue.Drain(10);
+        TestHarness.AssertEqual(3, drained.Count, "all three rows retained");
+        TestHarness.AssertEqual("trace-a", drained[0].EventName, "trace retained");
+        LogPass("queue protected row does not evict detail rows");
+    }
+
+    private static void QueuePerformanceDoesNotEvictDecisionOrState()
+    {
+        var queue = new TelemetryQueue(capacity: 2);
+        queue.Enqueue(Ev(TelemetryCategory.Decision, "decision-a"));
+        queue.Enqueue(Ev(TelemetryCategory.State, "state-a"));
+        TestHarness.AssertEqual(TelemetryQueueResult.Dropped, queue.Enqueue(Ev(TelemetryCategory.Performance, "perf-a")), "performance dropped when only decision/state queued");
+        TestHarness.AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.Performance), "performance drop counted");
+        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Decision, "decision-b")), "decision evicts state");
+        var drained = queue.Drain(10);
+        TestHarness.AssertEqual(2, drained.Count, "count");
+        TestHarness.AssertEqual("decision-a", drained[0].EventName, "decision-a kept");
+        TestHarness.AssertEqual("decision-b", drained[1].EventName, "decision-b kept");
+        LogPass("queue performance does not evict decision or state");
+    }
+
+    private static void QueueEvictsTraceBeforePerformance()
+    {
+        var queue = new TelemetryQueue(capacity: 2);
+        queue.Enqueue(Ev(TelemetryCategory.Performance, "perf-a"));
+        queue.Enqueue(Ev(TelemetryCategory.Trace, "trace-a"));
+        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Performance, "perf-b")), "performance evicts trace");
+        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Gate, "gate-a")), "gate evicts performance");
+        var drained = queue.Drain(10);
+        TestHarness.AssertEqual(2, drained.Count, "count");
+        TestHarness.AssertEqual("perf-a", drained[0].EventName, "oldest performance kept (newest evicted)");
+        TestHarness.AssertEqual("gate-a", drained[1].EventName, "gate kept");
+        TestHarness.AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.Trace), "trace evicted");
+        TestHarness.AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.Performance), "performance evicted");
+        LogPass("queue evicts trace before performance");
+    }
+
+    private static void QueueDrainPreservesFifoAcrossCategories()
+    {
+        var queue = new TelemetryQueue(capacity: 16);
+        var order = new[]
+        {
+            TelemetryCategory.State, TelemetryCategory.Failure, TelemetryCategory.Decision, TelemetryCategory.Performance,
+            TelemetryCategory.Health, TelemetryCategory.Trace, TelemetryCategory.Gate, TelemetryCategory.Write
+        };
+        for (int i = 0; i < order.Length; i++)
+            queue.Enqueue(Ev(order[i], "row-" + i.ToString(CultureInfo.InvariantCulture)));
+        var first = queue.Drain(3);
+        var rest = queue.Drain(100);
+        TestHarness.AssertEqual(3, first.Count, "partial drain count");
+        TestHarness.AssertEqual(5, rest.Count, "rest drain count");
+        for (int i = 0; i < 3; i++)
+            TestHarness.AssertEqual("row-" + i.ToString(CultureInfo.InvariantCulture), first[i].EventName, "fifo first " + i.ToString(CultureInfo.InvariantCulture));
+        for (int i = 0; i < 5; i++)
+            TestHarness.AssertEqual("row-" + (i + 3).ToString(CultureInfo.InvariantCulture), rest[i].EventName, "fifo rest " + i.ToString(CultureInfo.InvariantCulture));
+        TestHarness.AssertEqual(0, queue.Count, "drained empty");
+        LogPass("queue drain preserves fifo across categories");
+    }
+
+    private static void QueueCountersStayExactUnderChurn()
+    {
+        var queue = new TelemetryQueue(capacity: 128);
+        var rng = new Random(1234);
+        var categories = (TelemetryCategory[])Enum.GetValues(typeof(TelemetryCategory));
+        int expectedDetail = 0;
+        int expectedProtected = 0;
+        for (int round = 0; round < 50; round++)
+        {
+            for (int i = 0; i < 200; i++)
+            {
+                var category = categories[rng.Next(categories.Length)];
+                var result = queue.Enqueue(Ev(category, "churn"));
+                bool isProtected = category == TelemetryCategory.Health || category == TelemetryCategory.Failure;
+                if (result == TelemetryQueueResult.Enqueued)
+                {
+                    if (isProtected) expectedProtected++;
+                    else if (expectedDetail < 128) expectedDetail++;
+                }
+            }
+            TestHarness.AssertEqual(expectedDetail + expectedProtected, queue.Count, "count after enqueue round " + round.ToString(CultureInfo.InvariantCulture));
+            var drained = queue.Drain(rng.Next(1, 300));
+            for (int i = 0; i < drained.Count; i++)
+            {
+                bool isProtected = drained[i].Category == TelemetryCategory.Health || drained[i].Category == TelemetryCategory.Failure;
+                if (isProtected) expectedProtected--; else expectedDetail--;
+            }
+            TestHarness.AssertEqual(expectedDetail + expectedProtected, queue.Count, "count after drain round " + round.ToString(CultureInfo.InvariantCulture));
+            TestHarness.AssertTrue(expectedDetail <= 128, "detail bounded");
+            TestHarness.AssertTrue(expectedProtected <= queue.ProtectedReserveCapacity, "protected bounded");
+        }
+        LogPass("queue counters stay exact under churn");
+    }
+
+    private static void QueueEnqueueIsConstantTimeWhenFull()
+    {
+        var queue = new TelemetryQueue(capacity: TelemetryRuntimeConfig.MaxQueueCapacity);
+        for (int i = 0; i < TelemetryRuntimeConfig.MaxQueueCapacity; i++)
+            queue.Enqueue(Ev(TelemetryCategory.Decision, "fill"));
+        var trace = Ev(TelemetryCategory.Trace, "trace");
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 20000; i++)
+            queue.Enqueue(trace);
+        watch.Stop();
+        TestHarness.AssertTrue(watch.ElapsedMilliseconds < 250, "20k enqueues into a full 64k queue took " + watch.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) + "ms");
+        TestHarness.AssertEqual(TelemetryRuntimeConfig.MaxQueueCapacity, queue.Count, "full queue count");
+        TestHarness.AssertEqual(20000L, queue.DroppedCount, "drops counted");
+        LogPass("queue enqueue is constant time when full");
     }
 }
