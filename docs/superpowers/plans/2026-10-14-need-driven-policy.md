@@ -116,7 +116,7 @@ PROVE-MODE: harness for the pure layer, in-game smoke for the runtime. Per-slice
 4. No research stall: whenever an AI alliance has nothing in research at a daily review, a `select-policy` row (or vanilla's pick) follows within one alliance-data update.
 5. Emergencies (rating past 0.4 notches or ≤ 4 recruitable states in war) still launch vanilla's newspaper event; for the player's alliance with research in progress, LogOutput.log shows `[once:policy-selection:emergency-protect] PolicySelectionPatch kept the player's research through vanilla's emergency cancel alliance=<a> protected=<n>`, a `decision=emergency-protect` row follows, and the purchased policy keeps its progress.
 8. With `Logging Profile = CampaignTuning`, `[DailyOps:Perf]` rows in the campaign tuning sidecar carry `policyMs=`, and `campaign.policy-plan` rarely appears among slow scopes (threshold 4 ms).
-6. No `[once:policy-selection:*]` or `[once:policy-runtime:*]` warnings.
+6. No `[once:policy-selection:*]`, `[once:policy-runtime:*]` or `[once:campaign-need:*]` warnings (the strength ratio is read only once `AICampaign.aifaction` exists).
 7. W&L career as CIC: no `select-policy` rows for the player's alliance.
 
 ## Rollback

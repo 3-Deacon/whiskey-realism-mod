@@ -419,7 +419,7 @@ namespace WhiskeyRealism.Strategic
                 }
 
                 fiscalMs += Measure(() => UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat));
-                policyMs += Measure(() => UpdatePolicyPlan(alliance, era.Stage, reviewSerial));
+                policyMs += Measure(() => UpdatePolicyPlan(alliance, era.Stage, reviewSerial, operationalRuntimeReady));
                 bool frontChanged = false;
                 if (operationalRuntimeReady)
                     frontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance, cic));
@@ -1040,16 +1040,16 @@ namespace WhiskeyRealism.Strategic
         // Stage E: the alliance's needs (own-alliance and public reads only) and the ranked
         // policy plan PolicySelectionPatch consumes. Runs after UpdateFiscalIntent, whose input
         // and posture it reuses. Spec docs/superpowers/specs/2026-10-14-need-driven-policy-design.md.
-        private void UpdatePolicyPlan(int alliance, EraStage era, int reviewSerial)
+        private void UpdatePolicyPlan(int alliance, EraStage era, int reviewSerial, bool factionsReady)
         {
             using (TelemetryPerf.Scope("campaign.policy-plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
-                UpdatePolicyPlanCore(alliance, era, reviewSerial);
+                UpdatePolicyPlanCore(alliance, era, reviewSerial, factionsReady);
         }
 
-        private void UpdatePolicyPlanCore(int alliance, EraStage era, int reviewSerial)
+        private void UpdatePolicyPlanCore(int alliance, EraStage era, int reviewSerial, bool factionsReady)
         {
             int[] personality = PolicyRuntime.ReadPersonalityList(alliance, out bool emergencyCredit, out bool emergencyManpower);
-            var snapshot = CampaignNeedRuntime.Read(alliance, era, _fiscalInputs[alliance], FiscalIntents[alliance], emergencyCredit, emergencyManpower);
+            var snapshot = CampaignNeedRuntime.Read(alliance, era, _fiscalInputs[alliance], FiscalIntents[alliance], emergencyCredit, emergencyManpower, factionsReady);
             int days = _needDaySerial[alliance] >= 0 ? reviewSerial - _needDaySerial[alliance] : 1;
             var previous = Needs[alliance];
             var need = CampaignNeedBuilder.Next(previous, snapshot, days);
