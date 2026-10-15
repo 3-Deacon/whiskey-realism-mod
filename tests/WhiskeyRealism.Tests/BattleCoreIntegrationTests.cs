@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Telemetry;
 using static TestHarness;
 using static TestFixtures;
 
@@ -22,6 +23,8 @@ internal static class BattleCoreIntegrationTests
             ("battle-core ProducerRegistrySurvivesAThrowingFactory", ProducerRegistrySurvivesAThrowingFactory),
             ("battle-core RuntimeRegistryBuildsEveryProducerExplicitly", RuntimeRegistryBuildsEveryProducerExplicitly),
             ("battle-core GroupReachIsWidestCombatSightOrCancelDistance", GroupReachIsWidestCombatSightOrCancelDistance),
+            ("battle-core ArbiterStatsRowReachesTheMainLog", ArbiterStatsRowReachesTheMainLog),
+            ("battle-core DiscardedLegacyRowsRouteToTheSidecar", DiscardedLegacyRowsRouteToTheSidecar),
         });
     }
 
@@ -132,6 +135,48 @@ internal static class BattleCoreIntegrationTests
             AssertFalse(text.Contains("RegisterProducer("), Path.GetFileName(path) + " still self-registers a producer");
             AssertFalse(text.Contains("EnsureRegistered("), Path.GetFileName(path) + " still touches producer static constructors");
         }
+    }
+
+    // TelemetryRouter.LegacyInfo writes only to the sidecar; for a tag with no
+    // sidecar route (the default route: main log allowed, no sidecar) it returns
+    // true and writes nothing, leaving the main-log write to the caller
+    // (LegacyInfoToMainLogIfAllowed, OnceLog). The [OrderArbiter] 30 s row has no
+    // sidecar route, so it must go through LegacyInfoToMainLogIfAllowed.
+    private static void ArbiterStatsRowReachesTheMainLog()
+    {
+        const string row = "[OrderArbiter] alliance=0 intents=4 winners=3 issued=2 moved=1 failed=0 retried=0 gaveUp=0 skipped=1 deduped=0 superseded=0 topSkip=Cooldown";
+        TelemetryTagRoute route = TelemetryTagPolicy.Route(row);
+        AssertTrue(route.RouteToSidecar || route.AllowMainLog, "the arbiter row has a sink");
+        string tick = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Tactical/Battle/BattleCoreTick.cs"));
+        AssertTrue(tick.Contains("TelemetryRouter.LegacyInfoToMainLogIfAllowed(\"[OrderArbiter] alliance=\""),
+            "the arbiter row is written to the main log when its route allows it");
+    }
+
+    // A statement-level LegacyInfo call discards the main-log answer, so its row
+    // is written only if its tag routes to the sidecar. Every such call with a
+    // literal tag in the battle code must name a sidecar-routed tag.
+    private static void DiscardedLegacyRowsRouteToTheSidecar()
+    {
+        int checkedCalls = 0;
+        foreach (string dir in new[] { "src/WhiskeyRealism/Tactical", "src/WhiskeyRealism/Patches" })
+        {
+            foreach (string path in Directory.GetFiles(FindRepoPath(dir), "*.cs", SearchOption.AllDirectories))
+            {
+                string text = File.ReadAllText(path);
+                foreach (Match m in Regex.Matches(text, @"(?m)^\s*TelemetryRouter\.LegacyInfo\("))
+                {
+                    int end = text.IndexOf(';', m.Index);
+                    string call = end > m.Index ? text.Substring(m.Index, end - m.Index) : text.Substring(m.Index);
+                    Match tag = Regex.Match(call, "\"\\[([A-Za-z&][^\\]\"]*)\\]");
+                    if (!tag.Success) continue;
+                    checkedCalls++;
+                    TelemetryTagRoute route = TelemetryTagPolicy.Route("[" + tag.Groups[1].Value + "] x=1");
+                    AssertTrue(route.RouteToSidecar,
+                        Path.GetFileName(path) + ": [" + tag.Groups[1].Value + "] goes through LegacyInfo but has no sidecar route, so it is written nowhere");
+                }
+            }
+        }
+        AssertTrue(checkedCalls > 10, "the scan found the battle code's LegacyInfo rows");
     }
 
     // One reach for a group's enemies-in-range (#44 sector strength and the

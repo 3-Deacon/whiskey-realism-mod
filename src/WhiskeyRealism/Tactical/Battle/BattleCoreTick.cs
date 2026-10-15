@@ -278,7 +278,9 @@ namespace WhiskeyRealism.Tactical.Battle
                 float now = UnityEngine.Time.realtimeSinceStartup;
                 if (_windowStart < 0f) _windowStart = now;
                 if (now - _windowStart < TelemetryIntervalRealSeconds) return;
-                TelemetryRouter.LegacyInfo("[OrderArbiter] alliance=" + alliance
+                // [OrderArbiter] has no sidecar route: LegacyInfo alone writes it
+                // nowhere, so the main-log write is ours.
+                TelemetryRouter.LegacyInfoToMainLogIfAllowed("[OrderArbiter] alliance=" + alliance
                     + " intents=" + Intents + " winners=" + Winners + " issued=" + Issued
                     + " moved=" + Moved + " failed=" + Failed + " retried=" + Retried
                     + " gaveUp=" + GaveUp + " skipped=" + Skipped + " deduped=" + Deduped + " superseded=" + Superseded
