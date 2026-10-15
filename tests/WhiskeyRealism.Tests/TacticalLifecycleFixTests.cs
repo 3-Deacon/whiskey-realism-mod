@@ -40,6 +40,10 @@ internal static class TacticalLifecycleFixTests
         Pass("t14 soft abort odds use operation assigned strength", T14SoftAbortOddsUseAssignedStrength);
 
         Pass("t8 ledger clock is battle seconds", T8LedgerClockIsBattleSeconds);
+
+        Pass("t15 released reserve lets vanilla commit", T15ReleasedReserveAllowsVanillaCommit);
+        Pass("t15 unreleased reserve still held", T15UnreleasedReserveStillHeld);
+        Pass("t15 released reserve permits reserve list bias", T15ReleasedReservePermitsListBias);
     }
 
     private static void Pass(string name, Action test)
@@ -373,5 +377,35 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertEqual(30600f, TacticalBattleCoordinator.LedgerClockSecondsFromBattleHours(8.5f), "8.5h");
         TestHarness.AssertEqual(0f, TacticalBattleCoordinator.LedgerClockSecondsFromBattleHours(float.NaN), "nan");
         TestHarness.AssertEqual(0f, TacticalBattleCoordinator.LedgerClockSecondsFromBattleHours(-1f), "negative");
+    }
+
+    // ---- T15 reserve gate ----
+
+    private static CommandIntentResolution ReserveResolution()
+    {
+        return new CommandIntentResolution(true,
+            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Reserve, DirectChildAxis.Hold,
+                primarySector: 2, supportPriority: 50, aggressionBias01: 0.5f, depth: 1),
+            "exact-command-node");
+    }
+
+    private static void T15ReleasedReserveAllowsVanillaCommit()
+    {
+        var input = new TacticalReserveCommitGate.Input(true, ReserveResolution(), false, false, 1f, 1f, reserveReleased: true);
+        var d = TacticalReserveCommitGate.Decide(input);
+        TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
+        TestHarness.AssertEqual("reserve-released", d.Reason, "reason");
+    }
+
+    private static void T15UnreleasedReserveStillHeld()
+    {
+        var input = new TacticalReserveCommitGate.Input(true, ReserveResolution(), false, false, 1f, 1f);
+        TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Deny, TacticalReserveCommitGate.Decide(input).Action, "deny");
+    }
+
+    private static void T15ReleasedReservePermitsListBias()
+    {
+        TestHarness.AssertFalse(TacticalReserveCommitGate.PermitReserveListBias(ReserveResolution()), "held");
+        TestHarness.AssertTrue(TacticalReserveCommitGate.PermitReserveListBias(ReserveResolution(), reserveReleased: true), "released");
     }
 }

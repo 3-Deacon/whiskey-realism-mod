@@ -2,6 +2,13 @@ using System;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
+    // #59 reserve commitment gate (decision half of BattleReserveCommitGatePatch on
+    // vanilla AIBattle.CheckUseOfReserves). A Reserve-role group is held back unless
+    // the orchestrator released it (T15, 2026-10-14): either its role is no longer
+    // Reserve (the allocator re-roled it) or the caller passes reserveReleased=true
+    // for the release conditions owned by the allocator/doctrine (Exploit start,
+    // reserve-commit trigger odds, neighbouring-sector crisis). Released reserves let
+    // vanilla's own reserve movement through, like any other committed role.
     internal static class TacticalReserveCommitGate
     {
         public enum Action
@@ -19,7 +26,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 bool playerControlled,
                 bool committedUnitAlreadyEngaged,
                 float ownStrengthRatio,
-                float localOdds)
+                float localOdds,
+                bool reserveReleased = false)
             {
                 VanillaCommitted = vanillaCommitted;
                 Resolution = resolution;
@@ -27,6 +35,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 CommittedUnitAlreadyEngaged = committedUnitAlreadyEngaged;
                 OwnStrengthRatio = SanitizeRatio(ownStrengthRatio, 1f);
                 LocalOdds = SanitizeRatio(localOdds, 1f);
+                ReserveReleased = reserveReleased;
             }
 
             public bool VanillaCommitted { get; }
@@ -35,6 +44,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public bool CommittedUnitAlreadyEngaged { get; }
             public float OwnStrengthRatio { get; }
             public float LocalOdds { get; }
+            public bool ReserveReleased { get; }
         }
 
         public readonly struct Decision
@@ -67,7 +77,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             switch (role)
             {
                 case DirectChildRole.Reserve:
-                    return new Decision(Action.Deny, "role-reserve-hold", role);
+                    return input.ReserveReleased
+                        ? Allow("reserve-released", role)
+                        : new Decision(Action.Deny, "role-reserve-hold", role);
                 case DirectChildRole.Main:
                     return input.OwnStrengthRatio < 0.75f
                         ? Allow("main-understrength-release", role)
@@ -88,13 +100,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        public static bool PermitReserveListBias(CommandIntentResolution resolution)
+        public static bool PermitReserveListBias(CommandIntentResolution resolution, bool reserveReleased = false)
         {
             if (!resolution.Found) return true;
             switch (resolution.Intent.Role)
             {
                 case DirectChildRole.Reserve:
-                    return false;
+                    return reserveReleased;
                 default:
                     return true;
             }
