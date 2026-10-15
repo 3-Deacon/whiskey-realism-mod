@@ -14,6 +14,8 @@ internal static class CampaignMilitaryFixTests
         ListSnapshotRestoreIsIdempotent();
         TransferRequirementIsLocalNotTheaterWide();
         TransferSteersOnlyWhenPlanShortfallIsWorse();
+        ImportanceRedirectHonoursVanillaCandidateGates();
+        ImportanceRedirectStaysInPlanTheater();
     }
 
     private static void LogPass(string message)
@@ -131,5 +133,33 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertFalse(CampaignMilitaryGates.ShouldSteerTransfer(true, 20000f, 5000f, 5000f), "threatened zone worse -> vanilla keeps its deficit");
         TestHarness.AssertFalse(CampaignMilitaryGates.ShouldSteerTransfer(false, 0f, 0f, 0f), "no plan shortfall -> nothing to steer");
         LogPass("c2a transfer steers only when plan shortfall exceeds vanilla deficit");
+    }
+
+    // R7: ImportanceValuesPatch overwrote mostvalueableaiareaclose for EVERY
+    // source area, bypassing vanilla's candidate gates in
+    // CalculateMostValueableAIZones (decompile 10964-10987).
+    private static void ImportanceRedirectHonoursVanillaCandidateGates()
+    {
+        // baseline: same theater, in range, supply ok, vanilla value clause ok
+        TestHarness.AssertTrue(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
+            false, Theater.East, Theater.East, 200f, 300f, 10f, 50f, true), "eligible target redirects");
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
+            true, Theater.East, Theater.East, 0f, 300f, 10f, 50f, true), "aiarea[i] != this");
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
+            false, Theater.East, Theater.East, 301f, 300f, 10f, 50f, true), "distance gate (relocation range x offensive range factor)");
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
+            false, Theater.East, Theater.East, 200f, 300f, 60f, 50f, true), "supply gate ownpoints <= supplycapacity");
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
+            false, Theater.East, Theater.East, 200f, 300f, 10f, 50f, false), "vanilla points/distance/importance clause");
+        LogPass("c2a importance redirect honours vanilla candidate gates");
+    }
+
+    private static void ImportanceRedirectStaysInPlanTheater()
+    {
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
+            false, Theater.West, Theater.East, 200f, 300f, 10f, 50f, true), "other front keeps vanilla's local target");
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldRedirectToPlanTarget(
+            false, Theater.Unknown, Theater.East, 200f, 300f, 10f, 50f, true), "unclassified source keeps vanilla target");
+        LogPass("c2a importance redirect stays inside the plan theater");
     }
 }

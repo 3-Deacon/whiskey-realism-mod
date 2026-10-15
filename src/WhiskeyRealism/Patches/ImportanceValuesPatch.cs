@@ -9,9 +9,19 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Patches
 {
     // Bridge layer patch #2 — Postfix on AIArea.CalculateMostValueableAIZones
-    // (decompile line 10964). After vanilla picks the most valuable next-area
-    // for this faction, override the choice to point at our active plan's
-    // current-phase target zone if one exists.
+    // (decompile line 10964). Vanilla, per source area (`this`), picks the
+    // highest-scoring candidate area that passes its distance, supply and value
+    // gates (10984) and stores it in mostvalueableaiareaclose[aifaction];
+    // CheckOffensiveMovements (14166, 14227) reads it as the offensive target
+    // when the source area has enemy contact.
+    //
+    // 2026-10-14 (R7): the patch used to overwrite that slot for EVERY source
+    // area with the plan target, bypassing vanilla's gates — local
+    // counterattacks on other fronts vanished and units could be sent across
+    // the map. Now the plan target replaces vanilla's pick only when it passes
+    // vanilla's own candidate gates from this source area and the source area
+    // is in the plan target's theater (CampaignMilitaryGates
+    // .ShouldRedirectToPlanTarget). Everywhere else vanilla's selection stands.
     //
     // History: v0.2.0 originally targeted AICampaign.UpdateImportanceValues but
     // that method is parameterless, returns bool, and is a chunked per-IIP
@@ -22,22 +32,27 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch]
     internal static class ImportanceValuesPatch
     {
+        private static bool _closestAreaDistanceResolved;
+        private static System.Reflection.MethodInfo _closestAreaDistance;
+        private static int _cachedObjectiveId = int.MinValue;
+        private static object _cachedAreaList;
+        private static AICampaign.AIArea _cachedTargetArea;
+
         [HarmonyTargetMethod]
         internal static System.Reflection.MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("AIArea");
-            return AccessTools.Method(t, "CalculateMostValueableAIZones", new[] { typeof(int) });
+            return AccessTools.Method(typeof(AICampaign.AIArea), "CalculateMostValueableAIZones", new[] { typeof(int) });
         }
 
         [HarmonyPostfix]
-        internal static void Postfix(int aifaction, object __instance)
+        internal static void Postfix(int aifaction, AICampaign.AIArea __instance)
         {
             using (TelemetryPerf.Scope("campaign.patch.importance-values", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
             OnceLog.Info("importance", "ImportanceValuesPatch wired (Postfix on CalculateMostValueableAIZones)");
             try
             {
-                if (StrategicCoordinator.Instance == null) return;
+                if (StrategicCoordinator.Instance == null || __instance == null) return;
 
                 int allianceId = AICampaignReflect.GetAllianceId(aifaction);
                 if (allianceId < 0) return;
@@ -50,23 +65,83 @@ namespace WhiskeyRealism.Patches
                 var phase = cic?.ActivePlan?.CurrentPhase;
                 if (phase == null || phase.TargetObjectiveId < 0) return;
 
-                var targetArea = ResolveTargetAIArea(phase.TargetObjectiveId);
-                if (targetArea == null) return;
+                var picks = __instance.mostvalueableaiareaclose;
+                if (picks == null || aifaction < 0 || aifaction >= picks.Length) return;
 
-                // Override __instance.mostvalueableaiareaclose[aifaction] to point at the plan target.
-                var f = AccessTools.Field(__instance.GetType(), "mostvalueableaiareaclose");
-                if (f?.GetValue(__instance) is Array arr && aifaction >= 0 && aifaction < arr.Length)
-                {
-                    arr.SetValue(targetArea, aifaction);
-                    if (Plugin.Instance.VerboseLogging.Value)
-                        EmitPlanImportanceTarget(allianceId, phase.TargetObjectiveId);
-                }
+                var targetArea = ResolveTargetAIAreaCached(phase.TargetObjectiveId);
+                if (targetArea == null) return;
+                if (ReferenceEquals(picks[aifaction], targetArea)) return;
+                if (!TargetPassesVanillaGates(__instance, targetArea, aifaction)) return;
+
+                picks[aifaction] = targetArea;
+                if (Plugin.Instance.VerboseLogging.Value)
+                    EmitPlanImportanceTarget(allianceId, phase.TargetObjectiveId);
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogWarning("[Patch:Importance] " + ex.Message);
+                OnceLog.Warning("importance:postfix", "[Patch:Importance] " + ex.Message);
             }
             } // end using TelemetryPerf.Scope
+        }
+
+        private static bool TargetPassesVanillaGates(AICampaign.AIArea source, AICampaign.AIArea target, int aifaction)
+        {
+            if (!InRange(target.ownpoints, aifaction) || !InRange(target.points, aifaction) ||
+                !InRange(target.distancepoints, aifaction) || !InRange(target.importancevalues, aifaction) ||
+                !InRange(source.distancepoints, aifaction) || !InRange(source.importancevalues, aifaction))
+                return false;
+
+            float distance = ClosestAreaDistance(source, target);
+            if (float.IsNaN(distance)) return false;
+
+            bool valueClause = target.points[aifaction] >= 0f ||
+                target.distancepoints[aifaction] > source.distancepoints[aifaction] ||
+                target.importancevalues[aifaction] > source.importancevalues[aifaction];
+
+            return CampaignMilitaryGates.ShouldRedirectToPlanTarget(
+                ReferenceEquals(source, target),
+                TheaterClassifier.FromPosition(source.averageposition.x, source.averageposition.z),
+                TheaterClassifier.FromPosition(target.averageposition.x, target.averageposition.z),
+                distance,
+                GamePrefs.aimaximumdistancetosearchforunitrelocations * GamePrefs.rangefactoroffensivetargets,
+                target.ownpoints[aifaction],
+                target.supplycapacity,
+                valueClause);
+        }
+
+        private static bool InRange(float[] values, int index)
+        {
+            return values != null && index >= 0 && index < values.Length;
+        }
+
+        // Vanilla private static AICampaign.GetClosestAreaDistance(AIArea, AIArea)
+        // (decompile 14863); the (AIArea, Vector3) overload also exists.
+        private static float ClosestAreaDistance(AICampaign.AIArea source, AICampaign.AIArea target)
+        {
+            if (!_closestAreaDistanceResolved)
+            {
+                _closestAreaDistanceResolved = true;
+                _closestAreaDistance = AccessTools.Method(
+                    typeof(AICampaign),
+                    "GetClosestAreaDistance",
+                    new[] { typeof(AICampaign.AIArea), typeof(AICampaign.AIArea) });
+                if (_closestAreaDistance == null)
+                    OnceLog.Warning("importance:closest-area-distance",
+                        "[Patch:Importance] AICampaign.GetClosestAreaDistance(AIArea, AIArea) not found; plan-target redirect disabled");
+            }
+            if (_closestAreaDistance == null) return float.NaN;
+            return Convert.ToSingle(_closestAreaDistance.Invoke(null, new object[] { source, target }));
+        }
+
+        private static AICampaign.AIArea ResolveTargetAIAreaCached(int objectiveId)
+        {
+            var areaList = AICampaign.aiarea;
+            if (objectiveId == _cachedObjectiveId && ReferenceEquals(areaList, _cachedAreaList) && _cachedTargetArea != null)
+                return _cachedTargetArea;
+            _cachedObjectiveId = objectiveId;
+            _cachedAreaList = areaList;
+            _cachedTargetArea = ResolveTargetAIArea(objectiveId) as AICampaign.AIArea;
+            return _cachedTargetArea;
         }
 
         // Resolve a CampaignObjective UniqueObjectiveID → AIArea by:
@@ -129,7 +204,7 @@ namespace WhiskeyRealism.Patches
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogWarning("[Patch:Importance] ResolveTargetAIArea failed: " + ex.Message);
+                OnceLog.Warning("importance:resolve-target", "[Patch:Importance] ResolveTargetAIArea failed: " + ex.Message);
                 return null;
             }
         }

@@ -75,6 +75,33 @@ namespace WhiskeyRealism.Strategic
             return planShortfall > vanillaSeverity;
         }
 
+        // ---- R7: ImportanceValues --------------------------------------------
+        // Vanilla AIArea.CalculateMostValueableAIZones (decompile 10964) only
+        // accepts a candidate area that is not the source area, lies within
+        // GetClosestAreaDistance <= aimaximumdistancetosearchforunitrelocations *
+        // rangefactoroffensivetargets, passes the supply gate
+        // ownpoints[f] <= supplycapacity, and satisfies
+        // (points >= 0 | distancepoints > source | importance > source) (10984).
+        // The plan target may replace vanilla's pick only when it passes the same
+        // gates and the source area sits in the plan target's theater, so other
+        // fronts keep vanilla's local targets and nothing is pulled cross-map.
+        internal static bool ShouldRedirectToPlanTarget(
+            bool targetIsSource,
+            Theater sourceTheater,
+            Theater targetTheater,
+            float closestAreaDistance,
+            float maxOffensiveDistance,
+            float targetOwnPoints,
+            float targetSupplyCapacity,
+            bool vanillaValueClause)
+        {
+            if (targetIsSource) return false;
+            if (sourceTheater == Theater.Unknown || sourceTheater != targetTheater) return false;
+            if (closestAreaDistance > maxOffensiveDistance) return false;
+            if (targetOwnPoints > targetSupplyCapacity) return false;
+            return vanillaValueClause;
+        }
+
         internal static float Clamp(float value, float min, float max)
         {
             if (value < min) return min;
