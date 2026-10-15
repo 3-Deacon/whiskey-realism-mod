@@ -24,9 +24,11 @@ namespace WhiskeyRealism.Patches
     //    of a vanilla list, master switch only. Vanilla then waits for that research.
     //  - Emergency, AI alliance: vanilla.
     //  - Otherwise, when Enable Need-Driven Policy Selection is on, the daily review has a
-    //    ranking for the alliance, the player is not its W&L Commander-in-Chief and nothing is
-    //    in research: researches the first ranked policy that still passes the live filters
-    //    (PolicyEligibility) and skips vanilla. Nothing eligible / no ranking: vanilla.
+    //    ranking for the alliance (every AI-run alliance and a W&L player's alliance at any rank,
+    //    CIC included; never a non-career player alliance) and nothing is in research: researches
+    //    the first ranked policy that still passes the live filters (PolicyEligibility) and skips
+    //    vanilla. Irreversible acts below their need gate never rank. Nothing eligible / no
+    //    ranking: vanilla.
     [HarmonyPatch(typeof(Policies), "CheckAIPolicyChange")]
     internal static class PolicySelectionPatch
     {
@@ -63,7 +65,7 @@ namespace WhiskeyRealism.Patches
                         return true;
                     }
 
-                    return !TrySelectNeedDriven(alliance, playerAlliance);
+                    return !TrySelectNeedDriven(alliance);
                 }
                 catch (Exception ex)
                 {
@@ -133,13 +135,12 @@ namespace WhiskeyRealism.Patches
         }
 
         // True when Whiskey started research (vanilla is skipped).
-        private static bool TrySelectNeedDriven(int alliance, int playerAlliance)
+        private static bool TrySelectNeedDriven(int alliance)
         {
             if (!Plugin.Instance.EnableNeedDrivenPolicySelection.Value) return false;
             var coordinator = StrategicCoordinator.Instance;
             if (coordinator == null || coordinator.PolicyPlans == null || alliance >= coordinator.PolicyPlans.Length) return false;
             if (PolicyRuntime.HasResearchInProgress(alliance)) return false;
-            if (StrategicCoordinator.IsPlayerCICOf(alliance, playerAlliance)) return false;
 
             var plan = coordinator.PolicyPlans[alliance];
             if (plan == null || plan.Ranked.Count == 0) return false;
@@ -173,7 +174,7 @@ namespace WhiskeyRealism.Patches
                 .WithField("history", selected.Personality)
                 .WithField("profile", selected.Profile)
                 .WithField("lookAhead", selected.LookAhead)
-                .WithField("cost", selected.SideCost + selected.Irreversible + selected.SlotPressure + selected.Duration)
+                .WithField("cost", selected.SideCost + selected.SlotPressure + selected.Duration)
                 .WithField("top", plan.DescribeTop(3)));
         }
     }

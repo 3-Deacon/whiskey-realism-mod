@@ -36,6 +36,7 @@ namespace WhiskeyRealism.Strategic
         public PolicyPlanLedger[] PolicyPlans = { new PolicyPlanLedger(), new PolicyPlanLedger() };
         private readonly int[] _needDaySerial = { -1, -1 };
         private readonly FiscalInput[] _fiscalInputs = new FiscalInput[2];
+        private readonly FiscalOutput[] _fiscalOutputs = new FiscalOutput[2];
         private readonly DefenseCooldownTable[] _defenseCooldowns = new DefenseCooldownTable[2]
         {
             new DefenseCooldownTable(),
@@ -151,6 +152,7 @@ namespace WhiskeyRealism.Strategic
                 PolicyPlans[a] = new PolicyPlanLedger();
                 _needDaySerial[a] = -1;
                 _fiscalInputs[a] = null;
+                _fiscalOutputs[a] = null;
                 ConstructionIntents[a] = null;
                 DefenseIntents[a] = null;
                 _defenseCooldowns[a] = new DefenseCooldownTable();
@@ -376,6 +378,17 @@ namespace WhiskeyRealism.Strategic
                             $"alliance {alliance} ({(alliance == 1 ? "CSA" : "Union")}) is not run by vanilla campaign AI (player-controlled) — mod stands down for that faction");
                     }
                     CICs[alliance] = null;
+                    // User decision 2026-10-15: a W&L Commander-in-Chief player's alliance gets the
+                    // need-driven policy picks too (policies have no CIC exemption in vanilla,
+                    // 211019). Its fiscal posture is computed for the needs only, never published.
+                    if (operationalRuntimeReady && IsPlayerCICOf(alliance, playerAlliance))
+                    {
+                        var cicEra = Eras[alliance];
+                        var cicWs = ObserveWarStateCached(day, month, year);
+                        cicEra.CheckTransition(month, year, cicWs.VicksburgFallen, cicWs.AtlantaThreatened);
+                        fiscalMs += Measure(() => UpdateFiscalIntent(alliance, cicEra.Stage, day, month, year, logHeartbeat, publish: false));
+                        policyMs += Measure(() => UpdatePolicyPlan(alliance, cicEra.Stage, reviewSerial));
+                    }
                     continue;
                 }
                 if (CICs[alliance] == null) CICs[alliance] = BuildCICForAlliance(alliance);
@@ -418,8 +431,9 @@ namespace WhiskeyRealism.Strategic
                         OperationMemories[alliance].RecordReplan(daySerial);
                 }
 
-                fiscalMs += Measure(() => UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat));
-                policyMs += Measure(() => UpdatePolicyPlan(alliance, era.Stage, reviewSerial, operationalRuntimeReady));
+                fiscalMs += Measure(() => UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat, publish: true));
+                if (operationalRuntimeReady)
+                    policyMs += Measure(() => UpdatePolicyPlan(alliance, era.Stage, reviewSerial));
                 bool frontChanged = false;
                 if (operationalRuntimeReady)
                     frontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance, cic));
@@ -993,19 +1007,23 @@ namespace WhiskeyRealism.Strategic
             return set;
         }
 
-        private void UpdateFiscalIntent(int alliance, EraStage era, int day, int month, int year, bool logHeartbeat)
+        // publish = false (a W&L CIC player's alliance): the posture feeds the policy needs
+        // only; FiscalIntents (read by the fiscal, recruitment and construction patches) and the
+        // fiscal telemetry stay untouched.
+        private void UpdateFiscalIntent(int alliance, EraStage era, int day, int month, int year, bool logHeartbeat, bool publish)
         {
             using (TelemetryPerf.Scope("campaign.fiscal", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
-                UpdateFiscalIntentCore(alliance, era, day, month, year, logHeartbeat);
+                UpdateFiscalIntentCore(alliance, era, day, month, year, logHeartbeat, publish);
         }
 
-        private void UpdateFiscalIntentCore(int alliance, EraStage era, int day, int month, int year, bool logHeartbeat)
+        private void UpdateFiscalIntentCore(int alliance, EraStage era, int day, int month, int year, bool logHeartbeat, bool publish)
         {
             var input = FiscalRuntime.BuildInput(alliance, era, _fiscalMemory[alliance]);
             _fiscalInputs[alliance] = input;
             var options = new FiscalOptions();
             var output = FiscalIntentLedger.Compute(input, options);
-            FiscalIntents[alliance] = output;
+            _fiscalOutputs[alliance] = output;
+            if (publish) FiscalIntents[alliance] = output;
             bool emergencyRecoveryStable = FiscalIntentLedger.IsEmergencyRecoveryStable(input, options);
             if (output.Posture == FiscalPosture.EmergencySolvency)
             {
@@ -1025,6 +1043,8 @@ namespace WhiskeyRealism.Strategic
             _fiscalMemory[alliance].EmergencyResidue = output.Posture == FiscalPosture.EmergencySolvency ||
                 _fiscalMemory[alliance].EmergencyResidue && output.Posture == FiscalPosture.CreditDefense;
 
+            if (!publish) return;
+
             if (Plugin.Instance.VerboseLogging.Value || Plugin.Instance.FiscalTrace.Value || _fiscalSignatures[alliance] != output.Signature)
             {
                 EmitFiscalIntent(alliance, day, month, year, output);
@@ -1039,17 +1059,19 @@ namespace WhiskeyRealism.Strategic
 
         // Stage E: the alliance's needs (own-alliance and public reads only) and the ranked
         // policy plan PolicySelectionPatch consumes. Runs after UpdateFiscalIntent, whose input
-        // and posture it reuses. Spec docs/superpowers/specs/2026-10-14-need-driven-policy-design.md.
-        private void UpdatePolicyPlan(int alliance, EraStage era, int reviewSerial, bool factionsReady)
+        // and posture it reuses, and only once AICampaign.aifaction exists (vanilla
+        // GetAIPersonality 62716 can reach GetStrengthRatio, which indexes it). Spec
+        // docs/superpowers/specs/2026-10-14-need-driven-policy-design.md.
+        private void UpdatePolicyPlan(int alliance, EraStage era, int reviewSerial)
         {
             using (TelemetryPerf.Scope("campaign.policy-plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 4.0))
-                UpdatePolicyPlanCore(alliance, era, reviewSerial, factionsReady);
+                UpdatePolicyPlanCore(alliance, era, reviewSerial);
         }
 
-        private void UpdatePolicyPlanCore(int alliance, EraStage era, int reviewSerial, bool factionsReady)
+        private void UpdatePolicyPlanCore(int alliance, EraStage era, int reviewSerial)
         {
             int[] personality = PolicyRuntime.ReadPersonalityList(alliance, out bool emergencyCredit, out bool emergencyManpower);
-            var snapshot = CampaignNeedRuntime.Read(alliance, era, _fiscalInputs[alliance], FiscalIntents[alliance], emergencyCredit, emergencyManpower, factionsReady);
+            var snapshot = CampaignNeedRuntime.Read(alliance, era, _fiscalInputs[alliance], _fiscalOutputs[alliance], emergencyCredit, emergencyManpower);
             int days = _needDaySerial[alliance] >= 0 ? reviewSerial - _needDaySerial[alliance] : 1;
             var previous = Needs[alliance];
             var need = CampaignNeedBuilder.Next(previous, snapshot, days);

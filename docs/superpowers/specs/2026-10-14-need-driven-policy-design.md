@@ -1,6 +1,6 @@
 # Need-Driven Policy Selection — Design
 
-**Status:** approved direction (user, 2026-10-14: "any eligible policy, personality weighted"; 2026-10-15: policies are need-driven and personality-weighted, history acts as a weight, everything defaults on, the player's own policy choices are never overridden where the player legitimately controls policy). Applies to every alliance Whiskey's daily review runs for — both AI alliances and, in a W&L career, the player's own alliance while the player is not Commander-in-Chief. Replaces the C2b `PolicySelectionPatch` scoring (`FiscalPolicySelector`, `GrandStrategyPolicyScorer`).
+**Status:** approved direction (user, 2026-10-14: "any eligible policy, personality weighted"; 2026-10-15: policies are need-driven and personality-weighted, history acts as a weight, everything defaults on, the player's own policy choices are never overridden where the player legitimately controls policy). Applies to both AI alliances and, in a W&L career, the player's own alliance at every rank — Commander-in-Chief included (user decision 2026-10-15, verify round 1). Replaces the C2b `PolicySelectionPatch` scoring (`FiscalPolicySelector`, `GrandStrategyPolicyScorer`).
 
 ## Vanilla and W&L model (decompile build 14703111; data from the GTCW install)
 
@@ -48,12 +48,11 @@ Each government researches what its war needs — credit when the treasury fails
 | Alliance | Non-emergency pick | Emergency |
 |---|---|---|
 | AI alliance | Whiskey ranking (vanilla when the ranking is empty or nothing passes) | vanilla |
-| W&L player alliance, player not CIC | Whiskey ranking | vanilla, with the player's in-progress research protected |
-| W&L player alliance, player is CIC | vanilla (Whiskey stands down, matching `ProjectSelectionPatch` and the CIC review gate) | vanilla, protected |
+| W&L player alliance, any rank (CIC included) | Whiskey ranking | vanilla, with the alliance's in-progress research protected |
 | Non-W&L player alliance, automanage on | vanilla | vanilla, protected |
 | Non-W&L player alliance, automanage off | nobody (vanilla returns at 211019) | nobody |
 
-Neither Whiskey nor vanilla starts research while anything is in research, so a player purchase is never replaced. Standing down for a CIC player is a Whiskey convention, not a vanilla rule (decision).
+Neither Whiskey nor vanilla starts research while anything is in research, so a player purchase is never replaced or cancelled. A CIC player's alliance is not run by Whiskey's CIC review, so the daily review computes its fiscal posture for the needs only (not published to `FiscalIntents`, which the fiscal, recruitment and construction patches read) and its policy plan. The emergency protection spares every in-progress policy of the player's alliance, AI-picked ones included (no provenance is kept).
 
 ### Emergency protection (bug A fix)
 
@@ -86,7 +85,7 @@ Daily per alliance, own-alliance and public data only (fog-honest), each need in
 | Logistics | peak transport utilisation above 60 % (`transportcapacitypeak`) |
 | Supply | front supply pressure |
 
-Emergency personalities force Credit or Manpower to 1 (after smoothing). `ToProjectSignals` derives `ProjectDoctrineSignals` from the same vector; WeaponDeficit uses Industry; ArtilleryDeficit and NavalDeficit stay 0 (the only sources are enemy weapon/tonnage internals, which are not fog-honest and were never filled); OffensiveTempo and the late-war collapse term use `AICampaign.GetStrengthRatio` (12366: visible units only, `AIFaction.SeparateUnits` 10462).
+Emergency personalities force Credit or Manpower to 1 (after smoothing). `ToProjectSignals` derives `ProjectDoctrineSignals` from the same vector; WeaponDeficit uses Industry; ArtilleryDeficit and NavalDeficit stay 0 (the only sources are enemy weapon/tonnage internals, which are not fog-honest and were never filled); OffensiveTempo stays 0 and the late-war collapse risk has no strength term: `AICampaign.GetStrengthRatio` (12366-12402) adds the enemy's `troopsinrecruitment` and `AIFaction.SeparateUnits` (10462) does not filter by fog, so it is not fog-honest. A fog-honest enemy strength is stage G's `EnemyArmyModel`; wire it into these signals when it exists. The review builds needs only once `AICampaign.aifaction` exists (vanilla `GetAIPersonality` can reach `GetStrengthRatio`, which indexes it).
 
 ### Score
 
@@ -98,8 +97,9 @@ S(p) = Σk need_k·w[p,k]                                           need
      − 0.4·(usedSlots/maxSlots)²   non-acts only                     slot pressure
      − 1.0·ResearchDuration(years)·max_k need_k                      urgency
      − Σk need_k·cost[p,k]                                          side costs
-     − 1.5   if Irreversible and the max need over p's kinds < 0.7
 ```
+
+**Hard hold (irreversible acts).** An irreversible act whose largest need among the kinds it answers is below 0.7 is *held*: it never enters the ranking, so Whiskey never starts it at any score, and when nothing else is eligible the patch lets vanilla run its own personality list. A soft penalty was not enough: with the non-act slots full, the ranking always picked something (verify round 1: CSA emancipation 134 at low need).
 
 ### Cadence & hysteresis
 
@@ -128,7 +128,7 @@ Deleted: `GrandStrategyPolicyScorer`, `FiscalPolicyScorer.PolicyWeight`, `Policy
 
 ## Testing
 
-Catalog completeness against a fixture of every non-grand id in `policies.dat`; hard filters; need builder; scoring (credit crisis → War Bonds / Bank Act; manpower crisis → drafts over Diplomacy; history wins near ties; irreversible gate; support-costly acts penalised when support is low; slot pressure; look-ahead); hysteresis; emergency protected-id set.
+Catalog completeness against a fixture of every non-grand id in `policies.dat`; hard filters; need builder; scoring (credit crisis → War Bonds / Bank Act; manpower crisis → drafts over Diplomacy; history wins near ties; irreversible hold (incl. the verifier's slots-full probe); support-costly acts penalised when support is low; slot pressure; look-ahead); hysteresis; emergency protected-id set and restore; sidecar round-trip of needs and pick.
 
 ## Out of scope
 

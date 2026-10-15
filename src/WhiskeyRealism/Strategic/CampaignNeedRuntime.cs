@@ -10,7 +10,7 @@ namespace WhiskeyRealism.Strategic
     internal static class CampaignNeedRuntime
     {
         internal static NeedSnapshot Read(int alliance, EraStage era, FiscalInput fiscalInput, FiscalOutput fiscalOutput,
-            bool emergencyCredit, bool emergencyManpower, bool factionsReady)
+            bool emergencyCredit, bool emergencyManpower)
         {
             var s = new NeedSnapshot
             {
@@ -55,10 +55,6 @@ namespace WhiskeyRealism.Strategic
                 s.InterventionProbability = Math.Max(
                     GameVars.Alliance.GetInterventionProbability(2),
                     GameVars.Alliance.GetInterventionProbability(3));
-                // GetStrengthRatio (12366) indexes AICampaign.aifaction, which is null until the
-                // campaign AI builds its factions; neutral 1 until then.
-                if (factionsReady)
-                    s.StrengthRatio = AICampaign.GetStrengthRatio(alliance);
             }
             catch (Exception ex)
             {

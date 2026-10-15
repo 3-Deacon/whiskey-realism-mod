@@ -286,7 +286,7 @@ Full model and W&L notes: [`superpowers/specs/2026-10-14-need-driven-policy-desi
 | `Policies.UpdateActivations` | 209248-209258 | W&L display bug (`BUG-WL-004`). |
 | `GameVars.Alliance.GetInterventionProbability` / `AdjustInterventionLevel` | 62822 / 62887 | CSA level − Union level; positive policy adjustments help the actor on either side; W&L effect 34 shifts it for the career's side. |
 | `BattleUnits.GetAverageBlockadeRatio` | 93766 | Blockade of the alliance's **own** harbors. |
-| `AIFaction.SeparateUnits` / `AICampaign.GetStrengthRatio` | 10462 / 12366 | Enemy lists hold visible units only, so the strength ratio is fog-honest. |
+| `AIFaction.SeparateUnits` / `AICampaign.GetStrengthRatio` | 10462 / 12366-12402 | Not fog-honest: no fog filter on the enemy list, and the ratio adds the enemy's `troopsinrecruitment`. Stage E does not read it; `GetAIPersonality` reaches it, and it indexes `aifaction` (null until factions exist, 11097). |
 | `Config/policies.dat` / `aipersonalities.dat` | `ImportPolicyData` 211717 / import 66144 | Record layouts (the harness fixture copies the 117 policy ids). |
 
 ## Game-update re-decompile inventory

@@ -79,6 +79,7 @@ internal static class NeedDrivenPolicyTests
             ("need-policy manpower crisis prefers drafts", ScoreManpowerCrisisPrefersDrafts),
             ("need-policy history decides between equal needs", ScoreHistoryDecidesTies),
             ("need-policy irreversible acts wait for their need", ScoreIrreversibleGated),
+            ("need-policy held irreversible acts are never started", LedgerNeverStartsHeldActs),
             ("need-policy support-costly acts lose when support is low", ScoreSupportCostWhenSupportLow),
             ("need-policy slot pressure lowers non-acts only", ScoreSlotPressureNonActsOnly),
             ("need-policy look-ahead lifts a prerequisite", ScoreLookAheadLiftsPrerequisite),
@@ -92,6 +93,7 @@ internal static class NeedDrivenPolicyTests
             ("need-policy ledger next eligible serves the pick first", LedgerNextEligible),
             ("need-policy ledger restores a saved pick", LedgerRestore),
             ("need-policy ledger describes its top candidates", LedgerDescribeTop),
+            ("need-policy sidecar round-trips policy needs and pick", SidecarRoundTripsPolicyState),
             ("need-policy emergency protects only in-progress research", EmergencyProtectedIds),
             ("need-policy emergency restore removes exactly the appended tail", EmergencyRestoreRemovesTail),
         });
@@ -338,8 +340,7 @@ internal static class NeedDrivenPolicyTests
             NationalMorale = 1f,
             AverageSupport = 1f,
             RecruitableStates = 20,
-            CsaBlockadeRatio = 1f,
-            StrengthRatio = 1f
+            CsaBlockadeRatio = 1f
         };
     }
 
@@ -522,10 +523,9 @@ internal static class NeedDrivenPolicyTests
         s.FiscalPosture = FiscalPosture.CreditDefense;
         s.TroopsFielded = 100f;
         s.RecruitsAvailable = 5f;
-        s.StrengthRatio = 0.6f;
         signals = CampaignNeedBuilder.ToProjectSignals(s, CampaignNeedBuilder.Next(null, s, 1));
         AssertNear(0.8f, signals.ManpowerStress, 0.001f, "manpower stress");
-        AssertNear(0.7f, signals.LateWarCollapseRisk, 0.01f, "late war collapse risk");
+        AssertNear(0.62f, signals.LateWarCollapseRisk, 0.001f, "late war collapse risk from own credit and manpower only");
 
         s = Snapshot(1);
         s.InterventionProbability = 2f;
@@ -548,7 +548,6 @@ internal static class NeedDrivenPolicyTests
         s.RecruitsAvailable = 12.5f;
         s.AverageSupport = 0.6f;
         s.SupplyPressure = 0.4f;
-        s.StrengthRatio = 1.5f;
         s.TroopsInRecruitment = 10f;
         s.WeaponStock = 5f;
         s.OwnBlockadeRatio = 0.8f;
@@ -558,7 +557,7 @@ internal static class NeedDrivenPolicyTests
         AssertNear(0.5f, signals.ManpowerStress, 0.001f, "manpower stress");
         AssertNear(0.4f, signals.CivilOrderRisk, 0.001f, "civil order risk from support");
         AssertNear(0.4f, signals.AgricultureFoodStress, 0.001f, "agriculture");
-        AssertNear(0.5f, signals.OffensiveTempoNeed, 0.001f, "visible strength advantage");
+        AssertEqual(0f, signals.OffensiveTempoNeed, "no fog-honest enemy strength source yet (stage G)");
         AssertNear(0.5f, signals.WeaponDeficit, 0.001f, "weapon deficit from own stock");
         AssertNear(0.5f, signals.IndustryGap, 0.001f, "industry gap");
         AssertNear(0.8f, signals.BlockadePressure, 0.001f, "CSA blockade pressure");
@@ -612,7 +611,7 @@ internal static class NeedDrivenPolicyTests
         float conscription = Score(139, need, CsaHistorical).Total;
         float diplomacy = Score(115, need, CsaHistorical).Total;
         AssertTrue(conscription > diplomacy, "Conscription over Diplomacy I");
-        AssertEqual(0f, Score(139, need, CsaHistorical).Irreversible, "manpower crisis opens the contract-reset gate");
+        AssertFalse(Score(139, need, CsaHistorical).Held, "manpower crisis opens the contract-reset gate");
 
         float enrollment = Score(39, need, UnionHistorical).Total;
         float unionDiplomacy = Score(15, need, UnionHistorical).Total;
@@ -636,11 +635,10 @@ internal static class NeedDrivenPolicyTests
     {
         var low = Needs((NeedKind.Recognition, 0.3f));
         var high = Needs((NeedKind.Recognition, 0.8f));
-        AssertEqual(-PolicyNeedScorer.IrreversiblePenalty, Score(144, low, CsaHistorical).Irreversible, "Mexico gated at low need");
-        AssertEqual(0f, Score(144, high, CsaHistorical).Irreversible, "Mexico allowed above the gate");
-        AssertEqual(-PolicyNeedScorer.IrreversiblePenalty, Score(134, low, CsaHistorical).Irreversible, "CSA emancipation gated");
-        AssertTrue(Score(144, low, CsaHistorical).Total < Score(115, low, CsaHistorical).Total, "gated act ranks below Diplomacy");
-        AssertEqual(0f, Score(22, low, UnionHistorical).Irreversible, "reversible act never gated");
+        AssertTrue(Score(144, low, CsaHistorical).Held, "Mexico held at low need");
+        AssertFalse(Score(144, high, CsaHistorical).Held, "Mexico allowed above the gate");
+        AssertTrue(Score(134, low, CsaHistorical).Held, "CSA emancipation held");
+        AssertFalse(Score(22, low, UnionHistorical).Held, "reversible act never held");
     }
 
     private static void ScoreSupportCostWhenSupportLow()
@@ -706,7 +704,6 @@ internal static class NeedDrivenPolicyTests
         AssertEqual(3, PolicyNeedScorer.LookAheadDepth, "look-ahead depth");
         AssertEqual(0.4f, PolicyNeedScorer.SlotPressureWeight, "slot pressure");
         AssertEqual(1.0f, PolicyNeedScorer.DurationWeight, "duration");
-        AssertEqual(1.5f, PolicyNeedScorer.IrreversiblePenalty, "irreversible penalty");
         AssertEqual(0.7f, PolicyNeedScorer.IrreversibleNeedGate, "irreversible gate");
         AssertEqual(0.25f, PolicyPlanLedger.SwitchMargin, "switch margin");
         AssertEqual(0.85f, PolicyPlanLedger.EmergencyNeedThreshold, "emergency threshold");
@@ -714,7 +711,7 @@ internal static class NeedDrivenPolicyTests
         var need = Needs((NeedKind.Treasury, 0.5f));
         var score = Score(26, need, new int[0]);
         AssertNear(-PolicyNeedScorer.DurationWeight * 0.082f * 0.5f, score.Duration, 0.0001f, "duration × max need");
-        AssertNear(score.Need + score.Personality + score.Profile + score.LookAhead + score.SlotPressure + score.Duration + score.SideCost + score.Irreversible,
+        AssertNear(score.Need + score.Personality + score.Profile + score.LookAhead + score.SlotPressure + score.Duration + score.SideCost,
             score.Total, 0.0001f, "total is the sum of its terms");
     }
 
@@ -850,5 +847,52 @@ internal static class NeedDrivenPolicyTests
         PolicyEmergencyProtection.Restore(list, 5);
         AssertEqual(3, list.Count, "count beyond the list is a no-op");
         PolicyEmergencyProtection.Restore(null, 0);
+    }
+
+    // Verifier probe (stage E verify round 1): CSA, low recognition and manpower need,
+    // non-act slots full, only irreversible acts left — vanilla's own list starts nothing
+    // it does not list; Whiskey must not start CSA emancipation at a soft-penalised score.
+    private static void LedgerNeverStartsHeldActs()
+    {
+        var need = Needs((NeedKind.Recognition, 0.2f), (NeedKind.Manpower, 0.2f));
+        var field = new List<PolicyScore>();
+        foreach (int id in new[] { 130, 133, 134, 144 })
+            field.Add(Score(id, need, CsaHistorical, used: 7, max: 7));
+        var ledger = new PolicyPlanLedger();
+        ledger.Update(field, need, need);
+        AssertEqual(-1, ledger.CurrentPick, "no pick among held acts");
+        AssertEqual(-1, ledger.NextEligible(id => true), "nothing to start: vanilla runs its own list");
+        AssertEqual(0, ledger.Ranked.Count, "held acts never rank");
+
+        var crisis = Needs((NeedKind.Recognition, 0.2f), (NeedKind.Manpower, 0.9f));
+        field.Clear();
+        foreach (int id in new[] { 130, 133, 134, 144 })
+            field.Add(Score(id, crisis, CsaHistorical, used: 7, max: 7));
+        ledger.Update(field, crisis, need);
+        int pick = ledger.NextEligible(id => true);
+        AssertTrue(pick == 133 || pick == 134, "a manpower crisis opens the manpower acts only");
+        AssertEqual(2, ledger.Ranked.Count, "recognition acts stay held");
+    }
+
+    private static void SidecarRoundTripsPolicyState()
+    {
+        var snap = SidecarSnapshot.Empty();
+        snap.PolicyNeeds[0] = new[] { 0.5f, 0.25f, 1f };
+        snap.PolicyPicks[0] = 22;
+        snap.PolicyPicks[1] = -1;
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(snap));
+        AssertTrue(SidecarDtoCodec.TryDeserialize(json, out var dto, out _), "deserialize");
+        AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out _), "decode");
+        AssertEqual(3, back.PolicyNeeds[0].Length, "needs length");
+        AssertEqual(0.25f, back.PolicyNeeds[0][1], "need value");
+        AssertEqual(22, back.PolicyPicks[0], "union pick");
+        AssertEqual(-1, back.PolicyPicks[1], "no CSA pick");
+        AssertTrue(back.PolicyNeeds[1] == null, "no CSA needs");
+
+        AssertTrue(SidecarDtoCodec.TryDeserialize("{\"version\":2,\"factions\":[{\"factionId\":0}]}", out var old, out _), "older sidecar");
+        AssertTrue(SidecarDtoCodec.TryDecode(old, out var oldSnap, out _), "older sidecar decodes");
+        AssertTrue(oldSnap.PolicyNeeds[0] == null, "older sidecar has no needs");
+        AssertEqual(-1, oldSnap.PolicyPicks[0], "older sidecar has no pick");
+        AssertEqual(0f, NeedVector.FromArray(back.PolicyNeeds[0])[NeedKind.Treasury] - 0.25f, "restores into a need vector");
     }
 }

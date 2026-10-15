@@ -27,7 +27,6 @@ namespace WhiskeyRealism.Strategic
         public float WeaponStock;             // weapons in the alliance's stock
         public float PeakTransportUse;        // max transportcapacitypeak over the three transport types
         public float SupplyPressure;          // front supply stress (FiscalRuntime)
-        public float StrengthRatio = 1f;      // AICampaign.GetStrengthRatio: visible units only
         public bool EmergencyCredit;          // vanilla credit-emergency personality active
         public bool EmergencyManpower;        // vanilla recruiting-emergency personality active
     }
@@ -141,8 +140,11 @@ namespace WhiskeyRealism.Strategic
 
         // ProjectSelectionPatch's doctrine signals from the shared need vector. Before the
         // first review (no snapshot) the blockade and port signals stay neutral (0.5).
-        // ArtilleryDeficit and NavalDeficit stay 0: their only sources are the enemy's weapon
-        // and tonnage internals (not fog-honest; never filled before this slice either).
+        // ArtilleryDeficit, NavalDeficit and OffensiveTempoNeed stay 0 and the late-war collapse
+        // risk has no strength term: their only sources are enemy internals (weapon stats,
+        // tonnage; AICampaign.GetStrengthRatio 12366-12402 counts every enemy unit plus the
+        // enemy's troopsinrecruitment), which are not fog-honest. A fog-honest enemy strength
+        // estimate is stage G's EnemyArmyModel; wire it here when it exists.
         public static ProjectDoctrineSignals ToProjectSignals(NeedSnapshot s, NeedVector v)
         {
             if (s == null || v == null)
@@ -169,13 +171,11 @@ namespace WhiskeyRealism.Strategic
                 IndustryGap = v[NeedKind.Industry],
                 AgricultureFoodStress = v[NeedKind.Agriculture],
                 CivilOrderRisk = v[NeedKind.Support],
-                RecognitionWindow = v[NeedKind.Recognition],
-                OffensiveTempoNeed = Clamp01(s.StrengthRatio - 1f)
+                RecognitionWindow = v[NeedKind.Recognition]
             };
 
-            float strengthCollapse = Clamp01(1f - s.StrengthRatio);
             signals.LateWarCollapseRisk = s.Era == EraStage.TotalWar1864
-                ? Clamp01((0.4f * signals.CreditStress) + (0.4f * signals.ManpowerStress) + (0.2f * strengthCollapse))
+                ? Clamp01((0.4f * signals.CreditStress) + (0.4f * signals.ManpowerStress))
                 : 0f;
             return signals;
         }

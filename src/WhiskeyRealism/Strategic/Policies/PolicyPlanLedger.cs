@@ -6,6 +6,8 @@ namespace WhiskeyRealism.Strategic.Policies
     // read by PolicySelectionPatch. The pick only changes when a challenger beats it by
     // SwitchMargin, when a need crosses EmergencyNeedThreshold upward, or when the pick left
     // the field (researched, ineligible). Ranked lists the pick first, then by score.
+    // Held scores (irreversible acts below their need gate) never enter the ranking, so
+    // Whiskey never starts one; with nothing else ranked the patch lets vanilla run.
     public sealed class PolicyPlanLedger
     {
         public const float SwitchMargin = 0.25f;
@@ -22,7 +24,9 @@ namespace WhiskeyRealism.Strategic.Policies
         {
             int before = CurrentPick;
             _ranked.Clear();
-            if (scored != null) _ranked.AddRange(scored);
+            if (scored != null)
+                for (int i = 0; i < scored.Count; i++)
+                    if (!scored[i].Held) _ranked.Add(scored[i]);
             _ranked.Sort((a, b) => b.Total != a.Total ? b.Total.CompareTo(a.Total) : a.PolicyId.CompareTo(b.PolicyId));
 
             if (_ranked.Count == 0)
@@ -74,7 +78,7 @@ namespace WhiskeyRealism.Strategic.Policies
                   .Append('/').Append(r.Personality.ToString("0.00", inv))
                   .Append('/').Append(r.Profile.ToString("0.00", inv))
                   .Append('/').Append(r.LookAhead.ToString("0.00", inv))
-                  .Append('/').Append((r.SideCost + r.Irreversible + r.SlotPressure + r.Duration).ToString("0.00", inv))
+                  .Append('/').Append((r.SideCost + r.SlotPressure + r.Duration).ToString("0.00", inv))
                   .Append(')');
             }
             return sb.ToString();

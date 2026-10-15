@@ -14,10 +14,13 @@ namespace WhiskeyRealism.Strategic.Policies
         public float SlotPressure;
         public float Duration;
         public float SideCost;
-        public float Irreversible;
+        // Irreversible act whose gating need is below IrreversibleNeedGate: never started
+        // (PolicyPlanLedger drops it), whatever its score.
+        public bool Held;
     }
 
-    // Need-driven, history-weighted policy score (spec § Score). History is the vanilla
+    // Need-driven, history-weighted policy score (spec § Score) plus the hard hold on
+    // irreversible acts. History is the vanilla
     // personality list (Campaigns/<lvl>/<sub>/aipersonalities.dat, the order vanilla's
     // CheckAIPolicyChange 211079 walks), counted as a preference rather than a cage.
     public static class PolicyNeedScorer
@@ -28,7 +31,6 @@ namespace WhiskeyRealism.Strategic.Policies
         public const int LookAheadDepth = 3;
         public const float SlotPressureWeight = 0.4f;
         public const float DurationWeight = 1.0f;       // per research-year × the largest need
-        public const float IrreversiblePenalty = 1.5f;
         public const float IrreversibleNeedGate = 0.7f;
 
         public static PolicyScore Score(
@@ -55,11 +57,10 @@ namespace WhiskeyRealism.Strategic.Policies
             }
             score.Duration = -DurationWeight * Math.Max(0f, facts.ResearchDuration) * need.Max;
             score.SideCost = -SideCost(effect, need);
-            if (effect != null && effect.IrreversibleReason != null && GatingNeed(effect, need) < IrreversibleNeedGate)
-                score.Irreversible = -IrreversiblePenalty;
+            score.Held = effect != null && effect.IrreversibleReason != null && GatingNeed(effect, need) < IrreversibleNeedGate;
 
             score.Total = score.Need + score.Personality + score.Profile + score.LookAhead
-                + score.SlotPressure + score.Duration + score.SideCost + score.Irreversible;
+                + score.SlotPressure + score.Duration + score.SideCost;
             return score;
         }
 

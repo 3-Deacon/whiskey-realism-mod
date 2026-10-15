@@ -654,8 +654,9 @@ namespace WhiskeyRealism
                 true,
                 "Default ON. When an alliance the daily review runs for has nothing in policy research, starts the policy its war needs most " +
                 "(credit, manpower, recognition, blockade, industry...), with the faction's vanilla AI personality list as a strong preference and " +
-                "irreversible acts held back until their need is high. Never cancels research, never acts for a non-career player alliance or a " +
-                "career Commander-in-Chief player. Off: vanilla Policies.CheckAIPolicyChange picks. The player's in-progress research is protected " +
+                "irreversible acts never started until their need is high. Runs for every AI alliance and a W&L career player's alliance at any " +
+                "rank (Commander-in-Chief included); never for a non-career player alliance. Never cancels research and never starts one while " +
+                "any research (a prestige purchase included) is in progress. Off: vanilla Policies.CheckAIPolicyChange picks. The player's in-progress research is protected " +
                 "from vanilla's emergency cancel under the master switch either way.");
             EnableDefenseIntentLedger = Config.Bind(
                 "Defense Intent Ledger",
