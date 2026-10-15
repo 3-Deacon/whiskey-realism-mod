@@ -314,15 +314,26 @@ namespace WhiskeyRealism.Tactical
         }
 
         // Face writes (B7 + all-stance audit) follow vanilla's micro facing rule
-        // (AIBattle 4630 region): RotateRegiment only when
+        // (AIBattle 4599-4606): RotateRegiment only when
         // Tools.GetAbsAngleDifference(transform yaw, target) >=
-        // GamePrefs.angletriggerforturningtowardsenemy. RotateRegiment
-        // (130159) stops the regiment and clears its target, so re-issuing it
-        // to an already-facing battery every hold window is not harmless.
-        public static bool ShouldRotateTowardTarget(float currentYaw, float targetYaw, float turnTriggerDegrees)
+        // angletriggerforturningtowardsenemy, plus additionalanglewhenincovermicro
+        // when the unit sits in cover (covervalue > maxcovervalueforgrouprotation
+        // and coverobject != 3, 4600-4603). RotateRegiment (130159) stops the
+        // regiment and clears its target, so re-issuing it to an already-facing
+        // battery every hold window is not harmless.
+        public static bool ShouldRotateTowardTarget(
+            float currentYaw,
+            float targetYaw,
+            float turnTriggerDegrees,
+            float coverValue,
+            int coverObject,
+            float maxCoverValueForRotation,
+            float additionalAngleInCover)
         {
             if (!IsFinite(currentYaw) || !IsFinite(targetYaw)) return false;
-            float trigger = IsFinite(turnTriggerDegrees) && turnTriggerDegrees > 0f ? turnTriggerDegrees : 0f;
+            float trigger = IsFinite(turnTriggerDegrees) ? turnTriggerDegrees : 0f;
+            if (coverValue > maxCoverValueForRotation && coverObject != 3 && IsFinite(additionalAngleInCover))
+                trigger += additionalAngleInCover;
             return AbsAngleDifference(currentYaw, targetYaw) >= trigger;
         }
 

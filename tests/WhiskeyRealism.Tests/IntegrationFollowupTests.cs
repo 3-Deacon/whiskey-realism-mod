@@ -75,17 +75,37 @@ internal static class IntegrationFollowupTests
         Pass("full battery keeps its bombardment");
     }
 
-    // AIBattle micro facing (4630 region): vanilla only calls RotateRegiment
+    // AIBattle micro facing (4599-4606): vanilla only calls RotateRegiment
     // when Tools.GetAbsAngleDifference(eulerAngles.y, target) >=
-    // GamePrefs.angletriggerforturningtowardsenemy.
+    // angletriggerforturningtowardsenemy + (covervalue >
+    // maxcovervalueforgrouprotation && coverobject != 3 ?
+    // additionalanglewhenincovermicro : 0).
+    private static bool Rotate(float current, float target, float coverValue = 0f, int coverObject = 0)
+    {
+        return BattleWriterPolicy.ShouldRotateTowardTarget(
+            current, target,
+            turnTriggerDegrees: 20f,
+            coverValue: coverValue,
+            coverObject: coverObject,
+            maxCoverValueForRotation: 0.5f,
+            additionalAngleInCover: 30f);
+    }
+
     private static void ArtilleryFaceMirrorsVanillaTurnTrigger()
     {
-        TestHarness.AssertFalse(BattleWriterPolicy.ShouldRotateTowardTarget(90f, 100f, 20f), "inside trigger");
-        TestHarness.AssertTrue(BattleWriterPolicy.ShouldRotateTowardTarget(90f, 110f, 20f), "at trigger");
-        TestHarness.AssertFalse(BattleWriterPolicy.ShouldRotateTowardTarget(355f, 5f, 20f), "wraps through 0");
-        TestHarness.AssertTrue(BattleWriterPolicy.ShouldRotateTowardTarget(0f, 180f, 20f), "facing away");
-        TestHarness.AssertTrue(BattleWriterPolicy.ShouldRotateTowardTarget(-170f, 170f, 0f), "zero trigger rotates on any difference");
-        TestHarness.AssertFalse(BattleWriterPolicy.ShouldRotateTowardTarget(10f, float.NaN, 20f), "invalid target never rotates");
+        TestHarness.AssertFalse(Rotate(90f, 100f), "inside trigger");
+        TestHarness.AssertTrue(Rotate(90f, 110f), "at trigger");
+        TestHarness.AssertFalse(Rotate(355f, 5f), "wraps through 0");
+        TestHarness.AssertTrue(Rotate(0f, 180f), "facing away");
+        TestHarness.AssertFalse(Rotate(10f, float.NaN), "invalid target never rotates");
+        TestHarness.AssertTrue(BattleWriterPolicy.ShouldRotateTowardTarget(-170f, 170f, 0f, 0f, 0, 0.5f, 30f), "zero trigger rotates on any difference");
+
+        // In cover the trigger grows by additionalanglewhenincovermicro (20 + 30).
+        TestHarness.AssertFalse(Rotate(0f, 40f, coverValue: 0.8f), "in cover below enlarged trigger");
+        TestHarness.AssertTrue(Rotate(0f, 50f, coverValue: 0.8f), "in cover at enlarged trigger");
+        TestHarness.AssertTrue(Rotate(0f, 40f, coverValue: 0.5f), "cover not above the threshold");
+        TestHarness.AssertTrue(Rotate(0f, 40f, coverValue: 0.8f, coverObject: 3), "cover object 3 excluded");
+
         TestHarness.AssertEqual(20f, BattleWriterPolicy.AbsAngleDifference(350f, 10f), "vanilla wrap");
         TestHarness.AssertEqual(180f, BattleWriterPolicy.AbsAngleDifference(0f, 180f), "half turn");
         Pass("artillery face mirrors the vanilla turn trigger");

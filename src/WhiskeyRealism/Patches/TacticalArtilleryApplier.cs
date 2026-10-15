@@ -27,7 +27,8 @@ namespace WhiskeyRealism.Patches
     //   Face            -> RotateRegiment(Tools.GetAngle(own, enemy) + 180)
     //                      (never transform.rotation), only when the battery
     //                      is off by >= angletriggerforturningtowardsenemy, as
-    //                      vanilla's micro facing rule (4630 region).
+    //                      vanilla's micro facing rule (4599-4606, cover
+    //                      widens the trigger).
     //   CeaseBombard    -> ChangeCombatBehavior(7) + bombardstarttime = 0 (3904).
     // No stance is ever written: batteries are attached sub-units, and
     // ChangeStance (90772) would set permanentlydetached, after which vanilla
@@ -123,14 +124,19 @@ namespace WhiskeyRealism.Patches
             if ((UnityEngine.Object)enemy == null) return false;
             float rotation = Tools.GetAngle(((Component)unit).transform.position, enemy.transform.position) + 180f;
             if (float.IsNaN(rotation) || float.IsInfinity(rotation)) return false;
-            // A standing Face follows vanilla micro facing (4630 region): turn
-            // only when off by at least angletriggerforturningtowardsenemy.
-            // Unlimber always faces, as UnlimberArtilleryAIMicro does.
+            // A standing Face follows vanilla micro facing (4599-4606): turn
+            // only when off by at least angletriggerforturningtowardsenemy,
+            // widened by additionalanglewhenincovermicro in cover. Unlimber
+            // always faces, as UnlimberArtilleryAIMicro does.
             if (applyTurnTrigger &&
                 !BattleWriterPolicy.ShouldRotateTowardTarget(
                     ((Component)unit).transform.rotation.eulerAngles.y,
                     rotation,
-                    GamePrefs.angletriggerforturningtowardsenemy))
+                    GamePrefs.angletriggerforturningtowardsenemy,
+                    unit.covervalue,
+                    unit.coverobject,
+                    GamePrefs.maxcovervalueforgrouprotation,
+                    GamePrefs.additionalanglewhenincovermicro))
                 return false;
             unit.RotateRegiment(rotation);
             return true;
