@@ -46,7 +46,7 @@ Not built, with reason:
 
 ## PROVE-MODE
 
-Harness (2410 PASS on this branch, with `main` `0c2bd01` merged) proves the pure parts and the source wiring; every equivalence test was mutation-checked. Verify round 1 found two equivalence gaps whose plants survived (cell padding removed; recon tie pass removed) and two coordinator hand-offs pinned only by reading (probe -> formation changed; map job weekly catch-up): each now has a case that turns red under that plant (`SlicePressureBuilderTests` ulp-boundary case, `BattleReconSearchTests` 24 tied targets, `DailyReviewSchedulerTests` job hand-offs). Runtime proof is the smoke below; nothing is deployed. The `Clone()` label fix found here is already on `main` (`dce672e`, deployed); `TranspilerLabelTests` covers #109 and #110 with their real `Transpile` on the real IL.
+Harness (2411 PASS on this branch, with `main` `0c2bd01` merged) proves the pure parts and the source wiring; every equivalence test was mutation-checked. Verify round 1 found two equivalence gaps whose plants survived (cell padding removed; recon tie pass removed) and two coordinator hand-offs pinned only by reading (probe -> formation changed; map job weekly catch-up): each now has a case that turns red under that plant (`SlicePressureBuilderTests` ulp-boundary case, `BattleReconSearchTests` 24 tied targets, `DailyReviewSchedulerTests` job hand-offs). Runtime proof is the smoke below; nothing is deployed. The `Clone()` label fix found here is already on `main` (`dce672e`, deployed); `TranspilerLabelTests` covers #109 and #110 with their real `Transpile` on the real IL.
 
 ## Smoke (first perf smoke: `Logging Profile = FullTuning`, `Max Tuning Log MB = 2000`, review § 7)
 

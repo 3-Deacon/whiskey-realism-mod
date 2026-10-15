@@ -40,6 +40,7 @@ internal static class DailyReviewSchedulerTests
             ("daily review patches pump each frame and drain before vanilla saves", PatchesPumpAndDrain),
             ("daily review commit keeps the previous day published when the copy throws", CommitKeepsPreviousDayWhenCopyThrows),
             ("daily review commit applies deferred battles even when the publish throws", CommitAppliesDeferredWhenPublishThrows),
+            ("daily review commit keeps both failures when publish and deferred battles throw", CommitKeepsBothFailures),
             ("daily review jobs hand off what the single-frame review did", JobHandOffsPinned),
         });
     }
@@ -678,6 +679,49 @@ internal static class DailyReviewSchedulerTests
         var order = new List<string>();
         ReviewDayCommit.Run(() => order.Add("publish"), () => order.Add("deferred"));
         AssertEqual("publish,deferred", string.Join(",", order), "deferred battles after the publish");
+    }
+
+    private static void CommitKeepsBothFailures()
+    {
+        var publish = new InvalidOperationException("copy failed");
+        var deferred = new ArgumentException("battle record failed");
+        AggregateException both = null;
+        try
+        {
+            ReviewDayCommit.Run(() => throw publish, () => throw deferred);
+        }
+        catch (AggregateException ex)
+        {
+            both = ex;
+        }
+        AssertTrue(both != null, "one exception carries both failures");
+        AssertEqual(2, both.InnerExceptions.Count, "two inner failures");
+        AssertTrue(ReferenceEquals(publish, both.InnerExceptions[0]), "the publish failure first");
+        AssertTrue(ReferenceEquals(deferred, both.InnerExceptions[1]), "the deferred failure second");
+        AssertContains(both.Message, "copy failed", "the logged message names the publish failure");
+        AssertContains(both.Message, "battle record failed", "the logged message names the deferred failure");
+
+        Exception only = null;
+        try
+        {
+            ReviewDayCommit.Run(() => { }, () => throw deferred);
+        }
+        catch (Exception ex)
+        {
+            only = ex;
+        }
+        AssertTrue(ReferenceEquals(deferred, only), "a deferred failure alone propagates as itself");
+
+        only = null;
+        try
+        {
+            ReviewDayCommit.Run(() => throw publish, () => { });
+        }
+        catch (Exception ex)
+        {
+            only = ex;
+        }
+        AssertTrue(ReferenceEquals(publish, only), "a publish failure alone propagates as itself");
     }
 
     // The coordinator's job bodies hand each other the single-frame review's locals; these

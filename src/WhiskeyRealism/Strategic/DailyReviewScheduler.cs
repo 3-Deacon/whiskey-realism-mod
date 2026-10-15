@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.ExceptionServices;
 
 namespace WhiskeyRealism.Strategic
 {
@@ -174,16 +175,34 @@ namespace WhiskeyRealism.Strategic
 
         // Publishes and reports the day, then applies the battle results deferred while it
         // ran even when the publish threw, so they are not held back to the next day's commit.
+        // A failure is rethrown afterwards; when both steps fail, both travel in one
+        // AggregateException whose message names each, so the second never hides the first.
         internal static void Run(Action publishAndReport, Action applyDeferred)
         {
+            Exception publishFailure = null;
             try
             {
                 publishAndReport();
             }
-            finally
+            catch (Exception ex)
+            {
+                publishFailure = ex;
+            }
+
+            try
             {
                 applyDeferred();
             }
+            catch (Exception deferredFailure) when (publishFailure != null)
+            {
+                throw new AggregateException(
+                    "publish failed: " + publishFailure.Message + "; deferred battle results failed: " + deferredFailure.Message,
+                    publishFailure,
+                    deferredFailure);
+            }
+
+            if (publishFailure != null)
+                ExceptionDispatchInfo.Capture(publishFailure).Throw();
         }
     }
 }
