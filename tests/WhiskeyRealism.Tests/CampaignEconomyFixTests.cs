@@ -51,6 +51,10 @@ internal static class CampaignEconomyFixTests
         PerkCandidateWindowMatchesVanillaRandomRange();
         PerkNearTieIsWeightedRandom();
         PerkClearWinnerIgnoresRoll();
+
+        WlRetryDoesNothingWhenNoCommandSelectionPending();
+        WlRetryReusesLivePanelWithoutLookup();
+        WlRetryThrottlesPanelLookupWhilePending();
     }
 
     private static void LogPass(string message)
@@ -622,5 +626,40 @@ internal static class CampaignEconomyFixTests
         int fleet = PerkSelectionScorer.SelectFleetPerk(1, FleetPerkRole.Raid, new[] { 1, 5, 6, 8, 10 }, roll: 0.99f);
         TestHarness.AssertEqual(6, fleet, "raid fleet still takes sea raiders");
         LogPass("c2b perk clear winner ignores roll");
+    }
+
+    // ---------------------------------------------------------------- P-wlretry
+    // Vanilla CampaignController.Update calls careerinformationpanel
+    // .ShowStartUnitSelectionList() once at GameVars.frame == 50 (decompile 30145-30155);
+    // the panel (182353) only opens for a W&L scenario whose chosen commander has no
+    // command. The retry runs on every AICampaign/CampaignController frame, so all
+    // lookups must sit behind the pending check and be cached.
+
+    private static void WlRetryDoesNothingWhenNoCommandSelectionPending()
+    {
+        TestHarness.AssertFalse(
+            WlStartSelectionPanelLookup.ShouldFindPanel(pending: false, cachedPanelAlive: false, unityFrame: 1000, nextFindFrame: 0),
+            "no W&L command selection pending => no GameObject.Find");
+        LogPass("c2b wl retry does nothing when no command selection pending");
+    }
+
+    private static void WlRetryReusesLivePanelWithoutLookup()
+    {
+        TestHarness.AssertFalse(
+            WlStartSelectionPanelLookup.ShouldFindPanel(pending: true, cachedPanelAlive: true, unityFrame: 1000, nextFindFrame: 0),
+            "cached live panel => no lookup");
+        LogPass("c2b wl retry reuses live panel without lookup");
+    }
+
+    private static void WlRetryThrottlesPanelLookupWhilePending()
+    {
+        TestHarness.AssertTrue(
+            WlStartSelectionPanelLookup.ShouldFindPanel(pending: true, cachedPanelAlive: false, unityFrame: 100, nextFindFrame: 100),
+            "lookup due");
+        TestHarness.AssertFalse(
+            WlStartSelectionPanelLookup.ShouldFindPanel(pending: true, cachedPanelAlive: false, unityFrame: 101, nextFindFrame: 115),
+            "lookup throttled until next window");
+        TestHarness.AssertEqual(115, WlStartSelectionPanelLookup.NextFindFrame(100), "15-frame lookup window");
+        LogPass("c2b wl retry throttles panel lookup while pending");
     }
 }
