@@ -95,12 +95,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
 
+            // The W&L player's command subtree (dlcw_isundercommander) is never an
+            // AI direct child, as in ArmyPostureInputsRuntime's probe tree
+            // (PlayerCommandProbeFilter): no role is allocated to it.
+            bool wl = DLC_WL.dlc_scenarioactive;
             var result = new List<RegimentProbe>(units.Count);
             for (int i = 0; i < units.Count; i++)
             {
                 var reg = units[i] as Regiment;
                 if (reg == null) continue;
                 if (reg.alliance != allianceId) continue;
+                if (wl && reg.dlcw_isundercommander) continue;
                 var go = ((Component)reg).gameObject;
                 if (go == null) continue;
                 int instanceId = go.GetInstanceID();

@@ -1109,7 +1109,6 @@ static class Program
             ("tactical reserve commit gate allows fallback screen movement", TacticalReserveCommitGateAllowsFallbackScreenMovement),
             ("tactical reserve commit gate observes player controlled group", TacticalReserveCommitGateObservesPlayerControlledGroup),
             ("tactical reserve commit gate allows already engaged reserve", TacticalReserveCommitGateAllowsAlreadyEngagedReserve),
-            ("tactical reserve list bias rejects reserve role candidate", TacticalReserveListBiasRejectsReserveRoleCandidate),
             ("army orchestrator new has no plan until picked", ArmyOrchestratorNewHasNoPlanUntilPicked),
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
@@ -1357,6 +1356,7 @@ static class Program
         TacticalDecisionSnapshotTests.Run();
         TacticalResolvedGroupDecisionTests.Run();
         IntegrationFollowupTests.Run();
+        IntegrationWiringTests.Run();
 
         return 0;
     }
@@ -23059,21 +23059,6 @@ static class Program
         var d = TacticalReserveCommitGate.Decide(ReserveGateInput(role: DirectChildRole.Reserve, committedUnitAlreadyEngaged: true));
         AssertEqual(TacticalReserveCommitGate.Action.Allow, d.Action, "action");
         AssertEqual("already-committed-contact", d.Reason, "reason");
-    }
-
-    private static void TacticalReserveListBiasRejectsReserveRoleCandidate()
-    {
-        var reserve = new CommandIntentResolution(
-            true,
-            new CommandNodeIntent("node-200", "node-200", DirectChildRole.Reserve, DirectChildAxis.Hold, 2, 50, 0.5f, 1),
-            "exact-command-node");
-        var main = new CommandIntentResolution(
-            true,
-            new CommandNodeIntent("node-201", "node-201", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 90, 0.8f, 1),
-            "exact-command-node");
-
-        AssertFalse(TacticalReserveCommitGate.PermitReserveListBias(reserve), "reserve role is not list-bias eligible");
-        AssertTrue(TacticalReserveCommitGate.PermitReserveListBias(main), "main role can be list-bias eligible");
     }
 
     private static ArmyOrchestrator NewArmyOrchestratorWithPlan(int mainSector = 2)

@@ -240,10 +240,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     AttachArmyIfActive(side0, battle);
                     AttachArmyIfActive(side1, battle);
-                    AttachDirectChildrenIfReady(side0, battle);
-                    AttachDirectChildrenIfReady(side1, battle);
-                    AttachCommandTreeIfReady(side0, battle);
-                    AttachCommandTreeIfReady(side1, battle);
+                    AttachDirectChildrenIfReady(side0);
+                    AttachDirectChildrenIfReady(side1);
+                    AttachCommandTreeIfReady(side0);
+                    AttachCommandTreeIfReady(side1);
                 }
 
                 int suppressed = (suppressedAllianceId == 0 || suppressedAllianceId == 1) ? 1 : 0;
@@ -501,16 +501,41 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             side.Tick();
 
+            // Every per-side read (snapshot, objective records, objectivechain,
+            // macroai) uses this side's own AIBattle, not whichever instance fired
+            // the tick: each AIBattle's objectivechain holds only its own side's
+            // groups (aibattle[] assignment 85203-85212, SetSide 3408).
+            AIBattle sideBattle = ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battle, side.AllianceId);
+
             if (Plugin.EnableTacticalOrchestratorIntentInference != null
                 && Plugin.EnableTacticalOrchestratorIntentInference.Value)
             {
-                DriveTickCycle(side, battle);
-                AttachDirectChildrenIfReady(side, battle);
-                AttachCommandTreeIfReady(side, battle);
-                DriveDirectChildCycle(side, battle);
+                DriveTickCycle(side, sideBattle);
+                AttachDirectChildrenIfReady(side);
+                AttachCommandTreeIfReady(side);
+                DriveDirectChildCycle(side, sideBattle);
             }
 
-            DriveOperationsLedger(side, battle);
+            RefreshPostureInputs(side, sideBattle);
+            DriveOperationsLedger(side, sideBattle);
+        }
+
+        /// <summary>
+        /// #61's orchestrator inputs (leaf brigade map, live commander initiative,
+        /// reinforcement opportunity), once per side per tick, ahead of that side's
+        /// next AIBattle.UpdateAITasks.
+        /// </summary>
+        private static void RefreshPostureInputs(TacticalBattleOrchestrator side, AIBattle sideBattle)
+        {
+            if (side.Army == null) return;
+            var bunits = ResolveBattleUnits(sideBattle);
+            if (bunits == null || bunits.alliance == null) return;
+            for (int s = 0; s < 2 && s < bunits.alliance.Length; s++)
+            {
+                if (bunits.alliance[s] != side.AllianceId) continue;
+                ArmyPostureInputsRuntime.Refresh(sideBattle, bunits, s, side.Army);
+                return;
+            }
         }
 
         private static void DriveTickCycle(TacticalBattleOrchestrator side, AIBattle battle)
@@ -821,7 +846,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // decisions read by BattleGroupStancePatch tier-1.
                 using (TelemetryPerf.Scope("tactical.resolved-group-decisions.build", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                 {
-                    PopulateResolvedDecisionsForSide(side, battle);
+                    PopulateResolvedDecisionsForSide(side, battle, snap.EnemyVisible);
                 }
                 return snap;
             }
@@ -1110,8 +1135,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (armyEntry == null) return;
             var army = new ArmyOrchestrator(side.AllianceId, BuiltInPlaybooks.SeedCatalog(), armyEntry.PersonalityVector);
             side.AttachArmy(army);
-            var evidence = BuildArmyEvidenceForSide(side.AllianceId, battle);
-            army.PickInitialPlan(evidence);
+            AIBattle sideBattle = ArmyEvidenceBuilder.ResolveAiBattleForAlliance(battle, side.AllianceId);
+            army.PickInitialPlan(ArmyEvidenceBuilder.Build(sideBattle, side.AllianceId).OwnEvidence);
             if (army.HasPlan)
             {
                 TelemetryRouter.LegacyInfo("[TacticalPlan] " + SideLogContext(side.AllianceId)
@@ -1121,7 +1146,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static void AttachDirectChildrenIfReady(TacticalBattleOrchestrator side, AIBattle battle)
+        private static void AttachDirectChildrenIfReady(TacticalBattleOrchestrator side)
         {
             // Hot-path measurement scope (2026-05-19 hitch investigation).
             // Wraps the full discovery-snapshot + register flow so the tuning
@@ -1189,7 +1214,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return false;
         }
 
-        private static void AttachCommandTreeIfReady(TacticalBattleOrchestrator side, AIBattle battle)
+        private static void AttachCommandTreeIfReady(TacticalBattleOrchestrator side)
         {
             // Hot-path measurement scope (2026-05-19). See AttachDirectChildrenIfReady for context.
             using (TelemetryPerf.Scope("tactical.attach-command-tree", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
@@ -1406,7 +1431,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (side == null || side.Army == null || !side.Army.HasPlan) return;
                 if (side.Army.CurrentDirectChildIntents.Count == 0)
                 {
-                    AttachDirectChildrenIfReady(side, battle);
+                    AttachDirectChildrenIfReady(side);
                     if (side.Army.CurrentDirectChildIntents.Count == 0) return;
                 }
 
@@ -1424,7 +1449,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var axis = enemyVisForChildren.FrontAxis;
                 IReadOnlyDictionary<int, int> instanceToSector = enemyVisForChildren.InstanceSectors;
                 if (instanceToSector == null || instanceToSector.Count == 0)
-                    instanceToSector = BuildInstanceToSectorIndexMap(battle, side.AllianceId);
+                    instanceToSector = ArmyEvidenceBuilder.MapOwnGroupsToSectors(side.AllianceId);
                 int fallbackSector = ArmyEvidenceBuilder.DefaultMainEffortSector(axis);
 
                 var primarySectors = new int[childCount];
@@ -1531,47 +1556,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // ParseInstanceIdFromChildId moved to the test-included partial
         // TacticalBattleCoordinator.cs so the harness can lock the negative-id parse
         // contract. Both partials see it via the shared `partial class` declaration.
-
-        // Own command group GameObject InstanceID → lateral band of the side's
-        // front axis (the axis ArmyEvidenceBuilder last fitted for this
-        // alliance). Same banding as EnemyVisibleState.InstanceSectors, so
-        // per-child primary sectors line up with the evidence sectors.
-        private static System.Collections.Generic.Dictionary<int, int> BuildInstanceToSectorIndexMap(AIBattle battle, int allianceId)
-        {
-            return ArmyEvidenceBuilder.MapOwnGroupsToSectors(allianceId);
-        }
-
-        private static ArmyEvidence BuildArmyEvidenceForSide(int allianceId, AIBattle battle)
-        {
-            var bunits = ResolveBattleUnits(battle);
-            int side = -1;
-            try
-            {
-                if (bunits != null && bunits.alliance != null)
-                {
-                    for (int s = 0; s < 2 && s < bunits.alliance.Length; s++)
-                        if (bunits.alliance[s] == allianceId) { side = s; break; }
-                }
-            }
-            catch { }
-
-            float own = 0f;
-            float enemyTotal = 0f;
-            try
-            {
-                if (bunits != null && bunits.sideinformation != null && side >= 0 && side < bunits.sideinformation.Length)
-                    own = System.Math.Max(1f, bunits.sideinformation[side].totalactiveforce);
-                if (bunits != null && bunits.sideinformation != null)
-                {
-                    for (int s = 0; s < 2 && s < bunits.sideinformation.Length; s++)
-                        if (s != side) enemyTotal += System.Math.Max(0f, bunits.sideinformation[s].totalactiveforce);
-                }
-            }
-            catch { }
-
-            float odds = enemyTotal <= 0f ? 1f : own / enemyTotal;
-            return new ArmyEvidence(odds, TerrainKind.Open, defaultMainEffortSector: 0);
-        }
 
         private static void ClearLedgersBetweenBattles()
         {
@@ -1821,7 +1805,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // failure the per-group entry is skipped, and the patch falls
         // through to ApplyGroup for that Regiment.
 
-        private static void PopulateResolvedDecisionsForSide(TacticalBattleOrchestrator side, AIBattle battle)
+        private static void PopulateResolvedDecisionsForSide(TacticalBattleOrchestrator side, AIBattle battle, EnemyVisibleState enemyVisible)
         {
             try
             {
@@ -1835,23 +1819,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var bunits = ResolveBattleUnits(battle);
                 if (bunits == null) return;
 
-                // Walk BattleUnits.completeunitlist filtered by alliance —
-                // NOT AIBattle.unitsused. Tick() is debounced per vanilla
-                // CalculateSideStats cycle and drives both side0 and side1
-                // with whichever AIBattle fired first. That AIBattle's
-                // unitsused only contains its own side's regiments. Using
-                // completeunitlist + alliance filter gives us the right
-                // Regiment population for whichever side we're populating
-                // regardless of which AIBattle triggered Tick (mirrors
-                // BuildInstanceToSectorIndexMap above).
+                // Walk BattleUnits.completeunitlist filtered by alliance, not
+                // AIBattle.unitsused, which holds only the groups in that AI's
+                // pool (85227-85262).
                 var units = BattleUnits.completeunitlist as IList;
                 if (units == null || units.Count == 0) return;
 
-                // Macro is per-side; AIBattle.macroai belongs to the
-                // AIBattle that fired Tick, which may not match the side
-                // we're pre-computing. Pull from bunits.sideinformation
-                // indexed by the side whose alliance == allianceId.
-                int macro = SafeMacroAiForSideByAlliance(bunits, allianceId);
+                // The side's live macro is its own AIBattle.macroai (battle is
+                // the side's instance). sideinformation[side].macroai is only a
+                // scripted override, -1 unless set (CheckGlobalAIStrategy
+                // 6383-6386), so it never showed the army retreat (3).
+                int macro = SafeMacroAiOfOwnBattle(battle, bunits, allianceId);
 
                 bool chargeDenialOn = false;
                 bool localReactionsOn = false;
@@ -1871,7 +1849,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
                 catch { }
 
-                int sectorIndex = 0;
+                // Sector = the group's lateral band on the side's front axis
+                // (EnemyVisibleState.InstanceSectors, keyed by GameObject id), the
+                // same banding the direct-child allocator uses; the center band
+                // when the group was not banded.
+                int fallbackBand = ArmyEvidenceBuilder.DefaultMainEffortSector(enemyVisible.FrontAxis);
                 for (int i = 0; i < units.Count; i++)
                 {
                     var group = units[i] as Regiment;
@@ -1906,12 +1888,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     try { vanillaOrdered = group.ai_stanceordered; }
                     catch { continue; }
 
-                    // sectorIndex is the post-filter index for this side
-                    // (mirrors BuildInstanceToSectorIndexMap's accounting).
-                    // It's used as TacticalSectorAssessment.SectorId; the
-                    // scorers ignore the value, it just shows up in logs.
-                    var sector = BuildSectorForGroup(group, sectorIndex);
-                    sectorIndex++;
+                    int band;
+                    try { band = enemyVisible.SectorForInstance(((Component)group).gameObject.GetInstanceID(), fallbackBand); }
+                    catch { band = fallbackBand; }
+                    var sector = BuildSectorForGroup(group, band);
 
                     // 1) Doctrine. When doctrine produces Allow/Deny, that's
                     //    the final answer for this Regiment — overrides
@@ -1949,7 +1929,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                             reason: "doctrine-" + dReason,
                             fromDoctrine: true,
                             fromLedger: false,
-                            isChargeOverride: vanillaOrdered == 4,
+                            isChargeOverride: vanillaOrdered == TacticalCommandTaskToStanceMapper.StanceAssault,
                             chargeAction: chargeAction);
                         continue;
                     }
@@ -1958,7 +1938,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     //    freezes WHETHER to demote and to which stance
                     //    (FinalStance); Kind stays Skip so a group vanilla
                     //    takes out of assault before apply is left alone.
-                    if (vanillaOrdered == 4)
+                    if (vanillaOrdered == TacticalCommandTaskToStanceMapper.StanceAssault)
                     {
                         cache[instanceId] = new TacticalResolvedGroupDecision(
                             finalStance: ifAssault.DemoteStance,
@@ -1974,7 +1954,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // 3) Ledger task stance.
                     if (macro != 3 && TacticalLedgerStateResolver.TryResolve(group, out CommandNodeOperationalState state))
                     {
-                        int lStance = StanceForLedgerTask(state.Task, sector);
+                        int lStance = TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(
+                            state.Task, TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector));
                         // BattleGroupStancePatch.TryApplyLedgerTaskStance
                         // claims ownership whenever the ledger resolves
                         // (return true) — even when stance is invalid or
@@ -1983,7 +1964,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         // group as "ledger had an opinion, no write
                         // needed" and DOESN'T fall through to the default
                         // scorer.
-                        if (lStance < 0 || lStance > 3 || lStance == 4)
+                        if (lStance < 0)
                         {
                             cache[instanceId] = new TacticalResolvedGroupDecision(
                                 finalStance: -1,
@@ -2065,13 +2046,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static TacticalSectorAssessment BuildSectorForGroup(Regiment group, int index)
+        private static TacticalSectorAssessment BuildSectorForGroup(Regiment group, int band)
         {
             try
             {
                 Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
                 return TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
-                    index,
+                    band,
                     group != null ? Math.Max(group.groupowninrange, group.groupstrengthaigroup) : 0f,
                     group != null ? group.groupenemiesinrange : 0f,
                     SumEnemyStrengthWithinAngleSafe(group),
@@ -2116,47 +2097,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch { return string.Empty; }
         }
 
-        private static int StanceForLedgerTask(CommandTaskType task, TacticalSectorAssessment sector)
-        {
-            // Mirrors BattleGroupStancePatch.StanceForTask. Returns -1 when
-            // the task has no stance opinion (default scorer would have
-            // been consulted in the legacy path, but ledger claims
-            // ownership when it resolves).
-            if ((task == CommandTaskType.HoldObjective ||
-                 task == CommandTaskType.HoldChoke ||
-                 task == CommandTaskType.FixEnemy) &&
-                TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector))
-                return 3;
-
-            switch (task)
-            {
-                case CommandTaskType.AttackObjective:
-                case CommandTaskType.SupportAttack:
-                    return 3;
-                case CommandTaskType.FixEnemy:
-                case CommandTaskType.HoldObjective:
-                case CommandTaskType.HoldChoke:
-                case CommandTaskType.ReserveWait:
-                case CommandTaskType.FallBackToLine:
-                    return 2;
-                default:
-                    return -1;
-            }
-        }
-
-        private static int SafeMacroAiForSideByAlliance(BattleUnits bunits, int allianceId)
+        // -1 when battle does not play allianceId (unresolved own instance).
+        private static int SafeMacroAiOfOwnBattle(AIBattle battle, BattleUnits bunits, int allianceId)
         {
             try
             {
-                if (bunits == null || bunits.alliance == null || bunits.sideinformation == null) return -1;
-                for (int side = 0; side < bunits.alliance.Length && side < bunits.sideinformation.Length; side++)
-                {
-                    if (bunits.alliance[side] != allianceId) continue;
-                    var info = bunits.sideinformation[side];
-                    if (info == null) return -1;
-                    return info.macroai;
-                }
-                return -1;
+                if (battle == null || bunits == null || bunits.alliance == null) return -1;
+                int side = battle.sideofai;
+                if (side < 0 || side >= bunits.alliance.Length || bunits.alliance[side] != allianceId) return -1;
+                return battle.macroai;
             }
             catch
             {

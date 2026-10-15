@@ -51,10 +51,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         //   duty was over-allocating Refuse roles. Only HIGH (bucket 3+)
         //   flank exposure now locks a brigade into RefuseLeft/Right.
         //
-        // - SupportMainAdjacencyRange widened 1 → 2. Brigades within 2
-        //   sectors of main effort can be SupportMain. Restricting to
-        //   strictly-adjacent (distance == 1) excluded most of the army
-        //   from being available to support, dumping them to Refuse.
+        // - SupportMainAdjacencyRange is 1 (integration, 2026-10-15). It was
+        //   widened to 2 on 2026-05-22 when sectors were per-group indices;
+        //   sectors are now the TacticalFrontAxis lateral bands (5), where 2
+        //   from the center band is every band, so "adjacent" meant nothing.
+        //   The fall-through tier still fills the SupportMain budget.
         //
         // - MaxRefuseLeftCount / MaxRefuseRightCount cap 1 each. Beyond
         //   the cap, the brigade re-checks higher-priority roles
@@ -64,7 +65,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         //   smoke-observed "multiple Main roles assigned" symptom by
         //   enforcing role budgets after primary allocation.
         private const int FlankExposureRefuseThreshold = 3;
-        private const int SupportMainAdjacencyRange = 2;
+        internal const int SupportMainAdjacencyRange = 1;
         private const int MaxRefuseLeftCount = 1;
         private const int MaxRefuseRightCount = 1;
         private const int MaxSupportMainCount = 2;
@@ -555,12 +556,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return false;
         }
 
-        // Sector adjacency for SupportMain eligibility (2026-05-22 widened).
-        // Was strict-immediate (==1) which excluded most of the army from
-        // SupportMain consideration. Widened to within SupportMainAdjacencyRange
-        // (2) so a sector ≤2 hops from main qualifies. Combined with the
-        // MaxSupportMainCount cap, this lets the right brigades flank-attack
-        // without flooding the role.
+        // Sector adjacency (front-axis bands) for SupportMain eligibility and
+        // reserve crisis relief: within SupportMainAdjacencyRange of the band.
         private static bool IsAdjacentSector(int s, int main) => Math.Abs(s - main) <= SupportMainAdjacencyRange;
 
         /// <summary>

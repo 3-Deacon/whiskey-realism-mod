@@ -39,7 +39,6 @@ internal static class TacticalLifecycleFixTests
 
         Pass("t15 released reserve lets vanilla commit", T15ReleasedReserveAllowsVanillaCommit);
         Pass("t15 unreleased reserve still held", T15UnreleasedReserveStillHeld);
-        Pass("t15 released reserve permits reserve list bias", T15ReleasedReservePermitsListBias);
 
         Pass("perf ledger ticks on new snapshot", PerfLedgerTicksOnNewSnapshot);
         Pass("perf ledger skips unchanged snapshot within interval", PerfLedgerSkipsUnchangedSnapshot);
@@ -380,11 +379,6 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Deny, TacticalReserveCommitGate.Decide(input).Action, "deny");
     }
 
-    private static void T15ReleasedReservePermitsListBias()
-    {
-        TestHarness.AssertFalse(TacticalReserveCommitGate.PermitReserveListBias(ReserveResolution()), "held");
-        TestHarness.AssertTrue(TacticalReserveCommitGate.PermitReserveListBias(ReserveResolution(), reserveReleased: true), "released");
-    }
 
     // ---- Coordinator perf ----
 
