@@ -1079,7 +1079,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return;
             }
 
-            ledger.StoreDoctrineForCommandStates(copiedCommandOperations);
+            ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance);
             _currentOperation = ledger.CurrentOperation;
             _currentDoctrineOrders = ledger.CurrentDoctrineOrders;
         }

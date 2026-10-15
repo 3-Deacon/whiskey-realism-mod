@@ -34,7 +34,7 @@ namespace WhiskeyRealism.Tactical.Battle
     //     depth past where the group stands.
     //   - Skirmisher link: GetUnitLinkData (124208-124390) puts a front-linked company
     //     unitlinkdistance (10, unitprefs 1069) + skirmisherdistance (20, unitprefs 864)
-    //     ahead of its parent regiment; #69 moves that target to the interruption
+    //     ahead of its parent regiment; SkirmisherScreenDistancePatch moves that target to the interruption
     //     distance while the line screens out of contact (SkirmisherPushMeters).
     //   - Regiment formation 4 is the square (firearctype 2 = four all-round arcs,
     //     118174 / 118262-118270); a group's formation 4 is march column (5883).
@@ -63,6 +63,7 @@ namespace WhiskeyRealism.Tactical.Battle
         ProbeNominated = 2,
         MissionEnded = 4,
         ProbeEnded = 8,
+        ProbeHeld = 16,
     }
 
     public struct ReconTickResult
@@ -135,6 +136,10 @@ namespace WhiskeyRealism.Tactical.Battle
         public float ObjectiveX, ObjectiveZ;
         public bool[] AiPool = new bool[BattleSnapshot.InitialCapacity];
         public bool[] PostureMoved = new bool[BattleSnapshot.InitialCapacity];
+        // The posture pipeline's task for the group this tick (PostureTick GroupPosture
+        // State.Task; None when it has none). The ledger task a probe was nominated
+        // under, and the test for "the ledger reassigned it" that ends a hold.
+        public CommandTaskType[] PostureTask = new CommandTaskType[BattleSnapshot.InitialCapacity];
 
         private float[] _entryX = new float[8];
         private float[] _entryZ = new float[8];
@@ -149,9 +154,11 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 AiPool = new bool[Math.Max(ownCount, AiPool.Length * 2)];
                 PostureMoved = new bool[AiPool.Length];
+                PostureTask = new CommandTaskType[AiPool.Length];
             }
             Array.Clear(AiPool, 0, ownCount);
             Array.Clear(PostureMoved, 0, ownCount);
+            Array.Clear(PostureTask, 0, ownCount);
             EntryCount = 0;
             HasStaleBand = false;
             StaleBandRecency = 1f;
@@ -214,6 +221,18 @@ namespace WhiskeyRealism.Tactical.Battle
         private readonly float[] _probeZ = new float[MaxBands];
         private readonly double[] _probeStarted = new double[MaxBands];
         private readonly double[] _probeLastStart = new double[MaxBands];
+        private readonly CommandTaskType[] _probeTask = new CommandTaskType[MaxBands];
+        private readonly float[] _probeDirX = new float[MaxBands];
+        private readonly float[] _probeDirZ = new float[MaxBands];
+
+        // Ground a probe gained without meeting a superior enemy: the group holds it
+        // (the posture pipeline does not walk it back) until the ledger reassigns it.
+        private readonly int[] _holdGroup = new int[MaxBands];
+        private readonly float[] _holdX = new float[MaxBands];
+        private readonly float[] _holdZ = new float[MaxBands];
+        private readonly float[] _holdDirX = new float[MaxBands];
+        private readonly float[] _holdDirZ = new float[MaxBands];
+        private readonly CommandTaskType[] _holdTask = new CommandTaskType[MaxBands];
 
         // Scratch (grow-only).
         internal UnitFlags[] Descendants = new UnitFlags[BattleSnapshot.InitialCapacity];
@@ -238,6 +257,7 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 _probeGroup[b] = 0;
                 _probeLastStart[b] = double.NegativeInfinity;
+                _holdGroup[b] = 0;
             }
         }
 
@@ -253,6 +273,26 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             x = 0f;
             z = 0f;
+            return false;
+        }
+
+        /// <summary>
+        /// The ground <paramref name="groupId"/> holds after its probe, while its posture
+        /// task is still the ledger task it was nominated under; the probe's advance
+        /// direction (unit vector).
+        /// </summary>
+        public bool TryGetHold(int groupId, CommandTaskType postureTask, out float x, out float z, out float dirX, out float dirZ)
+        {
+            int k = groupId != 0 ? HoldSlotOf(groupId) : -1;
+            if (k >= 0 && _holdTask[k] == postureTask)
+            {
+                x = _holdX[k];
+                z = _holdZ[k];
+                dirX = _holdDirX[k];
+                dirZ = _holdDirZ[k];
+                return true;
+            }
+            x = z = dirX = dirZ = 0f;
             return false;
         }
 
@@ -330,16 +370,57 @@ namespace WhiskeyRealism.Tactical.Battle
         internal double ProbeStarted(int band) => _probeStarted[band];
         internal double ProbeLastStart(int band) => _probeLastStart[band];
 
-        internal void Nominate(int band, int groupId, float x, float z, double now)
+        internal void Nominate(int band, int groupId, float fromX, float fromZ, float x, float z, CommandTaskType ledgerTask, double now)
         {
             _probeGroup[band] = groupId;
             _probeX[band] = x;
             _probeZ[band] = z;
             _probeStarted[band] = now;
             _probeLastStart[band] = now;
+            _probeTask[band] = ledgerTask;
+            float dx = x - fromX, dz = z - fromZ;
+            float len = (float)Math.Sqrt(dx * dx + dz * dz);
+            _probeDirX[band] = len > 0f ? dx / len : 0f;
+            _probeDirZ[band] = len > 0f ? dz / len : 0f;
+            ReleaseHold(groupId);
         }
 
         internal void ClearProbe(int band) { _probeGroup[band] = 0; }
+
+        // The probe of band b ended short of a superior enemy: its group holds (x, z).
+        // No hold without a known ledger task (the posture pipeline had no state).
+        internal bool Hold(int band, float x, float z)
+        {
+            int groupId = _probeGroup[band];
+            if (groupId == 0 || _probeTask[band] == CommandTaskType.None) return false;
+            int k = HoldSlotOf(groupId);
+            if (k < 0) k = HoldSlotOf(0); // a free slot
+            if (k < 0) k = band;
+            _holdGroup[k] = groupId;
+            _holdX[k] = x;
+            _holdZ[k] = z;
+            _holdDirX[k] = _probeDirX[band];
+            _holdDirZ[k] = _probeDirZ[band];
+            _holdTask[k] = _probeTask[band];
+            return true;
+        }
+
+        internal int HoldGroup(int slot) => _holdGroup[slot];
+        internal CommandTaskType HoldTask(int slot) => _holdTask[slot];
+        internal void ClearHold(int slot) { _holdGroup[slot] = 0; }
+
+        private void ReleaseHold(int groupId)
+        {
+            int k = groupId != 0 ? HoldSlotOf(groupId) : -1;
+            if (k >= 0) _holdGroup[k] = 0;
+        }
+
+        private int HoldSlotOf(int groupId)
+        {
+            for (int k = 0; k < MaxBands; k++)
+                if (_holdGroup[k] == groupId) return k;
+            return -1;
+        }
 
         internal bool IsNominated(int groupId)
         {
@@ -355,6 +436,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public const string ReturnReason = "recon-return";
         public const string StopReason = "recon-stop";
         public const string ProbeStopReason = "probe-contact-stop";
+        public const string HoldReason = "probe-hold";
 
         // Vanilla regiment formation index of the square (118174).
         public const int SquareFormation = 4;
@@ -378,7 +460,11 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 // Rollback: hand everything back to the posture executor and vanilla.
                 if (memory.Leg != ReconLeg.None) End(memory, ref result, "disabled");
-                for (int b = 0; b < ReconMemory.MaxBands; b++) memory.ClearProbe(b);
+                for (int b = 0; b < ReconMemory.MaxBands; b++)
+                {
+                    memory.ClearProbe(b);
+                    memory.ClearHold(b);
+                }
                 return result;
             }
 
@@ -666,36 +752,49 @@ namespace WhiskeyRealism.Tactical.Battle
             bool active = p.Phase == BattlePhase.Probe && !p.SideDefending && axis.IsValid && axis.BandCount > 0;
             int bands = active ? Math.Min(axis.BandCount, ReconMemory.MaxBands) : 0;
 
+            // Holds first (a hold made below is checked from the next tick, when the
+            // posture task is no longer the probe rewrite): released when the ledger
+            // reassigned the group, the group is gone, or a visible enemy at least as
+            // strong is within infantry sight.
+            for (int k = 0; k < ReconMemory.MaxBands; k++)
+            {
+                int id = m.HoldGroup(k);
+                if (id == 0) continue;
+                int idx = s.IndexOfOwn(id);
+                if (idx < 0 || idx >= p.PostureTask.Length || p.PostureTask[idx] != m.HoldTask(k) ||
+                    SuperiorWithin(s, s.Own[idx], st.InfantrySight))
+                    m.ClearHold(k);
+            }
+
             for (int b = 0; b < ReconMemory.MaxBands; b++)
             {
                 int id = m.ProbeGroup(b);
                 if (id == 0) continue;
                 int idx = s.IndexOfOwn(id);
-                if (!active || b >= bands || idx < 0 || now - m.ProbeStarted(b) > ReconSettings.MaxProbeHours)
+                if (!active || b >= bands || idx < 0)
                 {
                     m.ClearProbe(b);
                     r.Events |= ReconEvents.ProbeEnded;
                     continue;
                 }
                 ref UnitRecord rec = ref s.Own[idx];
-                if (NearestVisible(s, rec.X, rec.Z, out float d, out _) && d <= st.InfantrySight)
+                bool contact = NearestVisible(s, rec.X, rec.Z, out float d, out _) && d <= st.InfantrySight;
+                bool arrived = Distance(rec.X, rec.Z, m.ProbeX(b), m.ProbeZ(b)) <= OrderArbiter.DedupeMeters;
+                bool timedOut = now - m.ProbeStarted(b) > ReconSettings.MaxProbeHours;
+                if (!contact && !arrived && !timedOut) continue;
+
+                // The probe is over. Contact: stop (a screen-stance group walks on into
+                // contact unless told, 117253). A visible enemy at least as strong sends
+                // the group back to its ledger task; otherwise it holds the ground gained.
+                if (contact && (rec.RegimentPaths > 0 || (idx < m.Moving.Length && m.Moving[idx] > 0)))
                 {
-                    // Contact established: stop, the probe is over. A screen-stance group
-                    // walks on into contact unless told (117253).
-                    m.ClearProbe(b);
-                    r.Events |= ReconEvents.ProbeEnded;
-                    if (rec.RegimentPaths > 0 || (idx < m.Moving.Length && m.Moving[idx] > 0))
-                    {
-                        sink.Submit(Stop(id, ProbeStopReason));
-                        r.Intents++;
-                    }
-                    continue;
+                    sink.Submit(Stop(id, ProbeStopReason));
+                    r.Intents++;
                 }
-                if (Distance(rec.X, rec.Z, m.ProbeX(b), m.ProbeZ(b)) <= OrderArbiter.DedupeMeters)
-                {
-                    m.ClearProbe(b);
-                    r.Events |= ReconEvents.ProbeEnded;
-                }
+                if (!SuperiorWithin(s, rec, st.InfantrySight) && m.Hold(b, rec.X, rec.Z))
+                    r.Events |= ReconEvents.ProbeHeld;
+                m.ClearProbe(b);
+                r.Events |= ReconEvents.ProbeEnded;
             }
 
             for (int b = 0; b < bands; b++)
@@ -721,9 +820,40 @@ namespace WhiskeyRealism.Tactical.Battle
                     bz = z;
                 }
                 if (best < 0) continue;
-                m.Nominate(b, s.Own[best].InstanceId, bx, bz, now);
+                ref UnitRecord pick = ref s.Own[best];
+                CommandTaskType ledgerTask = best < p.PostureTask.Length ? p.PostureTask[best] : CommandTaskType.None;
+                m.Nominate(b, pick.InstanceId, pick.X, pick.Z, bx, bz, ledgerTask, now);
                 r.Events |= ReconEvents.ProbeNominated;
             }
+        }
+
+        // A visible enemy at least as strong as the group within the given distance.
+        private static bool SuperiorWithin(BattleSnapshot s, in UnitRecord rec, float meters)
+        {
+            float strength = Math.Max(1f, Math.Max(rec.Strength, rec.GroupStrengthAiGroup));
+            EnemyObservation[] obs = s.Observations;
+            for (int k = 0; k < s.ObservationCount; k++)
+            {
+                if (obs[k].State != ObservationState.Visible || obs[k].IsReinforcement) continue;
+                if (obs[k].Strength < strength) continue;
+                if (Distance(obs[k].X, obs[k].Z, rec.X, rec.Z) <= meters) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// A held group's posture move is dropped when it would walk the ground the
+        /// probe gained back: a target more than the arbiter's dedupe radius behind the
+        /// held point along the probe's advance. Forward and along-the-line targets
+        /// go; a break-off, a fallback or a recovery keeps its own target.
+        /// </summary>
+        public static bool HoldBlocks(PostureExecutionTarget kind, float holdX, float holdZ, float dirX, float dirZ, float targetX, float targetZ)
+        {
+            if (kind == PostureExecutionTarget.DoctrineFallbackTarget || kind == PostureExecutionTarget.FallbackLine ||
+                kind == PostureExecutionTarget.RecoveryPath || kind == PostureExecutionTarget.None)
+                return false;
+            float along = (targetX - holdX) * dirX + (targetZ - holdZ) * dirZ;
+            return along < -OrderArbiter.DedupeMeters;
         }
 
         private static bool IsProbeCandidate(BattleSnapshot s, int i, ReconPicture p, ReconMemory m)
@@ -852,7 +982,7 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>
-        /// Extra metres #69 moves an AI skirmisher company's front link target forward,
+        /// Extra metres SkirmisherScreenDistancePatch moves an AI skirmisher company's front link target forward,
         /// or 0 for vanilla's own (unitlinkdistance + skirmisherdistance). Only for a
         /// detached skirmisher company whose command group is in screen stance, or in
         /// attack stance while it moves, with nothing in its own range list

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -22,8 +23,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // distancetoenemytocancelinterruption / distancetoenemyforinterruption 52444-52446,
     // aiminmoraletodeployskirmishers 52606).
     //
-    // The posture producer consumes the probe nominations (task rewrite) and the
-    // look points (Scout/Probe targets); the facing pulse the entry bearing.
+    // The posture producer consumes the probe nominations (task rewrite), the probe
+    // holds (moves back over the ground gained are dropped) and the look points
+    // (Scout/Probe targets); the facing pulse the entry bearing.
     // Rollback: Enable Battle Reconnaissance = false.
     internal sealed class ReconIntentProducer : IBattleIntentProducer
     {
@@ -63,6 +65,18 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             x = 0f;
             z = 0f;
             return alliance >= 0 && alliance < _memory.Length && _memory[alliance].TryGetProbe(groupId, out x, out z);
+        }
+
+        /// <summary>
+        /// The ground a group holds after its probe while <paramref name="postureTask"/> is
+        /// still the ledger task it probed under (the posture pipeline drops moves back).
+        /// </summary>
+        internal static bool TryHold(int alliance, int groupId, CommandTaskType postureTask,
+            out float x, out float z, out float dirX, out float dirZ)
+        {
+            x = z = dirX = dirZ = 0f;
+            return alliance >= 0 && alliance < _memory.Length && CurrentSettings().Enabled &&
+                _memory[alliance].TryGetHold(groupId, postureTask, out x, out z, out dirX, out dirZ);
         }
 
         /// <summary>Where a Scout or Probe task looks: the probe nomination, else BattleRecon.LookPoint.</summary>
@@ -126,6 +140,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if ((own[i].Flags & UnitFlags.IsGroup) == 0) continue;
                 p.AiPool[i] = ArmyPostureInputsRuntime.InAiPool(alliance, own[i].InstanceId);
                 p.PostureMoved[i] = posture != null && posture.Groups[i].Submitted;
+                p.PostureTask[i] = posture != null && posture.Groups[i].Has ? posture.Groups[i].State.Task : CommandTaskType.None;
             }
         }
 
@@ -174,6 +189,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     OnceLog.Info("tactical-battle-core:probe-first-fire",
                         "[BattleRecon] first reconnaissance in force: a group probes its front band in the Probe phase");
                     Row(s, alliance, "ProbeNominated", "probe-phase", 0, 0f, 0f);
+                }
+                if ((r.Events & ReconEvents.ProbeHeld) != 0)
+                {
+                    OnceLog.Info("tactical-battle-core:probe-hold-first-fire",
+                        "[BattleRecon] first probe hold: a probe ended short of a superior enemy and holds the ground it gained");
+                    Row(s, alliance, "ProbeHeld", BattleRecon.HoldReason, 0, 0f, 0f);
                 }
             }
             catch (Exception ex)

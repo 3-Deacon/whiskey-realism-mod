@@ -382,18 +382,22 @@ namespace WhiskeyRealism.Tactical.Operations
             CommandNodeRole role,
             CommandTaskType task,
             bool hasFowVisibleEnemy,
-            bool underRecentFire)
+            bool underRecentFire,
+            bool sideDefending = false)
         {
             Role = role;
             Task = task;
             HasFowVisibleEnemy = hasFowVisibleEnemy;
             UnderRecentFire = underRecentFire;
+            SideDefending = sideDefending;
         }
 
         public CommandNodeRole Role { get; }
         public CommandTaskType Task { get; }
         public bool HasFowVisibleEnemy { get; }
         public bool UnderRecentFire { get; }
+        // BC9: the side is the battle's Defender (GetBattleType 2): never sent probing.
+        public bool SideDefending { get; }
     }
 
     public readonly struct TacticalGrandTacticianReconDecision
@@ -423,6 +427,10 @@ namespace WhiskeyRealism.Tactical.Operations
             // Probe target is BattleRecon.LookPoint, a bounded advance.
             if (IsScreenRole(input.Role) || input.Task == CommandTaskType.Screen)
                 return new TacticalGrandTacticianReconDecision(CommandTaskType.Screen, "infantry-screen-by-bounds");
+
+            // A Defender screens its unseen front instead of probing it.
+            if (input.SideDefending)
+                return new TacticalGrandTacticianReconDecision(CommandTaskType.Screen, "defender-screen");
 
             return new TacticalGrandTacticianReconDecision(CommandTaskType.Probe, "infantry-probe-by-bounds");
         }

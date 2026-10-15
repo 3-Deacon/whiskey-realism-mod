@@ -59,6 +59,16 @@ internal static class BattleReconTests
             ("probe stop is not swallowed while the group's regiments still walk", ProbeStopReachesWalkingRegiments),
             ("recon looks at the nearest remembered enemy when confidence fell after contact", RememberedEnemyTargetAfterContact),
             ("recon own rotated retry is not taken for a recall", RetryIsNotARecall),
+            ("director: a defender without contact screens, never probes", DirectorDefenderScreens),
+            ("director: meeting and attacker stances still scout by probes", DirectorMeetingAndAttackerProbe),
+            ("gt recon: a defender's unseen front is screened, not probed", GtReconDefenderScreens),
+            ("recon: a defender still scouts with its cavalry", DefenderStillScouts),
+            ("probe hold: weaker contact holds the ground gained", ProbeHoldsAfterWeakerContact),
+            ("probe hold: superior contact falls back to the ledger task", ProbeSuperiorContactNoHold),
+            ("probe hold: arrival holds the probe point", ProbeHoldsOnArrival),
+            ("probe hold: released when the ledger reassigns the group", ProbeHoldReleasedOnReassign),
+            ("probe hold: blocks only moves back over the ground gained", ProbeHoldBlocksOnlyBackward),
+            ("probe hold: a new nomination replaces the hold", ProbeHoldReplacedByNomination),
         });
     }
 
@@ -129,7 +139,7 @@ internal static class BattleReconTests
     private static ref UnitRecord Own(BattleSnapshot s, int id) => ref s.Own[s.IndexOfOwn(id)];
 
     private static ReconPicture Picture(BattleSnapshot s, float confidence = 0.1f, bool hadContact = true,
-        BattlePhase phase = BattlePhase.MainEffort, bool defending = false)
+        BattlePhase phase = BattlePhase.MainEffort, bool defending = false, CommandTaskType postureTask = CommandTaskType.FormUp)
     {
         var p = new ReconPicture();
         p.BeginTick(s.OwnCount);
@@ -138,7 +148,11 @@ internal static class BattleReconTests
         p.Phase = phase;
         p.SideDefending = defending;
         for (int i = 0; i < s.OwnCount; i++)
-            if ((s.Own[i].Flags & UnitFlags.IsGroup) != 0 && s.Own[i].InstanceId != InfDivision) p.AiPool[i] = true;
+        {
+            if ((s.Own[i].Flags & UnitFlags.IsGroup) == 0 || s.Own[i].InstanceId == InfDivision) continue;
+            p.AiPool[i] = true;
+            p.PostureTask[i] = postureTask;
+        }
         return p;
     }
 
@@ -716,13 +730,15 @@ internal static class BattleReconTests
         AssertEqual("no-contact-scout", decision.Reason, "reason");
     }
 
-    private static CommandDoctrineOrder[] Orders(TacticalOperationShape shape, params CommandNodeRole[] roles)
+    private static CommandDoctrineOrder[] Orders(TacticalOperationShape shape, params CommandNodeRole[] roles) =>
+        Orders(new OperationRecord(shape, TacticalOperationPhase.Scouting, "obj-1", 500f), NoEnemyObjective(0.4f), roles);
+
+    private static CommandDoctrineOrder[] Orders(OperationRecord operation, BattlefieldObjectiveEstimate objective, params CommandNodeRole[] roles)
     {
         var nodes = new CommandNodeOperationalState[roles.Length];
         for (int i = 0; i < roles.Length; i++)
             nodes[i] = new CommandNodeOperationalState("node-" + (i + 1), CommandEchelonKind.DivisionLike, roles[i], CommandTaskType.FormUp, CommandTaskState.Planning);
-        var operation = new OperationRecord(shape, TacticalOperationPhase.Scouting, "obj-1", 500f);
-        var picture = new BattlefieldPictureSnapshot(new[] { NoEnemyObjective(0.4f) });
+        var picture = new BattlefieldPictureSnapshot(new[] { objective });
         return CommandDoctrineAssignment.Build(nodes, operation, picture, 20000f, 100f, 0.3f);
     }
 
@@ -861,5 +877,158 @@ internal static class BattleReconTests
         Own(t, scout).LastWaypointZ = -500f;
         rig.Plan(t, WithEntry(Picture(t), 0f, -200f, -1.0));
         AssertEqual(ReconLeg.Outbound, rig.Memory.Leg, "our own retry is not a recall");
+    }
+
+    // ------------------------------------------------------------------ defender stance
+
+    // A screen, not a formed line: enemy present, confidence above the recon floor, main line not exposed.
+    private static BattlefieldObjectiveEstimate ScreenContactObjective() =>
+        new BattlefieldObjectiveEstimate("obj-1", TacticalObjectiveType.VictoryPoint, 300f, 0.4f, false, 0.8f, 0f, 0f, 0f, 0f);
+
+    private static TacticalOperationDirectorDecision DecideFor(BattleStance stance, BattlefieldObjectiveEstimate objective) =>
+        TacticalOperationDirector.Decide(TacticalOperationDirectorInput.ForTest(OperationRecord.Noop, 100f, 20000f, 0.3f, 0.5f, 0.5f,
+            new[] { objective }).WithStance(stance));
+
+    private static void AssertNoProbe(CommandDoctrineOrder[] orders, string label)
+    {
+        for (int i = 0; i < orders.Length; i++)
+            AssertTrue(orders[i].Task != CommandTaskType.Probe, label + ": node " + (i + 1) + " is " + orders[i].Task);
+    }
+
+    private static void DirectorDefenderScreens()
+    {
+        CommandNodeRole[] roles = { CommandNodeRole.MainEffort, CommandNodeRole.ScreeningForce, CommandNodeRole.SupportingAttack, CommandNodeRole.FixingForce };
+        TacticalOperationDirectorDecision none = DecideFor(BattleStance.Defender, NoEnemyObjective(0.4f));
+        AssertEqual(TacticalOperationPhase.Scouting, none.Operation.Phase, "no contact: scouting, not a commit");
+        AssertEqual(TacticalOperationShape.DefensiveNetwork, none.Operation.Shape, "a defender's scouting is not sent forward");
+        AssertEqual("defender-screen", none.Reason, "reason");
+        CommandDoctrineOrder[] orders = Orders(none.Operation, NoEnemyObjective(0.4f), roles);
+        AssertNoProbe(orders, "defender, no contact");
+        AssertEqual(CommandTaskType.Screen, orders[1].Task, "the screen screens");
+
+        TacticalOperationDirectorDecision screen = DecideFor(BattleStance.Defender, ScreenContactObjective());
+        AssertEqual(TacticalOperationShape.DefensiveNetwork, screen.Operation.Shape, "reconnaissance contact: still no forward shape");
+        AssertNoProbe(Orders(screen.Operation, ScreenContactObjective(), roles), "defender, reconnaissance contact");
+    }
+
+    private static void DirectorMeetingAndAttackerProbe()
+    {
+        foreach (BattleStance stance in new[] { BattleStance.Meeting, BattleStance.Attacker })
+        {
+            TacticalOperationDirectorDecision none = DecideFor(stance, NoEnemyObjective(0.4f));
+            AssertEqual(TacticalOperationShape.FixAndFlank, none.Operation.Shape, stance + ": unchanged shape");
+            AssertEqual("no-contact-scout", none.Reason, stance + ": unchanged reason");
+            AssertEqual(CommandTaskType.Probe, Orders(none.Operation, NoEnemyObjective(0.4f), CommandNodeRole.MainEffort)[0].Task, stance + ": main effort probes");
+            AssertEqual("recon-contact", DecideFor(stance, ScreenContactObjective()).Reason, stance + ": reconnaissance contact unchanged");
+        }
+    }
+
+    private static void GtReconDefenderScreens()
+    {
+        TacticalGrandTacticianReconDecision d = TacticalGrandTacticianReconDoctrine.Decide(
+            new TacticalGrandTacticianReconInput(CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, hasFowVisibleEnemy: false,
+                underRecentFire: false, sideDefending: true));
+        AssertEqual(CommandTaskType.Screen, d.Task, "a defender screens the unseen front instead of probing it");
+    }
+
+    private static void DefenderStillScouts()
+    {
+        var s = Field(3.0);
+        var rig = new Rig();
+        rig.Plan(s, WithEntry(Picture(s, defending: true), 0f, -200f, -1.0));
+        AssertEqual(ReconLeg.Outbound, rig.Memory.Leg, "a defender's cavalry still rides to look");
+    }
+
+    // ------------------------------------------------------------------ probe hold
+
+    private static Rig Probing()
+    {
+        var s = Field(3.0);
+        var rig = new Rig();
+        rig.Plan(s, Picture(s, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertTrue(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "nominated");
+        return rig;
+    }
+
+    private static void ProbeHoldsAfterWeakerContact()
+    {
+        var rig = Probing();
+        var t = Field(3.05);
+        Own(t, InfBrigade).Z = -900f;
+        Own(t, InfBrigade).RegimentPaths = 1;
+        SeeEnemy(t, 400f, -720f, 500f, 3.05); // 180 m, weaker than the brigade's 1200
+        rig.Plan(t, Picture(t, confidence: 0.6f, phase: BattlePhase.Probe, postureTask: CommandTaskType.Probe));
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "the probe is over");
+        AssertTrue(rig.Sink.TryFind(InfBrigade, OrderChannel.Stop, out _), "stopped on contact");
+        AssertTrue(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.FormUp, out float x, out float z, out float dx, out float dz), "holds");
+        AssertNear(400f, x, 0.5f, "where the contact stopped it");
+        AssertNear(-900f, z, 0.5f, "100 m gained");
+        AssertNear(1f, dz, 0.01f, "the probe's advance direction");
+        AssertFalse(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.Screen, out _, out _, out _, out _), "only for the ledger task it was nominated under");
+        AssertTrue((rig.Last.Events & ReconEvents.ProbeHeld) != 0, "hold event");
+    }
+
+    private static void ProbeSuperiorContactNoHold()
+    {
+        var rig = Probing();
+        var t = Field(3.05);
+        Own(t, InfBrigade).Z = -900f;
+        Own(t, InfBrigade).RegimentPaths = 1;
+        SeeEnemy(t, 400f, -720f, 1200f, 3.05); // at least as strong
+        rig.Plan(t, Picture(t, confidence: 0.6f, phase: BattlePhase.Probe, postureTask: CommandTaskType.Probe));
+        AssertTrue(rig.Sink.TryFind(InfBrigade, OrderChannel.Stop, out _), "stopped on contact");
+        AssertFalse(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.FormUp, out _, out _, out _, out _), "falls back to its ledger task");
+    }
+
+    private static void ProbeHoldsOnArrival()
+    {
+        var rig = Probing();
+        var t = Field(3.1);
+        Own(t, InfBrigade).Z = -800f;
+        rig.Plan(t, Picture(t, confidence: 0.6f, phase: BattlePhase.Probe, postureTask: CommandTaskType.Probe));
+        AssertEqual(0, rig.Sink.CountOf(OrderChannel.Stop), "standing: no stop");
+        AssertTrue(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.FormUp, out _, out float z, out _, out _), "holds the probe point");
+        AssertNear(-800f, z, 0.5f, "the probe point");
+    }
+
+    private static void ProbeHoldReleasedOnReassign()
+    {
+        var rig = Probing();
+        var t = Field(3.1);
+        Own(t, InfBrigade).Z = -800f;
+        rig.Plan(t, Picture(t, confidence: 0.6f, phase: BattlePhase.Probe, postureTask: CommandTaskType.Probe));
+        var u = Field(3.15);
+        Own(u, InfBrigade).Z = -800f;
+        rig.Plan(u, Picture(u, confidence: 0.6f, phase: BattlePhase.MainEffort, postureTask: CommandTaskType.FormUp));
+        AssertTrue(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.FormUp, out _, out _, out _, out _), "same ledger task, other phase: still held");
+        rig.Plan(u, Picture(u, confidence: 0.6f, phase: BattlePhase.MainEffort, postureTask: CommandTaskType.AttackObjective));
+        AssertFalse(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.FormUp, out _, out _, out _, out _), "the ledger reassigned it: released");
+        AssertFalse(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.AttackObjective, out _, out _, out _, out _), "for good");
+    }
+
+    private static void ProbeHoldBlocksOnlyBackward()
+    {
+        AssertTrue(BattleRecon.HoldBlocks(PostureExecutionTarget.AssemblyArea, 400f, -800f, 0f, 1f, 400f, -1000f), "back to form-up: held");
+        AssertTrue(BattleRecon.HoldBlocks(PostureExecutionTarget.DoctrinePrimaryTarget, 400f, -800f, 0f, 1f, 300f, -900f), "back and aside: held");
+        AssertFalse(BattleRecon.HoldBlocks(PostureExecutionTarget.DoctrinePrimaryTarget, 400f, -800f, 0f, 1f, 400f, -600f), "forward: goes");
+        AssertFalse(BattleRecon.HoldBlocks(PostureExecutionTarget.AssemblyArea, 400f, -800f, 0f, 1f, 500f, -830f), "a shift along the line within the dedupe radius: goes");
+        AssertFalse(BattleRecon.HoldBlocks(PostureExecutionTarget.DoctrineFallbackTarget, 400f, -800f, 0f, 1f, 400f, -1000f), "a break-off stays a break-off");
+        AssertFalse(BattleRecon.HoldBlocks(PostureExecutionTarget.FallbackLine, 400f, -800f, 0f, 1f, 400f, -1000f), "a fallback stays a fallback");
+        AssertFalse(BattleRecon.HoldBlocks(PostureExecutionTarget.RecoveryPath, 400f, -800f, 0f, 1f, 400f, -1000f), "a recovery stays a recovery");
+    }
+
+    private static void ProbeHoldReplacedByNomination()
+    {
+        var rig = Probing();
+        var t = Field(3.1);
+        Own(t, InfBrigade).Z = -800f;
+        rig.Plan(t, Picture(t, confidence: 0.6f, phase: BattlePhase.Probe, postureTask: CommandTaskType.Probe));
+        AssertTrue(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.FormUp, out _, out _, out _, out _), "held");
+        var v = Field(4.15);
+        Own(v, InfBrigade).Z = -800f;
+        rig.Plan(v, Picture(v, confidence: 0.6f, phase: BattlePhase.Probe));
+        AssertTrue(rig.Memory.TryGetProbe(InfBrigade, out _, out float z), "probes the next bound after the hour");
+        AssertNear(-600f, z, 0.5f, "from the ground gained");
+        AssertFalse(rig.Memory.TryGetHold(InfBrigade, CommandTaskType.FormUp, out _, out _, out _, out _), "the new probe replaces the hold");
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical.Operations
 {
@@ -12,7 +13,8 @@ namespace WhiskeyRealism.Tactical.Operations
             float aggression01,
             float caution01,
             BattlefieldObjectiveEstimate[] objectives,
-            float operationAssignedStrength = 0f)
+            float operationAssignedStrength = 0f,
+            BattleStance stance = BattleStance.Meeting)
         {
             Current = current;
             CurrentTimeSeconds = SanitizeFloorZero(currentTimeSeconds);
@@ -22,6 +24,7 @@ namespace WhiskeyRealism.Tactical.Operations
             Caution01 = Clamp01(caution01);
             Objectives = objectives ?? Array.Empty<BattlefieldObjectiveEstimate>();
             OperationAssignedStrength = SanitizeFloorZero(operationAssignedStrength);
+            Stance = stance;
         }
 
         public OperationRecord Current { get; }
@@ -35,6 +38,9 @@ namespace WhiskeyRealism.Tactical.Operations
         // attack/support (summed by the coordinator from vanilla regiments). 0 = no
         // assignment yet (e.g. the first tick after commitment) -> army strength.
         public float OperationAssignedStrength { get; }
+        // The side's battle stance (vanilla GetBattleType via
+        // ArmyEvidenceBuilder.ReadBattleStance). A Defender is never sent probing.
+        public BattleStance Stance { get; }
 
         public static TacticalOperationDirectorInput ForTest(
             OperationRecord current,
@@ -65,7 +71,22 @@ namespace WhiskeyRealism.Tactical.Operations
                 Aggression01,
                 Caution01,
                 Objectives,
-                assignedStrength);
+                assignedStrength,
+                Stance);
+        }
+
+        public TacticalOperationDirectorInput WithStance(BattleStance stance)
+        {
+            return new TacticalOperationDirectorInput(
+                Current,
+                CurrentTimeSeconds,
+                OwnStrength,
+                ReserveFraction,
+                Aggression01,
+                Caution01,
+                Objectives,
+                OperationAssignedStrength,
+                stance);
         }
 
         private static float SanitizeFloorZero(float value)
@@ -165,8 +186,26 @@ namespace WhiskeyRealism.Tactical.Operations
             // An operation already active on that objective keeps the shipped rules
             // (a committed advance on an empty known map objective continues,
             // ShouldCancelCommittedContact).
-            if (primary.EnemyStrength <= 0f &&
-                !(activeOperation && ObjectiveIdMatches(input.Current.PrimaryObjectiveId, primary.ObjectiveId)))
+            bool noContact = primary.EnemyStrength <= 0f &&
+                !(activeOperation && ObjectiveIdMatches(input.Current.PrimaryObjectiveId, primary.ObjectiveId));
+
+            // BC9: a Defender (vanilla GetBattleType 2) scouts without being sent
+            // forward: the DefensiveNetwork shape keeps CommandDoctrineAssignment off
+            // the Probe tasks, so its screens screen and the recon producer's cavalry
+            // looks (information-gathering, not an attack).
+            if (input.Stance == BattleStance.Defender &&
+                (noContact || objectiveGate == TacticalObjectiveGate.ReconnaissanceContact))
+            {
+                return new TacticalOperationDirectorDecision(
+                    new OperationRecord(
+                        TacticalOperationShape.DefensiveNetwork,
+                        TacticalOperationPhase.Scouting,
+                        primary.ObjectiveId,
+                        input.CurrentTimeSeconds + 420f),
+                    "defender-screen");
+            }
+
+            if (noContact)
             {
                 return new TacticalOperationDirectorDecision(
                     new OperationRecord(

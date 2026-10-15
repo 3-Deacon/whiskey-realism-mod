@@ -10,7 +10,7 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // #69 — Vanilla Regiment.GetUnitLinkData (private, 124208-124390) computes where a
+    // SkirmisherScreenDistancePatch (ordinal assigned at merge) — Vanilla Regiment.GetUnitLinkData (private, 124208-124390) computes where a
     // linked unit belongs: for a skirmisher company linked to the front of its parent
     // regiment (linkedposition 0) that is unitlinkdistance (10, unitprefs 1069) +
     // skirmisherdistance (20, unitprefs 864) = 30 m ahead (124300-124306, 124359), and

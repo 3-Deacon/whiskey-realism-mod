@@ -132,7 +132,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        internal void StoreDoctrineForCommandStates(CommandNodeOperationalState[] commandStates)
+        // stance: the side's battle stance (ArmyEvidenceBuilder.ReadBattleStance, cached
+        // by the army from its force-balance evidence); a Defender is never sent probing.
+        internal void StoreDoctrineForCommandStates(CommandNodeOperationalState[] commandStates, BattleStance stance)
         {
             if (!RunsLedger)
             {
@@ -148,7 +150,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _currentForce.ReserveFraction,
                 Clamp01((_currentPersonality.Aggression + 1f) * 0.5f),
                 Clamp01((_currentPersonality.Caution + 1f) * 0.5f),
-                picture.Objectives).WithOperationAssignedStrength(_operationAssignedStrength));
+                picture.Objectives).WithOperationAssignedStrength(_operationAssignedStrength).WithStance(stance));
 
             _currentOperation = decision.Operation;
             StoreDoctrine(

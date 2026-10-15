@@ -451,7 +451,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             TacticalGrandTacticianReconDecision recon = TacticalGrandTacticianReconDoctrine.Decide(
-                new TacticalGrandTacticianReconInput(state.Role, state.Task, visibleEnemy, underRecentFire: closeEngaged));
+                new TacticalGrandTacticianReconInput(state.Role, state.Task, visibleEnemy, underRecentFire: closeEngaged,
+                    sideDefending: ArmyPostureInputsRuntime.SideDefending(s.Alliance)));
             if (recon.Task != state.Task)
             {
                 state = WithRoleAndTask(state, state.Role, recon.Task);
@@ -483,6 +484,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 state = WithRoleAndTask(state, state.Role, overridden);
                 if (hasOrder) order = order.WithTask(overridden, overrideReason);
             }
+
+            // BC9: a probe that ended short of a superior enemy holds the ground it gained
+            // while the ledger keeps the task it probed under (BattleRecon.ProbeTick).
+            float holdX = 0f, holdZ = 0f, holdDirX = 0f, holdDirZ = 0f;
+            bool holding = recordTick && !probe && ReconIntentProducer.TryHold(s.Alliance, rec.InstanceId, state.Task,
+                out holdX, out holdZ, out holdDirX, out holdDirZ);
 
             int targetFormation = rec.UnitTyp > TacticalUnitType.MaxCombat
                 ? CommandFormationCorrection.TargetFormationForTask(state.Task, rec.Formation)
@@ -528,6 +535,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 PostureTelemetry.Group(s, i, reason, state, decision, 0, "nav-budget-deferred");
                 return false;
             }
+            string targetReason = hasTarget ? decision.Reason : "target-unresolved";
+            if (hasTarget && holding && BattleRecon.HoldBlocks(decision.Target, holdX, holdZ, holdDirX, holdDirZ, x, z))
+            {
+                // No move back over the probe's ground: the move intents need a target.
+                hasTarget = false;
+                targetReason = BattleRecon.HoldReason;
+            }
 
             // #61 SetFormation: threat facing for holding tasks and the refused
             // flank in contact, on the formation channels.
@@ -569,7 +583,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (shapes && needsFacing && rec.UnitTyp > TacticalUnitType.MaxCombat)
                 submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, heading, state.Task, refuse,
                     priority, source, reason, t.RegimentQueue, t.Regiments);
-            PostureTelemetry.Group(s, i, reason, state, decision, submitted, hasTarget ? decision.Reason : "target-unresolved");
+            PostureTelemetry.Group(s, i, reason, state, decision, submitted, targetReason);
             return submitted > 0;
         }
 
