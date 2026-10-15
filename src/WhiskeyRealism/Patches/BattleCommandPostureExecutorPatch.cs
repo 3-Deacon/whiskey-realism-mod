@@ -1509,11 +1509,13 @@ namespace WhiskeyRealism.Patches
 
             bool closeEngaged = groupCloseEngaged || HasCloseEngagement(unit);
             bool flankRisk = groupFlankRisk || HasLocalFlankRisk(unit);
+            // R9: regiments only rotate — the current formation is passed as
+            // the target so the doctrine never asks for a formation change.
             if (!TryEvaluateFacingPulse(
                     unit,
                     state.Task,
                     TacticalFacingPulseScope.Regiment,
-                    targetFormation: 0,
+                    targetFormation: SafeFormation(unit),
                     closeEngaged,
                     flankRisk,
                     out TacticalFacingPulseDecision decision,
@@ -1570,24 +1572,26 @@ namespace WhiskeyRealism.Patches
                 HasPendingOrder(unit, allowStaleQueuedBypass: true),
                 HasActiveMoveMakingProgress(unit),
                 HasRecentFacingPulse(instanceId, cooldown),
-                FacingRefreshToleranceDegrees));
+                FacingRefreshToleranceDegrees,
+                isArtillery: IsArtilleryUnit(unit),
+                threatWithinFireRange: ThreatWithinFireRange(unit)));
 
             return decision.Action != TacticalFacingPulseAction.NoWrite || source != TacticalFacingThreatSource.None;
         }
 
+        // Vanilla turns a single unit toward an enemy with RotateRegiment
+        // (UnlimberArtilleryAIMicro 3491) — no formation change. Artillery
+        // never reaches here (doctrine: artillery-vanilla).
         private static bool ApplyRegimentFacingPulse(Regiment unit, TacticalFacingPulseDecision decision)
         {
-            if (unit == null || !decision.ShouldWrite) return false;
-            if (decision.TargetFormation < 0 || decision.TargetFormation > 4) return false;
+            if (unit == null || decision.Action != TacticalFacingPulseAction.CorrectFacing) return false;
+            if (IsArtilleryUnit(unit)) return false;
+            if (!WhiskeyRealism.Tactical.TacticalWriteGuard.CanWrite(unit)) return false;
 
             try
             {
-                unit.ChangeRegimentFormation(GameVars.SetFormationParam(
-                    decision.TargetFormation,
-                    manualset: true,
-                    newmounted: -1,
-                    manualrotationtarget: decision.TargetFacingDegrees,
-                    setalsoformationorderedvariable: true));
+                if (unit.regimentpaths > 0 || unit.withinrotationprocess || (UnityEngine.Object)unit.chargetarget != null) return false;
+                unit.RotateRegiment(decision.TargetFacingDegrees);
                 return true;
             }
             catch (Exception ex)
@@ -3289,6 +3293,21 @@ namespace WhiskeyRealism.Patches
             {
                 return false;
             }
+        }
+
+        private static bool IsArtilleryUnit(Regiment unit)
+        {
+            try { return unit != null && (unit.unittyp == TacticalUnitType.Artillery || unit.guns > 0); }
+            catch { return true; }
+        }
+
+        // Vanilla UnlimberArtilleryAIMicro only turns toward
+        // GetClosestEnemyUnit(firerange) (3487).
+        private static bool ThreatWithinFireRange(Regiment unit)
+        {
+            float range = SafeFireRange(unit);
+            float distance = SafeEnemyDistance(unit);
+            return range > 0f && distance > 0f && distance <= range;
         }
 
         private static bool IsCombatRegiment(Regiment unit)

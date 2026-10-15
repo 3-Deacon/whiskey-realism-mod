@@ -46,7 +46,9 @@ namespace WhiskeyRealism.Tactical.Operations
             bool pendingOrder,
             bool activeMove,
             bool recentPulse,
-            float toleranceDegrees)
+            float toleranceDegrees,
+            bool isArtillery = false,
+            bool threatWithinFireRange = true)
         {
             Scope = scope;
             Task = task;
@@ -64,6 +66,8 @@ namespace WhiskeyRealism.Tactical.Operations
             ActiveMove = activeMove;
             RecentPulse = recentPulse;
             ToleranceDegrees = Math.Max(0f, Sanitize(toleranceDegrees));
+            IsArtillery = isArtillery;
+            ThreatWithinFireRange = threatWithinFireRange;
         }
 
         public TacticalFacingPulseScope Scope { get; }
@@ -82,6 +86,8 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool ActiveMove { get; }
         public bool RecentPulse { get; }
         public float ToleranceDegrees { get; }
+        public bool IsArtillery { get; }
+        public bool ThreatWithinFireRange { get; }
 
         internal bool HasValidTargetFacing => HasThreatBearing && IsFinite(TargetFacingDegrees);
 
@@ -132,6 +138,13 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
+    // R9 (2026-10-14): regiment-scope pulses mirror vanilla
+    // UnlimberArtilleryAIMicro (3482-3494): only a unit that is not moving
+    // (regimentpaths <= 0) turns, only toward an enemy within its fire range
+    // (GetClosestEnemyUnit(firerange)), and the turn is RotateRegiment — no
+    // formation change. Batteries are left to vanilla: formation 0 on a
+    // limbered battery unlimbers it (ChangeRegimentFormation 135446). A
+    // withdrawing unit is never stopped to face (RotateRegiment → StopRegiment).
     public static class TacticalFacingPulseDoctrine
     {
         public static TacticalFacingPulseDecision Decide(TacticalFacingPulseInput input)
@@ -153,6 +166,17 @@ namespace WhiskeyRealism.Tactical.Operations
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "no-threat-bearing");
             if (!CommandFormationCorrection.ShouldFaceThreat(input.Task) && !input.CloseEngaged && !input.FlankRisk)
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "task-does-not-face-threat");
+            if (input.Scope == TacticalFacingPulseScope.Regiment)
+            {
+                if (input.IsArtillery)
+                    return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "artillery-vanilla");
+                if (!input.ThreatWithinFireRange)
+                    return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "threat-out-of-range");
+                if (input.Task == CommandTaskType.FallBackToLine)
+                    return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "withdrawing");
+                if (input.ActiveMove)
+                    return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "active-move");
+            }
             if (input.PendingOrder)
                 return TacticalFacingPulseDecision.NoWrite(input.TargetFacingDegrees, "pending-order");
             if (input.ActiveMove && !input.FlankRisk)

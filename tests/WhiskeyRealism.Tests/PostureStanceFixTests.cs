@@ -47,6 +47,12 @@ internal static class PostureStanceFixTests
         Pass("formation policy waits while moving or in cover", FormationPolicyWaitsWhileMovingOrInCover);
         Pass("formation policy cooldown is longer under fire", FormationPolicyCooldownLongerUnderFire);
         Pass("vanilla SetFormation index round-trips group formations", VanillaSetFormationIndexRoundTrips);
+
+        // R9
+        Pass("regiment facing pulse leaves artillery to vanilla", RegimentFacingPulseLeavesArtilleryToVanilla);
+        Pass("regiment facing pulse requires a threat inside fire range", RegimentFacingPulseRequiresFireRange);
+        Pass("regiment facing pulse never stops a moving or withdrawing unit", RegimentFacingPulseNeverStopsMovingUnit);
+        Pass("regiment facing pulse with current formation only rotates", RegimentFacingPulseOnlyRotates);
     }
 
     private static void Pass(string name, Action test)
@@ -389,5 +395,47 @@ internal static class PostureStanceFixTests
         for (int f = 0; f <= 4; f++)
             AssertEqual(f, VanillaGroupRemap(CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(f)), "group formation " + f);
         AssertEqual(-1, CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(7), "invalid");
+    }
+
+    private static TacticalFacingPulseDecision Pulse(
+        CommandTaskType task = CommandTaskType.HoldObjective,
+        int current = 3, int target = 3,
+        bool flankRisk = false, bool activeMove = false,
+        bool isArtillery = false, bool inRange = true)
+    {
+        return TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
+            TacticalFacingPulseScope.Regiment, task, current, target,
+            currentFacingDegrees: 139f, targetFacingDegrees: 45f,
+            hasThreatBearing: true, threatSource: TacticalFacingThreatSource.Visible,
+            closeEngaged: true, flankRisk: flankRisk, playerProtected: false, routed: false,
+            pendingOrder: false, activeMove: activeMove, recentPulse: false, toleranceDegrees: 15f,
+            isArtillery: isArtillery, threatWithinFireRange: inRange));
+    }
+
+    private static void RegimentFacingPulseLeavesArtilleryToVanilla()
+    {
+        var d = Pulse(current: 3, target: 0, isArtillery: true);
+        AssertFalse(d.ShouldWrite, "never formation 0 on a battery (unlimbers, 135446)");
+        AssertEqual("artillery-vanilla", d.Reason, "reason");
+    }
+
+    private static void RegimentFacingPulseRequiresFireRange()
+    {
+        var d = Pulse(inRange: false);
+        AssertFalse(d.ShouldWrite, "vanilla only turns to an enemy within fire range (3487)");
+        AssertEqual("threat-out-of-range", d.Reason, "reason");
+    }
+
+    private static void RegimentFacingPulseNeverStopsMovingUnit()
+    {
+        AssertFalse(Pulse(activeMove: true, flankRisk: true).ShouldWrite, "RotateRegiment stops a moving unit");
+        AssertFalse(Pulse(task: CommandTaskType.FallBackToLine).ShouldWrite, "a withdrawing unit keeps moving");
+    }
+
+    private static void RegimentFacingPulseOnlyRotates()
+    {
+        var d = Pulse(current: 3, target: 3);
+        AssertEqual(TacticalFacingPulseAction.CorrectFacing, d.Action, "rotate only");
+        AssertEqual(3, d.TargetFormation, "formation untouched");
     }
 }
