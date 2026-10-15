@@ -621,8 +621,6 @@ static class Program
             ("tactical wl guard allows charge cancellation", TacticalWlGuardAllowsChargeCancellation),
             ("tactical wl guard denies feud move with attached subordinate", TacticalWlGuardDeniesFeudMoveWithAttachedSubordinate),
             ("tactical wl guard allows ai chain feud move", TacticalWlGuardAllowsAiChainFeudMove),
-            ("tactical wl guard denies objective advance with attached subordinate", TacticalWlGuardDeniesObjectiveAdvanceWithAttachedSubordinate),
-            ("tactical wl guard allows ai chain objective advance", TacticalWlGuardAllowsAiChainObjectiveAdvance),
             ("operational startup gate fires once when runtime becomes ready same day", OperationalStartupGateFiresOnceWhenRuntimeBecomesReadySameDay),
             ("wl career start gate defers until player command is selected", WlCareerStartGateDefersUntilCommandSelected),
             ("wl diary startup gate defers until diary dependencies are ready", WlDiaryStartupGateDefersUntilReady),
@@ -10277,34 +10275,6 @@ static class Program
             attachedUnitUnderCommander: false);
 
         AssertTrue(decision.Allow, "AI-chain feud movement should remain vanilla");
-        AssertEqual("ai-chain", decision.Reason, "reason");
-    }
-
-    private static void TacticalWlGuardDeniesObjectiveAdvanceWithAttachedSubordinate()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: true,
-            dlcScenarioActive: true,
-            action: TacticalWlGuardAction.ObjectiveChainAdvance,
-            unitUnderCommander: false,
-            groupUnderCommander: false,
-            attachedUnitUnderCommander: true);
-
-        AssertTrue(!decision.Allow, "objective-chain advance should be denied when the center group contains a player-subordinate unit");
-        AssertEqual("player-subordinate-attached", decision.Reason, "reason");
-    }
-
-    private static void TacticalWlGuardAllowsAiChainObjectiveAdvance()
-    {
-        var decision = TacticalWlActionGuard.Decide(
-            configEnabled: true,
-            dlcScenarioActive: true,
-            action: TacticalWlGuardAction.ObjectiveChainAdvance,
-            unitUnderCommander: false,
-            groupUnderCommander: false,
-            attachedUnitUnderCommander: false);
-
-        AssertTrue(decision.Allow, "AI-chain objective movement should remain vanilla");
         AssertEqual("ai-chain", decision.Reason, "reason");
     }
 

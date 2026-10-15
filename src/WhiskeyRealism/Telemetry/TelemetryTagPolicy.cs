@@ -115,7 +115,6 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalCommandTreeProbeHealth", TelemetryCategory.Health);
             AddTactical("TacticalPlaybookFactionBias", TelemetryCategory.Decision);
             AddTactical("TacticalPlayerProtected", TelemetryCategory.Gate);
-            AddTactical("TacticalObjectiveGuard", TelemetryCategory.Gate);
             AddTactical("TacticalObjectiveMove", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveMutation", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveRecordsParityMismatch", TelemetryCategory.Gate);
