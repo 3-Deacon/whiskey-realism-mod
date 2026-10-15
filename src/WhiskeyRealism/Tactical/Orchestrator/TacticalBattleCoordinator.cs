@@ -105,6 +105,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return workerRunning && heavyBuiltThisTick;
         }
 
+        /// <summary>
+        /// Operations-ledger clock (T8): battle seconds from GameVars.currenttimefromstart
+        /// (battle hours = Hour + battlepasseddays*24, SetTimeVariables 93545), so the
+        /// director's commit windows (420/900/1200 s) span the same battle time at any
+        /// time compression. Previously realtimeSinceStartup: 15 battle-minutes at 1x
+        /// but ~5 battle-hours at 20x.
+        /// </summary>
+        internal static float LedgerClockSecondsFromBattleHours(float battleHours)
+        {
+            if (float.IsNaN(battleHours) || float.IsInfinity(battleHours) || battleHours < 0f) return 0f;
+            return battleHours * 3600f;
+        }
+
         // ---- Pure helpers used by the runtime partial for telemetry ----
 
         internal static int MatchedCount(TacticalCommanderRoster roster, int alliance)

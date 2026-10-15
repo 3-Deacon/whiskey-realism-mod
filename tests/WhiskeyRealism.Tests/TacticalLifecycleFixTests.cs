@@ -38,6 +38,8 @@ internal static class TacticalLifecycleFixTests
         Pass("t14 confidence below exit floor after window downgrades", T14ConfidenceBelowExitFloorDowngrades);
         Pass("t14 commit decision uses army before assignment", T14CommitOddsUseAssignedStrength);
         Pass("t14 soft abort odds use operation assigned strength", T14SoftAbortOddsUseAssignedStrength);
+
+        Pass("t8 ledger clock is battle seconds", T8LedgerClockIsBattleSeconds);
     }
 
     private static void Pass(string name, Action test)
@@ -360,5 +362,16 @@ internal static class TacticalLifecycleFixTests
         var d = WhiskeyRealism.Tactical.Operations.TacticalOperationDirector.Decide(input.WithOperationAssignedStrength(600f));
         TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.SoftAbort, d.Operation.Phase, "phase");
         TestHarness.AssertEqual("odds-collapse", d.Reason, "reason");
+    }
+
+    // ---- T8 ledger clock ----
+
+    private static void T8LedgerClockIsBattleSeconds()
+    {
+        // GameVars.currenttimefromstart is battle hours (Hour + battlepasseddays*24,
+        // SetTimeVariables 93545); commit windows (420/900/1200 s) are battle seconds.
+        TestHarness.AssertEqual(30600f, TacticalBattleCoordinator.LedgerClockSecondsFromBattleHours(8.5f), "8.5h");
+        TestHarness.AssertEqual(0f, TacticalBattleCoordinator.LedgerClockSecondsFromBattleHours(float.NaN), "nan");
+        TestHarness.AssertEqual(0f, TacticalBattleCoordinator.LedgerClockSecondsFromBattleHours(-1f), "negative");
     }
 }

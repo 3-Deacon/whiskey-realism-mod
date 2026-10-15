@@ -782,7 +782,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     TacticalCommanderMode mode = plugin.TacticalCommanderModeValue;
                     if (!TacticalCommanderModePolicy.RunsLedger(mode))
                     {
-                        side.OperationsLedger.SetRuntimeClock(SafeRealtimeSeconds());
+                        side.OperationsLedger.SetRuntimeClock(LedgerClockSecondsFromBattleHours(SafeCurrentBattleHours()));
                         side.TickOperationsLedger(
                             mode,
                             Array.Empty<ObjectiveRecord>(),
@@ -863,7 +863,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var strategic = BuildStrategicBattleIntentSnapshot(side, bundleForStrategic);
                     var force = new ForceAvailabilitySnapshot(forceMain, forceReserveAvail);
 
-                    side.OperationsLedger.SetRuntimeClock(SafeRealtimeSeconds());
+                    side.OperationsLedger.SetRuntimeClock(LedgerClockSecondsFromBattleHours(SafeCurrentBattleHours()));
                     side.TickOperationsLedger(
                         mode,
                         objectivesToUse,
