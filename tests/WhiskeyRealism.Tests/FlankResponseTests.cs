@@ -77,16 +77,12 @@ internal static partial class FlankResponseTests
         return sink.Intents[0];
     }
 
-    // The executor's formation policy input for the group (OrderExecutorRuntime.IssueFormation).
+    // The executor's formation verdict for the group (OrderExecutor.DecideFormation, what OrderExecutorRuntime.IssueFormation issues).
     private static FormationWriteDecision DecideFormation(BattleSnapshot s, in BattleOrderIntent w, float combatStatusSubordinates)
     {
         // OrderExecutorRuntime.GroupRangeReach is runtime-only; vanilla's reach is at least the 250 m close-contact range.
         float enemiesInRange = BattleWriterPolicy.SnapshotEnemyStrengthInRange(s, 0, 250f);
-        return CommandFormationWritePolicy.Decide(new FormationWriteInput(
-            needsFormation: s.Own[0].Formation != w.Value,
-            needsFacing: false,
-            needsRefuse: w.Refuse != RefuseFlank.None,
-            combatStatusSubordinates, 0f, 0, 0f, 2.0f, -1f, enemiesInRange));
+        return OrderExecutor.DecideFormation(w, s.Own[0].Formation, combatStatusSubordinates, 0f, 0, 0f, 2.0f, -1f, enemiesInRange);
     }
 
     // Out of combat (combatstatussubordinates 0) with a visible enemy 200 m off the left flank: the refused flank

@@ -1499,6 +1499,32 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
         }
 
+        // BC11 decision 2: a refused flank of a group in combat, rotated in place (limited by vanilla's micro turn).
+        internal static void RefuseInPlace(BattleSnapshot s, int i, RefuseFlank side, int rotated, int skipped)
+        {
+            try
+            {
+                int id = s.Own[i].InstanceId;
+                string signature = s.Alliance + "|" + id + "|" + side + "|" + rotated + "|" + skipped;
+                if (!TacticalTelemetry.ShouldEmit(_lastAt, "tactical-refuse-in-place:" + s.Alliance + ":" + id, signature,
+                        Time.realtimeSinceStartup, TelemetrySeconds, false))
+                    return;
+                string unit = NameOf(s, i);
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Write, "TacticalRefuseInPlace", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(s.Alliance)
+                        .WithUnit(unit)
+                        .WithDecision("RefuseInPlace", side.ToString(), signature)
+                        .WithField("side", side.ToString())
+                        .WithField("rotated", rotated)
+                        .WithField("skippedByMicroTurn", skipped));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-producer-posture:telemetry-failed", "[PostureProducer] telemetry threw: " + ex.Message);
+            }
+        }
+
         private static void Reset()
         {
             _lastAt.Clear();

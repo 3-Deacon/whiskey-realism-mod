@@ -61,6 +61,8 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableWlActionOnceEffectsFix;
         internal static ConfigEntry<bool> EnableBattleEntrenchmentAverageFix;
         internal static ConfigEntry<bool> EnableBattleHqConditionFix;
+        internal static ConfigEntry<bool> EnableFlankResponseAndEnvelopment;
+        internal static ConfigEntry<bool> EnableVanillaFlankThreatTallyFix;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
@@ -485,6 +487,26 @@ namespace WhiskeyRealism
                 "Default ON. Vanilla BattleUnits.AssignConditionToSubordinates sets each group HQ's horse and gun condition from the men " +
                 "value at battle start. With this on the HQ gets the horse and gun values its sub-units get, and the side's gun-condition " +
                 "average is recomputed from them. A stat correction, not an order. Off: vanilla.");
+            EnableFlankResponseAndEnvelopment = Config.Bind(
+                "Tactical",
+                "Enable Flank Response And Envelopment",
+                true,
+                "Default ON. BC11: a holding group faces the strongest perceived pressure on its front (a 3-bin window of the slice " +
+                "pressure, with hysteresis) instead of only its closest visible enemy; a wing under flank threat with contact draws the " +
+                "nearest reserve to guard the threatened flank; and the geometric plays that envelop (double envelopment, flank march, " +
+                "wide flank approach, the maneuvering wing of maneuver-and-fix, the cavalry deep raid) hold, march round the enemy line " +
+                "end, face it and attack it as orders to the child, instead of only relabelling roles. Never for a Defender side. " +
+                "The refused flank that reaches vanilla (the wheel and the in-combat rotation) is a bug fix and is not behind this. Off: " +
+                "the closest visible enemy decides facing, reserves release as before, plays only relabel roles.");
+            EnableVanillaFlankThreatTallyFix = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Flank Threat Tally Fix",
+                true,
+                "Default ON. Vanilla Regiment.UpdateGroupStrength adds the group's own outflanked code once per subordinate to " +
+                "flanksthreated, so the tally is usually 0 and a flanked line group reads as strong as an unflanked one to the AI's " +
+                "flank-move, reserve and flank-extension decisions. With this on the tally sums each subordinate's own outflanked weight. " +
+                "Vanilla's own AI then launches more counter-flank moves, on a Defender side too (CheckFlankMoves skips only macro AI " +
+                "-1 and 3). A stat correction on vanilla's field, not an order. Off: vanilla.");
             EnableCampaignChainDispatches = Config.Bind(
                 "W&L",
                 "Enable Campaign Chain Dispatches",
