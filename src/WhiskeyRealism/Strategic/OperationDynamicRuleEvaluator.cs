@@ -65,7 +65,7 @@ namespace WhiskeyRealism.Strategic
                 case OperationDynamicTrigger.EnemyConcentratesInTheater:
                     return context != null && context.EnemyConcentratesInTheater;
                 case OperationDynamicTrigger.EmptyTarget:
-                    return context != null && context.TargetSectorEnemyStrength <= 0f;
+                    return context != null && context.TargetLocalEnemyStrength <= 0f;
                 case OperationDynamicTrigger.ForceBelowThreshold:
                     return truth.Verdict == PhaseTruthVerdict.ForceBelowThreshold;
                 case OperationDynamicTrigger.ReplanThrash:
@@ -77,7 +77,7 @@ namespace WhiskeyRealism.Strategic
 
         private static bool RatioMatches(OperationDynamicRule rule, HistoricalOperationContext context)
         {
-            float ratio = context.TargetSectorRatio;
+            float ratio = context.TargetLocalRatio;
             if (rule.MinOwnEnemyRatio > 0f && ratio < rule.MinOwnEnemyRatio) return false;
             if (rule.MaxOwnEnemyRatio > 0f && ratio > rule.MaxOwnEnemyRatio) return false;
             return true;

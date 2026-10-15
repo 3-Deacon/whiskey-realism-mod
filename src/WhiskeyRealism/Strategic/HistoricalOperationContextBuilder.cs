@@ -110,9 +110,9 @@ namespace WhiskeyRealism.Strategic
                 ObjectiveAccomplished = false,
                 TargetPositionResolves = false,
                 TargetEngagedRecently = false,
-                TargetSectorOwnStrength = 0f,
-                TargetSectorEnemyStrength = 0f,
-                TargetSectorRatio = 0f,
+                TargetLocalOwnStrength = 0f,
+                TargetLocalEnemyStrength = 0f,
+                TargetLocalRatio = 0f,
                 Pace = posture?.Pace ?? CampaignPace.Stable,
                 DirectorIntent = posture?.Intent ?? StrategicIntent.Probe,
                 CollapseRisk = posture?.Risk ?? CollapseRisk.Low,
@@ -130,17 +130,17 @@ namespace WhiskeyRealism.Strategic
             context.TargetPositionResolves = true;
             var position = new Vector3(signals.TargetX, 0f, signals.TargetZ);
             Theater theater = fronts?.GetSector(signals.TargetTheater.ToString())?.Theater ?? signals.TargetTheater;
-            context.TargetSectorOwnStrength = Math.Max(0f, signals.LocalOwnStrength);
-            context.TargetSectorEnemyStrength = Math.Max(0f, signals.LocalEnemyStrength);
-            context.TargetSectorRatio = context.TargetSectorOwnStrength /
-                Math.Max(1f, context.TargetSectorEnemyStrength);
+            context.TargetLocalOwnStrength = Math.Max(0f, signals.LocalOwnStrength);
+            context.TargetLocalEnemyStrength = Math.Max(0f, signals.LocalEnemyStrength);
+            context.TargetLocalRatio = context.TargetLocalOwnStrength /
+                Math.Max(1f, context.TargetLocalEnemyStrength);
 
             FillTheaterPressure(context, pressure, fronts, theater);
             FillBattleSignals(context, allianceId, position, daySerial, battleHistory, NearTargetRadius(profile));
 
             context.EnemyConcentratesInTheater =
                 context.TheaterEnemyPressure > context.TheaterOwnPressure &&
-                context.TheaterEnemyPressure >= Math.Max(1f, context.TargetSectorEnemyStrength);
+                context.TheaterEnemyPressure >= Math.Max(1f, context.TargetLocalEnemyStrength);
 
             context.EnemyThreatensCapitalCorridor = signals.EnemyThreatensCapital;
             return context;

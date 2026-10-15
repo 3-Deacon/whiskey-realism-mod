@@ -1089,9 +1089,9 @@ internal static class CampaignLifecycleFixTests
         };
         var context = HistoricalOperationContextBuilder.Build(0, Serial(1, 6, 1862), 3, null, null, null, null, null, null, signals);
         TestHarness.AssertTrue(context.TargetPositionResolves, "position from live signals");
-        TestHarness.AssertEqual(12000f, context.TargetSectorOwnStrength, "local own");
-        TestHarness.AssertEqual(6000f, context.TargetSectorEnemyStrength, "local enemy");
-        TestHarness.AssertTrue(Math.Abs(context.TargetSectorRatio - 2f) < 0.001f, "local ratio");
+        TestHarness.AssertEqual(12000f, context.TargetLocalOwnStrength, "local own");
+        TestHarness.AssertEqual(6000f, context.TargetLocalEnemyStrength, "local enemy");
+        TestHarness.AssertTrue(Math.Abs(context.TargetLocalRatio - 2f) < 0.001f, "local ratio");
         TestHarness.AssertTrue(context.EnemyThreatensCapitalCorridor, "capital threat wired");
     }
 

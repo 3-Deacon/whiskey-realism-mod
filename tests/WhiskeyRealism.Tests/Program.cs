@@ -14869,9 +14869,9 @@ static class Program
             new HistoricalOperationContext
             {
                 MajorFriendlyVictoryNearTarget = true,
-                TargetSectorOwnStrength = 20000f,
-                TargetSectorEnemyStrength = 10000f,
-                TargetSectorRatio = 2f
+                TargetLocalOwnStrength = 20000f,
+                TargetLocalEnemyStrength = 10000f,
+                TargetLocalRatio = 2f
             },
             allianceId: 0,
             daySerial: 1864 * 372);
