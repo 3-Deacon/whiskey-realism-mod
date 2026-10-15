@@ -20,6 +20,8 @@ internal static class CampaignEconomyFixTests
         FiscalEmergencyPinsIndustrySubsidyCut();
         FiscalKingCottonCapsTariffLane();
         FiscalStepTowardBandMovesOneStepIntoBand();
+        FiscalCreditDefenseTaxFloorDoesNotRatchetDaily();
+        FiscalTaxFloorAnchorRefreshesAfterStressEnds();
         FiscalSingleLowSupplySectorDoesNotBlockExpansion();
         FiscalLowSupplyThirdOfSectorsIsStress();
         PolicySelectorDefersToVanillaWhenOnlyOptionPenalised();
@@ -294,6 +296,41 @@ internal static class CampaignEconomyFixTests
         TestHarness.AssertTrue(Math.Abs(FiscalIntentLedger.StepTowardBand(0.43f, 0.45f, 1f, Step) - 0.45f) < 1e-5f, "never overshoot floor");
         TestHarness.AssertEqual(0.30f, FiscalIntentLedger.StepTowardBand(0.30f, 0f, 1f, Step), "inside band untouched");
         LogPass("c2b fiscal step toward band moves one step into band");
+    }
+
+    // The floor is recomputed every daily review. Anchored to the snapshot at posture
+    // entry it stays entry + step; anchored to "today" it climbed one step per day to 1.0
+    // even while vanilla's own balance trigger (15405) was trying to cut taxes.
+    private static void FiscalCreditDefenseTaxFloorDoesNotRatchetDaily()
+    {
+        var input = Fiscal();
+        input.CurrentRating = 6;
+        input.Memory.PreviousPosture = FiscalPosture.BalancedWar;
+        input.Memory.TaxFloorAnchor = FiscalIntentLedger.NextTaxFloorAnchor(input.Memory.PreviousPosture, input.Memory.TaxFloorAnchor, input.Taxes);
+        var day1 = FiscalIntentLedger.Compute(input, new FiscalOptions());
+        TestHarness.AssertTrue(Math.Abs(day1.TargetTaxMin[1] - 0.45f) < 1e-5f, "day 1 floor = entry + step");
+
+        // Day 2..30: postfix lifted the lane to the floor; posture persists.
+        for (int day = 2; day <= 30; day++)
+        {
+            input.Taxes[1] = day1.TargetTaxMin[1];
+            input.Memory.PreviousPosture = FiscalPosture.CreditDefense;
+            input.Memory.TaxFloorAnchor = FiscalIntentLedger.NextTaxFloorAnchor(input.Memory.PreviousPosture, input.Memory.TaxFloorAnchor, input.Taxes);
+        }
+        var day30 = FiscalIntentLedger.Compute(input, new FiscalOptions());
+        TestHarness.AssertTrue(Math.Abs(day30.TargetTaxMin[1] - 0.45f) < 1e-5f, "floor stays entry + step (got " + day30.TargetTaxMin[1] + ")");
+        LogPass("c2b fiscal credit defense tax floor does not ratchet daily");
+    }
+
+    private static void FiscalTaxFloorAnchorRefreshesAfterStressEnds()
+    {
+        var anchor = new[] { 0.1f, 0.4f, 0.3f, 0f, 0f };
+        var now = new[] { 0.1f, 0.2f, 0.2f, 0f, 0f };
+        var next = FiscalIntentLedger.NextTaxFloorAnchor(FiscalPosture.BalancedWar, anchor, now);
+        TestHarness.AssertTrue(Math.Abs(next[1] - 0.2f) < 1e-6f, "outside stress the anchor tracks current taxes");
+        var held = FiscalIntentLedger.NextTaxFloorAnchor(FiscalPosture.EmergencySolvency, anchor, now);
+        TestHarness.AssertTrue(Math.Abs(held[1] - 0.4f) < 1e-6f, "inside stress the entry anchor is held");
+        LogPass("c2b fiscal tax floor anchor refreshes after stress ends");
     }
 
     private static void FiscalSingleLowSupplySectorDoesNotBlockExpansion()

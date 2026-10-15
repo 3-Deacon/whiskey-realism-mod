@@ -64,6 +64,17 @@ namespace WhiskeyRealism.Strategic.Fiscal
 
         // One bounded correction per call: move at most one vanilla step toward the band,
         // never past its edge. Inside the band the value (vanilla's own nudge) stands.
+        // Anchor for the stress tax floor. While the previous review was already in
+        // CreditDefense/Emergency the entry snapshot is held, so the floor stays
+        // entry + step instead of climbing one step per daily review; otherwise the
+        // anchor tracks current taxes (a fresh entry snapshots them).
+        public static float[] NextTaxFloorAnchor(FiscalPosture previousPosture, float[] previousAnchor, float[] currentTaxes)
+        {
+            bool inStress = previousPosture == FiscalPosture.CreditDefense || previousPosture == FiscalPosture.EmergencySolvency;
+            if (inStress && previousAnchor != null) return previousAnchor;
+            return currentTaxes != null ? (float[])currentTaxes.Clone() : null;
+        }
+
         public static float StepTowardBand(float current, float min, float max, float step)
         {
             if (min > max) min = max;
@@ -150,8 +161,9 @@ namespace WhiskeyRealism.Strategic.Fiscal
 
         // Bands are directional so vanilla UpdateFinancialAI nudges (decompile 15386-15447)
         // in the allowed direction survive: open [0,1] by default; credit stress sets a
-        // tax FLOOR (snapshot + step) on excise/income and an industry-subsidy CEILING
-        // (snapshot - step). Only EmergencySolvency pins the industry subsidy to a point.
+        // tax FLOOR on excise/income (posture-entry snapshot + step, NextTaxFloorAnchor)
+        // and an industry-subsidy CEILING (snapshot - step). Only EmergencySolvency pins
+        // the industry subsidy to a point.
         private static void FillTargets(FiscalInput input, FiscalOutput output, FiscalOptions options)
         {
             OpenBand(output.TargetTaxMin, output.TargetTaxMax);
@@ -159,8 +171,11 @@ namespace WhiskeyRealism.Strategic.Fiscal
 
             if (output.Posture == FiscalPosture.CreditDefense || output.Posture == FiscalPosture.EmergencySolvency)
             {
-                RaiseTaxFloor(input.Taxes, output, GameTaxExcise, options.VanillaStep);
-                RaiseTaxFloor(input.Taxes, output, GameTaxIncome, options.VanillaStep);
+                float[] anchor = input.Memory != null && input.Memory.TaxFloorAnchor != null
+                    ? input.Memory.TaxFloorAnchor
+                    : input.Taxes;
+                RaiseTaxFloor(anchor, output, GameTaxExcise, options.VanillaStep);
+                RaiseTaxFloor(anchor, output, GameTaxIncome, options.VanillaStep);
                 LowerSubsidyCeiling(input.Subsidies, output, GameSubsidyIndustry, options.VanillaStep,
                     pinFloor: output.Posture == FiscalPosture.EmergencySolvency);
             }

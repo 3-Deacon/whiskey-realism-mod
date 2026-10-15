@@ -43,6 +43,9 @@ namespace WhiskeyRealism.Strategic.Fiscal
         public FiscalPosture PreviousPosture = FiscalPosture.BalancedWar;
         public int StableTicksAboveEmergency;
         public bool EmergencyResidue;
+        // Tax snapshot taken when the alliance entered CreditDefense/Emergency; the
+        // stress tax floor is anchored to it. Null => use current taxes.
+        public float[] TaxFloorAnchor;
     }
 
     public sealed class FiscalInput
