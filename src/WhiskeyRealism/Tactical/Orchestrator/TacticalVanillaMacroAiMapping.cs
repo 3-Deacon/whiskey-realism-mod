@@ -28,8 +28,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public const int MacroAiFlankAttack = 0;
         public const int MacroAiFrontalAttack = 1;
         public const int MacroAiDefend = 2;
-        public const int MacroAiRetreat = 3;
-        public const int MacroAiUnset = -1;
 
         /// <summary>
         /// Returns the vanilla macroai value Whiskey wants for the given doctrine
