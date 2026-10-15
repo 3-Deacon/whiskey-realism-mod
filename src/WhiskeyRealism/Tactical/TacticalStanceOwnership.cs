@@ -25,9 +25,15 @@ namespace WhiskeyRealism.Tactical
     //     writes neither.
     //   macroai == 3 (army retreat): vanilla forces every group to screen (4258).
     //
-    // Ownership: a Whiskey write or claim stamps the vanilla hold so
-    // AdjustGroupAIStance leaves the group alone while Whiskey keeps an opinion.
-    // Inside the hold a lower-priority Whiskey source (#45 scorer) cannot flip a
+    // Ownership: a Whiskey write stamps the vanilla hold so AdjustGroupAIStance
+    // leaves the group alone for HoldHours. Agreement (claim) records ownership
+    // for the #45/#61 priority rules but does not re-stamp, so vanilla still
+    // re-evaluates once per hold — keeping its strength-triggered assault
+    // escalation (4239; the only route to AI charges, MicroAICheckForCharges
+    // 4913) and weak-group screen (4252). A vanilla assault is never replaced
+    // except by an explicit charge denial. On army retreat (macroai 3) the
+    // caller releases the stamp so vanilla can screen the army at once (4258;
+    // MicroAICheckForRetreats needs ai_stance == 1, 5641). Inside the hold a lower-priority Whiskey source (#45 scorer) cannot flip a
     // stance the posture executor (#61) set, and the same source needs a minimum
     // dwell before changing its own opinion. Once Whiskey stops claiming, the
     // hold lapses and vanilla resumes.
@@ -35,7 +41,10 @@ namespace WhiskeyRealism.Tactical
     {
         None = 0,
         Scorer = 1,
-        Executor = 2
+        Executor = 2,
+        // Explicit charge denial (#45 DemoteCharge): the only source allowed
+        // to replace a vanilla assault (4).
+        ChargeDemotion = 3
     }
 
     public enum StanceWriteAction
@@ -120,6 +129,8 @@ namespace WhiskeyRealism.Tactical
             if (input.TargetStance < 1 || input.TargetStance > 3) return Refuse("invalid-stance");
             if (input.MacroAi < 0) return Refuse("macro-inactive");
             if (input.MacroAi == 3) return Refuse("vanilla-retreat");
+            if (input.CurrentOrderedStance == 4 && input.Source != StanceWriteSource.ChargeDemotion)
+                return Refuse("vanilla-assault");
 
             StanceHoldRecord record = input.Record;
             if (record.HasValue && IsInsideHold(record, input.NowHours))
@@ -163,6 +174,18 @@ namespace WhiskeyRealism.Tactical
                 default:
                     return record;
             }
+        }
+
+        public static bool StampsVanillaHold(in StanceWriteDecision decision)
+        {
+            return decision.Action == StanceWriteAction.Write;
+        }
+
+        // lastaistancechangetime value that lets vanilla 4264 re-evaluate on
+        // its next cycle (army retreat release).
+        public static float ReleaseStamp(float nowHours)
+        {
+            return nowHours - MinSelfChangeHours;
         }
 
         // lastaistancechangetime value that makes vanilla 4264 skip the group

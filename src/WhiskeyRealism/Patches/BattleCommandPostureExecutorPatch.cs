@@ -104,7 +104,11 @@ namespace WhiskeyRealism.Patches
             if (side < 0 || bunits == null || units == null) return;
             // B-macro3: stand down for vanilla army retreat (macroai 3), the
             // end-of-day phase, and the W&L feud instance.
-            if (!PostureExecutorBattleGate.Allows(state, macro, SafeEodCycle(bunits), isPlayerAiOrFeud, GameVars.ai_vs_ai, out _)) return;
+            if (!PostureExecutorBattleGate.Allows(state, macro, SafeEodCycle(bunits), isPlayerAiOrFeud, GameVars.ai_vs_ai, out string gateReason))
+            {
+                if (gateReason == "vanilla-retreat") TacticalStanceWriter.ReleaseForRetreat(battle);
+                return;
+            }
 
             Dictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders = BuildRuntimeDivisionPlayOrders(bunits, units);
             var iteratedInstanceIds = new HashSet<int>();

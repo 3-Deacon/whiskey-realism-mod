@@ -30,8 +30,9 @@ namespace WhiskeyRealism.Util
     //     feud instance and is not a Whiskey target.
     //
     // Returns true only when a ChangeStance was issued. A "claim" (Whiskey
-    // already agrees with the ordered stance) refreshes the vanilla hold
-    // without a ChangeStance.
+    // already agrees with the ordered stance) records ownership for the
+    // #45/#61 priority rules without a ChangeStance and without re-stamping the
+    // vanilla hold (see TacticalStanceOwnership).
     public static class TacticalStanceWriter
     {
         private static readonly Dictionary<int, StanceHoldRecord> _records = new Dictionary<int, StanceHoldRecord>();
@@ -51,7 +52,7 @@ namespace WhiskeyRealism.Util
                 float now = GameVars.currenttimefromstart;
                 _records.TryGetValue(id, out StanceHoldRecord record);
 
-                // Cheap steady-state path: our claim is fresh and nothing moved.
+                // Cheap steady-state path: our record is fresh and nothing moved.
                 if (record.HasValue &&
                     record.Stance == targetStance &&
                     record.Source >= source &&
@@ -101,7 +102,8 @@ namespace WhiskeyRealism.Util
                         + " (was " + was + ") first=" + (contextTag ?? "-"));
                 }
 
-                group.lastaistancechangetime = stamp;
+                if (TacticalStanceOwnership.StampsVanillaHold(decision))
+                    group.lastaistancechangetime = stamp;
                 _records[id] = TacticalStanceOwnership.Next(decision, input);
                 return wrote;
             }
@@ -123,6 +125,30 @@ namespace WhiskeyRealism.Util
             int stance = TacticalCommandTaskToStanceMapper.Map(task);
             if (stance == TacticalCommandTaskToStanceMapper.StanceNone) return false;
             return EnsureStance(bunits, group, stance, contextTag, source);
+        }
+
+        // Army retreat (macroai 3): hand every Whiskey-held group of this AI
+        // back to vanilla so AdjustGroupAIStance screens it on the next cycle
+        // (4258) and MicroAICheckForRetreats (5641) can run.
+        public static void ReleaseForRetreat(AIBattle battle)
+        {
+            try
+            {
+                if ((UnityEngine.Object)battle == null || battle.unitsused == null || _records.Count == 0) return;
+                float release = TacticalStanceOwnership.ReleaseStamp(GameVars.currenttimefromstart);
+                for (int i = 0; i < battle.unitsused.Count; i++)
+                {
+                    Regiment group = battle.unitsused[i];
+                    if ((UnityEngine.Object)group == null) continue;
+                    if (!_records.Remove(group.GetInstanceID())) continue;
+                    if (group.lastaistancechangetime > release) group.lastaistancechangetime = release;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-stance-write:release-failed",
+                    "[TacticalStanceWrite] ReleaseForRetreat threw: " + ex.GetType().Name + " " + ex.Message);
+            }
         }
 
         // Called on battle teardown (coordinator OnBattleEnd).

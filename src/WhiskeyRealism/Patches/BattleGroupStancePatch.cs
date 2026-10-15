@@ -100,6 +100,12 @@ namespace WhiskeyRealism.Patches
             var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
             var units = SafeList(battle, ref _unitsUsedField, "unitsused");
             if (side < 0 || macro < 0 || bunits == null || units == null) return;
+            if (macro == 3)
+            {
+                // Vanilla army retreat: release Whiskey's stance holds.
+                TacticalStanceWriter.ReleaseForRetreat(battle);
+                return;
+            }
             int allianceId = SafeAllianceForSide(bunits, side);
 
             // Per group: the coordinator's resolved decision (populated at
@@ -763,7 +769,7 @@ namespace WhiskeyRealism.Patches
             int side,
             TacticalLocalReactionDecision reaction)
         {
-            if (!TacticalStanceWriter.EnsureStance(bunits, group, 3, null, StanceWriteSource.Scorer)) return;
+            if (!TacticalStanceWriter.EnsureStance(bunits, group, 3, null, StanceWriteSource.ChargeDemotion)) return;
 
             string signature = side + "|" + SafeInstanceId(group) + "|" + reaction.Reaction + "|" + reaction.Reason;
             if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "b6c-charge-deny-stance", signature, Time.realtimeSinceStartup, 30f, false))

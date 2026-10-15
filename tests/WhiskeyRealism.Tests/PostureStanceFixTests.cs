@@ -23,6 +23,9 @@ internal static class PostureStanceFixTests
         Pass("stance owner record update keeps highest source", StanceOwnerRecordUpdateKeepsHighestSource);
         Pass("vanilla hold stamp suppresses AdjustGroupAIStance until hold ends", VanillaHoldStampSuppressesAdjustGroupAIStance);
         Pass("task stance mapping matches vanilla stance semantics", TaskStanceMappingMatchesVanillaSemantics);
+        Pass("stance owner never overwrites vanilla assault except charge demotion", StanceOwnerRespectsVanillaAssault);
+        Pass("only a real write stamps the vanilla hold", OnlyWriteStampsVanillaHold);
+        Pass("retreat release lets vanilla re-evaluate immediately", RetreatReleaseLetsVanillaReevaluate);
         Pass("group stance scorer uses the shared task mapping", GroupStanceScorerUsesSharedTaskMapping);
 
         // T-settle
@@ -638,5 +641,31 @@ internal static class PostureStanceFixTests
         budget.NextApply(5);
         AssertEqual(3, budget.StartIndex(5), "rotates again");
         AssertEqual(0, budget.StartIndex(0), "empty list");
+    }
+
+    private static void StanceOwnerRespectsVanillaAssault()
+    {
+        // Assault (4) is vanilla's strength-triggered escalation (4239) and the
+        // only route to AI charges (MicroAICheckForCharges, 4913).
+        var exec = TacticalStanceOwnership.Decide(Input(target: 3, current: 4, source: StanceWriteSource.Executor));
+        AssertEqual(StanceWriteAction.Refuse, exec.Action, "#61 does not demote a vanilla assault");
+        AssertEqual("vanilla-assault", exec.Reason, "reason");
+        var demote = TacticalStanceOwnership.Decide(Input(target: 3, current: 4, source: StanceWriteSource.ChargeDemotion));
+        AssertEqual(StanceWriteAction.Write, demote.Action, "explicit charge denial may demote");
+    }
+
+    private static void OnlyWriteStampsVanillaHold()
+    {
+        AssertTrue(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Write, "write")), "write holds vanilla off");
+        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Claim, "held")), "agreement leaves vanilla free to re-evaluate (assault escalation, weak-group screen)");
+        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Refuse, "x")), "refuse");
+    }
+
+    private static void RetreatReleaseLetsVanillaReevaluate()
+    {
+        float now = 3f;
+        float release = TacticalStanceOwnership.ReleaseStamp(now);
+        AssertTrue(TacticalStanceOwnership.VanillaWouldReevaluate(release, now, 1f), "vanilla screens the retreating army next cycle (4258)");
+        AssertTrue(TacticalStanceOwnership.VanillaWouldReevaluate(release, now, 0f), "even with a zero reset pref");
     }
 }
