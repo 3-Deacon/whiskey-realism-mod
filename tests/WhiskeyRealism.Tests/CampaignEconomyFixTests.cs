@@ -40,6 +40,7 @@ internal static class CampaignEconomyFixTests
         ConstructionCapitalThreatIsPerSiteTheater();
         ConstructionCapitalThreatPeakIsNotDilutedByQuietSectors();
         ConstructionEastAtParityIsNotThreatened();
+        ConstructionEmptyCriticalSectorIsNotThreatened();
         ConstructionOutmatchedCriticalSectorYieldsDefensiveWorks();
         ConstructionFewLowSupplyFormationsDoNotForceFieldSupply();
 
@@ -547,6 +548,17 @@ internal static class CampaignEconomyFixTests
         var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
         TestHarness.AssertEqual(ConstructionPosture.IndustrialExpansion, output.Posture, "expansion reachable at parity");
         LogPass("c2b construction east at parity is not threatened");
+    }
+
+    // FrontSectorRuntime builds every theater sector, empty or not; with no enemy present
+    // own/max(1,enemy) is 0 and would read as a total deficit. No enemy, no threat.
+    private static void ConstructionEmptyCriticalSectorIsNotThreatened()
+    {
+        var input = ExpansionConstructionInput(Front(0f, 0f));
+        TestHarness.AssertEqual(0f, ConstructionThreat.ForTheater(input.SectorThreats, Theater.East), "empty critical sector");
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+        TestHarness.AssertEqual(ConstructionPosture.IndustrialExpansion, output.Posture, "empty sector does not force defensive works");
+        LogPass("c2b construction empty critical sector is not threatened");
     }
 
     private static void ConstructionOutmatchedCriticalSectorYieldsDefensiveWorks()

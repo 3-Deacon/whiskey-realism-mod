@@ -197,6 +197,9 @@ namespace WhiskeyRealism.Strategic.Construction
         public static float SectorThreat(FrontSector sector)
         {
             if (sector == null || !sector.IsCritical || sector.MinimumHoldRatio <= 0f) return 0f;
+            // Every theater sector exists even when empty; own/max(1, enemy) is 0 there,
+            // which would read as a total deficit. No enemy present means no threat.
+            if (sector.EnemyStrength <= 0f) return 0f;
             float deficit = 1f - sector.StrengthRatio / sector.MinimumHoldRatio;
             if (deficit <= 0f) return 0f;
             if (deficit > 1f) deficit = 1f;
