@@ -77,7 +77,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             public readonly Dictionary<int, int> EnemyIndexById = new Dictionary<int, int>(256);
             public readonly TacticalFriendlySpatialGrid Friendly = new TacticalFriendlySpatialGrid();
             // Up to 4 nav plans (12 NavMesh.CalculatePath) per arbiter tick and side,
-            // shared by the posture and division-play producers.
+            // consumed only by this producer (TryNavPlan).
             public readonly NavPlanBudget Nav = new NavPlanBudget(4);
             public int LastOwnCount;
             public bool NavDeferred;
