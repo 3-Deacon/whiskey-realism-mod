@@ -85,7 +85,6 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalChargePreserved", TelemetryCategory.Gate);
             AddTactical("TacticalChargeGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDoctrineCharge", TelemetryCategory.Gate);
-            AddTactical("TacticalOrchestratorChargeGate", TelemetryCategory.Gate);
             AddTactical("TacticalFeud", TelemetryCategory.Gate);
             AddTactical("TacticalFeudGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDirectChildDiscovery", TelemetryCategory.State);

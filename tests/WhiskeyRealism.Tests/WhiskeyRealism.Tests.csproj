@@ -276,7 +276,6 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DirectChildEvidenceBuilder.cs" Link="Orchestrator\DirectChildEvidenceBuilder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalDirectChildGate.cs" Link="Orchestrator\TacticalDirectChildGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalReserveCommitGate.cs" Link="Orchestrator\TacticalReserveCommitGate.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalOrchestratorChargeGate.cs" Link="Orchestrator\TacticalOrchestratorChargeGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalMainArrivalSynchronizer.cs" Link="Orchestrator\TacticalMainArrivalSynchronizer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalStanceReconciler.cs" Link="Orchestrator\TacticalStanceReconciler.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalVanillaMacroAiMapping.cs" Link="Orchestrator\TacticalVanillaMacroAiMapping.cs" />

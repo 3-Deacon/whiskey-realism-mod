@@ -337,36 +337,6 @@ namespace WhiskeyRealism.Tactical
             return combatBehaviorOrdered == 8 && !enemyArtilleryInFireRange;
         }
 
-        // AIBattle.PerformAIActionDLCWL (5101): outside W&L the AI may act;
-        // a unit of a group whose ai_stance >= 1 (the player delegated the
-        // group to the AI) may act even under the player's command; otherwise
-        // dlcw_isundercommander blocks.
-        public static bool WlAllowsUnitAction(
-            bool dlcScenarioActive,
-            int groupAiStance,
-            bool sameGroupAiObject,
-            bool unitUnderCommander)
-        {
-            if (!dlcScenarioActive) return true;
-            if (groupAiStance >= 1 && sameGroupAiObject) return true;
-            return !unitUnderCommander;
-        }
-
-        // #41: a charge into an enemy that is itself charging (movementmode 3,
-        // or 6 for an infantry bayonet charge - SetMovementMode 124704), or by a
-        // unit already in melee, is the counter-charge vanilla would make; no
-        // role/doctrine denial applies to it. A routed enemy is a pursuit.
-        public static bool IsCounterCharge(
-            bool hasVisibleEnemy,
-            int enemyMovementMode,
-            bool enemyRoutedOrMarked,
-            float ownInMelee)
-        {
-            if (ownInMelee > 0f) return true;
-            if (!hasVisibleEnemy || enemyRoutedOrMarked) return false;
-            return enemyMovementMode == 3 || enemyMovementMode == 6;
-        }
-
         // #42: CheckForFeudGroupActions (4931) targets
         // GetClosestEnemyUnit(GamePrefs.neededdistancefeudgroupmovement); the
         // FOW-visible replacement must keep that distance cap.

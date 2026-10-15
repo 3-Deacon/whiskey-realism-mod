@@ -22,9 +22,8 @@ namespace WhiskeyRealism.Patches
     // or strategic state. It is the per-macro-cycle cache of this legacy B6c
     // observer (its only producer), rebuilt from scratch every AdjustGroupAIStance
     // cycle (5866) and written only while the army orchestrator is off; with the
-    // orchestrator on (default) the observer is telemetry-only. Readers
-    // (BattleChargeGatePatch, BattleGroupStancePatch) consume it as observer
-    // output. W&L/player ownership uses TacticalWriteGuard.IsPlayerProtected.
+    // orchestrator on (default) the observer is telemetry-only. Its reader
+    // (BattleGroupStancePatch) consumes it as observer output. W&L/player ownership uses TacticalWriteGuard.IsPlayerProtected.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupAIStance")]
     internal static class BattleCommanderIntentObserverPatch
     {
