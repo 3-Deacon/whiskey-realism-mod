@@ -870,12 +870,88 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         strategic,
                         force,
                         side.Army.CommanderPersonality);
+                    side.OperationsLedger.SetOperationAssignedStrength(
+                        MeasureOperationAssignedStrength(side.Army.CurrentCommandOperations));
                 }
                 catch (Exception e)
                 {
                     WarnTickCycleOnce(side, e);
                 }
             }
+        }
+
+        /// <summary>
+        /// T14: live strength of the command nodes the current operation has tasked to
+        /// attack or support. Each node's combat units are summed once (a corps and its
+        /// division may both be tasked) from Regiment.allattachedunits (vanilla's
+        /// attachment list, UpdateAllAttachedUnits 129573), with the default filters of
+        /// vanilla GetAttachedUnitsReg: no dechained (permanentlydetached) units, no
+        /// skirmisher companies (unittyp 3/4), no inactive or routed units; plus
+        /// markedforrout. 0 when no node is tasked.
+        /// </summary>
+        private static float MeasureOperationAssignedStrength(IReadOnlyList<CommandNodeOperationalState> states)
+        {
+            try
+            {
+                if (states == null || states.Count == 0) return 0f;
+                Dictionary<int, Regiment> byInstanceId = null;
+                HashSet<int> counted = null;
+                float total = 0f;
+                for (int i = 0; i < states.Count; i++)
+                {
+                    var task = states[i].Task;
+                    if (task != CommandTaskType.AttackObjective && task != CommandTaskType.SupportAttack) continue;
+                    int instanceId = ParseCommandNodeInstanceId(states[i].NodeId);
+                    if (instanceId == 0) continue;
+                    if (byInstanceId == null)
+                    {
+                        byInstanceId = BuildGameObjectInstanceMap();
+                        counted = new HashSet<int>();
+                    }
+                    if (!byInstanceId.TryGetValue(instanceId, out Regiment group) || group == null) continue;
+                    var units = group.allattachedunits;
+                    if (units == null) continue;
+                    for (int u = 0; u < units.Length; u++)
+                    {
+                        var unit = units[u];
+                        if (unit == null || unit.unittyp > TacticalUnitType.MaxCombat) continue;
+                        if (unit.unittyp == 3 || unit.unittyp == 4 || unit.permanentlydetached) continue;
+                        if (unit.isrouted || unit.markedforrout || !unit.gameObject.activeInHierarchy) continue;
+                        if (!counted.Add(unit.GetInstanceID())) continue;
+                        total += Math.Max(0f, unit.strength);
+                    }
+                }
+                return total;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private static Dictionary<int, Regiment> BuildGameObjectInstanceMap()
+        {
+            var map = new Dictionary<int, Regiment>();
+            var units = BattleUnits.completeunitlist;
+            if (units == null) return map;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var reg = units[i];
+                if (reg == null) continue;
+                map[reg.gameObject.GetInstanceID()] = reg;
+            }
+            return map;
+        }
+
+        // Command node ids are "node-<GameObject InstanceID>" (CommandTreeBuilder) or a
+        // direct-child id ("child-<id>" / "synth-army-<id>").
+        private static int ParseCommandNodeInstanceId(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId)) return 0;
+            const string prefix = "node-";
+            if (nodeId.StartsWith(prefix, StringComparison.Ordinal))
+                return int.TryParse(nodeId.Substring(prefix.Length), out int id) ? id : 0;
+            return ParseInstanceIdFromChildId(nodeId);
         }
 
         /// <summary>

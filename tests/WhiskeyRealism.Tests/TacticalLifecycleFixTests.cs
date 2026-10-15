@@ -32,6 +32,12 @@ internal static class TacticalLifecycleFixTests
         Pass("brh5 map objective content hash sees owner and active", BrH5MapObjectiveContentHash);
         Pass("brh5 avenue source signature sees arrivals and owners", BrH5AvenueSourceSignature);
         Pass("brh5 avenue content hash sees owner change", BrH5AvenueContentHash);
+
+        Pass("t14 confidence dip inside commit window holds commitment", T14ConfidenceDipInsideWindowHolds);
+        Pass("t14 confidence above exit floor after window holds commitment", T14ConfidenceAboveExitFloorHolds);
+        Pass("t14 confidence below exit floor after window downgrades", T14ConfidenceBelowExitFloorDowngrades);
+        Pass("t14 commit decision uses army before assignment", T14CommitOddsUseAssignedStrength);
+        Pass("t14 soft abort odds use operation assigned strength", T14SoftAbortOddsUseAssignedStrength);
     }
 
     private static void Pass(string name, Action test)
@@ -289,5 +295,70 @@ internal static class TacticalLifecycleFixTests
         return new WhiskeyRealism.Tactical.Operations.TacticalApproachAvenueObservation(
             WhiskeyRealism.Tactical.Operations.TacticalApproachAvenueSource.EntryPoint,
             owner, 0f, 0f, 100f, 100f, 0.7f, true, false, "entrypoint-0");
+    }
+
+    // ---- T14 operation flicker ----
+
+    private static WhiskeyRealism.Tactical.Operations.BattlefieldObjectiveEstimate Line(string id, float enemy, float confidence, bool mainLine = true)
+    {
+        return new WhiskeyRealism.Tactical.Operations.BattlefieldObjectiveEstimate(
+            id, WhiskeyRealism.Tactical.Operations.TacticalObjectiveType.EnemyLine, enemy, confidence, mainLine, 0.65f, 300f, 400f, 0.1f, 0.1f);
+    }
+
+    private static WhiskeyRealism.Tactical.Operations.TacticalOperationDirectorDecision DecideCommitted(
+        float commitUntil, float now, float confidence)
+    {
+        var current = WhiskeyRealism.Tactical.Operations.OperationRecord.CreateCommittedForTest(
+            WhiskeyRealism.Tactical.Operations.TacticalOperationShape.SingleMainEffort, "line", minCommitUntilSeconds: commitUntil);
+        var input = WhiskeyRealism.Tactical.Operations.TacticalOperationDirectorInput.ForTest(
+            current, now, 5000f, 0.30f, 0.5f, 0.5f, new[] { Line("line", 900f, confidence) });
+        return WhiskeyRealism.Tactical.Operations.TacticalOperationDirector.Decide(input);
+    }
+
+    private static void T14ConfidenceDipInsideWindowHolds()
+    {
+        var d = DecideCommitted(commitUntil: 1800f, now: 600f, confidence: 0.55f);
+        TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.Committed, d.Operation.Phase, "phase");
+        TestHarness.AssertEqual("commit-window", d.Reason, "reason");
+        var low = DecideCommitted(commitUntil: 1800f, now: 600f, confidence: 0.40f);
+        TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.Committed, low.Operation.Phase, "below exit floor still inside window");
+    }
+
+    private static void T14ConfidenceAboveExitFloorHolds()
+    {
+        var d = DecideCommitted(commitUntil: 300f, now: 600f, confidence: 0.55f);
+        TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.Committed, d.Operation.Phase, "phase");
+        TestHarness.AssertEqual("line", d.Operation.PrimaryObjectiveId, "primary");
+    }
+
+    private static void T14ConfidenceBelowExitFloorDowngrades()
+    {
+        var d = DecideCommitted(commitUntil: 300f, now: 600f, confidence: 0.40f);
+        TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.Scouting, d.Operation.Phase, "phase");
+        TestHarness.AssertEqual("contact-downgraded", d.Reason, "reason");
+    }
+
+    private static void T14CommitOddsUseAssignedStrength()
+    {
+        // Before commitment nothing is assigned: the commit decision weighs the army,
+        // and a stray assigned value is ignored.
+        var input = WhiskeyRealism.Tactical.Operations.TacticalOperationDirectorInput.ForTest(
+            WhiskeyRealism.Tactical.Operations.OperationRecord.Noop, 120f, 10000f, 0.05f, 0.5f, 0.5f,
+            new[] { Line("line", 2000f, 0.9f) }).WithOperationAssignedStrength(500f);
+        var d = WhiskeyRealism.Tactical.Operations.TacticalOperationDirector.Decide(input);
+        TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.Committed, d.Operation.Phase, "commit on army odds");
+    }
+
+    private static void T14SoftAbortOddsUseAssignedStrength()
+    {
+        var current = WhiskeyRealism.Tactical.Operations.OperationRecord.CreateCommittedForTest(
+            WhiskeyRealism.Tactical.Operations.TacticalOperationShape.SingleMainEffort, "line", minCommitUntilSeconds: 1800f);
+        var input = WhiskeyRealism.Tactical.Operations.TacticalOperationDirectorInput.ForTest(
+            current, 600f, 5000f, 0.30f, 0.5f, 0.5f, new[] { Line("line", 900f, 0.9f) });
+        var army = WhiskeyRealism.Tactical.Operations.TacticalOperationDirector.Decide(input);
+        TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.Committed, army.Operation.Phase, "army odds would hide the collapse");
+        var d = WhiskeyRealism.Tactical.Operations.TacticalOperationDirector.Decide(input.WithOperationAssignedStrength(600f));
+        TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.SoftAbort, d.Operation.Phase, "phase");
+        TestHarness.AssertEqual("odds-collapse", d.Reason, "reason");
     }
 }
