@@ -369,7 +369,7 @@ Detail and fixes: [`bug-fixes/vanilla-armament.md`](bug-fixes/vanilla-armament.m
 | `AICampaign.CheckPurchaseWeapons` | 16259-16345 | Player gate 16263; coverage count 16287-16312 vs `aiminnumberofequippableunits` 16325/16335; candidates researched OR imported 16296/16313; dead `j == 37 \|\| j == 38` 16289; random pick 16328/16338. |
 | `GameVars.Weapon.AbleToOrder` / `GetAvailability` / `GetDeliveryTime` / `GetProductionFigures` | 63938 / 63962 / 63989 / 64074 | Order screen needs produced (pm > 0) or imported; `GetAvailability` reads the player alliance for every caller; availability floor 0.01 (64000); blockade import factor 64120-64124; identical relations branches 64110. |
 | `WeaponList.PlaceWeaponOrder` / `CheckWeaponOrders` / `AssignWeapon` / `IncreaseFiscalBudget` | 227136 / 227168 / 227092 / 226654 | Full cost up front 227162; W&L budget charged for any alliance 227157; budget gate 226965; prestige gate sign 226656. |
-| `Projects.UpdateOneTimeProjectsEffects` / `UpdateProjectEffects` | 212938 / 213041 | Projects 10/11: machine-gun stock (212945-212950) and research of 37/38 (213091-213092) and 2/12 (213095-213096) at pm 0. |
+| `Projects.UpdateOneTimeProjectsEffects` / `UpdateProjectEffects` | 212938 / 213041 | Projects 10/11: machine-gun stock (212945-212950) and research of 37/38 (213091-213092) and 2/12 (213095-213096). |
 | `MainMenu.CheckForCheckBoxUpdates` / `SetAutomanage` / `WeaponList.UpdateCheckBox` | 193614 (guard 193616) / 193666 / 227209 | #14 forces automanage at setup (career creation included); in-game weapon panel box is the player's choice. |
 
 ## W&L player-economy and battle-stat anchors (2026-10-15)
