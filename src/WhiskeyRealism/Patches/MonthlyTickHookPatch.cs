@@ -23,7 +23,7 @@ namespace WhiskeyRealism.Patches
                 if (StrategicCoordinator.Epoch.ShouldResetOnUpdate(__instance))
                 {
                     if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
-                    StrategicCoordinator.Instance?.ResetAll("new-campaign-scene");
+                    StrategicCoordinator.Instance?.ResetAll(CampaignEpochTracker.ResetReason(SceneManagement.currentoperation));
                 }
 
                 if (!ReviewCadenceCatchUp.CampaignIsLive(SceneManagement.currentoperation))

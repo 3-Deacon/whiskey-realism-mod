@@ -53,6 +53,21 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
+        // Log reason for a scene-change reset, from SceneManagement.currentoperation:
+        // 3/8 = campaign battle (re)load, 5 = return from battle, 6 = load save
+        // (SceneManagement 36640-36700, 36806; CampaignController 30003).
+        internal static string ResetReason(int currentOperation)
+        {
+            switch (currentOperation)
+            {
+                case 3:
+                case 8: return "battle-scene";
+                case 5: return "battle-return-scene";
+                case 6: return "save-load-scene";
+                default: return "new-campaign-scene";
+            }
+        }
+
         internal bool ShouldResetOnUpdate(object aiCampaignInstance)
         {
             if (aiCampaignInstance == null || ReferenceEquals(aiCampaignInstance, _lastInstance)) return false;

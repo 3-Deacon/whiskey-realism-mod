@@ -69,6 +69,7 @@ internal static class CampaignLifecycleFixTests
         Check("c1 r15 new campaign scene without load resets", R15NewCampaignSceneWithoutLoadResets);
         Check("c1 r15 load before first update keeps loaded state", R15LoadBeforeFirstUpdateKeepsLoadedState);
         Check("c1 r15 same campaign scene never resets twice", R15SameSceneNeverResetsTwice);
+        Check("c1 r15 reset reason reflects the scene operation", R15ResetReasonReflectsOperation);
         Check("c1 r15 era derives from date in both directions", R15EraDerivesFromDateBothDirections);
         Check("c1 r15 era transition stays monotonic within a campaign", R15EraTransitionStaysMonotonic);
 
@@ -830,6 +831,16 @@ internal static class CampaignLifecycleFixTests
         TestHarness.AssertTrue(tracker.ShouldResetOnUpdate(scene), "first sight");
         TestHarness.AssertFalse(tracker.ShouldResetOnUpdate(scene), "same scene");
         TestHarness.AssertFalse(tracker.ShouldResetOnUpdate(null), "no instance");
+    }
+
+    private static void R15ResetReasonReflectsOperation()
+    {
+        TestHarness.AssertEqual("battle-return-scene", CampaignEpochTracker.ResetReason(5), "op 5");
+        TestHarness.AssertEqual("save-load-scene", CampaignEpochTracker.ResetReason(6), "op 6");
+        TestHarness.AssertEqual("battle-scene", CampaignEpochTracker.ResetReason(3), "op 3");
+        TestHarness.AssertEqual("battle-scene", CampaignEpochTracker.ResetReason(8), "op 8");
+        TestHarness.AssertEqual("new-campaign-scene", CampaignEpochTracker.ResetReason(0), "op 0");
+        TestHarness.AssertEqual("new-campaign-scene", CampaignEpochTracker.ResetReason(2), "op 2");
     }
 
     private static void R15EraDerivesFromDateBothDirections()
