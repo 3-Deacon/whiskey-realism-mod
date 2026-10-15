@@ -14,6 +14,7 @@ These rules apply to Harmony patches under `src/WhiskeyRealism/Patches/`.
 
 - One concern per patch file.
 - Add a short header comment naming the vanilla method and what the patch changes.
+- Wrap every static Prefix/Postfix/Finalizer body in `TelemetryPerf.Scope("<layer>.patch.<short-name>", TelemetryLayer.<Layer>, TelemetryCategory.Performance, 2.0) { ... }` per root `AGENTS.md` § "Diagnostic scope on every patch entry" (non-negotiable per 2026-05-19 user direction). Use threshold 5.0ms for known-heavy paths. Transpilers exempt (cost is JIT-emit, not per-call).
 - Catch reflection failures and log one bounded warning. Never throw from a hot patch.
 - Use `OnceLog` or signature-gated logging for first-fire and behavioral proof.
 - Preserve vanilla side effects unless the spec explicitly says to replace them.

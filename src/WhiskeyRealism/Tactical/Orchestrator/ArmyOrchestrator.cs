@@ -147,13 +147,98 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, out TacticalBattlePlan nextPlan)
         {
             // Envelopment pressure: replan-time read of the latest reinforcement
-            // opportunity decision. AttackNow + ratio>=1.5 biases the catalog
-            // toward Lee/Jackson/Hooker/Sherman envelopment playbooks. Mirrors
-            // SoW's grand-tactics play selection (offai.cpp:1144-1168) but uses
-            // a doctrine flag instead of a pre-battle table.
+            // opportunity decision. AttackNow + personality-aware ratio threshold
+            // biases the catalog toward Lee/Jackson/Hooker/Sherman envelopment
+            // playbooks. Mirrors SoW's grand-tactics play selection
+            // (offai.cpp:1144-1168) but uses a doctrine flag instead of a
+            // pre-battle table. Aggressive commanders envelop at parity;
+            // cautious commanders require a clearer margin (1.4×).
+            float envelopAggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
+            if (envelopAggression01 < 0f) envelopAggression01 = 0f;
+            if (envelopAggression01 > 1f) envelopAggression01 = 1f;
+            float envelopMinRatio = EffectiveEnvelopmentMinRatio(envelopAggression01);
             bool envelopmentPressure =
                 _currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.AttackNow &&
-                _currentReinforcementOpportunity.CurrentRatio >= EnvelopmentMinRatio;
+                _currentReinforcementOpportunity.CurrentRatio >= envelopMinRatio;
+            // Force-composition probe (2026-05-21 precondition gate). Walks
+            // BattleUnits.completeunitlist filtered to this alliance, computes
+            // strength fractions per branch (infantry/artillery/cavalry). Used
+            // by TacticalPlaybook.MatchesPreconditions to hard-filter
+            // cavalry-specific playbooks (Buford, Forrest, etc.) when the
+            // force lacks cavalry. Defaults to 1f (permissive) if the probe
+            // can't complete — preserves pre-gate behavior on degradation.
+            //
+            // Branch resolution: vanilla unittyp values (see decompile
+            // line 5072: cavalry-mount-up checks unittyp == 1 || 4; line 4080:
+            // infantry filter is unittyp == 0 || 1; artillery is unittyp == 2).
+            // Cavalry is identified as unittyp == 4 (the unambiguous case);
+            // unittyp == 1 is mounted-infantry hybrid which doesn't trigger
+            // Buford-style plays.
+            float cavalryFraction = 1f, infantryFraction = 1f, artilleryFraction = 1f;
+            try
+            {
+                var units = BattleUnits.completeunitlist as System.Collections.IList;
+                if (units != null && units.Count > 0)
+                {
+                    float total = 0f, inf = 0f, cav = 0f, art = 0f;
+                    for (int i = 0; i < units.Count; i++)
+                    {
+                        var r = units[i] as Regiment;
+                        if (r == null) continue;
+                        if (r.alliance != AllianceId) continue;
+                        if (r.isrouted || r.markedforrout || r.permanentlydetached) continue;
+                        float strength = 0f;
+                        try { strength = r.groupstrengthdirect; } catch { strength = 1f; }
+                        if (strength <= 0f) strength = 1f;
+                        total += strength;
+                        if (r.unittyp == 0 || r.unittyp == 1) inf += strength;
+                        else if (r.unittyp == 2) art += strength;
+                        else if (r.unittyp == 4) cav += strength;
+                    }
+                    if (total > 0f)
+                    {
+                        cavalryFraction = cav / total;
+                        infantryFraction = inf / total;
+                        artilleryFraction = art / total;
+                    }
+                }
+            }
+            catch { /* preserve defaults (permissive) */ }
+
+            // DelayingDefense pressure: biases catalog toward delay+skirmish
+            // archetypes when the doctrine says we're outnumbered + no near
+            // parity but still defensible (added 2026-05-23 / I).
+            bool delayingDefensePressure =
+                _currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.DelayingDefense;
+
+            // Defensive pressure (2026-05-23 / K): broader signal — fires
+            // for ANY defensive doctrine outcome (DelayingDefense,
+            // DefensiveHold, WaitAndConsolidate). Stronger catalog weight
+            // (0.35 vs 0.2) so the playbook MUST agree with the doctrine
+            // when doctrine wants defense.
+            bool defensivePressure =
+                _currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.DelayingDefense ||
+                _currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.DefensiveHold ||
+                _currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.WaitAndConsolidate;
+
+            // Battle stance (2026-05-23 / L): pulled from the latest force-balance
+            // evidence (which read vanilla's GetBattleType). Hard-filters the
+            // catalog so a defender CANNOT pick an offensive playbook and an
+            // attacker CANNOT pick a pure-delay playbook.
+            //
+            // Force-aware demotion (2026-05-25 / A): GetBattleType only knows
+            // "is our mission to take ground?" — it does NOT know the force
+            // ratio. An outnumbered side that is nominally the objective-
+            // attacker was being FORCED into an offensive playbook
+            // (FrontalShockAssault) because the hard filter removed every
+            // defensive archetype before the DelayingDefensePressure /
+            // DefensivePressure biases could apply. When the force-aware
+            // doctrine wants a non-offensive posture, demote Attacker/Meeting →
+            // Defender so the outnumbered side delays/defends instead of
+            // launching a doomed assault. See TacticalStanceReconciler.
+            BattleStance stance = TacticalStanceReconciler.ResolveEffectiveStance(
+                _currentForceBalanceStance, _currentReinforcementOpportunity.Opportunity);
+
             var ctx = new PlaybookContext(
                 _commanderPersonality,
                 evidence.Terrain,
@@ -162,7 +247,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 defaultMainEffortSector: evidence.DefaultMainEffortSector,
                 jitterSeed: AllianceId * 31 + 7,
                 envelopmentPressure: envelopmentPressure,
-                allianceId: AllianceId);
+                allianceId: AllianceId,
+                cavalryFraction: cavalryFraction,
+                infantryFraction: infantryFraction,
+                artilleryFraction: artilleryFraction,
+                delayingDefensePressure: delayingDefensePressure,
+                defensivePressure: defensivePressure,
+                stance: stance);
             var pb = _catalog?.Select(ctx);
             if (pb == null)
             {
@@ -359,7 +450,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // plan instead of returning stale pre-replan intents. (AdvancePhase does not need
             // this — the allocator does not read BattlePhase.)
             _hasObservedEvidence = false;
+            // Opportunity-change trigger (2026-05-21). Snapshot the opportunity at
+            // each replan so ArmyReplanTriggers.Evaluate can detect transitions
+            // without firing the trigger every cycle. Next cycle's input compares
+            // CurrentOpportunity to LastReplanOpportunity; they match until the
+            // doctrine returns a different category, at which point the trigger
+            // fires and ArmyTickCycle invokes Replan again (this snapshot is
+            // updated, breaking the loop).
+            _lastReplanOpportunity = _currentReinforcementOpportunity.Opportunity;
         }
+
+        // Opportunity-change trigger state (2026-05-21). Snapshotted in Replan()
+        // and read by ReplanTriggerInput so the trigger fires once per category
+        // transition, not every cycle while the opportunity sits in the same
+        // category.
+        private ReinforcementOpportunity _lastReplanOpportunity = ReinforcementOpportunity.NoOpportunity;
+        public ReinforcementOpportunity LastReplanOpportunity => _lastReplanOpportunity;
 
         private static TacticalIntentModel UnknownIntentModel() =>
             new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null);
@@ -514,9 +620,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _directChildIntents = DirectChildAllocator.Allocate(
                 _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache);
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
+            EmitDirectChildIntentTelemetry();
         }
 
         public void ObserveDirectChildEvidenceWithIntent(IReadOnlyList<DirectChildEvidence> evidence, IReadOnlyList<TacticalIntentModel> perChildEnemyIntent)
+        {
+            ObserveDirectChildEvidenceWithZones(evidence, perChildEnemyIntent, null);
+        }
+
+        /// <summary>
+        /// Zone-aware observation (Stage 2 / G geometric play layer). When
+        /// <paramref name="zoneAssignments"/> is non-empty, the allocator
+        /// gives those children roles based on rect kind instead of evidence.
+        /// </summary>
+        public void ObserveDirectChildEvidenceWithZones(
+            IReadOnlyList<DirectChildEvidence> evidence,
+            IReadOnlyList<TacticalIntentModel> perChildEnemyIntent,
+            IReadOnlyList<WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsAssignment> zoneAssignments)
         {
             if (!HasPlan) return;
             if (evidence == null || evidence.Count != _directChildSnapshots.Length) return;
@@ -524,9 +644,114 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // since enemy intent (which is not part of DirectChildEvidence.SignatureEquals) can change.
             for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
             _hasObservedEvidence = true;
-            _directChildIntents = DirectChildAllocator.AllocateWithChildIntent(
-                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache, perChildEnemyIntent);
+            _directChildIntents = DirectChildAllocator.AllocateWithZones(
+                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
+                perChildEnemyIntent, zoneAssignments);
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
+            EmitDirectChildIntentTelemetry();
+        }
+
+        // ---- Role-distribution telemetry (2026-05-22 — D from "Fix it all correctly") ----
+        //
+        // Emits a single TacticalDirectChildIntent telemetry event whenever the
+        // role distribution changes. Bounded by a per-side signature dedup +
+        // minimum interval so it doesn't flood the log. This gives us visibility
+        // into Main/SupportMain/Refuse/Reserve/Fallback distribution per side
+        // that was previously missing — the role-budget allocator could be
+        // diagnosed in code only, never in smoke.
+        private string _lastDirectChildIntentTelemetrySig = string.Empty;
+        private static readonly System.Collections.Generic.Dictionary<string, float> _lastDirectChildIntentTelemetryAt =
+            new System.Collections.Generic.Dictionary<string, float>();
+        private const float DirectChildIntentTelemetrySeconds = 5f;
+
+        private void EmitDirectChildIntentTelemetry()
+        {
+            if (_directChildIntents == null || _directChildIntents.Count == 0) return;
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                int mainCount = 0;
+                int supportMainCount = 0;
+                int refuseLeftCount = 0;
+                int refuseRightCount = 0;
+                int fixCount = 0;
+                int screenCount = 0;
+                int reserveCount = 0;
+                int fallbackCount = 0;
+                int unknownCount = 0;
+                for (int i = 0; i < _directChildIntents.Count; i++)
+                {
+                    var intent = _directChildIntents[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append(intent.ChildId ?? "?").Append('=').Append(intent.Role).Append(':').Append(intent.PrimarySector);
+                    switch (intent.Role)
+                    {
+                        case DirectChildRole.Main:        mainCount++; break;
+                        case DirectChildRole.SupportMain: supportMainCount++; break;
+                        case DirectChildRole.Fix:         fixCount++; break;
+                        case DirectChildRole.Screen:      screenCount++; break;
+                        case DirectChildRole.RefuseLeft:  refuseLeftCount++; break;
+                        case DirectChildRole.RefuseRight: refuseRightCount++; break;
+                        case DirectChildRole.Reserve:     reserveCount++; break;
+                        case DirectChildRole.Fallback:    fallbackCount++; break;
+                        case DirectChildRole.Unknown:     unknownCount++; break;
+                    }
+                }
+                string roleSummary = "main=" + mainCount
+                    + " sup=" + supportMainCount
+                    + " fix=" + fixCount
+                    + " scrn=" + screenCount
+                    + " rL=" + refuseLeftCount
+                    + " rR=" + refuseRightCount
+                    + " rsrv=" + reserveCount
+                    + " fbck=" + fallbackCount
+                    + " unk=" + unknownCount;
+                string sig = "side=" + AllianceId + "|" + roleSummary;
+                if (string.Equals(sig, _lastDirectChildIntentTelemetrySig, System.StringComparison.Ordinal))
+                    return;
+                _lastDirectChildIntentTelemetrySig = sig;
+
+                float nowSeconds = System.Environment.TickCount * 0.001f;
+                string key = "tactical-direct-child-intent:" + AllianceId;
+                if (!WhiskeyRealism.Tactical.TacticalTelemetry.ShouldEmit(
+                        _lastDirectChildIntentTelemetryAt, key, sig, nowSeconds,
+                        DirectChildIntentTelemetrySeconds, false))
+                    return;
+
+                string detail = sb.ToString();
+                string opportunity = _currentReinforcementOpportunity.Opportunity.ToString();
+                float currentRatio = _currentReinforcementOpportunity.CurrentRatio;
+                int mainEffortSector = HasPlan ? _plan.MainEffortSector : -1;
+                string planId = HasPlan ? _plan.PlanId.ToString() : "<none>";
+                string phase = HasPlan ? _plan.Phase.ToString() : "<none>";
+                WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                    WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                    WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                    "TacticalDirectChildIntent",
+                    WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalDirectChildIntent", "summary", sig)
+                        .WithField("side", AllianceId)
+                        .WithField("plan", planId)
+                        .WithField("phase", phase)
+                        .WithField("mainEffortSector", mainEffortSector)
+                        .WithField("opportunity", opportunity)
+                        .WithField("currentRatio", currentRatio)
+                        .WithField("mainCount", mainCount)
+                        .WithField("supportMainCount", supportMainCount)
+                        .WithField("fixCount", fixCount)
+                        .WithField("screenCount", screenCount)
+                        .WithField("refuseLeftCount", refuseLeftCount)
+                        .WithField("refuseRightCount", refuseRightCount)
+                        .WithField("reserveCount", reserveCount)
+                        .WithField("fallbackCount", fallbackCount)
+                        .WithField("unknownCount", unknownCount)
+                        .WithField("brigades", detail));
+            }
+            catch (System.Exception ex)
+            {
+                try { Plugin.Log?.LogWarning("[TacticalDirectChildIntent] emit failed: " + ex.Message); } catch { }
+            }
         }
 
         public DirectChildRole GetDirectChildRole(string childId)
@@ -618,8 +843,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             //     and methodical commanders — probe with one wing, follow with
             //     the second once the first finds purchase).
             CascadeEnvelopmentMode envelopmentMode = CascadeEnvelopmentMode.None;
+            float effectiveEnvelopMinRatio = EffectiveEnvelopmentMinRatio(aggression01);
             if (_currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.AttackNow &&
-                _currentReinforcementOpportunity.CurrentRatio >= EnvelopmentMinRatio)
+                _currentReinforcementOpportunity.CurrentRatio >= effectiveEnvelopMinRatio)
             {
                 envelopmentMode = aggression01 >= EnvelopmentSimultaneousAggressionThreshold
                     ? CascadeEnvelopmentMode.DoubleWing
@@ -631,11 +857,56 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Minimum CurrentRatio for the cascade to spread Main+SupportMain
+        /// Baseline minimum CurrentRatio for the cascade to spread Main+SupportMain
         /// across two lateral wings. Below this, single-axis Main is safer —
         /// thin advantages get diluted across two axes and lose locally.
+        ///
+        /// (2026-05-22 tuned 1.5 → 1.2.) Historical envelopments commonly fired
+        /// at far less than 1.5× force ratio (Jackson at Chancellorsville
+        /// flanked at ~0.5×; Lee at Second Manassas at parity). Use
+        /// <see cref="EffectiveEnvelopmentMinRatio"/> for the personality-aware
+        /// threshold per commander aggression.
         /// </summary>
-        public const float EnvelopmentMinRatio = 1.5f;
+        public const float EnvelopmentMinRatio = 1.2f;
+
+        /// <summary>
+        /// Aggressive commanders (Lee/Jackson/Hood, aggression ≥ 0.7) accept
+        /// envelopment at parity or slightly outnumbered — the historical
+        /// precedent for offensive envelopment under disadvantage.
+        /// </summary>
+        public const float AggressiveEnvelopmentMinRatio = 1.0f;
+
+        /// <summary>
+        /// Cautious commanders (McClellan/Johnston, aggression ≤ 0.3) require
+        /// a clearer margin before committing to multi-axis attack.
+        /// </summary>
+        public const float CautiousEnvelopmentMinRatio = 1.4f;
+
+        /// <summary>
+        /// Aggression threshold above which the aggressive envelopment ratio applies.
+        /// </summary>
+        public const float AggressiveEnvelopmentAggressionThreshold = 0.7f;
+
+        /// <summary>
+        /// Aggression threshold below which the cautious envelopment ratio applies.
+        /// </summary>
+        public const float CautiousEnvelopmentAggressionThreshold = 0.3f;
+
+        /// <summary>
+        /// Returns the effective envelopment minimum CurrentRatio for a commander
+        /// with the given normalized aggression. Aggressive commanders accept
+        /// envelopment at parity; cautious commanders require a clearer margin;
+        /// mid-band uses the baseline.
+        /// </summary>
+        public static float EffectiveEnvelopmentMinRatio(float aggression01)
+        {
+            if (float.IsNaN(aggression01) || float.IsInfinity(aggression01)) return EnvelopmentMinRatio;
+            if (aggression01 < 0f) aggression01 = 0f;
+            if (aggression01 > 1f) aggression01 = 1f;
+            if (aggression01 >= AggressiveEnvelopmentAggressionThreshold) return AggressiveEnvelopmentMinRatio;
+            if (aggression01 <= CautiousEnvelopmentAggressionThreshold) return CautiousEnvelopmentMinRatio;
+            return EnvelopmentMinRatio;
+        }
 
         /// <summary>
         /// Commander aggression threshold above which envelopment uses
@@ -689,12 +960,51 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Refresh the reinforcement-opportunity decision. Runtime passes in a
         /// freshly-built TacticalForceBalanceEvidence (typically from
         /// ArmyEvidenceBuilder.BuildForceBalance). The doctrine is pure; this
-        /// just caches its output so consumers don't re-run it per tick.
+        /// caches its output so consumers don't re-run it per tick, and
+        /// passes the raw decision through TacticalOpportunityHysteresis to
+        /// prevent thrash when ratio inputs hover near category thresholds
+        /// (observed in smoke as WithdrawalToFightLater ↔ DefensiveHold
+        /// flipping every ~500ms — cascading into stuck-brigade behavior).
         /// </summary>
         public void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence)
         {
-            _currentReinforcementOpportunity = TacticalReinforcementOpportunityDoctrine.Decide(evidence);
+            UpdateReinforcementOpportunity(evidence, UnityEngine.Time.realtimeSinceStartup);
         }
+
+        // Test-injectable overload for harness use.
+        internal void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence, float nowRealtimeSeconds)
+        {
+            var raw = TacticalReinforcementOpportunityDoctrine.Decide(evidence);
+            float secondsSinceLastChange = nowRealtimeSeconds - _opportunityLastChangedRealtimeSeconds;
+            // Negative on first call (uninitialized timestamp = 0; nowRealtimeSeconds
+            // > 0); treat as "very long ago" so first decision is always accepted.
+            if (secondsSinceLastChange < 0f) secondsSinceLastChange = float.MaxValue;
+
+            float minHoldSeconds = TacticalOpportunityHysteresis.DefaultMinHoldSeconds;
+            if (Plugin.OpportunityHysteresisMinHoldSeconds != null)
+            {
+                minHoldSeconds = Plugin.OpportunityHysteresisMinHoldSeconds.Value;
+            }
+            var smoothed = TacticalOpportunityHysteresis.Smooth(
+                raw, _currentReinforcementOpportunity, secondsSinceLastChange, minHoldSeconds);
+            if (smoothed.Changed)
+            {
+                _opportunityLastChangedRealtimeSeconds = nowRealtimeSeconds;
+            }
+            _currentReinforcementOpportunity = smoothed.Decision;
+            _currentForceBalanceStance = evidence.Stance;
+        }
+
+        // ---- Cached stance from latest force-balance evidence (2026-05-23 / L) ----
+        // Read by TryPickPlan to hard-filter the playbook catalog by stance.
+        // Updated by UpdateReinforcementOpportunity each tick from vanilla's
+        // GetBattleType signal.
+        private BattleStance _currentForceBalanceStance = BattleStance.Meeting;
+
+        // Timestamp (Unity Time.realtimeSinceStartup) of the most recent
+        // accepted opportunity-category change. Read by
+        // TacticalOpportunityHysteresis.Smooth to enforce minimum hold time.
+        private float _opportunityLastChangedRealtimeSeconds = 0f;
 
         private string ComputeLeafMapSignature(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree)
         {
@@ -717,9 +1027,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // rebuilds with new positional priorities.
             sb.Append("|me=").Append(HasPlan ? _plan.MainEffortSector : -1);
             sb.Append("|ph=").Append(HasPlan ? (int)_plan.Phase : -1);
+            float sigAggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
+            if (sigAggression01 < 0f) sigAggression01 = 0f;
+            if (sigAggression01 > 1f) sigAggression01 = 1f;
+            float sigEnvelopMinRatio = EffectiveEnvelopmentMinRatio(sigAggression01);
             bool envelopActive =
                 _currentReinforcementOpportunity.Opportunity == ReinforcementOpportunity.AttackNow &&
-                _currentReinforcementOpportunity.CurrentRatio >= EnvelopmentMinRatio;
+                _currentReinforcementOpportunity.CurrentRatio >= sigEnvelopMinRatio;
             // Encode the mode (1 = simultaneous, 2 = echelon, 0 = off) so the
             // cache invalidates when commander aggression flips us across the
             // threshold mid-battle — e.g., a wounded aggressive commander
@@ -727,10 +1041,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int envCode = 0;
             if (envelopActive)
             {
-                float aggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
-                if (aggression01 < 0f) aggression01 = 0f;
-                if (aggression01 > 1f) aggression01 = 1f;
-                envCode = aggression01 >= EnvelopmentSimultaneousAggressionThreshold ? 1 : 2;
+                envCode = sigAggression01 >= EnvelopmentSimultaneousAggressionThreshold ? 1 : 2;
             }
             sb.Append("|env=").Append(envCode);
             return sb.ToString();

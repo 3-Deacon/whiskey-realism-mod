@@ -27,18 +27,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             TacticalPlaybook best = null;
             float bestScore = float.NegativeInfinity;
-            // Diagnostic counters: how often the faction-bias penalty engaged
-            // in this selection pass. Emitted via EmitFactionBiasTrace below
-            // so smoke can verify the bias actually fired (vs accidentally
-            // picking the right playbook by personality-fit alone).
-            int factionPenaltyApplied = 0;
-            int factionEitherSkipped = 0;
             // Deterministic per-seed jitter (xorshift32). Seed must be non-zero for the
             // generator to produce useful state, so OR with 1.
+            // Precondition filter (2026-05-21). Excludes plays the force can't
+            // execute (cavalry plays w/o cavalry). Hard filter — happens
+            // before scoring so an ineligible play can't win on personality
+            // fit.
+            int preconditionFiltered = 0;
             uint state = unchecked((uint)ctx.JitterSeed | 1u);
             for (int i = 0; i < _playbooks.Count; i++)
             {
                 var pb = _playbooks[i];
+                if (!pb.MatchesPreconditions(ctx))
+                {
+                    preconditionFiltered++;
+                    continue;
+                }
+                // Stance hard filter (2026-05-23 / L): defenders can ONLY pick
+                // defensive archetypes; attackers can ONLY pick offensive (or
+                // neutral) archetypes. Mirrors Scourge of War's attack-vs-defend
+                // play selection (offai.cpp:1153-1159) — the choice is dictated
+                // by vanilla's GetBattleType, not by per-tick force balance.
+                if (!StanceAllowsPlaybook(ctx.Stance, pb.Id))
+                {
+                    preconditionFiltered++;
+                    continue;
+                }
                 float personalityScore = pb.Fit.Score(ctx.CommanderPersonality);
                 float terrainScore = pb.TerrainFit.Score(ctx.Terrain);
                 float oddsScore = pb.PreferredOdds.Score(ctx.CurrentOdds);
@@ -52,40 +66,38 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                             + 0.1f * hintScore
                             + 0.05f * jitter;
 
-                // Faction affinity bias (added 2026-05-19): subtract a small
-                // penalty when the playbook's historical faction does NOT
-                // match the commander's alliance. Prevents jarring outcomes
-                // like "CSA Beauregard picks ShermanManeuverFix" where the
-                // personality vector happens to score the Union playbook
-                // slightly higher than Lee/Hood. Penalty magnitude (max 0.10)
-                // is calibrated to flip CSA→Union or Union→CSA selections
-                // when personality fit is close, but not override a strongly
-                // mismatched personality. Generic + MeetingEngagement
-                // playbooks are Either (no penalty either way).
-                int affinity = FactionAffinity(pb.Id);
-                if (affinity == 0) factionEitherSkipped++;
-                if (affinity != 0 && ctx.AllianceId >= 0 && ctx.AllianceId <= 1)
-                {
-                    // affinity=+1 means CSA-historical, affinity=-1 means
-                    // Union-historical. AllianceId=0 typically Union, =1 CSA
-                    // (matches HistoricalFigureRegistry convention).
-                    int commanderFactionSign = (ctx.AllianceId == 1) ? +1 : -1;
-                    if (commanderFactionSign != affinity)
-                    {
-                        score -= FactionMismatchPenalty;
-                        factionPenaltyApplied++;
-                    }
-                }
-
                 // Envelopment bias: when the doctrine signals AttackNow + clear
                 // standing advantage, add an additive bonus weighted by the
-                // playbook's historical envelopment affinity. Bonus magnitude
-                // (max 0.2) is tuned to swing the choice toward Lee/Jackson
-                // when personality fit is close, but not override a strongly
-                // mismatched commander (personality fit carries 0.5 weight).
+                // playbook's envelopment-doctrine affinity. Bonus magnitude
+                // (max 0.2) is tuned to swing the choice toward envelopment
+                // archetypes when personality fit is close, but not override
+                // a strongly mismatched commander (personality fit carries
+                // 0.5 weight).
                 if (ctx.EnvelopmentPressure)
                 {
                     score += 0.2f * EnvelopmentAffinity(pb.Id);
+                }
+
+                // Delaying bias (2026-05-23 / I): when the doctrine signals
+                // DelayingDefense (outnumbered + no near parity + still
+                // defensible), bias toward delay-and-skirmish archetypes.
+                // Bonus magnitude (max 0.2) parallels EnvelopmentPressure.
+                if (ctx.DelayingDefensePressure)
+                {
+                    score += 0.2f * DelayingAffinity(pb.Id);
+                }
+
+                // Defensive bias (2026-05-23 / K): broader signal that fires
+                // for any non-offensive doctrine outcome (DelayingDefense,
+                // DefensiveHold, WaitAndConsolidate). Stronger weight (0.35)
+                // than DelayingDefensePressure (0.2) — when doctrine doesn't
+                // want an attack, the playbook MUST agree. Without this, the
+                // smoke showed doctrine=DefensiveHold + playbook=ManeuverAndFix
+                // mismatches, which caused lone-brigade attacks while macroai=2
+                // (defend) was set.
+                if (ctx.DefensivePressure)
+                {
+                    score += 0.35f * DelayingAffinity(pb.Id);
                 }
 
                 if (score > bestScore)
@@ -94,112 +106,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     best = pb;
                 }
             }
-            EmitFactionBiasTrace(ctx, best, factionPenaltyApplied, factionEitherSkipped);
             return best;
-        }
-
-        /// <summary>
-        /// Diagnostic emission: after the selection loop, log the chosen
-        /// playbook + how many candidates the faction-bias penalty
-        /// engaged. Per the project's diagnostic-first pattern, we want
-        /// smoke logs to show the bias actively fired so we can verify
-        /// "CSA picks Lee" was driven by the alliance penalty, not by
-        /// personality-fit coincidence. Signature-deduped per (allianceId,
-        /// chosen-plan) so steady-state replans don't spam the sink.
-        /// </summary>
-        private static void EmitFactionBiasTrace(
-            PlaybookContext ctx,
-            TacticalPlaybook chosen,
-            int penaltyApplied,
-            int eitherSkipped)
-        {
-            if (chosen == null) return;
-            if (ctx.AllianceId < 0 || ctx.AllianceId > 1) return;
-            // Use System.Environment.TickCount instead of UnityEngine.Time —
-            // Unity Time is an ECall (external native call) whose JIT-time
-            // verification throws SecurityException in pure-.NET test
-            // environments, escaping even our try-catch. TickCount is in
-            // mscorlib, works in tests AND in Unity runtime. Wraps every
-            // ~25 days which is irrelevant for a battle session.
-            float nowSeconds = System.Environment.TickCount * 0.001f;
-
-            try
-            {
-                int chosenAffinity = FactionAffinity(chosen.Id);
-                int commanderFactionSign = (ctx.AllianceId == 1) ? +1 : -1;
-                bool factionMatched = chosenAffinity == 0 || chosenAffinity == commanderFactionSign;
-                string sig = "alliance=" + ctx.AllianceId
-                    + "|plan=" + chosen.Id
-                    + "|affinity=" + chosenAffinity
-                    + "|match=" + factionMatched
-                    + "|penaltyApplied=" + penaltyApplied
-                    + "|eitherSkipped=" + eitherSkipped;
-                string key = "tactical-faction-bias:" + ctx.AllianceId + ":" + chosen.Id;
-                if (!WhiskeyRealism.Tactical.TacticalTelemetry.ShouldEmit(_lastFactionBiasTelemetryAt, key, sig, nowSeconds, FactionBiasTelemetrySeconds, false))
-                    return;
-                WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
-                    WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
-                    WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
-                    "TacticalPlaybookFactionBias",
-                    WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
-                    ev => ev
-                        .WithDecision("TacticalPlaybookFactionBias", factionMatched ? "match" : "mismatch", sig)
-                        .WithField("alliance", ctx.AllianceId)
-                        .WithField("plan", chosen.Id.ToString())
-                        .WithField("affinity", chosenAffinity)
-                        .WithField("match", factionMatched)
-                        .WithField("penaltyApplied", penaltyApplied)
-                        .WithField("eitherSkipped", eitherSkipped));
-            }
-            catch { }
-        }
-
-        private static readonly System.Collections.Generic.Dictionary<string, float> _lastFactionBiasTelemetryAt = new System.Collections.Generic.Dictionary<string, float>();
-        private const float FactionBiasTelemetrySeconds = 30f;
-
-        /// <summary>
-        /// Penalty subtracted from a playbook's score when the commander's
-        /// alliance does not match the playbook's historical faction. Tuned
-        /// to swing close personality-fit ties (e.g., Beauregard could score
-        /// Sherman fractionally higher than Lee on pure personality) but not
-        /// override a strongly mismatched personality (Hood commander with
-        /// McClellan playbook still wins on personality magnitude).
-        /// </summary>
-        public const float FactionMismatchPenalty = 0.10f;
-
-        /// <summary>
-        /// Faction signature of each playbook. +1 = CSA-historical doctrine,
-        /// -1 = Union-historical doctrine, 0 = generic / either-faction.
-        /// Used by Select() to bias against CSA→Union (or vice versa)
-        /// playbook selection on close ties.
-        /// </summary>
-        public static int FactionAffinity(BattlePlanId id)
-        {
-            switch (id)
-            {
-                // CSA-historical playbooks
-                case BattlePlanId.LeeEnvelopment:           return +1;
-                case BattlePlanId.JacksonValleyShuffle:     return +1;
-                case BattlePlanId.LongstreetDefensiveOverslope: return +1;
-                case BattlePlanId.HoodFrontalAssault:       return +1;
-                case BattlePlanId.BraggIndecisiveCommit:    return +1;
-                case BattlePlanId.ForrestCavalryRaid:       return +1;
-                case BattlePlanId.JohnstonFabianDelay:      return +1;
-                // Union-historical playbooks
-                case BattlePlanId.McClellanPreparedDefense: return -1;
-                case BattlePlanId.ShermanManeuverFix:       return -1;
-                case BattlePlanId.GrantContinuousAttrition: return -1;
-                case BattlePlanId.HookerFlankDeparture:     return -1;
-                case BattlePlanId.BurnsideForcedAssault:    return -1;
-                case BattlePlanId.BufordCavalryScreenDelay: return -1;
-                // Generic / either-faction (no historical anchor) — no penalty
-                case BattlePlanId.GenericAggressive:
-                case BattlePlanId.GenericCautious:
-                case BattlePlanId.GenericMethodical:
-                case BattlePlanId.GenericDesperate:
-                case BattlePlanId.MeetingEngagement:
-                default:                                    return 0;
-            }
         }
 
         /// <summary>
@@ -211,28 +118,133 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// maneuver-then-fix; vs Hood's frontal Devil's Den / Burnside's
         /// Fredericksburg assault.
         /// </summary>
+        /// <summary>
+        /// Playbook stance classification. Used by <see cref="Select"/> to
+        /// hard-filter incompatible playbooks for a given battle stance
+        /// (defenders can't pick offensive; attackers can't pick pure-delay).
+        /// </summary>
+        public enum PlaybookStance
+        {
+            /// <summary>Acceptable on either side (Meeting / Generic).</summary>
+            Neutral = 0,
+            /// <summary>Only attackers should pick this.</summary>
+            Offensive = 1,
+            /// <summary>Only defenders should pick this.</summary>
+            Defensive = 2,
+        }
+
+        /// <summary>
+        /// Classifies each playbook by stance. Offensive archetypes only fire
+        /// when we're attacking; defensive only fire when we're defending.
+        /// Neutral archetypes (MeetingEngagement + Generic*) fire on any stance.
+        /// </summary>
+        public static PlaybookStance StanceOf(BattlePlanId id)
+        {
+            switch (id)
+            {
+                // Offensive archetypes — only valid for an attacker.
+                case BattlePlanId.DoubleEnvelopment:
+                case BattlePlanId.MobileFlankMarch:
+                case BattlePlanId.WideFlankApproach:
+                case BattlePlanId.ManeuverAndFix:
+                case BattlePlanId.ContinuousAttrition:
+                case BattlePlanId.FrontalShockAssault:
+                case BattlePlanId.ForcedFrontalAttack:
+                case BattlePlanId.HesitatedCommit:
+                case BattlePlanId.CavalryRaid:
+                case BattlePlanId.GenericAggressive:
+                case BattlePlanId.GenericDesperate:
+                    return PlaybookStance.Offensive;
+                // Defensive archetypes — only valid for a defender.
+                case BattlePlanId.PreparedDefense:
+                case BattlePlanId.ReverseSlopeDefense:
+                case BattlePlanId.DelayingDefense:
+                case BattlePlanId.CavalryScreeningDelay:
+                case BattlePlanId.GenericCautious:
+                    return PlaybookStance.Defensive;
+                // Neutral — fits any stance.
+                case BattlePlanId.MeetingEngagement:
+                case BattlePlanId.GenericMethodical:
+                default:
+                    return PlaybookStance.Neutral;
+            }
+        }
+
+        /// <summary>
+        /// True when a playbook is compatible with the given side stance.
+        /// Neutral playbooks always pass. Offensive playbooks fail on Defender.
+        /// Defensive playbooks fail on Attacker.
+        /// </summary>
+        public static bool StanceAllowsPlaybook(BattleStance stance, BattlePlanId id)
+        {
+            var pbStance = StanceOf(id);
+            if (pbStance == PlaybookStance.Neutral) return true;
+            switch (stance)
+            {
+                case BattleStance.Attacker:
+                    return pbStance != PlaybookStance.Defensive;
+                case BattleStance.Defender:
+                    return pbStance != PlaybookStance.Offensive;
+                case BattleStance.Meeting:
+                default:
+                    return true;
+            }
+        }
+
+        /// <summary>
+        /// Per-playbook affinity for Fabian-delay archetypes (outnumbered +
+        /// defensible). 1.0 = literal delay doctrine; 0.0 = offensive-only or
+        /// defense-without-delay.
+        /// </summary>
+        public static float DelayingAffinity(BattlePlanId id)
+        {
+            switch (id)
+            {
+                case BattlePlanId.DelayingDefense:           return 1.00f;
+                case BattlePlanId.CavalryScreeningDelay:     return 0.85f;
+                case BattlePlanId.ReverseSlopeDefense:       return 0.70f;
+                case BattlePlanId.PreparedDefense:           return 0.50f;
+                case BattlePlanId.GenericCautious:           return 0.45f;
+                case BattlePlanId.GenericMethodical:         return 0.30f;
+                case BattlePlanId.HesitatedCommit:           return 0.20f;
+                case BattlePlanId.MeetingEngagement:         return 0.15f;
+                case BattlePlanId.ContinuousAttrition:       return 0.10f;
+                case BattlePlanId.ManeuverAndFix:            return 0.10f;
+                // Offensive archetypes — should NOT win when delay is signaled.
+                case BattlePlanId.DoubleEnvelopment:
+                case BattlePlanId.MobileFlankMarch:
+                case BattlePlanId.WideFlankApproach:
+                case BattlePlanId.FrontalShockAssault:
+                case BattlePlanId.ForcedFrontalAttack:
+                case BattlePlanId.CavalryRaid:
+                case BattlePlanId.GenericAggressive:
+                case BattlePlanId.GenericDesperate:          return 0.00f;
+                default:                                     return 0.20f;
+            }
+        }
+
         public static float EnvelopmentAffinity(BattlePlanId id)
         {
             switch (id)
             {
-                case BattlePlanId.LeeEnvelopment:           return 1.00f;
-                case BattlePlanId.JacksonValleyShuffle:     return 0.90f;
-                case BattlePlanId.HookerFlankDeparture:     return 0.85f;
-                case BattlePlanId.ShermanManeuverFix:       return 0.80f;
+                case BattlePlanId.DoubleEnvelopment:           return 1.00f;
+                case BattlePlanId.MobileFlankMarch:     return 0.90f;
+                case BattlePlanId.WideFlankApproach:     return 0.85f;
+                case BattlePlanId.ManeuverAndFix:       return 0.80f;
                 case BattlePlanId.GenericAggressive:        return 0.50f;
-                case BattlePlanId.GrantContinuousAttrition: return 0.40f;
+                case BattlePlanId.ContinuousAttrition: return 0.40f;
                 case BattlePlanId.MeetingEngagement:        return 0.40f;
-                case BattlePlanId.ForrestCavalryRaid:       return 0.30f;
+                case BattlePlanId.CavalryRaid:       return 0.30f;
                 case BattlePlanId.GenericMethodical:        return 0.30f;
                 case BattlePlanId.GenericDesperate:         return 0.30f;
-                case BattlePlanId.BufordCavalryScreenDelay: return 0.20f;
-                case BattlePlanId.BraggIndecisiveCommit:    return 0.20f;
-                case BattlePlanId.HoodFrontalAssault:       return 0.10f;
-                case BattlePlanId.BurnsideForcedAssault:    return 0.10f;
+                case BattlePlanId.CavalryScreeningDelay: return 0.20f;
+                case BattlePlanId.HesitatedCommit:    return 0.20f;
+                case BattlePlanId.FrontalShockAssault:       return 0.10f;
+                case BattlePlanId.ForcedFrontalAttack:    return 0.10f;
                 case BattlePlanId.GenericCautious:          return 0.10f;
-                case BattlePlanId.JohnstonFabianDelay:      return 0.10f;
-                case BattlePlanId.McClellanPreparedDefense: return 0.00f;
-                case BattlePlanId.LongstreetDefensiveOverslope: return 0.00f;
+                case BattlePlanId.DelayingDefense:      return 0.10f;
+                case BattlePlanId.PreparedDefense: return 0.00f;
+                case BattlePlanId.ReverseSlopeDefense: return 0.00f;
                 default:                                    return 0.20f;
             }
         }
@@ -249,26 +261,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             switch (id)
             {
-                case BattlePlanId.McClellanPreparedDefense:
-                case BattlePlanId.LongstreetDefensiveOverslope:
+                case BattlePlanId.PreparedDefense:
+                case BattlePlanId.ReverseSlopeDefense:
                 case BattlePlanId.GenericCautious:
-                case BattlePlanId.JohnstonFabianDelay:
+                case BattlePlanId.DelayingDefense:
                     return 0.2f;
-                case BattlePlanId.BraggIndecisiveCommit:
+                case BattlePlanId.HesitatedCommit:
                 case BattlePlanId.GenericMethodical:
-                case BattlePlanId.BufordCavalryScreenDelay:
+                case BattlePlanId.CavalryScreeningDelay:
                 case BattlePlanId.MeetingEngagement:
                     return 0.4f;
-                case BattlePlanId.LeeEnvelopment:
-                case BattlePlanId.JacksonValleyShuffle:
-                case BattlePlanId.ShermanManeuverFix:
-                case BattlePlanId.GrantContinuousAttrition:
-                case BattlePlanId.HookerFlankDeparture:
-                case BattlePlanId.HoodFrontalAssault:
-                case BattlePlanId.BurnsideForcedAssault:
+                case BattlePlanId.DoubleEnvelopment:
+                case BattlePlanId.MobileFlankMarch:
+                case BattlePlanId.ManeuverAndFix:
+                case BattlePlanId.ContinuousAttrition:
+                case BattlePlanId.WideFlankApproach:
+                case BattlePlanId.FrontalShockAssault:
+                case BattlePlanId.ForcedFrontalAttack:
                 case BattlePlanId.GenericAggressive:
                 case BattlePlanId.GenericDesperate:
-                case BattlePlanId.ForrestCavalryRaid:
+                case BattlePlanId.CavalryRaid:
                     return 0.6f;
                 default:
                     return 0.4f;

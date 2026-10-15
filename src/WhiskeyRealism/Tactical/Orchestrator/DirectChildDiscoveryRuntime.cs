@@ -61,10 +61,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (units == null || units.Count == 0) return Array.Empty<RegimentProbe>();
             int effectiveCommandMin = ClampShiftedMin(commandHierarchyShift);
 
-            // First pass: walk every command-level group on this alliance and collect
-            // instanceIds of regiments flagged as direct children via vanilla's
-            // GetAttachedUnitsReg(directonly: true).
+            // Walk vanilla command hierarchy via GetAttachedUnitsReg to build
+            // TWO maps in one pass:
+            //   directChildren — set of instance ids that are a direct child of
+            //     some command-level parent.
+            //   directChildToParent — reverse map (child id -> parent id) so
+            //     we can populate parentInstanceId from the vanilla command
+            //     hierarchy. The prior code used go.transform.parent which is
+            //     the Unity scene-graph parent, NOT the command parent. Corps
+            //     / divisions in vanilla GTCW are typically siblings under a
+            //     common units root with the command hierarchy expressed only
+            //     through allattachedunits lists. That made parentInstanceId 0
+            //     for most units, which caused DirectChildDiscovery.Snapshot
+            //     to fall through to synth-army placeholders for any army
+            //     with no transform-parent-matched direct children.
+            //
+            // 2026-05-23 backport: the extended-probes path
+            // (BuildExtendedProbesForAlliance) was fixed in the 2026-05-19
+            // patch but the non-extended path still used transform.parent.
+            // Smoke confirmed synth-army-* IDs reappearing for CSA's corps
+            // root with no matched direct children. This brings both paths
+            // into sync.
             var directChildren = new HashSet<int>();
+            var directChildToParent = new Dictionary<int, int>();
             for (int i = 0; i < units.Count; i++)
             {
                 var reg = units[i] as Regiment;
@@ -73,6 +92,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var regGo = ((Component)reg).gameObject;
                 if (regGo == null) continue;
                 if (reg.unittyp < effectiveCommandMin) continue;
+                int regInstanceId = regGo.GetInstanceID();
                 Regiment[] kids;
                 try { kids = reg.GetAttachedUnitsReg(true, true, -1, true, false, false, false, false); }
                 catch { kids = null; }
@@ -83,7 +103,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (kid == null) continue;
                     var kidGo = ((Component)kid).gameObject;
                     if (kidGo == null) continue;
-                    directChildren.Add(kidGo.GetInstanceID());
+                    int kidId = kidGo.GetInstanceID();
+                    directChildren.Add(kidId);
+                    // Record FIRST command parent. Walks in unit-list order
+                    // so an Army containing a Corps records Corps→Army before
+                    // nested walks try to claim it.
+                    if (!directChildToParent.ContainsKey(kidId))
+                        directChildToParent[kidId] = regInstanceId;
                 }
             }
 
@@ -96,12 +122,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var go = ((Component)reg).gameObject;
                 if (go == null) continue;
                 int instanceId = go.GetInstanceID();
-                var parentTransform = go.transform != null ? go.transform.parent : null;
+                // Vanilla command hierarchy parent FIRST; fall back to Unity
+                // transform parent only when no command parent claimed this
+                // unit (true top-level army node).
                 int parentInstanceId = 0;
-                if (parentTransform != null)
+                if (!directChildToParent.TryGetValue(instanceId, out parentInstanceId))
                 {
-                    var parentReg = parentTransform.GetComponent<Regiment>();
-                    if (parentReg != null) parentInstanceId = ((Component)parentReg).gameObject.GetInstanceID();
+                    parentInstanceId = 0;
+                    var parentTransform = go.transform != null ? go.transform.parent : null;
+                    if (parentTransform != null)
+                    {
+                        var parentReg = parentTransform.GetComponent<Regiment>();
+                        if (parentReg != null) parentInstanceId = ((Component)parentReg).gameObject.GetInstanceID();
+                    }
                 }
                 result.Add(new RegimentProbe(
                     instanceId: instanceId,

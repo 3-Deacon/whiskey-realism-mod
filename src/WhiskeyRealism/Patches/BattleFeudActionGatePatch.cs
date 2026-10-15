@@ -102,6 +102,10 @@ namespace WhiskeyRealism.Patches
                             " enemy pos:" + ((object)closestEnemy.transform.position).ToString() +
                             " prob:" + probability +
                             " init:" + commanderInitiative);
+                        // Scope B alignment (2026-05-22): W&L feud-driven move
+                        // toward enemy = attack intent. Stance 3 (attack).
+                        WhiskeyRealism.Util.TacticalStanceWriter.EnsureStance(
+                            bunits, group, 3, contextTag: "feud-action-attack");
                         bunits.SetWaypoint(group, closestEnemy.transform.position, newpath: true, doublequick: false, -1f, modifylastwaypoint: false, useorderdelay: true, -1f, -1, showmovementoptions: false);
                     }
                 }

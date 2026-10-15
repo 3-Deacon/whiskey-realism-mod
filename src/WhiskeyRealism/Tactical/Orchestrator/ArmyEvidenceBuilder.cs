@@ -484,6 +484,87 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return TrySideInfoFloat(bunits, side, fieldName, out var value) ? value : 0f;
         }
 
+        /// <summary>
+        /// Reads vanilla's <c>BattleUnits.GetBattleType(alliance)</c> and maps
+        /// to <see cref="BattleStance"/>. Returns Meeting on any failure so
+        /// the doctrine + playbook layer fall through to evidence-based
+        /// behavior rather than acting on a wrong stance assumption.
+        /// </summary>
+        private static BattleStance ReadBattleStance(BattleUnits bunits, int allianceId)
+        {
+            try
+            {
+                if (bunits == null) return BattleStance.Meeting;
+                int code = bunits.GetBattleType(allianceId);
+                switch (code)
+                {
+                    case 1: return BattleStance.Attacker;
+                    case 2: return BattleStance.Defender;
+                    default: return BattleStance.Meeting;
+                }
+            }
+            catch { return BattleStance.Meeting; }
+        }
+
+        // Cached battle-start timestamp for elapsed-hours computation.
+        // uniStormSystem.Hour is HOUR OF DAY (0-24), not elapsed since battle
+        // start — vanilla uses `uniStormSystem.Hour + battlepasseddays * 24`
+        // as a TIMESTAMP everywhere (lastfeudactiontime at decompile 3898,
+        // 4212, etc.). Without subtracting the start, a battle that begins at
+        // 14:00 game time immediately reports 14h elapsed, which fires the
+        // doctrine's prolonged-delay gate (>= 6h) on tick 1 for any outnumbered
+        // side. Smoke 2026-05-23 14:07:51 confirmed: side 0 escalated
+        // DelayingDefense → WithdrawalToFightLater after 29 real seconds with
+        // reason=delay-escalation-prolonged.
+        private static float _battleStartTimestampHours = -1f;
+        private static System.WeakReference<BattleUnits> _battleStartTimestampOwner;
+
+        /// <summary>
+        /// Reads ELAPSED battle hours from vanilla state by snapshotting the
+        /// start timestamp on first read for this BattleUnits instance and
+        /// returning `current - start`. Resets the cache when the BattleUnits
+        /// reference changes (battle teardown + restart) or when the current
+        /// timestamp goes backward (impossible under normal play).
+        /// </summary>
+        private static float SafeReadBattleHours(BattleUnits bunits)
+        {
+            try
+            {
+                if (bunits == null) return 0f;
+                int days = bunits.battlepasseddays;
+                if (days < 0) days = 0;
+                float hourOfDay = 0f;
+                if (bunits.uniStormSystem != null)
+                {
+                    try { hourOfDay = bunits.uniStormSystem.Hour; }
+                    catch { hourOfDay = 0f; }
+                }
+                if (float.IsNaN(hourOfDay) || float.IsInfinity(hourOfDay) || hourOfDay < 0f) hourOfDay = 0f;
+                float currentTimestamp = days * 24f + hourOfDay;
+
+                bool sameOwner = false;
+                if (_battleStartTimestampOwner != null && _battleStartTimestampOwner.TryGetTarget(out var cachedOwner))
+                    sameOwner = ReferenceEquals(cachedOwner, bunits);
+
+                if (!sameOwner || _battleStartTimestampHours < 0f || currentTimestamp < _battleStartTimestampHours)
+                {
+                    _battleStartTimestampHours = currentTimestamp;
+                    _battleStartTimestampOwner = new System.WeakReference<BattleUnits>(bunits);
+                    return 0f;
+                }
+
+                return currentTimestamp - _battleStartTimestampHours;
+            }
+            catch { return 0f; }
+        }
+
+        /// <summary>Test seam: clears the battle-start cache.</summary>
+        public static void ResetBattleStartTimestampForTest()
+        {
+            _battleStartTimestampHours = -1f;
+            _battleStartTimestampOwner = null;
+        }
+
         private static bool TrySideInfoFloat(BattleUnits bunits, int side, string fieldName, out float value)
         {
             value = 0f;
@@ -791,6 +872,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // Otherwise 0.8 baseline so the doctrine engages.
                 float intelConfidence = enemyDeployed > 0f ? 0.8f : 0.4f;
 
+                // Casualty escalation inputs (2026-05-23 / J). Read from vanilla
+                // BattleUnits.sideinformation. casualtyratio: 0..1; routedratio:
+                // 0..1; battle hours from battlepasseddays * 24 + uniStormSystem.Hour.
+                float ownCasualtyRatio = Math.Max(0f, Math.Min(1f, SafeSideInfoFloat(bunits, side, "casualtyratio")));
+                float ownRoutedRatio = Math.Max(0f, Math.Min(1f, SafeSideInfoFloat(bunits, side, "routedratio")));
+                float battleHours = SafeReadBattleHours(bunits);
+
+                // Stance (2026-05-23 / L) — read vanilla's GetBattleType(alliance)
+                // at decompile line 86095. Returns 0 (meeting), 1 (we attack),
+                // 2 (we defend). Hard-filters doctrine + playbook so they can't
+                // diverge from vanilla's scenario-determined posture.
+                BattleStance stance = ReadBattleStance(bunits, allianceId);
+
                 return new TacticalForceBalanceEvidence(
                     ownDeployed,
                     enemyDeployed,
@@ -798,7 +892,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     enemyArrivals,
                     commanderInitiative01,
                     commanderAggression01,
-                    intelConfidence);
+                    intelConfidence,
+                    ownCasualtyRatio01: ownCasualtyRatio,
+                    ownRoutedFraction01: ownRoutedRatio,
+                    battleHoursElapsed: battleHours,
+                    stance: stance);
             }
             catch (Exception e)
             {

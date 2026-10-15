@@ -5,10 +5,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// for clearly-favorable odds. Commits reserves continuously rather than
     /// holding for a decisive moment.
     /// </summary>
-    public sealed class GrantContinuousAttritionPlaybook : TacticalPlaybook
+    public sealed class ContinuousAttritionPlaybook : TacticalPlaybook
     {
-        public GrantContinuousAttritionPlaybook() : base(
-            BattlePlanId.GrantContinuousAttrition,
+        public ContinuousAttritionPlaybook() : base(
+            BattlePlanId.ContinuousAttrition,
             "grant-continuous-attrition",
             new PersonalityFit(aggression: 0.6f, caution: 0.2f, audacity: 0.3f),
             new TerrainPreference(open: 0.7f, wooded: 0.6f, river: 0.6f, mountain: 0.5f),

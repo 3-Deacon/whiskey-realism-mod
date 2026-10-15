@@ -388,6 +388,10 @@ namespace WhiskeyRealism.Patches
                 ? GamePrefs.artilleryfallbackenemyclosedist
                 : 180f;
             Vector3 target = own + away * distance;
+            // Scope B alignment (2026-05-22): defensive stance before
+            // limber+retreat waypoint. Stance 2 = defend.
+            WhiskeyRealism.Util.TacticalStanceWriter.EnsureStance(
+                bunits, unit, 2, contextTag: "b7-artillery-retreat");
             unit.ChangeRegimentFormation(GameVars.SetFormationParam(0, manualset: true, 1));
             bunits.SetWaypoint(
                 unit,

@@ -90,12 +90,28 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalFeudGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDirectChildDiscovery", TelemetryCategory.State);
             AddTactical("TacticalDirectChildIntent", TelemetryCategory.Decision);
+            AddTactical("TacticalPlayExecution", TelemetryCategory.Decision);
+            AddTactical("TacticalMacroAiOverride", TelemetryCategory.Write);
             AddTactical("TacticalDirectChildGate", TelemetryCategory.Gate);
             AddTactical("TacticalDeploymentPhase", TelemetryCategory.State);
             AddTactical("TacticalRegimentDiagnostics", TelemetryCategory.Trace);
             AddTactical("TacticalRegimentTrace", TelemetryCategory.Trace);
             AddTactical("TacticalMapKnowledge", TelemetryCategory.Trace);
             AddTactical("TacticalLeafCascade", TelemetryCategory.Decision);
+            AddTactical("TacticalRegimentalIntel", TelemetryCategory.Decision);
+            AddTactical("TacticalRegimentalControl", TelemetryCategory.Decision);
+            AddTactical("TacticalRegimentalGate", TelemetryCategory.Trace);
+            AddTactical("TacticalFriendlyPathBlocked", TelemetryCategory.Gate);
+            AddTactical("TacticalFriendlyFireBlocked", TelemetryCategory.Gate);
+            // Scope B alignment (2026-05-22): canonical stance-write event +
+            // newer telemetry tags that emit but were not yet registered.
+            // Unregistered tags fall through to default routing which can
+            // dump them into the main log instead of the tactical sidecar.
+            AddTactical("TacticalStanceWrite", TelemetryCategory.Write);
+            AddTactical("TacticalArtilleryDecision", TelemetryCategory.Decision);
+            AddTactical("TacticalBrigadeTaskHold", TelemetryCategory.Gate);
+            AddTactical("TacticalBrigadePosture", TelemetryCategory.Decision);
+            AddTactical("TacticalArtilleryWaypointVeto", TelemetryCategory.Gate);
             AddTactical("TacticalReinforcementOpportunity", TelemetryCategory.Decision);
             AddTactical("TacticalCommandTreeProbeHealth", TelemetryCategory.Health);
             AddTactical("TacticalPlaybookFactionBias", TelemetryCategory.Decision);

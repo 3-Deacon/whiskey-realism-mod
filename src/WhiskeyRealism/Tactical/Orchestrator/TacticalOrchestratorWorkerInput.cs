@@ -104,6 +104,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public TacticalArmyPlanStateSnapshot Side0PlanState { get; }
         public TacticalArmyPlanStateSnapshot Side1PlanState { get; }
 
+        // Worker-migration (2026-05-21): per-side ObjectiveRecords capture, snapshotted
+        // on main via TacticalVisionRuntimeAdapter.CaptureObjectiveRecordsContextForSide
+        // at heavy-gate fire. Worker consumes via BuildObjectiveRecordsFromContext to
+        // produce ObjectiveRecord[] without touching Unity APIs. Empty when the worker
+        // path is disabled (config flag off) or the side is suppressed.
+        public ObjectiveRecordsCaptureContext Side0ObjectiveCaptureContext { get; }
+        public ObjectiveRecordsCaptureContext Side1ObjectiveCaptureContext { get; }
+
         public TacticalOrchestratorWorkerInput(
             int battleSequence,
             int playerAllianceId,
@@ -132,7 +140,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int side0MacroAi = -1,
             int side1MacroAi = -1,
             TacticalArmyPlanStateSnapshot side0PlanState = default,
-            TacticalArmyPlanStateSnapshot side1PlanState = default)
+            TacticalArmyPlanStateSnapshot side1PlanState = default,
+            ObjectiveRecordsCaptureContext side0ObjectiveCaptureContext = null,
+            ObjectiveRecordsCaptureContext side1ObjectiveCaptureContext = null)
         {
             BattleSequence = battleSequence;
             PlayerAllianceId = playerAllianceId;
@@ -162,6 +172,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Side1MacroAi = side1MacroAi;
             Side0PlanState = side0PlanState;
             Side1PlanState = side1PlanState;
+            Side0ObjectiveCaptureContext = side0ObjectiveCaptureContext ?? ObjectiveRecordsCaptureContext.Empty;
+            Side1ObjectiveCaptureContext = side1ObjectiveCaptureContext ?? ObjectiveRecordsCaptureContext.Empty;
         }
 
         private static readonly IReadOnlyDictionary<int, int> EmptyInstanceToSectorMap =

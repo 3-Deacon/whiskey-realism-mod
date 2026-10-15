@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -12,7 +13,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static class DirectChildAllocator
     {
-        private const int FlankExposureRefuseThreshold = 2;
+        // Role budgets + thresholds (2026-05-22 tuning, was producing
+        // "main alone + 4×RefuseRight" allocations in smoke):
+        //
+        // - FlankExposureRefuseThreshold raised 2 → 3. Bucket 2 = moderate
+        //   exposure; locking moderate-exposure brigades into static flank
+        //   duty was over-allocating Refuse roles. Only HIGH (bucket 3+)
+        //   flank exposure now locks a brigade into RefuseLeft/Right.
+        //
+        // - SupportMainAdjacencyRange widened 1 → 2. Brigades within 2
+        //   sectors of main effort can be SupportMain. Restricting to
+        //   strictly-adjacent (distance == 1) excluded most of the army
+        //   from being available to support, dumping them to Refuse.
+        //
+        // - MaxRefuseLeftCount / MaxRefuseRightCount cap 1 each. Beyond
+        //   the cap, the brigade re-checks higher-priority roles
+        //   (SupportMain / Reserve) instead of stacking on flank-guard.
+        //
+        // - MaxMainCount = 1, MaxSupportMainCount = 2. Prevents the
+        //   smoke-observed "multiple Main roles assigned" symptom by
+        //   enforcing role budgets after primary allocation.
+        private const int FlankExposureRefuseThreshold = 3;
+        private const int SupportMainAdjacencyRange = 2;
+        private const int MaxRefuseLeftCount = 1;
+        private const int MaxRefuseRightCount = 1;
+        private const int MaxSupportMainCount = 2;
 
         public static IReadOnlyList<DirectChildIntent> Allocate(
             TacticalBattlePlan plan,
@@ -33,6 +58,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<DirectChildEvidence> evidence,
             IReadOnlyList<TacticalIntentModel> perChildEnemyIntent)
         {
+            return AllocateWithZones(plan, personality, snapshots, evidence, perChildEnemyIntent, null);
+        }
+
+        /// <summary>
+        /// Zone-aware allocation overload (2026-05-23 / Stage 2 G). When
+        /// <paramref name="zoneAssignments"/> is non-empty, each child whose
+        /// <see cref="DirectChildSnapshot.ChildId"/> matches a row in the list
+        /// gets the role implied by the rect kind (Main for LeftWing/RightWing,
+        /// Fix for Center, Defender via Refuse for CenterHold/LeftFlank/etc.).
+        /// Children without a zone assignment fall through to the existing
+        /// evidence-based path.
+        ///
+        /// This is the integration point for <see cref="PlayCorpsAssignment"/>:
+        /// the runtime computes corps-to-rect assignments from a play template,
+        /// then passes them here so role allocation reflects the play geometry
+        /// rather than per-child evidence alone. The result is that vacant /
+        /// distant brigades that previously fell through to Reserve now get
+        /// coherent zone-scoped roles when a play is active.
+        /// </summary>
+        public static IReadOnlyList<DirectChildIntent> AllocateWithZones(
+            TacticalBattlePlan plan,
+            PersonalityVector personality,
+            IReadOnlyList<DirectChildSnapshot> snapshots,
+            IReadOnlyList<DirectChildEvidence> evidence,
+            IReadOnlyList<TacticalIntentModel> perChildEnemyIntent,
+            IReadOnlyList<CorpsAssignment> zoneAssignments)
+        {
             if (snapshots == null || evidence == null || snapshots.Count != evidence.Count)
                 return Array.Empty<DirectChildIntent>();
             if (perChildEnemyIntent == null || perChildEnemyIntent.Count != snapshots.Count)
@@ -46,9 +98,59 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var roles = new DirectChildRole[snapshots.Count];
             for (int i = 0; i < roles.Length; i++) roles[i] = DirectChildRole.Unknown;
 
-            int mainIdx = PickMainEffort(plan, snapshots, evidence);
-            if (mainIdx >= 0 && !ShouldFallbackUnderSevereOvermatch(evidence[mainIdx], perChildEnemyIntent[mainIdx]))
-                roles[mainIdx] = DirectChildRole.Main;
+            // Zone-based assignment FIRST — geometric play overrides evidence.
+            // Build childId → assignment lookup.
+            bool hasZones = zoneAssignments != null && zoneAssignments.Count > 0;
+            Dictionary<string, CorpsAssignment> zoneByChildId = null;
+            if (hasZones)
+            {
+                zoneByChildId = new Dictionary<string, CorpsAssignment>(zoneAssignments.Count);
+                for (int i = 0; i < zoneAssignments.Count; i++)
+                {
+                    var za = zoneAssignments[i];
+                    if (string.IsNullOrEmpty(za.ChildId)) continue;
+                    if (!zoneByChildId.ContainsKey(za.ChildId))
+                        zoneByChildId[za.ChildId] = za;
+                }
+                for (int i = 0; i < snapshots.Count; i++)
+                {
+                    if (snapshots[i].ChildId == null) continue;
+                    if (zoneByChildId.TryGetValue(snapshots[i].ChildId, out var za))
+                    {
+                        roles[i] = PlayCorpsAssignment.RoleForRectKind(za.RectKind);
+                    }
+                }
+            }
+
+            float allocAggression01 = (personality.Aggression + 1f) * 0.5f;
+            if (allocAggression01 < 0f) allocAggression01 = 0f;
+            if (allocAggression01 > 1f) allocAggression01 = 1f;
+
+            // Only pick a Main from evidence if zone assignments didn't already
+            // place one (zone-based Main takes precedence — that's the entire
+            // point of the geometric layer).
+            bool zoneAssignedMain = false;
+            if (hasZones)
+            {
+                for (int i = 0; i < roles.Length; i++)
+                    if (roles[i] == DirectChildRole.Main) { zoneAssignedMain = true; break; }
+            }
+
+            int mainIdx = -1;
+            if (!zoneAssignedMain)
+            {
+                mainIdx = PickMainEffort(plan, snapshots, evidence, allocAggression01);
+                if (mainIdx >= 0 && !ShouldFallbackUnderSevereOvermatch(evidence[mainIdx], perChildEnemyIntent[mainIdx]))
+                    roles[mainIdx] = DirectChildRole.Main;
+            }
+
+            // Role budget counters (2026-05-22). Enforce maximums during
+            // allocation so we never over-assign SupportMain/Refuse roles.
+            // Brigades that hit a budgeted cap fall through to the next
+            // candidate role.
+            int supportMainCount = 0;
+            int refuseLeftCount = 0;
+            int refuseRightCount = 0;
 
             for (int i = 0; i < snapshots.Count; i++)
             {
@@ -67,9 +169,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     continue;
                 }
 
-                if (mainIdx >= 0 && IsAdjacentSector(ev.PrimarySector, evidence[mainIdx].PrimarySector) && ev.OwnStrengthBucket >= 1 && ev.FlankExposureBucket < FlankExposureRefuseThreshold)
+                if (mainIdx >= 0
+                    && IsAdjacentSector(ev.PrimarySector, evidence[mainIdx].PrimarySector)
+                    && ev.OwnStrengthBucket >= 1
+                    && ev.FlankExposureBucket < FlankExposureRefuseThreshold
+                    && supportMainCount < MaxSupportMainCount)
                 {
                     roles[i] = DirectChildRole.SupportMain;
+                    supportMainCount++;
                     continue;
                 }
 
@@ -82,10 +189,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (ev.FlankExposureBucket >= FlankExposureRefuseThreshold)
                 {
                     int mainSector = mainIdx >= 0 ? evidence[mainIdx].PrimarySector : plan.MainEffortSector;
-                    roles[i] = ev.PrimarySector < mainSector
-                        ? DirectChildRole.RefuseLeft
-                        : DirectChildRole.RefuseRight;
-                    continue;
+                    bool wantLeft = ev.PrimarySector < mainSector;
+                    if (wantLeft && refuseLeftCount < MaxRefuseLeftCount)
+                    {
+                        roles[i] = DirectChildRole.RefuseLeft;
+                        refuseLeftCount++;
+                        continue;
+                    }
+                    if (!wantLeft && refuseRightCount < MaxRefuseRightCount)
+                    {
+                        roles[i] = DirectChildRole.RefuseRight;
+                        refuseRightCount++;
+                        continue;
+                    }
+                    // Refuse budget exhausted — fall through to lower-priority
+                    // candidates (Reserve / Screen / Fallback) so we don't
+                    // stack the flank-guard role on every brigade with moderate
+                    // flank exposure.
                 }
 
                 if (ev.OwnStrengthBucket >= 2 && !ev.ContactFlag)
@@ -94,12 +214,41 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     continue;
                 }
 
-                if (ev.EnemyStrengthBucket > ev.OwnStrengthBucket + 1
+                if (ev.ContactFlag
+                    && ev.EnemyStrengthBucket > ev.OwnStrengthBucket + 1
                     && perChildEnemyIntent[i].PrimaryIntent == InferredIntent.Attack)
                 {
+                    // Brigade is engaged AND severely outnumbered AND enemy
+                    // is actively attacking → orderly fallback.
+                    // Without ContactFlag, brigade stays in line (falls
+                    // through to Reserve / SupportMain default).
                     roles[i] = DirectChildRole.Fallback;
                     continue;
                 }
+
+                // Fall-through default — TIERED (2026-05-23 G3 tightening):
+                //   1) If still room in SupportMain budget AND brigade has
+                //      meaningful strength → SupportMain (joins maneuver).
+                //   2) Otherwise → Reserve. Even weak / far brigades get a
+                //      coherent role at the cascade level. Reserve maps to
+                //      CommandNodeRole.Reserve → CommandTaskType.ReserveWait;
+                //      vanilla's macroai-driven AdjustGroupAIStance (per F
+                //      sync) then writes the appropriate ai_stance (defend /
+                //      screen / etc.) to form a line of battle if defense is
+                //      the doctrine output.
+                //
+                // The prior fall-through left under-strength brigades as
+                // Unknown — which mapped to CommandTaskType.FormUp and
+                // produced incoherent behavior in smoke (3/5 CSA brigades at
+                // sectors >2 from main effort logged as Unknown:7/8/9 in the
+                // 2026-05-23 battle telemetry).
+                if (mainIdx >= 0 && supportMainCount < MaxSupportMainCount && ev.OwnStrengthBucket >= 1)
+                {
+                    roles[i] = DirectChildRole.SupportMain;
+                    supportMainCount++;
+                    continue;
+                }
+                roles[i] = DirectChildRole.Reserve;
             }
 
             var intents = new DirectChildIntent[snapshots.Count];
@@ -130,13 +279,38 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return intents;
         }
 
-        private static int PickMainEffort(TacticalBattlePlan plan, IReadOnlyList<DirectChildSnapshot> snaps, IReadOnlyList<DirectChildEvidence> ev)
+        /// <summary>
+        /// Aggression threshold above which the local-odds gate is bypassed.
+        /// Lee/Jackson/Hood (aggression ≥ 0.7) commit Main against locally
+        /// unfavorable odds — the historical "audacity" pattern that produced
+        /// Chancellorsville-style envelopments. Cautious/mid-band commanders
+        /// require local own ≥ enemy before assigning Main effort, so we don't
+        /// dispatch a single brigade alone at a clearly superior local force.
+        /// </summary>
+        public const float LocalOddsBypassAggressionThreshold = 0.7f;
+
+        private static int PickMainEffort(
+            TacticalBattlePlan plan,
+            IReadOnlyList<DirectChildSnapshot> snaps,
+            IReadOnlyList<DirectChildEvidence> ev,
+            float commanderAggression01)
         {
+            bool aggressiveOverride = commanderAggression01 >= LocalOddsBypassAggressionThreshold;
+
             int best = -1;
             int bestScore = -1;
             for (int i = 0; i < snaps.Count; i++)
             {
                 if (ev[i].PrimarySector != plan.MainEffortSector) continue;
+                // Local-odds gate (2026-05-22): cautious/mid-band commanders
+                // refuse Main assignment to a brigade that is locally
+                // outnumbered. Without this gate, the planned MainEffortSector
+                // brigade gets Main regardless of local force ratio — observed
+                // smoke pattern was "3rd Brigade attacks superior force alone".
+                // Aggressive commanders (≥ 0.7) bypass: Hood's frontal-assault
+                // pattern remains intact.
+                if (!aggressiveOverride && ev[i].EnemyStrengthBucket > ev[i].OwnStrengthBucket) continue;
+
                 int score = ev[i].OwnStrengthBucket * Math.Max(1, 4 - ev[i].FlankExposureBucket);
                 if (score > bestScore)
                 {
@@ -149,7 +323,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             best = PickFallbackMainEffort(plan, snaps, ev);
             if (best >= 0) return best;
 
-            return PickAggressiveProvisionalMainEffort(plan, snaps, ev);
+            return PickAggressiveProvisionalMainEffort(plan, snaps, ev, commanderAggression01);
         }
 
         private static int PickFallbackMainEffort(
@@ -186,9 +360,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static int PickAggressiveProvisionalMainEffort(
             TacticalBattlePlan plan,
             IReadOnlyList<DirectChildSnapshot> snaps,
-            IReadOnlyList<DirectChildEvidence> ev)
+            IReadOnlyList<DirectChildEvidence> ev,
+            float commanderAggression01)
         {
             if (!AllowsProvisionalAttackAxis(plan)) return -1;
+            bool aggressiveOverride = commanderAggression01 >= LocalOddsBypassAggressionThreshold;
 
             int best = -1;
             int bestScore = -1;
@@ -197,7 +373,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (!snaps[i].Active) continue;
                 if (Contains(plan.FixingSectors, ev[i].PrimarySector)) continue;
                 if (Contains(plan.ScreeningSectors, ev[i].PrimarySector)) continue;
-                if (ev[i].EnemyStrengthBucket > ev[i].OwnStrengthBucket + 1) continue;
+                // Provisional attack axis allows EnemyBucket = OwnBucket+1 only
+                // for aggressive commanders. Cautious/mid-band commanders gate
+                // at the same parity rule used in the preferred path —
+                // otherwise mid-band commanders pile into 1.5×-disadvantage
+                // sectors via the provisional fallback.
+                int maxAcceptableEnemyOver = aggressiveOverride ? 1 : 0;
+                if (ev[i].EnemyStrengthBucket > ev[i].OwnStrengthBucket + maxAcceptableEnemyOver) continue;
 
                 int distancePenalty = Math.Abs(ev[i].PrimarySector - plan.MainEffortSector);
                 int contactScore = ev[i].ContactFlag ? 4 : 0;
@@ -223,11 +405,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (plan.Phase == BattlePhase.Withdraw || plan.Phase == BattlePhase.Consolidate) return false;
             switch (plan.PlanId)
             {
-                case BattlePlanId.HoodFrontalAssault:
-                case BattlePlanId.BurnsideForcedAssault:
+                case BattlePlanId.FrontalShockAssault:
+                case BattlePlanId.ForcedFrontalAttack:
                 case BattlePlanId.GenericAggressive:
                 case BattlePlanId.GenericDesperate:
-                case BattlePlanId.ForrestCavalryRaid:
+                case BattlePlanId.CavalryRaid:
                     return true;
                 default:
                     return false;
@@ -242,18 +424,49 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return false;
         }
 
-        private static bool IsAdjacentSector(int s, int main) => Math.Abs(s - main) == 1;
+        // Sector adjacency for SupportMain eligibility (2026-05-22 widened).
+        // Was strict-immediate (==1) which excluded most of the army from
+        // SupportMain consideration. Widened to within SupportMainAdjacencyRange
+        // (2) so a sector ≤2 hops from main qualifies. Combined with the
+        // MaxSupportMainCount cap, this lets the right brigades flank-attack
+        // without flooding the role.
+        private static bool IsAdjacentSector(int s, int main) => Math.Abs(s - main) <= SupportMainAdjacencyRange;
 
+        /// <summary>
+        /// True when a brigade is severely outnumbered AND actively engaged,
+        /// such that retreating (Fallback) is preferable to holding the line.
+        /// Outnumbered-but-not-in-contact brigades stay in formation as
+        /// Reserve / Defender — the Union must form a line of battle, not
+        /// scatter as soon as they see a massed enemy.
+        ///
+        /// Tightened 2026-05-22 (user observation: Union side wasn't forming
+        /// a line at all because every brigade was logging FallBackToLine /
+        /// FallbackGuard). Previous broken behavior:
+        ///   - Confidence01 ≥ 0.9 alone triggered activePressure — visibility
+        ///     of a static enemy was being treated as an attack.
+        ///   - largeEnemyOvermatch fired at EnemyBucket=4 vs OwnBucket≤3
+        ///     (only 1 bucket diff) — that's parity, not severe overmatch.
+        /// Corrected behavior:
+        ///   - activePressure requires enemy intent = Attack (visibility no
+        ///     longer counts).
+        ///   - largeEnemyOvermatch requires actual bucket diff ≥ 2.
+        ///   - ContactFlag required — outnumbered but distant enemies are
+        ///     defended against in line, not retreated from preemptively.
+        /// </summary>
         private static bool ShouldFallbackUnderSevereOvermatch(
             DirectChildEvidence evidence,
             TacticalIntentModel enemyIntent)
         {
+            // Outnumbered + not yet in contact = form line and defend.
+            // Without contact, the orchestrator cannot know whether the enemy
+            // is closing on this brigade or another sector. Falling back
+            // preemptively scatters the army.
+            if (!evidence.ContactFlag) return false;
+
             bool severeBucketMismatch = evidence.EnemyStrengthBucket > evidence.OwnStrengthBucket + 1;
             bool largeEnemyOvermatch = evidence.EnemyStrengthBucket >= 4 &&
-                evidence.OwnStrengthBucket <= 3 &&
-                evidence.Confidence01 >= 0.9f;
-            bool activePressure = enemyIntent.PrimaryIntent == InferredIntent.Attack ||
-                evidence.Confidence01 >= 0.9f;
+                evidence.OwnStrengthBucket + 2 <= evidence.EnemyStrengthBucket;
+            bool activePressure = enemyIntent.PrimaryIntent == InferredIntent.Attack;
 
             return activePressure && (severeBucketMismatch || largeEnemyOvermatch);
         }

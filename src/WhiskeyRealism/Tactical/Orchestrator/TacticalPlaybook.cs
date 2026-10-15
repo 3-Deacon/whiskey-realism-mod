@@ -119,7 +119,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int defaultMainEffortSector,
             int jitterSeed,
             bool envelopmentPressure = false,
-            int allianceId = -1)
+            int allianceId = -1,
+            float cavalryFraction = 1f,
+            float infantryFraction = 1f,
+            float artilleryFraction = 1f,
+            bool delayingDefensePressure = false,
+            bool defensivePressure = false,
+            BattleStance stance = BattleStance.Meeting)
         {
             CommanderPersonality = commanderPersonality;
             Terrain = terrain;
@@ -129,6 +135,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             JitterSeed = jitterSeed;
             EnvelopmentPressure = envelopmentPressure;
             AllianceId = allianceId;
+            CavalryFraction = cavalryFraction;
+            InfantryFraction = infantryFraction;
+            ArtilleryFraction = artilleryFraction;
+            DelayingDefensePressure = delayingDefensePressure;
+            DefensivePressure = defensivePressure;
+            Stance = stance;
         }
 
         public PersonalityVector CommanderPersonality { get; }
@@ -147,6 +159,37 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public bool EnvelopmentPressure { get; }
 
         /// <summary>
+        /// Set by the orchestrator when the reinforcement-opportunity doctrine
+        /// returns DelayingDefense (outnumbered, no near parity, but still
+        /// defensible). Biases the catalog toward delay-and-skirmish archetypes
+        /// (DelayingDefense, ReverseSlopeDefense, CavalryScreeningDelay).
+        /// </summary>
+        public bool DelayingDefensePressure { get; }
+
+        /// <summary>
+        /// Set by the orchestrator when the reinforcement-opportunity doctrine
+        /// returns ANY defensive outcome (DelayingDefense, DefensiveHold, or
+        /// WaitAndConsolidate). Stronger and broader signal than
+        /// <see cref="DelayingDefensePressure"/> — used to bias the catalog
+        /// away from offensive archetypes whenever doctrine doesn't want an
+        /// attack, regardless of why. Prevents the smoke-observed
+        /// "doctrine=DefensiveHold but playbook=ManeuverAndFix" mismatch
+        /// where brigades got offensive roles while macroai=2 (defend) was
+        /// set — leading to lone brigades attacking and supporting brigades
+        /// holding, with no coordination.
+        /// </summary>
+        public bool DefensivePressure { get; }
+
+        /// <summary>
+        /// Battle stance from vanilla <c>GetBattleType(alliance)</c>. When set
+        /// to Attacker or Defender, the catalog HARD-FILTERS playbooks
+        /// incompatible with the stance — defenders cannot pick offensive
+        /// archetypes regardless of personality fit; attackers cannot pick
+        /// pure-delay archetypes. Default Meeting = no filter.
+        /// </summary>
+        public BattleStance Stance { get; }
+
+        /// <summary>
         /// Commander's alliance (0=Union, 1=CSA in HistoricalFigureRegistry
         /// convention). Used by the catalog's FactionMismatchPenalty to
         /// prefer historically-matching playbooks. Default -1 = unknown,
@@ -154,6 +197,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// for call sites that haven't been updated).
         /// </summary>
         public int AllianceId { get; }
+
+        /// <summary>
+        /// Fraction of own-side force strength that is cavalry (mounted).
+        /// Used by playbook preconditions to filter out cavalry-specific
+        /// plays (Buford screen, JebStuart raid, Forrest raid) when the
+        /// force has no cavalry. Default 1f = unknown/permissive — older
+        /// call sites that don't populate this preserve pre-gate behavior.
+        /// Computed by ArmyOrchestrator.TryPickPlan from completeunitlist.
+        /// </summary>
+        public float CavalryFraction { get; }
+        public float InfantryFraction { get; }
+        public float ArtilleryFraction { get; }
     }
 
     /// <summary>
@@ -187,5 +242,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float ReserveCommitTriggerOdds { get; }
 
         public abstract TacticalBattlePlan Instantiate(PlaybookContext ctx);
+
+        /// <summary>
+        /// Precondition gate for playbook eligibility (2026-05-21). Returns
+        /// true when the playbook can be executed given the force composition
+        /// + faction. Default is true (no precondition). Cavalry-specific and
+        /// faction-locked playbooks override to enforce hard filtering BEFORE
+        /// the catalog's weighted scoring runs.
+        ///
+        /// Smoke evidence motivating this gate: CavalryScreeningDelay was
+        /// selected for a force with zero cavalry (see Side 0 in the
+        /// 2026-05-21 23:31 log). The catalog's FactionMismatchPenalty is a
+        /// soft penalty (0.10 magnitude) that personality-fit (0.50 weight)
+        /// can override. Composition mismatches must be hard-filtered.
+        ///
+        /// Returning false removes the playbook from the selection pool
+        /// entirely. Generic plays + MeetingEngagement remain unconditional
+        /// fallbacks so every commander has at least one eligible play.
+        /// </summary>
+        public virtual bool MatchesPreconditions(PlaybookContext ctx) => true;
     }
 }

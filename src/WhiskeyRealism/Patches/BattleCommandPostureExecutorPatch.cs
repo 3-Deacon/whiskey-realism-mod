@@ -27,7 +27,13 @@ namespace WhiskeyRealism.Patches
         private const float ReserveStandOff = 350f;
         private const float FallbackStandOff = 250f;
         private const float MaxConservativeWaypointDistance = 2500f;
-        private const float MinWaypointDistance = 15f;
+        // Bumped 15f → 60f on 2026-05-21 to fix unit "microshift" pattern at high
+        // compression: probe targets drift by 20-50m as units move; with the prior
+        // 15m tolerance the executor re-issued SetWaypoint every cycle, triggering a
+        // vanilla pathfinder recompute that visibly reversed the unit's direction
+        // briefly. 60m covers typical probe drift while still letting a genuine
+        // 100m+ relocation bypass dedup.
+        private const float MinWaypointDistance = 60f;
         private const float VanillaBlockedMoveDistance = 150f;
         private const float FacingRefreshToleranceDegrees = 15f;
         private const float OutboundCourierIntervalSeconds = 900f;
@@ -72,6 +78,12 @@ namespace WhiskeyRealism.Patches
 
         private static void Apply(AIBattle battle)
         {
+            // Friendly-path snapshot cache (2026-05-21): reset per Postfix entry
+            // so each Apply loop builds its own snapshot. The first SetWaypoint
+            // call inside this Apply will lazy-build the snapshot; subsequent
+            // SetWaypoint calls reuse it.
+            ResetFriendlyPathSnapshotForFrame();
+
             int state = SafeIntField(battle, ref _stateField, "state", -1);
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
             int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
@@ -190,6 +202,54 @@ namespace WhiskeyRealism.Patches
                     state.Role,
                     effectiveTask,
                     state.TaskState);
+            }
+
+            // Army opportunity override (2026-05-21). Same logic the leaf-cascade
+            // path already uses, but applied at the BRIGADE-POSTURE layer too —
+            // smoke revealed that brigades coming through TryApplyGroup (vs
+            // TryApplyLeafBrigade) bypassed the override, so half the army got
+            // FallBackToLine on Withdrawal opportunity while the other half kept
+            // its playbook Probe/Screen/AttackObjective task, producing crossing
+            // paths ("H formation") and "indecisive" appearance for brigades
+            // pulled between opportunity-aware and opportunity-blind paths.
+            //
+            // Brigade level doesn't carry a DirectChildRole; we pass Main as the
+            // safe default. WithdrawalToFightLater / DefensiveHold / WaitAndConsolidate
+            // branches don't read role; the AttackNow branch's upgrade is safe on
+            // any brigade because we only upgrade Hold/Consolidate to AttackObjective
+            // (not other defensive tasks).
+            ReinforcementOpportunity opportunityForBrigade = ReinforcementOpportunity.NoOpportunity;
+            try
+            {
+                if (orchestrator?.Army != null)
+                    opportunityForBrigade = orchestrator.Army.CurrentReinforcementOpportunity.Opportunity;
+            }
+            catch { /* default NoOpportunity preserves prior behavior */ }
+            string brigadeOverrideReason;
+            CommandTaskType brigadeOverriddenTask = OverrideTaskForOpportunity(
+                state.Task,
+                WhiskeyRealism.Tactical.Orchestrator.DirectChildRole.Main,
+                opportunityForBrigade,
+                out brigadeOverrideReason);
+            if (brigadeOverriddenTask != state.Task && brigadeOverrideReason != null)
+            {
+                OnceLog.Info(
+                    "tactical-brigade-posture:opportunity-override:" + side + ":" + opportunityForBrigade,
+                    "[TacticalBrigadePosture] opportunity override: " + state.Task
+                    + " → " + brigadeOverriddenTask + " (opportunity=" + opportunityForBrigade
+                    + " reason=" + brigadeOverrideReason + " unit=" + SafeName(group) + ")");
+                state = new CommandNodeOperationalState(
+                    state.NodeId,
+                    state.Echelon,
+                    state.Role,
+                    brigadeOverriddenTask,
+                    state.TaskState);
+                // Also override the doctrine-order task so target resolution
+                // downstream uses the new task. Mirrors the leaf-cascade fix.
+                if (hasDoctrineOrder)
+                {
+                    doctrineOrder = doctrineOrder.WithTask(brigadeOverriddenTask, brigadeOverrideReason);
+                }
             }
 
             TacticalRefuseFlankIntent.Decision refusedFlank = ResolveRefusedFlank(group, state.Task, closeEngaged, flankRisk);
@@ -763,11 +823,49 @@ namespace WhiskeyRealism.Patches
             if (!IsSafeWaypoint(group, target)) return false;
             if (ShouldSkipDuplicateWaypoint(group, target)) return false;
 
+            // Brigade task-commitment hold (2026-05-22). Ports Scourge's
+            // offai.cpp:343 `if (Orders()) return` semantic: once we've given
+            // a brigade a task waypoint, don't re-issue the SAME task for the
+            // hold window. Brigade gets to actually execute the order. Task
+            // changes (Probe → AttackObjective) bypass the hold so legitimate
+            // role transitions still propagate.
+            if (ShouldSuppressTaskRefresh(group, task))
+            {
+                EmitTaskHoldSuppressedTelemetry(group, task);
+                return false;
+            }
+
+            // Friendly-path blocking gate (2026-05-21). Ported from Scourge of
+            // War's offcmds.cpp:448 FriendAheadMe + offcmds.cpp:207 CanRedeployLine.
+            // Runs ONLY when EnableFriendlyPathBlockingGate is true (default OFF).
+            // Pure-data evaluation against a cached friendly snapshot — main thread
+            // builds the snapshot once per Postfix call and reuses across SetWaypoint
+            // calls inside the same Apply loop.
+            if (ShouldBlockOnFriendlyPath(group, target, out string blockReason, out int blockerId))
+            {
+                EmitFriendlyPathBlockedTelemetry(group, task, target, blockReason, blockerId);
+                return false;
+            }
+
             if (TryQueueBlockedMovingOrder(battle, group, task, target))
             {
                 MarkGroupMovementStarted(group, task);
                 return true;
             }
+
+            // Scope B refactor (2026-05-22). Plug Whiskey into vanilla/W&L's
+            // canonical order pipeline: ChangeStance(mapped_stance) BEFORE
+            // SetWaypoint. ChangeStance updates ai_stanceordered (vanilla
+            // micro-AI reads this for execution context), manages aibattle[1]
+            // pool membership when player-side, and cascades to subordinates
+            // through groupaiobject. Doing only SetWaypoint orphans the unit
+            // from vanilla's stance-driven decision pipeline — which is why
+            // 4th Michigan-style units behaved erratically (movement but no
+            // stance context).
+            //
+            // Map task → vanilla stance. Skip if already at target stance
+            // (prevents redundant W&L queue entries).
+            EnsureStanceMatchesTask(bunits, group, task);
 
             int beforeMovingPaths = CountMovingPaths(group);
             bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true);
@@ -793,7 +891,115 @@ namespace WhiskeyRealism.Patches
                 return false;
 
             MarkGroupMovementStarted(group, task);
+            RecordTaskWrite(group, task);  // task-hold (2026-05-22)
+
+            // Scope C: regimental waypoint granularity (2026-05-22). After the
+            // brigade-level write succeeds, issue per-regiment SetWaypoint to
+            // each attached regiment's ideal slot in the formation. This makes
+            // Whiskey's per-regiment positioning explicit instead of leaving
+            // it to vanilla's default cascade. Scourge's `CanRedeployLine`
+            // destination-overlap check (offcmds.cpp:207) now has its proper
+            // scope: sibling regiments within the same brigade.
+            //
+            // Gated by Plugin.EnableRegimentalIntelligenceWrites since
+            // regiment-level intent is a behavioral change beyond vanilla
+            // cascade. If disabled, vanilla handles per-regiment positioning
+            // as before.
+            try { CascadeRegimentalSlots(bunits, group, target, task); }
+            catch (Exception cex)
+            {
+                OnceLog.Warning("tactical-regimental-cascade:failed",
+                    "[TacticalRegimentalCascade] threw: " + cex.GetType().Name + " " + cex.Message);
+            }
             return true;
+        }
+
+        // Walks the brigade's attached regiments, computes each regiment's
+        // ideal slot via TacticalRegimentalPositioner, and issues per-regiment
+        // SetWaypoint to that slot. Only commandable-eligible regiments (not
+        // routed, not player-W&L-commanded, infantry/mounted-infantry/cavalry)
+        // get per-regiment writes. Artillery + already-routed + player-commanded
+        // skip — vanilla's default cascade handles them.
+        private static void CascadeRegimentalSlots(BattleUnits bunits, Regiment group, Vector3 brigadeTarget, CommandTaskType task)
+        {
+            if (bunits == null || group == null) return;
+            if (Plugin.EnableRegimentalIntelligenceWrites == null
+                || !Plugin.EnableRegimentalIntelligenceWrites.Value) return;
+
+            var attached = group.allattachedunits;
+            if (attached == null || attached.Length == 0) return;
+
+            // Collect eligible regiments preserving brigade-internal order.
+            // Note (2026-05-22 bugfix): the prior `dlcw_isundercommander` filter
+            // was too aggressive in AI-vs-AI mode. Vanilla's IsUnitUnderCommander
+            // (line 91168) returns true for ALL units of GameVars.playeralliance
+            // when no W&L scenario is active. In AI-vs-AI battles, the AI side
+            // matching playeralliance gets dlcw_isundercommander=true on every
+            // regiment, which made the cascade exit silently with eligibleIds=0
+            // (no cascade telemetry in 30+ minute battle smoke).
+            //
+            // Player protection is already enforced upstream: if the BRIGADE-LEVEL
+            // write reached SetWaypoint, the brigade isn't player-controlled —
+            // its regiments under the AI brigade's command are ours to position.
+            // Skip the per-regiment flag check here; rely on the brigade-level
+            // path's gate.
+            var eligibleIds = new List<int>(attached.Length);
+            var eligibleRegs = new List<Regiment>(attached.Length);
+            for (int i = 0; i < attached.Length; i++)
+            {
+                var reg = attached[i];
+                if (reg == null) continue;
+                if (reg.isrouted || reg.markedforrout || reg.permanentlydetached) continue;
+                // Only infantry (0/1) and cavalry (4). Artillery (2) skipped —
+                // vanilla artillery positioning is its own concern.
+                if (reg.unittyp != 0 && reg.unittyp != 1 && reg.unittyp != 4) continue;
+                int id;
+                try { id = reg.GetInstanceID(); } catch { continue; }
+                if (id == 0) continue;
+                eligibleIds.Add(id);
+                eligibleRegs.Add(reg);
+            }
+            if (eligibleIds.Count <= 1) return;  // single regiment = vanilla cascade is fine
+
+            // Brigade center = current group position. Target = the just-written waypoint.
+            Vector3 brigadeCenter = ((Component)group).transform.position;
+            var slots = TacticalRegimentalPositioner.ComputeSlots(
+                brigadeCenter.x, brigadeCenter.z,
+                brigadeTarget.x, brigadeTarget.z,
+                eligibleIds);
+
+            // Apply slots to regiments. List order matches eligibleRegs by index.
+            for (int i = 0; i < eligibleRegs.Count && i < slots.Count; i++)
+            {
+                var reg = eligibleRegs[i];
+                var slot = slots[i];
+                var slotPos = new Vector3(slot.WorldX, brigadeCenter.y, slot.WorldZ);
+                try
+                {
+                    bunits.SetWaypoint(
+                        reg,
+                        slotPos,
+                        newpath: true,
+                        doublequick: false,
+                        manualfinalrotation: slot.FacingDegrees,
+                        modifylastwaypoint: false,
+                        useorderdelay: false,
+                        timetomove: -1f,
+                        direction: -1,
+                        showmovementoptions: false,
+                        ignorebattlemonuments: false,
+                        groupmoveonly: false,
+                        ignoredisabledships: false,
+                        checkforreadiness: true,
+                        clearinterruptionpaths: false);
+                }
+                catch { /* per-regiment failure shouldn't fail the cascade */ }
+            }
+
+            OnceLog.Info(
+                "tactical-regimental-cascade:" + SafeInstanceId(group),
+                "[TacticalRegimentalCascade] " + SafeName(group) + " task=" + task
+                + " regiments=" + eligibleRegs.Count + " slots=" + slots.Count);
         }
 
         private static bool TryQueueBlockedMovingOrder(AIBattle battle, Regiment group, CommandTaskType task, Vector3 target)
@@ -824,6 +1030,247 @@ namespace WhiskeyRealism.Patches
                     "BattleCommandPostureExecutorPatch blocked movement queue failed: " + ex.Message);
                 return false;
             }
+        }
+
+        // Brigade task-commitment state (2026-05-22). Per-instance (instanceId →
+        // last task + timestamp). On SetWaypoint, if the proposed task matches
+        // the last-written task within the hold window, suppress. Different
+        // task bypasses. Reset between battles via ResetTaskHoldForBattleEnd.
+        private static readonly Dictionary<int, (CommandTaskType task, float ts)> _brigadeTaskHoldState
+            = new Dictionary<int, (CommandTaskType, float)>();
+
+        internal static void ResetTaskHoldForBattleEnd()
+        {
+            _brigadeTaskHoldState.Clear();
+        }
+
+        // Returns true when the proposed task waypoint should be suppressed
+        // because the brigade was given the SAME task recently. Hold window
+        // is Plugin.BrigadeTaskHoldSeconds (default 12s wallclock). Set to 0
+        // to disable.
+        private static bool ShouldSuppressTaskRefresh(Regiment group, CommandTaskType task)
+        {
+            try
+            {
+                float hold = Plugin.BrigadeTaskHoldSeconds != null
+                    ? Plugin.BrigadeTaskHoldSeconds.Value
+                    : 12.0f;
+                if (hold <= 0f) return false;
+                int id = SafeInstanceId(group);
+                if (id == 0) return false;
+                if (!_brigadeTaskHoldState.TryGetValue(id, out var prior)) return false;
+                if (prior.task != task) return false;  // legitimate task change — bypass
+                float now = Time.realtimeSinceStartup;
+                return (now - prior.ts) < hold;
+            }
+            catch { return false; }
+        }
+
+        // Records a successful write so subsequent SetWaypoint calls in the
+        // hold window are suppressed for the same task. Called from the
+        // vanilla-SetWaypoint success path below.
+        private static void RecordTaskWrite(Regiment group, CommandTaskType task)
+        {
+            try
+            {
+                int id = SafeInstanceId(group);
+                if (id == 0) return;
+                _brigadeTaskHoldState[id] = (task, Time.realtimeSinceStartup);
+            }
+            catch { }
+        }
+
+        // Telemetry for suppressed writes — bounded by OnceLog (the same task
+        // for the same group during a sustained hold doesn't spam).
+        private static void EmitTaskHoldSuppressedTelemetry(Regiment group, CommandTaskType task)
+        {
+            try
+            {
+                int id = SafeInstanceId(group);
+                OnceLog.Info(
+                    "tactical-brigade-task-hold:suppressed:" + id + ":" + task,
+                    "[TacticalBrigadeTaskHold] suppressed " + task + " write for "
+                    + SafeName(group) + " (id=" + id + ") — within hold window");
+            }
+            catch { }
+        }
+
+        // Friendly-path snapshot cached for the duration of a single Postfix
+        // call. Built once on first SetWaypoint call inside the Apply loop;
+        // reused for every subsequent SetWaypoint in the same call. Reset on
+        // each Postfix entry via _friendlySnapshotCachedForPostfixFrame so
+        // we don't carry stale data into the next vanilla call.
+        //
+        // Keyed by alliance (0/1) so the brigade-stance path handles both
+        // sides via its single Postfix call.
+        private static readonly List<TacticalFriendlyPathBlockingGate.FriendlySnapshot> _friendlySnapshotScratch
+            = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>(64);
+        private static int _friendlySnapshotAlliance = -1;
+        private static int _friendlySnapshotFrame = -1;
+
+        // Resets the friendly-snapshot cache. Called at the top of each Postfix
+        // entry so we always build a fresh snapshot per Apply loop. Cheap
+        // (clears a list, resets two ints).
+        internal static void ResetFriendlyPathSnapshotForFrame()
+        {
+            _friendlySnapshotScratch.Clear();
+            _friendlySnapshotAlliance = -1;
+            _friendlySnapshotFrame = -1;
+        }
+
+        // Gate front door. Returns true when the proposed waypoint should be
+        // blocked. Lazy-builds the friendly snapshot on first call per Postfix.
+        // Builds bounded by Unity.Time.frameCount: if frame changed (next
+        // Postfix), we rebuild rather than reuse stale data.
+        private static bool ShouldBlockOnFriendlyPath(Regiment group, Vector3 target, out string blockReason, out int blockerInstanceId)
+        {
+            blockReason = null;
+            blockerInstanceId = 0;
+            try
+            {
+                if (Plugin.EnableFriendlyPathBlockingGate == null
+                    || !Plugin.EnableFriendlyPathBlockingGate.Value)
+                    return false;
+                if (group == null) return false;
+
+                int allianceId = group.alliance;
+                if (allianceId < 0) return false;
+
+                int frameNow = UnityEngine.Time.frameCount;
+                if (_friendlySnapshotAlliance != allianceId || _friendlySnapshotFrame != frameNow)
+                {
+                    BuildFriendlySnapshot(allianceId, group, frameNow);
+                }
+
+                Vector3 myPos = SafePosition(group);
+                bool myLine = SafeGroupFormation(group) == 0;
+                int myParentId = 0;
+                try
+                {
+                    var parent = group.groupaiobjectreg;
+                    if (parent != null) myParentId = parent.GetInstanceID();
+                }
+                catch { myParentId = 0; }
+                var result = TacticalFriendlyPathBlockingGate.Evaluate(
+                    myPos.x, myPos.z,
+                    target.x, target.z,
+                    myLine,
+                    _friendlySnapshotScratch,
+                    myParentBrigadeInstanceId: myParentId);
+                if (result.Blocked)
+                {
+                    blockReason = result.Reason;
+                    blockerInstanceId = result.BlockerInstanceId;
+                    return true;
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                // Gate must never throw out of SetWaypoint. Fail-open (allow write)
+                // so a bug in the gate doesn't deadlock movement.
+                OnceLog.Warning("tactical-friendly-path-gate:exception",
+                    "[TacticalFriendlyPathBlockingGate] threw: " + ex.GetType().Name + " " + ex.Message
+                    + " — failing open (waypoint allowed)");
+                return false;
+            }
+        }
+
+        // Walks completeunitlist filtered to the given alliance, capturing each
+        // own-side regiment's position + last waypoint + formation into a
+        // FriendlySnapshot. Excludes the caller (selfGroup) so the gate doesn't
+        // block on the unit's own state.
+        private static void BuildFriendlySnapshot(int allianceId, Regiment selfGroup, int frame)
+        {
+            _friendlySnapshotScratch.Clear();
+            _friendlySnapshotAlliance = allianceId;
+            _friendlySnapshotFrame = frame;
+
+            var units = BattleUnits.completeunitlist as System.Collections.IList;
+            if (units == null) return;
+
+            int selfId = 0;
+            try { selfId = selfGroup != null ? selfGroup.GetInstanceID() : 0; } catch { selfId = 0; }
+
+            for (int i = 0; i < units.Count; i++)
+            {
+                var reg = units[i] as Regiment;
+                if (reg == null) continue;
+                if (reg.alliance != allianceId) continue;
+                if (reg.isrouted || reg.markedforrout || reg.permanentlydetached) continue;
+
+                int instanceId;
+                try { instanceId = reg.GetInstanceID(); }
+                catch { continue; }
+                if (instanceId == 0 || instanceId == selfId) continue;
+
+                Vector3 pos = SafePosition(reg);
+                Vector3 wp = default(Vector3);
+                bool hasWp = false;
+                try
+                {
+                    wp = reg.lastsetwaypointposition;
+                    hasWp = (wp.x != 0f || wp.z != 0f);
+                }
+                catch { hasWp = false; }
+
+                bool isLine = false;
+                try { isLine = SafeGroupFormation(reg) == 0; } catch { isLine = false; }
+
+                // Parent brigade/group identity (2026-05-22 scope fix #5).
+                // Vanilla's groupaiobjectreg points at the parent commandable
+                // unit (brigade or division). Used by the path gate to scope
+                // destination-overlap to siblings only. Returns 0 on null/
+                // exception so the gate treats parent as unknown (safe).
+                int parentId = 0;
+                try
+                {
+                    var parent = reg.groupaiobjectreg;
+                    if (parent != null) parentId = parent.GetInstanceID();
+                }
+                catch { parentId = 0; }
+
+                _friendlySnapshotScratch.Add(new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                    instanceId,
+                    pos.x, pos.z,
+                    wp.x, wp.z,
+                    hasWp,
+                    isLine,
+                    parentBrigadeInstanceId: parentId));
+            }
+        }
+
+        // Bounded telemetry per blocked-write. Once-log keyed by (group, reason)
+        // so the same blocked condition for the same group doesn't spam during
+        // a sustained block window.
+        private static void EmitFriendlyPathBlockedTelemetry(Regiment group, CommandTaskType task, Vector3 target, string reason, int blockerInstanceId)
+        {
+            try
+            {
+                int instanceId;
+                try { instanceId = group.GetInstanceID(); } catch { instanceId = 0; }
+                string unit = SafeName(group);
+                string sig = "TacticalFriendlyPathBlocked|unit=" + unit
+                    + "|id=" + instanceId
+                    + "|task=" + task
+                    + "|reason=" + reason
+                    + "|blocker=" + blockerInstanceId;
+                TelemetryRouter.Emit(
+                    TelemetryLayer.Tactical,
+                    TelemetryCategory.Gate,
+                    "TacticalFriendlyPathBlocked",
+                    TelemetrySeverity.Info,
+                    ev => ev
+                        .WithUnit(unit)
+                        .WithDecision("Blocked", reason, sig)
+                        .WithField("instanceId", instanceId)
+                        .WithField("task", task.ToString())
+                        .WithField("targetX", target.x)
+                        .WithField("targetZ", target.z)
+                        .WithField("reason", reason)
+                        .WithField("blockerInstanceId", blockerInstanceId));
+            }
+            catch { /* never throw out of SetWaypoint */ }
         }
 
         private static void MarkGroupMovementStarted(Regiment group, CommandTaskType task)
@@ -2039,19 +2486,309 @@ namespace WhiskeyRealism.Patches
             // DirectChildAllocator for direct children so downstream resolvers
             // can still pattern-match.
             int instanceId = TacticalPatchIds.GameObjectInstanceId(group);
+
+            // Opportunity-override (2026-05-21). Without this, the cascade applies
+            // the brigade's role-default task (e.g. RefuseLeft → GuardFlank) regardless
+            // of what the army's high-level opportunity analysis has decided
+            // (WithdrawalToFightLater, AttackNow, DefensiveHold, WaitAndConsolidate).
+            // The user observed that "withdrawal" opportunity decisions never
+            // propagated to brigade behavior — brigades kept guarding their flank
+            // even when the army wanted to withdraw. Wire the decision through.
+            ReinforcementOpportunity opportunity = ReinforcementOpportunity.NoOpportunity;
+            ArmyOrchestrator army = null;
+            try
+            {
+                var sideOrch = group != null
+                    ? TacticalBattleCoordinator.GetSideOrchestrator(group.alliance)
+                    : null;
+                army = sideOrch?.Army;
+                if (army != null)
+                {
+                    opportunity = army.CurrentReinforcementOpportunity.Opportunity;
+                }
+            }
+            catch { /* default = NoOpportunity, preserves prior behavior */ }
+
+            CommandTaskType effectiveTask = OverrideTaskForOpportunity(
+                leafAssignment.LeafTask,
+                leafAssignment.LeafRole,
+                opportunity,
+                out string overrideReason);
+
+            // Arrival synchronization (2026-05-25 / B): a Main-effort brigade
+            // committed to AttackObjective must not charge in alone. Hold it as
+            // Screen (skirmish forward, ai_stance=1) until its SupportMain
+            // siblings close the line, the hold budget elapses, or an aggressive
+            // commander (≥ 0.7) overrides. Wires the previously-dead
+            // TacticalMainArrivalSynchronizer — root cause of the "lone brigade
+            // attacks a superior force without support" smoke pattern.
+            if (effectiveTask == CommandTaskType.AttackObjective
+                && leafAssignment.LeafRole == DirectChildRole.Main
+                && army != null)
+            {
+                float aggr01 = (army.CommanderPersonality.Aggression + 1f) * 0.5f;
+                if (aggr01 < 0f) aggr01 = 0f;
+                if (aggr01 > 1f) aggr01 = 1f;
+                var heldTask = ResolveMainArrivalHold(
+                    group, instanceId, army, aggr01, effectiveTask,
+                    out bool arrivalHolding, out string arrivalReason);
+                if (arrivalHolding)
+                {
+                    effectiveTask = heldTask;
+                    if (overrideReason == null) overrideReason = arrivalReason;
+                }
+            }
+
+            // Override-propagation fix (2026-05-21): the earlier override fix only
+            // updated synthesizedState.Task, but TryResolveLeafMovementTarget reads
+            // leafAssignment.LeafTask directly to pick the movement target — so the
+            // unit still moved per its ORIGINAL role (e.g. RefuseLeft → GuardFlank
+            // position) even when the army said WithdrawalToFightLater. Smoke logs
+            // showed Union brigades still getting `applied-GuardFlank` despite the
+            // opportunity decision being Withdrawal.
+            //
+            // Fix: when the override changes the task, construct a NEW LeafAssignment
+            // with the overridden task and pass that downstream. All target-resolution
+            // and telemetry paths now see the overridden task.
+            TacticalLeafBrigadeMap.LeafAssignment effectiveLeafAssignment = effectiveTask == leafAssignment.LeafTask
+                ? leafAssignment
+                : new TacticalLeafBrigadeMap.LeafAssignment(
+                    instanceId: leafAssignment.InstanceId,
+                    displayName: leafAssignment.DisplayName,
+                    leafRole: leafAssignment.LeafRole,
+                    leafTask: effectiveTask,
+                    cascadeChain: leafAssignment.CascadeChain,
+                    parentNameChain: leafAssignment.ParentNameChain,
+                    topLevelChildIndex: leafAssignment.TopLevelChildIndex);
+
+            if (overrideReason != null)
+            {
+                OnceLog.Info(
+                    "tactical-leaf-cascade:opportunity-override:" + side + ":" + leafAssignment.LeafRole + ":" + opportunity,
+                    "[TacticalLeafCascade] opportunity override: " + leafAssignment.LeafTask
+                    + " → " + effectiveTask + " (role=" + leafAssignment.LeafRole
+                    + " opportunity=" + opportunity + " reason=" + overrideReason + ")");
+            }
+
             var synthesizedState = new CommandNodeOperationalState(
                 nodeId: "leaf-" + instanceId,
                 echelon: CommandEchelonKind.BrigadeLike,
                 role: MapDirectChildRoleToNodeRole(leafAssignment.LeafRole),
-                task: leafAssignment.LeafTask,
+                task: effectiveTask,
                 taskState: CommandTaskState.Planning);
 
             // Reuse the same physical/eligibility/decision pipeline as the
             // primary unitsused iteration, but with the synthesized leaf state.
             // The TryApplyGroup signature requires resolving ledger state; for
             // nested brigades we don't have ledger state, so we replicate the
-            // minimal posture flow inline.
-            ApplyLeafBrigadePosture(battle, bunits, side, group, synthesizedState, leafAssignment, runtimePlayOrders);
+            // minimal posture flow inline. Pass effectiveLeafAssignment so target
+            // resolution sees the overridden task.
+            ApplyLeafBrigadePosture(battle, bunits, side, group, synthesizedState, effectiveLeafAssignment, runtimePlayOrders);
+        }
+
+        // ---- Arrival synchronization (2026-05-25 / B wire-in) ----
+        // Per-Main hold-start timestamps (realtime seconds): armed on the first
+        // hold tick, cleared on release so the next attack re-arms the 30s
+        // budget. Cleared on battle end alongside _lastExecutorOrderAt.
+        private static readonly Dictionary<int, float> _mainArrivalHoldStartedAt = new Dictionary<int, float>();
+        // Pooled scratch for SupportMain distances — avoids per-call allocation.
+        private static readonly List<TacticalMainArrivalSynchronizer.SupportMainPosition> _arrivalSupportScratch =
+            new List<TacticalMainArrivalSynchronizer.SupportMainPosition>(8);
+
+        /// <summary>
+        /// Decides whether a Main-effort brigade on <see cref="CommandTaskType.AttackObjective"/>
+        /// should hold (return <see cref="CommandTaskType.Screen"/>) until its
+        /// SupportMain siblings close within
+        /// <see cref="TacticalMainArrivalSynchronizer.DefaultSupportProximityThresholdMeters"/>
+        /// of the Main's position, the
+        /// <see cref="TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds"/>
+        /// budget elapses, or the commander is aggressive (≥ 0.7). The Main's
+        /// world position is the coordination anchor: supports closing on it
+        /// means the line is forming. Reads vanilla positions on the game thread
+        /// (this runs inside the leaf-cascade Postfix). Never throws.
+        /// </summary>
+        private static CommandTaskType ResolveMainArrivalHold(
+            Regiment mainGroup,
+            int mainInstanceId,
+            ArmyOrchestrator army,
+            float commanderAggression01,
+            CommandTaskType attackTask,
+            out bool holding,
+            out string reason)
+        {
+            holding = false;
+            reason = null;
+            try
+            {
+                var leafMap = army?.CurrentLeafBrigadeMap;
+                if (leafMap == null || mainGroup == null) return attackTask;
+
+                Vector3 mainPos;
+                try { mainPos = ((Component)mainGroup).gameObject.transform.position; }
+                catch { return attackTask; }
+
+                var supports = _arrivalSupportScratch;
+                supports.Clear();
+                var units = BattleUnits.completeunitlist as System.Collections.IList;
+                if (units == null) return attackTask;
+                int alliance = mainGroup.alliance;
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var r = units[i] as Regiment;
+                    if (r == null) continue;
+                    if (r.alliance != alliance) continue;
+                    // Command-tier only (brigade and above) — skips the ~34k
+                    // individual regiments so the walk stays cheap.
+                    if (r.unittyp < TacticalUnitType.BattleGroupBrigade) continue;
+                    int id = TacticalPatchIds.GameObjectInstanceId(r);
+                    if (id == 0 || id == mainInstanceId) continue;
+                    if (!leafMap.TryGetValue(id, out var la)) continue;
+                    if (la.LeafRole != DirectChildRole.SupportMain) continue;
+                    if (SafeRouted(r)) continue;
+                    Vector3 sp;
+                    try { sp = ((Component)r).gameObject.transform.position; }
+                    catch { continue; }
+                    float dx = sp.x - mainPos.x, dz = sp.z - mainPos.z;
+                    float dist = (float)Math.Sqrt(dx * dx + dz * dz);
+                    supports.Add(new TacticalMainArrivalSynchronizer.SupportMainPosition(dist));
+                }
+
+                float now = Time.realtimeSinceStartup;
+                float holdStart = _mainArrivalHoldStartedAt.TryGetValue(mainInstanceId, out var s) ? s : now;
+                float elapsed = now - holdStart;
+
+                var resolved = TacticalMainArrivalSynchronizer.ResolveMainAttackTask(
+                    DirectChildRole.Main, attackTask, supports,
+                    commanderAggression01, elapsed,
+                    TacticalMainArrivalSynchronizer.DefaultSupportProximityThresholdMeters,
+                    TacticalMainArrivalSynchronizer.DefaultMaxHoldSeconds,
+                    out holding);
+
+                if (holding)
+                {
+                    if (!_mainArrivalHoldStartedAt.ContainsKey(mainInstanceId))
+                        _mainArrivalHoldStartedAt[mainInstanceId] = now;
+                    reason = "arrival-hold-screen(supports=" + supports.Count
+                        + " elapsed=" + elapsed.ToString("0.0") + "s)";
+                }
+                else
+                {
+                    _mainArrivalHoldStartedAt.Remove(mainInstanceId);
+                }
+                return resolved;
+            }
+            catch (Exception e)
+            {
+                OnceLog.Warning("tactical-arrival-sync:resolve-failed",
+                    "ResolveMainArrivalHold failed: " + e.GetType().Name + " " + e.Message);
+                holding = false;
+                return attackTask;
+            }
+        }
+
+        // Opportunity-override mapping (2026-05-21). Maps the army's high-level
+        // ReinforcementOpportunity decision onto a per-brigade task override. Returns
+        // the original task unchanged (and null reason) when the opportunity has
+        // nothing to add. Returns a non-null reason when overriding so telemetry
+        // can show which brigades were redirected and why.
+        //
+        // Design intent: high-priority opportunities (WithdrawalToFightLater) override
+        // every role; low-priority opportunities (AttackNow, DefensiveHold) only
+        // override the roles that meaningfully conflict. Flank-guard roles
+        // (RefuseLeft, RefuseRight, Screen) always keep their task because the
+        // flank-guard is the right play in both attack and defense — they're not
+        // contributing to the main effort either way.
+        private static CommandTaskType OverrideTaskForOpportunity(
+            CommandTaskType originalTask,
+            DirectChildRole role,
+            ReinforcementOpportunity opportunity,
+            out string overrideReason)
+        {
+            overrideReason = null;
+            switch (opportunity)
+            {
+                case ReinforcementOpportunity.WithdrawalToFightLater:
+                    // 2026-05-21 role-aware refinement (Bug 3 fix). Previous
+                    // behavior flattened EVERY non-fallback task to FallBackToLine,
+                    // which broke delay-playbook execution: Buford-style screen-
+                    // and-delay needs Screen / RefuseLeft / RefuseRight brigades
+                    // to KEEP screening during the army's withdrawal — that IS the
+                    // delay action. Smoke 2026-05-21 23:31 confirmed this gap:
+                    // Union picked CavalryScreeningDelay but every brigade got
+                    // applied-FallBackToLine instead of executing their playbook
+                    // roles.
+                    //
+                    // Aggressive roles (Main / SupportMain / Fix / Probe) → fall
+                    // back: they were committed to the attack and now need to
+                    // disengage.
+                    // Defensive roles (Screen / RefuseLeft / RefuseRight / Reserve
+                    // / Fallback) → keep their task: they're already executing the
+                    // covering action that lets the army withdraw cleanly.
+                    if (originalTask == CommandTaskType.FallBackToLine)
+                        return originalTask;
+                    switch (role)
+                    {
+                        case DirectChildRole.Main:
+                        case DirectChildRole.SupportMain:
+                        case DirectChildRole.Fix:
+                            overrideReason = "withdrawal-aggressive-role";
+                            return CommandTaskType.FallBackToLine;
+                        case DirectChildRole.Screen:
+                        case DirectChildRole.RefuseLeft:
+                        case DirectChildRole.RefuseRight:
+                        case DirectChildRole.Reserve:
+                        case DirectChildRole.Fallback:
+                            // Already-defensive role — keep its existing task
+                            // (GuardFlank for refuse roles, screen task for
+                            // Screen role, etc.). This is the screen-and-delay
+                            // pattern the user's smoke complaint was missing.
+                            return originalTask;
+                        default:
+                            overrideReason = "withdrawal-unknown-role";
+                            return CommandTaskType.FallBackToLine;
+                    }
+
+                case ReinforcementOpportunity.DefensiveHold:
+                    // Hold ground; don't push attacks. Downgrade aggressive
+                    // attack tasks to HoldObjective. Defensive tasks stay.
+                    if (originalTask == CommandTaskType.AttackObjective
+                        || originalTask == CommandTaskType.Probe
+                        || originalTask == CommandTaskType.SupportAttack)
+                    {
+                        overrideReason = "defensive-hold";
+                        return CommandTaskType.HoldObjective;
+                    }
+                    return originalTask;
+
+                case ReinforcementOpportunity.WaitAndConsolidate:
+                    // Reinforcements arriving — wait for them before attacking.
+                    // Convert attack tasks to Consolidate; hold tasks stay.
+                    if (originalTask == CommandTaskType.AttackObjective
+                        || originalTask == CommandTaskType.SupportAttack)
+                    {
+                        overrideReason = "wait-for-relief";
+                        return CommandTaskType.Consolidate;
+                    }
+                    return originalTask;
+
+                case ReinforcementOpportunity.AttackNow:
+                    // Army has committed to the attack. If a Main/SupportMain
+                    // brigade was sitting in HoldObjective or Consolidate, upgrade
+                    // it to AttackObjective so it commits with the army. Defensive
+                    // flank-guard roles stay where they are.
+                    if ((originalTask == CommandTaskType.HoldObjective
+                         || originalTask == CommandTaskType.Consolidate)
+                        && (role == DirectChildRole.Main || role == DirectChildRole.SupportMain))
+                    {
+                        overrideReason = "attack-now";
+                        return CommandTaskType.AttackObjective;
+                    }
+                    return originalTask;
+
+                case ReinforcementOpportunity.NoOpportunity:
+                default:
+                    return originalTask;
+            }
         }
 
         private static void ApplyLeafBrigadePosture(
@@ -2113,6 +2850,10 @@ namespace WhiskeyRealism.Patches
                 if (TryResolveLeafMovementTarget(group, leafAssignment, out Vector3 target))
                 {
                     bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(state.Task, battleActive: true);
+                    // Scope B refactor (2026-05-22): set stance before waypoint
+                    // so the leaf brigade's vanilla micro-AI executes with
+                    // proper context. Mirrors the brigade-posture SetWaypoint path.
+                    EnsureStanceMatchesTask(bunits, group, leafAssignment.LeafTask);
                     bunits.SetWaypoint(
                         group,
                         target,
@@ -3102,22 +3843,42 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // Scope B refactor (2026-05-22): canonical stance write before any
+        // waypoint. Computes the vanilla ai_stance for the doctrine task and
+        // calls bunits.ChangeStance ONLY when the current stance differs (no
+        // redundant queue entries). When the mapped stance is StanceNone
+        // (-1 via StanceForTask), no stance write — preserves the prior
+        // behavior of "don't touch stance for tasks we don't have an opinion
+        // about" while still letting the SetWaypoint go through.
+        //
+        // Vanilla ChangeStance handles:
+        //   - ai_stanceordered = newstance (so micro-AI knows the goal)
+        //   - aibattle[1].AddUnitToPool when alliance == playeralliance
+        //   - cascade to subordinates via groupaiobject (automatic)
+        //   - queue-vs-immediate per useorderdelays/immediate flag
+        //
+        // We pass immediate=false (use vanilla's order queue if delays are
+        // enabled — matches W&L's UX) and overwriteaigroups=false (don't
+        // clobber AI group assignments — let vanilla manage those).
+        // Scope B cleanup (2026-05-22). Single canonical entry — delegates to
+        // the shared TacticalStanceWriter so every patch site uses the same
+        // skip-if-correct + telemetry contract.
+        private static void EnsureStanceMatchesTask(BattleUnits bunits, Regiment group, CommandTaskType task)
+        {
+            TacticalStanceWriter.EnsureStanceForTask(bunits, group, task,
+                contextTag: SafeName(group) + ":" + task);
+        }
+
+        // Scope B refactor (2026-05-22): delegates to the unified mapper that
+        // covers ALL CommandTaskType values. Returns -1 only when the mapped
+        // stance is StanceNone (no opinion), preserving the prior contract of
+        // "-1 = don't write stance" for the ChangeStance branch. Other callers
+        // wanting an explicit stance for waypoint writes use
+        // TacticalCommandTaskToStanceMapper.Map directly.
         private static int StanceForTask(CommandTaskType task)
         {
-            switch (task)
-            {
-                case CommandTaskType.AttackObjective:
-                case CommandTaskType.SupportAttack:
-                    return 3;
-                case CommandTaskType.FixEnemy:
-                case CommandTaskType.HoldObjective:
-                case CommandTaskType.HoldChoke:
-                case CommandTaskType.ReserveWait:
-                case CommandTaskType.FallBackToLine:
-                    return 2;
-                default:
-                    return -1;
-            }
+            int s = TacticalCommandTaskToStanceMapper.Map(task);
+            return s == TacticalCommandTaskToStanceMapper.StanceNone ? -1 : s;
         }
 
         private static bool SafeRouted(Regiment group)
@@ -3252,7 +4013,14 @@ namespace WhiskeyRealism.Patches
                     .WithField("paths", SafeRegimentPaths(group))
                     .WithField("movingFlag", SafeGroupMovingFlag(group))
                     .WithField("pathInterrupted", group != null && group.pathinterrupted)
-                    .WithField("activeMove", HasActiveMoveMakingProgress(group)));
+                    .WithField("activeMove", HasActiveMoveMakingProgress(group))
+                    // Microshift-fix diagnostic fields (2026-05-21). Smoke can now verify
+                    // whether near-duplicate waypoint targets are being deduped correctly
+                    // by comparing currentWaypointX/Z to targetX/Z in tactical.jsonl.
+                    .WithField("currentWaypointX", group != null ? group.lastsetwaypointposition.x : 0f)
+                    .WithField("currentWaypointZ", group != null ? group.lastsetwaypointposition.z : 0f)
+                    .WithField("groupPositionX", group != null ? SafePosition(group).x : 0f)
+                    .WithField("groupPositionZ", group != null ? SafePosition(group).z : 0f));
         }
 
         private static void EmitFacingPulseTelemetry(
@@ -3346,6 +4114,7 @@ namespace WhiskeyRealism.Patches
             _lastCourierAt.Clear();
             _lastOutboundOrderSignatureByGroup.Clear();
             _lastTelemetryAt.Clear();
+            _mainArrivalHoldStartedAt.Clear();
         }
 
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)

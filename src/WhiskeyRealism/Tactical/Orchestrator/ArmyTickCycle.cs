@@ -218,7 +218,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 mainEffortLocalOdds: currentMainEffortOdds,
                 mainEffortLocalOddsHistory: orchestrator.HistoryGlobalOdds,
                 bestNonMainEffortSectorOdds: bestNonMainEffortOdds,
-                currentMainEffortOdds: currentMainEffortOdds);
+                currentMainEffortOdds: currentMainEffortOdds,
+                // Opportunity-change trigger inputs (2026-05-21). The orchestrator
+                // refreshes _currentReinforcementOpportunity every tick via
+                // UpdateReinforcementOpportunity; _lastReplanOpportunity is
+                // snapshotted in Replan(). Differing values fire OpportunityChange.
+                currentOpportunity: orchestrator.CurrentReinforcementOpportunity.Opportunity,
+                lastReplanOpportunity: orchestrator.LastReplanOpportunity);
 
             var trigger = orchestrator.CheckReplanTriggers(input);
             if (trigger == ReplanTrigger.None) return ReplanTrigger.None;

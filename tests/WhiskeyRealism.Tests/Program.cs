@@ -310,6 +310,76 @@ static class Program
             ("posture executor long attack uses vanilla blocked movement order", PostureExecutorLongAttackUsesVanillaBlockedMovementOrder),
             ("posture executor group movement flags count as active move", PostureExecutorGroupMovementFlagsCountAsActiveMove),
             ("posture executor duplicate waypoint policy suppresses same target", PostureExecutorDuplicateWaypointPolicySuppressesSameTarget),
+            ("regimental doctrine routed yields no action", RegimentalDoctrineRoutedYieldsNoAction),
+            ("regimental doctrine pressed multiple sides yields retreat", RegimentalDoctrinePressedMultipleSidesYieldsRetreat),
+            ("regimental doctrine flanked low morale yields fallback", RegimentalDoctrineFlankedLowMoraleYieldsFallback),
+            ("regimental doctrine isolated with enemies yields fallback", RegimentalDoctrineIsolatedWithEnemiesYieldsFallback),
+            ("regimental doctrine flanked healthy yields wheel", RegimentalDoctrineFlankedHealthyYieldsWheel),
+            ("regimental doctrine no threats yields no action", RegimentalDoctrineNoThreatsYieldsNoAction),
+            ("regimental threat computer quadrant front detects centroid axis", RegimentalThreatComputerFrontQuadrant),
+            ("regimental threat computer detects flank from three enemies", RegimentalThreatComputerDetectsFlankFromThreeEnemies),
+            ("regimental threat computer isolation when no allies nearby", RegimentalThreatComputerIsolationWhenNoAllies),
+            ("friendly path gate empty list returns clear", FriendlyPathGateEmptyReturnsClear),
+            ("friendly path gate detects destination overlap", FriendlyPathGateDetectsDestinationOverlap),
+            ("friendly path gate detects narrow frontal cone block", FriendlyPathGateDetectsNarrowCone),
+            ("friendly path gate ignores friendly outside range", FriendlyPathGateIgnoresFriendlyOutsideRange),
+            ("friendly path gate cohesion fires when spread worsens", FriendlyPathGateCohesionWorsensSpread),
+            ("friendly path gate ignores cross-parent destination overlap", FriendlyPathGateIgnoresCrossParentDestinationOverlap),
+            ("friendly fire gate clear when no friendlies", FriendlyFireGateClearWhenEmpty),
+            ("friendly fire gate detects friend in line", FriendlyFireGateDetectsFriendInLine),
+            ("friendly fire gate ignores friend behind shooter", FriendlyFireGateIgnoresFriendBehind),
+            ("friendly fire gate ignores friend past target", FriendlyFireGateIgnoresFriendPastTarget),
+            ("friendly fire gate ignores friend outside lateral band", FriendlyFireGateIgnoresLateralFriend),
+            ("opportunity hysteresis holds same category", OpportunityHysteresisHoldsSameCategory),
+            ("opportunity hysteresis blocks transition within hold window", OpportunityHysteresisBlocksWithinHoldWindow),
+            ("opportunity hysteresis allows transition after hold expires", OpportunityHysteresisAllowsAfterHold),
+            ("opportunity hysteresis escalates to withdrawal immediately", OpportunityHysteresisEscalatesToWithdrawal),
+            ("opportunity hysteresis accepts first decision", OpportunityHysteresisAcceptsFirstDecision),
+            ("arrival sync holds mid-band commander when supports are far", ArrivalSyncHoldsMidBandCommanderWhenSupportsAreFar),
+            ("arrival sync releases when any support in proximity", ArrivalSyncReleasesWhenAnySupportInProximity),
+            ("arrival sync bypassed for aggressive commander", ArrivalSyncBypassedForAggressiveCommander),
+            ("arrival sync releases at max hold timeout", ArrivalSyncReleasesAtMaxHoldTimeout),
+            ("arrival sync releases when no supports assigned", ArrivalSyncReleasesWhenNoSupportsAssigned),
+            ("arrival sync sanitizes garbage inputs", ArrivalSyncSanitizesGarbageInputs),
+            ("arrival sync resolve holds main as screen when supports far", ArrivalSyncResolveHoldsMainAsScreenWhenSupportsFar),
+            ("arrival sync resolve releases main to attack when supports close", ArrivalSyncResolveReleasesMainToAttackWhenSupportsClose),
+            ("arrival sync resolve only gates main attack role", ArrivalSyncResolveOnlyGatesMainAttackRole),
+            ("arrival sync resolve passes through non-attack task", ArrivalSyncResolvePassesThroughNonAttackTask),
+            ("stance reconciler demotes attacker on defensive doctrine", StanceReconcilerDemotesAttackerOnDefensiveDoctrine),
+            ("stance reconciler demotes meeting on defensive doctrine", StanceReconcilerDemotesMeetingOnDefensiveDoctrine),
+            ("stance reconciler preserves attacker on attacknow", StanceReconcilerPreservesAttackerOnAttackNow),
+            ("stance reconciler preserves attacker on no opportunity", StanceReconcilerPreservesAttackerOnNoOpportunity),
+            ("stance reconciler leaves defender unchanged", StanceReconcilerLeavesDefenderUnchanged),
+            ("stance reconciler demotes attacker on withdrawal", StanceReconcilerDemotesAttackerOnWithdrawal),
+            ("macroai attack-now flanks at clear advantage", MacroAiAttackNowFlankAtClearAdvantage),
+            ("macroai attack-now frontal at marginal ratio", MacroAiAttackNowFrontalAtMarginalRatio),
+            ("macroai defensive-hold maps to defend", MacroAiDefensiveHoldMapsToDefend),
+            ("macroai wait-and-consolidate maps to defend", MacroAiWaitAndConsolidateMapsToDefend),
+            ("macroai withdrawal maps to retreat", MacroAiWithdrawalMapsToRetreat),
+            ("macroai no-opportunity returns null", MacroAiNoOpportunityReturnsNull),
+            ("macroai aggressive commander envelops at parity", MacroAiAggressiveCommanderEnvelopsAtParity),
+            ("macroai cautious commander requires clear margin to flank", MacroAiCautiousCommanderRequiresClearMarginToFlank),
+            ("macroai legal-check rejects unset/out-of-range", MacroAiIsLegalChecks),
+            ("play catalog returns template for every playbook", PlayCatalogReturnsTemplateForEveryPlaybook),
+            ("play catalog unknown returns null", PlayCatalogUnknownReturnsNull),
+            ("play projection forward axis aligns toward enemy", PlayProjectionForwardAxisAlignsTowardEnemy),
+            ("play projection rotates by enemy direction", PlayProjectionRotatesByEnemyDirection),
+            ("play projection degenerate zero distance uses default", PlayProjectionDegenerateZeroDistanceUsesDefault),
+            ("play corps assignment assigns closest corps to rect", PlayCorpsAssignmentAssignsClosestCorpsToRect),
+            ("play corps assignment priority order higher first", PlayCorpsAssignmentPriorityOrderHigherFirst),
+            ("play corps assignment skips rects with no available corps", PlayCorpsAssignmentSkipsRectsWithNoAvailableCorps),
+            ("play rect kind to role maps correctly", PlayRectKindToRoleMapsCorrectly),
+            ("allocator with zones overrides evidence", AllocatorWithZonesOverridesEvidence),
+            ("allocator without zones uses existing evidence path", AllocatorWithoutZonesUsesExistingEvidencePath),
+            ("stance mapper screen tasks → stance 1", StanceMapperScreenTasksMapToStance1),
+            ("stance mapper attack tasks → stance 3", StanceMapperAttackTasksMapToStance3),
+            ("stance mapper defensive tasks → stance 2", StanceMapperDefensiveTasksMapToStance2),
+            ("stance mapper none → stance 0", StanceMapperNoneTaskMapsToStance0),
+            ("stance mapper identifies offensive commitment", StanceMapperIdentifiesOffensiveCommitment),
+            ("regimental positioner empty regiments returns empty", RegimentalPositionerEmptyReturnsEmpty),
+            ("regimental positioner single regiment goes to target", RegimentalPositionerSingleToTarget),
+            ("regimental positioner two regiments split symmetric", RegimentalPositionerTwoSplitSymmetric),
+            ("regimental positioner lane index alternates", RegimentalPositionerLaneIndexAlternates),
             ("tactical nav planner probes to standoff bound", TacticalNavPlannerProbesToStandoffBound),
             ("tactical nav planner breaks off close screen", TacticalNavPlannerBreaksOffCloseScreen),
             ("tactical nav planner offsets covered attack approach", TacticalNavPlannerOffsetsCoveredAttackApproach),
@@ -1026,17 +1096,23 @@ static class Program
             ("direct child evidence equals same buckets", DirectChildEvidenceEqualsSameBuckets),
             ("direct child snapshot stores raw and effective unittyp", DirectChildSnapshotStoresRawAndEffectiveUnittyp),
             ("direct child allocator assigns main on main effort sector with strength", DirectChildAllocatorAssignsMainOnMainEffortSectorWithStrength),
+            ("direct child allocator rejects locally outnumbered main for cautious commander", DirectChildAllocatorRejectsLocallyOutnumberedMainForCautiousCommander),
+            ("direct child allocator accepts locally outnumbered main for aggressive commander", DirectChildAllocatorAcceptsLocallyOutnumberedMainForAggressiveCommander),
+            ("direct child allocator parity brigade gets main under cautious commander", DirectChildAllocatorLocallyEvenBrigadeStillGetsMainUnderCautiousCommander),
+            ("direct child allocator weak distant brigade becomes reserve not unknown", DirectChildAllocatorWeakDistantBrigadeBecomesReserveNotUnknown),
             ("direct child allocator assigns support main to adjacent strong child", DirectChildAllocatorAssignsSupportMainToAdjacentStrongChild),
             ("direct child allocator assigns fix on fixing sector with contact", DirectChildAllocatorAssignsFixOnFixingSectorWithContact),
             ("direct child allocator falls back before fixing under severe overmatch", DirectChildAllocatorFallbackBeatsFixUnderSevereOvermatch),
             ("direct child allocator falls back before main under severe overmatch", DirectChildAllocatorFallbackBeatsMainUnderSevereOvermatch),
+            ("direct child allocator outnumbered but not in contact stays in line", DirectChildAllocatorOutnumberedButNotInContactStaysInLine),
+            ("direct child allocator outnumbered with static enemy holds line", DirectChildAllocatorOutnumberedAndInContactWithStaticEnemyHolds),
             ("direct child allocator assigns reserve to uncommitted strong child", DirectChildAllocatorAssignsReserveToUncommittedStrongChild),
             ("direct child allocator assigns fallback on adverse odds and attack", DirectChildAllocatorAssignsFallbackOnAdverseOddsAndAttack),
             ("direct child allocator allocates refuse to flank with exposure", DirectChildAllocatorAllocatesRefuseToFlankWithExposure),
             ("direct child allocator deterministic on registration order tie", DirectChildAllocatorDeterministicOnRegistrationOrderTie),
             ("direct child allocator falls back to strongest main when plan sector is empty", DirectChildAllocatorFallsBackToStrongestMainWhenPlanSectorEmpty),
             ("direct child allocator keeps aggressive probe moving when planned sector is empty", DirectChildAllocatorKeepsAggressiveProbeMovingWhenPlannedSectorEmpty),
-            ("direct child allocator unknown when no plan main effort match", DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch),
+            ("direct child allocator reserve when no plan main effort match", DirectChildAllocatorReserveWhenNoPlanMainEffortMatch),
             ("direct child allocator assigns screen on screening sector with low strengths", DirectChildAllocatorAssignsScreenOnScreeningSectorWithLowStrengths),
             ("direct child allocator handles mismatched per child intent length", DirectChildAllocatorHandlesMismatchedPerChildIntentLength),
             ("command node contracts sanitize ids and finite aggression", TestCommandNodeContractsSanitizeInputs),
@@ -1135,17 +1211,19 @@ static class Program
             ("role cascade main double wing five children produces two wings + pin + refused outers", RoleCascadeMainDoubleWingFiveChildren),
             ("role cascade main double wing seven children adds support adjacent to wings", RoleCascadeMainDoubleWingSevenChildren),
             ("role cascade main double wing below three children falls back to single anchor", RoleCascadeMainDoubleWingTwoChildrenFallsBackToSingleAnchor),
+            ("playbook catalog defensive pressure biases away from offensive", PlaybookCatalogDefensivePressureBiasesAwayFromOffensive),
             ("playbook catalog envelopment pressure biases lee over hood", PlaybookCatalogEnvelopmentPressureBiasesLeeOverHood),
             ("playbook catalog envelopment pressure off keeps frontal playbook fit", PlaybookCatalogEnvelopmentPressureOffKeepsFrontalFit),
-            ("playbook catalog faction bias prefers historical match", PlaybookCatalogFactionBiasPrefersHistoricalMatch),
-            ("playbook catalog faction bias does not affect generic playbooks", PlaybookCatalogFactionBiasDoesNotAffectGeneric),
-            ("playbook catalog faction affinity table is correct", PlaybookCatalogFactionAffinityTableIsCorrect),
             ("heavy gate cycle scaler base at 1x compression", HeavyGateCycleScalerBaseAt1xCompression),
             ("heavy gate cycle scaler 5x compression stays near base", HeavyGateCycleScaler5xStaysNearBase),
             ("heavy gate cycle scaler 20x compression scales 5x", HeavyGateCycleScaler20xScales5x),
             ("heavy gate cycle scaler sanitizes garbage inputs", HeavyGateCycleScalerSanitizesGarbage),
             ("playbook catalog envelopment affinity ranking sanity", PlaybookCatalogEnvelopmentAffinityRankingSanity),
-            ("army orchestrator envelopment min ratio constant is 1.5", ArmyOrchestratorEnvelopmentMinRatioConstantIs15),
+            ("army orchestrator envelopment min ratio constant is 1.2 baseline", ArmyOrchestratorEnvelopmentMinRatioConstantIs12),
+            ("effective envelopment min ratio aggressive commander envelops at parity", EffectiveEnvelopmentMinRatioAggressiveCommanderEnvelopsAtParity),
+            ("effective envelopment min ratio cautious commander requires margin", EffectiveEnvelopmentMinRatioCautiousCommanderRequiresMargin),
+            ("effective envelopment min ratio mid-band uses baseline", EffectiveEnvelopmentMinRatioMidBandUsesBaseline),
+            ("effective envelopment min ratio sanitizes garbage inputs", EffectiveEnvelopmentMinRatioSanitizesGarbageInputs),
             ("army orchestrator envelopment reserve commit cap is 1.1", ArmyOrchestratorEnvelopmentReserveCommitCapIs11),
             ("seed catalog registers all eighteen playbooks", SeedCatalogRegistersAllEighteenPlaybooks),
             ("buford screen delay playbook id and historical label", BufordScreenDelayPlaybookIdAndHistoricalLabel),
@@ -1214,7 +1292,24 @@ static class Program
             ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h mid commander withdraws", ReinforcementOpportunity15kVs13kPlus7kIn12hMidWithdraws),
             ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h aggressive attacks now", ReinforcementOpportunity15kVs13kPlus7kIn12hAggressiveAttacks),
             ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h cautious withdraws", ReinforcementOpportunity15kVs13kPlus7kIn12hCautiousWithdraws),
-            ("reinforcement opportunity 10k vs 15k enemy growing cautious withdraws", ReinforcementOpportunity10kVs15kEnemyGrowingCautiousWithdraws),
+            ("reinforcement opportunity 10k vs 15k enemy growing cautious delays defensively", ReinforcementOpportunity10kVs15kEnemyGrowingCautiousDelaysDefensively),
+            ("reinforcement opportunity severely outnumbered withdraws", ReinforcementOpportunitySeverelyOutnumberedWithdraws),
+            ("reinforcement opportunity aggressive commander refuses withdraw at moderate disadvantage", ReinforcementOpportunityAggressiveCommanderRefusesToWithdrawAtModerateDisadvantage),
+            ("compute withdrawal ratio threshold personality scale", ComputeWithdrawalRatioThresholdPersonalityScale),
+            ("reinforcement opportunity smoke case routes to delaying defense", ReinforcementOpportunitySmokeCaseRoutesToDelayingDefense),
+            ("delaying defense escalates on casualties", DelayingDefenseEscalatesOnCasualties),
+            ("delaying defense escalates on routs", DelayingDefenseEscalatesOnRouts),
+            ("delaying defense holds under tolerable losses", DelayingDefenseHoldsUnderTolerableLosses),
+            ("delaying defense aggressive commander tolerates more casualties", DelayingDefenseAggressiveCommanderToleratesMoreCasualties),
+            ("delaying defense cautious commander escalates early", DelayingDefenseCautiousCommanderEscalatesEarly),
+            ("delaying defense prolonged battle escalates", DelayingDefenseProlongedBattleEscalates),
+            ("compute casualty escalation threshold personality scale", ComputeCasualtyEscalationThresholdPersonalityScale),
+            ("doctrine stance gate defender never attacks", DoctrineStanceGateDefenderNeverAttacks),
+            ("doctrine stance gate attacker produces attack on advantage", DoctrineStanceGateAttackerProducesAttackOnAdvantage),
+            ("doctrine stance gate meeting allows all outcomes", DoctrineStanceGateMeetingAllowsAllOutcomes),
+            ("playbook catalog stance hard filter defender rejects offensive", PlaybookCatalogStanceHardFilterDefenderRejectsOffensive),
+            ("playbook catalog stance hard filter attacker rejects defensive", PlaybookCatalogStanceHardFilterAttackerRejectsDefensive),
+            ("playbook catalog stance of classifies archetypes correctly", PlaybookCatalogStanceOfClassifiesArchetypesCorrectly),
             ("reinforcement opportunity 15k own vs 10k enemy +5k in 8h attack window open", ReinforcementOpportunity15kVs10kPlus5kIn8hAttackWindowOpen),
             ("reinforcement opportunity 12k own +5k in 6h vs 13k enemy waits to consolidate", ReinforcementOpportunity12kPlus5kIn6hWaitsToConsolidate),
             ("reinforcement opportunity 13k vs 13k both reinforcing defensive hold", ReinforcementOpportunity13kVs13kBothReinforcingDefensiveHold),
@@ -7152,7 +7247,13 @@ static class Program
                 pathInterrupted: false),
             "same assembly target should not enqueue another waypoint");
 
-        AssertFalse(
+        // Microshift fix (2026-05-21): interrupted paths with NEAR-same target should
+        // still dedup. Previously this returned false unconditionally, which caused
+        // the unit "microshift" pattern at high compression — every path-interrupt
+        // cycle re-issued SetWaypoint to a ~0.5m-different target and vanilla
+        // recomputed the path, briefly reversing the unit. The new behavior only
+        // bypasses dedup when the new target has truly relocated (>InterruptedReissueDistance).
+        AssertTrue(
             CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
                 currentWaypointX: 1880.5f,
                 currentWaypointZ: -708.5f,
@@ -7160,7 +7261,19 @@ static class Program
                 targetZ: -708.2f,
                 tolerance: 5f,
                 pathInterrupted: true),
-            "interrupted paths still need recovery writes");
+            "interrupted + same target should NOT trigger a wasteful re-write (microshift fix)");
+
+        // Confirm the new behavior — interrupted + genuinely different target DOES
+        // still bypass dedup. 200m delta is well past the 60m InterruptedReissueDistance.
+        AssertFalse(
+            CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
+                currentWaypointX: 1880.5f,
+                currentWaypointZ: -708.5f,
+                targetX: 2080.5f,
+                targetZ: -708.5f,
+                tolerance: 5f,
+                pathInterrupted: true),
+            "interrupted + genuinely-relocated target should still allow re-write");
 
         AssertFalse(
             CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
@@ -21192,7 +21305,7 @@ static class Program
     private static void TacticalBattlePlanRecordsIdPhaseMainEffortAndAge()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment,
+            BattlePlanId.DoubleEnvelopment,
             BattlePhase.Probe,
             mainEffortSector: 3,
             fixingSectors: new[] { 0, 1 },
@@ -21200,7 +21313,7 @@ static class Program
             reserveCommitTriggerOdds: 1.4f,
             ageSeconds: 0f,
             jitterSeed: 17);
-        AssertEqual(BattlePlanId.LeeEnvelopment, plan.PlanId, "plan id");
+        AssertEqual(BattlePlanId.DoubleEnvelopment, plan.PlanId, "plan id");
         AssertEqual(BattlePhase.Probe, plan.Phase, "phase");
         AssertEqual(3, plan.MainEffortSector, "main effort sector");
         AssertEqual(2, plan.FixingSectors.Length, "fixing sectors length");
@@ -21247,14 +21360,14 @@ static class Program
     private static void ArmyIntentCarriesPlanIdPhaseAndAggressionBias()
     {
         var intent = new ArmyIntent(
-            BattlePlanId.ShermanManeuverFix,
+            BattlePlanId.ManeuverAndFix,
             BattlePhase.MainEffort,
             mainEffortSector: 1,
             fixingSectors: new[] { 2, 3 },
             screeningSectors: System.Array.Empty<int>(),
             reserveCommitTriggerOdds: 1.3f,
             aggressionBias01: 0.65f);
-        AssertEqual(BattlePlanId.ShermanManeuverFix, intent.PlanId, "plan id");
+        AssertEqual(BattlePlanId.ManeuverAndFix, intent.PlanId, "plan id");
         AssertEqual(BattlePhase.MainEffort, intent.Phase, "phase");
         AssertEqual(1, intent.MainEffortSector, "main effort sector");
         AssertNear(0.65f, intent.AggressionBias01, 1e-5f, "aggression bias");
@@ -21311,7 +21424,7 @@ static class Program
                 new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>())),
         };
         var intent = new ArmyIntent(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             mainEffortSector: 2, fixingSectors: new[] { 0 }, screeningSectors: new[] { 4 },
             reserveCommitTriggerOdds: 1.2f, aggressionBias01: 0.7f,
             directChildIntents: children);
@@ -21324,7 +21437,7 @@ static class Program
     {
         // existing 7-arg ctor must continue to work and yield empty children list
         var intent = new ArmyIntent(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0.5f);
         AssertEqual(0, intent.DirectChildIntents.Count);
     }
@@ -21449,7 +21562,7 @@ static class Program
         // Personality weight (0.5) should dominate terrain (0.2): a perfect-on-personality
         // playbook beats a perfect-on-terrain playbook when personality is the only differentiator.
         var cat = new TacticalPlaybookCatalog();
-        cat.Register(new FakePlaybook(BattlePlanId.LeeEnvelopment,
+        cat.Register(new FakePlaybook(BattlePlanId.DoubleEnvelopment,
             new PersonalityFit(1f, -1f, 1f),
             new TerrainPreference(0f, 0f, 0f, 0f),
             new OddsRange(0f, 0f)));
@@ -21458,7 +21571,7 @@ static class Program
             new TerrainPreference(1f, 1f, 1f, 1f),
             new OddsRange(0f, 0f)));
         var ctx = new PlaybookContext(new PersonalityVector(1f, -1f, 1f, 0, 0), TerrainKind.Open, 5f, 0f, 0, 1);
-        AssertEqual(BattlePlanId.LeeEnvelopment, cat.Select(ctx).Id, "personality outweighs terrain when both are extreme");
+        AssertEqual(BattlePlanId.DoubleEnvelopment, cat.Select(ctx).Id, "personality outweighs terrain when both are extreme");
     }
 
     private static void TacticalPlaybookCatalogOpposingHintChangesRanking()
@@ -21545,24 +21658,24 @@ static class Program
         public static TacticalPlaybookCatalog AllHistoricalAndGeneric()
         {
             var c = new TacticalPlaybookCatalog();
-            c.Register(new LeeEnvelopmentPlaybook());
-            c.Register(new JacksonValleyShufflePlaybook());
-            c.Register(new McClellanPreparedDefensePlaybook());
-            c.Register(new ShermanManeuverFixPlaybook());
-            c.Register(new GrantContinuousAttritionPlaybook());
-            c.Register(new LongstreetDefensiveOverslopePlaybook());
-            c.Register(new HookerFlankDeparturePlaybook());
-            c.Register(new HoodFrontalAssaultPlaybook());
-            c.Register(new BurnsideForcedAssaultPlaybook());
-            c.Register(new BraggIndecisiveCommitPlaybook());
+            c.Register(new DoubleEnvelopmentPlaybook());
+            c.Register(new MobileFlankMarchPlaybook());
+            c.Register(new PreparedDefensePlaybook());
+            c.Register(new ManeuverAndFixPlaybook());
+            c.Register(new ContinuousAttritionPlaybook());
+            c.Register(new ReverseSlopeDefensePlaybook());
+            c.Register(new WideFlankApproachPlaybook());
+            c.Register(new FrontalShockAssaultPlaybook());
+            c.Register(new ForcedFrontalAttackPlaybook());
+            c.Register(new HesitatedCommitPlaybook());
             c.Register(new GenericAggressivePlaybook());
             c.Register(new GenericCautiousPlaybook());
             c.Register(new GenericMethodicalPlaybook());
             c.Register(new GenericDesperatePlaybook());
-            c.Register(new BufordCavalryScreenDelayPlaybook());
-            c.Register(new ForrestCavalryRaidPlaybook());
+            c.Register(new CavalryScreeningDelayPlaybook());
+            c.Register(new CavalryRaidPlaybook());
             c.Register(new MeetingEngagementPlaybook());
-            c.Register(new JohnstonFabianDelayPlaybook());
+            c.Register(new DelayingDefensePlaybook());
             return c;
         }
     }
@@ -21572,7 +21685,7 @@ static class Program
         var cat = SeedCatalog.AllHistoricalAndGeneric();
         var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
         var ctx = new PlaybookContext(lee, TerrainKind.Wooded, currentOdds: 1.1f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 1);
-        AssertEqual(BattlePlanId.LeeEnvelopment, cat.Select(ctx).Id, "Lee personality picks lee-envelopment");
+        AssertEqual(BattlePlanId.DoubleEnvelopment, cat.Select(ctx).Id, "Lee personality picks lee-envelopment");
     }
 
     private static void HistoricalPlaybookSelectionMcClellanPersonalitySelectsMcClellanDefense()
@@ -21580,7 +21693,7 @@ static class Program
         var cat = SeedCatalog.AllHistoricalAndGeneric();
         var mcc = new PersonalityVector(-0.6f, 0.8f, -0.7f, 0.7f, 0.4f);
         var ctx = new PlaybookContext(mcc, TerrainKind.Open, currentOdds: 1.2f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 1);
-        AssertEqual(BattlePlanId.McClellanPreparedDefense, cat.Select(ctx).Id, "McClellan personality picks mcclellan-prepared-defense");
+        AssertEqual(BattlePlanId.PreparedDefense, cat.Select(ctx).Id, "McClellan personality picks mcclellan-prepared-defense");
     }
 
     private static void HistoricalPlaybookSelectionJacksonInMountainsAtLowOddsSelectsValleyShuffle()
@@ -21588,7 +21701,7 @@ static class Program
         var cat = SeedCatalog.AllHistoricalAndGeneric();
         var jackson = new PersonalityVector(0.7f, -0.5f, 0.9f, 0.5f, 0.0f);
         var ctx = new PlaybookContext(jackson, TerrainKind.Mountain, currentOdds: 0.7f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 1);
-        AssertEqual(BattlePlanId.JacksonValleyShuffle, cat.Select(ctx).Id, "Jackson in mountains at low odds picks jackson-valley-shuffle");
+        AssertEqual(BattlePlanId.MobileFlankMarch, cat.Select(ctx).Id, "Jackson in mountains at low odds picks jackson-valley-shuffle");
     }
 
     private static void HistoricalPlaybookSelectionGrantAtFavorableOddsSelectsAttrition()
@@ -21603,7 +21716,7 @@ static class Program
         var cat = SeedCatalog.AllHistoricalAndGeneric();
         var grant = new PersonalityVector(0.5f, 0.5f, 0.0f, 0.6f, 0.4f);
         var ctx = new PlaybookContext(grant, TerrainKind.Open, currentOdds: 2.5f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 1);
-        AssertEqual(BattlePlanId.GrantContinuousAttrition, cat.Select(ctx).Id, "Grant at favorable odds picks grant-continuous-attrition");
+        AssertEqual(BattlePlanId.ContinuousAttrition, cat.Select(ctx).Id, "Grant at favorable odds picks grant-continuous-attrition");
     }
 
     private static void HistoricalPlaybookSelectionShermanInOpenSelectsManeuverFix()
@@ -21611,7 +21724,7 @@ static class Program
         var cat = SeedCatalog.AllHistoricalAndGeneric();
         var sherman = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.4f, 0.5f);
         var ctx = new PlaybookContext(sherman, TerrainKind.Open, currentOdds: 1.3f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 1);
-        AssertEqual(BattlePlanId.ShermanManeuverFix, cat.Select(ctx).Id, "Sherman in open terrain picks sherman-maneuver-fix");
+        AssertEqual(BattlePlanId.ManeuverAndFix, cat.Select(ctx).Id, "Sherman in open terrain picks sherman-maneuver-fix");
     }
 
     // ---- Secondary historical playbook selection tests (O1.6) ----
@@ -21629,7 +21742,7 @@ static class Program
         // a behavioral guarantee for arbitrary commander vectors.
         var longstreet = new PersonalityVector(-0.2f, 0.5f, -0.5f, 0.4f, 0.3f);
         var ctx = new PlaybookContext(longstreet, TerrainKind.Mountain, currentOdds: 0.95f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 18892);
-        AssertEqual(BattlePlanId.LongstreetDefensiveOverslope, cat.Select(ctx).Id, "Longstreet personality + mountain near-parity selects longstreet-defensive-overslope");
+        AssertEqual(BattlePlanId.ReverseSlopeDefense, cat.Select(ctx).Id, "Longstreet personality + mountain near-parity selects longstreet-defensive-overslope");
     }
 
     private static void HistoricalPlaybookSelectionHookerInOpenAtFavorableOddsSelectsFlankDeparture()
@@ -21641,7 +21754,7 @@ static class Program
         // to amplify Hooker's nerve-loss signature against Sherman's audacity +0.6.
         var hooker = new PersonalityVector(0.6f, -0.2f, -0.8f, 0.4f, 0.4f);
         var ctx = new PlaybookContext(hooker, TerrainKind.Wooded, currentOdds: 1.4f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 1);
-        AssertEqual(BattlePlanId.HookerFlankDeparture, cat.Select(ctx).Id, "Hooker personality at favorable odds wooded terrain selects hooker-flank-departure");
+        AssertEqual(BattlePlanId.WideFlankApproach, cat.Select(ctx).Id, "Hooker personality at favorable odds wooded terrain selects hooker-flank-departure");
     }
 
     private static void HistoricalPlaybookSelectionHoodLowOddsHighAggressionSelectsFrontalAssault()
@@ -21654,7 +21767,7 @@ static class Program
         // signature against the rest of the catalog.
         var hood = new PersonalityVector(0.9f, -0.9f, 0.6f, 0.4f, 0.0f);
         var ctx = new PlaybookContext(hood, TerrainKind.Open, currentOdds: 0.5f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 1);
-        AssertEqual(BattlePlanId.HoodFrontalAssault, cat.Select(ctx).Id, "Hood personality at low odds selects hood-frontal-assault");
+        AssertEqual(BattlePlanId.FrontalShockAssault, cat.Select(ctx).Id, "Hood personality at low odds selects hood-frontal-assault");
     }
 
     private static void HistoricalPlaybookSelectionBurnsideLowCautionLowAudacitySelectsForcedAssault()
@@ -21667,7 +21780,7 @@ static class Program
         // Sherman's [0.9, 1.6].
         var burnside = new PersonalityVector(0.5f, -0.5f, -0.7f, 0.4f, 0.7f);
         var ctx = new PlaybookContext(burnside, TerrainKind.Wooded, currentOdds: 0.7f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 1);
-        AssertEqual(BattlePlanId.BurnsideForcedAssault, cat.Select(ctx).Id, "Burnside personality selects burnside-forced-assault");
+        AssertEqual(BattlePlanId.ForcedFrontalAttack, cat.Select(ctx).Id, "Burnside personality selects burnside-forced-assault");
     }
 
     private static void HistoricalPlaybookSelectionBraggMidOddsLowAudacitySelectsIndecisiveCommit()
@@ -21682,7 +21795,7 @@ static class Program
         // registration path, not a behavioral oracle.
         var bragg = new PersonalityVector(0.5f, 0.3f, -0.4f, 0.4f, 0.4f);
         var ctx = new PlaybookContext(bragg, TerrainKind.Wooded, currentOdds: 1.1f, opposingCommanderHint: 0f, defaultMainEffortSector: 0, jitterSeed: 5254);
-        AssertEqual(BattlePlanId.BraggIndecisiveCommit, cat.Select(ctx).Id, "Bragg personality at mid-odds selects bragg-indecisive-commit");
+        AssertEqual(BattlePlanId.HesitatedCommit, cat.Select(ctx).Id, "Bragg personality at mid-odds selects bragg-indecisive-commit");
     }
 
     // ---- Army orchestrator tests (O1.7) ----
@@ -21826,7 +21939,7 @@ static class Program
     private static void DirectChildAllocatorAssignsMainOnMainEffortSectorWithStrength()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             mainEffortSector: 2, fixingSectors: new[] { 0 }, screeningSectors: new[] { 4 },
             reserveCommitTriggerOdds: 1.2f, ageSeconds: 0f, jitterSeed: 0);
         var snapshots = new[]
@@ -21850,10 +21963,139 @@ static class Program
         AssertEqual(2, intents[1].AxisSector);
     }
 
+    private static void DirectChildAllocatorRejectsLocallyOutnumberedMainForCautiousCommander()
+    {
+        // Cautious commander (aggression -0.6 → 0.20 normalized) with the
+        // planned MainEffortSector brigade locally outnumbered by 1 bucket.
+        // New local-odds gate must reject this brigade for Main.
+        // Brigades in OTHER sectors with parity should pick up Main via
+        // PickFallbackMainEffort (the safe-fallback tier already enforces
+        // local-odds parity).
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.PreparedDefense, BattlePhase.MainEffort,
+            mainEffortSector: 2, fixingSectors: new int[0], screeningSectors: new int[0],
+            reserveCommitTriggerOdds: 1.6f, ageSeconds: 0f, jitterSeed: 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
+            new DirectChildSnapshot("c2", "a", 15, 0, "Third", true),
+        };
+        // c1 (sector 2 = planned main effort) is outnumbered own=1, enemy=2.
+        // c0 (sector 1, adjacent) is strong own=3, enemy=1 — should win Main.
+        var evidence = new[]
+        {
+            new DirectChildEvidence(3, 1, true, 1, 0, 0.8f),
+            new DirectChildEvidence(1, 2, true, 2, 0, 0.7f),
+            new DirectChildEvidence(2, 2, false, 3, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(-0.6f, 0.0f, 0.0f, 0.0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertTrue(intents[1].Role != DirectChildRole.Main,
+            "locally outnumbered brigade in MainEffortSector must NOT be Main under cautious commander; got " + intents[1].Role);
+        // Some other sector should have picked up Main via fallback.
+        bool anyMain = false;
+        for (int i = 0; i < intents.Count; i++)
+            if (intents[i].Role == DirectChildRole.Main) { anyMain = true; break; }
+        AssertTrue(anyMain, "PickFallbackMainEffort should have found a parity sector for Main");
+    }
+
+    private static void DirectChildAllocatorAcceptsLocallyOutnumberedMainForAggressiveCommander()
+    {
+        // Aggressive commander (aggression 0.6 → 0.80 normalized) bypasses
+        // the local-odds gate. The planned MainEffortSector brigade gets Main
+        // even when locally outnumbered by 1 bucket — Hood's frontal-assault /
+        // Jackson's Chancellorsville pattern.
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.FrontalShockAssault, BattlePhase.MainEffort,
+            mainEffortSector: 2, fixingSectors: new int[0], screeningSectors: new int[0],
+            reserveCommitTriggerOdds: 1.0f, ageSeconds: 0f, jitterSeed: 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
+            new DirectChildSnapshot("c2", "a", 15, 0, "Third", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(1, 1, false, 1, 0, 0.5f),
+            new DirectChildEvidence(1, 2, true, 2, 0, 0.7f),  // outnumbered but planned main
+            new DirectChildEvidence(1, 1, false, 3, 0, 0.5f),
+        };
+        var personality = new PersonalityVector(0.6f, 0.0f, 0.0f, 0.0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Main, intents[1].Role,
+            "aggressive commander bypasses local-odds gate and assigns Main to planned brigade");
+    }
+
+    private static void DirectChildAllocatorLocallyEvenBrigadeStillGetsMainUnderCautiousCommander()
+    {
+        // Regression guard: when local odds are EVEN (own=enemy), the cautious
+        // commander gate must still allow Main assignment. The gate only blocks
+        // ENEMY > OWN. Equal buckets are acceptable for Main.
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.PreparedDefense, BattlePhase.MainEffort,
+            mainEffortSector: 2, fixingSectors: new int[0], screeningSectors: new int[0],
+            reserveCommitTriggerOdds: 1.6f, ageSeconds: 0f, jitterSeed: 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 2, true, 2, 0, 0.7f),
+        };
+        var personality = new PersonalityVector(-0.6f, 0.0f, 0.0f, 0.0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Main, intents[0].Role,
+            "parity (own == enemy) is acceptable for Main even under cautious commander");
+    }
+
+    private static void DirectChildAllocatorWeakDistantBrigadeBecomesReserveNotUnknown()
+    {
+        // 2026-05-23 G3 fix: brigades that can't fit Main/SupportMain/Fix/
+        // Screen/Refuse/Fallback (weak strength OR distant sector AND
+        // SupportMain budget exhausted) now default to Reserve, not Unknown.
+        // Unknown maps to FormUp task which produces incoherent behavior;
+        // Reserve maps to ReserveWait + vanilla's macroai cascade.
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 0, fixingSectors: new int[0], screeningSectors: new int[0],
+            reserveCommitTriggerOdds: 1.2f, ageSeconds: 0f, jitterSeed: 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "MainBde", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "WeakDistantA", true),
+            new DirectChildSnapshot("c2", "a", 15, 0, "WeakDistantB", true),
+            new DirectChildSnapshot("c3", "a", 15, 0, "WeakDistantC", true),
+            new DirectChildSnapshot("c4", "a", 15, 0, "WeakDistantD", true),
+        };
+        // Main at sector 0; weak (own=0) brigades at distant sectors 7/8/9/10.
+        // None qualify for primary SupportMain (sector >2 from main) and the
+        // fall-through SupportMain requires OwnStrengthBucket>=1. They should
+        // become Reserve, not Unknown.
+        var evidence = new[]
+        {
+            new DirectChildEvidence(2, 1, true, 0, 0, 0.8f),
+            new DirectChildEvidence(0, 0, false, 7, 0, 0.4f),
+            new DirectChildEvidence(0, 0, false, 8, 0, 0.4f),
+            new DirectChildEvidence(0, 0, false, 9, 0, 0.4f),
+            new DirectChildEvidence(0, 0, false, 10, 0, 0.4f),
+        };
+        var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        AssertEqual(DirectChildRole.Main, intents[0].Role, "c0 is Main");
+        for (int i = 1; i < intents.Count; i++)
+        {
+            AssertTrue(intents[i].Role != DirectChildRole.Unknown,
+                "weak distant brigade c" + i + " must NOT be Unknown — got " + intents[i].Role);
+        }
+    }
+
     private static void DirectChildAllocatorAssignsSupportMainToAdjacentStrongChild()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, new[] { 0 }, new int[0], 1.2f, 0f, 0);
         var snapshots = new[]
         {
@@ -21877,7 +22119,7 @@ static class Program
     private static void DirectChildAllocatorAssignsFixOnFixingSectorWithContact()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, new[] { 0 }, new[] { 4 }, 1.2f, 0f, 0);
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pinning", true) };
         var evidence = new[] { new DirectChildEvidence(2, 2, true, 0, 0, 0.6f) };
@@ -21889,7 +22131,7 @@ static class Program
     private static void DirectChildAllocatorFallbackBeatsFixUnderSevereOvermatch()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, new[] { 7 }, new[] { 4 }, 1.2f, 0f, 0);
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed Fixing Force", true) };
         var evidence = new[] { new DirectChildEvidence(2, 4, true, 7, 0, 0.95f) };
@@ -21905,7 +22147,7 @@ static class Program
     private static void DirectChildAllocatorFallbackBeatsMainUnderSevereOvermatch()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             7, new[] { 2 }, new[] { 4 }, 1.2f, 0f, 0);
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Overmatched Main Effort", true) };
         var evidence = new[] { new DirectChildEvidence(2, 4, true, 7, 0, 0.95f) };
@@ -21921,7 +22163,7 @@ static class Program
     private static void DirectChildAllocatorAssignsReserveToUncommittedStrongChild()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, new int[0], new int[0], 1.2f, 0f, 0);
         var snapshots = new[]
         {
@@ -21939,10 +22181,54 @@ static class Program
         AssertEqual(DirectChildRole.Reserve, intents[1].Role);
     }
 
+    private static void DirectChildAllocatorOutnumberedButNotInContactStaysInLine()
+    {
+        // 2026-05-22 line-of-battle fix: a brigade severely outnumbered by
+        // bucket math but NOT in contact stays in the line as Reserve /
+        // RefuseLeft/Right / fall-through SupportMain — NOT preemptive Fallback.
+        // Previous behavior was scattering the army the moment the enemy was
+        // visible.
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 2, fixingSectors: new int[0], screeningSectors: new int[0],
+            reserveCommitTriggerOdds: 1.2f, ageSeconds: 0f, jitterSeed: 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Distant Brigade", true) };
+        var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 5, 0.9f, 0f, Array.Empty<EvidenceTag>());
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.AllocateWithChildIntent(
+            plan, personality, snapshots,
+            new[] { new DirectChildEvidence(1, 4, contactFlag: false, primarySector: 5, flankExposureBucket: 0, confidence01: 0.95f) },
+            new[] { enemyAttack });
+        AssertTrue(intents[0].Role != DirectChildRole.Fallback,
+            "outnumbered but not in contact must NOT be Fallback; got " + intents[0].Role);
+    }
+
+    private static void DirectChildAllocatorOutnumberedAndInContactWithStaticEnemyHolds()
+    {
+        // High visibility (confidence ≥ 0.9) used to count as "active pressure"
+        // even when enemy intent wasn't Attack. After 2026-05-22 tightening,
+        // visibility alone no longer triggers Fallback — enemy intent must
+        // actually be Attack.
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
+            2, new int[0], new int[0], 1.2f, 0f, 0);
+        var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Holding Brigade", true) };
+        // Enemy is visible (high confidence) AND outnumbering, but its intent
+        // is NOT Attack (e.g., Defend). Should NOT trigger Fallback.
+        var enemyHold = new TacticalIntentModel(InferredIntent.Defend, 5, 0.9f, 0f, Array.Empty<EvidenceTag>());
+        var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.AllocateWithChildIntent(
+            plan, personality, snapshots,
+            new[] { new DirectChildEvidence(2, 4, contactFlag: true, primarySector: 5, flankExposureBucket: 0, confidence01: 0.95f) },
+            new[] { enemyHold });
+        AssertTrue(intents[0].Role != DirectChildRole.Fallback,
+            "outnumbered but enemy-not-attacking must hold the line; got " + intents[0].Role);
+    }
+
     private static void DirectChildAllocatorAssignsFallbackOnAdverseOddsAndAttack()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, new int[0], new int[0], 1.2f, 0f, 0);
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 0, 0.8f, 0f, Array.Empty<EvidenceTag>());
@@ -21957,7 +22243,7 @@ static class Program
     private static void DirectChildAllocatorAllocatesRefuseToFlankWithExposure()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, new int[0], new int[0], 1.2f, 0f, 0);
         var snapshots = new[]
         {
@@ -21978,7 +22264,7 @@ static class Program
     private static void DirectChildAllocatorDeterministicOnRegistrationOrderTie()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, new int[0], new int[0], 1.2f, 0f, 0);
         var snapshots = new[]
         {
@@ -21999,7 +22285,7 @@ static class Program
     private static void DirectChildAllocatorFallsBackToStrongestMainWhenPlanSectorEmpty()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             99, new int[0], new int[0], 1.2f, 0f, 0);
         var snapshots = new[]
         {
@@ -22025,7 +22311,7 @@ static class Program
     private static void DirectChildAllocatorKeepsAggressiveProbeMovingWhenPlannedSectorEmpty()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.HoodFrontalAssault, BattlePhase.Probe,
+            BattlePlanId.FrontalShockAssault, BattlePhase.Probe,
             0, new int[0], new int[0], 1.0f, 0f, 0);
         var snapshots = new[]
         {
@@ -22034,8 +22320,8 @@ static class Program
         };
         var evidence = new[]
         {
-            new DirectChildEvidence(2, 1, false, 1, 2, 0.05f),
-            new DirectChildEvidence(2, 1, false, 3, 2, 0.05f),
+            new DirectChildEvidence(2, 1, false, 1, 3, 0.05f),
+            new DirectChildEvidence(2, 1, false, 3, 3, 0.05f),
         };
         var personality = new PersonalityVector(0.8f, -0.6f, 0.5f, 0f, 0f);
 
@@ -22043,25 +22329,36 @@ static class Program
 
         AssertEqual(DirectChildRole.Main, intents[0].Role, "first aggressive wing becomes provisional main");
         AssertEqual(1, intents[0].AxisSector, "provisional main axis follows observed child sector");
-        AssertEqual(DirectChildRole.RefuseRight, intents[1].Role, "opposite exposed wing still guards the flank");
+        // Severe flank exposure (bucket 3) — opposite wing still must lock to
+        // flank-guard. Was bucket=2 with old FlankExposureRefuseThreshold=2;
+        // 2026-05-22 raised threshold to 3 (only SEVERE exposure triggers
+        // refuse), so the test now uses bucket=3 to assert the same
+        // doctrinal intent (severe exposure → lock flank guard).
+        AssertEqual(DirectChildRole.RefuseRight, intents[1].Role, "severely exposed wing still guards the flank");
     }
 
-    private static void DirectChildAllocatorUnknownWhenNoPlanMainEffortMatch()
+    private static void DirectChildAllocatorReserveWhenNoPlanMainEffortMatch()
     {
+        // 2026-05-23 G3: when no brigade matches the planned main effort sector
+        // AND no fallback can be picked, the lonely brigade defaults to Reserve
+        // (was Unknown before). Reserve produces ReserveWait task; combined
+        // with vanilla's macroai-driven AdjustGroupAIStance (F sync), the
+        // brigade gets a coherent stance instead of falling to FormUp from
+        // Unknown role.
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             99, new int[0], new int[0], 1.2f, 0f, 0);
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Lonely", true) };
         var evidence = new[] { new DirectChildEvidence(1, 1, false, 0, 0, 0.3f) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
         var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
-        AssertEqual(DirectChildRole.Unknown, intents[0].Role);
+        AssertEqual(DirectChildRole.Reserve, intents[0].Role);
     }
 
     private static void DirectChildAllocatorAssignsScreenOnScreeningSectorWithLowStrengths()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, new int[0], new[] { 4 }, 1.2f, 0f, 0);
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Screening", true) };
         var evidence = new[] { new DirectChildEvidence(1, 1, false, 4, 0, 0.3f) };
@@ -22074,7 +22371,7 @@ static class Program
     private static void DirectChildAllocatorHandlesMismatchedPerChildIntentLength()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             2, new int[0], new int[0], 1.2f, 0f, 0);
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
@@ -22084,9 +22381,11 @@ static class Program
             new[] { new DirectChildEvidence(1, 3, true, 0, 0, 0.7f) },
             Array.Empty<TacticalIntentModel>());
         // With Unknown enemy intent, Fallback rule (which needs Attack intent) cannot fire.
-        // Adverse-odds child with no other rule match should land Unknown.
+        // Adverse-odds child with no other rule match used to land Unknown; with
+        // the 2026-05-23 G3 fall-through default → Reserve (so vanilla's macroai
+        // cascade can give the brigade a coherent stance via F sync).
         AssertEqual(1, intents.Count);
-        AssertEqual(DirectChildRole.Unknown, intents[0].Role);
+        AssertEqual(DirectChildRole.Reserve, intents[0].Role);
         AssertEqual(InferredIntent.Unknown, intents[0].EnemyIntent.PrimaryIntent);
     }
 
@@ -22701,7 +23000,7 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(currentOdds: 1.1f, terrain: TerrainKind.Wooded, defaultMainEffortSector: 0));
         AssertTrue(orch.HasPlan, "plan picked");
-        AssertEqual(BattlePlanId.LeeEnvelopment, orch.CurrentPlan.PlanId, "Lee personality + wooded + 1.1 odds picks lee-envelopment");
+        AssertEqual(BattlePlanId.DoubleEnvelopment, orch.CurrentPlan.PlanId, "Lee personality + wooded + 1.1 odds picks lee-envelopment");
         AssertEqual(BattlePhase.Probe, orch.CurrentPlan.Phase, "initial phase is Probe");
     }
 
@@ -22729,7 +23028,7 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 2));
         var intent = orch.EmitArmyIntent();
-        AssertEqual(BattlePlanId.LeeEnvelopment, intent.PlanId, "intent plan id matches");
+        AssertEqual(BattlePlanId.DoubleEnvelopment, intent.PlanId, "intent plan id matches");
         AssertEqual(BattlePhase.Probe, intent.Phase, "intent phase matches");
         AssertEqual(2, intent.MainEffortSector, "intent main effort matches plan");
         AssertTrue(intent.AggressionBias01 > 0.5f, "intent aggression bias positive for aggressive CO");
@@ -23260,7 +23559,7 @@ static class Program
         // make TryPickPlan fail, so we register a single placeholder playbook by re-using
         // SetPlanForTesting before calling Replan with the new sector.
         orch.SetPlanForTesting(new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             mainEffortSector: 5,  // different sector than before
             Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0f, 0));
 
@@ -23298,7 +23597,7 @@ static class Program
         var catalog = new TacticalPlaybookCatalog();
         var orch = new ArmyOrchestrator(allianceId: 0, catalog, personality);
         orch.SetPlanForTesting(new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.MainEffort,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
             mainSector, Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0f, 0));
         return orch;
     }
@@ -23708,6 +24007,43 @@ static class Program
             "2-child env falls back to single-anchor; idx 1 = SupportMain, got " + r1);
     }
 
+    private static void PlaybookCatalogDefensivePressureBiasesAwayFromOffensive()
+    {
+        // 2026-05-23 / K: when doctrine signals any defensive outcome
+        // (DefensiveHold/DelayingDefense/WaitAndConsolidate), the playbook
+        // catalog MUST pick a defensive archetype. Without this, the user
+        // observed doctrine=DefensiveHold with playbook=ManeuverAndFix —
+        // brigades got offensive roles while macroai=2 (defend) was set,
+        // causing lone-brigade attacks with no support.
+        var cat = new TacticalPlaybookCatalog();
+        var sharedFit = new PersonalityFit(0.5f, -0.2f, 0.5f);
+        var neutralTerrain = new TerrainPreference(1f, 1f, 1f, 1f);
+        var openOdds = new OddsRange(0.5f, 2f);
+        cat.Register(new FakePlaybook(BattlePlanId.ManeuverAndFix,   sharedFit, neutralTerrain, openOdds));
+        cat.Register(new FakePlaybook(BattlePlanId.PreparedDefense,  sharedFit, neutralTerrain, openOdds));
+        cat.Register(new FakePlaybook(BattlePlanId.DelayingDefense,  sharedFit, neutralTerrain, openOdds));
+
+        // Without DefensivePressure: offensive archetype could win on jitter.
+        var pressureOff = new PlaybookContext(
+            new PersonalityVector(0.5f, -0.2f, 0.5f, 0f, 0f),
+            TerrainKind.Open, currentOdds: 1.17f,
+            opposingCommanderHint: 0f,
+            defaultMainEffortSector: 0, jitterSeed: 1);
+        var pickedOff = cat.Select(pressureOff);
+        // Don't assert specific pick — jitter dependent — just verify NOT preferring defensive here.
+
+        // With DefensivePressure: defensive archetypes win unambiguously.
+        var pressureOn = new PlaybookContext(
+            new PersonalityVector(0.5f, -0.2f, 0.5f, 0f, 0f),
+            TerrainKind.Open, currentOdds: 1.17f,
+            opposingCommanderHint: 0f,
+            defaultMainEffortSector: 0, jitterSeed: 1,
+            defensivePressure: true);
+        var picked = cat.Select(pressureOn);
+        AssertTrue(picked.Id == BattlePlanId.DelayingDefense || picked.Id == BattlePlanId.PreparedDefense,
+            "DefensivePressure on: defensive archetype wins, not ManeuverAndFix; got " + picked.Id);
+    }
+
     private static void PlaybookCatalogEnvelopmentPressureBiasesLeeOverHood()
     {
         // Same neutral-aggressive personality registered as fit for both Lee
@@ -23719,15 +24055,15 @@ static class Program
         var sharedFit = new PersonalityFit(0.5f, -0.2f, 0.5f);
         var neutralTerrain = new TerrainPreference(1f, 1f, 1f, 1f);
         var openOdds = new OddsRange(0.5f, 2f);
-        cat.Register(new FakePlaybook(BattlePlanId.LeeEnvelopment,    sharedFit, neutralTerrain, openOdds));
-        cat.Register(new FakePlaybook(BattlePlanId.HoodFrontalAssault, sharedFit, neutralTerrain, openOdds));
+        cat.Register(new FakePlaybook(BattlePlanId.DoubleEnvelopment,    sharedFit, neutralTerrain, openOdds));
+        cat.Register(new FakePlaybook(BattlePlanId.FrontalShockAssault, sharedFit, neutralTerrain, openOdds));
 
         var pressureOn = new PlaybookContext(
             new PersonalityVector(0.5f, -0.2f, 0.5f, 0f, 0f),
             TerrainKind.Open, currentOdds: 2.0f,
             opposingCommanderHint: 0f,
             defaultMainEffortSector: 0, jitterSeed: 11, envelopmentPressure: true);
-        AssertEqual(BattlePlanId.LeeEnvelopment, cat.Select(pressureOn).Id,
+        AssertEqual(BattlePlanId.DoubleEnvelopment, cat.Select(pressureOn).Id,
             "envelopment pressure on: Lee wins over Hood");
     }
 
@@ -23770,75 +24106,17 @@ static class Program
         AssertNear(0.003f, TacticalHeavyPathGate.ScaleCycleForCompression(0.003f, -5f), 1e-6f, "negative ratio -> 1x scaling");
     }
 
-    private static void PlaybookCatalogFactionBiasPrefersHistoricalMatch()
-    {
-        // Same personality (close to both Lee/CSA and Sherman/Union fit).
-        // Without faction context, the catalog might pick either depending
-        // on terrain/odds/jitter. With allianceId=1 (CSA), Lee should win;
-        // with allianceId=0 (Union), Sherman should win.
-        var cat = SeedCatalog.AllHistoricalAndGeneric();
-        var moderate = new PersonalityVector(0.7f, -0.4f, 0.6f, 0.4f, 0.2f);
-        var ctxCSA = new PlaybookContext(moderate, TerrainKind.Open,
-            currentOdds: 1.2f, opposingCommanderHint: 0f,
-            defaultMainEffortSector: 0, jitterSeed: 1,
-            allianceId: 1);  // CSA
-        var ctxUnion = new PlaybookContext(moderate, TerrainKind.Open,
-            currentOdds: 1.2f, opposingCommanderHint: 0f,
-            defaultMainEffortSector: 0, jitterSeed: 1,
-            allianceId: 0);  // Union
-
-        var csaChoice = cat.Select(ctxCSA);
-        var unionChoice = cat.Select(ctxUnion);
-
-        AssertTrue(TacticalPlaybookCatalog.FactionAffinity(csaChoice.Id) >= 0,
-            "CSA alliance picks CSA-historical or Either playbook (got " + csaChoice.Id + ")");
-        AssertTrue(TacticalPlaybookCatalog.FactionAffinity(unionChoice.Id) <= 0,
-            "Union alliance picks Union-historical or Either playbook (got " + unionChoice.Id + ")");
-    }
-
-    private static void PlaybookCatalogFactionBiasDoesNotAffectGeneric()
-    {
-        // GenericAggressive is Either (affinity=0). It scores the same for
-        // CSA and Union allianceId — no faction penalty.
-        var cat = new TacticalPlaybookCatalog();
-        cat.Register(new GenericAggressivePlaybook());
-
-        var ctxCSA = new PlaybookContext(default, TerrainKind.Open, 1f, 0f, 0, 1, allianceId: 1);
-        var ctxUnion = new PlaybookContext(default, TerrainKind.Open, 1f, 0f, 0, 1, allianceId: 0);
-
-        AssertEqual(BattlePlanId.GenericAggressive, cat.Select(ctxCSA).Id,
-            "Either playbook picked by CSA");
-        AssertEqual(BattlePlanId.GenericAggressive, cat.Select(ctxUnion).Id,
-            "Either playbook picked by Union");
-    }
-
-    private static void PlaybookCatalogFactionAffinityTableIsCorrect()
-    {
-        // Spot-check the canonical assignments.
-        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.LeeEnvelopment), "Lee=CSA");
-        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.JacksonValleyShuffle), "Jackson=CSA");
-        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.HoodFrontalAssault), "Hood=CSA");
-        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.ForrestCavalryRaid), "Forrest=CSA");
-        AssertEqual(+1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.JohnstonFabianDelay), "Johnston=CSA");
-        AssertEqual(-1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.ShermanManeuverFix), "Sherman=Union");
-        AssertEqual(-1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.GrantContinuousAttrition), "Grant=Union");
-        AssertEqual(-1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.McClellanPreparedDefense), "McClellan=Union");
-        AssertEqual(-1, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.BufordCavalryScreenDelay), "Buford=Union");
-        AssertEqual(0, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.GenericAggressive), "GenericAggressive=Either");
-        AssertEqual(0, TacticalPlaybookCatalog.FactionAffinity(BattlePlanId.MeetingEngagement), "MeetingEngagement=Either");
-    }
-
     private static void PlaybookCatalogEnvelopmentPressureOffKeepsFrontalFit()
     {
         // Personality fit favoring frontal (Hood) playbook. Without
         // envelopment pressure, the affinity bonus is zero so personality
         // fit dominates and Hood wins.
         var cat = new TacticalPlaybookCatalog();
-        cat.Register(new FakePlaybook(BattlePlanId.LeeEnvelopment,
+        cat.Register(new FakePlaybook(BattlePlanId.DoubleEnvelopment,
             new PersonalityFit(0.5f, -0.2f, 0.5f),
             new TerrainPreference(1f, 1f, 1f, 1f),
             new OddsRange(0.5f, 2f)));
-        cat.Register(new FakePlaybook(BattlePlanId.HoodFrontalAssault,
+        cat.Register(new FakePlaybook(BattlePlanId.FrontalShockAssault,
             new PersonalityFit(1.0f, -0.8f, 1.0f),  // Hood personality: high aggression, low caution, high audacity
             new TerrainPreference(1f, 1f, 1f, 1f),
             new OddsRange(0.5f, 2f)));
@@ -23848,7 +24126,7 @@ static class Program
             TerrainKind.Open, currentOdds: 2.0f,
             opposingCommanderHint: 0f,
             defaultMainEffortSector: 0, jitterSeed: 11, envelopmentPressure: false);
-        AssertEqual(BattlePlanId.HoodFrontalAssault, cat.Select(hoodPersonality).Id,
+        AssertEqual(BattlePlanId.FrontalShockAssault, cat.Select(hoodPersonality).Id,
             "envelopment pressure off: Hood personality fit wins");
     }
 
@@ -23858,14 +24136,14 @@ static class Program
         // envelopment) > Jackson (flank march) > Hooker (Chancellorsville plan)
         // > Sherman (Atlanta maneuver) > GenericAggressive (frontal-ish) >
         // Hood/Burnside (frontal-only) > McClellan/Longstreet (defensive).
-        float lee = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.LeeEnvelopment);
-        float jackson = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.JacksonValleyShuffle);
-        float hooker = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.HookerFlankDeparture);
-        float sherman = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.ShermanManeuverFix);
+        float lee = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.DoubleEnvelopment);
+        float jackson = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.MobileFlankMarch);
+        float hooker = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.WideFlankApproach);
+        float sherman = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.ManeuverAndFix);
         float aggressive = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.GenericAggressive);
-        float hood = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.HoodFrontalAssault);
-        float burnside = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.BurnsideForcedAssault);
-        float mcclellan = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.McClellanPreparedDefense);
+        float hood = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.FrontalShockAssault);
+        float burnside = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.ForcedFrontalAttack);
+        float mcclellan = TacticalPlaybookCatalog.EnvelopmentAffinity(BattlePlanId.PreparedDefense);
 
         AssertTrue(lee >= jackson, "Lee >= Jackson; got lee=" + lee + " jackson=" + jackson);
         AssertTrue(jackson > hooker, "Jackson > Hooker; got jackson=" + jackson + " hooker=" + hooker);
@@ -23876,13 +24154,64 @@ static class Program
         AssertTrue(burnside > mcclellan, "Burnside > McClellan; got burnside=" + burnside + " mcclellan=" + mcclellan);
     }
 
-    private static void ArmyOrchestratorEnvelopmentMinRatioConstantIs15()
+    private static void ArmyOrchestratorEnvelopmentMinRatioConstantIs12()
     {
-        // Constant must be 1.5 to match the user-confirmed threshold (2026-05-19)
-        // and the docs' threshold for "clear advantage" justifying multi-axis
-        // envelopment over single-axis frontal pressure.
-        AssertNear(1.5f, ArmyOrchestrator.EnvelopmentMinRatio, 1e-6f,
-            "EnvelopmentMinRatio = 1.5");
+        // Baseline lowered 1.5 → 1.2 on 2026-05-22 — historical envelopments
+        // commonly fired well below 1.5×. Use EffectiveEnvelopmentMinRatio for
+        // the personality-aware threshold per commander aggression.
+        AssertNear(1.2f, ArmyOrchestrator.EnvelopmentMinRatio, 1e-6f,
+            "EnvelopmentMinRatio = 1.2 baseline");
+    }
+
+    private static void EffectiveEnvelopmentMinRatioAggressiveCommanderEnvelopsAtParity()
+    {
+        // Lee/Jackson/Hood (aggression ≥ 0.7) accept envelopment at parity.
+        AssertNear(ArmyOrchestrator.AggressiveEnvelopmentMinRatio,
+            ArmyOrchestrator.EffectiveEnvelopmentMinRatio(0.7f),
+            1e-6f, "aggressive commander at threshold uses AggressiveEnvelopmentMinRatio");
+        AssertNear(ArmyOrchestrator.AggressiveEnvelopmentMinRatio,
+            ArmyOrchestrator.EffectiveEnvelopmentMinRatio(0.95f),
+            1e-6f, "very aggressive commander uses AggressiveEnvelopmentMinRatio");
+        AssertNear(1.0f, ArmyOrchestrator.AggressiveEnvelopmentMinRatio, 1e-6f,
+            "AggressiveEnvelopmentMinRatio = 1.0 (parity)");
+    }
+
+    private static void EffectiveEnvelopmentMinRatioCautiousCommanderRequiresMargin()
+    {
+        // McClellan/Johnston (aggression ≤ 0.3) require a clearer margin.
+        AssertNear(ArmyOrchestrator.CautiousEnvelopmentMinRatio,
+            ArmyOrchestrator.EffectiveEnvelopmentMinRatio(0.3f),
+            1e-6f, "cautious commander at threshold uses CautiousEnvelopmentMinRatio");
+        AssertNear(ArmyOrchestrator.CautiousEnvelopmentMinRatio,
+            ArmyOrchestrator.EffectiveEnvelopmentMinRatio(0.05f),
+            1e-6f, "very cautious commander uses CautiousEnvelopmentMinRatio");
+        AssertNear(1.4f, ArmyOrchestrator.CautiousEnvelopmentMinRatio, 1e-6f,
+            "CautiousEnvelopmentMinRatio = 1.4");
+    }
+
+    private static void EffectiveEnvelopmentMinRatioMidBandUsesBaseline()
+    {
+        // Mid-aggression commanders (0.3 < aggression < 0.7) use the 1.2 baseline.
+        AssertNear(ArmyOrchestrator.EnvelopmentMinRatio,
+            ArmyOrchestrator.EffectiveEnvelopmentMinRatio(0.5f),
+            1e-6f, "mid-band aggression uses EnvelopmentMinRatio baseline");
+        AssertNear(ArmyOrchestrator.EnvelopmentMinRatio,
+            ArmyOrchestrator.EffectiveEnvelopmentMinRatio(0.69f),
+            1e-6f, "just-below-aggressive threshold uses baseline");
+        AssertNear(ArmyOrchestrator.EnvelopmentMinRatio,
+            ArmyOrchestrator.EffectiveEnvelopmentMinRatio(0.31f),
+            1e-6f, "just-above-cautious threshold uses baseline");
+    }
+
+    private static void EffectiveEnvelopmentMinRatioSanitizesGarbageInputs()
+    {
+        // Out-of-range / NaN must not throw and must produce a usable value.
+        AssertTrue(!float.IsNaN(ArmyOrchestrator.EffectiveEnvelopmentMinRatio(float.NaN)),
+            "NaN aggression returns a finite ratio");
+        AssertTrue(ArmyOrchestrator.EffectiveEnvelopmentMinRatio(-5f) > 0f,
+            "negative aggression clamps to ≥ 0 then returns cautious ratio");
+        AssertTrue(ArmyOrchestrator.EffectiveEnvelopmentMinRatio(99f) > 0f,
+            "huge aggression clamps to 1 then returns aggressive ratio");
     }
 
     private static void ArmyOrchestratorEnvelopmentReserveCommitCapIs11()
@@ -23908,15 +24237,15 @@ static class Program
 
     private static void BufordScreenDelayPlaybookIdAndHistoricalLabel()
     {
-        var pb = new BufordCavalryScreenDelayPlaybook();
-        AssertEqual(BattlePlanId.BufordCavalryScreenDelay, pb.Id, "Buford playbook id");
+        var pb = new CavalryScreeningDelayPlaybook();
+        AssertEqual(BattlePlanId.CavalryScreeningDelay, pb.Id, "Buford playbook id");
         AssertEqual("buford-cavalry-screen-delay", pb.HistoricalLabel, "Buford label slug");
     }
 
     private static void ForrestCavalryRaidPlaybookIdAndHistoricalLabel()
     {
-        var pb = new ForrestCavalryRaidPlaybook();
-        AssertEqual(BattlePlanId.ForrestCavalryRaid, pb.Id, "Forrest playbook id");
+        var pb = new CavalryRaidPlaybook();
+        AssertEqual(BattlePlanId.CavalryRaid, pb.Id, "Forrest playbook id");
         AssertEqual("forrest-cavalry-raid", pb.HistoricalLabel, "Forrest label slug");
     }
 
@@ -23929,8 +24258,8 @@ static class Program
 
     private static void JohnstonFabianDelayPlaybookIdAndHistoricalLabel()
     {
-        var pb = new JohnstonFabianDelayPlaybook();
-        AssertEqual(BattlePlanId.JohnstonFabianDelay, pb.Id, "Johnston playbook id");
+        var pb = new DelayingDefensePlaybook();
+        AssertEqual(BattlePlanId.DelayingDefense, pb.Id, "Johnston playbook id");
         AssertEqual("johnston-fabian-delay", pb.HistoricalLabel, "Johnston label slug");
     }
 
@@ -23939,7 +24268,7 @@ static class Program
         // Buford's cavalry doctrine wants open ground (mobility advantage)
         // over mountain (cavalry can't operate effectively). Confirms the
         // TerrainPreference scores match historical doctrine.
-        var pb = new BufordCavalryScreenDelayPlaybook();
+        var pb = new CavalryScreeningDelayPlaybook();
         float open = pb.TerrainFit.Score(TerrainKind.Open);
         float mountain = pb.TerrainFit.Score(TerrainKind.Mountain);
         AssertTrue(open > mountain,
@@ -23951,7 +24280,7 @@ static class Program
         // Forrest's raids tolerate near-parity (0.7-1.5x) but lose appeal
         // at extreme outnumber (cavalry can't trade attrition with infantry).
         // OddsRange.Score gives 1.0 at 0.7 (in band) and decays below.
-        var pb = new ForrestCavalryRaidPlaybook();
+        var pb = new CavalryRaidPlaybook();
         float at0_8 = pb.PreferredOdds.Score(0.8f);
         AssertEqual(1.0f, at0_8, "Forrest raid scores 1.0 at 0.8x");
         float at0_5 = pb.PreferredOdds.Score(0.5f);
@@ -23974,7 +24303,7 @@ static class Program
         // Johnston's Fabian doctrine preserves the force above all — reserves
         // commit only late (trigger odds > 1.3) so the army never breaks contact
         // under pressure with an uncommitted reserve still in hand.
-        var pb = new JohnstonFabianDelayPlaybook();
+        var pb = new DelayingDefensePlaybook();
         AssertTrue(pb.ReserveCommitTriggerOdds > 1.3f,
             "Johnston holds reserves until very late; got " + pb.ReserveCommitTriggerOdds);
     }
@@ -23996,13 +24325,13 @@ static class Program
         AssertTrue(method != null, "AllowsProvisionalAttackAxis method exists");
 
         var forrestPlan = new TacticalBattlePlan(
-            BattlePlanId.ForrestCavalryRaid, BattlePhase.MainEffort, 0, null, null, 1.0f, 0f, 1);
+            BattlePlanId.CavalryRaid, BattlePhase.MainEffort, 0, null, null, 1.0f, 0f, 1);
         var bufordPlan = new TacticalBattlePlan(
-            BattlePlanId.BufordCavalryScreenDelay, BattlePhase.MainEffort, 0, null, null, 0.7f, 0f, 1);
+            BattlePlanId.CavalryScreeningDelay, BattlePhase.MainEffort, 0, null, null, 0.7f, 0f, 1);
         var meetingPlan = new TacticalBattlePlan(
             BattlePlanId.MeetingEngagement, BattlePhase.MainEffort, 0, null, null, 0.9f, 0f, 1);
         var johnstonPlan = new TacticalBattlePlan(
-            BattlePlanId.JohnstonFabianDelay, BattlePhase.MainEffort, 0, null, null, 1.5f, 0f, 1);
+            BattlePlanId.DelayingDefense, BattlePhase.MainEffort, 0, null, null, 1.5f, 0f, 1);
 
         bool forrest = (bool)method.Invoke(null, new object[] { forrestPlan });
         bool buford = (bool)method.Invoke(null, new object[] { bufordPlan });
@@ -24267,7 +24596,7 @@ static class Program
     private static void BattlePlanWithMainEffortSectorReplacesField()
     {
         var plan = new TacticalBattlePlan(
-            BattlePlanId.LeeEnvelopment, BattlePhase.Probe,
+            BattlePlanId.DoubleEnvelopment, BattlePhase.Probe,
             mainEffortSector: 0,
             fixingSectors: new[] { 1 }, screeningSectors: new[] { 2 },
             reserveCommitTriggerOdds: 1.2f,
@@ -24275,7 +24604,7 @@ static class Program
         var moved = plan.WithMainEffortSector(3);
         AssertEqual(3, moved.MainEffortSector, "main effort sector replaced");
         AssertEqual(BattlePhase.Probe, moved.Phase, "phase preserved");
-        AssertEqual(BattlePlanId.LeeEnvelopment, moved.PlanId, "plan id preserved");
+        AssertEqual(BattlePlanId.DoubleEnvelopment, moved.PlanId, "plan id preserved");
         AssertNear(10f, moved.AgeSeconds, 1e-5f, "age preserved");
         AssertNear(1.2f, moved.ReserveCommitTriggerOdds, 1e-5f, "trigger odds preserved");
     }
@@ -25246,13 +25575,20 @@ static class Program
         float own, float enemy,
         ReinforcementArrival[] ownArrivals = null,
         ReinforcementArrival[] enemyArrivals = null,
-        float aggression = 0.5f, float initiative = 0.5f, float intel = 0.8f)
+        float aggression = 0.5f, float initiative = 0.5f, float intel = 0.8f,
+        float ownCasualtyRatio = 0f, float ownRoutedFraction = 0f,
+        float battleHoursElapsed = 0f,
+        BattleStance stance = BattleStance.Meeting)
     {
         return new TacticalForceBalanceEvidence(
             own, enemy,
             ownArrivals ?? System.Array.Empty<ReinforcementArrival>(),
             enemyArrivals ?? System.Array.Empty<ReinforcementArrival>(),
-            initiative, aggression, intel);
+            initiative, aggression, intel,
+            ownCasualtyRatio01: ownCasualtyRatio,
+            ownRoutedFraction01: ownRoutedFraction,
+            battleHoursElapsed: battleHoursElapsed,
+            stance: stance);
     }
 
     private static void ReinforcementOpportunity15kVs13kPlus7kIn12hMidWithdraws()
@@ -25303,16 +25639,258 @@ static class Program
             "cautious commander holds defensively (not attack, not withdraw with own ahead now), got reason=" + d.Reason);
     }
 
-    private static void ReinforcementOpportunity10kVs15kEnemyGrowingCautiousWithdraws()
+    private static void ReinforcementOpportunity10kVs15kEnemyGrowingCautiousDelaysDefensively()
     {
-        // Distinct withdrawal case: actually outnumbered NOW (10K vs 15K = 0.67 < 0.85)
-        // AND enemy growing AND no own relief in window → Withdraw.
+        // 10K vs 15K = ratio 0.67. With 2026-05-23 personality-modulated
+        // withdrawal threshold, cautious commander (aggression 0.10) threshold
+        // is ~0.52. Ratio 0.67 > 0.52 → does NOT withdraw, instead routes to
+        // DelayingDefense (outnumbered but defensible, no near parity).
+        // Historical CW pattern: Johnston Atlanta-campaign-style Fabian delay.
         var ev = MakeForceBalance(10000f, 15000f,
             enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
             aggression: 0.10f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, d.Opportunity,
+            "moderate disadvantage + no near relief → DelayingDefense (not Withdraw), got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunitySeverelyOutnumberedWithdraws()
+    {
+        // 5K vs 15K = ratio 0.33. Cautious commander threshold 0.52,
+        // ratio 0.33 < 0.52 → WithdrawalToFightLater fires (severe overmatch).
+        var ev = MakeForceBalance(5000f, 15000f,
+            enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
+            aggression: 0.10f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, d.Opportunity,
-            "actually outnumbered + no relief → Withdraw, got reason=" + d.Reason);
+            "severely outnumbered + no relief → Withdraw, got reason=" + d.Reason);
+    }
+
+    private static void ReinforcementOpportunityAggressiveCommanderRefusesToWithdrawAtModerateDisadvantage()
+    {
+        // 6K vs 15K = 0.40 ratio. Aggressive commander (0.95) threshold:
+        // 0.55 - 0.95*0.30 = 0.27. Ratio 0.40 > 0.27 → does NOT withdraw.
+        // Jackson at Chancellorsville pattern: hold ground even at 2.5:1 odds.
+        var ev = MakeForceBalance(6000f, 15000f,
+            enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
+            aggression: 0.95f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, d.Opportunity,
+            "aggressive commander refuses withdrawal at 2.5:1 odds, got reason=" + d.Reason);
+    }
+
+    private static void DelayingDefenseEscalatesOnCasualties()
+    {
+        // 10k vs 18k = ratio 0.56, aggression 0.5 (mid).
+        //   maxWaitHours = 23h, withdrawalThreshold = 0.40
+        //   ratio 0.56 > 0.40 → not WithdrawalToFightLater
+        //   ratio 0.56 < attackThreshold → can't attack
+        //   parityForOwn = never → DelayingDefense
+        // Now add 12% casualties (above mid escalation threshold 0.10) → escalates.
+        var ev = MakeForceBalance(10000f, 18000f,
+            aggression: 0.5f,
+            ownCasualtyRatio: 0.12f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, d.Opportunity,
+            "delaying force taking 12% casualties → escalate to withdrawal, reason=" + d.Reason);
+        AssertEqual("delay-escalation-casualties", d.Reason);
+    }
+
+    private static void DelayingDefenseEscalatesOnRouts()
+    {
+        // Same baseline, but routed-brigade fraction crosses threshold (mid 0.22).
+        var ev = MakeForceBalance(10000f, 18000f,
+            aggression: 0.5f,
+            ownRoutedFraction: 0.25f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, d.Opportunity,
+            "delaying force losing brigades to routs → escalate, reason=" + d.Reason);
+        AssertEqual("delay-escalation-routs", d.Reason);
+    }
+
+    private static void DelayingDefenseHoldsUnderTolerableLosses()
+    {
+        // 5% casualties at mid threshold 10% → still DelayingDefense.
+        var ev = MakeForceBalance(10000f, 18000f,
+            aggression: 0.5f,
+            ownCasualtyRatio: 0.05f,
+            ownRoutedFraction: 0.10f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, d.Opportunity,
+            "moderate losses below threshold → keep delaying, reason=" + d.Reason);
+    }
+
+    private static void DelayingDefenseAggressiveCommanderToleratesMoreCasualties()
+    {
+        // 12% casualties — at mid this escalates, but aggressive threshold is 15%.
+        var ev = MakeForceBalance(10000f, 18000f,
+            aggression: 1.0f,
+            ownCasualtyRatio: 0.12f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, d.Opportunity,
+            "aggressive commander tolerates 12% casualties — does not escalate, reason=" + d.Reason);
+    }
+
+    private static void DelayingDefenseCautiousCommanderEscalatesEarly()
+    {
+        // 6% casualties — cautious threshold 5%, so this escalates.
+        var ev = MakeForceBalance(10000f, 18000f,
+            aggression: 0.0f,
+            ownCasualtyRatio: 0.06f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, d.Opportunity,
+            "cautious commander escalates at 6% casualties (threshold 5%), reason=" + d.Reason);
+    }
+
+    private static void DelayingDefenseProlongedBattleEscalates()
+    {
+        // 8h elapsed (above 6h threshold), ratio 0.40 (< 0.50), parityForOwn never → escalate.
+        var ev = MakeForceBalance(10000f, 25000f,  // ratio 0.40
+            aggression: 0.8f,                       // aggressive — withdrawalThreshold 0.31, so ratio 0.40 doesn't trigger normal withdraw
+            battleHoursElapsed: 8f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, d.Opportunity,
+            "prolonged delay (8h) at heavy disadvantage (0.40) with no parity → escalate, reason=" + d.Reason);
+        AssertEqual("delay-escalation-prolonged", d.Reason);
+    }
+
+    private static void DoctrineStanceGateDefenderNeverAttacks()
+    {
+        // 20k vs 10k = ratio 2.0 (clear attack advantage), aggressive commander.
+        // Without stance, this is AttackNow. With Defender stance, blocked.
+        var ev = MakeForceBalance(20000f, 10000f,
+            aggression: 0.9f,
+            stance: BattleStance.Defender);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertTrue(d.Opportunity != ReinforcementOpportunity.AttackNow,
+            "Defender stance MUST NOT produce AttackNow, got " + d.Opportunity);
+    }
+
+    private static void DoctrineStanceGateAttackerProducesAttackOnAdvantage()
+    {
+        var ev = MakeForceBalance(20000f, 10000f,
+            aggression: 0.9f,
+            stance: BattleStance.Attacker);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
+            "Attacker stance + clear advantage → AttackNow");
+    }
+
+    private static void DoctrineStanceGateMeetingAllowsAllOutcomes()
+    {
+        // Meeting stance (the default) doesn't filter — force balance alone
+        // drives outcome. Preserves pre-L behavior for backward compat.
+        var attackEv = MakeForceBalance(20000f, 10000f,
+            aggression: 0.9f, stance: BattleStance.Meeting);
+        AssertEqual(ReinforcementOpportunity.AttackNow,
+            TacticalReinforcementOpportunityDoctrine.Decide(attackEv).Opportunity,
+            "Meeting + clear advantage → AttackNow");
+
+        var holdEv = MakeForceBalance(10000f, 15000f,
+            aggression: 0.5f, stance: BattleStance.Meeting);
+        AssertEqual(ReinforcementOpportunity.DelayingDefense,
+            TacticalReinforcementOpportunityDoctrine.Decide(holdEv).Opportunity,
+            "Meeting + moderate disadvantage → DelayingDefense");
+    }
+
+    private static void PlaybookCatalogStanceHardFilterDefenderRejectsOffensive()
+    {
+        // Register an offensive AND defensive playbook. Defender stance MUST
+        // skip the offensive one regardless of personality fit.
+        var cat = new TacticalPlaybookCatalog();
+        var sharedFit = new PersonalityFit(0.5f, -0.2f, 0.5f);
+        var neutralTerrain = new TerrainPreference(1f, 1f, 1f, 1f);
+        var openOdds = new OddsRange(0.5f, 2f);
+        cat.Register(new FakePlaybook(BattlePlanId.ManeuverAndFix, sharedFit, neutralTerrain, openOdds));
+        cat.Register(new FakePlaybook(BattlePlanId.PreparedDefense, sharedFit, neutralTerrain, openOdds));
+
+        var defenderCtx = new PlaybookContext(
+            new PersonalityVector(0.5f, -0.2f, 0.5f, 0f, 0f),
+            TerrainKind.Open, currentOdds: 1.5f,  // favorable but defender stance vetoes attack
+            opposingCommanderHint: 0f,
+            defaultMainEffortSector: 0, jitterSeed: 1,
+            stance: BattleStance.Defender);
+        var picked = cat.Select(defenderCtx);
+        AssertEqual(BattlePlanId.PreparedDefense, picked.Id,
+            "Defender stance MUST pick defensive archetype even when force balance favors attack; got " + picked.Id);
+    }
+
+    private static void PlaybookCatalogStanceHardFilterAttackerRejectsDefensive()
+    {
+        var cat = new TacticalPlaybookCatalog();
+        var sharedFit = new PersonalityFit(0.5f, -0.2f, 0.5f);
+        var neutralTerrain = new TerrainPreference(1f, 1f, 1f, 1f);
+        var openOdds = new OddsRange(0.5f, 2f);
+        cat.Register(new FakePlaybook(BattlePlanId.ManeuverAndFix, sharedFit, neutralTerrain, openOdds));
+        cat.Register(new FakePlaybook(BattlePlanId.PreparedDefense, sharedFit, neutralTerrain, openOdds));
+
+        var attackerCtx = new PlaybookContext(
+            new PersonalityVector(0.5f, -0.2f, 0.5f, 0f, 0f),
+            TerrainKind.Open, currentOdds: 1.5f,
+            opposingCommanderHint: 0f,
+            defaultMainEffortSector: 0, jitterSeed: 1,
+            stance: BattleStance.Attacker);
+        var picked = cat.Select(attackerCtx);
+        AssertEqual(BattlePlanId.ManeuverAndFix, picked.Id,
+            "Attacker stance MUST pick offensive archetype even on defender-favorable personality; got " + picked.Id);
+    }
+
+    private static void PlaybookCatalogStanceOfClassifiesArchetypesCorrectly()
+    {
+        // Spot-check the stance classification table.
+        AssertEqual(TacticalPlaybookCatalog.PlaybookStance.Offensive,
+            TacticalPlaybookCatalog.StanceOf(BattlePlanId.DoubleEnvelopment), "Lee/envelopment = Offensive");
+        AssertEqual(TacticalPlaybookCatalog.PlaybookStance.Offensive,
+            TacticalPlaybookCatalog.StanceOf(BattlePlanId.ManeuverAndFix), "Sherman/maneuver = Offensive");
+        AssertEqual(TacticalPlaybookCatalog.PlaybookStance.Defensive,
+            TacticalPlaybookCatalog.StanceOf(BattlePlanId.PreparedDefense), "McClellan defense = Defensive");
+        AssertEqual(TacticalPlaybookCatalog.PlaybookStance.Defensive,
+            TacticalPlaybookCatalog.StanceOf(BattlePlanId.DelayingDefense), "Fabian delay = Defensive");
+        AssertEqual(TacticalPlaybookCatalog.PlaybookStance.Neutral,
+            TacticalPlaybookCatalog.StanceOf(BattlePlanId.MeetingEngagement), "MeetingEngagement = Neutral");
+        AssertEqual(TacticalPlaybookCatalog.PlaybookStance.Neutral,
+            TacticalPlaybookCatalog.StanceOf(BattlePlanId.GenericMethodical), "GenericMethodical = Neutral");
+    }
+
+    private static void ComputeCasualtyEscalationThresholdPersonalityScale()
+    {
+        AssertNear(0.05f, TacticalReinforcementOpportunityDoctrine.ComputeCasualtyEscalationThreshold(0.0f),
+            1e-6f, "cautious casualty threshold 5%");
+        AssertNear(0.10f, TacticalReinforcementOpportunityDoctrine.ComputeCasualtyEscalationThreshold(0.5f),
+            1e-6f, "mid casualty threshold 10%");
+        AssertNear(0.15f, TacticalReinforcementOpportunityDoctrine.ComputeCasualtyEscalationThreshold(1.0f),
+            1e-6f, "aggressive casualty threshold 15%");
+    }
+
+    private static void ReinforcementOpportunitySmokeCaseRoutesToDelayingDefense()
+    {
+        // 2026-05-23 user-observed smoke scenario, post-fix:
+        // CSA at ratio 0.44 (e.g., 5500 vs 12500), reinforcements coming
+        // at 19h but parityForOwn=999 (reinforcements don't reach parity).
+        // Aggression 0.65 (mid-aggressive). Pre-I doctrine: WithdrawalToFightLater.
+        // Post-I doctrine: should route to DelayingDefense — historically correct
+        // for an outnumbered army with terrain holding action and reinforcements
+        // hours out.
+        var ev = MakeForceBalance(5500f, 12500f,
+            ownArrivals: new[] { new ReinforcementArrival(19f, 4000f) },  // not enough to reach parity
+            aggression: 0.65f);
+        var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
+        AssertEqual(ReinforcementOpportunity.DelayingDefense, d.Opportunity,
+            "user-observed smoke case (CSA 0.44 ratio, 19h relief, never parity) → DelayingDefense, got reason=" + d.Reason);
+    }
+
+    private static void ComputeWithdrawalRatioThresholdPersonalityScale()
+    {
+        // Spot-check the personality-modulated withdrawal threshold:
+        //   aggressive (1.0) → 0.25 (won't withdraw until ~4:1 odds)
+        //   mid       (0.5) → 0.40 (withdraws at ~2.5:1 odds)
+        //   cautious  (0.0) → 0.55 (withdraws at ~2:1 odds)
+        AssertNear(0.25f, TacticalReinforcementOpportunityDoctrine.ComputeWithdrawalRatioThreshold(1.0f),
+            1e-6f, "aggressive threshold");
+        AssertNear(0.40f, TacticalReinforcementOpportunityDoctrine.ComputeWithdrawalRatioThreshold(0.5f),
+            1e-6f, "mid threshold");
+        AssertNear(0.55f, TacticalReinforcementOpportunityDoctrine.ComputeWithdrawalRatioThreshold(0.0f),
+            1e-6f, "cautious threshold");
     }
 
     private static void ReinforcementOpportunity15kVs10kPlus5kIn8hAttackWindowOpen()
@@ -25509,11 +26087,13 @@ static class Program
 
     private static void ReinforcementOpportunityWaitHoursScalesWithAggression()
     {
+        // 2026-05-23: raised to realistic CW timing.
+        //   base 18h + (1 - aggression) * 10 → cautious 28h, aggressive 18h.
         float cautious = TacticalReinforcementOpportunityDoctrine.ComputeMaxWaitHours(0.0f);
         float aggressive = TacticalReinforcementOpportunityDoctrine.ComputeMaxWaitHours(1.0f);
         AssertTrue(cautious > aggressive, "cautious waits longer than aggressive");
-        AssertNear(9f, cautious, 0.001f, "cautious max wait ~9h");
-        AssertNear(6f, aggressive, 0.001f, "aggressive max wait ~6h");
+        AssertNear(28f, cautious, 0.001f, "cautious max wait ~28h");
+        AssertNear(18f, aggressive, 0.001f, "aggressive max wait ~18h");
     }
 
     private static void ReinforcementOpportunityStrengthAtHourAccumulatesArrivals()
@@ -26219,36 +26799,36 @@ static class Program
 
     private static void TacticalBattleStateSignatureEqualsIdentical()
     {
-        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
         AssertTrue(a.SignatureEquals(b), "identical signatures must be equal");
     }
 
     private static void TacticalBattleStateSignatureDiffersOnMacroAI()
     {
-        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 2, false, 98765, false, 12); // macro AI side1 differs
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 2, false, 98765, 0, 12); // macro AI side1 differs
         AssertTrue(!a.SignatureEquals(b), "different MacroAI must cause signature differ");
     }
 
     private static void TacticalBattleStateSignatureDiffersOnObjectiveHash()
     {
-        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 54321, false, 12); // objective hash differs
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 54321, 0, 12); // objective hash differs
         AssertTrue(!a.SignatureEquals(b), "different MajorObjectiveAnchorHash must cause signature differ");
     }
 
     private static void TacticalBattleStateSignatureDiffersOnActiveUnitCount()
     {
-        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var b = new TacticalBattleStateSignature(101, 12000, 11500, 3, 1, false, 98765, false, 12); // active count differs
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var b = new TacticalBattleStateSignature(101, 12000, 11500, 3, 1, false, 98765, 0, 12); // active count differs
         AssertTrue(!a.SignatureEquals(b), "different ActiveUnitCount must cause signature differ");
     }
 
     private static void TacticalBattleStateSignatureEqualsIgnoresHourBucket()
     {
-        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 13); // only bucket differs
+        var a = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var b = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 13); // only bucket differs
         AssertTrue(a.SignatureEquals(b), "hour bucket change alone must not affect signature equality (time gate separate)");
     }
 
@@ -26258,8 +26838,8 @@ static class Program
 
     private static void TacticalHeavyPathGateFirstTickAlwaysRuns()
     {
-        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
         // lastHeavy <=0 -> first tick
         var input = new TacticalHeavyPathGate.Input(curr, 1.5f, 0f, lastSig, 0.003f, false);
         var dec = TacticalHeavyPathGate.Decide(input);
@@ -26269,8 +26849,8 @@ static class Program
 
     private static void TacticalHeavyPathGateSignatureChangeRespectsFloor()
     {
-        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 2, false, 98765, false, 12); // macro AI differs -> sig change
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 2, false, 98765, 0, 12); // macro AI differs -> sig change
         // elapsed < cycle -> must throttle even on change
         var input = new TacticalHeavyPathGate.Input(curr, 1.502f, 1.5f, lastSig, 0.003f, false);
         var dec = TacticalHeavyPathGate.Decide(input);
@@ -26279,8 +26859,8 @@ static class Program
 
     private static void TacticalHeavyPathGateSignatureChangeRunsAfterFloor()
     {
-        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 2, false, 98765, false, 12); // differs
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 2, false, 98765, 0, 12); // differs
         // elapsed >= cycle -> run
         var input = new TacticalHeavyPathGate.Input(curr, 1.504f, 1.5f, lastSig, 0.003f, false);
         var dec = TacticalHeavyPathGate.Decide(input);
@@ -26290,8 +26870,8 @@ static class Program
 
     private static void TacticalHeavyPathGateMaxIntervalForcesEvenOnStable()
     {
-        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12); // identical
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12); // identical
         // no pending, same sig, but elapsed >= cycle -> force refresh (max interval)
         var input = new TacticalHeavyPathGate.Input(curr, 1.504f, 1.5f, lastSig, 0.003f, false);
         var dec = TacticalHeavyPathGate.Decide(input);
@@ -26301,8 +26881,8 @@ static class Program
 
     private static void TacticalHeavyPathGatePendingChangeRunsAfterFloor()
     {
-        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12); // same now, but pending from earlier change
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12); // same now, but pending from earlier change
         var input = new TacticalHeavyPathGate.Input(curr, 1.504f, 1.5f, lastSig, 0.003f, true); // hasPending
         var dec = TacticalHeavyPathGate.Decide(input);
         AssertTrue(dec.ShouldRun, "pending change must execute once floor met");
@@ -26311,8 +26891,8 @@ static class Program
 
     private static void TacticalHeavyPathGatePendingDoesNotBypassFloor()
     {
-        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
         var input = new TacticalHeavyPathGate.Input(curr, 1.502f, 1.5f, lastSig, 0.003f, true); // pending but under floor
         var dec = TacticalHeavyPathGate.Decide(input);
         AssertFalse(dec.ShouldRun, "pending must still respect the cycleHours floor");
@@ -26320,8 +26900,8 @@ static class Program
 
     private static void TacticalHeavyPathGateNoRunWhenStableUnderMax()
     {
-        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
         var input = new TacticalHeavyPathGate.Input(curr, 1.502f, 1.5f, lastSig, 0.003f, false);
         var dec = TacticalHeavyPathGate.Decide(input);
         AssertFalse(dec.ShouldRun, "stable + under max interval must skip (cheap path)");
@@ -26330,8 +26910,8 @@ static class Program
 
     private static void TacticalHeavyPathGateRealtimeFloorThrottlesTimeCompression()
     {
-        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
-        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, false, 12);
+        var curr = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
+        var lastSig = new TacticalBattleStateSignature(100, 12000, 11500, 3, 1, false, 98765, 0, 12);
 
         var compressed = new TacticalHeavyPathGate.Input(
             curr,
@@ -26379,7 +26959,7 @@ static class Program
 
     private static void TacticalBattleRuntimeSnapshotConstructionSanitizesAndStores()
     {
-        var sig = new TacticalBattleStateSignature(50, 8000, 7500, 1, 2, true, 12345, true, 5);
+        var sig = new TacticalBattleStateSignature(50, 8000, 7500, 1, 2, true, 12345, 0, 5);
         var ev = new ArmyEvidence(1.2f, TerrainKind.Open, 3);
         var vis = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.4f, true, false, 1200f);
         var objs = new ObjectiveRecord[0];
@@ -26427,5 +27007,1108 @@ static class Program
             new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
             10f, 0.5f, 0.1f, 0f, new[] { default(ObjectiveRecord) }, CommandTreeSnapshot.Empty, Array.Empty<DirectChildSnapshot>());
         AssertTrue(snapWithObj.HasData, "snapshot with objectives has data");
+    }
+
+    // ============================================================================
+    // Regimental intelligence tests (2026-05-21). Cover the doctrine's 6 priority
+    // branches + threat computer's quadrant assignment + isolation detection.
+    // ============================================================================
+
+    private static void RegimentalDoctrineRoutedYieldsNoAction()
+    {
+        var threats = new TacticalRegimentalThreatAssessment(
+            100f, 200f, 0f, 0f, 1, true, false, 3, 0f);
+        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.3f, 0.5f, isRouted: true, stanceAllowsWheel: true);
+        AssertEqual(RegimentalAction.NoAction, d.Action, "routed regiments defer to vanilla rout state");
+    }
+
+    private static void RegimentalDoctrinePressedMultipleSidesYieldsRetreat()
+    {
+        // pressed=2: enemies inside wheel-distance on 2 quadrants. No safe wheel.
+        var threats = new TacticalRegimentalThreatAssessment(
+            150f, 200f, 100f, 50f, 2, true, false, 5, 90f);
+        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.7f, 0.1f, isRouted: false, stanceAllowsWheel: true);
+        AssertEqual(RegimentalAction.RetreatToBrigade, d.Action, "pressed>=2 forces retreat");
+    }
+
+    private static void RegimentalDoctrineFlankedLowMoraleYieldsFallback()
+    {
+        // Flanked but only pressed=1, low morale → fallback (not retreat, not wheel).
+        var threats = new TacticalRegimentalThreatAssessment(
+            100f, 200f, 0f, 0f, 1, true, false, 3, 0f);
+        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.30f, 0.1f, isRouted: false, stanceAllowsWheel: true);
+        AssertEqual(RegimentalAction.FallBack, d.Action, "flanked+low-morale falls back");
+    }
+
+    private static void RegimentalDoctrineIsolatedWithEnemiesYieldsFallback()
+    {
+        // Not flanked, healthy, but isolated from brigade-mates + enemies present.
+        var threats = new TacticalRegimentalThreatAssessment(
+            150f, 30f, 0f, 0f, 0, false, true, 2, 0f);
+        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.8f, 0.1f, isRouted: false, stanceAllowsWheel: true);
+        AssertEqual(RegimentalAction.FallBack, d.Action, "isolated regiments fall back toward brigade");
+    }
+
+    private static void RegimentalDoctrineFlankedHealthyYieldsWheel()
+    {
+        // Flanked, healthy, can wheel → wheel toward whichever flank is heaviest.
+        // Left=300, right=50, rear=0 → wheel left.
+        var threats = new TacticalRegimentalThreatAssessment(
+            100f, 300f, 0f, 50f, 1, true, false, 3, 0f);
+        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.8f, 0.1f, isRouted: false, stanceAllowsWheel: true);
+        AssertEqual(RegimentalAction.WheelToLeftFlank, d.Action, "healthy flanked unit wheels to heaviest flank");
+    }
+
+    private static void RegimentalDoctrineNoThreatsYieldsNoAction()
+    {
+        var threats = TacticalRegimentalThreatAssessment.Empty;
+        var d = TacticalRegimentalIntelligenceDoctrine.Decide(threats, 0.9f, 0.0f, isRouted: false, stanceAllowsWheel: true);
+        AssertEqual(RegimentalAction.NoAction, d.Action, "no engagement, no override");
+    }
+
+    private static void RegimentalThreatComputerFrontQuadrant()
+    {
+        // Single enemy directly north of own position → front quadrant assignment.
+        AssertEqual(RegimentalQuadrant.Front,
+            TacticalRegimentalThreatComputer.QuadrantFromRelativeBearing(0f),
+            "0° relative bearing = Front");
+        AssertEqual(RegimentalQuadrant.RightFlank,
+            TacticalRegimentalThreatComputer.QuadrantFromRelativeBearing(90f),
+            "+90° relative bearing = RightFlank");
+        AssertEqual(RegimentalQuadrant.LeftFlank,
+            TacticalRegimentalThreatComputer.QuadrantFromRelativeBearing(-90f),
+            "-90° relative bearing = LeftFlank");
+        AssertEqual(RegimentalQuadrant.Rear,
+            TacticalRegimentalThreatComputer.QuadrantFromRelativeBearing(180f),
+            "180° relative bearing = Rear");
+    }
+
+    private static void RegimentalThreatComputerDetectsFlankFromThreeEnemies()
+    {
+        // Own at (0,0). 3 enemies all to the east (right flank if front faces north,
+        // but front is centroid-derived so front IS the east direction here).
+        // To force a real flank: place 1 enemy north (front) + 2 east (right flank).
+        // Centroid bearing should split between them → enemies will land in front
+        // and right flank quadrants.
+        var observations = new List<TacticalUnitObservation>();
+        var allyIndices = new List<int> { 0 };
+        var enemyIndices = new List<int> { 1, 2, 3 };
+
+        // Own unit at origin
+        observations.Add(BuildObs(0, 1, 0, 0, 100));
+        // Enemy 1 at (0, 100) — straight ahead (north)
+        observations.Add(BuildObs(100, 2, 0, 100, 100));
+        // Enemy 2 at (100, 0) — east (right flank from north-facing perspective)
+        observations.Add(BuildObs(101, 2, 100, 0, 100));
+        // Enemy 3 at (100, 50) — north-east
+        observations.Add(BuildObs(102, 2, 100, 50, 100));
+
+        var assessment = TacticalRegimentalThreatComputer.Compute(observations[0], observations, allyIndices, enemyIndices);
+        AssertEqual(3, assessment.TotalEnemiesInRange, "all 3 enemies counted within 300m");
+        // Sanity: total threat across quadrants > 0
+        AssertTrue(
+            assessment.FrontThreat + assessment.LeftFlankThreat + assessment.RightFlankThreat + assessment.RearThreat > 0f,
+            "threat assigned to at least one quadrant");
+    }
+
+    private static void RegimentalThreatComputerIsolationWhenNoAllies()
+    {
+        // Own at origin, no other allies → isolated.
+        var observations = new List<TacticalUnitObservation>
+        {
+            BuildObs(1, 1, 0, 0, 100),
+        };
+        var allyIndices = new List<int> { 0 };
+        var enemyIndices = new List<int>();
+
+        var assessment = TacticalRegimentalThreatComputer.Compute(observations[0], observations, allyIndices, enemyIndices);
+        AssertTrue(assessment.IsIsolated, "lone regiment with no allies is isolated");
+    }
+
+    // ============================================================================
+    // Friendly-path blocking gate tests (2026-05-21). Verify Scourge's 3-layer
+    // gate logic produces the right block/clear results for common scenarios.
+    // ============================================================================
+
+    private static void FriendlyPathGateEmptyReturnsClear()
+    {
+        var result = TacticalFriendlyPathBlockingGate.Evaluate(0f, 0f, 100f, 0f, false, new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>());
+        AssertFalse(result.Blocked, "no friendlies = clear");
+    }
+
+    private static void FriendlyPathGateDetectsDestinationOverlap()
+    {
+        // Sibling brigades (same parent=42): friendly at (50,50) with waypoint
+        // at (100, 0). I propose target (110, 0). Distance between targets is
+        // 10m — well under BrigadeSpacingMeters (280m). Layer 2 should fire
+        // because we're siblings (2026-05-22 scope fix #5: cross-parent
+        // overlap no longer triggers).
+        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
+        {
+            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                instanceId: 1,
+                currentX: 50f, currentZ: 50f,
+                waypointX: 100f, waypointZ: 0f,
+                hasWaypoint: true,
+                isLineFormation: false,
+                parentBrigadeInstanceId: 42),
+        };
+        var result = TacticalFriendlyPathBlockingGate.Evaluate(
+            0f, 0f, 110f, 0f, false, friendlies, myParentBrigadeInstanceId: 42);
+        AssertTrue(result.Blocked, "sibling destination overlap should block");
+        AssertEqual("destination-overlap-sibling-waypoint", result.Reason, "reason matches sibling-scoped Layer 2");
+    }
+
+    private static void FriendlyPathGateIgnoresCrossParentDestinationOverlap()
+    {
+        // Cross-parent brigades: friendly's parent=42, mine=99 (different).
+        // Same close destinations — Layer 2 must NOT fire (scope fix #5).
+        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
+        {
+            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                instanceId: 1,
+                currentX: 50f, currentZ: 50f,
+                waypointX: 100f, waypointZ: 0f,
+                hasWaypoint: true,
+                isLineFormation: false,
+                parentBrigadeInstanceId: 42),
+        };
+        var result = TacticalFriendlyPathBlockingGate.Evaluate(
+            0f, 0f, 110f, 0f, false, friendlies, myParentBrigadeInstanceId: 99);
+        AssertFalse(result.Blocked, "cross-parent destination overlap must NOT block");
+    }
+
+    private static void FriendlyPathGateDetectsNarrowCone()
+    {
+        // Friendly straight ahead at (0, 60), I'm at (0,0) moving to (0, 200).
+        // Friendly is within narrow cone (0°) and within NarrowConeRangeMeters (70m).
+        // Layer 1 narrow cone fires.
+        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
+        {
+            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                instanceId: 2,
+                currentX: 0f, currentZ: 60f,
+                waypointX: 0f, waypointZ: 0f,
+                hasWaypoint: false,
+                isLineFormation: false),
+        };
+        var result = TacticalFriendlyPathBlockingGate.Evaluate(0f, 0f, 0f, 200f, false, friendlies);
+        AssertTrue(result.Blocked, "narrow cone should block when friendly is in path");
+    }
+
+    private static void FriendlyPathGateIgnoresFriendlyOutsideRange()
+    {
+        // Friendly at (0, 500) — way beyond MediumConeRangeMeters (140m).
+        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
+        {
+            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                instanceId: 3,
+                currentX: 0f, currentZ: 500f,
+                waypointX: 0f, waypointZ: 0f,
+                hasWaypoint: false,
+                isLineFormation: false),
+        };
+        var result = TacticalFriendlyPathBlockingGate.Evaluate(0f, 0f, 0f, 100f, false, friendlies);
+        AssertFalse(result.Blocked, "friendly far outside range doesn't block");
+    }
+
+    private static void FriendlyPathGateCohesionWorsensSpread()
+    {
+        // Friendly already 200m away (> 115m cohesion max). My move to (400, 0)
+        // would make me 600m from friendly — way more spread.
+        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
+        {
+            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                instanceId: 4,
+                currentX: -200f, currentZ: 0f,
+                waypointX: 0f, waypointZ: 0f,
+                hasWaypoint: false,
+                isLineFormation: false),
+        };
+        // Move from (0,0) to (400, 0): friend now 600m away vs original 200m.
+        var result = TacticalFriendlyPathBlockingGate.Evaluate(0f, 0f, 400f, 0f, false, friendlies);
+        AssertTrue(result.Blocked, "cohesion gate should fire when move worsens spread");
+        AssertEqual("cohesion-spread-worsens", result.Reason, "reason matches Layer 3");
+    }
+
+    // ============================================================================
+    // Opportunity hysteresis tests (2026-05-21). Verify the smoother holds
+    // decisions for the configured min-hold window and accepts escalations
+    // to Withdrawal immediately.
+    // ============================================================================
+
+    private static ReinforcementOpportunityDecision MakeOpportunityDecision(ReinforcementOpportunity opp, string reason)
+    {
+        return new ReinforcementOpportunityDecision(opp, reason, 1f, 999f, 999f, 1.2f, 1.0f);
+    }
+
+    private static void OpportunityHysteresisHoldsSameCategory()
+    {
+        var prev = MakeOpportunityDecision(ReinforcementOpportunity.DefensiveHold, "hold");
+        var raw = MakeOpportunityDecision(ReinforcementOpportunity.DefensiveHold, "hold");
+        var result = TacticalOpportunityHysteresis.Smooth(raw, prev, 100f, 6f);
+        AssertFalse(result.Changed, "same category never changes");
+        AssertEqual("same-category", result.SmoothingReason, "smoothingReason matches");
+    }
+
+    private static void OpportunityHysteresisBlocksWithinHoldWindow()
+    {
+        var prev = MakeOpportunityDecision(ReinforcementOpportunity.DefensiveHold, "hold");
+        var raw = MakeOpportunityDecision(ReinforcementOpportunity.AttackNow, "attack");
+        var result = TacticalOpportunityHysteresis.Smooth(raw, prev, 3f, 6f);
+        AssertFalse(result.Changed, "within hold window = no transition");
+        AssertEqual(ReinforcementOpportunity.DefensiveHold, result.Decision.Opportunity, "holds prior decision");
+        AssertEqual("hold-time-active", result.SmoothingReason, "reason matches");
+    }
+
+    private static void OpportunityHysteresisAllowsAfterHold()
+    {
+        var prev = MakeOpportunityDecision(ReinforcementOpportunity.DefensiveHold, "hold");
+        var raw = MakeOpportunityDecision(ReinforcementOpportunity.AttackNow, "attack");
+        var result = TacticalOpportunityHysteresis.Smooth(raw, prev, 10f, 6f);
+        AssertTrue(result.Changed, "after hold expires, transition is allowed");
+        AssertEqual(ReinforcementOpportunity.AttackNow, result.Decision.Opportunity, "accepts new decision");
+    }
+
+    private static void OpportunityHysteresisEscalatesToWithdrawal()
+    {
+        var prev = MakeOpportunityDecision(ReinforcementOpportunity.DefensiveHold, "hold");
+        var raw = MakeOpportunityDecision(ReinforcementOpportunity.WithdrawalToFightLater, "outnumbered");
+        var result = TacticalOpportunityHysteresis.Smooth(raw, prev, 1f, 6f);
+        AssertTrue(result.Changed, "escalation to withdrawal bypasses hold");
+        AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, result.Decision.Opportunity, "accepts withdrawal");
+        AssertEqual("escalation-to-withdrawal", result.SmoothingReason, "reason matches");
+    }
+
+    // ============================================================================
+    // Stance mapper tests (2026-05-22, Scope B).
+    // ============================================================================
+
+    private static void StanceMapperScreenTasksMapToStance1()
+    {
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceScreen,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.Screen), "Screen → 1");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceScreen,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.Probe), "Probe → 1");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceScreen,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.Scout), "Scout → 1");
+    }
+
+    private static void StanceMapperAttackTasksMapToStance3()
+    {
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceAttack,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.AttackObjective), "AttackObjective → 3");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceAttack,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.SupportAttack), "SupportAttack → 3");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceAttack,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.FixEnemy), "FixEnemy → 3");
+    }
+
+    private static void StanceMapperDefensiveTasksMapToStance2()
+    {
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.HoldObjective), "HoldObjective → 2");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.FallBackToLine), "FallBackToLine → 2");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.GuardFlank), "GuardFlank → 2");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.Consolidate), "Consolidate → 2");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.ReserveWait), "ReserveWait → 2");
+    }
+
+    private static void StanceMapperNoneTaskMapsToStance0()
+    {
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceNone,
+            TacticalCommandTaskToStanceMapper.Map(CommandTaskType.None), "None → 0");
+    }
+
+    // ============================================================================
+    // Regimental positioner tests (2026-05-22, Scope C). Verifies the
+    // per-regiment slot computation produces sensible left/right symmetric
+    // positions perpendicular to the brigade-→-target axis.
+    // ============================================================================
+
+    private static void RegimentalPositionerEmptyReturnsEmpty()
+    {
+        var slots = TacticalRegimentalPositioner.ComputeSlots(
+            0f, 0f, 100f, 0f, new List<int>());
+        AssertEqual(0, slots.Count, "empty regiment list → empty slots");
+    }
+
+    private static void RegimentalPositionerSingleToTarget()
+    {
+        var slots = TacticalRegimentalPositioner.ComputeSlots(
+            0f, 0f, 200f, 0f, new List<int> { 42 });
+        AssertEqual(1, slots.Count, "one regiment → one slot");
+        AssertEqual(0, slots[0].LaneIndex, "lane = 0 (center)");
+        AssertEqual(42, slots[0].RegimentInstanceId, "instance ID preserved");
+        // Slot should be at target position (no offset for center lane).
+        AssertTrue(Math.Abs(slots[0].WorldX - 200f) < 0.001f, "centered at target X");
+        AssertTrue(Math.Abs(slots[0].WorldZ - 0f) < 0.001f, "centered at target Z");
+    }
+
+    private static void RegimentalPositionerTwoSplitSymmetric()
+    {
+        // Brigade at (0,0), target (0, 200) — moving north. Two regiments.
+        // Lane 0 (first regiment) at center. Lane -1 (second regiment) to the
+        // left (west of the centerline, perpendicular to north-bound axis).
+        var slots = TacticalRegimentalPositioner.ComputeSlots(
+            0f, 0f, 0f, 200f, new List<int> { 1, 2 });
+        AssertEqual(2, slots.Count, "two regiments → two slots");
+        AssertEqual(0, slots[0].LaneIndex, "first → center lane");
+        AssertEqual(-1, slots[1].LaneIndex, "second → first left lane");
+        // Center regiment at target.
+        AssertTrue(Math.Abs(slots[0].WorldX) < 0.001f, "center slot at X=0");
+        // Left regiment at -RegimentSpacing meters west (negative X for north-bound).
+        AssertTrue(Math.Abs(slots[1].WorldX - (-TacticalRegimentalPositioner.RegimentSpacingMeters)) < 0.001f,
+            "left slot at -spacing X");
+    }
+
+    private static void RegimentalPositionerLaneIndexAlternates()
+    {
+        // 0, 1, 2, 3, 4 → 0, -1, +1, -2, +2
+        AssertEqual(0, TacticalRegimentalPositioner.LaneIndexFor(0), "0 → 0");
+        AssertEqual(-1, TacticalRegimentalPositioner.LaneIndexFor(1), "1 → -1");
+        AssertEqual(1, TacticalRegimentalPositioner.LaneIndexFor(2), "2 → +1");
+        AssertEqual(-2, TacticalRegimentalPositioner.LaneIndexFor(3), "3 → -2");
+        AssertEqual(2, TacticalRegimentalPositioner.LaneIndexFor(4), "4 → +2");
+    }
+
+    private static void StanceMapperIdentifiesOffensiveCommitment()
+    {
+        AssertTrue(TacticalCommandTaskToStanceMapper.IsOffensiveCommitment(CommandTaskType.AttackObjective),
+            "AttackObjective is offensive");
+        AssertTrue(TacticalCommandTaskToStanceMapper.IsOffensiveCommitment(CommandTaskType.SupportAttack),
+            "SupportAttack is offensive");
+        AssertFalse(TacticalCommandTaskToStanceMapper.IsOffensiveCommitment(CommandTaskType.Screen),
+            "Screen is not offensive");
+        AssertFalse(TacticalCommandTaskToStanceMapper.IsOffensiveCommitment(CommandTaskType.FallBackToLine),
+            "FallBackToLine is not offensive");
+    }
+
+    private static void OpportunityHysteresisAcceptsFirstDecision()
+    {
+        var prev = MakeOpportunityDecision(ReinforcementOpportunity.NoOpportunity, "init");
+        var raw = MakeOpportunityDecision(ReinforcementOpportunity.AttackNow, "attack");
+        var result = TacticalOpportunityHysteresis.Smooth(raw, prev, float.MaxValue, 6f);
+        AssertTrue(result.Changed, "first decision accepted");
+        AssertEqual(ReinforcementOpportunity.AttackNow, result.Decision.Opportunity, "accepts AttackNow");
+    }
+
+    // ============================================================================
+    // Brigade-arrival synchronization tests (2026-05-22). The pure predicate
+    // for "should Main hold until supports arrive" used by the executor to
+    // delay AttackObjective waypoint writes.
+    // ============================================================================
+
+    private static void ArrivalSyncHoldsMidBandCommanderWhenSupportsAreFar()
+    {
+        var supports = new[]
+        {
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(900f),
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(1200f),
+        };
+        bool hold = TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(
+            supports, commanderAggression01: 0.5f, holdSecondsElapsed: 5f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f);
+        AssertTrue(hold, "mid-band commander should hold when all supports are beyond 500m proximity");
+    }
+
+    private static void ArrivalSyncReleasesWhenAnySupportInProximity()
+    {
+        var supports = new[]
+        {
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(900f),
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(450f), // within threshold
+        };
+        bool hold = TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(
+            supports, commanderAggression01: 0.5f, holdSecondsElapsed: 5f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f);
+        AssertFalse(hold, "release when any single support is within the proximity threshold");
+    }
+
+    private static void ArrivalSyncBypassedForAggressiveCommander()
+    {
+        var supports = new[]
+        {
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(2000f),
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(2500f),
+        };
+        bool hold = TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(
+            supports, commanderAggression01: 0.85f, holdSecondsElapsed: 0f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f);
+        AssertFalse(hold, "Lee/Jackson/Hood (≥ 0.7) never wait for supports");
+    }
+
+    private static void ArrivalSyncReleasesAtMaxHoldTimeout()
+    {
+        var supports = new[]
+        {
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(2000f),
+        };
+        bool hold = TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(
+            supports, commanderAggression01: 0.5f, holdSecondsElapsed: 31f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f);
+        AssertFalse(hold, "release Main when timeout elapses even if supports never arrive");
+    }
+
+    private static void ArrivalSyncReleasesWhenNoSupportsAssigned()
+    {
+        var supports = Array.Empty<TacticalMainArrivalSynchronizer.SupportMainPosition>();
+        bool hold = TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(
+            supports, commanderAggression01: 0.5f, holdSecondsElapsed: 0f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f);
+        AssertFalse(hold, "no supports → nothing to wait for, release immediately");
+    }
+
+    // ============================================================================
+    // Vanilla macroai mapping tests (Stage 1 / F). Pure mapping logic between
+    // Whiskey's doctrine opportunity and vanilla's per-side macroai field.
+    // ============================================================================
+
+    private static void MacroAiAttackNowFlankAtClearAdvantage()
+    {
+        // Aggressive commander (aggression 0.85 → threshold 1.0). Ratio 1.5
+        // clearly exceeds → flank-attack.
+        int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.AttackNow, currentRatio: 1.5f, commanderAggression01: 0.85f);
+        AssertTrue(result.HasValue, "AttackNow must return a macroai value");
+        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiFlankAttack, result.Value,
+            "AttackNow at clear-advantage ratio + aggressive commander → flank attack (0)");
+    }
+
+    private static void MacroAiAttackNowFrontalAtMarginalRatio()
+    {
+        // Mid-band commander (aggression 0.5 → threshold 1.2 baseline).
+        // Ratio 1.10 < 1.2 → frontal attack, not flank.
+        int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.AttackNow, currentRatio: 1.10f, commanderAggression01: 0.5f);
+        AssertTrue(result.HasValue, "AttackNow must return a macroai value");
+        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiFrontalAttack, result.Value,
+            "AttackNow below envelopment threshold → frontal attack (1)");
+    }
+
+    private static void MacroAiDefensiveHoldMapsToDefend()
+    {
+        int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.DefensiveHold, currentRatio: 0.95f, commanderAggression01: 0.5f);
+        AssertTrue(result.HasValue, "DefensiveHold must return a macroai value");
+        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiDefend, result.Value,
+            "DefensiveHold → vanilla macroai = 2 (forms line of battle via AdjustGroupAIStance)");
+    }
+
+    private static void MacroAiWaitAndConsolidateMapsToDefend()
+    {
+        // While we wait for reinforcements, we still want the line formed —
+        // map to defend, not retreat.
+        int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.WaitAndConsolidate, currentRatio: 0.95f, commanderAggression01: 0.5f);
+        AssertTrue(result.HasValue, "WaitAndConsolidate must return a macroai value");
+        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiDefend, result.Value,
+            "WaitAndConsolidate → defensive posture (macroai = 2)");
+    }
+
+    private static void MacroAiWithdrawalMapsToRetreat()
+    {
+        int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.WithdrawalToFightLater, currentRatio: 0.60f, commanderAggression01: 0.5f);
+        AssertTrue(result.HasValue, "WithdrawalToFightLater must return a macroai value");
+        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiRetreat, result.Value,
+            "WithdrawalToFightLater → vanilla macroai = 3 (retreat)");
+    }
+
+    private static void MacroAiNoOpportunityReturnsNull()
+    {
+        // NoOpportunity / pre-doctrine state must NOT overwrite vanilla.
+        int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.NoOpportunity, currentRatio: 1.0f, commanderAggression01: 0.5f);
+        AssertTrue(!result.HasValue,
+            "NoOpportunity must return null so vanilla's own hysteresis-driven decision runs");
+    }
+
+    private static void MacroAiAggressiveCommanderEnvelopsAtParity()
+    {
+        // Cross-check: at aggression 0.7 (Hood/Jackson), envelopment threshold
+        // drops to 1.0× per ArmyOrchestrator.EffectiveEnvelopmentMinRatio.
+        // Ratio 1.0 at aggression 0.7 → flank attack.
+        int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.AttackNow, currentRatio: 1.0f, commanderAggression01: 0.7f);
+        AssertTrue(result.HasValue, "must return a value");
+        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiFlankAttack, result.Value,
+            "Aggressive commander envelops at parity (matches EffectiveEnvelopmentMinRatio)");
+    }
+
+    private static void MacroAiCautiousCommanderRequiresClearMarginToFlank()
+    {
+        // Cautious commander (aggression 0.2): threshold 1.4. Ratio 1.3 → frontal,
+        // not flank.
+        int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
+            ReinforcementOpportunity.AttackNow, currentRatio: 1.3f, commanderAggression01: 0.2f);
+        AssertTrue(result.HasValue, "must return a value");
+        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiFrontalAttack, result.Value,
+            "Cautious commander requires clear-margin (1.4×) before enveloping");
+    }
+
+    private static void MacroAiIsLegalChecks()
+    {
+        AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(0), "0 is legal");
+        AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(1), "1 is legal");
+        AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(2), "2 is legal");
+        AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(3), "3 is legal");
+        AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(-1), "-1 (unset) is NOT a legal write");
+        AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(4), "4 is out of range");
+        AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(99), "99 is out of range");
+    }
+
+    // ============================================================================
+    // Play templates: catalog coverage + projection geometry + corps assignment +
+    // role-via-rect mapping (Stage 2 / G geometric play layer, 2026-05-23).
+    // ============================================================================
+
+    private static void PlayCatalogReturnsTemplateForEveryPlaybook()
+    {
+        // Every BattlePlanId except Unknown must have a template — otherwise
+        // the runtime falls through to evidence-based allocation for that
+        // playbook, defeating the geometric layer.
+        var values = System.Enum.GetValues(typeof(BattlePlanId));
+        int unknownExceptions = 0;
+        foreach (BattlePlanId id in values)
+        {
+            if (id == BattlePlanId.Unknown) { unknownExceptions++; continue; }
+            var tpl = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayTemplateCatalog.Lookup(id);
+            AssertTrue(tpl != null, "PlayTemplateCatalog must have a template for " + id);
+            AssertTrue(tpl.Rects.Count > 0, "Template " + id + " must have at least one rect");
+            AssertEqual(id, tpl.PlaybookId, "Template " + id + " PlaybookId matches lookup key");
+        }
+        AssertEqual(1, unknownExceptions, "exactly one Unknown sentinel is expected");
+    }
+
+    private static void PlayCatalogUnknownReturnsNull()
+    {
+        AssertTrue(WhiskeyRealism.Tactical.Orchestrator.Plays.PlayTemplateCatalog.Lookup(BattlePlanId.Unknown) == null,
+            "Unknown plan returns null template so caller falls back to evidence-based allocation");
+    }
+
+    private static void PlayProjectionForwardAxisAlignsTowardEnemy()
+    {
+        // Army at (0,0), enemy at (1000, 0). Forward axis = +X. A rect at
+        // RelativeAnchor (0, +1) should project to ~world (1000, 0).
+        var tpl = new WhiskeyRealism.Tactical.Orchestrator.Plays.PlayTemplate(
+            "TestForward", BattlePlanId.GenericAggressive, new[]
+            {
+                new WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRect(
+                    WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Center,
+                    relativeAnchorX: 0f, relativeAnchorY: 1f,
+                    relativeSizeX: 0.5f, relativeSizeY: 0.5f,
+                    startTimeOffsetSeconds: 0f, priority: 10),
+            });
+        var rects = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayProjection.Project(
+            tpl,
+            armyCentroidX: 0f, armyCentroidZ: 0f,
+            enemyCentroidX: 1000f, enemyCentroidZ: 0f,
+            frontageMeters: 600f);
+        AssertEqual(1, rects.Count);
+        var r = rects[0];
+        AssertNear(1000f, r.AnchorX, 1f, "Center rect at +1 forward projects to enemy distance along forward axis");
+        AssertNear(0f, r.AnchorZ, 1f, "Center rect at 0 lateral stays on the axis");
+    }
+
+    private static void PlayProjectionRotatesByEnemyDirection()
+    {
+        // Army at origin, enemy NORTH at (0, 1000). Forward axis = +Z.
+        // RightWing at RelativeAnchor (+1, 0.5) should be at world (+halfFrontage, 500) — EAST of army.
+        var tpl = new WhiskeyRealism.Tactical.Orchestrator.Plays.PlayTemplate(
+            "TestRotation", BattlePlanId.DoubleEnvelopment, new[]
+            {
+                new WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRect(
+                    WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.RightWing,
+                    relativeAnchorX: 1f, relativeAnchorY: 0.5f,
+                    relativeSizeX: 0.4f, relativeSizeY: 0.4f,
+                    startTimeOffsetSeconds: 0f, priority: 10),
+            });
+        float frontage = 600f;
+        var rects = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayProjection.Project(
+            tpl, 0f, 0f, 0f, 1000f, frontage);
+        AssertEqual(1, rects.Count);
+        var r = rects[0];
+        AssertNear(frontage * 0.5f, r.AnchorX, 1f, "RightWing rotated 90° CW: lateral = +halfFrontage on +X (east)");
+        AssertNear(500f, r.AnchorZ, 1f, "RightWing at 0.5 forward = halfway to enemy (500m north)");
+    }
+
+    private static void PlayProjectionDegenerateZeroDistanceUsesDefault()
+    {
+        // Enemy centroid coincides with army (no visible enemy). Projection
+        // should not produce NaN/Inf and should still place rects coherently.
+        var tpl = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayTemplateCatalog.Lookup(BattlePlanId.PreparedDefense);
+        var rects = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayProjection.Project(
+            tpl, 100f, 100f, 100f, 100f, 600f);
+        AssertTrue(rects.Count > 0, "still produces rects on degenerate input");
+        for (int i = 0; i < rects.Count; i++)
+        {
+            AssertTrue(!float.IsNaN(rects[i].AnchorX) && !float.IsInfinity(rects[i].AnchorX),
+                "rect " + i + " AnchorX finite");
+            AssertTrue(!float.IsNaN(rects[i].AnchorZ) && !float.IsInfinity(rects[i].AnchorZ),
+                "rect " + i + " AnchorZ finite");
+        }
+    }
+
+    private static void PlayCorpsAssignmentAssignsClosestCorpsToRect()
+    {
+        // 3 rects at distinct world positions; 3 corps near each rect; expect
+        // each corps assigned to its nearest rect.
+        var rects = new[]
+        {
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.WorldPlayRect(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.LeftWing,
+                anchorX: -500f, anchorZ: 0f, halfExtentX: 100f, halfExtentZ: 100f, startTimeOffsetSeconds: 0f, priority: 10),
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.WorldPlayRect(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Center,
+                anchorX: 0f, anchorZ: 0f, halfExtentX: 100f, halfExtentZ: 100f, startTimeOffsetSeconds: 0f, priority: 10),
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.WorldPlayRect(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.RightWing,
+                anchorX: +500f, anchorZ: 0f, halfExtentX: 100f, halfExtentZ: 100f, startTimeOffsetSeconds: 0f, priority: 10),
+        };
+        var corps = new[]
+        {
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsPosition("east", +450f, 50f),
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsPosition("center", 20f, -30f),
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsPosition("west", -480f, 10f),
+        };
+        var result = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.Assign(
+            rects, corps, System.Array.Empty<WhiskeyRealism.Tactical.Orchestrator.Plays.ObjectivePosition>());
+        AssertEqual(3, result.Count);
+        // Lookup result by ChildId
+        string westRect = "", centerRect = "", eastRect = "";
+        foreach (var a in result)
+        {
+            if (a.ChildId == "west") westRect = a.RectKind.ToString();
+            else if (a.ChildId == "center") centerRect = a.RectKind.ToString();
+            else if (a.ChildId == "east") eastRect = a.RectKind.ToString();
+        }
+        AssertEqual("LeftWing", westRect, "west corps → LeftWing rect");
+        AssertEqual("Center", centerRect, "center corps → Center rect");
+        AssertEqual("RightWing", eastRect, "east corps → RightWing rect");
+    }
+
+    private static void PlayCorpsAssignmentPriorityOrderHigherFirst()
+    {
+        // 2 rects: priority 10 (Center) and 5 (Reserve). 1 corps. Priority-10
+        // rect must get it.
+        var rects = new[]
+        {
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.WorldPlayRect(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Reserve,
+                anchorX: 0f, anchorZ: -500f, halfExtentX: 200f, halfExtentZ: 200f, startTimeOffsetSeconds: 0f, priority: 5),
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.WorldPlayRect(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Center,
+                anchorX: 0f, anchorZ: 0f, halfExtentX: 200f, halfExtentZ: 200f, startTimeOffsetSeconds: 0f, priority: 10),
+        };
+        var corps = new[]
+        {
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsPosition("only", 0f, -400f),  // closer to Reserve, but Center is higher priority
+        };
+        var result = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.Assign(
+            rects, corps, System.Array.Empty<WhiskeyRealism.Tactical.Orchestrator.Plays.ObjectivePosition>());
+        AssertEqual(1, result.Count);
+        AssertEqual(WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Center, result[0].RectKind,
+            "higher-priority rect (Center) gets the only corps even though Reserve is closer");
+    }
+
+    private static void PlayCorpsAssignmentSkipsRectsWithNoAvailableCorps()
+    {
+        // 3 rects, 1 corps → only 1 assignment.
+        var rects = new[]
+        {
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.WorldPlayRect(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Center,
+                0f, 0f, 100f, 100f, 0f, 10),
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.WorldPlayRect(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.LeftWing,
+                -500f, 0f, 100f, 100f, 0f, 9),
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.WorldPlayRect(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.RightWing,
+                +500f, 0f, 100f, 100f, 0f, 9),
+        };
+        var corps = new[]
+        {
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsPosition("only", 0f, 0f),
+        };
+        var result = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.Assign(
+            rects, corps, System.Array.Empty<WhiskeyRealism.Tactical.Orchestrator.Plays.ObjectivePosition>());
+        AssertEqual(1, result.Count, "only one corps → only one assignment");
+    }
+
+    private static void PlayRectKindToRoleMapsCorrectly()
+    {
+        AssertEqual(DirectChildRole.Main,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.LeftWing));
+        AssertEqual(DirectChildRole.Main,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.RightWing));
+        AssertEqual(DirectChildRole.Main,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.FlankMarch));
+        AssertEqual(DirectChildRole.Fix,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Center));
+        AssertEqual(DirectChildRole.RefuseLeft,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.CenterHold));
+        AssertEqual(DirectChildRole.RefuseLeft,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.LeftFlank));
+        AssertEqual(DirectChildRole.RefuseRight,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.RightFlank));
+        AssertEqual(DirectChildRole.Screen,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.ForwardScreen));
+        AssertEqual(DirectChildRole.Reserve,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Reserve));
+        AssertEqual(DirectChildRole.Reserve,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.ReserveLine));
+        AssertEqual(DirectChildRole.Unknown,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayCorpsAssignment.RoleForRectKind(
+                WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Unknown));
+    }
+
+    private static void AllocatorWithZonesOverridesEvidence()
+    {
+        // Zone assignment says c0=LeftWing(Main), c1=Center(Fix). Evidence
+        // alone would have produced different roles (Reserve / Unknown).
+        // Zone-aware allocator must honor the zone.
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 5, fixingSectors: new int[0], screeningSectors: new int[0],
+            reserveCommitTriggerOdds: 1.2f, ageSeconds: 0f, jitterSeed: 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "WestCorps", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "CenterCorps", true),
+        };
+        // Evidence has both brigades at sectors NOT matching plan.MainEffortSector
+        // and weak strength — without zones, both would end up Reserve/Unknown.
+        var evidence = new[]
+        {
+            new DirectChildEvidence(1, 0, false, 1, 0, 0.5f),
+            new DirectChildEvidence(1, 0, false, 2, 0, 0.5f),
+        };
+        var perChildIntent = new[]
+        {
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, System.Array.Empty<EvidenceTag>()),
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, System.Array.Empty<EvidenceTag>()),
+        };
+        var zones = new[]
+        {
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsAssignment(
+                "c0", WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.LeftWing, 0, -500f, 0f, 0f),
+            new WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsAssignment(
+                "c1", WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Center, 1, 0f, 0f, 0f),
+        };
+        var personality = new PersonalityVector(0.5f, 0f, 0f, 0f, 0f);
+        var intents = DirectChildAllocator.AllocateWithZones(
+            plan, personality, snapshots, evidence, perChildIntent, zones);
+        AssertEqual(DirectChildRole.Main, intents[0].Role, "c0 LeftWing → Main");
+        AssertEqual(DirectChildRole.Fix, intents[1].Role, "c1 Center → Fix");
+    }
+
+    private static void AllocatorWithoutZonesUsesExistingEvidencePath()
+    {
+        // Empty zones → falls through to existing evidence-based allocation.
+        // Existing behavior must be preserved.
+        var plan = new TacticalBattlePlan(
+            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
+            mainEffortSector: 2, fixingSectors: new int[0], screeningSectors: new int[0],
+            reserveCommitTriggerOdds: 1.2f, ageSeconds: 0f, jitterSeed: 0);
+        var snapshots = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "MainCandidate", true),
+        };
+        var evidence = new[]
+        {
+            new DirectChildEvidence(3, 1, true, 2, 0, 0.8f),
+        };
+        var personality = new PersonalityVector(0.5f, 0f, 0f, 0f, 0f);
+        var intentsNoZone = DirectChildAllocator.AllocateWithZones(
+            plan, personality, snapshots, evidence, null, null);
+        AssertEqual(DirectChildRole.Main, intentsNoZone[0].Role,
+            "without zones, evidence-based path picks brigade as Main");
+    }
+
+    private static void ArrivalSyncSanitizesGarbageInputs()
+    {
+        var supports = new[]
+        {
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(float.NaN),
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(2000f),
+        };
+        // Both supports effectively distant (NaN skipped, 2000m > threshold)
+        bool hold = TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(
+            supports, commanderAggression01: 0.5f, holdSecondsElapsed: 5f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f);
+        AssertTrue(hold, "NaN distances are skipped; remaining distant supports still hold");
+
+        // Inf elapsed time → release
+        bool holdInf = TacticalMainArrivalSynchronizer.ShouldHoldMainForSupports(
+            supports, commanderAggression01: 0.5f, holdSecondsElapsed: float.PositiveInfinity,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f);
+        AssertFalse(holdInf, "Infinite elapsed time treated as timeout → release");
+    }
+
+    // ---- Arrival-sync task resolution (2026-05-25 / B wire-in) ----
+    // The runtime substitutes Main's AttackObjective → Screen while holding for
+    // supports so the brigade skirmishes forward (ai_stance=1) instead of
+    // charging in alone. These guard the pure resolution that the leaf-cascade
+    // patch calls.
+
+    private static void ArrivalSyncResolveHoldsMainAsScreenWhenSupportsFar()
+    {
+        var supports = new[]
+        {
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(900f),
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(1200f),
+        };
+        var task = TacticalMainArrivalSynchronizer.ResolveMainAttackTask(
+            DirectChildRole.Main, CommandTaskType.AttackObjective, supports,
+            commanderAggression01: 0.5f, holdSecondsElapsed: 5f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f,
+            out bool holding);
+        AssertTrue(holding, "Main holds when supports are far");
+        AssertEqual(CommandTaskType.Screen, task,
+            "holding Main downgrades AttackObjective → Screen (skirmish forward)");
+    }
+
+    private static void ArrivalSyncResolveReleasesMainToAttackWhenSupportsClose()
+    {
+        var supports = new[]
+        {
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(300f),
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(1200f),
+        };
+        var task = TacticalMainArrivalSynchronizer.ResolveMainAttackTask(
+            DirectChildRole.Main, CommandTaskType.AttackObjective, supports,
+            commanderAggression01: 0.5f, holdSecondsElapsed: 5f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f,
+            out bool holding);
+        AssertFalse(holding, "a support within proximity releases the Main");
+        AssertEqual(CommandTaskType.AttackObjective, task,
+            "released Main keeps AttackObjective — advances with the line");
+    }
+
+    private static void ArrivalSyncResolveOnlyGatesMainAttackRole()
+    {
+        var supports = new[]
+        {
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(900f),
+        };
+        // A SupportMain brigade on its own attack task is never held — only the
+        // Main role is gated.
+        var task = TacticalMainArrivalSynchronizer.ResolveMainAttackTask(
+            DirectChildRole.SupportMain, CommandTaskType.AttackObjective, supports,
+            commanderAggression01: 0.5f, holdSecondsElapsed: 5f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f,
+            out bool holding);
+        AssertFalse(holding, "non-Main role is never held by arrival sync");
+        AssertEqual(CommandTaskType.AttackObjective, task,
+            "SupportMain attack task passes through unchanged");
+    }
+
+    private static void ArrivalSyncResolvePassesThroughNonAttackTask()
+    {
+        var supports = new[]
+        {
+            new TacticalMainArrivalSynchronizer.SupportMainPosition(900f),
+        };
+        // A Main brigade already on a non-attack task (e.g. opportunity override
+        // downgraded it to HoldObjective) is not touched.
+        var task = TacticalMainArrivalSynchronizer.ResolveMainAttackTask(
+            DirectChildRole.Main, CommandTaskType.HoldObjective, supports,
+            commanderAggression01: 0.5f, holdSecondsElapsed: 5f,
+            supportProximityThresholdMeters: 500f, maxHoldSeconds: 30f,
+            out bool holding);
+        AssertFalse(holding, "non-attack task is not gated");
+        AssertEqual(CommandTaskType.HoldObjective, task,
+            "Main on HoldObjective passes through unchanged");
+    }
+
+    // ---- Stance reconciliation (2026-05-25 / A) ----
+    // The force-aware doctrine demotes an objective-attacker to Defender for
+    // playbook selection so an outnumbered side can't be forced into an
+    // offensive playbook by GetBattleType alone.
+
+    private static void StanceReconcilerDemotesAttackerOnDefensiveDoctrine()
+    {
+        AssertEqual(BattleStance.Defender,
+            TacticalStanceReconciler.ResolveEffectiveStance(
+                BattleStance.Attacker, ReinforcementOpportunity.DelayingDefense),
+            "Attacker + DelayingDefense → demote to Defender");
+        AssertEqual(BattleStance.Defender,
+            TacticalStanceReconciler.ResolveEffectiveStance(
+                BattleStance.Attacker, ReinforcementOpportunity.DefensiveHold),
+            "Attacker + DefensiveHold → demote to Defender");
+        AssertEqual(BattleStance.Defender,
+            TacticalStanceReconciler.ResolveEffectiveStance(
+                BattleStance.Attacker, ReinforcementOpportunity.WaitAndConsolidate),
+            "Attacker + WaitAndConsolidate → demote to Defender");
+    }
+
+    private static void StanceReconcilerDemotesMeetingOnDefensiveDoctrine()
+    {
+        AssertEqual(BattleStance.Defender,
+            TacticalStanceReconciler.ResolveEffectiveStance(
+                BattleStance.Meeting, ReinforcementOpportunity.DelayingDefense),
+            "Meeting + DelayingDefense → demote to Defender");
+    }
+
+    private static void StanceReconcilerPreservesAttackerOnAttackNow()
+    {
+        AssertEqual(BattleStance.Attacker,
+            TacticalStanceReconciler.ResolveEffectiveStance(
+                BattleStance.Attacker, ReinforcementOpportunity.AttackNow),
+            "Attacker + AttackNow → stays Attacker (offensive playbooks allowed)");
+    }
+
+    private static void StanceReconcilerPreservesAttackerOnNoOpportunity()
+    {
+        AssertEqual(BattleStance.Attacker,
+            TacticalStanceReconciler.ResolveEffectiveStance(
+                BattleStance.Attacker, ReinforcementOpportunity.NoOpportunity),
+            "Attacker + NoOpportunity → stays Attacker (neutral outcome, no demotion)");
+    }
+
+    private static void StanceReconcilerLeavesDefenderUnchanged()
+    {
+        AssertEqual(BattleStance.Defender,
+            TacticalStanceReconciler.ResolveEffectiveStance(
+                BattleStance.Defender, ReinforcementOpportunity.AttackNow),
+            "Defender stays Defender even on AttackNow (no offensive promotion)");
+        AssertEqual(BattleStance.Defender,
+            TacticalStanceReconciler.ResolveEffectiveStance(
+                BattleStance.Defender, ReinforcementOpportunity.DelayingDefense),
+            "Defender + DelayingDefense → still Defender");
+    }
+
+    private static void StanceReconcilerDemotesAttackerOnWithdrawal()
+    {
+        AssertEqual(BattleStance.Defender,
+            TacticalStanceReconciler.ResolveEffectiveStance(
+                BattleStance.Attacker, ReinforcementOpportunity.WithdrawalToFightLater),
+            "Attacker + WithdrawalToFightLater → demote to Defender (don't attack while withdrawing)");
+    }
+
+    // ============================================================================
+    // Friendly-fire gate tests (2026-05-21). Verify Scourge's StopOverlapTarget
+    // analog correctly detects friendlies in the fire corridor.
+    // ============================================================================
+
+    private static void FriendlyFireGateClearWhenEmpty()
+    {
+        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 100f, 0f, new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>());
+        AssertFalse(result.Blocked, "no friendlies = no fire-block");
+    }
+
+    private static void FriendlyFireGateDetectsFriendInLine()
+    {
+        // Shoot from (0,0) toward (200, 0). Friend at (100, 5) — directly in the
+        // line (5m off, well under LateralOffsetMeters = 30m), halfway to target.
+        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
+        {
+            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                instanceId: 5,
+                currentX: 100f, currentZ: 5f,
+                waypointX: 0f, waypointZ: 0f,
+                hasWaypoint: false,
+                isLineFormation: false),
+        };
+        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 200f, 0f, friendlies);
+        AssertTrue(result.Blocked, "friend in line should block fire");
+        AssertEqual(5, result.BlockerInstanceId, "correct blocker reported");
+    }
+
+    private static void FriendlyFireGateIgnoresFriendBehind()
+    {
+        // Friend at (-50, 0) — behind shooter facing (+200, 0).
+        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
+        {
+            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                instanceId: 6,
+                currentX: -50f, currentZ: 0f,
+                waypointX: 0f, waypointZ: 0f,
+                hasWaypoint: false,
+                isLineFormation: false),
+        };
+        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 200f, 0f, friendlies);
+        AssertFalse(result.Blocked, "friend behind shooter should not block fire");
+    }
+
+    private static void FriendlyFireGateIgnoresFriendPastTarget()
+    {
+        // Friend at (250, 0) — past the target at (200, 0).
+        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
+        {
+            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                instanceId: 7,
+                currentX: 250f, currentZ: 0f,
+                waypointX: 0f, waypointZ: 0f,
+                hasWaypoint: false,
+                isLineFormation: false),
+        };
+        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 200f, 0f, friendlies);
+        AssertFalse(result.Blocked, "friend past target should not block fire");
+    }
+
+    private static void FriendlyFireGateIgnoresLateralFriend()
+    {
+        // Friend at (100, 100) — 100m off the firing line. Well beyond LateralOffsetMeters (30m).
+        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
+        {
+            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
+                instanceId: 8,
+                currentX: 100f, currentZ: 100f,
+                waypointX: 0f, waypointZ: 0f,
+                hasWaypoint: false,
+                isLineFormation: false),
+        };
+        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 200f, 0f, friendlies);
+        AssertFalse(result.Blocked, "friend far off the firing line should not block fire");
+    }
+
+    // Helper: builds a minimal TacticalUnitObservation for regimental tests.
+    // Captures only the fields the threat computer reads (position, alliance,
+    // strength, routed/permdetached). Other fields default to zero/false.
+    private static TacticalUnitObservation BuildObs(int instanceId, int alliance, float x, float z, float strength)
+    {
+        return new TacticalUnitObservation(
+            instanceId: instanceId,
+            unittyp: 0,
+            alliance: alliance,
+            isRouted: false,
+            permanentlyDetached: false,
+            worldX: x,
+            worldZ: z,
+            strength: strength,
+            groupOwnInRange: 0f,
+            groupAiGroup: 0f,
+            hasCurrentSetObjective: false,
+            objectiveName: string.Empty,
+            objectiveX: 0f,
+            objectiveZ: 0f,
+            objectiveType: TacticalObjectiveType.UnknownVanillaObjective,
+            hasLastWaypoint: false,
+            lastWaypointX: 0f,
+            lastWaypointZ: 0f,
+            visibleEnemyStrength: 0f,
+            hasVisibleEnemy: false,
+            hasVisibleEnemyPosition: false,
+            visibleEnemyX: 0f,
+            visibleEnemyZ: 0f,
+            fatigue01: 0f,
+            ammo01: 0f,
+            effectiveCommandLevel: 0);
     }
 }

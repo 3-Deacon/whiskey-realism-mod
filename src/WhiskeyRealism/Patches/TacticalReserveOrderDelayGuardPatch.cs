@@ -113,6 +113,12 @@ namespace WhiskeyRealism.Patches
                     float rotation = SafeTargetAngle(unit, target);
                     RemoveAddedPaths(unit, before.Paths, afterPaths);
 
+                    // Scope B alignment (2026-05-22): reserve commitment =
+                    // attack intent (unit moving forward to engagement zone
+                    // double-quick). Stance 3 gives vanilla micro-AI proper
+                    // context for the committed reserve.
+                    WhiskeyRealism.Util.TacticalStanceWriter.EnsureStance(
+                        battleUnits, unit, 3, contextTag: "reserve-delay-guard:commit:" + SafeUnitName(unit));
                     battleUnits.SetWaypoint(
                         unit,
                         target,
@@ -166,6 +172,10 @@ namespace WhiskeyRealism.Patches
                 Vector3 target = new Vector3(order.FallbackTarget.X, 0f, order.FallbackTarget.Z);
                 if (!IsSafeTarget(group, target)) return;
 
+                // Scope B alignment (2026-05-22): stalled-fallback recovery is
+                // defensive — unit retreating to fallback target. Stance 2.
+                WhiskeyRealism.Util.TacticalStanceWriter.EnsureStance(
+                    battleUnits, group, 2, contextTag: "reserve-delay-guard:fallback:" + SafeUnitName(group));
                 battleUnits.SetWaypoint(
                     group,
                     target,

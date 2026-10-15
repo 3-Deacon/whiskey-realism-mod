@@ -7,15 +7,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// counter-pursuit + the Murfreesboro raid. Aggressive + audacious
     /// commanders only — caution kills raids.
     ///
-    /// Distinct from JacksonValleyShuffle (Jackson is infantry-with-cavalry-
+    /// Distinct from MobileFlankMarch (Jackson is infantry-with-cavalry-
     /// supplement, Forrest is cavalry-with-infantry-rare). Pairs with the
     /// existing TacticalCavalryFollowDoctrine raid filters (hidden/officer/
     /// fort/square/supported targets get rejected before raid commits).
     /// </summary>
-    public sealed class ForrestCavalryRaidPlaybook : TacticalPlaybook
+    public sealed class CavalryRaidPlaybook : TacticalPlaybook
     {
-        public ForrestCavalryRaidPlaybook() : base(
-            BattlePlanId.ForrestCavalryRaid,
+        public CavalryRaidPlaybook() : base(
+            BattlePlanId.CavalryRaid,
             "forrest-cavalry-raid",
             // Personality fit deliberately moderate. The scoring model is
             // dot-product based, so a high-magnitude fit vector in the
@@ -53,5 +53,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ReserveCommitTriggerOdds,
                 ageSeconds: 0f,
                 ctx.JitterSeed);
+
+        // Cavalry-raid patterns are GENERIC — any cavalry-rich force can
+        // execute regardless of faction (Sheridan and Buford ran similar
+        // raids for the Union; Wheeler for CSA). Hard-filter on cavalry
+        // composition only. Soft faction-affinity in the catalog handles
+        // thematic preference.
+        public override bool MatchesPreconditions(PlaybookContext ctx) =>
+            ctx.CavalryFraction >= 0.05f;
     }
 }

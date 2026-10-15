@@ -77,6 +77,91 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     groupSector0,
                     groupSector1);
 
+                // Worker-migration: compute ObjectiveRecord[] off main per side via the
+                // pure-data builder. Empty context (config flag off, suppressed side)
+                // yields an empty record array — main detects this via TryGetObjectiveRecords
+                // and falls back to the legacy on-main builder.
+                ObjectiveRecord[] objectives0 = BuildObjectivesForSide(0, input);
+                ObjectiveRecord[] objectives1 = BuildObjectivesForSide(1, input);
+
+                // Regimental intelligence (2026-05-21). Per-regiment decisions ported
+                // from Scourge of War's StandTargetAmmoAI decision tree. Computed on
+                // worker thread from observation data; applied on main inside the
+                // group-stance patch's per-regiment write surface.
+                var regimentalDecisions0 = BuildRegimentalDecisionsForSide(0, input);
+                var regimentalDecisions1 = BuildRegimentalDecisionsForSide(1, input);
+
+                // Worker-migration fix (2026-05-21): with F stagger, only one side has
+                // fresh observations per Tick (the building side). The other side gets
+                // empty records AND empty group decisions this cycle. Without
+                // preservation, the next published snapshot would BLOW AWAY the prior
+                // cycle's data for the non-building side — main would then:
+                //   - For ObjectiveRecords: fall back to legacy on-main BuildObjectiveRecordsFromAggregate
+                //   - For group stance / sector: tier-2 (worker snapshot) miss → tier-3
+                //     legacy ApplyGroup (~15-33 ms / call)
+                // Both defeat the worker-migration perf win.
+                //
+                // Preserve: if this cycle produced no data for a side AND the prior
+                // published snapshot has data for that side on the SAME battleSequence,
+                // carry it forward. Stale by one F-stagger cycle (~4-8s wallclock) but
+                // observation state doesn't shift materially in that window. The dicts
+                // are immutable-by-convention so reference-sharing across snapshots is
+                // safe (the snapshot ctor takes ownership but never mutates).
+                var priorSnapshot = TacticalDecisionSnapshot.Current;
+                if (priorSnapshot != null && priorSnapshot.BattleSequence == input.BattleSequence)
+                {
+                    if (objectives0.Length == 0
+                        && priorSnapshot.TryGetObjectiveRecords(0, out ObjectiveRecord[] prior0))
+                    {
+                        objectives0 = prior0;
+                    }
+                    if (objectives1.Length == 0
+                        && priorSnapshot.TryGetObjectiveRecords(1, out ObjectiveRecord[] prior1))
+                    {
+                        objectives1 = prior1;
+                    }
+                    if (groupStance0.Count == 0)
+                    {
+                        var priorDict = priorSnapshot.GetGroupStanceDict(0);
+                        if (priorDict != null && priorDict.Count > 0)
+                            groupStance0 = priorDict;
+                    }
+                    if (groupStance1.Count == 0)
+                    {
+                        var priorDict = priorSnapshot.GetGroupStanceDict(1);
+                        if (priorDict != null && priorDict.Count > 0)
+                            groupStance1 = priorDict;
+                    }
+                    if (groupSector0.Count == 0)
+                    {
+                        var priorDict = priorSnapshot.GetGroupSectorDict(0);
+                        if (priorDict != null && priorDict.Count > 0)
+                            groupSector0 = priorDict;
+                    }
+                    if (groupSector1.Count == 0)
+                    {
+                        var priorDict = priorSnapshot.GetGroupSectorDict(1);
+                        if (priorDict != null && priorDict.Count > 0)
+                            groupSector1 = priorDict;
+                    }
+                    // Regimental decisions: same preservation pattern. With F stagger,
+                    // only one side has fresh observations per cycle; we'd otherwise
+                    // blow away the prior cycle's regimental decisions for the
+                    // non-building side.
+                    if (regimentalDecisions0.Count == 0)
+                    {
+                        var priorDict = priorSnapshot.GetRegimentalDecisionsDict(0);
+                        if (priorDict != null && priorDict.Count > 0)
+                            regimentalDecisions0 = priorDict;
+                    }
+                    if (regimentalDecisions1.Count == 0)
+                    {
+                        var priorDict = priorSnapshot.GetRegimentalDecisionsDict(1);
+                        if (priorDict != null && priorDict.Count > 0)
+                            regimentalDecisions1 = priorDict;
+                    }
+                }
+
                 return new TacticalDecisionSnapshot(
                     battleSequence: input.BattleSequence,
                     cycleId: cycleId,
@@ -87,7 +172,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     groupStance0: groupStance0,
                     groupStance1: groupStance1,
                     groupSector0: groupSector0,
-                    groupSector1: groupSector1);
+                    groupSector1: groupSector1,
+                    objectiveRecords0: objectives0,
+                    objectiveRecords1: objectives1,
+                    regimentalDecisions0: regimentalDecisions0,
+                    regimentalDecisions1: regimentalDecisions1);
             }
             catch (Exception e)
             {
@@ -311,6 +400,190 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (value < 0f) return 0f;
             if (value > 1f) return 1f;
             return value;
+        }
+
+        // Per-session bookkeeping for first-emission deduplication. Worker thread is NOT
+        // proven OnceLog-safe; using volatile bool flags is the cheap dedup primitive
+        // that works across threads without contention.
+        private static long _objectivesDiagFlags;  // bit-packed: 6 bits (3 reason flags × 2 sides)
+
+        private static bool TryClaimDiagBit(int sideIdx, int reasonIdx)
+        {
+            int bit = 1 << (sideIdx * 4 + reasonIdx);
+            long prev, next;
+            do
+            {
+                prev = System.Threading.Interlocked.Read(ref _objectivesDiagFlags);
+                if ((prev & bit) != 0) return false;
+                next = prev | bit;
+            } while (System.Threading.Interlocked.CompareExchange(ref _objectivesDiagFlags, next, prev) != prev);
+            return true;
+        }
+
+        // Worker-migration (2026-05-21): runs BuildObjectiveRecordsFromContext on the
+        // worker thread. The context is pure data captured on main; the per-side
+        // IObservationSource has been the worker's input since the chunk-1 migration.
+        // Returns empty array on suppressed side / empty context / null source — main
+        // detects empty via TryGetObjectiveRecords and uses its legacy on-main builder.
+        //
+        // Diagnostic logs (cross-thread-safe via Interlocked-CAS bit flags) emit ONCE
+        // per (side, reason) per session so smoke can see why the worker isn't
+        // producing records. Each branch claims a flag bit; subsequent hits on the
+        // same branch are silent.
+        private static ObjectiveRecord[] BuildObjectivesForSide(int sideIdx, TacticalOrchestratorWorkerInput input)
+        {
+            try
+            {
+                if (input == null) return Array.Empty<ObjectiveRecord>();
+
+                ObjectiveRecordsCaptureContext context = sideIdx == 0
+                    ? input.Side0ObjectiveCaptureContext
+                    : input.Side1ObjectiveCaptureContext;
+                int allianceId = sideIdx == 0
+                    ? input.Side0AllianceId
+                    : input.Side1AllianceId;
+
+                if (context == null || context == ObjectiveRecordsCaptureContext.Empty)
+                {
+                    if (TryClaimDiagBit(sideIdx, 0))
+                    {
+                        Plugin.Log.LogInfo("[TacticalOrchestratorWorkerAnalysis] side=" + sideIdx
+                            + " context-empty (alliance=" + allianceId
+                            + ") — main thread didn't capture; check EnableWorkerObjectiveRecords flag");
+                    }
+                    return Array.Empty<ObjectiveRecord>();
+                }
+
+                var sourceAdapter = WorkerObservationSourceAdapter.Build(input, sideIdx);
+                if (sourceAdapter == null)
+                {
+                    if (TryClaimDiagBit(sideIdx, 1))
+                    {
+                        int obsCount = sideIdx == 0
+                            ? (input.Side0Observations?.Count ?? -1)
+                            : (input.Side1Observations?.Count ?? -1);
+                        Plugin.Log.LogInfo("[TacticalOrchestratorWorkerAnalysis] side=" + sideIdx
+                            + " observation-adapter-null (alliance=" + allianceId
+                            + " obsCount=" + obsCount + ")");
+                    }
+                    return Array.Empty<ObjectiveRecord>();
+                }
+
+                var records = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromContext(
+                    sourceAdapter,
+                    context,
+                    allianceId);
+                if (TryClaimDiagBit(sideIdx, 2))
+                {
+                    Plugin.Log.LogInfo("[TacticalOrchestratorWorkerAnalysis] side=" + sideIdx
+                        + " first-build success (alliance=" + allianceId
+                        + " records=" + (records?.Length ?? 0)
+                        + " mapObj=" + context.MapObjectives.Count
+                        + " chains=" + context.ObjectiveChains.Count
+                        + " avenues=" + context.ApproachAvenues.Length + ")");
+                }
+                return records ?? Array.Empty<ObjectiveRecord>();
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestratorWorkerAnalysis] BuildObjectivesForSide "
+                    + sideIdx + " degraded: " + e.GetType().Name + " " + e.Message);
+                return Array.Empty<ObjectiveRecord>();
+            }
+        }
+
+        // Reset the diagnostic flags so the next battle gets a fresh set of one-shot
+        // emissions. Called from TacticalBattleCoordinatorRuntime.ResetRuntimeTickState.
+        internal static void ResetForBattleStart()
+        {
+            System.Threading.Interlocked.Exchange(ref _objectivesDiagFlags, 0L);
+        }
+
+        // Regimental intelligence builder (2026-05-21). For each commandable own-side
+        // regiment in the observation array, compute a quadrant threat assessment
+        // and run the doctrine scorer to produce a per-regiment action. Results are
+        // keyed by GameObject InstanceID and consumed on main via
+        // TacticalDecisionSnapshot.TryGetRegimentalDecision.
+        //
+        // Empty observation array → empty dict (default NoAction at apply time).
+        private static Dictionary<int, TacticalRegimentalDecision> BuildRegimentalDecisionsForSide(int sideIdx, TacticalOrchestratorWorkerInput input)
+        {
+            try
+            {
+                if (input == null) return new Dictionary<int, TacticalRegimentalDecision>(0);
+
+                IReadOnlyList<TacticalUnitObservation> observations = sideIdx == 0
+                    ? input.Side0Observations
+                    : input.Side1Observations;
+                int allianceId = sideIdx == 0
+                    ? input.Side0AllianceId
+                    : input.Side1AllianceId;
+                if (observations == null || observations.Count == 0)
+                    return new Dictionary<int, TacticalRegimentalDecision>(0);
+
+                // Build allied + enemy index partition for this side. Mirrors
+                // WorkerObservationSourceAdapter logic but inlined so we don't
+                // construct another adapter just to read indices.
+                var alliedIndices = new List<int>(observations.Count);
+                var enemyIndices = new List<int>(observations.Count);
+                for (int i = 0; i < observations.Count; i++)
+                {
+                    var obs = observations[i];
+                    if (obs.Alliance == allianceId) alliedIndices.Add(i);
+                    else if (obs.Alliance >= 0) enemyIndices.Add(i);
+                }
+
+                var result = new Dictionary<int, TacticalRegimentalDecision>(alliedIndices.Count);
+                for (int ai = 0; ai < alliedIndices.Count; ai++)
+                {
+                    int idx = alliedIndices[ai];
+                    var own = observations[idx];
+                    if (own.IsRouted || own.PermanentlyDetached) continue;
+                    if (own.InstanceId == 0) continue;
+                    // Only regiments at the writeable layer get scored. Mirrors
+                    // the same filter the existing group-stance patch uses.
+                    if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(own.Unittyp)) continue;
+
+                    var threats = TacticalRegimentalThreatComputer.Compute(
+                        own,
+                        observations,
+                        alliedIndices,
+                        enemyIndices);
+
+                    // Casualty fraction not in the observation today; pass 0 and
+                    // let the doctrine's morale check do the work. (Future: capture
+                    // strength_history vs strength for a real casualty fraction.)
+                    float casualtyFraction = 0f;
+                    // Worker doesn't have direct morale on the observation either
+                    // — TacticalUnitObservation captures position/strength but not
+                    // a per-unit morale01. Use a neutral default of 0.7 so the
+                    // doctrine's "low morale" branch only fires via casualty path.
+                    float ownMorale01 = 0.7f;
+                    // stanceAllowsWheel: pessimistic default true; the brigade
+                    // executor's eligibility gate still filters apply-time.
+                    bool stanceAllowsWheel = true;
+                    bool isRouted = own.IsRouted;
+
+                    var decision = TacticalRegimentalIntelligenceDoctrine.Decide(
+                        threats,
+                        ownMorale01,
+                        casualtyFraction,
+                        isRouted,
+                        stanceAllowsWheel);
+
+                    if (decision.Action != RegimentalAction.NoAction)
+                    {
+                        result[own.InstanceId] = decision;
+                    }
+                }
+                return result;
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestratorWorkerAnalysis] BuildRegimentalDecisionsForSide "
+                    + sideIdx + " degraded: " + e.GetType().Name + " " + e.Message);
+                return new Dictionary<int, TacticalRegimentalDecision>(0);
+            }
         }
     }
 }

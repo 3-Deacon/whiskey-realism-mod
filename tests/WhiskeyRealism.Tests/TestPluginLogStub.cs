@@ -6,6 +6,7 @@ namespace WhiskeyRealism
         internal static TestConfig<bool> EnableTacticalMapKnowledgeDiagnostics = new TestConfig<bool>(false);
         internal static TestConfig<bool> EnableTacticalRegimentDiagnostics = new TestConfig<bool>(false);
         internal static TestConfig<string> TacticalRegimentDiagnosticNames = new TestConfig<string>(string.Empty);
+        internal static TestConfig<float> OpportunityHysteresisMinHoldSeconds = new TestConfig<float>(6.0f);
     }
 
     internal sealed class TestConfig<T>

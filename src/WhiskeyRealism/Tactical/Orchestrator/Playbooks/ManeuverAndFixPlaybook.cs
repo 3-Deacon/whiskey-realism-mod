@@ -5,10 +5,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// for aggressive commanders at favorable odds. Pin one part of the
     /// enemy line while a wider arm marches around it.
     /// </summary>
-    public sealed class ShermanManeuverFixPlaybook : TacticalPlaybook
+    public sealed class ManeuverAndFixPlaybook : TacticalPlaybook
     {
-        public ShermanManeuverFixPlaybook() : base(
-            BattlePlanId.ShermanManeuverFix,
+        public ManeuverAndFixPlaybook() : base(
+            BattlePlanId.ManeuverAndFix,
             "sherman-maneuver-fix",
             new PersonalityFit(aggression: 0.7f, caution: -0.3f, audacity: 0.6f),
             new TerrainPreference(open: 0.9f, wooded: 0.5f, river: 0.5f, mountain: 0.4f),

@@ -176,7 +176,17 @@ namespace WhiskeyRealism.Tactical.Operations
             float currentX,
             float currentZ)
         {
-            if (pathInterrupted) return false;
+            // Microshift fix (2026-05-21): the old "if (pathInterrupted) return false" bypass
+            // unconditionally allowed re-writes whenever vanilla flagged the path as
+            // interrupted (which happens frequently during active combat: terrain, friendly
+            // unit-in-way, momentary path-recompute). Each re-write triggered vanilla's
+            // pathfinder to recompute, causing the visible "brief move and revert" microshift
+            // for units that were logically pursuing the same target across many cycles.
+            //
+            // New behavior: even when pathInterrupted, still apply distance-based dedup —
+            // if the new target is within InterruptedReissueDistance of the current waypoint,
+            // skip the re-write and let vanilla resolve the interrupt on its own path. Only
+            // a TRUE target relocation (genuinely different objective) bypasses dedup.
             if (!IsFinite(currentWaypointX) || !IsFinite(currentWaypointZ)) return false;
             if (!IsFinite(targetX) || !IsFinite(targetZ)) return false;
             if (currentWaypointX == 0f && currentWaypointZ == 0f) return false;
@@ -184,18 +194,35 @@ namespace WhiskeyRealism.Tactical.Operations
             float safeTolerance = IsFinite(tolerance) && tolerance > 0f ? tolerance : 1f;
             float dx = currentWaypointX - targetX;
             float dz = currentWaypointZ - targetZ;
-            if ((dx * dx) + (dz * dz) > safeTolerance * safeTolerance) return false;
+            float distanceSq = (dx * dx) + (dz * dz);
+
+            // When path is interrupted, use a larger threshold so genuinely-different
+            // targets still bypass dedup but probe-drift (~20-50m off the existing target)
+            // does not. InterruptedReissueDistance is intentionally larger than tolerance
+            // because path interrupt is signal that vanilla wants a fresh decision; we
+            // honor that for real relocations.
+            float effectiveTolerance = pathInterrupted
+                ? (safeTolerance > InterruptedReissueDistance ? safeTolerance : InterruptedReissueDistance)
+                : safeTolerance;
+            if (distanceSq > effectiveTolerance * effectiveTolerance) return false;
 
             if (!activeMove && regimentPaths <= 0 && IsFinite(currentX) && IsFinite(currentZ))
             {
                 float currentDx = currentX - targetX;
                 float currentDz = currentZ - targetZ;
-                if ((currentDx * currentDx) + (currentDz * currentDz) > safeTolerance * safeTolerance)
+                if ((currentDx * currentDx) + (currentDz * currentDz) > effectiveTolerance * effectiveTolerance)
                     return false;
             }
 
             return true;
         }
+
+        // Microshift fix tunable. When pathInterrupted is set, the new-target must be at
+        // least this far from the current waypoint before dedup releases. Calibrated to
+        // ~3x the standard MinWaypointDistance so probe targets that drift by tens of
+        // meters as a unit moves still resolve to "same logical target" rather than
+        // triggering a new path recompute every cycle.
+        private const float InterruptedReissueDistance = 60f;
 
         private static bool IsFinite(float value)
         {

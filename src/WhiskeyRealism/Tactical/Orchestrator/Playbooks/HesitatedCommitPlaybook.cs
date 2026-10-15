@@ -4,10 +4,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// Methodical but indecisive — plans well, commits late, low audacity.
     /// Mid-odds preference; reserve trigger conservative.
     /// </summary>
-    public sealed class BraggIndecisiveCommitPlaybook : TacticalPlaybook
+    public sealed class HesitatedCommitPlaybook : TacticalPlaybook
     {
-        public BraggIndecisiveCommitPlaybook() : base(
-            BattlePlanId.BraggIndecisiveCommit,
+        public HesitatedCommitPlaybook() : base(
+            BattlePlanId.HesitatedCommit,
             "bragg-indecisive-commit",
             new PersonalityFit(aggression: 0.0f, caution: 0.3f, audacity: -0.4f),
             new TerrainPreference(open: 0.6f, wooded: 0.6f, river: 0.6f, mountain: 0.6f),

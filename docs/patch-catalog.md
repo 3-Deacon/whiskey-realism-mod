@@ -2,6 +2,10 @@
 
 Canonical numbered catalog of all shipped Harmony patches. Each item has a stable ordinal (never re-used even after withdrawal) and a one-line description with file path + decompile coordinates.
 
+> **2026-05-23 stance gating + geometric play layer (current branch `feat/orchestrator-worker-thread`):** Whiskey now reads `BattleUnits.GetBattleType(alliance)` (decompile line 86095) as the canonical battle stance signal — Meeting / Attacker / Defender. The doctrine + playbook layer hard-filter on this so a defender side can NEVER produce AttackNow / pick an offensive playbook regardless of force ratio. Mirrors Scourge of War's `OpenType()` + `Rank(eRankSide)` pattern (offai.cpp:1153-1159). New `BattleMacroAIOverridePatch` syncs Whiskey's doctrine output to vanilla's `sideinformation[side].macroai` via a Prefix on `AIBattle.CheckGlobalAIStrategy` (line 6314) so vanilla's `AdjustGroupAIStance` (4220) drives per-group `ai_stance` for brigades we don't explicitly role-assign — line of battle forms via vanilla's macroai=2 cascade. New geometric play layer (`Tactical/Orchestrator/Plays/`) projects army-relative play templates to world rects, assigns corps closest-first with VP override, role allocator runs in zone-aware mode. 13 historical-figure playbook names renamed to tactical archetypes (`LeeEnvelopment → DoubleEnvelopment` etc.); FactionAffinity bias removed entirely. See `docs/handoff.md` § "Resume from cold context (2026-05-23)" for the full session log.
+
+> **2026-05-22 Scope B architectural shift (current branch `feat/orchestrator-worker-thread`):** Whiskey's order-write pipeline now plugs into vanilla GT / W&L's canonical `ChangeStance(unit, mapped_stance) → SetWaypoint(unit, target)` flow rather than working around it. Previously a dedicated Prefix patch (`PerformAIActionDLCWLPatch`, introduced + removed within this branch — never assigned a catalog ordinal) blocked vanilla's W&L gate for "claimed" regiments via a parallel `_whiskeyControlledRegiments` HashSet. That patch + tracking state is removed; vanilla's native gate now handles player protection, and our writes carry intent via `ai_stanceordered` which vanilla micro-AI respects natively. New canonical writers live in `Util/`: `TacticalStanceWriter`, `TacticalFormationWriter`, `TacticalCombatBehaviorWriter`. New stance mapper: `Tactical/TacticalCommandTaskToStanceMapper` (Whiskey's 17 `CommandTaskType` → vanilla's 5 `ai_stance` per decompile line 65061). All 8 SetWaypoint sites in this branch now precede the waypoint with a stance write through these helpers. See `docs/handoff.md` § "Resume from cold context (2026-05-22)" for the full session log.
+
 | # | Patch | Type | File | Targets (decompile line) | Description |
 |---|---|---|---|---|---|
 | 1 | `PickCampaignObjectivePatch`   | Prefix  | `Patches/PickCampaignObjectivePatch.cs` | `AICampaign.PickCampaignObjective` (17769)   | Replace vanilla random pick with active CIC plan target; vanilla fallback when no plan / player-CIC. |
@@ -113,6 +117,45 @@ The 2026-05-11 full-spectrum tactical command doctrine build retargets existing 
 - **#2 `ImportanceValuesPatch` redesigned** — moved from `AICampaign.UpdateImportanceValues` (wrong shape) to `AIArea.CalculateMostValueableAIZones` (Postfix override of `mostvalueableaiareaclose`). Catalog ordinal preserved.
 - **#6 `CommanderReplacementPatch` upgraded** — gate-only stub replaced with concrete `AssignCommando` + `DoCommanderPromotion` swap when scripted succession events fire. `AppliedEventIds` tracking persisted in sidecar.
 - **`Strategic/WarStateObserver.cs`** — town-ownership observers for Vicksburg / Chattanooga / Atlanta. Unlocks succession events #8 (Grant→GiC), #9 (Sherman→Western), #10 (Hood replaces Johnston) which previously could never fire.
+
+## 2026-05-23 additions (`feat/orchestrator-worker-thread`)
+
+| Patch / file | Type | Target (decompile line) | Description |
+|---|---|---|---|
+| `BattleMacroAIOverridePatch` | Harmony Prefix | `AIBattle.CheckGlobalAIStrategy` (6314) | F sync — writes Whiskey doctrine output to `sideinformation[side].macroai` BEFORE vanilla reads it at line 6383, so vanilla's `AdjustGroupAIStance` (4220) drives per-group `ai_stance` from our intent. Maps AttackNow → 0 (flank) or 1 (frontal) per envelopment ratio; DefensiveHold / WaitAndConsolidate / DelayingDefense → 2 (defend); WithdrawalToFightLater → 3 (retreat); NoOpportunity → no write. Player-protection gated via `alliance == playeralliance && !ai_vs_ai`. Config flag `EnableVanillaMacroAiSync` default-on. Telemetry: `TacticalMacroAiOverride` (Write). Performance scope: `tactical.patch.macroai-override` (2.0ms). |
+
+**Coordinator runtimes (not numbered — read by patches, no Harmony entry point):**
+
+| Runtime / file | Description |
+|---|---|
+| `Tactical/Orchestrator/Plays/PlayRect.cs` + `PlayTemplate.cs` + `PlayTemplateCatalog.cs` | G-Stage2 geometric play layer. 18 templates, one per BattlePlanId archetype. Each template is a list of army-relative `PlayRect` entries (`RelativeAnchor` + `RelativeSize` + `StartTimeOffset` + `Priority`, tagged with `PlayRectKind` ∈ {LeftWing/Center/RightWing/Reserve/LeftFlank/RightFlank/ForwardScreen/ReserveLine/DeepRaid/FlankMarch/Demonstration/CenterHold}). |
+| `Tactical/Orchestrator/Plays/PlayProjection.cs` | Pure — projects army-relative rects to world rects via `forwardAxis = normalize(enemy - army)`, `rightAxis = forwardAxis ⊥ 90°CW`. Solves Scourge's `StartQuad` rotation problem in 30 lines. |
+| `Tactical/Orchestrator/Plays/PlayCorpsAssignment.cs` | Pure — closest-corps + VP-override (mirrors Scourge `offai.cpp:1289`). Priority-ordered rect processing. |
+| `Tactical/Orchestrator/Plays/PlayExecutorRuntime.cs` | Vanilla-touching wrapper. Reads `BattleUnits.completeunitlist`, computes army+enemy centroids, projects template, assigns corps. Pooled scratch buffers + 3s time-bucket pre-gate + signature-skip cache + `TelemetryPerf.Scope("tactical.play-executor.zone-assignments", 5.0ms)`. Emits `TacticalPlayExecution` (Decision). Config flag `EnableGeometricPlayTemplates` default-on. |
+| `Tactical/Orchestrator/TacticalVanillaMacroAiMapping.cs` | Pure mapping `ReinforcementOpportunity → vanilla macroai value`. Consumed by `BattleMacroAIOverridePatch`. |
+| `Tactical/Orchestrator/TacticalMainArrivalSynchronizer.cs` | Pure predicate "should Main hold for SupportMain siblings to arrive". Shipped with harness coverage; wire-in deferred (F + L doctrine work resolved the lone-brigade symptom at the playbook layer). |
+
+**Allocator changes (`DirectChildAllocator`):**
+
+- `AllocateWithZones(plan, personality, snapshots, evidence, perChildEnemyIntent, zoneAssignments)` — zone-aware overload. When `zoneAssignments` is non-empty, each child whose `ChildId` matches a row gets the role implied by the rect kind (LeftWing/RightWing → Main, Center → Fix, LeftFlank/RightFlank/CenterHold → Defender via Refuse, ForwardScreen → Screen, Reserve/ReserveLine → Reserve, etc.). Children without zones use the existing evidence-based path with the G3 Reserve fallback default.
+- G2: `BuildProbesForAlliance` backported the vanilla-parent walk (`GetAttachedUnitsReg` reverse-map) that `BuildExtendedProbesForAlliance` had since 2026-05-19. Eliminates synth-army-* placeholders for armies with corps subordinates.
+- G3: Fall-through default at end of allocator loop is now `DirectChildRole.Reserve` (was `Unknown`). Reserve → ReserveWait task + vanilla's macroai cascade via F sync gives the brigade a coherent stance.
+
+**Doctrine changes (`TacticalReinforcementOpportunityDoctrine`):**
+
+- New `ReinforcementOpportunity.DelayingDefense` outcome between WaitAndConsolidate and WithdrawalToFightLater. Fires for "outnumbered + no near parity + still defensible". Maps to vanilla macroai = 2 (defend). Biases playbook toward DelayingDefense/CavalryScreeningDelay/ReverseSlopeDefense via `DelayingAffinity` table.
+- `WithdrawalRatioThreshold` is now personality-modulated via `ComputeWithdrawalRatioThreshold(aggression01) = 0.55 - aggression × 0.30` clamped to [0.15, 0.70]. Aggressive (1.0) → 0.25; mid (0.5) → 0.40; cautious (0.0) → 0.55.
+- `BaseMaxWaitHoursForOwn` raised 6h → 18h. `AggressionWaitScale` 3h → 10h. New range: aggressive 18h, cautious 28h (CW-realistic).
+- Casualty escalation (J): DelayingDefense escalates to WithdrawalToFightLater when `ownCasualtyRatio01` exceeds personality-modulated threshold (cautious 5% / mid 10% / aggressive 15%), OR routed-brigade fraction exceeds threshold (cautious 15% / mid 22% / aggressive 30%), OR battle elapsed >= 6h + ratio < 0.50 + no parity (`delay-escalation-prolonged`). Vanilla state read via `sideinformation[side].casualtyratio` + `routedratio` + `battlepasseddays * 24 + uniStormSystem.Hour`.
+- Stance gating (L): `BattleStance.Defender` blocks `AttackNow` regardless of force ratio. Read from `BattleUnits.GetBattleType(alliance)` at decompile line 86095.
+
+**Catalog changes (`TacticalPlaybookCatalog`):**
+
+- 13 historical-figure `BattlePlanId` values renamed to tactical archetypes (`LeeEnvelopment → DoubleEnvelopment`, `ShermanManeuverFix → ManeuverAndFix`, etc.).
+- `FactionAffinity` + `FactionMismatchPenalty` removed entirely (H). Playbooks are pure tactical patterns; selection is personality + terrain + odds + composition + envelopment-pressure + delaying-pressure + stance.
+- New `StanceOf(BattlePlanId)` classifier (L) returns Offensive / Defensive / Neutral. `Select()` hard-skips playbooks incompatible with the side's `BattleStance` (defenders cannot pick offensive; attackers cannot pick defensive).
+- New `DelayingAffinity(BattlePlanId)` table (I) used to bias toward delay archetypes when doctrine outputs DelayingDefense.
+- New `DefensivePressure` flag (K) fires for any non-offensive doctrine outcome; adds `0.35 × DelayingAffinity(id)` bonus. Mostly subordinate to L's hard filter but retained for Meeting-stance edge cases.
 
 ## Pending
 

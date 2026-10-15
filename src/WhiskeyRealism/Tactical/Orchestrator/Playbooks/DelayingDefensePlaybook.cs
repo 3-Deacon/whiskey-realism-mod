@@ -4,7 +4,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// Joseph Johnston's Atlanta-campaign Fabian doctrine: disciplined
     /// fight-yield-fight-yield delay, preserving the force at the cost
     /// of ground. Distinct from Fallback (panic retreat), GenericDesperate
-    /// (last stand), and BufordCavalryScreenDelay (cavalry-led). Johnston
+    /// (last stand), and CavalryScreeningDelay (cavalry-led). Johnston
     /// applied this with infantry across the entire Atlanta campaign,
     /// trading ground from Dalton to Atlanta over four months.
     ///
@@ -14,10 +14,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// engagement. Won't fight on open ground (TerrainPreference low
     /// for Open), will fight on wooded/mountain (defensible).
     /// </summary>
-    public sealed class JohnstonFabianDelayPlaybook : TacticalPlaybook
+    public sealed class DelayingDefensePlaybook : TacticalPlaybook
     {
-        public JohnstonFabianDelayPlaybook() : base(
-            BattlePlanId.JohnstonFabianDelay,
+        public DelayingDefensePlaybook() : base(
+            BattlePlanId.DelayingDefense,
             "johnston-fabian-delay",
             new PersonalityFit(aggression: -0.2f, caution: 0.8f, audacity: 0.2f),
             new TerrainPreference(open: 0.3f, wooded: 0.8f, river: 0.7f, mountain: 0.8f),

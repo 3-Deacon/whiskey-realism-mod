@@ -3,18 +3,28 @@ using System;
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// The five outcomes of the reinforcement-opportunity decision.
+    /// Outcomes of the reinforcement-opportunity decision.
     /// </summary>
     public enum ReinforcementOpportunity
     {
         /// <summary>No specific opportunity — caller falls through to existing playbook selection.</summary>
         NoOpportunity = 0,
-        /// <summary>Strike now before enemy concentrates — fire DefeatInDetail playbook.</summary>
+        /// <summary>Strike now before enemy concentrates — fire envelopment playbook.</summary>
         AttackNow,
         /// <summary>Hold and wait for own reinforcements to swing the balance.</summary>
         WaitAndConsolidate,
         /// <summary>Dig in and refuse decisive engagement until the situation clarifies.</summary>
         DefensiveHold,
+        /// <summary>
+        /// Outnumbered with no near relief, but still defensible — fight Fabian:
+        /// forward screen, delay lines, refuse decisive engagement, force the
+        /// enemy to attack you on your terms while buying time. Historically
+        /// the dominant CW pattern when outnumbered (Johnston Atlanta campaign,
+        /// Lee in 1864). Distinct from <see cref="DefensiveHold"/> in that we
+        /// expect no parity relief and accept a long delaying action; distinct
+        /// from <see cref="WithdrawalToFightLater"/> in that we still hold ground.
+        /// </summary>
+        DelayingDefense,
         /// <summary>Orderly withdrawal — preserve force to fight from a better position later.</summary>
         WithdrawalToFightLater,
     }
@@ -88,14 +98,45 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public const float AggressionWindowOffset = 1.5f;
 
         // Maximum hours we'll tolerate waiting for own reinforcements before
-        // giving up on Wait and falling back to Hold/Withdraw. Aggressive
-        // commanders are impatient; cautious ones are patient.
-        public const float BaseMaxWaitHoursForOwn = 6.0f;
-        public const float AggressionWaitScale = 3.0f;  // cautious wait up to 9h, aggressive only 3h
+        // giving up on Wait and falling back to DelayingDefense/Withdraw.
+        // Tuned to CW timing (2026-05-23): historical commanders waited
+        // 1-2 days for reinforcements; the prior 6-9h cap was way too tight
+        // and forced premature withdrawal. Cautious commanders are most
+        // patient (McClellan would wait a week); aggressive ones short-circuit
+        // sooner (Jackson would attack outnumbered rather than wait).
+        public const float BaseMaxWaitHoursForOwn = 18.0f;
+        public const float AggressionWaitScale = 10.0f;  // cautious wait up to 28h, aggressive 18h
 
-        // Below this ratio, we're in withdrawal territory — outnumbered with
-        // no near-term relief is a recipe for piecemeal destruction.
-        public const float WithdrawalRatioThreshold = 0.85f;
+        // Base withdrawal threshold — personality-modulated by
+        // ComputeWithdrawalRatioThreshold (2026-05-23). The prior FLAT 0.85
+        // forced withdrawal at any 17%+ disadvantage regardless of commander
+        // temperament, which contradicts CW history (most outnumbered armies
+        // FOUGHT defensively rather than retreated). Aggressive commanders
+        // (Jackson, Hood) refuse to withdraw until severely outnumbered (~5:1);
+        // cautious commanders (McClellan) withdraw earlier (~2:1).
+        public const float BaseWithdrawalRatioThreshold = 0.55f;
+        public const float WithdrawalAggressionScale = 0.30f;
+
+        // ---- Casualty escalation (2026-05-23 / J) ----
+        //
+        // When DelayingDefense is the active outcome, the doctrine re-evaluates
+        // each tick. If casualties or routs cross personality-modulated
+        // thresholds, the outcome ESCALATES to WithdrawalToFightLater — the
+        // user's "should not let it become a decisive victory" rule.
+        //
+        //   aggressive (1.0)  → casualty 0.15, rout 0.30
+        //   mid       (0.5)   → casualty 0.10, rout 0.22
+        //   cautious  (0.0)   → casualty 0.05, rout 0.15
+        public const float BaseCasualtyEscalationThreshold = 0.05f;
+        public const float CasualtyAggressionScale = 0.10f;
+        public const float BaseRoutEscalationThreshold = 0.15f;
+        public const float RoutAggressionScale = 0.15f;
+
+        // If a side has been in DelayingDefense for > this many hours AND
+        // still outnumbered AND parity never comes, escalate to withdrawal.
+        // Represents the "we've bought enough time" judgment — at some point
+        // the delay window expires regardless of casualties.
+        public const float ProlongedDelayHoursThreshold = 6.0f;
 
         // Confidence floor — if intel quality is below this, fall back to
         // existing behavior (don't act on bad data). This is the ONLY gate
@@ -144,12 +185,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // Scale-invariant: only the ratio matters. Whether you have a 500-
             // man cavalry detachment or a 60,000-man field army, the question
             // is "do I have a clear advantage right now."
+            // Stance gate (2026-05-23 / L): defenders cannot output AttackNow
+            // regardless of force balance. Vanilla's GetBattleType makes this
+            // decision once at battle start from objective-points-held. The
+            // doctrine respects that — Scourge of War offai.cpp:1153-1159 does
+            // the same. If we're the defender, the worst-case favorable force
+            // balance still produces DefensiveHold (we hold what we have).
+            bool stanceAllowsAttack = ev.Stance != BattleStance.Defender;
+
             bool ratioAndForceOk = currentRatio >= attackThreshold;
             bool enemyNotGrowing = parityForEnemy >= 999f;
             bool defeatInDetailWindowOpen =
                 parityForEnemy <= 24f &&
                 parityForEnemy >= attackWindowHours;
-            if (ratioAndForceOk && (defeatInDetailWindowOpen || enemyNotGrowing))
+            if (stanceAllowsAttack && ratioAndForceOk && (defeatInDetailWindowOpen || enemyNotGrowing))
             {
                 string reason = enemyNotGrowing
                     ? "advantage-and-enemy-static"
@@ -179,12 +228,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     attackThreshold, attackWindowHours);
             }
 
-            // WITHDRAW TO FIGHT LATER: we're outnumbered NOW (ratio below
-            // WithdrawalRatioThreshold = 0.85) AND no own reinforcement is
-            // arriving in time. Preserve the force, give up the position,
-            // fight from a better one. Mirrors SoW's AttackEnemy → retreat
-            // path but adds the reinforcement-timing dimension SoW lacks.
-            if (currentRatio < WithdrawalRatioThreshold &&
+            // WITHDRAW TO FIGHT LATER: outnumbered SEVERELY (ratio below
+            // personality-modulated WithdrawalRatioThreshold) AND no own
+            // reinforcement arriving in time. Preserve the force, give up
+            // the position, fight from a better one.
+            //
+            // The personality scaling matters: Jackson at 0.44 ratio would
+            // delay-and-skirmish (DelayingDefense below), not withdraw.
+            // McClellan at the same ratio WOULD withdraw — same evidence,
+            // different doctrine output. This matches CW history.
+            float withdrawalThreshold = ComputeWithdrawalRatioThreshold(ev.CommanderAggression01);
+            if (currentRatio < withdrawalThreshold &&
                 parityForOwn > maxWaitHours)
             {
                 return new ReinforcementOpportunityDecision(
@@ -194,18 +248,115 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     attackThreshold, attackWindowHours);
             }
 
+            // DELAYING DEFENSE: outnumbered but NOT enough to require
+            // withdrawal, AND no near reinforcement to swing the balance.
+            // The historical CW pattern: forward screen, delay lines,
+            // refuse decisive engagement, force the enemy to attack you on
+            // your terms. Johnston Atlanta campaign, Lee 1864.
+            //
+            // ESCALATION (2026-05-23 / J): DelayingDefense is NOT static.
+            // If casualties mount or routs cascade while delaying, the
+            // doctrine escalates to WithdrawalToFightLater. The escalation
+            // thresholds are personality-modulated — aggressive commanders
+            // tolerate higher losses before bailing; cautious commanders
+            // pull back sooner.
+            //
+            // Fires when: ratio < attackThreshold (can't attack) AND
+            //   either no parity coming OR parity too far out for Wait
+            //   AND ratio >= withdrawalThreshold (not severely outnumbered)
+            // Caller routes to DelayingDefense playbook archetype +
+            // macroai = 2 (vanilla forms line).
+            if (currentRatio < attackThreshold &&
+                (parityForOwn >= 999f || parityForOwn > maxWaitHours))
+            {
+                // Check escalation triggers.
+                float casualtyThreshold = ComputeCasualtyEscalationThreshold(ev.CommanderAggression01);
+                float routEscalationThreshold = ComputeRoutEscalationThreshold(ev.CommanderAggression01);
+                bool casualtyEscalation = ev.OwnCasualtyRatio01 >= casualtyThreshold;
+                bool routEscalation = ev.OwnRoutedFraction01 >= routEscalationThreshold;
+                bool prolongedEngagement = ev.BattleHoursElapsed >= ProlongedDelayHoursThreshold
+                    && currentRatio < 0.50f
+                    && parityForOwn >= 999f;
+
+                if (casualtyEscalation || routEscalation || prolongedEngagement)
+                {
+                    string reason;
+                    if (casualtyEscalation) reason = "delay-escalation-casualties";
+                    else if (routEscalation) reason = "delay-escalation-routs";
+                    else reason = "delay-escalation-prolonged";
+                    return new ReinforcementOpportunityDecision(
+                        ReinforcementOpportunity.WithdrawalToFightLater,
+                        reason,
+                        currentRatio, parityForEnemy, parityForOwn,
+                        attackThreshold, attackWindowHours);
+                }
+
+                return new ReinforcementOpportunityDecision(
+                    ReinforcementOpportunity.DelayingDefense,
+                    "outnumbered-defensible-no-near-parity",
+                    currentRatio, parityForEnemy, parityForOwn,
+                    attackThreshold, attackWindowHours);
+            }
+
             // DEFENSIVE HOLD: fall-through default for any case that's NOT
-            // an attack opportunity, NOT a clear wait-for-relief, and NOT
-            // outnumbered enough to need withdrawal. Covers the user's
-            // 15k-vs-13k+7k scenario: own ahead now but future worse and
-            // no own relief → hold ground, refuse decisive engagement,
-            // attrit them as they arrive. The "current advantage, future
-            // disadvantage" middle band.
+            // an attack opportunity, NOT a clear wait-for-relief, NOT
+            // outnumbered enough to delay, and NOT outnumbered enough to
+            // withdraw. Covers the "current advantage, future disadvantage"
+            // middle band: own ahead now but future worse and no own relief →
+            // hold ground, refuse decisive engagement, attrit them as they
+            // arrive.
             return new ReinforcementOpportunityDecision(
                 ReinforcementOpportunity.DefensiveHold,
                 "hold-and-refuse-decisive",
                 currentRatio, parityForEnemy, parityForOwn,
                 attackThreshold, attackWindowHours);
+        }
+
+        /// <summary>
+        /// Personality-modulated withdrawal threshold. Aggressive commanders
+        /// almost never withdraw until severely outnumbered; cautious
+        /// commanders withdraw earlier. Formula:
+        ///   threshold = BaseWithdrawalRatioThreshold - aggression01 * WithdrawalAggressionScale
+        ///   aggressive (1.0) → 0.25  (won't withdraw until 4:1 odds)
+        ///   mid       (0.5) → 0.40  (withdraws at ~2.5:1 odds)
+        ///   cautious  (0.0) → 0.55  (withdraws at ~2:1 odds)
+        /// Clamped to [0.15, 0.70] to keep extreme personalities sane.
+        /// </summary>
+        public static float ComputeWithdrawalRatioThreshold(float aggression01)
+        {
+            float agg = Clamp01(aggression01);
+            float t = BaseWithdrawalRatioThreshold - agg * WithdrawalAggressionScale;
+            if (t < 0.15f) t = 0.15f;
+            if (t > 0.70f) t = 0.70f;
+            return t;
+        }
+
+        /// <summary>
+        /// Personality-modulated casualty ratio above which a side delaying
+        /// defensively escalates to withdrawal. Aggressive commanders tolerate
+        /// higher losses; cautious commanders pull back sooner.
+        ///   aggressive (1.0) → 0.15  (15% casualties before withdraw)
+        ///   mid       (0.5) → 0.10
+        ///   cautious  (0.0) → 0.05
+        /// </summary>
+        public static float ComputeCasualtyEscalationThreshold(float aggression01)
+        {
+            float agg = Clamp01(aggression01);
+            return BaseCasualtyEscalationThreshold + agg * CasualtyAggressionScale;
+        }
+
+        /// <summary>
+        /// Personality-modulated routed-brigade fraction above which a side
+        /// delaying defensively escalates to withdrawal. Routs are a sharper
+        /// signal than casualties — even moderate routs imply morale collapse.
+        ///   aggressive (1.0) → 0.30
+        ///   mid       (0.5) → 0.22
+        ///   cautious  (0.0) → 0.15
+        /// </summary>
+        public static float ComputeRoutEscalationThreshold(float aggression01)
+        {
+            float agg = Clamp01(aggression01);
+            return BaseRoutEscalationThreshold + agg * RoutAggressionScale;
         }
 
         public static float ComputeAttackThreshold(float commanderAggression01)

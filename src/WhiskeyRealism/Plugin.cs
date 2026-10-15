@@ -84,6 +84,91 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
         public static ConfigEntry<bool> EnableSinglePassObjectiveRecords;
+        public static ConfigEntry<bool> EnableVanillaMacroAiSync;
+        public static ConfigEntry<bool> EnableGeometricPlayTemplates;
+        // Worker-migration (2026-05-21): when ON, BuildObjectiveRecordsFromAggregate is
+        // computed on the orchestrator worker thread instead of inline on main during
+        // TacticalBattleSnapshotBuilder.Build. Default OFF until parity is verified in
+        // smoke; flip to default-on after observation that worker records match the
+        // legacy on-main records for a few cycles.
+        public static ConfigEntry<bool> EnableWorkerObjectiveRecords;
+        // Per-side cooldown for BattleGroupStancePatch.Apply. At high time compression
+        // (20x/50x), vanilla calls AdjustGroupAIStance many times per wallclock-second;
+        // the Postfix walks unitsused on each call even when no write happens. Cooldown
+        // gates the walk so it runs at most once per N seconds wallclock per side.
+        // Default 1.5s. 0 disables (preserves pre-2026-05-21 behavior).
+        public static ConfigEntry<float> BattleGroupStanceMinIntervalSeconds;
+        // Regimental intelligence (2026-05-21). When the orchestrator worker
+        // detects a regiment is being flanked, pressed on multiple sides, or
+        // isolated from its brigade, the doctrine produces a recommended
+        // action (fall back, retreat, wheel). This flag controls whether main
+        // thread actually WRITES the order. Default OFF — telemetry-only mode
+        // emits TacticalRegimentalIntel decisions to tactical.jsonl without
+        // touching vanilla state. Flip to true once smoke verifies the
+        // decisions look sensible for known scenarios (flanked regiments,
+        // isolated battalions).
+        public static ConfigEntry<bool> EnableRegimentalIntelligenceWrites;
+        // Friendly-path blocking gate (2026-05-21, ported from Scourge of War's
+        // offcmds.cpp three-layer waypoint-issuance gate). When ON, every
+        // SetWaypoint call (brigade-posture + regimental-intelligence paths)
+        // first consults TacticalFriendlyPathBlockingGate. If the proposed
+        // waypoint would cross a friendly brigade's path or overlap its
+        // destination, the write is skipped. Default OFF until smoke verifies
+        // false-positive rate is acceptable; turning ON should eliminate
+        // remaining "H formation" crossings beyond what the opportunity-override
+        // fix achieves.
+        public static ConfigEntry<bool> EnableFriendlyPathBlockingGate;
+        // Friendly-fire detection (2026-05-21, ports Scourge unitai.cpp:1484
+        // StopOverlapTarget). Telemetry-only — emits TacticalFriendlyFireBlocked
+        // events when a friendly sits in the firing line between a regiment
+        // and its in-range enemy. Default OFF.
+        public static ConfigEntry<bool> EnableFriendlyFireDetection;
+        // Opportunity-hysteresis minimum hold time (2026-05-21). Once
+        // TacticalReinforcementOpportunityDoctrine commits to a category
+        // (AttackNow / DefensiveHold / WithdrawalToFightLater / etc.),
+        // hold that decision for at least N wallclock seconds before
+        // allowing transition. Prevents the ~500ms-1s thrash observed in
+        // smoke when ratio inputs hovered near category thresholds.
+        // Default 6.0s. Escalations to WithdrawalToFightLater bypass the
+        // hold (situation got materially worse — react immediately).
+        public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
+        // Brigade task-commitment hold (2026-05-22, ports Scourge offai.cpp:343
+        // `if (base.Orders()) return` + offai.cpp:816 CourTime throttle). Once
+        // a brigade is given a task waypoint (probe / screen / guard-flank /
+        // etc), suppress re-issuance of the SAME task for N seconds. Different
+        // task bypasses (legitimate role change). Prevents the "set up line,
+        // move it, set up again" churn observed when probe targets drift
+        // across cycles. Default 12.0s wallclock.
+        public static ConfigEntry<float> BrigadeTaskHoldSeconds;
+        // Artillery panic-retreat doctrine (2026-05-21, ports Scourge of War's
+        // artyai.cpp:180-225 panic logic). When ON, walks each brigade's
+        // attached artillery sub-units. If an artillery unit is within panic
+        // distance of an enemy AND has no friendly infantry/cavalry interposed
+        // AND the enemy is not routed/retreating, issues a retreat waypoint
+        // backward. Handles BOTH standalone artillery brigades AND artillery
+        // attached to infantry brigades — vanilla's CheckAIBombardment only
+        // runs for stance 3/4 so this fills the gap for all other stances.
+        // Default OFF.
+        // Comprehensive artillery audit (2026-05-21, ports Scourge artyai.cpp
+        // full lifecycle). Vanilla GT's CheckAIBombardment only runs for
+        // ai_stance 3/4 — every other stance leaves artillery on pure vanilla
+        // AI which dueles at point-blank range without limber/retreat
+        // decisions. When ON, BattleGroupStancePatch.ApplyArtilleryAudit
+        // walks all artillery sub-units (standalone batteries + brigade-
+        // attached batteries) for the patch's alliance, runs
+        // TacticalArtilleryMicroDoctrine, and applies Limber / Unlimber /
+        // Retreat / WheelToBestThreat / ConserveAmmo actions via the
+        // existing TacticalArtilleryApplier write surface. Per-unit
+        // hysteresis prevents thrash. Default OFF for safety.
+        public static ConfigEntry<bool> EnableArtilleryAllStanceAudit;
+        // Artillery point-blank waypoint veto (2026-05-22). Postfix on
+        // BattleUnits.SetWaypoint detects artillery being sent toward enemy
+        // within 60m and overwrites with a 200m retreat backward. Closes the
+        // timing gap between vanilla's forward-move and our 1.5s BGS audit.
+        // Default-on per the 2026-05-18 default-on policy for behavioral
+        // writes.
+        public static ConfigEntry<bool> EnableArtilleryWaypointVeto;
+        public static ConfigEntry<float> ArtilleryAuditMinHoldSeconds;
         public static ConfigEntry<bool> EnableTacticalOrchestratorWorker;
         public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
         public static ConfigEntry<int> TacticalDeploymentTerrainMaxCandidates;
@@ -418,8 +503,8 @@ namespace WhiskeyRealism
             TacticalHeavyReviewMinRealtimeSeconds = Config.Bind(
                 "TacticalTickOptimization",
                 "Heavy Ledger Review Min Realtime Seconds",
-                2.0f,
-                "Minimum real seconds between heavy planning passes under time compression. First tick still runs; urgent recovery still uses the latest snapshot plus live vanilla reads.");
+                4.0f,
+                "Minimum real seconds between heavy planning passes under time compression (default 4.0; raised from 2.0 on 2026-05-20 to halve heavy-rebuild rate at 10×/20× compression where the snapshot rebuild was the dominant orchestrator-tick cost). First tick still runs; urgent recovery still uses the latest snapshot plus live vanilla reads.");
             EnableTacticalBattleOrchestrator = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Battle Orchestrator",
@@ -504,6 +589,116 @@ namespace WhiskeyRealism
                 + "Set false to roll back to synchronous on-main-thread analysis if "
                 + "a regression appears. Performance characteristics documented in "
                 + "docs/telemetry.md once smoke-verified.");
+            EnableWorkerObjectiveRecords = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Worker Objective Records",
+                false,
+                "Computes BuildObjectiveRecordsFromAggregate on the orchestrator worker "
+                + "thread instead of inline on main during snapshot build. Removes ~5ms "
+                + "per side per heavy-gate fire from the main-thread frame budget at the "
+                + "cost of one-cycle staleness on the observation→record path. Default "
+                + "OFF (2026-05-21) until smoke verifies worker records match the legacy "
+                + "on-main records. Main always falls back to the legacy on-main builder "
+                + "when the worker has not yet published records for a side (first cycle "
+                + "of a battle, suppressed side, or worker fault).");
+            BattleGroupStanceMinIntervalSeconds = Config.Bind(
+                "Tactical Orchestrator",
+                "Battle Group Stance Min Interval Seconds",
+                1.5f,
+                "Per-side wallclock cooldown for BattleGroupStancePatch.Apply. At 20x/50x "
+                + "compression vanilla calls AdjustGroupAIStance N× more often per wallclock "
+                + "— our Postfix walks unitsused on each call even when no write happens. "
+                + "Cooldown gates the walk so it runs at most once per N seconds wallclock "
+                + "per side. Default 1.5s. 0 disables. Smoke at 20× compression showed "
+                + "the patch contributing ~22ms/sec of sustained main-thread cost before "
+                + "the cooldown; cooldown drops it to ~3ms/sec at 1.5s while preserving "
+                + "tactical AI responsiveness (writes are rare; vanilla preserves stance "
+                + "between fires).");
+            EnableArtilleryWaypointVeto = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Artillery Waypoint Veto",
+                true,
+                "When ON, Postfix on BattleUnits.SetWaypoint detects artillery "
+                + "being sent toward a destination within 60m of any visible "
+                + "enemy and overwrites with a 200m retreat backward. Closes "
+                + "the timing gap between vanilla's autonomous forward-moves "
+                + "and Whiskey's 1.5s artillery audit cycle. Default ON "
+                + "(behavioral-write default-on policy). Set false for rollback.");
+            EnableArtilleryAllStanceAudit = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Artillery All-Stance Audit",
+                false,
+                "When ON, BattleGroupStancePatch walks all artillery sub-units "
+                + "(standalone batteries + brigade-attached batteries) for the "
+                + "patch's alliance, runs TacticalArtilleryMicroDoctrine, and "
+                + "applies Limber / Unlimber / Retreat / Wheel / ConserveAmmo "
+                + "actions through TacticalArtilleryApplier. Ports Scourge of "
+                + "War's full artyai.cpp lifecycle. Fills the gap left by B7 "
+                + "(which only runs for ai_stance 3/4 via vanilla's "
+                + "CheckAIBombardment hook). Default OFF.");
+            ArtilleryAuditMinHoldSeconds = Config.Bind(
+                "Tactical Orchestrator",
+                "Artillery Audit Min Hold Seconds",
+                3.0f,
+                "Per-artillery-unit hysteresis hold time. Once an action is "
+                + "applied to an artillery unit (e.g. Retreat), hold that "
+                + "decision for at least N wallclock seconds before issuing "
+                + "another. Mirrors Scourge's tier-priority cascade pattern. "
+                + "Default 3.0s. Lowering increases responsiveness at the "
+                + "cost of more frequent re-writes during borderline conditions.");
+            BrigadeTaskHoldSeconds = Config.Bind(
+                "Tactical Orchestrator",
+                "Brigade Task Hold Seconds",
+                12.0f,
+                "Scourge-style brigade task-commitment hold. Once a brigade is "
+                + "issued a task waypoint (probe/screen/guard-flank/etc), the "
+                + "same task can't be re-issued for N seconds. Different task "
+                + "bypasses the hold (legitimate role change). Prevents the "
+                + "'set up line, move it, set up again' churn observed when "
+                + "probe targets drift across cycles. Default 12.0s wallclock "
+                + "(~5-10 game-minutes at 25-50× compression). Set to 0 to disable.");
+            OpportunityHysteresisMinHoldSeconds = Config.Bind(
+                "Tactical Orchestrator",
+                "Opportunity Hysteresis Min Hold Seconds",
+                6.0f,
+                "Anti-thrash hold time for TacticalReinforcementOpportunityDoctrine. "
+                + "Once the doctrine commits to a category (AttackNow / DefensiveHold "
+                + "/ WithdrawalToFightLater / WaitAndConsolidate), hold that decision "
+                + "for at least N wallclock seconds before allowing transition. Default "
+                + "6.0s. Escalations to WithdrawalToFightLater bypass the hold to keep "
+                + "reaction time on collapse scenarios. Set to 0 to disable.");
+            EnableFriendlyFireDetection = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Friendly Fire Detection",
+                false,
+                "Telemetry-only detector for friendly-fire risk. When ON, for "
+                + "each own regiment with an in-range enemy, checks whether a "
+                + "friendly sits in the fire corridor between the regiment and "
+                + "its target. Emits TacticalFriendlyFireBlocked events. No "
+                + "behavioral writes — purely diagnostic. Default OFF.");
+            EnableFriendlyPathBlockingGate = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Friendly Path Blocking Gate",
+                false,
+                "Ports Scourge of War's three-layer waypoint-issuance gate "
+                + "(angle cones, destination overlap, brigade cohesion) into "
+                + "every SetWaypoint call. When ON, refuses to write waypoints "
+                + "that would cross a friendly brigade's frontal cone or overlap "
+                + "a sibling regiment's destination. Default OFF until smoke "
+                + "verifies false-positive rate; enable to eliminate remaining "
+                + "H-formation crossings.");
+            EnableRegimentalIntelligenceWrites = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Regimental Intelligence Writes",
+                false,
+                "Master switch for the regimental-intelligence layer's vanilla writes. "
+                + "When ON, the worker's per-regiment decisions (fall back when flanked, "
+                + "retreat when pressed on multiple sides, wheel to face flank) issue "
+                + "actual SetWaypoint / SetGroupFormation orders. When OFF (default), "
+                + "the doctrine still runs and emits TacticalRegimentalIntel telemetry "
+                + "events for diagnostic verification, but no vanilla writes happen. "
+                + "Smoke decisions-only first; flip to true once tactical.jsonl confirms "
+                + "the right regiments are being flagged for the right reasons.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",
@@ -545,6 +740,23 @@ namespace WhiskeyRealism
                 "from BattleUnits.scheduledarrival + sideinformation.totalactiveforce. Considers current force ratio, per-arrival timing, and commander " +
                 "aggression. Telemetry: TacticalReinforcementOpportunity events with currentRatio, enemyParityHours, ownParityHours, threshold, window. " +
                 "Disable to fall back to the previous purely-current-strength playbook selection.");
+            EnableVanillaMacroAiSync = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Macro AI Sync",
+                true,
+                "Default ON. Writes Whiskey's doctrine output (AttackNow / DefensiveHold / WaitAndConsolidate / WithdrawalToFightLater) to " +
+                "BattleUnits.sideinformation[side].macroai via a Prefix on AIBattle.CheckGlobalAIStrategy. This lets vanilla's AdjustGroupAIStance " +
+                "drive per-group ai_stance for brigades we don't have explicit roles for — the line of battle then forms via vanilla's macroai==2 " +
+                "cascade. Skips for player-controlled sides (honors GameVars.playeralliance + ai_vs_ai). Disable for rollback.");
+            EnableGeometricPlayTemplates = Config.Bind(
+                "Tactical",
+                "Enable Geometric Play Templates",
+                true,
+                "Default ON. Stage 2 of the Scourge-of-War-pattern integration. When the army selects a playbook (DoubleEnvelopment / PreparedDefense / etc), " +
+                "look up its geometric template — a set of army-relative rectangles, each tagged with a tactical purpose (LeftWing / Center / Reserve / etc.) — " +
+                "project to world coordinates (army centroid + enemy direction), and assign corps to rects by closest-distance. The role allocator then " +
+                "uses the rect kind as the role basis instead of per-brigade sector evidence. Falls back to evidence-based allocation when no template is " +
+                "available for the current plan or positions cannot be computed.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",

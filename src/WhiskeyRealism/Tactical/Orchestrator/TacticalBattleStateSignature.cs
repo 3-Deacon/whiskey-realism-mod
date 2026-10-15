@@ -37,7 +37,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int side1MacroAI,
             bool anySideInRetreatOrEOD,
             int majorObjectiveAnchorHash,
-            bool anyInterruptedPathsOrNewContact,
+            int interruptedContactBucket,
             int battleHourBucket)
         {
             ActiveUnitCount = activeUnitCount < 0 ? 0 : activeUnitCount;
@@ -47,7 +47,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Side1MacroAI = side1MacroAI;
             AnySideInRetreatOrEOD = anySideInRetreatOrEOD;
             MajorObjectiveAnchorHash = majorObjectiveAnchorHash;
-            AnyInterruptedPathsOrNewContact = anyInterruptedPathsOrNewContact;
+            InterruptedContactBucket = interruptedContactBucket < 0 ? 0 : interruptedContactBucket;
             BattleHourBucket = battleHourBucket;
         }
 
@@ -58,7 +58,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int Side1MacroAI { get; }
         public bool AnySideInRetreatOrEOD { get; }
         public int MajorObjectiveAnchorHash { get; }
-        public bool AnyInterruptedPathsOrNewContact { get; }
+        // Bucket of (count of units with pathinterrupted OR groupenemiesinrange>0) from
+        // a bounded scan. Replaces the prior volatile bool (2026-05-22) — the bool
+        // flipped every cycle once contact was made because groupenemiesinrange
+        // oscillates as units enter/exit fire range, causing heavy-gate churn.
+        // Bucket changes only on meaningful contact-density shifts.
+        // Bucket ranges: 0 = 0 contacts, 1 = 1-3, 2 = 4-10, 3 = 11+.
+        public int InterruptedContactBucket { get; }
         public int BattleHourBucket { get; }
 
         public bool SignatureEquals(TacticalBattleStateSignature other)
@@ -76,7 +82,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 && Side1MacroAI == other.Side1MacroAI
                 && AnySideInRetreatOrEOD == other.AnySideInRetreatOrEOD
                 && MajorObjectiveAnchorHash == other.MajorObjectiveAnchorHash
-                && AnyInterruptedPathsOrNewContact == other.AnyInterruptedPathsOrNewContact;
+                && InterruptedContactBucket == other.InterruptedContactBucket;
         }
     }
 }

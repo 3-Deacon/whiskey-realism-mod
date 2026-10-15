@@ -21,6 +21,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                                         // odds spike sharply -> escalate to Exploit
                                         // via replan (picks a more aggressive
                                         // playbook for the new sector posture).
+        // Opportunity-change trigger (added 2026-05-21). The army's
+        // ReinforcementOpportunityDoctrine has transitioned to a materially-
+        // different category (e.g. DefensiveHold → WithdrawalToFightLater).
+        // Without this trigger, opportunity decisions were computed every
+        // cycle but never drove the orchestrator's plan to replan — brigades
+        // kept executing their initial plan's roles even when the army's
+        // analysis said "withdraw" or "attack now."
+        OpportunityChange,
     }
 
     public readonly struct ReplanTriggerInput
@@ -40,7 +48,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float mainEffortLocalOdds = 1f,
             float mainEffortLocalOddsHistory = 1f,
             float bestNonMainEffortSectorOdds = 0f,
-            float currentMainEffortOdds = 0f)
+            float currentMainEffortOdds = 0f,
+            ReinforcementOpportunity currentOpportunity = ReinforcementOpportunity.NoOpportunity,
+            ReinforcementOpportunity lastReplanOpportunity = ReinforcementOpportunity.NoOpportunity)
         {
             PlanAgeSeconds = planAgeSeconds;
             CurrentPhase = currentPhase;
@@ -57,6 +67,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             MainEffortLocalOddsHistory = mainEffortLocalOddsHistory;
             BestNonMainEffortSectorOdds = bestNonMainEffortSectorOdds;
             CurrentMainEffortOdds = currentMainEffortOdds;
+            CurrentOpportunity = currentOpportunity;
+            LastReplanOpportunity = lastReplanOpportunity;
         }
 
         public float PlanAgeSeconds { get; }
@@ -79,6 +91,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float MainEffortLocalOddsHistory { get; }   // sector odds at last replan / phase
         public float BestNonMainEffortSectorOdds { get; }  // strongest off-axis sector odds
         public float CurrentMainEffortOdds { get; }        // for the off-axis comparison
+
+        // Opportunity-change trigger inputs (added 2026-05-21). CurrentOpportunity is
+        // the latest decision from TacticalReinforcementOpportunityDoctrine;
+        // LastReplanOpportunity is what it was at the last successful replan (or at
+        // plan creation). Differing values fire ReplanTrigger.OpportunityChange.
+        public ReinforcementOpportunity CurrentOpportunity { get; }
+        public ReinforcementOpportunity LastReplanOpportunity { get; }
     }
 
     public static class ArmyReplanTriggers
@@ -175,6 +194,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     i.CurrentMainEffortOdds > 0f &&
                     i.BestNonMainEffortSectorOdds - i.CurrentMainEffortOdds >= BreakthroughOpportunityMargin)
                     return ReplanTrigger.BreakthroughOpportunity;
+            }
+
+            // Opportunity-change trigger (2026-05-21). Lowest priority — defensive
+            // and offensive triggers above handle their concrete state changes
+            // first. This catches "the situation has shifted enough that the
+            // doctrine returned a different opportunity category" cases that the
+            // specific triggers miss. ArmyTickCycle's minReplanSeconds cooldown
+            // prevents thrashing when the opportunity oscillates.
+            if (i.CurrentOpportunity != i.LastReplanOpportunity)
+            {
+                return ReplanTrigger.OpportunityChange;
             }
 
             return ReplanTrigger.None;

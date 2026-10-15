@@ -5,10 +5,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// for outnumbered audacious commanders in mountain or river terrain.
     /// Speed and surprise compensate for force disadvantage.
     /// </summary>
-    public sealed class JacksonValleyShufflePlaybook : TacticalPlaybook
+    public sealed class MobileFlankMarchPlaybook : TacticalPlaybook
     {
-        public JacksonValleyShufflePlaybook() : base(
-            BattlePlanId.JacksonValleyShuffle,
+        public MobileFlankMarchPlaybook() : base(
+            BattlePlanId.MobileFlankMarch,
             "jackson-valley-shuffle",
             new PersonalityFit(aggression: 0.7f, caution: -0.5f, audacity: 0.9f),
             new TerrainPreference(open: 0.5f, wooded: 0.7f, river: 0.7f, mountain: 0.9f),

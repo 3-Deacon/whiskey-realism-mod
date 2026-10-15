@@ -3,6 +3,51 @@
 **Default profile is `TacticalTuning`** as of 2026-05-18 (user direction): battles produce diagnostic sidecars by default. Disk usage is bounded by `Max Tuning Log MB` (default 250) and retention is capped to the newest 2 sessions, so this won't grow without limit. Set `Logging Profile = Off` in `<GTCW>/BepInEx/config/dev.kyle.whiskey-realism.cfg` if you want quiet operation.
 Tuning profiles write under `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session-id>/`.
 
+## Event tag inventory (2026-05-23)
+
+Three new event tags registered in `TelemetryTagPolicy` for the F + G-Stage2 work:
+
+| Event | Category | Source |
+|---|---|---|
+| `TacticalDirectChildIntent` | Decision | `ArmyOrchestrator.EmitDirectChildIntentTelemetry` — per-side role distribution (main/sup/fix/scrn/rL/rR/rsrv/fbck/unk counts + per-child `ChildId=Role:Sector` detail + plan/phase/opportunity/currentRatio). Signature-deduped + 5s throttle. |
+| `TacticalMacroAiOverride` | Write | `BattleMacroAIOverridePatch.EmitWriteTelemetry` — fires when F sync writes a NEW vanilla `sideinformation[side].macroai` value (skip-if-correct otherwise). Includes previous + new value + opportunity + currentRatio + attackThreshold. Signature-deduped + 5s throttle. |
+| `TacticalPlayExecution` | Decision | `PlayExecutorRuntime.EmitPlayExecutionTelemetry` — per-side play summary when geometric play assignments change. Fields: side, plan, template name, rect count, assigned count, army/enemy centroid X/Z, frontage, per-corps `ChildId=RectKind` assignments. Signature-deduped + 10s throttle. |
+
+Performance-scope additions (visible in `performance.jsonl`):
+
+| Scope | Threshold | Source |
+|---|---|---|
+| `tactical.patch.macroai-override` | 2.0ms | F — Harmony Prefix on `AIBattle.CheckGlobalAIStrategy` |
+| `tactical.play-executor.zone-assignments` | 5.0ms | G-Stage2 — per-side play projection + corps assignment (gated by 3s recompute interval) |
+
+## Event tag inventory (2026-05-22)
+
+Earlier tags registered for the Scope B refactor — all route to `tactical.jsonl`:
+
+| Event | Category | Source |
+|---|---|---|
+| `TacticalStanceWrite` | Write | `TacticalStanceWriter.EnsureStance` — every vanilla `ChangeStance` write by mod |
+| `TacticalArtilleryDecision` | Decision | `TacticalArtilleryApplier` + B7 + all-stance audit — per-artillery cycle decision (Limber/Unlimber/Retreat/Wheel/ConserveAmmo/Fire/Preserve) |
+| `TacticalBrigadeTaskHold` | Gate | `BattleCommandPostureExecutorPatch.EmitTaskHoldSuppressedTelemetry` — same-task re-issuance suppressed within hold window |
+| `TacticalBrigadePosture` | Decision | Brigade-posture opportunity override telemetry |
+| `TacticalRegimentalIntel` | Decision | `BattleGroupStancePatch.EmitRegimentalIntelTelemetry` — per-regiment non-NoAction decisions (FallBack/RetreatToBrigade/Wheel) |
+| `TacticalRegimentalControl` | Decision | `BattleGroupStancePatch.EmitRegimentalControlEvent` — applied regimental actions (Scope B: `transition=applied`, no more claim/release pattern) |
+| `TacticalRegimentalGate` | Trace | Reserved tag (was for the removed `PerformAIActionDLCWLPatch`; retained for compatibility) |
+| `TacticalFriendlyPathBlocked` | Gate | Path-block events. Reason `destination-overlap-sibling-waypoint` indicates the sibling-scoped fix (2026-05-22) is firing — cross-brigade overlaps no longer block. |
+| `TacticalFriendlyFireBlocked` | Gate | Friendly in firing-line corridor (telemetry-only, no behavioral writes) |
+
+OnceLog-routed entries (emit via `Plugin.Log.LogInfo` with `[once:...]` prefix; the first non-once tag is parsed by `TelemetryTagPolicy.Route`):
+
+| Once tag prefix | Source | Routing |
+|---|---|---|
+| `tactical-stance-write` | `TacticalStanceWriter.EnsureStance` | Inherits `TacticalStanceWrite` (Write) routing |
+| `tactical-formation-write` | `TacticalFormationWriter` | Default OnceLog |
+| `tactical-combatbehavior-write` | `TacticalCombatBehaviorWriter` | Default OnceLog |
+| `tactical-brigade-task-hold:suppressed` | Task-hold suppressions | Inherits `TacticalBrigadeTaskHold` (Gate) routing |
+| `tactical-orch:frame-coalesce` | Heavy-gate Layer 2 frame coalescing | Default OnceLog |
+
+
+
 Profiles:
 - `Off`
 - `TacticalTuning`

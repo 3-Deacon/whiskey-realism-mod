@@ -5,9 +5,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// <summary>
     /// Test-friendly partial — pure state machine, no BepInEx/OnceLog/Plugin.Log references.
     ///
-    /// Owns two per-side TacticalBattleOrchestrator roots (side0 = CSA alliance 0,
-    /// side1 = USA alliance 1). On battle start the player-CIC side is suppressed (null)
-    /// so we never retask units the player is personally commanding.
+    /// Owns two per-side TacticalBattleOrchestrator roots, keyed by allianceId
+    /// 0 or 1. The alliance-id-to-nation mapping is NOT fixed: it is per-battle,
+    /// populated by vanilla from the actual combatants
+    /// (BattleUnits.alliance[side] = combatant alliance id, see decompile
+    /// /tmp/gt_src/asm/Assembly-CSharp.decompiled.cs:19898 and adjacent).
+    /// CSA can be side 0 OR side 1 depending on who deploys first / battle
+    /// type / scenario. Historical NB: "Army of the Potomac" was Confederate
+    /// (May 1861 – March 1862, Beauregard then Joe Johnston) before it was
+    /// renamed the Army of Northern Virginia; the Union Army of the Potomac
+    /// dates from August 1861. Both sides used the same name briefly in 1861.
+    /// On battle start the player-CIC side is suppressed (null) so we never
+    /// retask units the player is personally commanding.
     ///
     /// Runtime entry points (OnBattleStart / OnBattleEnd / Tick) live in the runtime
     /// partial: TacticalBattleCoordinatorRuntime.cs (excluded from the test assembly).

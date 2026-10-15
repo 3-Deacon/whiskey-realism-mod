@@ -1,18 +1,19 @@
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// Aggressive opening, methodical execution, but loses nerve mid-battle.
-    /// Prefers favorable initial odds and open terrain to deploy a wide flank arm.
+    /// High aggression, low caution, audacious — desperate frontal assaults
+    /// regardless of force position. Reserve commit triggers early; willing
+    /// to spend forces.
     /// </summary>
-    public sealed class HookerFlankDeparturePlaybook : TacticalPlaybook
+    public sealed class FrontalShockAssaultPlaybook : TacticalPlaybook
     {
-        public HookerFlankDeparturePlaybook() : base(
-            BattlePlanId.HookerFlankDeparture,
-            "hooker-flank-departure",
-            new PersonalityFit(aggression: 0.6f, caution: -0.2f, audacity: -0.4f),
+        public FrontalShockAssaultPlaybook() : base(
+            BattlePlanId.FrontalShockAssault,
+            "hood-frontal-assault",
+            new PersonalityFit(aggression: 0.9f, caution: -0.7f, audacity: 0.6f),
             new TerrainPreference(open: 0.7f, wooded: 0.6f, river: 0.5f, mountain: 0.4f),
-            new OddsRange(min: 1.0f, max: 1.5f),
-            reserveCommitTriggerOdds: 1.3f)
+            new OddsRange(min: 0.5f, max: 1.2f),
+            reserveCommitTriggerOdds: 1.0f)
         { }
 
         public override TacticalBattlePlan Instantiate(PlaybookContext ctx) =>

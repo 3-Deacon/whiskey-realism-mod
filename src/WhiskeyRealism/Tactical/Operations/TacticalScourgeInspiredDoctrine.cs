@@ -708,6 +708,26 @@ namespace WhiskeyRealism.Tactical.Operations
             TacticalArtilleryAmmoMission ammo = SelectAmmo(input);
             if (!input.HasEnemy)
                 return new TacticalArtilleryMicroDecision(TacticalArtilleryMicroAction.Preserve, TacticalArtilleryAmmoMission.Preserve, "no-enemy");
+
+            // Point-blank panic (2026-05-22 user-reported bug fix). Smoke
+            // showed artillery at 0-50m from enemy infantry with support-count
+            // 14+ — Scourge's "friendly closer to artillery than enemy" test
+            // counted friendlies BEHIND artillery as "support," which doesn't
+            // protect from infantry in front. At true point-blank (≤60m),
+            // artillery is in immediate danger regardless of nominal support
+            // count — Civil War batteries overrun at this range are doctrinally
+            // lost. Force limber-or-retreat unconditionally. Runs BEFORE the
+            // ammo conservation check so a battery at point blank doesn't
+            // sit and conserve ammo while being charged.
+            if (!input.EnemyRoutedOrRetreating
+                && input.EnemyCloseDistance > 0f
+                && input.EnemyCloseDistance <= 60f)
+            {
+                if (input.LimberState == TacticalArtilleryLimberState.Limbered)
+                    return new TacticalArtilleryMicroDecision(TacticalArtilleryMicroAction.Retreat, TacticalArtilleryAmmoMission.Preserve, "point-blank-retreat");
+                return new TacticalArtilleryMicroDecision(TacticalArtilleryMicroAction.Limber, TacticalArtilleryAmmoMission.Preserve, "point-blank-limber");
+            }
+
             if (input.AmmoRatio01 < 0.10f)
                 return new TacticalArtilleryMicroDecision(TacticalArtilleryMicroAction.ConserveAmmo, TacticalArtilleryAmmoMission.Preserve, "low-ammo");
             if (!input.EnemyRoutedOrRetreating &&

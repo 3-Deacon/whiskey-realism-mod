@@ -6,10 +6,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// Confederate Army of Northern Virginia's preferred shape — fix one
     /// flank, swing the other into the enemy rear.
     /// </summary>
-    public sealed class LeeEnvelopmentPlaybook : TacticalPlaybook
+    public sealed class DoubleEnvelopmentPlaybook : TacticalPlaybook
     {
-        public LeeEnvelopmentPlaybook() : base(
-            BattlePlanId.LeeEnvelopment,
+        public DoubleEnvelopmentPlaybook() : base(
+            BattlePlanId.DoubleEnvelopment,
             "lee-envelopment",
             new PersonalityFit(aggression: 0.8f, caution: -0.4f, audacity: 0.7f),
             new TerrainPreference(open: 0.7f, wooded: 0.8f, river: 0.5f, mountain: 0.4f),

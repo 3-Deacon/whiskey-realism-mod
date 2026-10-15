@@ -13,24 +13,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public static TacticalPlaybookCatalog SeedCatalog()
         {
             var c = new TacticalPlaybookCatalog();
-            c.Register(new LeeEnvelopmentPlaybook());
-            c.Register(new JacksonValleyShufflePlaybook());
-            c.Register(new McClellanPreparedDefensePlaybook());
-            c.Register(new ShermanManeuverFixPlaybook());
-            c.Register(new GrantContinuousAttritionPlaybook());
-            c.Register(new LongstreetDefensiveOverslopePlaybook());
-            c.Register(new HookerFlankDeparturePlaybook());
-            c.Register(new HoodFrontalAssaultPlaybook());
-            c.Register(new BurnsideForcedAssaultPlaybook());
-            c.Register(new BraggIndecisiveCommitPlaybook());
+            c.Register(new DoubleEnvelopmentPlaybook());
+            c.Register(new MobileFlankMarchPlaybook());
+            c.Register(new PreparedDefensePlaybook());
+            c.Register(new ManeuverAndFixPlaybook());
+            c.Register(new ContinuousAttritionPlaybook());
+            c.Register(new ReverseSlopeDefensePlaybook());
+            c.Register(new WideFlankApproachPlaybook());
+            c.Register(new FrontalShockAssaultPlaybook());
+            c.Register(new ForcedFrontalAttackPlaybook());
+            c.Register(new HesitatedCommitPlaybook());
             c.Register(new GenericAggressivePlaybook());
             c.Register(new GenericCautiousPlaybook());
             c.Register(new GenericMethodicalPlaybook());
             c.Register(new GenericDesperatePlaybook());
-            c.Register(new BufordCavalryScreenDelayPlaybook());
-            c.Register(new ForrestCavalryRaidPlaybook());
+            c.Register(new CavalryScreeningDelayPlaybook());
+            c.Register(new CavalryRaidPlaybook());
             c.Register(new MeetingEngagementPlaybook());
-            c.Register(new JohnstonFabianDelayPlaybook());
+            c.Register(new DelayingDefensePlaybook());
             return c;
         }
     }

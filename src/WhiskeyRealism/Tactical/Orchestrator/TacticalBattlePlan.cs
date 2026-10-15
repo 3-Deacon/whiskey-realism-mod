@@ -2,37 +2,45 @@ using System;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
+    /// <summary>
+    /// Generic tactical archetypes (renamed 2026-05-23 from historical-figure
+    /// labels: "LeeEnvelopment" / "ShermanManeuverFix" / etc. The historical
+    /// names leaked into the selection logic as FactionAffinity bias and
+    /// caused incorrect mental models — playbooks are pure tactical patterns
+    /// available to ANY commander on EITHER side whose personality + force
+    /// situation fits. Selection is fully personality + terrain + odds +
+    /// composition driven; no faction lock or commander-name shortcut.
+    /// </summary>
     public enum BattlePlanId
     {
         Unknown = 0,
-        LeeEnvelopment,
-        JacksonValleyShuffle,
-        McClellanPreparedDefense,
-        ShermanManeuverFix,
-        GrantContinuousAttrition,
-        LongstreetDefensiveOverslope,
-        HookerFlankDeparture,
-        HoodFrontalAssault,
-        BurnsideForcedAssault,
-        BraggIndecisiveCommit,
+        DoubleEnvelopment,          // converging two-wing envelopment (was LeeEnvelopment)
+        MobileFlankMarch,           // fast operational flank (was JacksonValleyShuffle)
+        PreparedDefense,            // methodical defensive setup (was McClellanPreparedDefense)
+        ManeuverAndFix,             // fix center, maneuver wing to flank (was ShermanManeuverFix)
+        ContinuousAttrition,        // sustained attritional pressure (was GrantContinuousAttrition)
+        ReverseSlopeDefense,        // defensive reverse-slope hold (was LongstreetDefensiveOverslope)
+        WideFlankApproach,          // single wide-arc flank march (was HookerFlankDeparture)
+        FrontalShockAssault,        // aggressive frontal commit (was HoodFrontalAssault)
+        ForcedFrontalAttack,        // frontal attack under disadvantage (was BurnsideForcedAssault)
+        HesitatedCommit,            // methodical-aggressive with hesitation (was BraggIndecisiveCommit)
         GenericAggressive,
         GenericCautious,
         GenericMethodical,
         GenericDesperate,
-        // Cavalry-as-main-effort playbooks. Existing CavalryFollowDoctrine
-        // handles per-unit guard/scout/screen/raid behavior; these playbooks
-        // make cavalry the army's decisive arm rather than a supporting one.
-        BufordCavalryScreenDelay,
-        ForrestCavalryRaid,
+        // Cavalry-as-main-effort playbooks. CavalryFollowDoctrine handles
+        // per-unit guard/scout/screen/raid behavior; these playbooks make
+        // cavalry the army's decisive arm rather than a supporting one.
+        CavalryScreeningDelay,      // cavalry screen + delaying action (was BufordCavalryScreenDelay)
+        CavalryRaid,                // cavalry deep raid (was ForrestCavalryRaid)
         // Meeting engagement: both sides arrive piecemeal, neither set up.
         // Distinct from Probe (Probe assumes deploy-from-march; meeting
-        // engagement is collide-while-moving). McPherson's Ridge Day 1.
+        // engagement is collide-while-moving).
         MeetingEngagement,
-        // Joseph Johnston's Atlanta-campaign Fabian doctrine. Uses existing
-        // CommandTaskType.Delay + WithdrawalDoctrine to thread disciplined
-        // fight-yield-fight-yield rather than Fallback (panic) or
-        // GenericDesperate (last stand).
-        JohnstonFabianDelay,
+        // Disciplined fight-yield-yield delaying defense. Uses
+        // CommandTaskType.Delay + WithdrawalDoctrine for ordered withdrawal
+        // rather than Fallback (panic) or GenericDesperate (last stand).
+        DelayingDefense,            // disciplined yielding defense (was JohnstonFabianDelay)
     }
 
     public enum BattlePhase

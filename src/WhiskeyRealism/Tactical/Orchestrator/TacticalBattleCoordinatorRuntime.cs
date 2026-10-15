@@ -80,6 +80,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
         private static readonly TacticalBattleRuntimeSnapshot[] _lastPublishedSnapshots = { TacticalBattleRuntimeSnapshot.Empty, TacticalBattleRuntimeSnapshot.Empty };
         private static readonly bool[] _hasPendingChange = { false, false };
+        // Layer 2 frame-coalescing (2026-05-22). Per-side Unity Time.frameCount
+        // of the most recent heavy snapshot build. Used to coalesce multiple
+        // ShouldRun signals in the same frame into a single build per side.
+        // Defense against signature-mutation churn — even when N legitimate
+        // mutations happen in one frame, we build ONCE.
+        private static readonly int[] _lastHeavyBuildFrame = { -1, -1 };
 
         // "Cheap per-group" cache (2026-05-20). Populated in DriveTickCycle on
         // every heavy-gate-fire — one entry per commandable Regiment in
@@ -108,6 +114,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // time compression. Reset per battle in ResetRuntimeTickState.
         private static readonly int[] _lastGen0CountBySide = { 0, 0 };
 
+        // Side-stagger parity (2026-05-20, plan F). Tracks WHICH side gets
+        // the heavy-build slot this Tick. Flipped at the end of every Tick
+        // body so consecutive Ticks alternate side0 / side1 / side0 / ...
+        // When a side's heavy-gate decides ShouldRun but parity is not its
+        // turn AND it has a cached snapshot, the build is deferred (the
+        // _lastHeavyReview* markers are NOT updated so the side stays
+        // eligible for the next Tick). Halves the per-Update frame snapshot
+        // cost (~20-25ms → ~10-12ms) at the cost of each side refreshing
+        // every other heavy-gate fire instead of every one. Safe because the
+        // orchestrator's coarse macro decisions tolerate one cycle of
+        // staleness on the deferred side (cheap per-group patch path still
+        // reads live vanilla state; only the side-wide objective record
+        // snapshot is staggered). Reset to 0 in ResetRuntimeTickState.
+        private static int _heavyTickParity = 0;
+
         // Slice 2 parity window: compare worker-published decisions against the
         // synchronous orchestrator state for the first N cycles per (battleSeq,
         // alliance). After N clean compares, the window logs "window-clean" and
@@ -115,9 +136,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // emit TacticalOrchestratorParityMismatch (registered in Task 6) and stop
         // comparing for that key to avoid log spam.
         // Key formula: _battleSequence * 10 + allianceId.
+        // Budget cut 20 → 5 (2026-05-20) → 0 (2026-05-21). Matches TacticalBattleSnapshotBuilder.ParityCompareBudget retirement.
         private static readonly Dictionary<int, int> _workerParityComparesRemaining = new Dictionary<int, int>();
         private static readonly HashSet<int> _workerParityMismatchObserved = new HashSet<int>();
-        private const int WorkerParityCompareBudget = 20;
+        private const int WorkerParityCompareBudget = 0;
 
         // Slice 2: dedicated worker thread for tactical orchestrator analysis.
         // Started in OnBattleStart, joined in OnBattleEnd. Disabled when
@@ -235,6 +257,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + ex.GetType().Name + " " + ex.Message);
                 _worker = null;
             }
+
+            // Stage A perf cache (2026-05-21): populate battle-lifetime scene-scan cache
+            // after vanilla has built the battle scene. Subsequent heavy-gate fires read
+            // from this cache instead of re-scanning the scene every cycle. Populate is
+            // try/catch-safe internally; on failure the cache stays empty and live-scan
+            // fallback engages (strict no-regression contract).
+            try { TacticalStableSceneCache.Populate(); }
+            catch (Exception sce)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] scene-cache populate threw: "
+                    + sce.GetType().Name + " " + sce.Message);
+            }
+
+            // Stage C perf cache (2026-05-21): pre-populate the per-group resolved
+            // decision cache with Skip defaults so BattleGroupStancePatch tier-1 hits
+            // from the very first patch invocation. Eliminates the battle-start window
+            // where tier-3 ApplyGroup fallback would fire on every group walk (~5-15 ms
+            // per missed group). First heavy-gate fire replaces these placeholders with
+            // real doctrine/ledger decisions via PopulateResolvedDecisionsForSide.
+            try { PrePopulateResolvedDecisionsAtBattleStart(); }
+            catch (Exception rce)
+            {
+                Plugin.Log.LogWarning("[TacticalOrchestrator] resolved-cache pre-populate threw: "
+                    + rce.GetType().Name + " " + rce.Message);
+            }
         }
 
         private static bool IsWorkerEnabled()
@@ -277,6 +324,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ResetRuntimeTickState();
                 _directChildDeferLogged.Clear();
                 _commandTreeTelemetrySignatures.Clear();
+
+                // Stage A perf cache (2026-05-21): clear battle-lifetime scene-scan
+                // cache so the next battle starts with a fresh state. Idempotent if
+                // cache wasn't populated.
+                try { TacticalStableSceneCache.Clear(); }
+                catch (Exception sce)
+                {
+                    Plugin.Log.LogWarning("[TacticalOrchestrator] scene-cache clear threw: "
+                        + sce.GetType().Name + " " + sce.Message);
+                }
+
+                // Stage B perf cache (2026-05-21): invalidate command tree cache. Next
+                // battle's first Snapshot() will rebuild from a fresh roster.
+                try { CommandTreeRuntime.InvalidateAll(); }
+                catch (Exception cte)
+                {
+                    Plugin.Log.LogWarning("[TacticalOrchestrator] command-tree-cache clear threw: "
+                        + cte.GetType().Name + " " + cte.Message);
+                }
+
+                // Stage D (2026-05-21): reset validator counters so the next battle
+                // starts fresh and the next validation cycle isn't skipped due to a
+                // stale lastValidationRealtimeSeconds value.
+                try { TacticalCacheValidator.ResetForBattleEnd(); } catch { }
+
+                // Regimental control state (2026-05-22, Scope B): claim-set
+                // tracking removed. Reset now only clears the artillery-action
+                // timestamp dictionary so next battle starts with fresh hold
+                // windows. Doctrine writes via vanilla ChangeStance — no
+                // mod-owned state to release.
+                try { WhiskeyRealism.Patches.BattleGroupStancePatch.ResetRegimentalControlForBattleEnd(); } catch { }
+                try { WhiskeyRealism.Patches.BattleCommandPostureExecutorPatch.ResetTaskHoldForBattleEnd(); } catch { }
+
                 side0 = null;
                 side1 = null;
                 _playerAllianceId = -1;
@@ -326,6 +406,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // TacticalHeavyPathGate and both built on the same tick.
                     DriveTacticalCommanderSide(side0, battle, aiVsAi, deltaSeconds);
                     DriveTacticalCommanderSide(side1, battle, aiVsAi, deltaSeconds);
+
+                    // Plan F (2026-05-20): flip the heavy-build parity so the
+                    // NEXT vanilla side-stat cycle's Tick alternates which side
+                    // gets the build slot. See _heavyTickParity field comment.
+                    _heavyTickParity = 1 - _heavyTickParity;
+
+                    // Stage D (2026-05-21): periodic cache validation. Internally
+                    // rate-limited to once per 30s wallclock so the per-Tick cost
+                    // is a single comparison + early-return on most ticks. Emits
+                    // TacticalCacheValidation events on each run; warnings on
+                    // any mismatch so smoke catches silent cache staleness.
+                    try { TacticalCacheValidator.ValidateIfDue(); }
+                    catch (Exception cve)
+                    {
+                        Plugin.Log.LogWarning("[TacticalOrchestrator] cache-validator threw: "
+                            + cve.GetType().Name + " " + cve.Message);
+                    }
 
                     // Slice 2: capture worker input and enqueue. Worker is async
                     // by design — being one tick behind on data is fine. Worker
@@ -484,8 +581,43 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var dec = TacticalHeavyPathGate.Decide(input);
                     EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
                     TacticalBattleRuntimeSnapshot snap;
-                    if (dec.ShouldRun)
+                    // Plan F (2026-05-20): the heavy build is alternated between
+                    // sides via _heavyTickParity (flipped at end of Tick body).
+                    // If parity is not this side's turn AND we have a cached
+                    // snapshot for it, defer the build so the per-Update-frame
+                    // hitch doesn't pile both sides' BuildObjectiveRecords walks
+                    // on the same frame. We do NOT update _lastHeavyReview* on
+                    // stagger-skip so the gate keeps signaling ShouldRun next cycle.
+                    bool staggerSkip = dec.ShouldRun
+                        && s != _heavyTickParity
+                        && _lastPublishedSnapshots[s].HasData;
+                    if (staggerSkip)
                     {
+                        OnceLog.Info(
+                            "tactical-orch:side-stagger:" + s,
+                            "[TacticalOrchestrator] side-stagger-skip side=" + s
+                            + " parity=" + _heavyTickParity
+                            + " (reusing cached snapshot; other side gets this build slot)");
+                    }
+                    // Layer 2 frame-coalescing (2026-05-22). If we already built
+                    // a heavy snapshot for this side IN THIS FRAME, skip the
+                    // rebuild even on ShouldRun. Defense against multiple Tick
+                    // calls per frame producing redundant heavy work — even
+                    // legitimate signature mutations from different sources
+                    // (mass rout + objective change + reinforcement) coalesce
+                    // into ONE build per frame per side.
+                    int frameNow = UnityEngine.Time.frameCount;
+                    bool sameFrameAsLastBuild = _lastHeavyBuildFrame[s] == frameNow;
+                    if (dec.ShouldRun && !staggerSkip && sameFrameAsLastBuild)
+                    {
+                        OnceLog.Info(
+                            "tactical-orch:frame-coalesce:" + s,
+                            "[TacticalOrchestrator] frame-coalesce side=" + s
+                            + " frame=" + frameNow + " — already built this frame, reusing snapshot");
+                    }
+                    if (dec.ShouldRun && !staggerSkip && !sameFrameAsLastBuild)
+                    {
+                        _lastHeavyBuildFrame[s] = frameNow;
                         using (TelemetryPerf.Scope("tactical.snapshot-build.tick-cycle", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                         {
                             snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
@@ -665,7 +797,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         var dec = TacticalHeavyPathGate.Decide(input);
                         EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
                         TacticalBattleRuntimeSnapshot snap;
-                        if (dec.ShouldRun)
+                        // Plan F stagger — same logic as DriveTickCycle.
+                        bool staggerSkip = dec.ShouldRun
+                            && s != _heavyTickParity
+                            && _lastPublishedSnapshots[s].HasData;
+                        if (dec.ShouldRun && !staggerSkip)
                         {
                             using (TelemetryPerf.Scope("tactical.snapshot-build.operations-ledger", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                             {
@@ -1471,7 +1607,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var dec = TacticalHeavyPathGate.Decide(input);
                     EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
                     TacticalBattleRuntimeSnapshot snap;
-                    if (dec.ShouldRun)
+                    // Plan F stagger — same logic as DriveTickCycle.
+                    bool staggerSkip = dec.ShouldRun
+                        && s != _heavyTickParity
+                        && _lastPublishedSnapshots[s].HasData;
+                    if (dec.ShouldRun && !staggerSkip)
                     {
                         using (TelemetryPerf.Scope("tactical.snapshot-build.direct-child-cycle", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                         {
@@ -1545,7 +1685,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
 
                 var evidence = DirectChildEvidenceBuilder.BuildAll(snapshots, primarySectors, flankBuckets, enemyVisForChildren);
-                side.Army.ObserveDirectChildEvidenceWithIntent(evidence, perChildIntent);
+                // Stage 2 / G: geometric play layer. Compute corps→rect
+                // assignments from the current plan's template. When zone
+                // assignments are available, the allocator uses them in
+                // preference to evidence-based role picking (per-corps zone
+                // role overrides the per-brigade sector role).
+                IReadOnlyList<WhiskeyRealism.Tactical.Orchestrator.Plays.CorpsAssignment> zoneAssignments = null;
+                if (Plugin.EnableGeometricPlayTemplates != null && Plugin.EnableGeometricPlayTemplates.Value
+                    && side.Army.HasPlan)
+                {
+                    BattlePlanId planId = side.Army.CurrentPlan.PlanId;
+                    int shift = 0;
+                    if (childCount > 0)
+                    {
+                        // commandHierarchyShift = rawUnitTyp - effectiveCommandLevel
+                        var ex = side.Army.CurrentDirectChildIntents[0];
+                        shift = ex.RawUnitTyp - ex.EffectiveCommandLevel;
+                    }
+                    zoneAssignments = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime
+                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount);
+                }
+                side.Army.ObserveDirectChildEvidenceWithZones(evidence, perChildIntent, zoneAssignments);
 
                 for (int i = 0; i < side.Army.CurrentDirectChildIntents.Count; i++)
                 {
@@ -1639,14 +1799,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // and TacticalBattleSnapshotBuilder.Build mutates
                 // TacticalUnitObservationAggregate.Shared (line 263) during the
                 // sync build — by the time we're here, the aggregate's last
-                // mutation is from side1's sync build (or side0's if side1 was
-                // suppressed). Clear the aggregate so each side's
-                // SnapshotAggregateForWorker only counts data tagged with its
-                // own alliance: SnapshotAggregateForWorker checks
-                // CapturedForAlliance, and ClearForBattleEnd resets that to -1.
-                // (Steady state: the worker sees a one-tick-lagged aggregate,
-                // which is fine — async worker design.)
-                try { TacticalUnitObservationAggregate.Shared.ClearForBattleEnd(); } catch { }
+                // mutation is from whichever side actually built this Tick.
+                //
+                // Pre-existing bug fix (2026-05-21): the prior ClearForBattleEnd()
+                // call here reset CapturedForAlliance to -1 BEFORE SnapshotAggregateForWorker
+                // could read it, which made the alliance filter `CapturedForAlliance != allianceId`
+                // ALWAYS true. Result: obs0/obs1 always empty → worker had no observations
+                // to compute group stance decisions OR (chunk 3) objective records. The clear
+                // was originally added to prevent side-A from receiving side-B's stale data
+                // when both sides built per Tick — but with F-stagger (2026-05-20) only one
+                // side builds per Tick, so the agg's CapturedForAlliance correctly identifies
+                // the building side and SnapshotAggregateForWorker naturally returns empty
+                // for the non-building side.
                 TacticalBattleRuntimeSnapshot snap0;
                 ArmyEvidenceBuilder.Bundle bundle0;
                 CaptureSideForWorker(battle, allianceA, nowH, out snap0, out bundle0);
@@ -1688,6 +1852,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var planState0 = CaptureArmyPlanState(side0);
                 var planState1 = CaptureArmyPlanState(side1);
 
+                // Worker-migration (2026-05-21): per-side ObjectiveRecordsCaptureContext.
+                // Only capture when the feature flag is on; empty context otherwise so
+                // the worker.BuildObjectivesForSide short-circuits and main's
+                // TryGetObjectiveRecords returns false, routing snapshot.Build back to
+                // the legacy on-main BuildObjectiveRecordsFromAggregate path.
+                ObjectiveRecordsCaptureContext objCtx0 = ObjectiveRecordsCaptureContext.Empty;
+                ObjectiveRecordsCaptureContext objCtx1 = ObjectiveRecordsCaptureContext.Empty;
+                if (Plugin.EnableWorkerObjectiveRecords != null && Plugin.EnableWorkerObjectiveRecords.Value)
+                {
+                    objCtx0 = TacticalVisionRuntimeAdapter.CaptureObjectiveRecordsContextForSide(battle, allianceA);
+                    objCtx1 = TacticalVisionRuntimeAdapter.CaptureObjectiveRecordsContextForSide(battle, allianceB);
+                }
+
                 var config = BuildWorkerConfigSnapshot();
 
                 return new TacticalOrchestratorWorkerInput(
@@ -1718,7 +1895,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     side0MacroAi: macro0,
                     side1MacroAi: macro1,
                     side0PlanState: planState0,
-                    side1PlanState: planState1);
+                    side1PlanState: planState1,
+                    side0ObjectiveCaptureContext: objCtx0,
+                    side1ObjectiveCaptureContext: objCtx1);
             }
             catch (Exception e)
             {
@@ -2011,6 +2190,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // with the wrong group's cached action.
                     try { _resolvedDecisionsBySide[i]?.Clear(); } catch { }
                 }
+                _heavyTickParity = 0;
             }
             catch { }
             // Tasks 10/11: clear aggregate pool and parity window state for new battle
@@ -2110,6 +2290,85 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             side1 = null;
             _playerAllianceId = -1;
             active = false;
+        }
+
+        // Stage C perf cache (2026-05-21): pre-populates _resolvedDecisionsBySide at
+        // battle start with Skip defaults for every commandable Regiment in
+        // BattleUnits.completeunitlist. Eliminates the GAP between battle-start and
+        // first heavy-gate fire where BattleGroupStancePatch.TryApplyFromDecisionSnapshot
+        // tier-1 lookup would miss and fall through to tier-3 ApplyGroup (~5-15ms per
+        // missed group). After first heavy-gate fire, PopulateResolvedDecisionsForSide
+        // takes over with the normal Clear+Refill cycle.
+        //
+        // Diagnostic emissions:
+        //   tactical-resolved-cache:prepopulated:<allianceId> — first populate count per side
+        //
+        // Safe to call multiple times — clears + refills idempotently.
+        public static void PrePopulateResolvedDecisionsAtBattleStart()
+        {
+            try
+            {
+                var units = BattleUnits.completeunitlist as IList;
+                if (units == null || units.Count == 0) return;
+
+                // Skip default: Kind=Skip, FinalStance=-1, no charge override. Patch's
+                // tier-1 hit will see Kind != Apply, early-return without writing —
+                // identical to vanilla behavior until first heavy-gate fire replaces
+                // these placeholders with real doctrine/ledger decisions.
+                var skipDefault = new TacticalResolvedGroupDecision(
+                    finalStance: -1,
+                    kind: TacticalDoctrineDecisionKind.Skip,
+                    reason: "battle-start-noop",
+                    fromDoctrine: false,
+                    fromLedger: false,
+                    isChargeOverride: false,
+                    chargeAction: ChargeOverrideAction.None);
+
+                int[] counts = new int[_resolvedDecisionsBySide.Length];
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var reg = units[i] as Regiment;
+                    if (reg == null) continue;
+                    int alliance;
+                    int unittyp;
+                    int instanceId;
+                    try
+                    {
+                        alliance = reg.alliance;
+                        unittyp = reg.unittyp;
+                        instanceId = reg.GetInstanceID();
+                    }
+                    catch { continue; }
+
+                    if (alliance < 0 || alliance >= _resolvedDecisionsBySide.Length) continue;
+                    if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(unittyp)) continue;
+                    if (instanceId == 0) continue;
+
+                    var cache = _resolvedDecisionsBySide[alliance];
+                    if (cache == null) continue;
+                    cache[instanceId] = skipDefault;
+                    counts[alliance]++;
+                }
+
+                for (int s = 0; s < counts.Length; s++)
+                {
+                    if (counts[s] > 0)
+                    {
+                        OnceLog.Info(
+                            "tactical-resolved-cache:prepopulated:" + s,
+                            "[TacticalResolvedCache] pre-populated alliance=" + s
+                            + " count=" + counts[s]
+                            + " — battle-start gap closed; tier-1 hits begin immediately");
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                OnceLog.Warning(
+                    "tactical-resolved-cache:prepopulate-failed",
+                    "[TacticalResolvedCache] pre-populate failed: " + e.GetType().Name + " " + e.Message
+                    + " — tier-3 fallback path engages for the gap window");
+            }
         }
 
         // ---- "Cheap per-group" pre-compute (2026-05-20) ----

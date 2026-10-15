@@ -188,3 +188,254 @@ After the 2026-05-14 Scourge conversion pass, the direct tactical Scourge gaps a
 The already-implemented Whiskey analogs are: frontage/echelon/artillery-line battle geometry, runtime path-quality sampling, tactical massing/endurance gates, operational reserve percentage/partial/final reserve policy, fallback ladder mapping, artillery weak-point/ammo/reposition mission planning, SOP authority gates, and default-off W&L player-subordinate order bridge.
 
 The lower-level candidates above are now partly converted: melee fear is wired into #41 charge doctrine, friendly front blockers are wired into #61 path-quality planning, and infantry fire control is wired into #61/#41 through verified vanilla combat-behavior orders. Skirmisher recall and the battlefield attribute matrix remain pure tested doctrine. Anti-cavalry square analogs and scenario phase templates were intentionally skipped in this pass. Fresh Active runtime smoke is still required for the new fire-control write surface.
+
+## 2026-05-21 Scourge regimental-AI deep dive
+
+**Investigation goal:** map Scourge's per-regiment tactical decision tree (flanking, isolation, retreat) and identify the corresponding vanilla GTCW W&L hook points so Whiskey can extend rather than fight vanilla's regimental logic.
+
+### Scourge's regimental decision tree (`sdk/SowAiInf/unitai.cpp`)
+
+The master tactical function is `StandTargetAmmoAI()`. Decision priority (per the `Think()` ladder, line 2284-2483):
+
+1. Routed → exit AI
+2. MoraleAI — routed/broken/morale-drop triggers retreat or fallback
+3. Melee/charge resolution
+4. Follow/guard reattach (if `morale < AI_CANTFOLLOW = 3`)
+5. Target check + tactical no-target routines
+6. ChargedByCavFaceSituation / BayonetSituation
+7. CheckAllTargets — builds enemy[4] quadrant array
+8. Fort logic / cavalry-danger square decision
+9. Covering troops AI
+10. Skirmisher logic
+11. Charge eligibility
+12. Advance/fallback
+13. Standing without ammo
+14. **Standing with ammo — StandTargetAmmoAI: the wheel/flank/retreat decision tree (line 1410-1640)**
+15. Marching to target
+
+### Quadrant threat model (`StandTargetAmmoAI`, line 1410-1450)
+
+```cpp
+for ( i = 0; i < eQuadMax; i++ ) {            // 4 quadrants: front/left/rear/right
+    enemy[i].threat = enemy[i].men * 100 - enemy[i].dist - enemy[i].cdist;
+    enemy[i].threat = WheelingThreatEvaluation(i, base, enemy, myquad);
+    if (enemy[i].men > 0 && (quad == -1 || enemy[i].threat > threat)) {
+        quad = i;  threat = enemy[i].threat;
+        if (enemy[i].cdist < base.GetMod(eGameWheelDist))
+            pressed += 1;
+    }
+}
+if (!bMustWheel && quad != myquad) bMustWheel = true;
+```
+
+- Threat = `men × 100 − dist − cavDist`
+- `WheelingThreatEvaluation` applies 50% reduction for enemies in fallback/melee/fort/skirmish state
+- `pressed >= 2` → unit is boxed in, can't wheel safely → retreat (Scourge's `bMustWheel + !bCanWheel`)
+- `IsFlanked()` flag triggers wheel when flank threat exceeds front
+
+### 3-tier morale retreat (`MoraleAI`, line 929-1032)
+
+```cpp
+if (base.Morale() <= MORAL_ROUTED) base.ICommand(eComRoute, 1);          // priority 1
+else if (base.Morale() <= MORAL_BROKEN + danger) base.ICommand(eComRetreat, 1);  // priority 2
+else if (PrevMor > Morale && danger) {                                    // priority 3
+    if (Ran(0,100) <= eGameFallbackPct) base.ICommand(eComFallback, 1);  // 15-20yd fallback
+    else if (Ran(0,100) <= eGameRetreatPct) base.ICommand(eComRetreat, 1);
+}
+```
+
+Retreat direction = `base.DeP()` (brigade commander's rally point), NOT "away from enemy vector."
+
+### Vanilla GTCW W&L regimental hook points (`/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`)
+
+| Vanilla method | Line | Purpose | Patch potential |
+|---|---|---|---|
+| `PerformAIActionDLCWL(unit, groupforstancecheck)` | 5101 | **Master AI gate. Called 50+ times. Returns false when `dlcw_isundercommander=true` → blocks all vanilla micro-AI for that regiment.** | **HIGH-VALUE TARGET** — selective injection point. Patch to allow conditional regimental override without re-patching every call site. |
+| `CheckCurrentOrderUpdate(unit, type, pos, ...)` | 8233 | Order validation + propagation. Re-attributes orders to player commander when `dlcw_isundercommander=true`. | Augmentation point for "feed suggested orders to player" workflows. |
+| `CheckLineFallbacks(aigroup)` | 5140 | Per-regiment fallback. Player-commanded regiments in non-offensive parent stance skip fallback. | Mirror semantics for our regimental fallback doctrine. |
+| `UpdateMicroAI(unit)` | 5543 | Per-regiment tactical decisions. Runs sub-task cycle (`microaitaskupdatecycle=30`). | Per-regiment per-frame work happens here. |
+| `CalculateSideStatsAndUpdateAITasks()` | 84570 | Master battle update. | Already our heavy-gate anchor. |
+
+### Vanilla GTCW regimental decision triggers
+
+- `morale < GamePrefs.moraletriggerforfallbackifenemyclose[ai_stance]` — fallback threshold (per stance)
+- `groupstrengthdirect < GamePrefs.minstrengthbattlewithdrawal` — battle-avoidance threshold (~450 men typical)
+- `groupmorale >= GamePrefs.minimummoraleforunitstoparticipateinbattles` — minimum-morale to engage
+- `lastretreatiswithdrawal && unittyp != 17` — independent withdrawal continuation flag
+
+### Player-command semantics (`dlcw_isundercommander`)
+
+**Binary, not augmented:** when `true`, vanilla AI is fully blocked. Player input is the ONLY decision source for that regiment. No partial-control scenarios.
+
+For Whiskey's regimental intelligence: this means our doctrine MUST either (a) write through the same gate (selectively block vanilla and inject our order), or (b) skip player-commanded regiments entirely. We currently do (b) via `IsPlayerProtectedForRegiment`.
+
+### Whiskey integration plan
+
+1. `TacticalRegimentalIntelligenceDoctrine` ships independently of `PerformAIActionDLCWL` — our doctrine runs on the worker, applies on main via `BattleGroupStancePatch.ApplyRegimentalIntelligence`. Gated by `Enable Regimental Intelligence Writes`.
+2. Skips player-commanded regiments via `dlcw_isundercommander` check (matches vanilla's player-protection contract).
+3. Future enhancement (deferred): patch `PerformAIActionDLCWL` directly so our regimental decisions injection at the vanilla gate, replacing parallel-write architecture with proper integration.
+
+## 2026-05-22 artillery panic audit
+
+**Investigation goal:** verify Whiskey's artillery panic/retreat logic against both Scourge of War SDK and vanilla GT decompile, after smoke showed batteries at 0-50m from enemy infantry with support count 14-27.
+
+### Scourge artyai.cpp findings
+
+- **`DistArtyPanic()` (line 180)** — dynamic per-unit method, default likely 150-200yd. Leader can override via `eSTStandArtilleryFallBack` command (line 192).
+- **Support detection (line 199-205)** — RADIAL check, NOT directional. Counts any inf/cav within `EnemyCloseYds()` of artillery in any direction (including behind). Filtered by `CanFight()` (excludes routed).
+- **Retreat cascade (line 209-224)** — fires when `EnemyCloseYds() < panicdistance` AND (`MorUnitBon == 0` OR `sup == 0`) AND enemy not routed/retreating. Unlimbered → limber first; limbered → halt + retreat.
+- **No anti-cavalry special case** — same panic threshold for cavalry as infantry.
+- **No forward-movement on own initiative** — Scourge artillery is purely reactive. `AttackMarch()` defers to externally-issued orders only.
+
+### Vanilla GT decompile findings
+
+- **`CheckArtyFallback` (line 3499)** — reads `unitrange.closestownunitnonrouted` for support. **Counts ANY non-routed friendly including other artillery** — fundamentally broken: a battery 50m from another battery thinks it has support and won't retreat.
+- **`CheckAIBombardment` (line 3869)** — bombardment decision, only fires for `ai_stance == 3 || 4`.
+- **`Regiment.ammo` array** — float[3] indexed by ammo type. GT slot 2 = canister (not Scourge's slot 0).
+- **`Regiment.mounted`** — 1 = limbered, 0 = unlimbered. No explicit unlimbering-transition state exposed.
+- **`unitrange.enemyinfirerangereg`** — `List<Regiment>` of enemies in artillery's fire range, populated by vanilla's range scan.
+- **`CheckCounterBatteryFire` (line 3827)** — yes, vanilla has counter-battery logic; integrated into bombardment cascade.
+- **Forward-movement source**: vanilla has multiple paths that can advance artillery (objective-driven movement, post-firing repositioning via `aritimetowaitbeforemovingcloser` at line 3789). No single trigger; the cumulative effect is artillery ending up forward.
+
+### Whiskey alignment + corrections
+
+| Layer | Scourge | Vanilla GT | Whiskey | Verdict |
+|---|---|---|---|---|
+| Panic distance | `DistArtyPanic()` ~150-200yd | none (vanilla doesn't retreat properly) | 100m default + 60m point-blank floor | More conservative, with explicit floor |
+| Support detection | Radial (any inf/cav within EnemyCloseYds) | Broken (any friendly inc. artillery) | Geometric: on-axis interposition only | More correct than both |
+| Anti-cavalry | No special case | No special case | No special case | Match |
+| Forward-movement initiation | None | Multiple paths | None (Whiskey is reactive) | Match Scourge |
+| Forward-movement veto | n/a | None | **NEW: SetWaypoint Postfix veto** | Closes vanilla's gap |
+
+### `ArtillerySetWaypointVetoPatch` (shipped 2026-05-22)
+
+Postfix on `BattleUnits.SetWaypoint(Regiment, ...)`:
+- Filtered to artillery (unittyp == 2)
+- If proposed target is within 60m of any visible enemy → overwrite with 200m retreat away from enemy
+- Recursion guard via `[ThreadStatic] _inVetoWrite`
+- Default-on behind `Enable Artillery Waypoint Veto`
+- Emits `TacticalArtilleryWaypointVeto` telemetry
+
+This closes the timing gap between vanilla's forward-move and Whiskey's 1.5s `ApplyArtilleryAudit` cycle — artillery can no longer end up at point-blank between audit fires.
+
+### `TacticalArtilleryMicroDoctrine.Decide` updated cascade (2026-05-22)
+
+Priority order (descending urgency):
+1. **No enemy** → Preserve
+2. **Point-blank ≤60m** → Limber or Retreat (NEW — unconditional, ignores support count)
+3. **Low ammo <10%** → ConserveAmmo
+4. **Close ≤PanicDistance + no support + no morale bonus** → Limber or Retreat
+5. **Limbered with target in range** → Unlimber
+6. **Can wheel + better quadrant elsewhere** → WheelToBestThreat
+7. **Target in range** → Fire
+8. Else → Preserve
+
+The point-blank branch ahead of low-ammo ensures a battery at <60m doesn't sit and conserve ammo while being charged.
+
+### `CountFriendlyInfantryCavInterposed` (2026-05-22 refactor)
+
+Replaces prior `CountFriendlyInfantryCavWithinEnemyDistance`. Uses geometric projection:
+- Friend must be on enemy-side of artillery (positive projection onto artillery→enemy axis)
+- Friend's projection length < distance to enemy (interposed, not past)
+- Lateral offset from axis ≤ 100m (on-axis, regiment-frontage scale)
+
+Falls back to original 200m radial check when enemy is null or distance is invalid (sanity floor).
+
+## 2026-05-23 Scourge grand-strategy + play-template architecture
+
+### Play templates (`offai.cpp:1144-1320`)
+
+Scourge's army-level offensive AI maps **grand tactics** to **plays** to **rects**:
+
+```cpp
+// offai.cpp:1144
+if ( base.ReEval() )   // re-evaluation triggered — NOT every tick
+{
+    base.ReEvalTactics();
+    if ( aplay == NULL && base.NumComplete() == 0 && !base.PlyrCtrl() )
+    {
+        type = CXUtil::OpenType();                   // scenario-determined battle type
+
+        if ( type == eTypeAtt1 || type == eTypeAtt2 )
+        {
+            if ( base.Rank(eRankSide) == type )      // I'm the attacker?
+                aplay = CXUtil::GetAttackPlay();
+            else
+                aplay = CXUtil::GetDefendPlay();
+        }
+        else if ( type == eTypeMeet )
+            aplay = CXUtil::GetMeetingPlay( rect );
+        // implicit: defend if not specified
+    }
+}
+```
+
+**Key invariants:**
+1. **Battle type is scenario-set, not per-tick.** `CXUtil::OpenType()` is set by the SCENARIO (`eTypeAtt1`, `eTypeAtt2`, `eTypeMeet`, implicit defend). Not derived from per-tick force balance.
+2. **Side identity matches battle type.** `base.Rank(eRankSide) == type` checks if THIS side is the attacker designation.
+3. **Play is cached across ticks.** `base.ArmyPlay()` holds it. Only re-picked on `ReEval()` triggers.
+
+**Each play is a TABLE of rects with corps assignments (`offai.cpp:1191`):**
+- `PLAYRect(aplay, i)` — zone (rectangle) for slot i
+- `PLAYCorpNum(aplay, i)` — preferred corps for slot i (1-based)
+- `PLAYFTime(aplay, i)` — start time for slot i (echelon sequencing)
+- `PLAYSize(aplay)` — slot count
+
+Quadrant rotation (`offai.cpp:1199`) maps canonical play coords into world coords via `base.StartQuad()`.
+
+Corps assignment (`offai.cpp:1289`): VP-override (corps tracking major VP gets the rect containing it), else closest-corps by `Dist2Yds(rect.Mid())`.
+
+Per-corps internal slots (`offai.cpp:1030`): `PSTATL*` (left side) and `PSTATR*` (right side) indexed by `eSpotBot/Mid/Top × Left/Right`. Divisions fill slots as they become ready.
+
+### Battle-type stance gate (`offai.cpp:1151-1159`)
+
+The "am I attacking or defending" decision is set ONCE by the scenario, then STAYS STABLE. Force balance does NOT flip a side from defend to attack mid-battle. Personality + force balance influence the SECONDARY pick (which OF several defend or attack plays) but never cross the attack/defend boundary.
+
+This invariant prevents doctrine-vs-playbook mismatches: the playbook layer can't decide on tick 47 that it wants to attack if the scenario says it's the defender.
+
+### Vanilla GTCW equivalent: `BattleUnits.GetBattleType` (decompile line 86095)
+
+Vanilla exposes the same signal Scourge gets from `OpenType()`:
+
+```csharp
+public int GetBattleType(int alliance, bool usereadinesswhendraw = false)
+{
+    // Compare objective-points-held ratio to GamePrefs.objectiveratiodefend
+    if (sideinformation[sideFromAlliance].objectivepointsheld / ... >= ratio) return 2; // defend
+    if (sideinformation[num].objectivepointsheld / ... >= ratio) return 1;              // attack
+    return 0;  // meeting engagement
+}
+```
+
+Return codes: **0** = meeting / **1** = we attack / **2** = we defend. Vanilla itself uses this gate at `CheckGlobalAIStrategy` line 6396 to force `macroai = 2` when battleType==2 and force balance is below defensive trigger.
+
+### Whiskey integration (2026-05-23 L — stance gating)
+
+`ArmyEvidenceBuilder.ReadBattleStance` reads `GetBattleType` and stamps `BattleStance` (Meeting / Attacker / Defender) onto `TacticalForceBalanceEvidence`. Two hard gates fire:
+
+1. **Doctrine gate** (`TacticalReinforcementOpportunityDoctrine.Decide`): `BattleStance.Defender` blocks the `AttackNow` branch regardless of force ratio. Force balance can still output DefensiveHold / DelayingDefense / WithdrawalToFightLater for the defender side.
+2. **Catalog hard filter** (`TacticalPlaybookCatalog.Select`): `StanceOf(BattlePlanId)` classifies each playbook (Offensive / Defensive / Neutral). Defender stance skips Offensive playbooks at the precondition stage. Attacker stance skips Defensive playbooks. Meeting allows all.
+
+The Whiskey play-template ↔ Scourge play translation:
+
+| Scourge | Whiskey |
+|---|---|
+| `SXArmyPlay aplay` | `PlayTemplate template` |
+| `PLAYRect(aplay, i)` | `PlayTemplate.Rects[i]` (army-relative coords) |
+| `PLAYCorpNum(aplay, i)` | implicit — closest-corps in `PlayCorpsAssignment.Assign` |
+| `PLAYFTime(aplay, i)` | `PlayRect.StartTimeOffsetSeconds` |
+| `base.StartQuad()` rotation | `PlayProjection.Project` (army↔enemy axis, not quadrant cases) |
+| `RunArmyPlay(corps, rect)` | `DirectChildAllocator.AllocateWithZones` |
+
+The 18 Whiskey templates correspond one-to-one with the 18 BattlePlanId archetypes (after the 2026-05-23 generic rename — `LeeEnvelopment → DoubleEnvelopment` etc.). Offensive templates only fire when stance allows attack; defensive templates only on Defender stance.
+
+### F sync — Whiskey ↔ vanilla macroai (2026-05-23)
+
+`BattleMacroAIOverridePatch` (Harmony Prefix on `AIBattle.CheckGlobalAIStrategy`, line 6314) writes our doctrine output to `sideinformation[side].macroai` BEFORE vanilla reads it (line 6383). Vanilla's `AdjustGroupAIStance` (line 4220) then drives per-group `ai_stance` for brigades Whiskey doesn't have explicit roles for — line of battle forms for free via vanilla's macroai=2 cascade.
+
+Mapping:
+- Doctrine `AttackNow` + ratio ≥ effective-envelopment-threshold → macroai = 0 (flank attack)
+- Doctrine `AttackNow` + ratio < threshold → macroai = 1 (frontal attack)
+- Doctrine `DefensiveHold` / `WaitAndConsolidate` / `DelayingDefense` → macroai = 2 (defend → line of battle)
+- Doctrine `WithdrawalToFightLater` → macroai = 3 (retreat)
+- `NoOpportunity` → no write (vanilla's own decision stands)

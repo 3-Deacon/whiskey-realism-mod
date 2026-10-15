@@ -47,13 +47,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static FieldInfo _bunitsFieldCache;
 
         // Parity window state (Tasks 10/11 — single-pass refactor).
-        // Keyed by (battleSequence, allianceId) so each side gets its own 20-clean
+        // Keyed by (battleSequence, allianceId) so each side gets its own
         // budget; mismatch on one side does not shut down the other.
+        // Budget cut 20 → 5 (2026-05-20) → 0 (2026-05-21): no
+        // TacticalObjectiveRecordsParityMismatch event has ever fired across
+        // many smoke sessions. The parity window's only remaining cost is the
+        // first-cycle dual-walk at battle start (~15ms hitch). Retiring it (0)
+        // means BuildObjectiveRecordsWithParityWindow always takes the
+        // aggregate-only path. The legacy walk stays in the codebase as a
+        // fallback when EnableSinglePassObjectiveRecords is disabled by the
+        // user; the parity comparator is just no longer used.
         private static readonly Dictionary<ParityKey, int> _parityComparesRemaining
             = new Dictionary<ParityKey, int>();
         private static readonly HashSet<ParityKey> _parityMismatchObserved
             = new HashSet<ParityKey>();
-        private const int ParityCompareBudget = 20;
+        private const int ParityCompareBudget = 0;
 
         private readonly struct ParityKey : IEquatable<ParityKey>
         {
@@ -112,7 +120,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         side1MacroAI: -1,
                         anySideInRetreatOrEOD: false,
                         majorObjectiveAnchorHash: 0,
-                        anyInterruptedPathsOrNewContact: false,
+                        interruptedContactBucket: 0,
                         battleHourBucket: ComputeHourBucket(currentBattleHours));
                 }
 
@@ -130,7 +138,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 int objHash = ComputeCheapObjectiveHash(battle);
 
-                bool anyInterrupted = ComputeAnyPathInterruptedOrNewContact(bunits);
+                int contactBucket = ComputeInterruptedContactBucket(bunits);
 
                 int bucket = ComputeHourBucket(currentBattleHours);
 
@@ -142,7 +150,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     side1MacroAI: macro1,
                     anySideInRetreatOrEOD: anyRetreatOrEod,
                     majorObjectiveAnchorHash: objHash,
-                    anyInterruptedPathsOrNewContact: anyInterrupted,
+                    interruptedContactBucket: contactBucket,
                     battleHourBucket: bucket);
             }
             catch (Exception e)
@@ -151,8 +159,53 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     "[TacticalOrchestrator] TacticalBattleSnapshotBuilder.ExtractCurrentSignature degraded: "
                     + e.GetType().Name + " " + e.Message);
                 return new TacticalBattleStateSignature(
-                    0, 0, 0, -1, -1, false, 0, false, ComputeHourBucket(currentBattleHours));
+                    0, 0, 0, -1, -1, false, 0, 0, ComputeHourBucket(currentBattleHours));
             }
+        }
+
+        // Returns the worker-published ObjectiveRecord[] for the given alliance when
+        // EnableWorkerObjectiveRecords is on and the published snapshot is current.
+        // Returns null to signal "fall back to legacy on-main builder". Emits a once-log
+        // line per reject reason so smoke can diagnose why the worker path isn't taking
+        // over without instrumenting every fire.
+        private static ObjectiveRecord[] TryConsumeWorkerObjectiveRecords(AIBattle battle, int allianceId)
+        {
+            if (Plugin.EnableWorkerObjectiveRecords == null || !Plugin.EnableWorkerObjectiveRecords.Value)
+            {
+                OnceLog.Info("tactical-orch:worker-objectives-reject:" + allianceId + ":flag-off",
+                    "[TacticalOrchestrator] worker-objectives off (alliance=" + allianceId + " reason=flag-off)");
+                return null;
+            }
+
+            var snapshot = TacticalDecisionSnapshot.Current;
+            if (snapshot == null)
+            {
+                OnceLog.Info("tactical-orch:worker-objectives-reject:" + allianceId + ":snapshot-null",
+                    "[TacticalOrchestrator] worker-objectives rejected (alliance=" + allianceId + " reason=snapshot-null)");
+                return null;
+            }
+
+            int seqExpected = TacticalBattleCoordinator.BattleSequenceForParity;
+            if (snapshot.BattleSequence != seqExpected)
+            {
+                OnceLog.Info("tactical-orch:worker-objectives-reject:" + allianceId + ":seq-mismatch",
+                    "[TacticalOrchestrator] worker-objectives rejected (alliance=" + allianceId
+                    + " reason=seq-mismatch worker=" + snapshot.BattleSequence + " main=" + seqExpected + ")");
+                return null;
+            }
+
+            if (!snapshot.TryGetObjectiveRecords(allianceId, out ObjectiveRecord[] workerRecords))
+            {
+                OnceLog.Info("tactical-orch:worker-objectives-reject:" + allianceId + ":records-empty",
+                    "[TacticalOrchestrator] worker-objectives rejected (alliance=" + allianceId
+                    + " reason=records-empty worker has published but no records for this side)");
+                return null;
+            }
+
+            OnceLog.Info("tactical-orch:worker-objectives:" + allianceId,
+                "[TacticalOrchestrator] worker-objectives in use (alliance=" + allianceId
+                + " count=" + workerRecords.Length + ") — main skipped BuildObjectiveRecordsFromAggregate");
+            return workerRecords;
         }
 
         /// <summary>
@@ -179,10 +232,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     bundle = ArmyEvidenceBuilder.Build(battle, allianceId);
                 }
 
-                ObjectiveRecord[] objectives;
-                using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                // Worker-migration (2026-05-21): when EnableWorkerObjectiveRecords is on
+                // AND the worker has published a non-empty ObjectiveRecord[] for this
+                // alliance on the current battleSequence, consume the worker's records
+                // directly. Skips the BuildObjectiveRecordsFromAggregate Unity walk on
+                // main. Falls back to the legacy parity-window builder when the worker
+                // hasn't published yet (first cycle, suppressed side, worker fault).
+                ObjectiveRecord[] objectives = TryConsumeWorkerObjectiveRecords(battle, allianceId);
+                if (objectives == null)
                 {
-                    objectives = BuildObjectiveRecordsWithParityWindow(battle, allianceId);
+                    using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                    {
+                        objectives = BuildObjectiveRecordsWithParityWindow(battle, allianceId);
+                    }
                 }
 
                 var commandTree = CommandTreeRuntime.Snapshot(allianceId);
@@ -523,29 +585,46 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static bool ComputeAnyPathInterruptedOrNewContact(BattleUnits bunits)
+        private static int ComputeInterruptedContactBucket(BattleUnits bunits)
         {
+            // Replaces ComputeAnyPathInterruptedOrNewContact (2026-05-22). The
+            // prior bool flipped on every cycle once contact was made because
+            // groupenemiesinrange oscillates as units enter/exit fire range —
+            // causing heavy-gate signature mismatches and re-fires every cycle.
+            //
+            // New form: count units matching the condition, bucket into discrete
+            // ranges so signature only changes on meaningful shifts:
+            //   0  → 0 contacts
+            //   1  → 1-3 contacts
+            //   2  → 4-10 contacts
+            //   3  → 11+ contacts
+            //
+            // Same bounded scan (first 40 units) to keep the signature computation
+            // cheap on every vanilla side-stat tick.
             try
             {
-                if (bunits == null) return false;
+                if (bunits == null) return 0;
                 var units = BattleUnits.completeunitlist as IList;
-                if (units == null || units.Count == 0) return false;
+                if (units == null || units.Count == 0) return 0;
 
-                // Bounded scan (cheap path) — first 40 units sufficient for change detection
                 int limit = Math.Min(units.Count, 40);
+                int count = 0;
                 for (int i = 0; i < limit; i++)
                 {
                     var reg = units[i] as Regiment;
                     if (reg != null && (reg.pathinterrupted || reg.groupenemiesinrange > 0))
                     {
-                        return true;
+                        count++;
                     }
                 }
-                return false;
+                if (count <= 0) return 0;
+                if (count <= 3) return 1;
+                if (count <= 10) return 2;
+                return 3;
             }
             catch
             {
-                return false;
+                return 0;
             }
         }
     }

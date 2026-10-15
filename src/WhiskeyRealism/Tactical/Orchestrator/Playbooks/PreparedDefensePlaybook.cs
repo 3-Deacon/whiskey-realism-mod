@@ -5,10 +5,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// defensive doctrine with low audacity. Strong on prepared positions;
     /// relies on reserves and terrain rather than maneuver.
     /// </summary>
-    public sealed class McClellanPreparedDefensePlaybook : TacticalPlaybook
+    public sealed class PreparedDefensePlaybook : TacticalPlaybook
     {
-        public McClellanPreparedDefensePlaybook() : base(
-            BattlePlanId.McClellanPreparedDefense,
+        public PreparedDefensePlaybook() : base(
+            BattlePlanId.PreparedDefense,
             "mcclellan-prepared-defense",
             new PersonalityFit(aggression: -0.6f, caution: 0.8f, audacity: -0.7f),
             new TerrainPreference(open: 0.6f, wooded: 0.7f, river: 0.7f, mountain: 0.7f),
