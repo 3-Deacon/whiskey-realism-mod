@@ -172,6 +172,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (mode == PerceptionMode.RangeOnly) CollectRangeVisible(s);
             try
             {
+                MaskPlayerIntelIncidents(mode);
                 UnitRecord[] enemies = s.EnemyRecords;
                 for (int i = 0; i < s.EnemyRecordCount; i++)
                 {
@@ -190,6 +191,44 @@ namespace WhiskeyRealism.Tactical.Battle
                 OnceLog.Warning("tactical.battle-perception:fog-probe-failed",
                     "[BattlePerception] fog-grid probe threw, side falls back to range-only: " + ex.GetType().Name + " " + ex.Message);
                 return false;
+            }
+            finally
+            {
+                if (_incidentMask.Active)
+                {
+                    string failure = _incidentMask.Restore();
+                    if (failure != null)
+                        OnceLog.Warning("tactical.battle-perception:incident-restore",
+                            "[BattlePerception] W&L incident restore failed: " + failure);
+                }
+            }
+        }
+
+        // FogOfWar.UnitIsHidden returns false for every position while the W&L player's
+        // intelligence incident 60 (Lost Orders), 61 or 64 (Scouting Ahead) is active
+        // (101183-101186): the incident reveals the enemy to the player. Vanilla's AI never asks
+        // that grid about the player's units (iswithinfog is computed for non-player units
+        // only, 127212-127230), so the shortcut was never meant for an AI side. For the FogGrid
+        // probe (an AI side's own grid) the incidents are marked not launched for the probe's
+        // UnitIsHidden calls and restored in FillProbe's finally (BUG-TAC-020).
+        private static readonly WhiskeyRealism.Patches.FieldValueSwap<DLC_WL.Incident, float> _incidentMask =
+            new WhiskeyRealism.Patches.FieldValueSwap<DLC_WL.Incident, float>(i => i.launchedtime, (i, v) => i.launchedtime = v);
+
+        private static void MaskPlayerIntelIncidents(PerceptionMode mode)
+        {
+            if (!BattlePerception.MasksPlayerIntelIncidents(mode, DLC_WL.dlc_scenarioactive)) return;
+            List<DLC_WL.Incident> incidents = DLC_WL.incidents;
+            if (incidents == null) return;
+            int[] ids = BattlePerception.PlayerIntelIncidents;
+            for (int i = 0; i < ids.Length; i++)
+            {
+                int id = ids[i];
+                if (id < 0 || id >= incidents.Count) continue;
+                DLC_WL.Incident incident = incidents[id];
+                if (incident == null || !BattlePerception.IncidentLaunched(incident.launchedtime)) continue;
+                _incidentMask.Set(incident, BattlePerception.IncidentNotLaunched);
+                OnceLog.Info("tactical.battle-perception:incident-mask",
+                    "[BattlePerception] W&L incident " + id + " (player intelligence) ignored by the AI side's fog-grid probe");
             }
         }
 

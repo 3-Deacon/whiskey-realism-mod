@@ -109,6 +109,10 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
         internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal static ConfigEntry<bool> FixPerkEffectScope;
+        internal static ConfigEntry<bool> FixAiPerkPickRange;
+        internal static ConfigEntry<bool> FixPontoonTrainCreekSpeed;
+        internal static ConfigEntry<bool> FixEngineerBranchBonus;
+        internal static ConfigEntry<bool> FixGoodGroundCoverCap;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -346,6 +350,14 @@ namespace WhiskeyRealism
                 "player-owned groups never feud-move. The orchestrator direct-child gate may deny the move. Without a battle snapshot for the " +
                 "side it fails closed: vanilla's move goes out directly only where the write guard allows it. Needs Tactical Commander Mode = " +
                 "Active. Off: vanilla feud movement runs unmodified and the direct-child gate is skipped. (The key name is kept for existing cfg files.)");
+            FixGoodGroundCoverCap = Config.Bind(
+                "W&L",
+                "Fix Good Ground Cover Cap",
+                true,
+                "Default ON. W&L incident 'A Good Ground' doubles the cover of the player's command with no ceiling, so behind " +
+                "parapets cover reaches 1.0 or more and the units take no ranged losses at all. With this on the doubled cover is " +
+                "capped at 0.9 (ranged losses never below 10%); below that the incident keeps its full doubling, and a unit never ends " +
+                "below its cover without the incident. Set false for rollback to vanilla.");
             EnableWlOperationNullGuard = Config.Bind(
                 "W&L",
                 "Enable Operation Null Guard",
@@ -764,6 +776,25 @@ namespace WhiskeyRealism
                 "Default ON. Applies two perks only where their tooltips say: Foot Cavalry's forced-march speed only while the unit is on a " +
                 "forced march (vanilla applies it to every campaign move), and Embedded Reporters' fame bonus for the unit that has the perk at " +
                 "that unit's level (vanilla ignores a corps' own perk when the corps sits under an army, and reads the level from the corps even when its army holds the perk). Set false for rollback to vanilla.");
+            FixAiPerkPickRange = Config.Bind(
+                "Campaign", "Fix AI Perk Pick Range", true,
+                "Default ON. Vanilla's campaign AI perk pick draws Random.Range(0, count - 1), so no AI army ever takes River Expedition " +
+                "and no AI fleet Port Defender. With this on every perk id is a candidate, both for Whiskey's role-aware pick and for the " +
+                "plain random pick vanilla makes where Whiskey does not steer (a W&L commander-in-chief's own alliance, Europe). Set false " +
+                "for rollback to vanilla.");
+            FixPontoonTrainCreekSpeed = Config.Bind(
+                "Campaign", "Fix Pontoon Train Creek Speed", true,
+                "Default ON. Pontoon Train promises +25/50/75% movement speed across small rivers; vanilla only lowers the creek path cost " +
+                "(x0.75/0.5/0.25), so armies route through creeks they still cross at normal creek speed. With this on a division, corps, " +
+                "army or army group with the perk (or under an army that has it) crosses creeks 1.25/1.5/1.75 times as fast, and its creek " +
+                "path cost is 1/1.25, 1/1.5, 1/1.75 so routes are chosen by real travel time. Every side, including the W&L player. Set " +
+                "false for rollback to vanilla.");
+            FixEngineerBranchBonus = Config.Bind(
+                "Campaign", "Fix Engineer Branch Bonus", true,
+                "Default ON. The engineering-point bonus for an engineer regiment whose commander is an engineer officer (unitprefs " +
+                "'if commander fits to branch of arms (engineers)', x1.5) tests the navy branch in vanilla, so no engineer officer " +
+                "(Lee, McClellan, Meade, a W&L Engineer) ever gets it. With this on the bonus goes to engineer-branch commanders, in " +
+                "battle deployment and in autoresolve. Set false for rollback to vanilla.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");

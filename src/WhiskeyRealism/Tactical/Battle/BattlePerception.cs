@@ -118,6 +118,25 @@ namespace WhiskeyRealism.Tactical.Battle
         /// already applies the HQ-in-the-saddle rule and is cleared at init), HQ in the
         /// saddle, grid not painted yet, else the AI fog grid.
         /// </summary>
+        // W&L player-intelligence incidents that make FogOfWar.UnitIsHidden answer "visible" for
+        // every position (101183-101186): 60 Lost Orders (battle), 61 and 64 Scouting Ahead
+        // (campaign). Incident.launchedtime >= 0 is what IsIncidentActive tests (46251-46263).
+        internal static readonly int[] PlayerIntelIncidents = { 60, 61, 64 };
+        internal const float IncidentNotLaunched = -1f;
+
+        internal static bool IncidentLaunched(float launchedTime)
+        {
+            return launchedTime >= 0f;
+        }
+
+        // Only the FogGrid probe asks UnitIsHidden for an AI side about the player's units; the
+        // player-alliance side (OwnSideWithinFog) reads vanilla's own verdict, which the
+        // incident is meant to open.
+        internal static bool MasksPlayerIntelIncidents(PerceptionMode mode, bool dlcScenarioActive)
+        {
+            return dlcScenarioActive && mode == PerceptionMode.FogGrid;
+        }
+
         public static PerceptionMode DecideMode(bool configOn, bool useFow, bool hqInTheSaddleBattle, bool gridFirstRunFinished,
             double secondsSinceBattleStart, bool sideIsPlayerAlliance, out PerceptionFallbackReason reason)
         {
