@@ -48,7 +48,9 @@ namespace WhiskeyRealism.Patches
                 }
 
                 bool dateChanged = day != _lastNotifiedDay || month != _lastNotifiedMonth || year != _lastNotifiedYear;
-                bool runtimeReady = OperationalRuntimeReady() && !StrategicCoordinator.WlCareerStartPending();
+                // Spec C5: notify the review once a W&L commander is chosen, also between commands
+                // (the review narrows itself while vanilla's job machine is paused, 11368).
+                bool runtimeReady = OperationalRuntimeReady() && !StrategicCoordinator.WlCareerNotStarted();
                 if (!_startupGate.ShouldNotify(dateChanged, runtimeReady))
                     return;
 

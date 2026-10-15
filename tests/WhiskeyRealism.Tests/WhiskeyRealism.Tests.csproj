@@ -64,6 +64,15 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignDispatchPolicy.cs" Link="WlCampaignDispatchPolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignDispatchRuntime.cs" Link="WlCampaignDispatchRuntime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PlayerComplianceLedger.cs" Link="PlayerComplianceLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignPlannerContracts.cs" Link="Planner\CampaignPlannerContracts.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignSnapshot.cs" Link="Planner\CampaignSnapshot.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SightRadiusFormula.cs" Link="Planner\SightRadiusFormula.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyBeliefQuery.cs" Link="Planner\EnemyBeliefQuery.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ViewerCoverage.cs" Link="Planner\ViewerCoverage.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SectorModel.cs" Link="Planner\SectorModel.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\LogisticsGate.cs" Link="Planner\LogisticsGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlayerCommandClassifier.cs" Link="Planner\PlayerCommandClassifier.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignPlanStore.cs" Link="Planner\CampaignPlanStore.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicFactionAiGuard.cs" Link="CicFactionAiGuard.cs" />

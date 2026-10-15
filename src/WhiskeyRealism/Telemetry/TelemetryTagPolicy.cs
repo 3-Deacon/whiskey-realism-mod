@@ -138,6 +138,21 @@ namespace WhiskeyRealism.Telemetry
             // profile (bounded: one order per target per game day, last four targets);
             // skip lines are written with LegacyInfo and stay on the campaign sidecar.
             AddCampaignAndMainLog("W&LCampaignDispatch", TelemetryCategory.Decision);
+            // Stage G campaign planner (plan G0 registers every event of G0-G7). The first-review
+            // line is G0's runtime proof and reaches LogOutput.log under every profile (bounded:
+            // once per alliance per campaign), as the #69 dispatch line does.
+            AddCampaignAndMainLog("CampaignPlanner", TelemetryCategory.State);
+            AddCampaign("CampaignPlan", TelemetryCategory.Decision);
+            AddCampaign("EnemyBeliefs", TelemetryCategory.State);
+            AddCampaign("Recon", TelemetryCategory.State);
+            AddCampaign("ReconMission", TelemetryCategory.Write);
+            AddCampaign("Appointment", TelemetryCategory.Write);
+            AddCampaign("Allocation", TelemetryCategory.Decision);
+            AddCampaign("CampaignMover", TelemetryCategory.Write);
+            AddCampaign("DepotTask", TelemetryCategory.Write);
+            AddCampaign("RailroadSteer", TelemetryCategory.Write);
+            AddCampaign("CapitalFloor", TelemetryCategory.Write);
+            AddCampaign("ReplacementFlow", TelemetryCategory.Write);
             AddCampaign("Succession", TelemetryCategory.Decision);
             AddCampaign("Plan", TelemetryCategory.Decision);
         }

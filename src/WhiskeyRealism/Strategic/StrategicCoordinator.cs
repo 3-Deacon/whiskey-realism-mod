@@ -9,6 +9,7 @@ using UnityEngine;
 using WhiskeyRealism.Patches;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Strategic.Policies;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -85,6 +86,7 @@ namespace WhiskeyRealism.Strategic
         internal static readonly CampaignEpochTracker Epoch = new CampaignEpochTracker();
         private bool _operationalRuntimeDeferredLogged;
         private bool _wlCareerStartDeferredLogged;
+        private bool _wlJobMachinePauseLogged;
         private bool _dailyOpsAnnounced;
         private readonly bool[] _playerCicAnnounced = new bool[2];
 
@@ -190,6 +192,7 @@ namespace WhiskeyRealism.Strategic
             _operationalCadence = new DailyCadence();
             _operationalRuntimeDeferredLogged = false;
             _wlCareerStartDeferredLogged = false;
+            _wlJobMachinePauseLogged = false;
             _dailyOpsAnnounced = false;
             _forcedAllSuccession = false;
             _erasSeededFromSave = false;
@@ -339,17 +342,37 @@ namespace WhiskeyRealism.Strategic
             double policyMs = 0d;
             double constructionMs = 0d;
             double defenseMs = 0d;
+            double plannerMs = 0d;
 
-            if (WlCareerStartPending())
+            // Stage G spec C5: only a career whose commander is not chosen yet defers the whole
+            // review. Between commands vanilla's job machine is paused (UpdateUnitAI 11368) and the
+            // review narrows below instead.
+            if (WlCareerNotStarted())
             {
                 if (!_wlCareerStartDeferredLogged)
                 {
                     _wlCareerStartDeferredLogged = true;
-                    EmitCampaignInfoToMainLogIfAllowed("[Coordinator] W&L career start selection pending; strategic review deferred until player has a command");
+                    EmitCampaignInfoToMainLogIfAllowed("[Coordinator] W&L career start selection pending; strategic review deferred until the player picks a commander");
                 }
                 return;
             }
             _wlCareerStartDeferredLogged = false;
+
+            // While vanilla's 11368 return freezes every faction's job machine, the ledgers that
+            // issue moves or mirror job-machine work (succession swaps and the CIC/probe path,
+            // front, formation directives, army areas, defense intent) and the planner's executors
+            // pause for both alliances; the state-only ledgers (era, capital threat, director
+            // posture, fiscal, policy, construction) and the planner's bookkeeping keep running.
+            bool jobMachinePaused = WlVanillaJobMachinePaused();
+            if (jobMachinePaused && !_wlJobMachinePauseLogged)
+            {
+                _wlJobMachinePauseLogged = true;
+                EmitCampaignInfoToMainLogIfAllowed("[Coordinator] W&L player has no command (hierarchy -1): planner executors and order-issuing ledgers paused for every alliance, as vanilla's job machine");
+            }
+            else if (!jobMachinePaused)
+            {
+                _wlJobMachinePauseLogged = false;
+            }
 
             RefreshStrategicSettings();
             int reviewSerial = ReviewCadenceCatchUp.DaySerial(day, month, year);
@@ -397,13 +420,16 @@ namespace WhiskeyRealism.Strategic
                 var ws = ObserveWarStateCached(day, month, year);
                 era.CheckTransition(month, year, ws.VicksburgFallen, ws.AtlantaThreatened);
 
-                var fired = Succession.CheckEvents(BuildSchedulerView(month, year, alliance, ws));
-                foreach (var e in fired)
+                if (!jobMachinePaused)
                 {
-                    if (e.AllianceId != alliance) continue;
-                    SwapOfficer(alliance, e);
-                    if (CICs[alliance].ActivePlan != null)
-                        CICs[alliance].ActivePlan.IsDirty = true;
+                    var fired = Succession.CheckEvents(BuildSchedulerView(month, year, alliance, ws));
+                    foreach (var e in fired)
+                    {
+                        if (e.AllianceId != alliance) continue;
+                        SwapOfficer(alliance, e);
+                        if (CICs[alliance].ActivePlan != null)
+                            CICs[alliance].ActivePlan.IsDirty = true;
+                    }
                 }
 
                 var cic = CICs[alliance];
@@ -414,36 +440,46 @@ namespace WhiskeyRealism.Strategic
                     PublishDirectorPosture(alliance, cic, era, day, month, year, daySerial);
                 }
 
-                var phaseTruth = BuildPhaseTruth(cic, alliance, day, month, year);
-                if (!cic.ReviewPlanWithTruth(day, month, year, phaseTruth))
+                if (!jobMachinePaused)
                 {
-                    string beforeOperation = cic.ActivePlan?.OperationId;
-                    cic.Replan(
-                        era,
-                        month,
-                        year,
-                        daySerial,
-                        SafePolicyChapter(),
-                        alliance < DirectorMemories.Length ? DirectorMemories[alliance].LastPosture : null,
-                        null);
-                    string afterOperation = cic.ActivePlan?.OperationId;
-                    if (!string.IsNullOrEmpty(afterOperation) && afterOperation != beforeOperation)
-                        OperationMemories[alliance].RecordReplan(daySerial);
+                    var phaseTruth = BuildPhaseTruth(cic, alliance, day, month, year);
+                    if (!cic.ReviewPlanWithTruth(day, month, year, phaseTruth))
+                    {
+                        string beforeOperation = cic.ActivePlan?.OperationId;
+                        cic.Replan(
+                            era,
+                            month,
+                            year,
+                            daySerial,
+                            SafePolicyChapter(),
+                            alliance < DirectorMemories.Length ? DirectorMemories[alliance].LastPosture : null,
+                            null);
+                        string afterOperation = cic.ActivePlan?.OperationId;
+                        if (!string.IsNullOrEmpty(afterOperation) && afterOperation != beforeOperation)
+                            OperationMemories[alliance].RecordReplan(daySerial);
+                    }
                 }
 
                 fiscalMs += Measure(() => UpdateFiscalIntent(alliance, era.Stage, day, month, year, logHeartbeat, publish: true));
                 if (operationalRuntimeReady)
                     policyMs += Measure(() => UpdatePolicyPlan(alliance, era.Stage, reviewSerial));
-                bool frontChanged = false;
                 if (operationalRuntimeReady)
-                    frontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance, cic));
-                if (frontChanged || _frontChangedDay[alliance] < 0)
-                    _frontChangedDay[alliance] = daySerial;
+                    plannerMs += Measure(() => CampaignPlannerRuntime.ReviewPlan(alliance, day, month, year, DirectorMemories[alliance]?.LastPosture));
+                bool frontChanged = false;
+                if (!jobMachinePaused)
+                {
+                    if (operationalRuntimeReady)
+                        frontMs += Measure(() => frontChanged = UpdateFrontLedger(alliance, cic));
+                    if (frontChanged || _frontChangedDay[alliance] < 0)
+                        _frontChangedDay[alliance] = daySerial;
 
-                defenseMs += Measure(() => UpdateDefenseIntent(alliance, era.Stage, day, month, year));
+                    defenseMs += Measure(() => UpdateDefenseIntent(alliance, era.Stage, day, month, year));
+                    if (operationalRuntimeReady)
+                        plannerMs += Measure(() => CampaignPlannerRuntime.ReviewExecute(alliance));
+                }
 
                 bool formationChanged = false;
-                if (operationalRuntimeReady)
+                if (operationalRuntimeReady && !jobMachinePaused)
                 {
                     string formationSource = FormationSourceSignature(alliance, cic);
                     bool runFormation = StrategicCadencePolicy.ShouldRunAlternatingByAlliance(day, alliance, alternatingCatchUp) ||
@@ -498,7 +534,7 @@ namespace WhiskeyRealism.Strategic
                     $"totalMs={totalWatch.Elapsed.TotalMilliseconds:F2} " +
                     $"mapMs={mapMs:F2} frontMs={frontMs:F2} armyAreaMs={armyAreaMs:F2} " +
                     $"formationMs={formationMs:F2} probeMs={probeMs:F2} fiscalMs={fiscalMs:F2} policyMs={policyMs:F2} " +
-                    $"constructionMs={constructionMs:F2} defenseMs={defenseMs:F2}");
+                    $"constructionMs={constructionMs:F2} defenseMs={defenseMs:F2} plannerMs={plannerMs:F2}");
             }
         }
 
@@ -1706,6 +1742,35 @@ namespace WhiskeyRealism.Strategic
             catch (Exception ex)
             {
                 Plugin.Log.LogWarning("[Coordinator] IsPlayerCICOf failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        // WlCareerStartGate.CareerNotStarted on vanilla state (direct reads, as IsPlayerCICOf).
+        public static bool WlCareerNotStarted()
+        {
+            try
+            {
+                return WlCareerStartGate.CareerNotStarted(DLC_WL.dlc_scenarioactive, DLC_WL.dlc_chosencommander);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-career-not-started-gate", "[Coordinator] W&L career start gate failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        // Vanilla's job-machine pause predicate (AICampaign.UpdateUnitAI 11368).
+        public static bool WlVanillaJobMachinePaused()
+        {
+            try
+            {
+                bool active = DLC_WL.dlc_scenarioactive;
+                return active && WlCareerStartGate.VanillaJobMachinePaused(active, DLC_WL.GetPlayerCommandHierarchy(), DLC_WL.IsCommanderInChief());
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-job-machine-pause-gate", "[Coordinator] W&L job-machine pause gate failed: " + ex.Message);
                 return false;
             }
         }
