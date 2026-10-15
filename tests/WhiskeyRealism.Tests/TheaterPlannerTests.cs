@@ -278,11 +278,12 @@ internal static class TheaterPlannerTests
 
     private static void RandomOnlyWithinEpsilon()
     {
-        // 98 and 99 tie; 97 (x 0, no value, out of reach) is far below the best.
+        // 98 and 99 tie; 97 (beside 99, less important) is 0.06 below them: just outside Epsilon,
+        // where the softmax alone would still draw it about one time in forty.
         var s = TwoTargets(0.5f, 0.5f);
-        s.Objectives.Add(Target(97, 0f, 0f));
+        s.Objectives.Add(Target(97, 300f, 0.1f));
         var seen = new HashSet<int>();
-        for (long seed = 1; seed <= 200; seed++)
+        for (long seed = 1; seed <= 400; seed++)
             seen.Add(Plan(s, new PlannerState { CampaignSeed = seed }).MainObjectiveId);
         AssertTrue(seen.Contains(98) && seen.Contains(99), "both near-equal candidates are drawn");
         AssertFalse(seen.Contains(97), "a candidate outside Epsilon is never drawn");
@@ -698,6 +699,9 @@ internal static class TheaterPlannerTests
         int plan = review.IndexOf("TheaterPlanner.Plan(", StringComparison.Ordinal);
         int publish = review.IndexOf("CampaignPlanStore.Publish(", StringComparison.Ordinal);
         AssertTrue(build >= 0 && bookkeeping > build && plan > bookkeeping && publish > plan, "build, bookkeeping return, plan, publish in order");
+        AssertContains(review, "plan = TheaterPlanner.Plan(snapshot, sectors, SectorProfileUntilG2, state, PendingBattles,", "the plan step's inputs");
+        AssertContains(review, "CampaignPlanStore.Publish(alliance, plan,", "the planner's plan is what is published");
+        AssertContains(review, "EmitPlan(plan, trace,", "[CampaignPlan] row from the published plan");
         AssertContains(review, "Battles.Take(alliance,", "each review takes only its own battles");
         int seams = src.Split(new[] { "// G2 SEAM" }, StringSplitOptions.None).Length - 1;
         AssertEqual(1, seams, "exactly one G2 seam line");

@@ -135,7 +135,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         mainX = force.X;
                         mainZ = force.Z;
                     }
-                    LogisticsGate.AddDepotTasks(s, plan, sectors, force.X, force.Z, m.X, m.Z, force.CommandRange, profile.SupplySlack);
+                    LogisticsGate.AddDepotTasks(s, plan, sectors, mainX, mainZ, m.X, m.Z, force.CommandRange, profile.SupplySlack);
                 }
             }
             AssignPostures(inputs, plan, axisFromX, axisFromZ, mainX, mainZ);
@@ -155,12 +155,14 @@ namespace WhiskeyRealism.Strategic.Planner
             float maxMovable = 0f;
             for (int i = 0; i < s.Own.Count; i++)
                 if (Movable(s.Own[i])) maxMovable = Math.Max(maxMovable, s.Own[i].Strength);
+            var ownIips = MarchTime.OwnIips(s);
 
             for (int i = 0; i < s.Objectives.Count; i++)
             {
                 var o = s.Objectives[i];
                 if (!o.Available || o.Accomplished || o.HolderAlliance == s.Alliance) continue;
-                var cand = new Candidate { ObjectiveId = o.ObjectiveId, X = o.X, Z = o.Z, SectorId = c.Sectors.SectorAt(o.X, o.Z) };
+                int area = AreaGeometry.AreaAt(s.Areas, o.X, o.Z); // SectorModel.SectorAt's own lookup, done once
+                var cand = new Candidate { ObjectiveId = o.ObjectiveId, X = o.X, Z = o.Z, SectorId = area >= 0 ? c.Sectors.SectorOfArea(s.Areas[area].Index) : -1 };
                 cand.Force = PickForce(s, o.X, o.Z, maxMovable);
                 var profile = ProfileOf(c, cand.Force);
                 cand.Required = Math.Max(0f, s.OffensiveDominance * (1f + mass) + profile.RequiredOddsShift);
@@ -172,7 +174,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 cand.Ratio = enemy > 0f ? own / enemy : (own > 0f ? float.MaxValue : 0f);
                 float balance = own + enemy > 0f ? own / (own + enemy) : 0f;
                 cand.Balance = SnapshotRules.Clamp01(balance * (1f + AttackBiasBalanceScale * profile.AttackBias));
-                cand.Value = SnapshotRules.Clamp01(0.5f * o.Importance01 + 0.25f * AreaImportance01(s, o.X, o.Z, maxAreaImportance) + 0.25f * Role01(o.Roles));
+                float area01 = area >= 0 && maxAreaImportance > 0f ? SnapshotRules.Clamp01(s.Areas[area].Importance / maxAreaImportance) : 0f;
+                cand.Value = SnapshotRules.Clamp01(0.5f * o.Importance01 + 0.25f * area01 + 0.25f * Role01(o.Roles));
                 cand.Capital = CapitalTerm(c, o);
 
                 if (cand.Force >= 0)
@@ -182,7 +185,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     cand.InReach = reach.InReach;
                     cand.Reach = reach.InReach ? 0.5f + 0.5f * reach.Slack01 : 0f;
                     float distance = RiverLines.EffectiveDistance(f.X, f.Z, o.X, o.Z, c.Probe, s.Crossings);
-                    float days = MarchTime.EstimateDays(c.Speed, f, o.X, o.Z, distance, s, c.Probe);
+                    float days = MarchTime.EstimateDays(c.Speed, f, o.X, o.Z, distance, s, c.Probe, ownIips);
                     cand.March = days < float.MaxValue ? 1f - SnapshotRules.Clamp01(days / MarchHorizonDays) : 0f;
                     float flank = FlankThreat(c, f.X, f.Z, o.X, o.Z, range);
                     cand.Exposure = flank + f.Strength > 0f ? flank / (flank + Math.Max(0f, f.Strength)) : 0f;
@@ -466,7 +469,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var f = s.Own[i];
                 if (!Movable(f) || f.Strength < MainBodyShare * maxMovable) continue;
-                float d = RiverLines.Distance(f.X, f.Z, x, z);
+                float d = DistanceSq(f.X, f.Z, x, z);
                 if (d >= bestDistance) continue;
                 bestDistance = d;
                 best = i;
@@ -483,9 +486,17 @@ namespace WhiskeyRealism.Strategic.Planner
         private static float OwnStrengthWithin(CampaignSnapshot s, float x, float z, float range)
         {
             float total = 0f;
+            float rangeSq = range * range;
             for (int i = 0; i < s.Own.Count; i++)
-                if (RiverLines.Distance(s.Own[i].X, s.Own[i].Z, x, z) <= range) total += Math.Max(0f, s.Own[i].Strength);
+                if (DistanceSq(s.Own[i].X, s.Own[i].Z, x, z) <= rangeSq) total += Math.Max(0f, s.Own[i].Strength);
             return total;
+        }
+
+        private static float DistanceSq(float ax, float az, float bx, float bz)
+        {
+            float dx = ax - bx;
+            float dz = az - bz;
+            return dx * dx + dz * dz;
         }
 
         private static float Live(in EnemyBelief b)
@@ -572,13 +583,6 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!s.HasCapital || c.CapitalThreat01 <= 0f || s.RelocationRange <= 0f) return 0f;
             float closeness = SnapshotRules.Clamp01(1f - RiverLines.Distance(o.X, o.Z, s.CapitalX, s.CapitalZ) / (2f * s.RelocationRange));
             return c.CapitalThreat01 * closeness;
-        }
-
-        private static float AreaImportance01(CampaignSnapshot s, float x, float z, float maxAreaImportance)
-        {
-            if (maxAreaImportance <= 0f) return 0f;
-            int position = AreaGeometry.AreaAt(s.Areas, x, z);
-            return position >= 0 ? SnapshotRules.Clamp01(s.Areas[position].Importance / maxAreaImportance) : 0f;
         }
 
         private static float Role01(ObjectiveRole roles)

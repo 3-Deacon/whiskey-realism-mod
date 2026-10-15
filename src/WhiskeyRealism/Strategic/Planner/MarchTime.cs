@@ -62,8 +62,9 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Days for the formation to cover effectiveDistance toward (toX, toZ); float.MaxValue
         // when the inputs give no speed.
+        // ownIips: MarchTime.OwnIips(s) when the caller estimates many marches on one snapshot.
         public static float EstimateDays(in MarchSpeedInputs m, in FormationRecord f, float toX, float toZ, float effectiveDistance,
-                                         CampaignSnapshot s, ITerrainLineProbe probe)
+                                         CampaignSnapshot s, ITerrainLineProbe probe, HashSet<int> ownIips = null)
         {
             float road = SpeedPerDay(m, f.UnitTyp, f.GroupSpeed, m.RoadCost);
             if (road <= 0f) return float.MaxValue;
@@ -80,7 +81,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (f.UseRails && s != null && TrainCovers(m, f.Strength))
             {
                 float rail = SpeedPerDay(m, f.UnitTyp, f.GroupSpeed, m.RailCost) * m.RailroadSpeedAdj;
-                float leg = Math.Min(distance, RailLeg(s, f, toX, toZ));
+                float leg = Math.Min(distance, RailLeg(s, f, toX, toZ, ownIips));
                 if (rail > 0f && leg > 0f) bestDays = Math.Min(bestDays, (distance - leg) / road + leg / rail);
             }
             return bestDays;
@@ -111,12 +112,11 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // The best completed own line with one endpoint within commanderrange: the distance its far
         // endpoint gains toward the target, capped at the line's own length.
-        internal static float RailLeg(CampaignSnapshot s, in FormationRecord f, float toX, float toZ)
+        internal static float RailLeg(CampaignSnapshot s, in FormationRecord f, float toX, float toZ, HashSet<int> own)
         {
             float range = Math.Max(0f, f.CommandRange);
             float fromTarget = RiverLines.Distance(f.X, f.Z, toX, toZ);
             float best = 0f;
-            HashSet<int> own = null;
             for (int i = 0; i < s.Rails.Count; i++)
             {
                 var line = s.Rails[i];
@@ -138,7 +138,8 @@ namespace WhiskeyRealism.Strategic.Planner
             return gain > 0f ? Math.Min(gain, lineLength) : 0f;
         }
 
-        private static HashSet<int> OwnIips(CampaignSnapshot s)
+        // The snapshot alliance's own IIP ids (SupplySourceRecord.Id = RailLineRecord.AIipId/BIipId).
+        internal static HashSet<int> OwnIips(CampaignSnapshot s)
         {
             var own = new HashSet<int>();
             for (int i = 0; i < s.Supply.Count; i++)
