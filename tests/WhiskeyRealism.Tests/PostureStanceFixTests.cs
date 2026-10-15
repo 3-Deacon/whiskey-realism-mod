@@ -1,6 +1,7 @@
 using System;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 using static TestHarness;
 
 // WS T4 (2026-10-14 remediation): #61 posture executor + single ai_stance owner.
@@ -31,6 +32,10 @@ internal static class PostureStanceFixTests
         // B-macro3
         Pass("posture executor stands down in vanilla retreat and end of day", PostureExecutorStandsDownInRetreatAndEndOfDay);
         Pass("posture executor skips the feud instance", PostureExecutorSkipsFeudInstance);
+
+        // BR-H1
+        Pass("defensive hold is no opinion for leaf and brigade tasks", DefensiveHoldIsNoOpinionForTasks);
+        Pass("opportunity overrides keep withdrawal consolidate and attack-now rules", OpportunityOverridesKeepOtherRules);
     }
 
     private static void Pass(string name, Action test)
@@ -242,5 +247,37 @@ internal static class PostureStanceFixTests
         AssertEqual("feud-instance", feud, "feud reason");
         AssertFalse(PostureExecutorBattleGate.Allows(5, 1, 0, 1, false, out _), "player instance outside ai_vs_ai");
         AssertTrue(PostureExecutorBattleGate.Allows(5, 1, 0, 1, true, out _), "player instance under ai_vs_ai (W&L) runs; per-unit guard protects");
+    }
+
+    private static void DefensiveHoldIsNoOpinionForTasks()
+    {
+        foreach (var task in new[] { CommandTaskType.AttackObjective, CommandTaskType.Probe, CommandTaskType.SupportAttack })
+        {
+            var result = TacticalOpportunityTaskOverride.Override(task, DirectChildRole.Main, ReinforcementOpportunity.DefensiveHold, out string reason);
+            AssertEqual(task, result, "DefensiveHold keeps " + task);
+            AssertTrue(reason == null, "no override reason for " + task);
+        }
+    }
+
+    private static void OpportunityOverridesKeepOtherRules()
+    {
+        AssertEqual(CommandTaskType.FallBackToLine,
+            TacticalOpportunityTaskOverride.Override(CommandTaskType.AttackObjective, DirectChildRole.Main, ReinforcementOpportunity.WithdrawalToFightLater, out _),
+            "withdrawal pulls the main effort back");
+        AssertEqual(CommandTaskType.Screen,
+            TacticalOpportunityTaskOverride.Override(CommandTaskType.Screen, DirectChildRole.Screen, ReinforcementOpportunity.WithdrawalToFightLater, out _),
+            "screen keeps covering the withdrawal");
+        AssertEqual(CommandTaskType.Consolidate,
+            TacticalOpportunityTaskOverride.Override(CommandTaskType.AttackObjective, DirectChildRole.Main, ReinforcementOpportunity.WaitAndConsolidate, out _),
+            "wait for relief");
+        AssertEqual(CommandTaskType.AttackObjective,
+            TacticalOpportunityTaskOverride.Override(CommandTaskType.HoldObjective, DirectChildRole.SupportMain, ReinforcementOpportunity.AttackNow, out _),
+            "attack now commits held main/support");
+        AssertEqual(CommandTaskType.HoldObjective,
+            TacticalOpportunityTaskOverride.Override(CommandTaskType.HoldObjective, DirectChildRole.RefuseLeft, ReinforcementOpportunity.AttackNow, out _),
+            "flank guard stays");
+        AssertEqual(CommandTaskType.Probe,
+            TacticalOpportunityTaskOverride.Override(CommandTaskType.Probe, DirectChildRole.Main, ReinforcementOpportunity.NoOpportunity, out _),
+            "no opportunity no change");
     }
 }

@@ -228,7 +228,7 @@ namespace WhiskeyRealism.Patches
             }
             catch { /* default NoOpportunity preserves prior behavior */ }
             string brigadeOverrideReason;
-            CommandTaskType brigadeOverriddenTask = OverrideTaskForOpportunity(
+            CommandTaskType brigadeOverriddenTask = TacticalOpportunityTaskOverride.Override(
                 state.Task,
                 WhiskeyRealism.Tactical.Orchestrator.DirectChildRole.Main,
                 opportunityForBrigade,
@@ -2499,7 +2499,7 @@ namespace WhiskeyRealism.Patches
             }
             catch { /* default = NoOpportunity, preserves prior behavior */ }
 
-            CommandTaskType effectiveTask = OverrideTaskForOpportunity(
+            CommandTaskType effectiveTask = TacticalOpportunityTaskOverride.Override(
                 leafAssignment.LeafTask,
                 leafAssignment.LeafRole,
                 opportunity,
@@ -2673,111 +2673,6 @@ namespace WhiskeyRealism.Patches
                     "ResolveMainArrivalHold failed: " + e.GetType().Name + " " + e.Message);
                 holding = false;
                 return attackTask;
-            }
-        }
-
-        // Opportunity-override mapping (2026-05-21). Maps the army's high-level
-        // ReinforcementOpportunity decision onto a per-brigade task override. Returns
-        // the original task unchanged (and null reason) when the opportunity has
-        // nothing to add. Returns a non-null reason when overriding so telemetry
-        // can show which brigades were redirected and why.
-        //
-        // Design intent: high-priority opportunities (WithdrawalToFightLater) override
-        // every role; low-priority opportunities (AttackNow, DefensiveHold) only
-        // override the roles that meaningfully conflict. Flank-guard roles
-        // (RefuseLeft, RefuseRight, Screen) always keep their task because the
-        // flank-guard is the right play in both attack and defense — they're not
-        // contributing to the main effort either way.
-        private static CommandTaskType OverrideTaskForOpportunity(
-            CommandTaskType originalTask,
-            DirectChildRole role,
-            ReinforcementOpportunity opportunity,
-            out string overrideReason)
-        {
-            overrideReason = null;
-            switch (opportunity)
-            {
-                case ReinforcementOpportunity.WithdrawalToFightLater:
-                    // 2026-05-21 role-aware refinement (Bug 3 fix). Previous
-                    // behavior flattened EVERY non-fallback task to FallBackToLine,
-                    // which broke delay-playbook execution: Buford-style screen-
-                    // and-delay needs Screen / RefuseLeft / RefuseRight brigades
-                    // to KEEP screening during the army's withdrawal — that IS the
-                    // delay action. Smoke 2026-05-21 23:31 confirmed this gap:
-                    // Union picked CavalryScreeningDelay but every brigade got
-                    // applied-FallBackToLine instead of executing their playbook
-                    // roles.
-                    //
-                    // Aggressive roles (Main / SupportMain / Fix / Probe) → fall
-                    // back: they were committed to the attack and now need to
-                    // disengage.
-                    // Defensive roles (Screen / RefuseLeft / RefuseRight / Reserve
-                    // / Fallback) → keep their task: they're already executing the
-                    // covering action that lets the army withdraw cleanly.
-                    if (originalTask == CommandTaskType.FallBackToLine)
-                        return originalTask;
-                    switch (role)
-                    {
-                        case DirectChildRole.Main:
-                        case DirectChildRole.SupportMain:
-                        case DirectChildRole.Fix:
-                            overrideReason = "withdrawal-aggressive-role";
-                            return CommandTaskType.FallBackToLine;
-                        case DirectChildRole.Screen:
-                        case DirectChildRole.RefuseLeft:
-                        case DirectChildRole.RefuseRight:
-                        case DirectChildRole.Reserve:
-                        case DirectChildRole.Fallback:
-                            // Already-defensive role — keep its existing task
-                            // (GuardFlank for refuse roles, screen task for
-                            // Screen role, etc.). This is the screen-and-delay
-                            // pattern the user's smoke complaint was missing.
-                            return originalTask;
-                        default:
-                            overrideReason = "withdrawal-unknown-role";
-                            return CommandTaskType.FallBackToLine;
-                    }
-
-                case ReinforcementOpportunity.DefensiveHold:
-                    // Hold ground; don't push attacks. Downgrade aggressive
-                    // attack tasks to HoldObjective. Defensive tasks stay.
-                    if (originalTask == CommandTaskType.AttackObjective
-                        || originalTask == CommandTaskType.Probe
-                        || originalTask == CommandTaskType.SupportAttack)
-                    {
-                        overrideReason = "defensive-hold";
-                        return CommandTaskType.HoldObjective;
-                    }
-                    return originalTask;
-
-                case ReinforcementOpportunity.WaitAndConsolidate:
-                    // Reinforcements arriving — wait for them before attacking.
-                    // Convert attack tasks to Consolidate; hold tasks stay.
-                    if (originalTask == CommandTaskType.AttackObjective
-                        || originalTask == CommandTaskType.SupportAttack)
-                    {
-                        overrideReason = "wait-for-relief";
-                        return CommandTaskType.Consolidate;
-                    }
-                    return originalTask;
-
-                case ReinforcementOpportunity.AttackNow:
-                    // Army has committed to the attack. If a Main/SupportMain
-                    // brigade was sitting in HoldObjective or Consolidate, upgrade
-                    // it to AttackObjective so it commits with the army. Defensive
-                    // flank-guard roles stay where they are.
-                    if ((originalTask == CommandTaskType.HoldObjective
-                         || originalTask == CommandTaskType.Consolidate)
-                        && (role == DirectChildRole.Main || role == DirectChildRole.SupportMain))
-                    {
-                        overrideReason = "attack-now";
-                        return CommandTaskType.AttackObjective;
-                    }
-                    return originalTask;
-
-                case ReinforcementOpportunity.NoOpportunity:
-                default:
-                    return originalTask;
             }
         }
 
