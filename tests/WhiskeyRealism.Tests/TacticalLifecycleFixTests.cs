@@ -49,6 +49,10 @@ internal static class TacticalLifecycleFixTests
         Pass("perf frame cache hits within one frame only", PerfFrameCacheHitsWithinOneFrame);
         Pass("perf intents hash equal for reallocated identical intents", PerfIntentsHashEqualForReallocatedIntents);
         Pass("perf intents hash sees role change", PerfIntentsHashSeesRoleChange);
+
+        Pass("dead wl cic alliance suppressed under ai_vs_ai", WlCicAllianceSuppressedUnderAiVsAi);
+        Pass("dead player alliance suppressed outside ai_vs_ai", PlayerAllianceSuppressedOutsideAiVsAi);
+        Pass("dead w&l subordinate career suppresses nothing", WlSubordinateCareerSuppressesNothing);
     }
 
     private static void Pass(string name, Action test)
@@ -448,5 +452,24 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertTrue(
             TacticalBattleCoordinator.CommandNodeIntentsHash(Intents(DirectChildRole.Main))
             != TacticalBattleCoordinator.CommandNodeIntentsHash(Intents(DirectChildRole.SupportMain)), "role");
+    }
+
+    // ---- Suppressed alliance ----
+
+    private static void WlCicAllianceSuppressedUnderAiVsAi()
+    {
+        // W&L forces ai_vs_ai (29789); a CIC player owns every unit of that alliance.
+        TestHarness.AssertEqual(1, TacticalBattleCoordinator.ResolveSuppressedAllianceId(aiVsAi: true, playerAllianceId: -1, playerCicAllianceId: 1), "cic");
+    }
+
+    private static void PlayerAllianceSuppressedOutsideAiVsAi()
+    {
+        TestHarness.AssertEqual(0, TacticalBattleCoordinator.ResolveSuppressedAllianceId(false, 0, -1), "player");
+    }
+
+    private static void WlSubordinateCareerSuppressesNothing()
+    {
+        // Below CIC the player's own command is protected per unit (TacticalWriteGuard).
+        TestHarness.AssertEqual(-1, TacticalBattleCoordinator.ResolveSuppressedAllianceId(true, -1, -1), "none");
     }
 }

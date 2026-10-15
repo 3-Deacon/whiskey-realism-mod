@@ -211,8 +211,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return;
                 }
 
-                int playerCicAllianceId = aiVsAi ? -1 : ResolvePlayerCicAllianceId();
-                int suppressedAllianceId = aiVsAi ? -1 : playerAllianceId;
+                int suppressedAllianceId = ResolveSuppressedAllianceId(aiVsAi, playerAllianceId, ResolvePlayerCicAllianceId());
                 var commanders = DiscoverCommandersFromVanilla(battle);
                 // 2026-05-18: prior code called BuildFromSynthetic here, which was a stub path
                 // that bypassed HistoricalFigureRegistry entirely and silently degraded every

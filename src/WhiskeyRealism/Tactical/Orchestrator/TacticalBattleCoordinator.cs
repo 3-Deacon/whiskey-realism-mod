@@ -79,6 +79,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             active = true;
         }
 
+        /// <summary>
+        /// Alliance whose orchestrator is not built. W&amp;L forces ai_vs_ai (29789), so a
+        /// W&amp;L Commander-in-Chief player (DLC_WL.IsCommanderInChief, 47475) owns every
+        /// unit of their alliance and that alliance is suppressed. Outside W&amp;L the
+        /// player's alliance is suppressed unless ai_vs_ai. A W&amp;L subordinate career
+        /// suppresses nothing here (its units are protected per unit by the write guard).
+        /// </summary>
+        public static int ResolveSuppressedAllianceId(bool aiVsAi, int playerAllianceId, int playerCicAllianceId)
+        {
+            if (playerCicAllianceId == 0 || playerCicAllianceId == 1) return playerCicAllianceId;
+            if (!aiVsAi && (playerAllianceId == 0 || playerAllianceId == 1)) return playerAllianceId;
+            return -1;
+        }
+
         public static bool ShouldRunTacticalCommanderForSide(int allianceId, int playerAllianceId, bool aiVsAi)
         {
             if (allianceId < 0 || allianceId > 1) return false;
