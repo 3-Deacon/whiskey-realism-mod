@@ -23,6 +23,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.arty-combine-gun-transfer.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.arty-combine-gun-transfer.postfix");
                 try
                 {
                     if (!Enabled()) return;

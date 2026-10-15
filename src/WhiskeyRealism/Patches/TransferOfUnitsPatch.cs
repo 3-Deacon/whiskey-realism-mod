@@ -62,6 +62,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.transfer-of-units.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.transfer-of-units.prefix");
             _pending.Remove(_aifaction);
             OnceLog.Info("transfer", "TransferOfUnitsPatch wired (concrete plan-target steering)");
 
@@ -207,6 +208,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.transfer-of-units.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.transfer-of-units.postfix");
             if (!_pending.TryGetValue(_aifaction, out var state) || state == null) return;
 
             try
@@ -231,6 +233,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.transfer-of-units.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.transfer-of-units.finalizer");
                 if (!_pending.TryGetValue(_aifaction, out var state)) return;
                 _pending.Remove(_aifaction);
                 if (state == null) return;

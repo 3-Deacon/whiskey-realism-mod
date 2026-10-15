@@ -20,6 +20,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.economy-alliance-data-guard", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.economy-alliance-data-guard");
                 try
                 {
                     if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return __exception;

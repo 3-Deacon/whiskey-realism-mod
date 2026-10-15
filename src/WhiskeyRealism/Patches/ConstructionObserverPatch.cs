@@ -27,6 +27,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.construction-observer.building", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.construction-observer.building");
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
                 if (__result == null) return;
                 if (!ConstructionStartFilter.CountsBuildingStart(
@@ -73,6 +74,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.construction-observer.railroad", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.construction-observer.railroad");
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
                 if (checkonly || !__result) return;
                 if (_alliancetoconstruct < 0 || _alliancetoconstruct >= 2) return;

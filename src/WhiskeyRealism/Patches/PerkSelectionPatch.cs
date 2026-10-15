@@ -26,6 +26,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.perk-selection", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.perk-selection");
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return true;

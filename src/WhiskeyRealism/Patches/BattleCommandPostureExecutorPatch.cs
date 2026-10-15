@@ -79,6 +79,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.posture-executor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.posture-executor");
                 if (!EnabledForWrites() || __instance == null) return;
 
                 try

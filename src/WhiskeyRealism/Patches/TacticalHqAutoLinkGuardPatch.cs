@@ -35,6 +35,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.hq-link-guard-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.hq-link-guard-prefix");
                 __state = new LinkState(
                     __instance != null ? __instance.unitlinkedto : null,
                     __instance != null ? __instance.linkedposition : 0);
@@ -46,6 +47,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.hq-link-guard", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.hq-link-guard");
                 try
                 {
                     if ((UnityEngine.Object)__instance == null || __instance.unittyp <= 13) return;

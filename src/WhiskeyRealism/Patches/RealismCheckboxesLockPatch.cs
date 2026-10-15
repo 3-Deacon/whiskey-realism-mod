@@ -33,6 +33,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.realism-checkboxes-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.realism-checkboxes-lock");
             if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
             try
             {

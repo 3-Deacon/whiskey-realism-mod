@@ -32,6 +32,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.project-appoint-observer.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.project-appoint-observer.prefix");
             try
             {
                 __state = default(AppointmentSnapshot);
@@ -77,6 +78,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.project-appoint-observer.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.project-appoint-observer.postfix");
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;

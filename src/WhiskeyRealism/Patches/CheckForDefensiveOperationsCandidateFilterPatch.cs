@@ -71,6 +71,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.defensive-ops-candidate-filter.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.defensive-ops-candidate-filter.prefix");
             if (!_wiredLogged)
             {
                 _wiredLogged = true;
@@ -177,6 +178,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.defensive-ops-candidate-filter.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.defensive-ops-candidate-filter.postfix");
             try
             {
                 var faction = AICampaignReflect.GetFaction(_aifaction);
@@ -282,6 +284,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.defensive-ops-candidate-filter.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.defensive-ops-candidate-filter.finalizer");
                 try
                 {
                     var faction = AICampaignReflect.GetFaction(_aifaction);

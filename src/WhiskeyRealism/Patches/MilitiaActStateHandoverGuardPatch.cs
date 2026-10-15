@@ -34,6 +34,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.militia-act-handover-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.militia-act-handover-scope.prefix");
                 __state = false;
                 try
                 {
@@ -53,6 +54,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.militia-act-handover-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.militia-act-handover-scope.finalizer");
                 if (__state) MilitiaActStateHandoverScope.Exit();
                 return __exception;
             }
@@ -81,6 +83,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.militia-act-handover-guard", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.militia-act-handover-guard");
             try
             {
                 if (!MilitiaActStateHandoverScope.Active) return true;

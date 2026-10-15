@@ -58,6 +58,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.battle-group-stance", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.battle-group-stance");
                 if (!Enabled() || __instance == null) return;
 
                 try

@@ -30,6 +30,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.aggressiveness-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.aggressiveness-lock");
                 if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
                 try
                 {

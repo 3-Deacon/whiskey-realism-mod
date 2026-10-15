@@ -44,6 +44,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.battle-commander-intent", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.battle-commander-intent");
                 if (!Enabled() || __instance == null) return;
                 try
                 {

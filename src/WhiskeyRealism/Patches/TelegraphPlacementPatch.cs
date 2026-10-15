@@ -32,6 +32,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.telegraph-place", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.telegraph-place");
                 if (type != CBuilding.id_telegraphstation || !newlycreated || pay) return;
 
                 try

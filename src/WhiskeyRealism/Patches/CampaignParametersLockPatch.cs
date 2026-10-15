@@ -26,6 +26,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.campaign-params-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.campaign-params-lock");
                 if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
                 OnceLog.Info("settings:finalize", "CampaignParametersLockPatch wired");
                 try

@@ -24,6 +24,7 @@ namespace WhiskeyRealism
         internal bool ThrowOnInfo;
         internal bool ThrowOnWarning;
         internal int InfoCount;
+        internal string LastInfo;
         internal int WarningCount;
         internal int ErrorCount;
 
@@ -33,6 +34,7 @@ namespace WhiskeyRealism
                 throw new System.InvalidOperationException("test info logger unavailable");
 
             InfoCount++;
+            LastInfo = message;
         }
 
         internal void LogWarning(string message)

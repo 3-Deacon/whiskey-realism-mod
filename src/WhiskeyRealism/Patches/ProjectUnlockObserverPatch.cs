@@ -19,6 +19,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.project-unlock-observer.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.project-unlock-observer.prefix");
                 __state = Snapshot(alliance);
             }
         }
@@ -28,6 +29,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.project-unlock-observer.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.project-unlock-observer.postfix");
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;

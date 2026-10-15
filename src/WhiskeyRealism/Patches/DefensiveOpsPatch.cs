@@ -45,6 +45,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.defensive-ops", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.defensive-ops");
                 OnceLog.Info("defensiveops", "DefensiveOpsPatch wired (capital-defense strength gate)");
 
                 try

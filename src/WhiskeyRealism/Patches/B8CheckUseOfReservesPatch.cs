@@ -47,6 +47,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.b8-check-reserves-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.b8-check-reserves-prefix");
                 __state = null;
 
                 if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
@@ -83,6 +84,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.b8-check-reserves", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.b8-check-reserves");
             if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
             if (aigroup == null) return;
 

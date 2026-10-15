@@ -23,6 +23,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.fast-forward-ai-catchup.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.fast-forward-ai-catchup.prefix");
                 _updateStartTicks = Stopwatch.GetTimestamp();
             }
         }
@@ -32,6 +33,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.fast-forward-ai-catchup.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.fast-forward-ai-catchup.postfix");
             try
             {
                 if (__instance == null) return;

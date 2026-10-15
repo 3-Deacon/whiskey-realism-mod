@@ -34,6 +34,7 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.economy-construction.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             try
             {
+                PatchFirstFire.Mark("campaign.patch.economy-construction.prefix");
                 _pending.Clear();
                 _pendingAlliance = -1;
 
@@ -168,6 +169,7 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("campaign.patch.economy-construction.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             try
             {
+                PatchFirstFire.Mark("campaign.patch.economy-construction.finalizer");
                 if (_pendingAlliance < 0 || _pendingAlliance != alliancerunthrough || _pending.Count == 0) return;
                 var state = GameVars.alliance != null && alliancerunthrough < GameVars.alliance.Length
                     ? GameVars.alliance[alliancerunthrough]

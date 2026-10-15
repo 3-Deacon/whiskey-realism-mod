@@ -31,6 +31,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.commander-prev-command.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.commander-prev-command.prefix");
                 __state = default;
                 try
                 {
@@ -54,6 +55,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.commander-prev-command.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.commander-prev-command.postfix");
                 try
                 {
                     if (!__state.Valid) return;

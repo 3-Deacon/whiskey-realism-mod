@@ -59,6 +59,7 @@ namespace WhiskeyRealism.Patches
             using (TelemetryPerf.Scope("tactical.patch.artillery-waypoint-veto",
                 TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.artillery-waypoint-veto");
                 if (_inVetoWrite) return;
                 try
                 {

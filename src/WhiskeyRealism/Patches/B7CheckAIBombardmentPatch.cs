@@ -35,6 +35,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.b7-bombardment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.b7-bombardment");
             if (Plugin.EnableTacticalArtilleryDoctrine == null) return;
             if (!Plugin.EnableTacticalArtilleryDoctrine.Value) return;
             if (aigroup == null) return;

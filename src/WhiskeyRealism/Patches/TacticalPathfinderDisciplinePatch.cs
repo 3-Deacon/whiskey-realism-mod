@@ -32,6 +32,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.pathfinder-discipline-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.pathfinder-discipline-prefix");
                 __state = (UnityEngine.Object)__instance != null ? Math.Max(0, __instance.regimentpaths) : -1;
             }
         }
@@ -46,6 +47,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.pathfinder-discipline", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.pathfinder-discipline");
                 if (__state < 0 || __result != 0) return;
 
                 try

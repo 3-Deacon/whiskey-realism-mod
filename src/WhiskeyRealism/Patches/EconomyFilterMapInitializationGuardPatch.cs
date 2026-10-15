@@ -32,6 +32,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.economy-filter-init-guard.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.economy-filter-init-guard.prefix");
                 __state = CaptureState();
             }
         }
@@ -41,6 +42,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.economy-filter-init-guard.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.economy-filter-init-guard.postfix");
                 try
                 {
                     if (!Enabled()) return;
@@ -68,6 +70,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.economy-filter-init-guard.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.economy-filter-init-guard.finalizer");
                 try
                 {
                     if (__exception == null || !Enabled()) return __exception;
