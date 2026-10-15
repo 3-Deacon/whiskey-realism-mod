@@ -34,6 +34,8 @@ internal static class CampaignEconomyFixTests
         ConstructionSupplyCorridorMatchesTheaterAgainstTheater();
         ConstructionCapitalThreatIsPerSiteTheater();
         ConstructionCapitalThreatPeakIsNotDilutedByQuietSectors();
+        ConstructionEastAtParityIsNotThreatened();
+        ConstructionOutmatchedCriticalSectorYieldsDefensiveWorks();
 
         GovernorMatchesVanillaPassesOnCheapFrames();
         GovernorKeepsVanillaProgressionWhenEveryFrameIsOverBudget();
@@ -423,6 +425,53 @@ internal static class CampaignEconomyFixTests
     {
         TestHarness.AssertEqual(0.9f, ConstructionThreat.Peak(Sectors), "peak, not 0.9/6");
         LogPass("c2b construction capital threat peak is not diluted by quiet sectors");
+    }
+
+    // Built from a real FrontSectorLedger (FrontSectorRuntime: East/River are always
+    // critical, importance 0.95/0.9; ChoosePosture defaults to Hold). Threat must come
+    // from the hold-ratio deficit, not from criticality alone.
+    private static FrontSectorLedger Front(float eastOwn, float eastEnemy)
+    {
+        return FrontSectorLedger.Build(new[]
+        {
+            new FrontSectorInput { SectorKey = "East", Theater = Theater.East, OwnStrength = eastOwn, EnemyStrength = eastEnemy, StrategicImportance = 0.95f, IsCritical = true },
+            new FrontSectorInput { SectorKey = "River", Theater = Theater.River, OwnStrength = 60000f, EnemyStrength = 60000f, StrategicImportance = 0.9f, IsCritical = true },
+            new FrontSectorInput { SectorKey = "West", Theater = Theater.West, OwnStrength = 30000f, EnemyStrength = 30000f, StrategicImportance = 0.7f }
+        });
+    }
+
+    private static ConstructionInput ExpansionConstructionInput(FrontSectorLedger front)
+    {
+        var input = new ConstructionInput
+        {
+            AllianceId = 0,
+            FiscalPosture = WhiskeyRealism.Strategic.Fiscal.FiscalPosture.Expansion,
+            CurrentRating = 2,
+            BondFloorRating = 11
+        };
+        ConstructionThreat.Apply(input, front);
+        return input;
+    }
+
+    private static void ConstructionEastAtParityIsNotThreatened()
+    {
+        var front = Front(100000f, 100000f);
+        TestHarness.AssertEqual(FrontPosture.Hold, front.GetSector("East").Posture, "real ledger: East at parity holds");
+        var input = ExpansionConstructionInput(front);
+        TestHarness.AssertTrue(input.CapitalThreat < 0.35f, "parity is not a capital threat (got " + input.CapitalThreat + ")");
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+        TestHarness.AssertEqual(ConstructionPosture.IndustrialExpansion, output.Posture, "expansion reachable at parity");
+        LogPass("c2b construction east at parity is not threatened");
+    }
+
+    private static void ConstructionOutmatchedCriticalSectorYieldsDefensiveWorks()
+    {
+        var input = ExpansionConstructionInput(Front(25000f, 100000f));
+        TestHarness.AssertTrue(ConstructionThreat.ForTheater(input.SectorThreats, Theater.East) >= 0.65f, "East at 1:4 is threatened");
+        TestHarness.AssertTrue(ConstructionThreat.ForTheater(input.SectorThreats, Theater.River) < 0.35f, "River at parity stays below the critical-defense site bar");
+        var output = ConstructionIntentLedger.Compute(input, new ConstructionOptions());
+        TestHarness.AssertEqual(ConstructionPosture.DefensiveWorks, output.Posture, "outmatched critical sector => defensive works");
+        LogPass("c2b construction outmatched critical sector yields defensive works");
     }
 
     // ---------------------------------------------------------------- C-Governor

@@ -171,6 +171,36 @@ namespace WhiskeyRealism.Strategic.Construction
             return peak;
         }
 
+        // Fills per-sector threats and the alliance peak from the daily front ledger.
+        // FrontSectorRuntime marks East/River critical permanently and ChoosePosture
+        // defaults to Hold, so criticality alone is no signal: threat is the critical
+        // sector's importance scaled by how far its own:enemy ratio sits below the
+        // ledger's own hold ratio (0 at/above MinimumHoldRatio, -> importance as own -> 0).
+        public static void Apply(ConstructionInput input, FrontSectorLedger front)
+        {
+            if (input == null) return;
+            input.SectorThreats.Clear();
+            if (front != null)
+            {
+                foreach (var sector in front.Sectors)
+                {
+                    float threat = SectorThreat(sector);
+                    if (threat > 0f)
+                        input.SectorThreats.Add(new ConstructionSectorThreat { Theater = sector.Theater, Threat = threat });
+                }
+            }
+            input.CapitalThreat = Peak(input.SectorThreats);
+        }
+
+        public static float SectorThreat(FrontSector sector)
+        {
+            if (sector == null || !sector.IsCritical || sector.MinimumHoldRatio <= 0f) return 0f;
+            float deficit = 1f - sector.StrengthRatio / sector.MinimumHoldRatio;
+            if (deficit <= 0f) return 0f;
+            if (deficit > 1f) deficit = 1f;
+            return sector.StrategicImportance * deficit;
+        }
+
         // Alliance-level capital threat is the most threatened sector, not an average
         // diluted by every quiet theater.
         public static float Peak(System.Collections.Generic.IEnumerable<ConstructionSectorThreat> sectors)

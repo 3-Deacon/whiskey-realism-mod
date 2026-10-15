@@ -91,21 +91,15 @@ namespace WhiskeyRealism.Strategic.Construction
                     if (sector == null) continue;
                     count++;
                     supply += 1f - Clamp01(sector.AverageSupply);
-                    if (sector.IsCritical && sector.Posture == FrontPosture.Hold)
-                        input.SectorThreats.Add(new ConstructionSectorThreat
-                        {
-                            Theater = sector.Theater,
-                            Threat = Clamp01(sector.StrategicImportance)
-                        });
                 }
 
+                ConstructionThreat.Apply(input, front);
                 if (count <= 0) return;
                 input.SupplyPressure = Clamp01(supply / count);
                 input.AmmoPressure = input.LowAmmoFormationCount > 0
                     ? Clamp01(input.SupplyPressure + 0.15f)
                     : Clamp01(input.SupplyPressure * 0.5f);
                 input.TransportPressure = input.LogisticsExpansion ? Math.Max(input.SupplyPressure, 0.35f) : input.SupplyPressure;
-                input.CapitalThreat = ConstructionThreat.Peak(input.SectorThreats);
             }
             catch (Exception ex)
             {
