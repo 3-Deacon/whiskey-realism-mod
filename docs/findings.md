@@ -198,7 +198,7 @@ new string[5] { "none", "screen", "defend", "attack", "assault" };
 | 17 | Flying Battery | River Expedition | |
 | 18 | Sapper Gunners | | |
 
-Full call-site audit and the wrong-table reads: [bug-fixes/vanilla-perk-ids.md](bug-fixes/vanilla-perk-ids.md). Pure rule: `Strategic/VanillaPerkTables.cs`.
+Full call-site audit and the wrong-table reads: [bug-fixes/vanilla-perk-ids.md](bug-fixes/vanilla-perk-ids.md). Pure rule: `Strategic/VanillaPerkTables.cs`. The perk-id Transpilers' IL edits are in `Patches/PerkIdIlRewrites.cs`; the harness (`PerkIdIlTests`) runs them on the real `refs/Assembly-CSharp.dll` IL, so a game update that moves a site fails a test instead of silently patching the wrong call. `PatchProcessor.ReadMethodBody` works on .NET 8 for reading IL; applying a HarmonyX 2.10 patch under .NET 8 segfaults, so the harness cannot JIT-check a patched method.
 
 ## Reflection gotchas
 
