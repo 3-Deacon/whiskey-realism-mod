@@ -198,7 +198,7 @@ namespace WhiskeyRealism.Telemetry
         {
             try
             {
-                // Write the calling thread's final partial aggregate window before stopping.
+                // Write every thread's final partial aggregate window before stopping.
                 TelemetryPerf.FlushAggregates();
 
                 TelemetryRuntime runtime;
@@ -207,8 +207,10 @@ namespace WhiskeyRealism.Telemetry
                     runtime = _runtime;
                     if (runtime == null)
                         return;
-                    _runtime = null;
+                    // Publish the shutdown runtime before clearing the live one: readers are
+                    // lock-free (`_runtime ?? _shutdownRuntime`) and must never see both null.
                     _shutdownRuntime = runtime;
+                    _runtime = null;
                     _profile = runtime.Profile;
                 }
 
