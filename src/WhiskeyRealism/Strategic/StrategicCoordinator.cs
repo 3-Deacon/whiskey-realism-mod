@@ -300,18 +300,6 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private static void ForceChapterUpdate()
-        {
-            try
-            {
-                var policyType = AccessTools.TypeByName("Policy");
-                if (policyType == null) return;
-                var m = AccessTools.Method(policyType, "CheckForChapterUpdate");
-                m?.Invoke(null, null);
-            }
-            catch { /* tolerate — CIC.diag will surface CurrentChapter if still wrong */ }
-        }
-
         private static int SafePolicyChapter()
         {
             try { return Policy.CurrentChapter; }
@@ -322,16 +310,6 @@ namespace WhiskeyRealism.Strategic
         {
             try
             {
-                // Vanilla's Policy.CheckForChapterUpdate() runs from a per-day cycle
-                // and sets Policy.CurrentChapter (initial value -1). For scenario "002"
-                // (Whiskey & Lemons) it unconditionally sets CurrentChapter = 1. Our
-                // OnMonthlyTick can fire BEFORE vanilla's per-day cycle has run on a
-                // fresh campaign, so CurrentChapter is still -1 — which deactivates
-                // every CampaignObjective (their ObjectiveChapters lists don't contain
-                // -1). Call it ourselves to make the chapter current before we read
-                // objective state.
-                ForceChapterUpdate();
-
                 // Test-mode: bypass gates and fire every event on first tick.
                 if (Plugin.Instance.ForceAllSuccessionEvents.Value && !_forcedAllSuccession)
                 {

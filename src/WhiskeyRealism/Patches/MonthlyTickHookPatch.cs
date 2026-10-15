@@ -38,6 +38,15 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
+                // The first review waits for vanilla's own chapter update (frame 50): with the chapter
+                // at -1 every objective is deactivated. Waiting here, before a notify is consumed, lets
+                // the next frame retry with the date and startup gate untouched.
+                if (!ReviewCadenceCatchUp.ChapterKnown(Policy.CurrentChapter))
+                {
+                    OnceLog.Info("strategic-cadence:chapter-wait", "[MonthlyTickHookPatch] waiting for vanilla's chapter update (Policy.CurrentChapter < 0)");
+                    return;
+                }
+
                 int day = ReadGameDay();
                 int month = ReadGameMonth();
                 int year  = ReadGameYear();

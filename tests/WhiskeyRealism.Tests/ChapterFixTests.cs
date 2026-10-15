@@ -35,6 +35,9 @@ internal static class ChapterFixTests
             ("chapter election pressure stays in unit range and off without a verdict day", ElectionNeedStaysInRangeAndOffWithoutVerdict),
             ("chapter election pressure reaches the policy score of a morale policy", ElectionReachesThePolicyScore),
             ("chapter election runtime reads objective 26 and threads the review date", ElectionRuntimeWiring),
+            ("chapter wait treats only a negative chapter as unknown", ChapterKnownOnlyAfterVanillaUpdate),
+            ("chapter wait gates the cadence hook before it consumes a notify", HookWaitsForVanillaChapterBeforeNotifying),
+            ("chapter wait replaces whiskey's own chapter update call", WhiskeyNoLongerRunsTheChapterUpdate),
             ("chapter era callers pass the live chapter and migrate a seeded sidecar era once", CoordinatorPassesTheChapterToTheEra),
         });
     }
@@ -297,5 +300,41 @@ internal static class ChapterFixTests
         AssertContains(runtime, "s.ElectionMoraleThreshold = GamePrefs.lincolnmaintainmoraleabove;", "vanilla's own threshold");
         string coordinator = Flat("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
         AssertContains(coordinator, "CampaignNeedRuntime.Read(alliance, era, day, month, year,", "the review date reaches the read");
+    }
+
+    // ---- waiting for vanilla's chapter update instead of calling it ----
+
+    private static void ChapterKnownOnlyAfterVanillaUpdate()
+    {
+        // Policy.CurrentChapter is -1 until CheckForChapterUpdate runs (reset on frame 1 at 29857,
+        // first call on frame 50 at 30146-30149); that method sets it to 0 or more unconditionally (211611).
+        AssertFalse(ReviewCadenceCatchUp.ChapterKnown(-1), "frames 1-49 of a new campaign");
+        AssertTrue(ReviewCadenceCatchUp.ChapterKnown(0), "pre-war chapter");
+        AssertTrue(ReviewCadenceCatchUp.ChapterKnown(1), "chapter 1 (W&L is always 1)");
+        AssertTrue(ReviewCadenceCatchUp.ChapterKnown(3), "chapter 3");
+    }
+
+    private static void HookWaitsForVanillaChapterBeforeNotifying()
+    {
+        string hook = Flat("src/WhiskeyRealism/Patches/MonthlyTickHookPatch.cs");
+        AssertContains(hook, "ReviewCadenceCatchUp.ChapterKnown(Policy.CurrentChapter)", "the hook reads vanilla's chapter");
+        int live = hook.IndexOf("CampaignIsLive(SceneManagement.currentoperation)", StringComparison.Ordinal);
+        int wait = hook.IndexOf("ReviewCadenceCatchUp.ChapterKnown(Policy.CurrentChapter)", StringComparison.Ordinal);
+        int gate = hook.IndexOf("_startupGate.ShouldNotify(dateChanged, runtimeReady)", StringComparison.Ordinal);
+        int pump = hook.IndexOf("PumpDailyReview()", StringComparison.Ordinal);
+        AssertTrue(live >= 0 && live < wait, "campaign live first");
+        AssertTrue(wait < gate, "the wait comes before a notify can be consumed");
+        AssertTrue(wait < pump, "and before any pump");
+        AssertContains(hook, "OnceLog.Info(\"strategic-cadence:chapter-wait\"", "one bounded line");
+    }
+
+    private static void WhiskeyNoLongerRunsTheChapterUpdate()
+    {
+        // Calling CheckForChapterUpdate from the monthly tick could do the -1 to N transition before
+        // vanilla's frame-50 call (newspaper, chapter video, policy 36, pre-war armies) and a bare catch
+        // could swallow a half-finished one (Policy.newspaper is assigned in Policy.Initialize, 211276).
+        string coordinator = Flat("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        AssertFalse(coordinator.Contains("CheckForChapterUpdate\")"), "no reflection call into vanilla's chapter update");
+        AssertFalse(coordinator.Contains("ForceChapterUpdate"), "the helper is gone");
     }
 }
