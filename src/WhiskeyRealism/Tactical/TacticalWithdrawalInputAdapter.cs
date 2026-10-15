@@ -20,6 +20,8 @@ namespace WhiskeyRealism.Tactical
             public float[] EnemyStrengthWithinAngle;
             public float SliceWidthDegrees;
             public float UnitFacingDegrees;
+            public float LossFraction;      // BC8 (UnitRecord.LossFraction)
+            public float BreakLossFraction; // BC8 (UnitRecord.BreakLossFraction)
         }
 
         public static TacticalMoralePressure.Input ToMoralePressureInput(in Snapshot snapshot)
@@ -38,6 +40,8 @@ namespace WhiskeyRealism.Tactical
                 CoverObject = snapshot.CoverObject,
                 AiFeudStance = snapshot.AiFeudStance,
                 IsPlayerAiOrFeud = snapshot.IsPlayerAiOrFeud,
+                LossFraction = snapshot.LossFraction,
+                BreakLossFraction = snapshot.BreakLossFraction,
             };
         }
 

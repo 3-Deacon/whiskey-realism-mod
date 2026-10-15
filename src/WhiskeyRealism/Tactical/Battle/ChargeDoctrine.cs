@@ -30,7 +30,9 @@
 //
 // So the doctrine only writes behavior 3 into the 122214 gate on a regiment (never the group: cycle
 // 6 re-orders a group whose combatbehaviorordered != 2), adds Whiskey's margins on top, and leaves
-// vanilla's odds check as the final word: Decide has no strength input and never writes mode 6.
+// vanilla's odds check as the final word: Decide never writes mode 6. BC8: it arms only when
+// vanilla's own experience-weighted odds (122229-122231) would pass, so it does not arm charges
+// vanilla refuses; the odds never revert an armed regiment.
 // A revert in mode 3 is Disarm (behavior 2 plus SetMovementMode(0)), because behavior alone does not
 // leave charge mode; a revert in mode 6 defers the disarm until vanilla returns 6 -> 3.
 
@@ -79,6 +81,13 @@ namespace WhiskeyRealism.Tactical.Battle
         // flanking fire") is set and the regiment's own outflanked or firefromflank is
         // non-zero: no new charge.
         public bool OutflankedBarsCharge;
+        // BC8: vanilla's own odds for this regiment against the target (UpdateChargeTarget
+        // 122229-122231, TroopQuality.VanillaChargeOdds: strength, experience, morale and
+        // fatigue of both, the target's experience as the stars this side sees) and its
+        // trigger microaitriggerforcharge (122259). A new charge is armed only when the
+        // odds exceed the trigger; a trigger of 0 or less is no pre-filter.
+        public float VanillaChargeOdds;
+        public float VanillaChargeTrigger;
     }
 
     public enum ChargeAction
@@ -162,6 +171,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     : RearmAfterRefusalBattleSeconds;
                 bool backoffElapsed = input.SecondsSinceLastAiChargeRefusal >= backoff;
                 return atGate && backoffElapsed && !input.OutflankedBarsCharge && input.GroupAiStance == AssaultStance && ConditionsHold(in input)
+                    && VanillaOddsAllowArming(in input)
                     ? ChargeAction.Charge
                     : ChargeAction.None;
             }
@@ -201,6 +211,15 @@ namespace WhiskeyRealism.Tactical.Battle
                 && input.OwnMorale >= OwnMoraleFloor
                 && input.OwnFatigue <= OwnFatigueCeiling
                 && !input.LaneBlockedByFriendly;
+        }
+
+        // BC8 pre-filter: vanilla checks these odds only after the gate armed the regiment and
+        // a refusal costs the renew back-off (RefusalBackoffSeconds), so the doctrine does not
+        // arm a charge vanilla would refuse. Strict >, as 122259. Arming only: an armed
+        // regiment is left to vanilla's own check.
+        private static bool VanillaOddsAllowArming(in ChargeInput input)
+        {
+            return !(input.VanillaChargeTrigger > 0f) || input.VanillaChargeOdds > input.VanillaChargeTrigger;
         }
 
         // A charge cycle ends when the regiment leaves charge modes 3/6 (odds refused 3 -> 0 at

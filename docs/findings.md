@@ -271,6 +271,30 @@ Anchors cited by the remediation commits (`git log 262a50d..`) and checked again
 
 `GameVars.subsidynames` (64301) = Politics 0, Economy 1, Agriculture 2, Industry 3, **Military 4**, Diplomacy 5, N/A 6-7; index constants 64303-64319 (`subsidy_military = 4`, alias `subsidy_transportx = 4`; `subsidy_tradewarx = 5`, `subsidy_civilorderx = 7` are aliases too). `FinancialAIPatch` (#18) lane 4 is therefore the **Military** subsidy: it funds military projects (`nextprojecttoresearch[4]`, `UseSubsidyForPurpose` 17529-17562, project filter 213462) and policies scale it (`militarysubsidies`, 209625, 209818-209830). No building type has `subsidytype 4`; supply depots, forts and telegraph stations have `subsidytype -1` (`Config/buildingtypes.dat` 353, 1094, 1137), so `CBuilding.Place` charges them to the treasury (`constructioncosts`, 96211-96257), not to a subsidy lane. The stage G campaign planner does not touch fiscal steering.
 
+## Policy selection (stage E)
+
+Full model and W&L notes: [`superpowers/specs/2026-10-14-need-driven-policy-design.md`](superpowers/specs/2026-10-14-need-driven-policy-design.md) § "Vanilla and W&L model".
+
+| Symbol | Line | Why it matters |
+|---|---|---|
+| `CampaignController.UpdateAllianceData` → `CheckAIPolicyChange` | 81488 → 81736 | Per-alliance cadence (`updaterhythmalliancedata`); runs before `UpdateProjects` and `UpdatePolicyResearch`. |
+| `Policies.CheckAIPolicyChange` | 211017-211098 | Player gate 211019 (no CIC exemption); emergency newspaper + cancel 211026-211074; one-at-a-time return 211061; personality walk 211076-211091. |
+| `GameVars.Alliance.GetAIPersonality` | 62716 | Emergency credit (101) / recruiting (100) personalities replace `usedaipersonality`. |
+| `GetActivatedPolicies` | 62803 | `researchedonly` counts every policy below progress 1 (incl. a player purchase); the default form counts non-act, non-grand slots. |
+| `Policies.LaunchPolicyEffect` | 209681-210955 | Every policy effect, hard-coded per id; magnitudes from `campaignprefs.txt` "Policies & Subsidies". |
+| `Policies.IsDeactivated` (private) | 210957 | Union 36 before 4 Mar 1861; CSA 170 while Virginia is Union. |
+| `Policies.UpdatePolicyResearch` | 209455-209482 | Speed ∝ `averagesupport / n^1.1 × (1 + 0.05 × project 95) / ResearchDuration`. |
+| `Policy.InitializeStatics` / `UpdateGrandStrategyIcons` | 211285 / 209337 | `grandpolicies` from the "GrandPolicies" folder; `markedasgrandpolicy` only once the panel opens. |
+| `Policy.GetAllianceFromPolicy` | 211392 | Folder name; ids < 100 Union, 100-199 CSA. |
+| `Policy.CheckSelections` | 211350-211368 | W&L prestige purchase (`CalculatePrestigeCostPolicy` 46081) starts research; career cannot cancel. |
+| `Policies.UpdateActivations` | 209248-209258 | W&L display bug (`BUG-WL-004`). |
+| `GameVars.Alliance.GetInterventionProbability` / `AdjustInterventionLevel` | 62822 / 62887 | CSA level − Union level; positive policy adjustments help the actor on either side; W&L effect 34 shifts it for the career's side. |
+| `BattleUnits.GetAverageBlockadeRatio` | 93766 | Blockade of the alliance's **own** harbors. |
+| `AIFaction.SeparateUnits` / `AICampaign.GetStrengthRatio` | 10462 / 12366-12402 | Not fog-honest: no fog filter on the enemy list, and the ratio adds the enemy's `troopsinrecruitment`. Stage E does not call it; `GetAIPersonality` reaches it, and it indexes `aifaction` (null until factions exist, 11097). |
+| `GetAIPersonality` recruiting emergency → `EmergencyManpower` | 62733 | Accepted: `PolicyRuntime.ReadPersonalityList` mirrors vanilla's own emergency personality, whose test includes `GetStrengthRatio < 0.8`. Vanilla announces the emergency publicly (newspaper event, `CheckAIPolicyChange` 211026-211058), so forcing Manpower = 1 from it leaks nothing a player cannot read. Keep it; add no other strength read. |
+| `CheckAIPolicyChange` fallback walk | 211076-211090 | Walks `personality.policies` from the head and starts the first available entry; Union Historical lists 33/39/40 and CSA Historical 139/140 early. #19 removes the held irreversible acts from the list for the call (snapshot restored in its Finalizer), never on an emergency personality. |
+| `Config/policies.dat` / `aipersonalities.dat` | `ImportPolicyData` 211717 / import 66144 | Record layouts (the harness fixture copies the 117 policy ids). |
+
 ## Game-update re-decompile inventory
 
 When GTCW patches:

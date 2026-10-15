@@ -39,7 +39,7 @@ With writes off, `Enable Player Order Doctrine Diagnostics` still composes, clas
 
 Dedupe state is cleared when the battle identity, the player's current command or the Commander-in-Chief status changes.
 
-The campaign side stays in `WlStrategicOrderBridge`, which runs the same `PlayerOrderDedupe.Decide` rules with its own state and campaign throttle and issues its orders with `calledfromcampaign: true`.
+The campaign side is `WlStrategicOrderBridge` + `WlCampaignDispatchRuntime` (stage F, `docs/wl-dispatch-objective-bridge.md`): it no longer uses `PlayerOrderDedupe` or vanilla's gated `calledfromcampaign: true` call; it builds vanilla's campaign order itself with its own dedupe (`WlCampaignDispatchPolicy`).
 
 ## Composer
 
@@ -70,7 +70,7 @@ Orchestrator surfaces read by `PlayerOrderRuntimeAdapter`: `TacticalBattleCoordi
 3. Vanilla dedupe model (`VanillaWouldBlock`): active 15 blocks tactical candidates; candidate 12 over active 0-5 or 13 is rejected; active 13 blocks non-13; candidate 14 is accepted only over active 12; same type is a duplicate. Stale or battle-ended orders never block.
 4. An active vanilla type-11 support request blocks candidates of equal or lower priority.
 5. A higher-priority active order of the same scope blocks (the 14-over-12 clear-hold transition excepted).
-6. Cross-scope: a tactical candidate replaces a campaign order only with priority at least 40 above it and a campaign order that is no longer actionable (a type-15 retreat needs only a valid exit); a campaign candidate replaces a tactical order only when that order is stale, battle-ended or 40 below.
+6. Cross-scope: a tactical candidate replaces a campaign order only with priority at least 40 above it and a campaign order that is no longer actionable (a type-15 retreat needs only a valid exit). (Campaign candidates no longer exist: the campaign dispatcher has its own dedupe.)
 7. Same request signature as the shadow is suppressed; otherwise a 120-tick throttle applies after the last attempt.
 
 The priority model is a request model, not a force model: Whiskey never bypasses vanilla dedupe by switching tactical calls to `calledfromcampaign: true`.
@@ -117,5 +117,5 @@ Enable Player Order Doctrine Diagnostics = false
 
 - Patch: `src/WhiskeyRealism/Patches/PlayerSubordinateOrderPatch.cs`
 - Doctrine: `src/WhiskeyRealism/Tactical/PlayerOrders/`
-- Campaign bridge: `src/WhiskeyRealism/Strategic/WlStrategicOrderBridge.cs`
+- Campaign bridge and dispatcher: `src/WhiskeyRealism/Strategic/WlStrategicOrderBridge.cs`, `WlCampaignDispatchRuntime.cs`
 - Patch catalog: `docs/patch-catalog.md`

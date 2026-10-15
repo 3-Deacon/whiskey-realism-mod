@@ -30,7 +30,6 @@ internal static class PlayerOrderTests
             ("player order mapper keeps type fifteen retreat only", PlayerOrderMapperKeepsTypeFifteenRetreatOnly),
             ("player order mapper maps fallback to type twelve", PlayerOrderMapperMapsFallbackToTypeTwelve),
             ("player order mapper maps tactical support attack and movement lanes", PlayerOrderMapperMapsTacticalSupportAttackAndMovementLanes),
-            ("player order mapper maps campaign build rows", PlayerOrderMapperMapsCampaignBuildRows),
             ("player order active priority is conservative for ambiguous vanilla types", PlayerOrderActivePriorityIsConservativeForAmbiguousVanillaTypes),
             ("player order dedupe blocks tactical over active type fifteen", PlayerOrderDedupeBlocksTacticalOverActiveTypeFifteen),
             ("player order dedupe protects vanilla transition orders", PlayerOrderDedupeProtectsVanillaTransitionOrders),
@@ -50,10 +49,6 @@ internal static class PlayerOrderTests
             ("player order dedupe enforces campaign tactical scope gap", PlayerOrderDedupeEnforcesCampaignTacticalScopeGap),
             ("player order dedupe allows emergency retreat over invalid campaign order", PlayerOrderDedupeAllowsEmergencyRetreatOverInvalidCampaignOrder),
             ("player order dedupe allows emergency retreat over actionable campaign order", PlayerOrderDedupeAllowsEmergencyRetreatOverActionableCampaignOrder),
-            ("player order dedupe blocks campaign over fresh tactical without gap", PlayerOrderDedupeBlocksCampaignOverFreshTacticalWithoutGap),
-            ("player order dedupe allows campaign over stale tactical", PlayerOrderDedupeAllowsCampaignOverStaleTactical),
-            ("player order dedupe allows campaign over battle ended tactical", PlayerOrderDedupeAllowsCampaignOverBattleEndedTactical),
-            ("player order dedupe allows campaign over tactical with priority gap", PlayerOrderDedupeAllowsCampaignOverTacticalWithPriorityGap),
             ("player order dedupe blocks type fourteen unless active hold", PlayerOrderDedupeBlocksTypeFourteenUnlessActiveHold),
             ("player order dedupe allows type fourteen past vanilla preflight on active hold", PlayerOrderDedupeAllowsTypeFourteenPastVanillaPreflightOnActiveHold),
             ("player order dedupe type fourteen does not permanently yield", PlayerOrderDedupeTypeFourteenDoesNotPermanentlyYield),
@@ -112,13 +107,6 @@ internal static class PlayerOrderTests
         AssertEqual(0, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.AttackObjective).Type, "attack objective tactical type");
         AssertEqual(1, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.AdvanceToAssemblyArea).Type, "advance movement tactical type");
         AssertEqual(50, PlayerOrderPriority.ForIntent(PlayerOrderIntent.AdvanceToAssemblyArea), "advance movement priority");
-    }
-
-    private static void PlayerOrderMapperMapsCampaignBuildRows()
-    {
-        AssertEqual(8, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.DefendCapital, PlayerOrderScope.Campaign).Type, "defend capital type");
-        AssertEqual(9, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.BuildFort, PlayerOrderScope.Campaign).Type, "build fort type");
-        AssertEqual(10, PlayerOrderVanillaMapper.Map(PlayerOrderIntent.BuildSupplyDepot, PlayerOrderScope.Campaign).Type, "supply depot type");
     }
 
     private static void PlayerOrderActivePriorityIsConservativeForAmbiguousVanillaTypes()
@@ -344,54 +332,6 @@ internal static class PlayerOrderTests
         var candidate = PlayerOrderCandidateFor("u1", PlayerOrderIntent.RetreatToExit, validExitPoint: true);
         var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
         AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "valid tactical emergency retreat can replace actionable campaign order");
-    }
-
-    private static void PlayerOrderDedupeBlocksCampaignOverFreshTacticalWithoutGap()
-    {
-        var active = PlayerOrderActive("u1", 1, provenance: PlayerOrderProvenance.WhiskeyTactical);
-        var candidate = PlayerOrderCandidateFor(
-            "u1",
-            PlayerOrderIntent.SupportMainEffort,
-            scope: PlayerOrderScope.Campaign,
-            objectiveKey: "campaign-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
-        AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByScopePriority, decision.Kind, "campaign order lacks +40 over fresh tactical");
-    }
-
-    private static void PlayerOrderDedupeAllowsCampaignOverStaleTactical()
-    {
-        var active = PlayerOrderActive("u1", 1, provenance: PlayerOrderProvenance.WhiskeyTactical, stale: true);
-        var candidate = PlayerOrderCandidateFor(
-            "u1",
-            PlayerOrderIntent.SupportMainEffort,
-            scope: PlayerOrderScope.Campaign,
-            objectiveKey: "campaign-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
-        AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "stale tactical order allows campaign replacement");
-    }
-
-    private static void PlayerOrderDedupeAllowsCampaignOverBattleEndedTactical()
-    {
-        var active = PlayerOrderActive("u1", 1, provenance: PlayerOrderProvenance.WhiskeyTactical, battleEnded: true);
-        var candidate = PlayerOrderCandidateFor(
-            "u1",
-            PlayerOrderIntent.SupportMainEffort,
-            scope: PlayerOrderScope.Campaign,
-            objectiveKey: "campaign-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
-        AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "battle ended tactical order allows campaign replacement");
-    }
-
-    private static void PlayerOrderDedupeAllowsCampaignOverTacticalWithPriorityGap()
-    {
-        var active = PlayerOrderActive("u1", 8, provenance: PlayerOrderProvenance.WhiskeyTactical);
-        var candidate = PlayerOrderCandidateFor(
-            "u1",
-            PlayerOrderIntent.SupportMainEffort,
-            scope: PlayerOrderScope.Campaign,
-            objectiveKey: "campaign-a");
-        var decision = PlayerOrderDedupe.Decide(candidate, active, new PlayerOrderDedupeState(), PlayerOrderDedupeOptions.Default, tick: 1);
-        AssertEqual(PlayerOrderDedupeDecisionKind.Issue, decision.Kind, "campaign priority gap allows replacement");
     }
 
     private static void PlayerOrderDedupeBlocksTypeFourteenUnlessActiveHold()

@@ -7,6 +7,14 @@ namespace WhiskeyRealism
         internal static TestConfig<bool> EnableTacticalRegimentDiagnostics = new TestConfig<bool>(false);
         internal static TestConfig<string> TacticalRegimentDiagnosticNames = new TestConfig<string>(string.Empty);
         internal static TestConfig<float> OpportunityHysteresisMinHoldSeconds = new TestConfig<float>(6.0f);
+        internal static TestConfig<bool> EnableCampaignChainDispatches = new TestConfig<bool>(true);
+        internal static TestPluginInstance Instance = new TestPluginInstance();
+    }
+
+    // Stands in for the BepInEx plugin instance's master switch.
+    internal sealed class TestPluginInstance
+    {
+        internal TestConfig<bool> Enabled = new TestConfig<bool>(true);
     }
 
     internal sealed class TestConfig<T>

@@ -67,6 +67,10 @@ namespace WhiskeyRealism.Patches
     // its flank risk is BattleWriterPolicy.PerceivedFlankRisk (perceived flank
     // pressure) instead of flanksthreated / outflanked (120566-120580 over the
     // unfiltered range lists, 122650, 122976+).
+    // Troop quality (BC8): the orchestrator opinion's force ratio is vanilla's force
+    // balance (84862, TacticalForceBalanceEvidence) with the initiative-divided attack
+    // threshold (6396-6430); the legacy scorer's odds and sectors are weighed by vanilla's
+    // experience blend (GetGroupStrength 6057; TroopQuality.SideBlends / SectorBlends).
     // W&L player side (docs/wl-player-model.md rule 4): its macroai produces
     // dispatches to the player, so only a planned-operation opinion that
     // differs from vanilla's current and pending (newmacroaitoset) value is
@@ -304,6 +308,11 @@ namespace WhiskeyRealism.Patches
                 AnyReceivedFire(units),
                 confirmedEnemy <= 0f));
 
+            float ownBlend = 1f, enemyBlend = 1f;
+            if (snapshot != null)
+                TroopQuality.SideBlends(TroopQuality.OwnQuality(snapshot.Own, snapshot.OwnCount), snapshot.PerceivedEnemyQuality,
+                    TroopQualityRuntime.Prefs.ExpInfluence, TroopQualityRuntime.Prefs.MoraleInfluence, out ownBlend, out enemyBlend);
+
             return TacticalOddsDoctrine.Evaluate(new TacticalOddsInput(
                 own,
                 confirmedEnemy,
@@ -312,7 +321,9 @@ namespace WhiskeyRealism.Patches
                 reinforcements,
                 0f,
                 contact,
-                BuildSectorAssessments(units, snapshot)));
+                BuildSectorAssessments(units, snapshot),
+                ownBlend,
+                enemyBlend));
         }
 
         private static void LogDecision(
@@ -393,6 +404,7 @@ namespace WhiskeyRealism.Patches
 
                 int index = OwnIndex(snapshot, group);
                 Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
+                TroopQuality.SectorBlends(snapshot, index, TroopQualityRuntime.Prefs.ExpInfluence, TroopQualityRuntime.Prefs.MoraleInfluence, out float ownBlend, out float enemyBlend);
                 sectors.Add(TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                     sectorId++,
                     Math.Max(group.groupowninrange, group.groupstrengthaigroup),
@@ -404,7 +416,9 @@ namespace WhiskeyRealism.Patches
                     closest != null && closest.isrouted,
                     closest != null && closest.permanentlydetached,
                     BattleWriterPolicy.PerceivedFlankRisk(snapshot, index, _flankThreatMean),
-                    group.covervalue > 0.5f || group.fortinrange)));
+                    group.covervalue > 0.5f || group.fortinrange,
+                    ownBlend,
+                    enemyBlend)));
             }
 
             return sectors.ToArray();

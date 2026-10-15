@@ -15,7 +15,9 @@ namespace WhiskeyRealism.Tactical
             bool closestEnemyRouted,
             bool closestEnemyPermanentlyDetached,
             bool flankRisk,
-            bool strongPoint)
+            bool strongPoint,
+            float ownExperienceBlend = 1f,
+            float enemyExperienceBlend = 1f)
         {
             SectorId = sectorId;
             OwnStrength = NonNegative(ownStrength);
@@ -28,6 +30,8 @@ namespace WhiskeyRealism.Tactical
             ClosestEnemyPermanentlyDetached = closestEnemyPermanentlyDetached;
             FlankRisk = flankRisk;
             StrongPoint = strongPoint;
+            OwnExperienceBlend = Blend(ownExperienceBlend);
+            EnemyExperienceBlend = Blend(enemyExperienceBlend);
         }
 
         public int SectorId { get; }
@@ -41,6 +45,15 @@ namespace WhiskeyRealism.Tactical
         public bool ClosestEnemyPermanentlyDetached { get; }
         public bool FlankRisk { get; }
         public bool StrongPoint { get; }
+        // BC8: vanilla's experience blend (GetGroupStrength 6057, TroopQuality.AiDecisionBlend)
+        // for this group and for the enemy it faces; a non-finite or non-positive blend is 1.
+        public float OwnExperienceBlend { get; }
+        public float EnemyExperienceBlend { get; }
+
+        private static float Blend(float value)
+        {
+            return float.IsNaN(value) || float.IsInfinity(value) || value <= 0f ? 1f : value;
+        }
 
         private static float NonNegative(float value)
         {
@@ -54,12 +67,15 @@ namespace WhiskeyRealism.Tactical
         public static TacticalSectorAssessment BuildSector(TacticalGroupContactInput input)
         {
             bool lineContact = IsVisibleLineContact(input);
-            float enemy = Math.Max(input.EnemiesInRangeStrength, input.AngleEnemyStrength);
+            // Troop quality (BC8): both sides weighed by vanilla's experience blend, as
+            // AdjustGroupAIStance's GetGroupStrength(includeexp: true) does (4238, 6057).
+            float enemyBlend = input.EnemyExperienceBlend;
+            float enemy = Math.Max(input.EnemiesInRangeStrength, input.AngleEnemyStrength) * enemyBlend;
             TacticalSectorSource source = TacticalSectorSource.AngleSlice;
 
             if (lineContact)
             {
-                enemy = Math.Max(enemy, input.ClosestEnemyStrength);
+                enemy = Math.Max(enemy, input.ClosestEnemyStrength * enemyBlend);
                 source = TacticalSectorSource.VisibleLineContact;
             }
 
@@ -77,7 +93,7 @@ namespace WhiskeyRealism.Tactical
             var sector = new TacticalSectorAssessment(
                 input.SectorId,
                 source,
-                input.OwnStrength,
+                input.OwnStrength * input.OwnExperienceBlend,
                 enemy,
                 confidence,
                 input.StrongPoint,

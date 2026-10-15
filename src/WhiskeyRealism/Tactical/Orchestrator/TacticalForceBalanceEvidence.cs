@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Battle;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
@@ -56,6 +57,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// schedule. Enemy reinforcements count once they are on the map and in
     /// range, through the ledger estimate.
     ///
+    /// Troop quality (BC8): own and perceived enemy mean morale / experience turn the
+    /// headcount ratio into vanilla's force balance (84862: × (1 + Δmorale) × (1 +
+    /// Δexperience)); the enemy is compared in own-equivalent men
+    /// (<see cref="EffectiveEnemyStrength"/>) everywhere the doctrine weighs the two forces.
+    /// <see cref="InitiativeTriggerInfluence"/> is vanilla's
+    /// influenceofcommanderinitiativeonattackdefendtrigger (6396-6430), 0 = no division.
+    ///
     /// Test-friendly: no Unity types, no vanilla types.
     /// </summary>
     public readonly struct TacticalForceBalanceEvidence
@@ -70,7 +78,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownCasualtyRatio01 = 0f,
             float ownRoutedFraction01 = 0f,
             float battleHoursElapsed = 0f,
-            BattleStance stance = BattleStance.Meeting)
+            BattleStance stance = BattleStance.Meeting,
+            SideQuality ownQuality = default,
+            SideQuality enemyQuality = default,
+            float initiativeTriggerInfluence = 0f)
         {
             OwnDeployedStrength = SanitizeNonNeg(ownDeployedStrength);
             EnemyDeployedStrength = SanitizeNonNeg(enemyDeployedStrength);
@@ -82,7 +93,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             OwnRoutedFraction01 = Clamp01(ownRoutedFraction01);
             BattleHoursElapsed = SanitizeNonNeg(battleHoursElapsed);
             Stance = stance;
+            QualityFactor = TroopQuality.ForceBalanceFactor(ownQuality, enemyQuality);
+            InitiativeTriggerInfluence = SanitizeNonNeg(initiativeTriggerInfluence);
         }
+
+        // Floor of the quality factor when converting the enemy into own-equivalent men, so a
+        // zero factor (own morale or experience a full point below the enemy's) reads as an
+        // overwhelming enemy instead of a division by zero.
+        public const float MinQualityFactor = 0.01f;
 
         public float OwnDeployedStrength { get; }
         public float EnemyDeployedStrength { get; }
@@ -122,16 +140,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public BattleStance Stance { get; }
 
+        /// <summary>Vanilla's force-balance quality factor (84862); 1 when either side's
+        /// quality is unknown.</summary>
+        public float QualityFactor { get; }
+
+        /// <summary>influenceofcommanderinitiativeonattackdefendtrigger; 0 = none.</summary>
+        public float InitiativeTriggerInfluence { get; }
+
+        /// <summary>The enemy in own-equivalent men: deployed strength / quality factor.</summary>
+        public float EffectiveEnemyStrength => EnemyDeployedStrength / Math.Max(MinQualityFactor, QualityFactor);
+
         /// <summary>
-        /// Current ratio of own vs enemy deployed strength. Returns 1.0 when
-        /// both are zero so callers don't divide-by-zero into a weird state.
+        /// Vanilla's force balance of own vs enemy deployed strength (84862): the headcount
+        /// ratio × the quality factor. Returns 1.0 when both are zero and 10 with no enemy,
+        /// so callers don't divide-by-zero into a weird state.
         /// </summary>
         public float CurrentRatio
         {
             get
             {
                 if (EnemyDeployedStrength <= 0f) return OwnDeployedStrength > 0f ? 10f : 1f;
-                return OwnDeployedStrength / EnemyDeployedStrength;
+                return OwnDeployedStrength / EffectiveEnemyStrength;
             }
         }
 
@@ -151,30 +180,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Hours until enemy force ≥ own force (parity for enemy): 0 when the
-        /// known enemy already matches us, otherwise HoursUntilNever (999).
+        /// Hours until enemy force ≥ own force (parity for enemy, in own-equivalent
+        /// men): 0 when the known enemy already matches us, otherwise HoursUntilNever (999).
         /// The enemy's known strength does not grow on a schedule (no
         /// enemy-arrivals input), and own arrivals only widen the gap.
         /// </summary>
         public float ParityHoursForEnemy()
         {
             const float HoursUntilNever = 999f;
-            return EnemyDeployedStrength >= OwnDeployedStrength ? 0f : HoursUntilNever;
+            return EffectiveEnemyStrength >= OwnDeployedStrength ? 0f : HoursUntilNever;
         }
 
         /// <summary>
-        /// Hours until own force ≥ the known enemy force. Returns
+        /// Hours until own force ≥ the known enemy force (own-equivalent men). Returns
         /// HoursUntilNever (= 999f) when own arrivals never catch up.
         /// </summary>
         public float ParityHoursForOwn()
         {
             const float HoursUntilNever = 999f;
-            if (OwnDeployedStrength >= EnemyDeployedStrength) return 0f;
+            float enemy = EffectiveEnemyStrength;
+            if (OwnDeployedStrength >= enemy) return 0f;
             var events = OwnArrivalEvents();
             for (int i = 0; i < events.Count; i++)
             {
                 float h = events[i];
-                if (OwnStrengthAtHour(h) >= EnemyDeployedStrength) return h;
+                if (OwnStrengthAtHour(h) >= enemy) return h;
             }
             return HoursUntilNever;
         }

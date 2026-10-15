@@ -51,6 +51,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //              WaypointValidator.FriendlyFireClearanceMeters (40 m) of that segment.
     //   leading    ChargeDoctrine.IsLeading over the parent's direct children's distances
     //              to their own visible first target (+Infinity without one).
+    //   odds       BC8: vanilla's own charge odds (122229-122231: strength, experience,
+    //              morale, fatigue of both sides; the target's experience as its stars,
+    //              the rest from its visible record) must exceed microaitriggerforcharge
+    //              (122259) before a regiment is armed (ChargeDoctrine).
     //   refusal    vanilla stamps lastaichargetime = currenttimefromstart when its odds
     //              check refuses (122290-122292). A change of the stamp since the last tick
     //              is a refusal seen now, on the doctrine clock; the first value seen is
@@ -79,18 +83,21 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         internal readonly struct Settings
         {
-            public Settings(bool configOn, float maxChargeRadius, float vanillaRenewHours, bool noChargeIfOutflanked = false)
+            public Settings(bool configOn, float maxChargeRadius, float vanillaRenewHours, bool noChargeIfOutflanked = false,
+                ChargeOddsRules chargeOdds = default)
             {
                 ConfigOn = configOn;
                 MaxChargeRadius = maxChargeRadius;
                 VanillaRenewHours = vanillaRenewHours;
                 NoChargeIfOutflanked = noChargeIfOutflanked;
+                ChargeOdds = chargeOdds;
             }
 
             public bool ConfigOn { get; }
             public float MaxChargeRadius { get; }          // GamePrefs.maxchargeradius (53232)
             public float VanillaRenewHours { get; }        // GamePrefs.timetorenewaichargecheck (54820)
             public bool NoChargeIfOutflanked { get; }       // GamePrefs.nomicroaichargeifunitisoutflanked (54784)
+            public ChargeOddsRules ChargeOdds { get; }      // BC8: vanilla's odds weights + trigger (122229-122259); default = no pre-filter
         }
 
         // What the producer remembers about one regiment between ticks.
@@ -287,6 +294,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 input.TargetMorale = t.Morale;
                 input.TargetFlanked = t.Outflanked != 0;
                 input.TargetDisordered = Disordered(t);
+                // BC8: vanilla's own odds (122229-122231) from what this side sees: the
+                // target's strength, morale and fatigue from its visible record, its
+                // experience as its stars (the observation).
+                ChargeOddsRules odds = settings.ChargeOdds;
+                input.VanillaChargeTrigger = odds.Trigger;
+                if (odds.Trigger > 0f)
+                    input.VanillaChargeOdds = TroopQuality.VanillaChargeOdds(r.Strength, r.Experience, r.Morale, r.Fatigue,
+                        target.Strength, target.Experience, t.Morale, t.Fatigue, odds);
             }
             return input;
         }

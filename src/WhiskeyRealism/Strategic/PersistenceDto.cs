@@ -5,6 +5,9 @@ namespace WhiskeyRealism.Strategic
 {
     // Version history: 1 = v0.2.x; 2 = adds lastSeenMonth/Year, per-faction probe state and
     // fiscal memory, nullable director posture. Readers accept 1..CurrentVersion.
+    // Optional fields added without a version bump (older readers ignore them, a
+    // missing field decodes to null): playerCompliance (stage F, 2026-10-15; W&L order
+    // reliability {careerKey, reliability, samples}, PlayerComplianceRuntime).
     internal class SidecarDto
     {
         internal const int CurrentVersion = 2;
@@ -18,6 +21,15 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("minorOfficerProfiles")] public List<MinorOfficerDto> MinorOfficerProfiles = new List<MinorOfficerDto>();
         [JsonProperty("succession")] public SuccessionDto Succession = new SuccessionDto();
         [JsonProperty("battleHistory")] public List<BattleHistoryDto> BattleHistory = new List<BattleHistoryDto>();
+        // W&L player-compliance estimate (stage F); null when none. Older readers ignore it.
+        [JsonProperty("playerCompliance")] public PlayerComplianceDto PlayerCompliance;
+    }
+
+    internal class PlayerComplianceDto
+    {
+        [JsonProperty("careerKey")] public string CareerKey;
+        [JsonProperty("reliability")] public float Reliability;
+        [JsonProperty("samples")] public int Samples;
     }
 
     internal class FactionDto
@@ -33,6 +45,9 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("frontChangedDay")] public int? FrontChangedDay;
         [JsonProperty("capitalStreakDay")] public int? CapitalStreakDay;
         [JsonProperty("probeHysteresis")] public ProbeHysteresisDto ProbeHysteresis;
+        // Stage E need-driven policy: smoothed needs (NeedKind order) and the ledger's pick.
+        [JsonProperty("policyNeeds")] public float[] PolicyNeeds;
+        [JsonProperty("policyPick")] public int? PolicyPick;
     }
 
     internal class OperationalProbeStateDto

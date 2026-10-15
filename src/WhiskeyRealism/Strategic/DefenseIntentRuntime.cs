@@ -596,12 +596,12 @@ namespace WhiskeyRealism.Strategic
                 ? AccessTools.Method(sifType, "GetSeaInvasionForceReference", new[] { typeof(Regiment) })
                 : null;
             var getReadiness = AccessTools.Method(AccessTools.TypeByName("CampaignArmyPanel"), "GetReadinessStep");
-            var isMovedByPlayer = AccessTools.Method(AccessTools.TypeByName("DLC_WL"), "IsMovedByPlayer", new[] { typeof(Regiment) });
 
             // Look up the front ledger for this alliance once; used for CriticalFront classification.
             FrontSectorLedger frontLedger = input.FrontLedger;
             FormationDirectiveLedger formationLedger = input.FormationDirectives;
 
+            var chain = WlChainContext.Capture(); // once per pass: WlChainRules below
             for (int i = 0; i < ownUnits.Count; i++)
             {
                 var unit = ownUnits[i];
@@ -663,13 +663,13 @@ namespace WhiskeyRealism.Strategic
                     catch { readinessStep = 2f; }
                 }
 
-                // Player-controlled check (DLC_WL; may not be present in non-W&L scenarios).
-                bool playerControlled = false;
-                if (isMovedByPlayer != null && regiment != null)
-                {
-                    try { playerControlled = Convert.ToBoolean(isMovedByPlayer.Invoke(null, new object[] { regiment })); }
-                    catch { }
-                }
+                // W&L chain (WlChainRules, stage F / C4): the player's own command, his map
+                // group (an unreliable executor) and a CIC side are no committed defenders;
+                // the ledger pre-suppresses them ("player-controlled") so must-hold
+                // coverage never rests on the player. The AI group carrying a player
+                // below map-group level counts like any AI unit.
+                bool playerControlled = regiment != null &&
+                    !WlChainRules.CountsAsCommittedDefender(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, regiment));
 
                 // Single-pass tier + closest-threat classification.
                 // Tracks (minDist, closestIndex) to eliminate the float-equality fragility of a

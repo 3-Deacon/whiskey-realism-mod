@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Util;
 
@@ -481,6 +482,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
                 MeanFlankThreatByGroup(s, _flankThreatMean, _flankThreatCount);
 
+                // W&L: the player's regiments count at his order reliability (chain-of-command
+                // spec §E): a player who ignores his dispatches is an unreliable executor, so the
+                // sectors he holds get less weight for Main/SupportMain and draw reserve relief.
+                float playerReliability = PlayerComplianceRuntime.Reliability;
                 UnitRecord[] own = s.Own;
                 for (int i = 0; i < s.OwnCount; i++)
                 {
@@ -508,7 +513,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     Regiment live = BattleSnapshotBuilder.UnitAt(s, i, enemy: false);
                     bool fire = HasReceivedFire(live);
                     if (fire) anyRecentFire = true;
-                    ownCombat.Add(new FrontUnitSample(u.InstanceId, u.X, u.Z, u.Strength, fire));
+                    float weight = PlayerComplianceLedger.StrengthWeight((u.Flags & UnitFlags.PlayerOwned) != 0, playerReliability);
+                    ownCombat.Add(new FrontUnitSample(u.InstanceId, u.X, u.Z, u.Strength * weight, fire));
                     AddFireRangeIds(live);
                     if (!entryPointsChecked) MarkVisibleEntryPoints(u.UnitTyp, u.X, u.Z, enemyEntries, visibleEntries);
                     entryPointsChecked = enemyEntries.Count > 0 && visibleEntries.Count == enemyEntries.Count;
@@ -1057,6 +1063,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // diverge from vanilla's scenario-determined posture.
                 BattleStance stance = ReadBattleStance(bunits, allianceId);
 
+                // Troop quality (BC8): own regiments' mean morale / experience against the
+                // perceived enemy's (stars of visible regiments, remembered by confidence),
+                // turning the ratio into vanilla's force balance (84862); and vanilla's
+                // initiative division of the attack trigger (6396-6430). The rollback flag
+                // makes both neutral (TroopQualityPrefs).
+                TroopQualityPrefs quality = TroopQualityRuntime.Prefs;
+                SideQuality ownQuality = SideQuality.Unknown, enemyQuality = SideQuality.Unknown;
+                if (BattleCore.TryGetSnapshot(allianceId, out BattleSnapshot snapshot))
+                {
+                    ownQuality = quality.Quality(TroopQuality.OwnQuality(snapshot.Own, snapshot.OwnCount));
+                    enemyQuality = quality.Quality(snapshot.PerceivedEnemyQuality);
+                }
+
                 return new TacticalForceBalanceEvidence(
                     ownDeployed,
                     enemyDeployed,
@@ -1067,7 +1086,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ownCasualtyRatio01: ownCasualtyRatio,
                     ownRoutedFraction01: ownRoutedRatio,
                     battleHoursElapsed: battleHours,
-                    stance: stance);
+                    stance: stance,
+                    ownQuality: ownQuality,
+                    enemyQuality: enemyQuality,
+                    initiativeTriggerInfluence: quality.InitiativeInfluence);
             }
             catch (Exception e)
             {

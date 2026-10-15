@@ -21,7 +21,9 @@ namespace WhiskeyRealism.Tactical
             float reinforcementStrength24h,
             float terrainAdvantage,
             TacticalContactAssessment contact,
-            TacticalSectorAssessment[] sectors)
+            TacticalSectorAssessment[] sectors,
+            float ownExperienceBlend = 1f,
+            float enemyExperienceBlend = 1f)
         {
             OwnStrength = Sanitize(ownStrength);
             EnemyStrengthConfirmed = Sanitize(enemyStrengthConfirmed);
@@ -31,6 +33,8 @@ namespace WhiskeyRealism.Tactical
             TerrainAdvantage = Clamp01(terrainAdvantage);
             Contact = contact;
             Sectors = sectors ?? Array.Empty<TacticalSectorAssessment>();
+            OwnExperienceBlend = Blend(ownExperienceBlend);
+            EnemyExperienceBlend = Blend(enemyExperienceBlend);
         }
 
         public float OwnStrength { get; }
@@ -41,6 +45,15 @@ namespace WhiskeyRealism.Tactical
         public float TerrainAdvantage { get; }
         public TacticalContactAssessment Contact { get; }
         public TacticalSectorAssessment[] Sectors { get; }
+        // BC8: vanilla's experience blend (6057) for the own side and the perceived enemy
+        // (TroopQuality.SideBlends); a non-finite or non-positive blend is 1.
+        public float OwnExperienceBlend { get; }
+        public float EnemyExperienceBlend { get; }
+
+        private static float Blend(float value)
+        {
+            return float.IsNaN(value) || float.IsInfinity(value) || value <= 0f ? 1f : value;
+        }
 
         private static float Sanitize(float value)
         {
@@ -109,8 +122,10 @@ namespace WhiskeyRealism.Tactical
                 input.EnemyStrengthConfirmed,
                 Math.Max(input.EnemyStrengthRecent * 0.75f, input.EnemyStrengthInferred * 0.5f));
             bool noContact = input.Contact.State == TacticalContactState.None || enemyCurrent <= 0f;
-            float current = noContact ? 0f : input.OwnStrength / Math.Max(1f, enemyCurrent);
-            float projected = noContact ? 0f : (input.OwnStrength + input.ReinforcementStrength24h) / Math.Max(1f, enemyCurrent);
+            float ownBlend = input.OwnExperienceBlend;
+            float enemyWeighted = Math.Max(1f, enemyCurrent * input.EnemyExperienceBlend);
+            float current = noContact ? 0f : input.OwnStrength * ownBlend / enemyWeighted;
+            float projected = noContact ? 0f : (input.OwnStrength + input.ReinforcementStrength24h) * ownBlend / enemyWeighted;
             TacticalInferiorForcePosture posture = TacticalInferiorForcePosture.None;
 
             if (noContact)

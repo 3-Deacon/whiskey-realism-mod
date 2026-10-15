@@ -61,6 +61,9 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalReserveIntentTelemetry;
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrine { get; private set; }
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrineDiagnostics { get; private set; }
+        internal static ConfigEntry<bool> EnableCampaignChainDispatches { get; private set; }
+        internal static ConfigEntry<bool> EnablePlayerComplianceLedger { get; private set; }
+        internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
         public static ConfigEntry<bool> EnableTacticalBattleOrchestrator;
@@ -81,6 +84,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableGeometricPlayTemplates;
         public static ConfigEntry<bool> EnableBattleFogHonestPerception;
         public static ConfigEntry<bool> EnableInfantryChargeDoctrine;
+        public static ConfigEntry<bool> EnableExperienceAndDrillAiWeighting;
         public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
         public static ConfigEntry<float> BrigadeTaskHoldSeconds;
         public static ConfigEntry<bool> EnableArtilleryAllStanceAudit;
@@ -93,6 +97,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<float> TacticalHeavyReviewMinRealtimeSeconds;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
+        internal ConfigEntry<bool> EnableNeedDrivenPolicySelection;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
         internal ConfigEntry<bool> DefenseIntentVerboseLogging;
         internal ConfigEntry<bool> EnableConstructionSiteSteering;
@@ -354,6 +359,33 @@ namespace WhiskeyRealism
                 "Enable Player Order Doctrine Diagnostics",
                 true,
                 "Default ON. Writes the player-order doctrine's issue/suppress/skip decisions as TacticalPlayerOrder rows to the tactical tuning sidecar, once per distinct unit + decision signature (the last 128 signatures are remembered). Logs even when Enable Player Order Doctrine is off (decisions then show reason writes-disabled).");
+            EnableCampaignChainDispatches = Config.Bind(
+                "W&L",
+                "Enable Campaign Chain Dispatches",
+                true,
+                "Default ON. #69: when vanilla moves the campaign-map group that carries a subordinate W&L player (a brigade or division " +
+                "inside a corps, which vanilla never sends campaign orders), the player gets the career-panel order vanilla would give a " +
+                "top-level player for that move (Redeploy, Offensive, Offensive Operation, Engage Enemy, Defend Capital), naming the " +
+                "commander of the moving formation, with vanilla's order zone and arrival prestige. Whiskey's own strategic orders to a " +
+                "top-level player's group use the same dispatcher. At most one order per target per game day (the last four targets " +
+                "are remembered). Whiskey never " +
+                "moves the player's command. Off: no Whiskey campaign orders; vanilla's own are unchanged.");
+            EnablePlayerComplianceLedger = Config.Bind(
+                "W&L",
+                "Enable Player Compliance Ledger",
+                true,
+                "Default ON. W&L: measures how often the player reaches the zone of the orders his superiors give (campaign: within three " +
+                "game days, only while his command is its own map group; battle: within half a battle hour) and keeps a per-career " +
+                "reliability (saved in the sidecar). The battle AI counts the player's regiments at that reliability when it weighs its " +
+                "sectors, so it does not build its main effort on a player who ignores orders. Starts at full trust; no penalty for the player. Off: the " +
+                "player's regiments count fully and nothing is recorded.");
+            EnableCicFactionAiBugGuard = Config.Bind(
+                "W&L",
+                "Enable CIC Faction AI Bug Guard",
+                true,
+                "Default ON. #70 (vanilla bug BUG-WL-001): when the W&L player is commander-in-chief, vanilla's ship-construction and " +
+                "army-group AI skip every faction, not only the player's. The guard lets the other factions run them; the player's own " +
+                "faction stays the player's. Off: vanilla behaviour (the enemy builds no ships and forms no army groups in a CIC career).");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",
@@ -599,12 +631,31 @@ namespace WhiskeyRealism
                 "the two moving regiments closest to their target get combat behavior 3 when their own first range-list enemy is visible, within " +
                 "vanilla's charge radius of the brigade HQ (maxchargeradius, 50 m shipped, so charges are rare), and weaker in morale by 0.15, " +
                 "disordered or flanked; own morale at least 0.5, fatigue at most 0.6, no friendly in the lane, and (vanilla's unread pref No Micro " +
-                "AI Charge If Outflanked) not while outflanked or under flanking fire. Vanilla's own odds check still decides the charge. Reverts " +
+                "AI Charge If Outflanked) not while outflanked or under flanking fire; with Enable Experience And Drill AI Weighting on, only when " +
+                "vanilla's own experience-weighted charge odds would pass. Vanilla's own odds check still decides the charge. Reverts " +
                 "to behavior 2 when the charge resolves, the conditions fail or the brigade leaves assault, waits out vanilla's renew interval " +
                 "(at least 120 battle seconds) after a refused charge, and restores vanilla's intended cancel: an AI infantry regiment left in " +
                 "charge mode whose brigade is out of assault is taken out of it. Never on W&L player-owned or feud units; orders go through the " +
                 "battle-core order executor (Tactical Commander Mode = Active). Off: arms nothing, hands back what it armed and stops the " +
                 "restored cancel; AI infantry then reaches melee only by contact, as in vanilla.");
+            EnableExperienceAndDrillAiWeighting = Config.Bind(
+                "Tactical",
+                "Enable Experience And Drill AI Weighting",
+                true,
+                "Default ON. Whiskey's battle decisions weigh troop quality the way vanilla's own do. Army attack/hold (reinforcement " +
+                "opportunity doctrine, #44's macro opinion): vanilla's force balance, the strength ratio x (1 + own - enemy mean morale) x " +
+                "(1 + own - enemy mean experience); the attack/defend boundary is divided by 1 + commander initiative x vanilla's " +
+                "initiative influence (0.7 shipped) and the withdrawal threshold is not, as vanilla divides its attack and defend " +
+                "triggers but not its retreat trigger. Group stance sectors and #44's odds: own and enemy strength x vanilla's blends " +
+                "1 - w + experience x w and 1 - w + morale x w (expinfluenceonaidecisions / moraleinfluenceonaidecisions, 0.25 shipped), " +
+                "a group's own experience and morale against the closest visible enemy's. Withdrawal: an AI regiment under fire whose losses reach 80% of its own rout point (vanilla's unbearable-losses " +
+                "trigger, which rises with experience, drill and leadership) falls back before it breaks. Infantry charge: armed only when " +
+                "vanilla's own charge odds (strength, experience, morale, fatigue of both) would pass. Enemy experience is what the player " +
+                "sees: the experience stars of enemy regiments while they are visible, remembered after they drop out of sight. Reads only. " +
+                "Campaign: a coordinated offensive package (#38, which replaces vanilla's offensive gathering) needs its attack and reinforce " +
+                "ratios x (1 + (1 - lead commander initiative) x vanilla's 0.25), as vanilla scales its own. Off: headcount ratios and " +
+                "sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter, unscaled offensive ratios. The battle " +
+                "rules read this flag once per battle (a change applies from the next battle); the campaign scaling reads it on each call.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
@@ -647,6 +698,16 @@ namespace WhiskeyRealism
                 "Default ON. AI CICs plan named historical operations when one fits. With no matching profile the CIC uses a generic plan only on " +
                 "objectives vanilla itself would pick that have towns/IIPs; otherwise vanilla picks. A phase in a defensive posture never sets the " +
                 "campaign objective. Off: historical operations are skipped and only generic plans are built.");
+            EnableNeedDrivenPolicySelection = Config.Bind(
+                "Strategic",
+                "Enable Need-Driven Policy Selection",
+                true,
+                "Default ON. When an alliance the daily review runs for has nothing in policy research, starts the policy its war needs most " +
+                "(credit, manpower, recognition, blockade, industry...), with the faction's vanilla AI personality list as a strong preference and " +
+                "irreversible acts never started by Whiskey or vanilla's fallback until their need is high. Runs for every AI alliance and a W&L career player's alliance at any " +
+                "rank (Commander-in-Chief included); never for a non-career player alliance. Never cancels research and never starts one while " +
+                "any research (a prestige purchase included) is in progress. Off: vanilla Policies.CheckAIPolicyChange picks. The player's in-progress research is protected " +
+                "from vanilla's emergency cancel under the master switch either way.");
             EnableDefenseIntentLedger = Config.Bind(
                 "Defense Intent Ledger",
                 "Enable Defense Intent Ledger",
