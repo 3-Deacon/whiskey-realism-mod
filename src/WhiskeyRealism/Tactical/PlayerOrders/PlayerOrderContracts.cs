@@ -17,9 +17,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     internal enum PlayerOrderIntent
     {
         None,
-        BuildSupplyDepot,
-        BuildFort,
-        DefendCapital,
         AdvanceToAssemblyArea,
         ProbeObjective,
         AttackObjective,

@@ -61,6 +61,9 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalReserveIntentTelemetry;
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrine { get; private set; }
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrineDiagnostics { get; private set; }
+        internal static ConfigEntry<bool> EnableCampaignChainDispatches { get; private set; }
+        internal static ConfigEntry<bool> EnablePlayerComplianceLedger { get; private set; }
+        internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
         public static ConfigEntry<bool> EnableTacticalBattleOrchestrator;
@@ -358,6 +361,33 @@ namespace WhiskeyRealism
                 "Enable Player Order Doctrine Diagnostics",
                 true,
                 "Default ON. Writes the player-order doctrine's issue/suppress/skip decisions as TacticalPlayerOrder rows to the tactical tuning sidecar, once per distinct unit + decision signature (the last 128 signatures are remembered). Logs even when Enable Player Order Doctrine is off (decisions then show reason writes-disabled).");
+            EnableCampaignChainDispatches = Config.Bind(
+                "W&L",
+                "Enable Campaign Chain Dispatches",
+                true,
+                "Default ON. #69: when vanilla moves the campaign-map group that carries a subordinate W&L player (a brigade or division " +
+                "inside a corps, which vanilla never sends campaign orders), the player gets the career-panel order vanilla would give a " +
+                "top-level player for that move (Redeploy, Offensive, Offensive Operation, Engage Enemy, Defend Capital), naming the " +
+                "commander of the moving formation, with vanilla's order zone and arrival prestige. Whiskey's own strategic orders to a " +
+                "top-level player's group use the same dispatcher. At most one order per target per game day (the last four targets " +
+                "are remembered). Whiskey never " +
+                "moves the player's command. Off: no Whiskey campaign orders; vanilla's own are unchanged.");
+            EnablePlayerComplianceLedger = Config.Bind(
+                "W&L",
+                "Enable Player Compliance Ledger",
+                true,
+                "Default ON. W&L: measures how often the player reaches the zone of the orders his superiors give (campaign: within three " +
+                "game days, only while his command is its own map group; battle: within half a battle hour) and keeps a per-career " +
+                "reliability (saved in the sidecar). The battle AI counts the player's regiments at that reliability when it weighs its " +
+                "sectors, so it does not build its main effort on a player who ignores orders. Starts at full trust; no penalty for the player. Off: the " +
+                "player's regiments count fully and nothing is recorded.");
+            EnableCicFactionAiBugGuard = Config.Bind(
+                "W&L",
+                "Enable CIC Faction AI Bug Guard",
+                true,
+                "Default ON. #70 (vanilla bug BUG-WL-001): when the W&L player is commander-in-chief, vanilla's ship-construction and " +
+                "army-group AI skip every faction, not only the player's. The guard lets the other factions run them; the player's own " +
+                "faction stays the player's. Off: vanilla behaviour (the enemy builds no ships and forms no army groups in a CIC career).");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",

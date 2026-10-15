@@ -35,6 +35,11 @@ namespace WhiskeyRealism.Telemetry
         // Internal (not const) so tests can shorten them.
         internal static int ManifestIntervalMs = 5000;
         internal static int RetryBaseMilliseconds = 50;
+        // Retry-backoff and manifest-interval clock (Stopwatch ticks). A test seam like
+        // OpenFileStream: harness tests advance it explicitly, so retry and timer
+        // behaviour does not depend on how fast the machine runs. Write durations
+        // (perf rows) keep the real Stopwatch.
+        internal static Func<long> Clock = Stopwatch.GetTimestamp;
 
         // Opens a write handle on one output file: FileMode.Append for row writes (one encoded
         // chunk per file per batch, so unbuffered), FileMode.Open for post-fault length checks
@@ -106,7 +111,7 @@ namespace WhiskeyRealism.Telemetry
             _warningCallback = warningCallback;
             _flushMilliseconds = TelemetryRuntimeConfig.ClampFlushMilliseconds(flushMilliseconds);
             _flushRows = TelemetryRuntimeConfig.ClampFlushRows(flushRows);
-            _lastManifestTimestamp = Stopwatch.GetTimestamp();
+            _lastManifestTimestamp = Clock();
             _thread = new Thread(Run)
             {
                 IsBackground = true,
@@ -284,7 +289,7 @@ namespace WhiskeyRealism.Telemetry
             if (retryAt == 0L)
                 return _flushMilliseconds;
 
-            long remainingMs = (retryAt - Stopwatch.GetTimestamp()) * 1000L / Stopwatch.Frequency;
+            long remainingMs = (retryAt - Clock()) * 1000L / Stopwatch.Frequency;
             if (remainingMs <= 0L)
                 return 1;
             return (int)Math.Min(_flushMilliseconds, remainingMs);
@@ -313,7 +318,7 @@ namespace WhiskeyRealism.Telemetry
             if (retryAt == 0L)
                 return;
 
-            long remainingTicks = retryAt - Stopwatch.GetTimestamp();
+            long remainingTicks = retryAt - Clock();
             if (remainingTicks <= 0L)
                 return;
 
@@ -695,7 +700,7 @@ namespace WhiskeyRealism.Telemetry
             long retryAt = Interlocked.Read(ref _retryNotBeforeTimestamp);
             if (retryAt == 0L)
                 return false;
-            if (Stopwatch.GetTimestamp() < retryAt)
+            if (Clock() < retryAt)
                 return true;
 
             Interlocked.Exchange(ref _retryNotBeforeTimestamp, 0L);
@@ -704,7 +709,7 @@ namespace WhiskeyRealism.Telemetry
 
         private void MaybeWriteManifest(bool force)
         {
-            long now = Stopwatch.GetTimestamp();
+            long now = Clock();
             long intervalTicks = (long)Math.Max(1, ManifestIntervalMs) * Stopwatch.Frequency / 1000L;
             if (!force && !_manifestDue && now - _lastManifestTimestamp < intervalTicks)
                 return;
@@ -743,7 +748,7 @@ namespace WhiskeyRealism.Telemetry
             long backoffMs = _stopRequested
                 ? baseMs
                 : Math.Min(MaxRetryBackoffMs, baseMs << Math.Min(failures - 1, 16));
-            Interlocked.Exchange(ref _retryNotBeforeTimestamp, Stopwatch.GetTimestamp() + backoffMs * Stopwatch.Frequency / 1000L);
+            Interlocked.Exchange(ref _retryNotBeforeTimestamp, Clock() + backoffMs * Stopwatch.Frequency / 1000L);
         }
 
         private OpenFile GetOrOpen(string fileName)

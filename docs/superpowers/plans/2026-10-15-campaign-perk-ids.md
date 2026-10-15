@@ -25,7 +25,7 @@ Pure rules (in the harness): `Strategic/VanillaPerkTables.cs` (table by unit typ
 | `CommanderFameReportersPatch` | Transpiler (call swaps) | `BattleUnits.CalculateCommanderFame` | Fix Perk Effect Scope | 010 |
 | `ColdSteelMoralePatch` | Transpiler (id remap) | `Regiment.UpdateMorale` | Fix Perk Id Mismatches | 010 |
 
-Ordinals are assigned at merge (`docs/patch-catalog.md`). `FogPerkSightPatch` reads `FogOfWar.units` / `FOWUnit.reg` through getters compiled once (`CompiledFieldGetter`), not `FieldInfo.GetValue` per call. `RegimentMove` has no Prefix/Postfix; its hooks are timed under `campaign.patch.perk-ids.regiment-move.*` and `tactical.patch.perk-ids.regiment-move.zouave-sound`.
+Ordinals #71-#79 (`docs/patch-catalog.md`, assigned at the merge to `main`). `FogPerkSightPatch` reads `FogOfWar.units` / `FOWUnit.reg` through getters compiled once (`CompiledFieldGetter`), not `FieldInfo.GetValue` per call. `RegimentMove` has no Prefix/Postfix; its hooks are timed under `campaign.patch.perk-ids.regiment-move.*` and `tactical.patch.perk-ids.regiment-move.zouave-sound`.
 
 Not fixed, recorded: `IncreasePerkExp` 123361 can set an HQ's `isabletorun` only through the F5 debug key (189138, 189546).
 
