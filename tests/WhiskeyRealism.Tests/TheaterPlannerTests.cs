@@ -249,7 +249,7 @@ internal static class TheaterPlannerTests
 
     private static void DecisiveBattleNearTargetSwitchesImmediately()
     {
-        var decisive = new BattleHistoryRecord { LandOrSea = 0, BattleResultType = 1, AllianceWon = 1, PositionX = 300f, PositionZ = 0f };
+        var decisive = new BattleHistoryRecord { LandOrSea = 0, BattleResultType = 1, AllianceWon = 1, Alliance = new[] { 0, 1 }, PositionX = 300f, PositionZ = 0f };
         var state = StateOn(99);
         var plan = TheaterPlanner.Plan(TwoTargets(0.5f, 0.1f), Sectors(TwoTargets(0.5f, 0.1f)), null, state,
             new[] { decisive }, null, Speed(), out _);
@@ -641,7 +641,7 @@ internal static class TheaterPlannerTests
     private static void BattleInboxDeliversToBothSides()
     {
         var inbox = new BattleInbox();
-        var record = new BattleHistoryRecord { LandOrSea = 0, BattleResultType = 1 };
+        var record = new BattleHistoryRecord { LandOrSea = 0, BattleResultType = 1, AllianceWon = 1, Alliance = new[] { 0, 1 } };
         inbox.Add(record);
         var taken = new List<BattleHistoryRecord>();
         inbox.Take(0, taken);
@@ -659,6 +659,13 @@ internal static class TheaterPlannerTests
         inbox.Clear();
         inbox.Take(0, taken);
         AssertEqual(0, taken.Count, "cleared");
+
+        // CSA vs a European power: the Union did not fight it and never judges it.
+        inbox.Add(new BattleHistoryRecord { LandOrSea = 0, BattleResultType = 1, AllianceWon = 2, Alliance = new[] { 1, 2 } });
+        inbox.Take(0, taken);
+        AssertEqual(0, taken.Count, "a battle without alliance 0 is not alliance 0's");
+        inbox.Take(1, taken);
+        AssertEqual(1, taken.Count, "the CSA fought it");
     }
 
     private static void PlannerStateRestoreRoundTrips()

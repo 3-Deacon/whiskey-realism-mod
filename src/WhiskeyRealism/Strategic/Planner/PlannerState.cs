@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -49,9 +50,11 @@ namespace WhiskeyRealism.Strategic.Planner
     }
 
     // Finished battles waiting for each alliance's next plan (P4's decisive-battle trigger).
-    // StrategicCoordinator.RecordBattleOutcome forwards every new record through
-    // CampaignPlannerRuntime.OnBattleRecorded; a battle concerns both sides, so it is queued for
-    // alliances 0 and 1 and each review takes only its own queue.
+    // StrategicCoordinator.RecordBattleOutcome forwards every new record (it already drops one with
+    // no winner) through CampaignPlannerRuntime.OnBattleRecorded. As the R4 rule it replaces
+    // (DirtyPlanIfBattleInvalidates for AllianceWon and LosingAlliance), a battle concerns the
+    // alliances that fought it: it is queued for each participant of 0 and 1 (Alliance[], the
+    // winner and the loser) and each review takes only its own queue.
     public sealed class BattleInbox
     {
         public const int MaxPending = 16;
@@ -62,10 +65,18 @@ namespace WhiskeyRealism.Strategic.Planner
             if (record == null) return;
             for (int a = 0; a < _pending.Length; a++)
             {
+                if (!Fought(record, a)) continue;
                 var list = _pending[a];
                 list.Add(record);
                 if (list.Count > MaxPending) list.RemoveAt(0);
             }
+        }
+
+        private static bool Fought(BattleHistoryRecord record, int alliance)
+        {
+            if (record.AllianceWon == alliance || record.LosingAlliance == alliance) return true;
+            var sides = record.Alliance;
+            return sides != null && Array.IndexOf(sides, alliance) >= 0;
         }
 
         // The alliance's pending battles, moved into `into` (cleared first); the queue empties.

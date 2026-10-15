@@ -17,9 +17,11 @@ namespace WhiskeyRealism.Strategic.Planner
     //              results are memoized for the campaign (CampaignScope) on endpoints snapped to an
     //              8-unit grid (the probe runs between the snapped points), bounded to
     //              MaxMemoEntries; new probes are capped at MaxLineStepsPerReview map units per
-    //              review. Past the cap a line reads as clear (the straight distance, the no-river
-    //              answer) for this review and one static-key warning is logged; the memo fills on
-    //              later reviews.
+    //              review. Lines between static points (targets, centroids, the capital) fill the
+    //              memo once; a believed army moves tens of units a day, so its lines re-key daily
+    //              and the budget is the steady daily spend. Past the budget a line reads as clear
+    //              (the straight distance, the no-river answer) for this review and one static-key
+    //              warning is logged.
     //   RiverNear  BattlefieldSetup.GetCurrentTerrainOnPos at the point and 8 points on each of two
     //              rings (half and full range) for terrain 3/4/5 (small river, river, river
     //              crossing: the cells River Expedition speeds, 133482-133491); memoized the same
@@ -27,7 +29,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   ReadMarchSpeed  the campaign speed terms of the march-time estimate (MarchSpeedInputs).
     internal sealed class TerrainLineRuntime : ITerrainLineProbe
     {
-        internal const float MaxLineStepsPerReview = 4000f; // map units of CountTerrainLine per review
+        internal const float MaxLineStepsPerReview = 1500f; // map units of CountTerrainLine per review (about five 300-unit lines)
         internal const int MaxRiverProbesPerReview = 128;
         internal const int MaxMemoEntries = 20000;
         private const float Snap = 8f;
