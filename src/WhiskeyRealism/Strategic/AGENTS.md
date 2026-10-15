@@ -13,7 +13,7 @@ These rules apply to non-patch logic under `src/WhiskeyRealism/Strategic/`. Iden
 
 ## Layout Notes
 
-- `Policies/` holds the stage E need-driven policy selection: pure `PolicyEffectCatalog`, `PolicyEligibility`, `PolicyNeedScorer`, `PolicyPlanLedger`, `PolicyEmergencyProtection`, and the runtime adapter `PolicyRuntime`. The needs come from `CampaignNeedBuilder` (pure) / `CampaignNeedRuntime` (runtime) in this folder and are shared with project selection. Inside `WhiskeyRealism.Strategic.*` the vanilla `Policies` class must be written `global::Policies` (the namespace shadows it).
+- `Policies/` holds the stage E need-driven policy selection: pure `PolicyEffectCatalog`, `PolicyEligibility`, `PolicyNeedScorer`, `PolicyPlanLedger`, `PolicyListOverride`, and the runtime adapter `PolicyRuntime`. The needs come from `CampaignNeedBuilder` (pure) / `CampaignNeedRuntime` (runtime) in this folder and are shared with project selection. Inside `WhiskeyRealism.Strategic.*` the vanilla `Policies` class must be written `global::Policies` (the namespace shadows it).
 
 ## Cadence Rules
 

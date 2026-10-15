@@ -14,8 +14,9 @@ namespace WhiskeyRealism.Strategic.Policies
         public float SlotPressure;
         public float Duration;
         public float SideCost;
-        // Irreversible act whose gating need is below IrreversibleNeedGate: never started
-        // (PolicyPlanLedger drops it), whatever its score.
+        // Irreversible act whose gating need is below IrreversibleNeedGate (IsHeld): never
+        // started, whatever its score. PolicyPlanLedger drops it from the ranking and
+        // PolicySelectionPatch takes it out of vanilla's fallback walk (PolicyListOverride).
         public bool Held;
     }
 
@@ -57,11 +58,21 @@ namespace WhiskeyRealism.Strategic.Policies
             }
             score.Duration = -DurationWeight * Math.Max(0f, facts.ResearchDuration) * need.Max;
             score.SideCost = -SideCost(effect, need);
-            score.Held = effect != null && effect.IrreversibleReason != null && GatingNeed(effect, need) < IrreversibleNeedGate;
+            score.Held = IsHeld(facts.PolicyId, need);
 
             score.Total = score.Need + score.Personality + score.Profile + score.LookAhead
                 + score.SlotPressure + score.Duration + score.SideCost;
             return score;
+        }
+
+        // The hard hold: an irreversible act waits until a need it answers reaches
+        // IrreversibleNeedGate. Shared by the ranking and the fallback filter so both hold
+        // the same acts under the same need vector.
+        public static bool IsHeld(int policyId, NeedVector need)
+        {
+            var effect = PolicyEffectCatalog.Get(policyId);
+            if (effect == null || effect.IrreversibleReason == null) return false;
+            return GatingNeed(effect, need ?? new NeedVector()) < IrreversibleNeedGate;
         }
 
         private static float NeedMet(PolicyEffect effect, NeedVector need)

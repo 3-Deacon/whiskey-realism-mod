@@ -99,7 +99,7 @@ S(p) = Σk need_k·w[p,k]                                           need
      − Σk need_k·cost[p,k]                                          side costs
 ```
 
-**Hard hold (irreversible acts).** An irreversible act whose largest need among the kinds it answers is below 0.7 is *held*: it never enters the ranking, so Whiskey never starts it at any score, and when nothing else is eligible the patch lets vanilla run its own personality list. A soft penalty was not enough: with the non-act slots full, the ranking always picked something (verify round 1: CSA emancipation 134 at low need).
+**Hard hold (irreversible acts).** An irreversible act whose largest need among the kinds it answers is below 0.7 is *held*: it never enters the ranking, so Whiskey never starts it at any score. When nothing else is eligible the patch lets vanilla run its fallback walk (211076-211090) with the held acts taken out of the personality list for that call (`PolicyListOverride.HeldIdsToRemove`, same `PolicyNeedScorer.IsHeld` test under the review's need vector; snapshot restored in the Finalizer), so vanilla does not start one either: Union Historical lists 33/39/40 and CSA Historical 139/140 near the head (verify round 2). Never on an emergency personality (vanilla's emergency list is walked as written) and never before the review has a need vector for the alliance. A soft penalty was not enough: with the non-act slots full, the ranking always picked something (verify round 1: CSA emancipation 134 at low need).
 
 ### Cadence & hysteresis
 
@@ -107,7 +107,7 @@ The daily strategic review builds the need vector and ranks every eligible polic
 
 ### Telemetry
 
-`FiscalIntent` decision events, `source=PolicySelection`, signature `alliance|pick|reason`, with the top-3 need/history/profile/cost breakdown; `decision=emergency-protect` with the protected count.
+`FiscalIntent` decision events, `source=PolicySelection`, signature `alliance|pick|reason`, with the top-3 need/history/profile/cost breakdown; `decision=emergency-protect` with the protected count; `decision=hold-irreversible` (reason `vanilla-fallback`) with the held ids taken out of vanilla's fallback walk.
 
 ## Components
 
@@ -117,7 +117,7 @@ The daily strategic review builds the need vector and ranks every eligible polic
 | `Strategic/Policies/PolicyEligibility.cs` | pure |
 | `Strategic/Policies/PolicyNeedScorer.cs` | pure |
 | `Strategic/Policies/PolicyPlanLedger.cs` | pure |
-| `Strategic/Policies/PolicyEmergencyProtection.cs` | pure (protected-id set) |
+| `Strategic/Policies/PolicyListOverride.cs` | pure (emergency protected-id set, held-act fallback filter, snapshot restore) |
 | `Strategic/Policies/PolicyRuntime.cs` | runtime |
 | `Strategic/CampaignNeedBuilder.cs` | pure |
 | `Strategic/CampaignNeedRuntime.cs` | runtime |

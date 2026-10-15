@@ -95,7 +95,11 @@ internal static class NeedDrivenPolicyTests
             ("need-policy ledger describes its top candidates", LedgerDescribeTop),
             ("need-policy sidecar round-trips policy needs and pick", SidecarRoundTripsPolicyState),
             ("need-policy emergency protects only in-progress research", EmergencyProtectedIds),
-            ("need-policy emergency restore removes exactly the appended tail", EmergencyRestoreRemovesTail),
+            ("need-policy emergency restore gives back vanilla's list", EmergencyRestoreGivesBackList),
+            ("need-policy fallback hold removes held acts and keeps vanilla's order", FallbackHoldRemovesHeldActs),
+            ("need-policy fallback hold restore gives back vanilla's exact list", FallbackHoldRestoreIsExact),
+            ("need-policy fallback hold leaves vanilla untouched without a plan or with selection off", FallbackHoldNeedsPlanAndFlag),
+            ("need-policy fallback hold never filters the emergency list", FallbackHoldSkipsEmergency),
         });
     }
 
@@ -791,14 +795,14 @@ internal static class NeedDrivenPolicyTests
     private static void EmergencyProtectedIds()
     {
         var personality = new List<int> { 20, 21, 22 };
-        var ids = PolicyEmergencyProtection.ProtectedIds(new[] { 12, 22, 31, 12, 40 }, new[] { 0.3f, 0.5f, 1f, 0.3f, 0.99f }, personality);
+        var ids = PolicyListOverride.ProtectedIds(new[] { 12, 22, 31, 12, 40 }, new[] { 0.3f, 0.5f, 1f, 0.3f, 0.99f }, personality);
         AssertEqual(2, ids.Count, "in progress, not listed, distinct");
         AssertEqual(12, ids[0], "first");
         AssertEqual(40, ids[1], "second");
-        AssertEqual(0, PolicyEmergencyProtection.ProtectedIds(new int[0], new float[0], personality).Count, "nothing in research");
-        AssertEqual(0, PolicyEmergencyProtection.ProtectedIds(null, null, personality).Count, "null research");
-        AssertEqual(1, PolicyEmergencyProtection.ProtectedIds(new[] { 12 }, new[] { 0.1f }, null).Count, "null list");
-        AssertEqual(1, PolicyEmergencyProtection.ProtectedIds(new[] { 12, 13 }, new[] { 0.1f }, personality).Count, "mismatched lengths read the common prefix");
+        AssertEqual(0, PolicyListOverride.ProtectedIds(new int[0], new float[0], personality).Count, "nothing in research");
+        AssertEqual(0, PolicyListOverride.ProtectedIds(null, null, personality).Count, "null research");
+        AssertEqual(1, PolicyListOverride.ProtectedIds(new[] { 12 }, new[] { 0.1f }, null).Count, "null list");
+        AssertEqual(1, PolicyListOverride.ProtectedIds(new[] { 12, 13 }, new[] { 0.1f }, personality).Count, "mismatched lengths read the common prefix");
     }
 
     private static void LedgerDescribeTop()
@@ -832,21 +836,81 @@ internal static class NeedDrivenPolicyTests
         AssertTrue(Total(115) > Total(135), "Diplomacy over Civilian Ships");
     }
 
-    private static void EmergencyRestoreRemovesTail()
+    private static void EmergencyRestoreGivesBackList()
     {
         var list = new List<int> { 20, 21, 22 };
-        int original = list.Count;
-        list.AddRange(PolicyEmergencyProtection.ProtectedIds(new[] { 12, 40 }, new[] { 0.3f, 0.5f }, list));
+        var snapshot = list.ToArray();
+        list.AddRange(PolicyListOverride.ProtectedIds(new[] { 12, 40 }, new[] { 0.3f, 0.5f }, list));
         AssertEqual(5, list.Count, "appended");
-        PolicyEmergencyProtection.Restore(list, original);
-        AssertEqual(3, list.Count, "restored length");
-        AssertEqual(20, list[0], "vanilla order kept");
-        AssertEqual(22, list[2], "vanilla order kept");
-        PolicyEmergencyProtection.Restore(list, original);
-        AssertEqual(3, list.Count, "second restore is a no-op");
-        PolicyEmergencyProtection.Restore(list, 5);
-        AssertEqual(3, list.Count, "count beyond the list is a no-op");
-        PolicyEmergencyProtection.Restore(null, 0);
+        PolicyListOverride.Restore(list, snapshot);
+        AssertSequence(new[] { 20, 21, 22 }, list, "vanilla list and order back");
+        PolicyListOverride.Restore(list, snapshot);
+        AssertSequence(new[] { 20, 21, 22 }, list, "second restore is a no-op");
+        PolicyListOverride.Restore(list, null);
+        AssertSequence(new[] { 20, 21, 22 }, list, "no snapshot never clears the list");
+        PolicyListOverride.Restore(null, snapshot);
+    }
+
+    // Verifier probe (stage E verify round 2): with a plan and no eligible Whiskey pick,
+    // vanilla's fallback walk (211076-211090) would start the first available entry of the
+    // Union Historical list, where USCT (33) and the enrollment acts (39/40, listed twice)
+    // sit. Below their need gate they leave the walk; everything else keeps vanilla's order.
+    private static void FallbackHoldRemovesHeldActs()
+    {
+        var calm = Needs((NeedKind.Manpower, 0.2f), (NeedKind.Treasury, 0.5f));
+        var list = new List<int>(UnionHistorical);
+        var held = PolicyListOverride.HeldIdsToRemove(true, false, calm, list);
+        AssertSequence(new[] { 33, 39, 40 }, held, "held acts in list order, each once");
+        PolicyListOverride.Remove(list, held);
+        var expected = new List<int>();
+        foreach (int id in UnionHistorical)
+            if (id != 33 && id != 39 && id != 40) expected.Add(id);
+        AssertSequence(expected, list, "every occurrence removed, vanilla order kept");
+
+        var csa = PolicyListOverride.HeldIdsToRemove(true, false, calm, CsaHistorical);
+        AssertSequence(new[] { 139, 140 }, csa, "CSA conscription acts held");
+
+        var crisis = Needs((NeedKind.Manpower, 0.9f));
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, false, crisis, UnionHistorical).Count, "a manpower crisis opens the gate: vanilla walks its own list");
+        var recognitionOnly = new List<int> { 144, 143, 130 };
+        AssertSequence(new[] { 144, 130 }, PolicyListOverride.HeldIdsToRemove(true, false, crisis, recognitionOnly), "recognition acts stay held in a manpower crisis");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, false, calm, new List<int> { 22, 35, 41 }).Count, "nothing irreversible listed: untouched");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, false, calm, null).Count, "null list");
+    }
+
+    private static void FallbackHoldRestoreIsExact()
+    {
+        var calm = Needs((NeedKind.Manpower, 0.2f));
+        var list = new List<int>(UnionHistorical);
+        var snapshot = list.ToArray();
+        PolicyListOverride.Remove(list, PolicyListOverride.HeldIdsToRemove(true, false, calm, list));
+        AssertTrue(list.Count < UnionHistorical.Length, "filtered for the call");
+        PolicyListOverride.Restore(list, snapshot);
+        AssertSequence(UnionHistorical, list, "identical list, duplicates and order included");
+    }
+
+    private static void FallbackHoldNeedsPlanAndFlag()
+    {
+        var calm = Needs((NeedKind.Manpower, 0.2f));
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, false, null, UnionHistorical).Count, "no plan (no need vector yet): vanilla untouched");
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(false, false, calm, UnionHistorical).Count, "selection off: vanilla untouched");
+        var list = new List<int>(UnionHistorical);
+        PolicyListOverride.Remove(list, new List<int>());
+        AssertSequence(UnionHistorical, list, "removing nothing leaves the list");
+    }
+
+    private static void FallbackHoldSkipsEmergency()
+    {
+        var calm = Needs((NeedKind.Manpower, 0.2f));
+        var emergencyList = new List<int> { 39, 40, 33, 22 };
+        AssertEqual(0, PolicyListOverride.HeldIdsToRemove(true, true, calm, emergencyList).Count, "emergency list walked as vanilla wrote it");
+    }
+
+    private static void AssertSequence(IList<int> expected, IList<int> actual, string label)
+    {
+        AssertEqual(expected.Count, actual.Count, label + " (count)");
+        for (int i = 0; i < expected.Count; i++)
+            AssertEqual(expected[i], actual[i], label + " [" + i + "]");
     }
 
     // Verifier probe (stage E verify round 1): CSA, low recognition and manpower need,

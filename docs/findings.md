@@ -286,7 +286,9 @@ Full model and W&L notes: [`superpowers/specs/2026-10-14-need-driven-policy-desi
 | `Policies.UpdateActivations` | 209248-209258 | W&L display bug (`BUG-WL-004`). |
 | `GameVars.Alliance.GetInterventionProbability` / `AdjustInterventionLevel` | 62822 / 62887 | CSA level − Union level; positive policy adjustments help the actor on either side; W&L effect 34 shifts it for the career's side. |
 | `BattleUnits.GetAverageBlockadeRatio` | 93766 | Blockade of the alliance's **own** harbors. |
-| `AIFaction.SeparateUnits` / `AICampaign.GetStrengthRatio` | 10462 / 12366-12402 | Not fog-honest: no fog filter on the enemy list, and the ratio adds the enemy's `troopsinrecruitment`. Stage E does not read it; `GetAIPersonality` reaches it, and it indexes `aifaction` (null until factions exist, 11097). |
+| `AIFaction.SeparateUnits` / `AICampaign.GetStrengthRatio` | 10462 / 12366-12402 | Not fog-honest: no fog filter on the enemy list, and the ratio adds the enemy's `troopsinrecruitment`. Stage E does not call it; `GetAIPersonality` reaches it, and it indexes `aifaction` (null until factions exist, 11097). |
+| `GetAIPersonality` recruiting emergency → `EmergencyManpower` | 62733 | Accepted: `PolicyRuntime.ReadPersonalityList` mirrors vanilla's own emergency personality, whose test includes `GetStrengthRatio < 0.8`. Vanilla announces the emergency publicly (newspaper event, `CheckAIPolicyChange` 211026-211058), so forcing Manpower = 1 from it leaks nothing a player cannot read. Keep it; add no other strength read. |
+| `CheckAIPolicyChange` fallback walk | 211076-211090 | Walks `personality.policies` from the head and starts the first available entry; Union Historical lists 33/39/40 and CSA Historical 139/140 early. #19 removes the held irreversible acts from the list for the call (snapshot restored in its Finalizer), never on an emergency personality. |
 | `Config/policies.dat` / `aipersonalities.dat` | `ImportPolicyData` 211717 / import 66144 | Record layouts (the harness fixture copies the 117 policy ids). |
 
 ## Game-update re-decompile inventory

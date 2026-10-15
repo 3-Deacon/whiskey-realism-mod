@@ -77,7 +77,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Policies\PolicyEligibility.cs" Link="Policies\PolicyEligibility.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Policies\PolicyNeedScorer.cs" Link="Policies\PolicyNeedScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Policies\PolicyPlanLedger.cs" Link="Policies\PolicyPlanLedger.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Policies\PolicyEmergencyProtection.cs" Link="Policies\PolicyEmergencyProtection.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Policies\PolicyListOverride.cs" Link="Policies\PolicyListOverride.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CampaignNeedBuilder.cs" Link="CampaignNeedBuilder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveMetadata.cs" Link="ObjectiveMetadata.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ObjectiveCatalog.cs" Link="ObjectiveCatalog.cs" />

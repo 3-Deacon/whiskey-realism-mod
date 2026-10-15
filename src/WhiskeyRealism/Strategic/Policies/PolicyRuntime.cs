@@ -94,6 +94,11 @@ namespace WhiskeyRealism.Strategic.Policies
         }
 
         // The personality vanilla would walk (GetAIPersonality 62716), with its emergency kind.
+        // Accepted strength read (stage E landing): the recruiting emergency (62733) consults
+        // AICampaign.GetStrengthRatio, which is not fog-honest. Vanilla declares that
+        // emergency publicly (newspaper event, CheckAIPolicyChange 211026-211058), so
+        // mirroring vanilla's own emergency state is information any side has. Do not
+        // "fix" this by re-deriving the emergency, and add no other strength read.
         internal static int[] ReadPersonalityList(int alliance, out bool emergencyCredit, out bool emergencyManpower)
         {
             emergencyCredit = false;
