@@ -53,6 +53,7 @@ namespace WhiskeyRealism.Strategic
         internal static Func<int, IList> AvailableObjectivesProvider = GetAvailableObjectivesViaReflection;
         internal static Func<object, int> ObjectiveIdReader = ReadObjectiveIdViaReflection;
         internal static Func<int, bool> TargetPositionResolves = id => ObjectiveAdapter.ResolveObjectivePosition(id).HasValue;
+        internal static Func<object, bool> ObjectiveHasGround = ReadObjectiveHasGroundViaReflection;
 
         public PersonalityVector Effective(EraStageManager era)
         {
@@ -169,15 +170,21 @@ namespace WhiskeyRealism.Strategic
                 // PickCampaignObjective and freeze followedcampaignobjective).
             }
 
-            // Only objectives with a resolvable position can drive a plan: objectives 0-28 have
-            // no towns in campaignobjectives.dat, and a plan on one would hit
-            // MissingTargetPosition -> Replan every day.
+            // Generic fallback only over objectives vanilla itself can act on: candidates already
+            // come from GetAvailableObjectives (alliance/scenario/chapter, decompile 178827), and
+            // the objective must own at least one town/IIP — followedcampaignobjective only adds
+            // importance through the objective's towns/IIPs (UpdateImportanceValues 14922/14961).
+            // Abstract objectives 0-28 (e.g. 4 "Capture Washington") have none; with no such
+            // candidate there is no plan and vanilla's PickCampaignObjective runs.
             var reachable = new List<(object obj, float score, ObjectiveMetadata meta)>();
             for (int i = 0; i < scored.Count; i++)
-                if (TargetPositionResolves(GetObjectiveId(scored[i].obj))) reachable.Add(scored[i]);
+            {
+                if (ObjectiveHasGround(scored[i].obj) && TargetPositionResolves(GetObjectiveId(scored[i].obj)))
+                    reachable.Add(scored[i]);
+            }
             if (reachable.Count == 0)
             {
-                EmitPlanDecision("clear", "no-resolvable-objective", "alliance=" + AllianceId + "|decision=clear|objectiveCount=" + scored.Count, ev => ev.WithField("objectiveCount", scored.Count));
+                EmitPlanDecision("clear", "no-objective-with-ground", "alliance=" + AllianceId + "|decision=clear|objectiveCount=" + scored.Count, ev => ev.WithField("objectiveCount", scored.Count));
                 ActivePlan = null;
                 return;
             }
@@ -524,6 +531,15 @@ namespace WhiskeyRealism.Strategic
         private static int GetObjectiveId(object campaignObjective)
         {
             return ObjectiveIdReader(campaignObjective);
+        }
+
+        // CampaignObjective.objectives: the Town/IIP list loaded from campaignobjectives.dat
+        // (InitializeObjectives 178635).
+        private static bool ReadObjectiveHasGroundViaReflection(object campaignObjective)
+        {
+            if (campaignObjective == null) return false;
+            var list = AccessTools.Field(campaignObjective.GetType(), "objectives")?.GetValue(campaignObjective) as IList;
+            return list != null && list.Count > 0;
         }
 
         private static int ReadObjectiveIdViaReflection(object campaignObjective)

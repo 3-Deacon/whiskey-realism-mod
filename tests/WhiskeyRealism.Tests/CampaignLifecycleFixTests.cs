@@ -45,8 +45,9 @@ internal static class CampaignLifecycleFixTests
         Check("c1 r5 every phase target has a resolvable position", R5EveryPhaseTargetHasResolvablePosition);
         Check("c1 r5 defensive csa ops do not target capture washington", R5DefensiveCsaOpsDoNotTargetWashington);
         Check("c1 r5 resolve rejects profile whose phase targets are unavailable", R5ResolveRejectsUnavailablePhaseTargets);
-        Check("c1 r5 no profile falls back to generic plan with a resolvable target", R5NoProfileFallsBackToGenericPlan);
-        Check("c1 r5 no resolvable candidate leaves plan empty for vanilla", R5NoResolvableCandidateLeavesPlanEmpty);
+        Check("c1 r5 generic fallback only targets objectives with towns or IIPs", R5GenericFallbackRequiresVanillaGround);
+        Check("c1 r5 generic fallback skips abstract objectives like capture washington", R5GenericFallbackSkipsAbstractObjectives);
+        Check("c1 r5 scenario 001 csa gets no plan and vanilla picks", R5Scenario001CsaGetsNoPlan);
         Check("c1 r5 objective steering lets vanilla pick without a plan", R5ObjectiveSteeringLetsVanillaPickWithoutPlan);
 
         // PER — sidecar persistence
@@ -498,13 +499,20 @@ internal static class CampaignLifecycleFixTests
         TestHarness.AssertEqual(HistoricalOperationMatchKind.Matched, accepted.Kind, "phase targets available");
     }
 
+    // Mirrors the CampaignObjective fields the CIC reads: UniqueObjectiveID and the
+    // town/IIP `objectives` list (empty for abstract objectives 0-28 in campaignobjectives.dat).
     internal sealed class FakeObjective
     {
         public int UniqueObjectiveID;
-        public FakeObjective(int id) { UniqueObjectiveID = id; }
+        public List<object> objectives = new List<object>();
+        public FakeObjective(int id, int towns = 0)
+        {
+            UniqueObjectiveID = id;
+            for (int i = 0; i < towns; i++) objectives.Add(new object());
+        }
     }
 
-    private static OperationalPlan ReplanWith(int alliance, EraStage stage, int month, int year, params int[] objectiveIds)
+    private static OperationalPlan ReplanWith(int alliance, EraStage stage, int month, int year, params FakeObjective[] objectives)
     {
         var savedProvider = CIC.AvailableObjectivesProvider;
         var savedPosition = CIC.TargetPositionResolves;
@@ -512,7 +520,7 @@ internal static class CampaignLifecycleFixTests
         try
         {
             var list = new List<object>();
-            foreach (int id in objectiveIds) list.Add(new FakeObjective(id));
+            list.AddRange(objectives);
             CIC.AvailableObjectivesProvider = _ => list;
             CIC.TargetPositionResolves = id => ObjectiveCatalog.TryResolvePosition(id, out _, out _);
             CicSettings.HistoricalOperationDoctrine = true;
@@ -529,20 +537,37 @@ internal static class CampaignLifecycleFixTests
         }
     }
 
-    private static void R5NoProfileFallsBackToGenericPlan()
+    private static void R5GenericFallbackRequiresVanillaGround()
     {
-        // CSA in 1863 has no historical profile. Objective 25 (abstract, no towns, no
-        // position) must not be picked; objective 4 has a catalog position.
-        var plan = ReplanWith(1, EraStage.Decisive1863, 6, 1863, 25, 4);
+        // CSA in 1863 has no historical profile. Only an objective with towns/IIPs can carry
+        // vanilla's followedcampaignobjective weight (UpdateImportanceValues 14922/14961).
+        var plan = ReplanWith(1, EraStage.Decisive1863, 6, 1863, new FakeObjective(25), new FakeObjective(4), new FakeObjective(30, towns: 4));
         TestHarness.AssertTrue(plan != null, "generic fallback plan built");
         TestHarness.AssertTrue(string.IsNullOrEmpty(plan.OperationId), "fallback is the legacy generic plan");
-        TestHarness.AssertEqual(4, plan.CurrentPhase.TargetObjectiveId, "fallback targets a resolvable objective");
+        TestHarness.AssertEqual(30, plan.CurrentPhase.TargetObjectiveId, "fallback targets the objective with ground");
     }
 
-    private static void R5NoResolvableCandidateLeavesPlanEmpty()
+    private static void R5GenericFallbackSkipsAbstractObjectives()
     {
-        var plan = ReplanWith(1, EraStage.Decisive1863, 6, 1863, 25, 8);
+        // Objective 4 (Capture Washington) has a mod catalog position but no towns: it must
+        // not become a permanent generic offensive.
+        var plan = ReplanWith(1, EraStage.Decisive1863, 6, 1863, new FakeObjective(25), new FakeObjective(4));
         TestHarness.AssertTrue(plan == null, "no plan => PickCampaignObjective lets vanilla choose");
+    }
+
+    private static void R5Scenario001CsaGetsNoPlan()
+    {
+        // Grand campaign (001): every CSA objective is abstract (no towns) and no CSA profile
+        // matches, so the CSA keeps vanilla's own objective picking in every era.
+        foreach (var era in new[] { EraStage.Amateur1861, EraStage.Operational1862, EraStage.Decisive1863, EraStage.TotalWar1864 })
+        {
+            int year = 1861 + (int)era;
+            var plan = ReplanWith(1, era, 7, year,
+                new FakeObjective(1), new FakeObjective(4), new FakeObjective(8), new FakeObjective(12),
+                new FakeObjective(13), new FakeObjective(15), new FakeObjective(16), new FakeObjective(19),
+                new FakeObjective(21), new FakeObjective(25), new FakeObjective(28));
+            TestHarness.AssertTrue(plan == null, "001 CSA " + era + " gets no plan");
+        }
     }
 
     private static void R5ObjectiveSteeringLetsVanillaPickWithoutPlan()
