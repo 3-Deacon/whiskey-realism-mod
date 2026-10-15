@@ -76,7 +76,10 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Each threatened sector's hold reserve: what holds there anyway (formations that cannot
         // be massed, and the capital reserve) counts first, then the massable formations nearest the
-        // sector's believed army until the hold need is met. holdReserved[i] is the sector whose hold
+        // sector's believed army until the hold need is met. Only a committed defender counts
+        // (WlChainRules.CountsAsCommittedDefender, spec C4): the W&L player's own command and a
+        // map-group player never hold a sector, whatever his reliability, so the AI formations that
+        // do are not massed away for a sector the player stands in. holdReserved[i] is the sector whose hold
         // keeps formation i, -1 none. need/nearX/nearZ are per sector.
         internal static void Hold(CampaignSnapshot s, SectorModel sectors, float[] need, float[] nearX, float[] nearZ,
                                   bool[] capitalReserved, int[] holdReserved)
@@ -93,7 +96,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     var f = s.Own[i];
                     if (SectorOf(sectors, f) != sector) continue;
-                    if (!TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) || capitalReserved[i]) held += System.Math.Max(0f, f.Strength);
+                    if (!TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) || capitalReserved[i])
+                    {
+                        if (WlChainRules.CountsAsCommittedDefender(f.Chain)) held += System.Math.Max(0f, f.Strength);
+                    }
                     else order.Add(i);
                 }
                 SortByDistance(s, order, nearX[sector], nearZ[sector]);

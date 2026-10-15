@@ -502,14 +502,14 @@ internal static class DailyReviewSchedulerTests
             for (int i = 0; i < 2; i++)
                 s.Beliefs.Add(new EnemyBelief { InstanceId = -1, UnitKey = "e" + i + ":0", UnitTyp = 15, X = rng.Next(0, 600), Z = 0f, Strength = 4000f + rng.Next(9000), Confidence01 = 1f, LastSeenDay = s.DaySerial });
             var sectors = SectorModel.Build(s);
-            var plan = new TheaterPlan { Alliance = a, DaySerial = s.DaySerial, MainSectorId = sectors.SectorAt(100f, 0f), MainObjectiveId = 100, MainRequiredRatio = 1.1f, CapitalFloorStrength = rng.Next(6000) };
+            var plan = new TheaterPlan { Alliance = a, DaySerial = s.DaySerial, MainSectorId = sectors.SectorAt(100f, 0f), MainObjectiveId = 100, MainRequiredRatio = 1.1f, MainEnemyStrength = 4000f + rng.Next(9000), CapitalFloorStrength = rng.Next(6000) };
             plan.Sectors.Add(new SectorPlan { SectorId = plan.MainSectorId, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 100, TargetX = 100f, TargetZ = 0f });
             plan.Sectors.Add(new SectorPlan { SectorId = sectors.SectorAt(550f, 0f), Posture = TheaterPosture.Hold, HoldNeed = rng.Next(9000) });
             for (int i = 1; i <= 7; i++)
                 if (rng.Next(2) == 0) plan.MassInstanceIds.Add(i);
             var tasks = new List<ReconTask>();
             ReconPlanner.PlanTasks(s, sectors, plan, _recon[a], tasks);
-            var allocation = ForceAllocator.Allocate(plan, s, sectors, 1f, 0, HomeTheaterPrior.ForAlliance(a), tasks, _recon[a]);
+            var allocation = ForceAllocator.Allocate(plan, s, sectors, HomeTheaterPrior.ForAlliance(a), tasks, _recon[a]);
             _recon[a].Sync(s, tasks, allocation);
             return AllocationSignature(allocation) + "#" + _recon[a].Missions.Count;
         }
