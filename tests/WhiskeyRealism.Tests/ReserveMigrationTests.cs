@@ -22,6 +22,7 @@ internal static class ReserveMigrationTests
             ("withdrawal fallback is a safety move validated", WithdrawalFallbackIsSafetyMoveValidated),
             ("withdrawal combat behavior 2 via writer", WithdrawalCombatBehavior2ViaWriter),
             ("withdrawal skips player-owned and feud units", WithdrawalSkipsPlayerOwnedAndFeud),
+            ("withdrawal near the break point falls back (BC8)", WithdrawalNearBreakPointFallsBack),
             ("withdrawal retreat bearing is fog-honest", WithdrawalRetreatBearingIsFogHonest),
             ("release reserve producer support priority", ReleaseReserveProducerSupportPriority),
             ("stalled fallback reissue from producer", StalledFallbackReissueFromProducer),
@@ -505,6 +506,30 @@ internal static class ReserveMigrationTests
     private static CommandDoctrineOrder FallbackOrder(float x, float z)
     {
         return TestFixtures.DoctrineOrder(CommandTaskType.FallBackToLine, fallback: DoctrineTargetPoint.From(x, z));
+    }
+
+    // BC8: steady morale (0.95), under fire, at 36% losses: a regiment whose break point is
+    // 40% (green) falls back by vanilla's fallback distance; one whose break point is 60%
+    // (veteran, drilled, well led) holds. Break point 0 (weighting off) keeps the shipped ladder.
+    private static void WithdrawalNearBreakPointFallsBack()
+    {
+        BattleSnapshot green = LeafSnapshot(morale: 0.95f);
+        green.Own[1].LossFraction = 0.36f;
+        green.Own[1].BreakLossFraction = 0.40f;
+        var kind = WithdrawalIntentProducer.PlanUnit(green, 1, Settings(), out BattleOrderIntent move, out _);
+        AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.Fallback, kind, "green regiment near its break point falls back");
+        AssertNear(-600f, move.TargetZ, 0.01f, "by the fallback distance, away from the enemy");
+
+        BattleSnapshot veteran = LeafSnapshot(morale: 0.95f);
+        veteran.Own[1].LossFraction = 0.36f;
+        veteran.Own[1].BreakLossFraction = 0.60f;
+        AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
+            WithdrawalIntentProducer.PlanUnit(veteran, 1, Settings(), out _, out _), "veteran holds at the same losses");
+
+        BattleSnapshot off = LeafSnapshot(morale: 0.95f);
+        off.Own[1].LossFraction = 0.36f;
+        AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
+            WithdrawalIntentProducer.PlanUnit(off, 1, Settings(), out _, out _), "no break point: shipped ladder");
     }
 
     private static WithdrawalIntentProducer.Settings Settings(ITerrainProbe terrain = null)

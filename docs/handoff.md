@@ -8,12 +8,12 @@
 
 | | |
 |---|---|
-| **Branch** | `main` — roadmap stage D (battle core, BC0-BC7) merged 2026-10-15 at `fc0b8af` after per-slice and two whole-branch reviews. In progress: BC8 (experience- and drill-aware AI decisions) on `feat/battle-core-bc8`. |
-| **`main`** | `fc0b8af` — battle core on top of the 2026-10-15 checkpoint (`6695ecd`); last released line is v0.2.2 (2026-05-04). |
+| **Branch** | `main` — roadmap stage D (battle core, BC0-BC7) merged 2026-10-15 at `fc0b8af`; BC8 (experience- and drill-aware AI) merged at `75a7000`. In progress: stage E need-driven policy, stage F W&L campaign chain of command (both in review), stage G campaign planner (plan ready). |
+| **`main`** | `75a7000` — battle core + BC8 on top of the 2026-10-15 checkpoint (`6695ecd`); last released line is v0.2.2 (2026-05-04). |
 | **Build** | `./build.sh` — 0 warnings, 0 errors on `main`; the test build is 0 warnings too. |
-| **Harness** | 1917 PASS / 0 FAIL on `main` (auto-discovered `*Tests.Run()`; exit 0). |
+| **Harness** | 1961 PASS / 0 FAIL on `main` (auto-discovered `*Tests.Run()`; exit 0). |
 | **Tools** | `python3 -I tools/config-audit.py .` (0 findings over 101 entries), `python3 -I tools/orphan-sweep.py .` (0; `--include-test-only` lists only members that predate the battle core), `python3 -I tools/test_smoke_check.py` (passes). See AGENTS.md § Testing. |
-| **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` `fc0b8af` (battle core): `WhiskeyRealism.dll` 1,631,232 bytes, SHA-256 `4f6e01fad62aa689a4f64296033c20196a2766d75d6b51fab4aefb9d2beab9ce` (dist and plugins match); harness 1917 PASS / 0 FAIL. The earlier checkpoint DLL (`0831547f…`) was never smoke-tested and is superseded. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
+| **Game install** | Steam build 14703111 (2026-10-14 update) wiped BepInEx. **BepInEx 5.4.23.5 x64 was reinstalled 2026-10-15.** Deployed 2026-10-15 from `main` `75a7000` (battle core + BC8): `WhiskeyRealism.dll` 1,648,128 bytes, SHA-256 `3257f907e4f1c2ca11910af283f567b187d12dc85d4062745140f1099405f6e1` (dist and plugins match); harness 1961 PASS / 0 FAIL. Earlier DLLs (`0831547f…`, `4f6e01fa…`) were never smoke-tested and are superseded. No `config/` or `LogOutput.log` until first launch, which writes a fresh cfg with the C# defaults (all on). |
 | **Decompile** | `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, 266,136 lines for build 14703111. Regenerate per `docs/findings.md` if `/tmp` was wiped. |
 
 ### Stage F — W&L chain of command, campaign side (branch `feat/wl-chain-campaign`, not merged)
@@ -55,8 +55,8 @@ Per-patch state: [`patch-catalog.md`](patch-catalog.md). Vanilla bugs found alon
 
 ### Open items
 
-- **Battle core:** merged and deployed 2026-10-15 (`fc0b8af`, SHA-256 `4f6e01fa…`). Next: run the ordered smoke checklist in the battle-core plan § BC7 (`python3 -I tools/smoke-check.py "<GTCW>/BepInEx/LogOutput.log"` first). After the smoke: archive the battle-core spec and plan (`docs/superpowers/{specs,plans}/archive/`), rewrite their cross-references, record the result here. Watch items that may need tuning are listed in the checklist (close-engagement and flank-risk proxies, leaf slots, point-blank watchdog, charge rarity at the 50 m vanilla radius).
-- **BC8 experience and drill** (from the user's 2026-10-15 question): the mod's battle replacements (#44 force balance, group stance, withdrawal, charge pre-filter) ignore unit experience/drill where vanilla uses them (84862, 4238/6057, 128677, 122229); campaign offensives ignore live commander initiative (14250/14281). In progress on `feat/battle-core-bc8`.
+- **Battle core + BC8:** merged and deployed 2026-10-15 (`75a7000`, SHA-256 `3257f907…`). Next: run the ordered smoke checklist in the battle-core plan § BC7 (`python3 -I tools/smoke-check.py "<GTCW>/BepInEx/LogOutput.log"` first). After the smoke: archive the battle-core spec and plan (`docs/superpowers/{specs,plans}/archive/`), rewrite their cross-references, record the result here. Watch items that may need tuning are listed in the checklist (close-engagement and flank-risk proxies, leaf slots, point-blank watchdog, charge rarity at the 50 m vanilla radius).
+- **BC8 experience and drill:** merged `75a7000` (smoke items 2.12-2.14 in the battle-core plan).
 - **`[CIC:diag]`** was never written on `main` before `fc0b8af`; fixed in BC7 landing.
 
 ## Next stages

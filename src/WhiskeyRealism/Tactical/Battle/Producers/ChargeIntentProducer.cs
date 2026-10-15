@@ -25,6 +25,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     //   GamePrefs.nomicroaichargeifunitisoutflanked (54784; battleprefs "No micro ai
     //     charge if unit is outflanked or receiving flanking fire", shipped true, never
     //     read by vanilla): honoured, an outflanked regiment is not armed.
+    //   BC8: microaitriggerforcharge and weightingfactorsformicroaicharge (54776-54781) through
+    //     TroopQualityRuntime (per battle; Enable Experience And Drill AI Weighting): a
+    //     regiment is armed only when vanilla's own odds would pass.
     //
     // Built by BattleCoreTick's producer registry; runs last in the arbiter tick
     // (BattleCoreArbiterPatch, AdjustGroupFormations 5870 Postfix).
@@ -55,7 +58,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if (alliance < 0 || alliance >= _memory.Length || !PluginEnabled()) return;
                 ReadPrefsOnce();
 
-                var settings = new Settings(ConfigOn(), _maxChargeRadius, _renewHours, _noChargeIfOutflanked);
+                var settings = new Settings(ConfigOn(), _maxChargeRadius, _renewHours, _noChargeIfOutflanked,
+                    TroopQualityRuntime.Prefs.ChargeOddsRulesIfEnabled);
                 int confirmed = Plan(snapshot, settings, _memory[alliance], OrderExecutor.ForAlliance(alliance), sink);
                 if (confirmed > 0)
                     OnceLog.Info("tactical-battle-core:charge-first-fire",

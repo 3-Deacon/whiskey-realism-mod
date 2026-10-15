@@ -39,6 +39,8 @@ namespace WhiskeyRealism.Tactical.Battle
         public bool[] IsReinforcement;
         public bool[] Routed;          // visible routed enemies leave memory (out of the fight)
         public float[] ArrivalHours;   // reinforcement rows: ScheduledArrival.durationleft
+        public float[] Experience;     // true Experience() of the row (BC8); memory keeps its star value when visible
+        public float[] Morale;         // true morale of the row (BC8); memory keeps it when visible
 
         public static PerceptionProbeResult Create(int capacity)
         {
@@ -63,6 +65,8 @@ namespace WhiskeyRealism.Tactical.Battle
             Array.Resize(ref result.IsReinforcement, size);
             Array.Resize(ref result.Routed, size);
             Array.Resize(ref result.ArrivalHours, size);
+            Array.Resize(ref result.Experience, size);
+            Array.Resize(ref result.Morale, size);
         }
     }
 
@@ -254,6 +258,9 @@ namespace WhiskeyRealism.Tactical.Battle
                 memory[index].Confidence01 = 1f;
                 memory[index].HiddenTicks = 0;
                 memory[index].IsReinforcement = probe.IsReinforcement[i];
+                // Fog rule (BC8): only a visible regiment's stars and morale reach memory.
+                memory[index].Experience = probe.IsReinforcement[i] ? 0f : TroopQuality.PerceivedExperience(probe.Experience[i]);
+                memory[index].Morale = probe.IsReinforcement[i] ? 0f : probe.Morale[i];
             }
 
             int write = 0;
@@ -280,7 +287,7 @@ namespace WhiskeyRealism.Tactical.Battle
         /// Writes one tick of perception into a snapshot the builder has just begun: mode,
         /// one observation per memory entry, the enemy summary (visible strength, remembered
         /// strength weighted by confidence, strength-weighted visible centroid; reinforcement
-        /// columns excluded) and the reinforcement summary (columns at visible entry points,
+        /// columns excluded), the perceived enemy quality (BC8) and the reinforcement summary (columns at visible entry points,
         /// from this tick's probe because arrival hours are not part of an observation).
         /// Call once per build: observations are appended.
         /// </summary>
@@ -309,6 +316,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
             }
             s.SetEnemySummary(visible, remembered, visible > 0f ? sumX / visible : 0f, visible > 0f ? sumZ / visible : 0f);
+            s.SetPerceivedEnemyQuality(TroopQuality.PerceivedQuality(memory, count));
 
             // Starts from BeginBuild's "none seen" value, so the sentinel lives in one place.
             float reinforcements = 0f;

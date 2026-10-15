@@ -39,6 +39,10 @@ namespace WhiskeyRealism.Tactical.Battle
     //                   (left/right/rear) > 0 (BC2a: the slots differ, no thresholds reused);
     //   under fire      for vanilla's ReceivedFireFromUnit(closest): the unit's first
     //                   range-list enemy (enemyinrangereg[0]) is visible.
+    // Break tolerance (BC8): the snapshot's LossFraction / BreakLossFraction (vanilla's
+    // unbearable-losses rule, 113363-113400 / 139831, with experience, drill and
+    // leadership) feed TacticalMoralePressure's near-break rule: under fire at
+    // NearBreakShare of its break point a regiment falls back (RearGuard) before it routs.
     // The rear-pressure quadrant reads the snapshot's slice pressure with vanilla's
     // slice width (SlicePressureBuilder bins by floor(bearing / sliceCount), 122732).
     //
@@ -243,6 +247,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 EnemyStrengthWithinAngle = _slices,
                 SliceWidthDegrees = sliceCount,
                 UnitFacingDegrees = rec.RotationY,
+                LossFraction = rec.LossFraction,
+                BreakLossFraction = rec.BreakLossFraction,
             };
             var morale = TacticalMoralePressure.Score(TacticalWithdrawalInputAdapter.ToMoralePressureInput(inputs));
             var quadrant = TacticalQuadrantThreatScorer.Score(TacticalWithdrawalInputAdapter.ToQuadrantInput(inputs));
