@@ -34,6 +34,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private BattlefieldPictureSnapshot _currentBattlefieldPicture = new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>());
         private readonly List<CommandDoctrineOrder> _currentDoctrineOrders = new List<CommandDoctrineOrder>();
         private float _currentTimeSeconds;
+        private float _operationAssignedStrength;
         private TacticalCommanderMode _commanderMode = TacticalCommanderMode.Off;
 
         public TacticalCommanderMode CommanderMode => _commanderMode;
@@ -77,6 +78,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _currentOperation = NoOpOperation();
                 _currentForce = new ForceAvailabilitySnapshot(0f, 0f);
                 _currentPersonality = default(PersonalityVector);
+                _operationAssignedStrength = 0f;
                 StoreDoctrine(new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>()), Array.Empty<CommandDoctrineOrder>());
                 return;
             }
@@ -103,6 +105,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     first.Observation.ObjectiveId,
                     minimumCommitSeconds: 0f);
             }
+        }
+
+        /// <summary>
+        /// Live strength of the nodes tasked to attack/support the current operation,
+        /// measured by the coordinator after the previous ledger tick (T14). 0 = none.
+        /// </summary>
+        internal void SetOperationAssignedStrength(float strength)
+        {
+            _operationAssignedStrength = SanitizeNonNegative(strength);
         }
 
         internal void SetRuntimeClock(float nowSeconds)
@@ -137,7 +148,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _currentForce.ReserveFraction,
                 Clamp01((_currentPersonality.Aggression + 1f) * 0.5f),
                 Clamp01((_currentPersonality.Caution + 1f) * 0.5f),
-                picture.Objectives));
+                picture.Objectives).WithOperationAssignedStrength(_operationAssignedStrength));
 
             _currentOperation = decision.Operation;
             StoreDoctrine(

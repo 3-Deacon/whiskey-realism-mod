@@ -5,8 +5,57 @@ using UnityEngine;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
+    /// <summary>
+    /// Per-frame memo keyed by an int id: entries are valid only for the frame they were
+    /// stored in; the first access in a new frame drops them.
+    /// </summary>
+    internal sealed class TacticalFrameCache<TValue>
+    {
+        private readonly Dictionary<int, TValue> _entries = new Dictionary<int, TValue>();
+        private int _frame = int.MinValue;
+
+        public bool TryGet(int frame, int key, out TValue value)
+        {
+            Roll(frame);
+            return _entries.TryGetValue(key, out value);
+        }
+
+        public void Set(int frame, int key, TValue value)
+        {
+            Roll(frame);
+            _entries[key] = value;
+        }
+
+        private void Roll(int frame)
+        {
+            if (frame == _frame) return;
+            _entries.Clear();
+            _frame = frame;
+        }
+    }
+
+    // Visible-contact reads over vanilla's per-unit range lists
+    // (unitrange.enemyinfirerangereg / enemyinrangereg). Many patches ask for the same
+    // unit's nearest visible enemy in one frame (stance, posture, charge, reserve,
+    // artillery), so the nearest-enemy search is memoised per frame (main thread only),
+    // and HasVisibleEnemy stops at the first valid candidate instead of ranking all of
+    // them by distance.
     internal static class TacticalFogOfWarContact
     {
+        private readonly struct NearestEnemy
+        {
+            public NearestEnemy(Regiment enemy, float distance)
+            {
+                Enemy = enemy;
+                Distance = distance;
+            }
+
+            public Regiment Enemy { get; }
+            public float Distance { get; }
+        }
+
+        private static readonly TacticalFrameCache<NearestEnemy> _nearestByUnit = new TacticalFrameCache<NearestEnemy>();
+
         public static bool AcceptContactEvidence(
             bool inVanillaVisibleRange,
             bool inVanillaFireRange,
@@ -27,9 +76,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             distance = 0f;
             if (unit == null || unit.unitrange == null) return false;
 
+            int frame = Time.frameCount;
+            int key = UnitIdentity(unit);
+            if (_nearestByUnit.TryGet(frame, key, out NearestEnemy cached))
+            {
+                enemy = cached.Enemy;
+                distance = cached.Distance;
+                return enemy != null;
+            }
+
             float bestDistance = float.MaxValue;
             AddNearestVisibleEnemy(unit, unit.unitrange.enemyinfirerangereg, ref enemy, ref bestDistance);
             AddNearestVisibleEnemy(unit, unit.unitrange.enemyinrangereg, ref enemy, ref bestDistance);
+            _nearestByUnit.Set(frame, key, new NearestEnemy(enemy, enemy != null ? bestDistance : 0f));
             if (enemy == null) return false;
 
             distance = bestDistance;
@@ -38,7 +97,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public static bool HasVisibleEnemy(Regiment unit)
         {
-            return TryClosestVisibleEnemy(unit, out _, out _);
+            if (unit == null || unit.unitrange == null) return false;
+            return AnyValidVisibleEnemy(unit, unit.unitrange.enemyinfirerangereg)
+                || AnyValidVisibleEnemy(unit, unit.unitrange.enemyinrangereg);
+        }
+
+        private static bool AnyValidVisibleEnemy(Regiment own, IList<Regiment> candidates)
+        {
+            if (candidates == null) return false;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (IsValidVisibleEnemy(own, candidates[i])) return true;
+            }
+            return false;
         }
 
         public static int VisibleEnemyCount(Regiment unit)

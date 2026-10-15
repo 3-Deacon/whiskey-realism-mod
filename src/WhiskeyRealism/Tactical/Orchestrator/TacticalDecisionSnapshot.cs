@@ -1,12 +1,17 @@
-using System;
 using System.Collections.Generic;
 using System.Threading;
 using WhiskeyRealism.Tactical;
-using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
+    /// NO PRODUCER since the orchestrator worker thread was removed (2026-10-14):
+    /// Publish is test-only, so Current is always Empty and both BattleGroupStancePatch
+    /// (T4) reads early-out (regimental-intelligence pass ~199-201 returns on Empty;
+    /// tier-2 lookup ~1027-1066 is skipped). Kept only for those reads;
+    /// delete this type, TacticalSideDecision and TacticalDecisionSnapshotTests with
+    /// those reads at integration.
+    ///
     /// Per-cycle immutable snapshot of all per-side and per-unit decisions
     /// produced by the worker thread. Read by main-thread Harmony patches
     /// via <see cref="Current"/>. Atomic publish via Interlocked.Exchange.
@@ -53,14 +58,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private readonly Dictionary<int, TacticalSectorAssessment> _groupSector0;
         private readonly Dictionary<int, TacticalSectorAssessment> _groupSector1;
 
-        // Worker-migration (2026-05-21): per-side ObjectiveRecord arrays produced by
-        // BuildObjectiveRecordsFromContext on the worker thread. Empty arrays when the
-        // worker path is disabled or the worker hasn't published yet. Main reads via
-        // TryGetObjectiveRecords during TacticalBattleSnapshotBuilder.Build to populate
-        // TacticalBattleRuntimeSnapshot.Objectives without doing the walk on main.
-        private readonly ObjectiveRecord[] _objectiveRecords0;
-        private readonly ObjectiveRecord[] _objectiveRecords1;
-
         // Regimental intelligence (2026-05-21). Per-regiment action map keyed by
         // GameObject InstanceID. Produced by TacticalRegimentalIntelligenceDoctrine
         // on the worker thread, consumed on main inside BattleGroupStancePatch /
@@ -86,8 +83,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Dictionary<int, TacticalGroupStanceDecision> groupStance1,
             Dictionary<int, TacticalSectorAssessment> groupSector0 = null,
             Dictionary<int, TacticalSectorAssessment> groupSector1 = null,
-            ObjectiveRecord[] objectiveRecords0 = null,
-            ObjectiveRecord[] objectiveRecords1 = null,
             Dictionary<int, TacticalRegimentalDecision> regimentalDecisions0 = null,
             Dictionary<int, TacticalRegimentalDecision> regimentalDecisions1 = null)
         {
@@ -101,8 +96,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _groupStance1 = groupStance1 ?? new Dictionary<int, TacticalGroupStanceDecision>(0);
             _groupSector0 = groupSector0 ?? new Dictionary<int, TacticalSectorAssessment>(0);
             _groupSector1 = groupSector1 ?? new Dictionary<int, TacticalSectorAssessment>(0);
-            _objectiveRecords0 = objectiveRecords0 ?? Array.Empty<ObjectiveRecord>();
-            _objectiveRecords1 = objectiveRecords1 ?? Array.Empty<ObjectiveRecord>();
             _regimentalDecisions0 = regimentalDecisions0 ?? new Dictionary<int, TacticalRegimentalDecision>(0);
             _regimentalDecisions1 = regimentalDecisions1 ?? new Dictionary<int, TacticalRegimentalDecision>(0);
         }
@@ -150,46 +143,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                  : TacticalSideDecision.Empty;
         }
 
-        /// <summary>
-        /// Returns the worker-built ObjectiveRecord[] for the given alliance. Empty
-        /// array when the worker hasn't published yet (first cycle of a battle, the
-        /// side is suppressed, or the worker-objective-records feature flag is off).
-        /// Returns false when alliance is out of range so the caller knows to fall
-        /// back to the main-thread legacy builder.
-        /// </summary>
-        public bool TryGetObjectiveRecords(int allianceId, out ObjectiveRecord[] records)
-        {
-            if (allianceId == 0) { records = _objectiveRecords0; return records.Length > 0; }
-            if (allianceId == 1) { records = _objectiveRecords1; return records.Length > 0; }
-            records = Array.Empty<ObjectiveRecord>();
-            return false;
-        }
-
-        // Worker-migration preservation accessors (2026-05-21). The worker's
-        // PopulateGroupDecisions only fills the dict for whichever side has fresh
-        // observations this cycle (F-stagger: one side at a time). Without
-        // preservation, the next published snapshot would BLOW AWAY the prior
-        // cycle's dict for the non-building side, forcing BattleGroupStancePatch's
-        // tier-2 lookup to miss and tier-3 legacy ApplyGroup to fire (~15-33ms).
-        // These accessors let TacticalOrchestratorWorkerAnalysis.Analyze read the
-        // prior snapshot's dict and forward it into the new snapshot when this
-        // cycle has none. The dict is immutable-by-convention; the snapshot owns
-        // it and never mutates after construction, so reference-sharing across
-        // two snapshots is safe.
-        internal Dictionary<int, TacticalGroupStanceDecision> GetGroupStanceDict(int allianceId)
-        {
-            return allianceId == 0 ? _groupStance0
-                 : allianceId == 1 ? _groupStance1
-                 : null;
-        }
-
-        internal Dictionary<int, TacticalSectorAssessment> GetGroupSectorDict(int allianceId)
-        {
-            return allianceId == 0 ? _groupSector0
-                 : allianceId == 1 ? _groupSector1
-                 : null;
-        }
-
         // Regimental intelligence accessors (2026-05-21). Patch reads via
         // TryGetRegimentalDecision per regiment. Missing entry → NoAction (default).
         public bool TryGetRegimentalDecision(int allianceId, int instanceId, out TacticalRegimentalDecision decision)
@@ -200,13 +153,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (dict != null && dict.TryGetValue(instanceId, out decision)) return true;
             decision = TacticalRegimentalDecision.NoAction;
             return false;
-        }
-
-        internal Dictionary<int, TacticalRegimentalDecision> GetRegimentalDecisionsDict(int allianceId)
-        {
-            return allianceId == 0 ? _regimentalDecisions0
-                 : allianceId == 1 ? _regimentalDecisions1
-                 : null;
         }
 
         public static TacticalDecisionSnapshot Current

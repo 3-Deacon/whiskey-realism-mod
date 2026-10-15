@@ -11,7 +11,8 @@ namespace WhiskeyRealism.Tactical.Operations
             float reserveFraction,
             float aggression01,
             float caution01,
-            BattlefieldObjectiveEstimate[] objectives)
+            BattlefieldObjectiveEstimate[] objectives,
+            float operationAssignedStrength = 0f)
         {
             Current = current;
             CurrentTimeSeconds = SanitizeFloorZero(currentTimeSeconds);
@@ -20,6 +21,7 @@ namespace WhiskeyRealism.Tactical.Operations
             Aggression01 = Clamp01(aggression01);
             Caution01 = Clamp01(caution01);
             Objectives = objectives ?? Array.Empty<BattlefieldObjectiveEstimate>();
+            OperationAssignedStrength = SanitizeFloorZero(operationAssignedStrength);
         }
 
         public OperationRecord Current { get; }
@@ -29,6 +31,10 @@ namespace WhiskeyRealism.Tactical.Operations
         public float Aggression01 { get; }
         public float Caution01 { get; }
         public BattlefieldObjectiveEstimate[] Objectives { get; }
+        // Live strength of the command nodes the committed operation has tasked to
+        // attack/support (summed by the coordinator from vanilla regiments). 0 = no
+        // assignment yet (e.g. the first tick after commitment) -> army strength.
+        public float OperationAssignedStrength { get; }
 
         public static TacticalOperationDirectorInput ForTest(
             OperationRecord current,
@@ -58,7 +64,21 @@ namespace WhiskeyRealism.Tactical.Operations
                 ReserveFraction,
                 Aggression01,
                 Caution01,
-                Objectives);
+                Objectives,
+                OperationAssignedStrength);
+        }
+
+        public TacticalOperationDirectorInput WithOperationAssignedStrength(float assignedStrength)
+        {
+            return new TacticalOperationDirectorInput(
+                Current,
+                CurrentTimeSeconds,
+                OwnStrength,
+                ReserveFraction,
+                Aggression01,
+                Caution01,
+                Objectives,
+                assignedStrength);
         }
 
         private static float SanitizeFloorZero(float value)
@@ -87,22 +107,51 @@ namespace WhiskeyRealism.Tactical.Operations
         public string Reason { get; }
     }
 
+    // T14 (2026-10-14): a committed operation no longer flickers Committed <->
+    // Scouting on a one-tick confidence dip.
+    //   - Emergency exits ignore the commit window: contact lost, odds collapse, and a
+    //     contact revealed as a screen (main line no longer exposed).
+    //   - Inside the commit window nothing else demotes the operation.
+    //   - Enter/exit hysteresis: commitment needs formed main-line evidence
+    //     (confidence >= 0.65, TacticalDecisionDoctrine.MainLineConfidenceFloor);
+    //     a committed operation is only downgraded once confidence falls below
+    //     CommittedExitConfidenceFloor (0.5), and re-selection after the window does
+    //     not demote it while that exit evidence still holds.
+    //   - Once committed, odds are the operation's assigned force (attack/support nodes,
+    //     OperationAssignedStrength) against the objective-local enemy, not the whole
+    //     army (totalactiveforce) against a local enemy. Before commitment nothing is
+    //     assigned yet, so the commit decision still weighs the available army.
     public static class TacticalOperationDirector
     {
+        public const float CommittedExitConfidenceFloor = 0.50f;
+
         public static TacticalOperationDirectorDecision Decide(TacticalOperationDirectorInput input)
         {
             bool activeOperation = IsActiveOperation(input.Current.Phase);
-            if (input.Current.Phase == TacticalOperationPhase.Committed &&
-                TryEvaluateCommittedContact(input, out TacticalOperationDirectorDecision committedContactDecision))
+            bool committed = input.Current.Phase == TacticalOperationPhase.Committed;
+            bool insideCommitWindow = committed && input.CurrentTimeSeconds < input.Current.MinimumCommitSeconds;
+            if (committed &&
+                TryEvaluateCommittedContact(input, insideCommitWindow, out TacticalOperationDirectorDecision committedContactDecision))
             {
                 return committedContactDecision;
             }
 
-            if (input.Current.Phase == TacticalOperationPhase.Committed &&
-                input.CurrentTimeSeconds < input.Current.MinimumCommitSeconds)
+            if (insideCommitWindow)
             {
                 return new TacticalOperationDirectorDecision(input.Current, "commit-window");
             }
+
+            TacticalOperationDirectorDecision selected = SelectOperation(input, activeOperation);
+            if (committed && IsDemotionOfSameObjective(input.Current, selected.Operation) && HoldsCommittedExitEvidence(input))
+            {
+                return new TacticalOperationDirectorDecision(input.Current, "commit-hysteresis");
+            }
+
+            return selected;
+        }
+
+        private static TacticalOperationDirectorDecision SelectOperation(TacticalOperationDirectorInput input, bool activeOperation)
+        {
 
             if (activeOperation &&
                 !TryFindObjective(input.Objectives, input.Current.PrimaryObjectiveId, out _))
@@ -117,9 +166,10 @@ namespace WhiskeyRealism.Tactical.Operations
                     : new TacticalOperationDirectorDecision(OperationRecord.Noop, "no-objective");
             }
 
+            float operationStrength = OperationStrength(input);
             TacticalObjectiveGate objectiveGate = TacticalDecisionDoctrine.ClassifyObjective(
                 primary,
-                input.OwnStrength,
+                operationStrength,
                 input.ReserveFraction);
 
             if (objectiveGate == TacticalObjectiveGate.ReconnaissanceContact)
@@ -155,7 +205,7 @@ namespace WhiskeyRealism.Tactical.Operations
                     "fix-and-flank");
             }
 
-            float odds = Odds(input.OwnStrength, primary.EnemyStrength);
+            float odds = Odds(operationStrength, primary.EnemyStrength);
             TacticalOperationShape shape = odds >= 1.35f
                 ? TacticalOperationShape.SingleMainEffort
                 : TacticalOperationShape.DefensiveNetwork;
@@ -168,8 +218,20 @@ namespace WhiskeyRealism.Tactical.Operations
                 "selected");
         }
 
+        private static TacticalOperationDirectorDecision Downgrade(TacticalOperationDirectorInput input)
+        {
+            return new TacticalOperationDirectorDecision(
+                new OperationRecord(
+                    input.Current.Shape,
+                    TacticalOperationPhase.Scouting,
+                    input.Current.PrimaryObjectiveId,
+                    input.CurrentTimeSeconds + 420f),
+                "contact-downgraded");
+        }
+
         private static bool TryEvaluateCommittedContact(
             TacticalOperationDirectorInput input,
+            bool insideCommitWindow,
             out TacticalOperationDirectorDecision decision)
         {
             decision = default(TacticalOperationDirectorDecision);
@@ -186,26 +248,60 @@ namespace WhiskeyRealism.Tactical.Operations
 
             if (TacticalDecisionDoctrine.ShouldSoftAbortCommitted(
                     primary,
-                    input.OwnStrength,
+                    OperationStrength(input),
                     input.ReserveFraction))
             {
                 decision = SoftAbort(input, "odds-collapse");
                 return true;
             }
 
-            if (TacticalDecisionDoctrine.ShouldDowngradeCommittedContact(primary))
+            // The contact turned out to be a screen (enemy present, main line no longer
+            // exposed): not a confidence dip, so it may break the commitment at once.
+            if (primary.EnemyStrength > 0f && !primary.MainLineExposed)
             {
-                decision = new TacticalOperationDirectorDecision(
-                    new OperationRecord(
-                        input.Current.Shape,
-                        TacticalOperationPhase.Scouting,
-                        input.Current.PrimaryObjectiveId,
-                        input.CurrentTimeSeconds + 420f),
-                    "contact-downgraded");
+                decision = Downgrade(input);
+                return true;
+            }
+
+            if (insideCommitWindow) return false;
+
+            if (primary.EnemyStrength > 0f && primary.Confidence01 < CommittedExitConfidenceFloor)
+            {
+                decision = Downgrade(input);
                 return true;
             }
 
             return false;
+        }
+
+        // Re-selection after the commit window would demote (Scouting / Forming) the
+        // same objective.
+        private static bool IsDemotionOfSameObjective(OperationRecord current, OperationRecord selected)
+        {
+            if (selected.Phase != TacticalOperationPhase.Scouting && selected.Phase != TacticalOperationPhase.Forming)
+                return false;
+            return ObjectiveIdMatches(current.PrimaryObjectiveId, selected.PrimaryObjectiveId);
+        }
+
+        // Exit-side evidence for keeping a commitment: main line still exposed, enemy
+        // still present, confidence at or above the exit floor. Odds collapse was already
+        // handled by the soft-abort branch.
+        private static bool HoldsCommittedExitEvidence(TacticalOperationDirectorInput input)
+        {
+            if (!TryFindObjective(input.Objectives, input.Current.PrimaryObjectiveId, out BattlefieldObjectiveEstimate primary))
+                return false;
+            return primary.MainLineExposed
+                && primary.EnemyStrength > 0f
+                && primary.Confidence01 >= CommittedExitConfidenceFloor;
+        }
+
+        // Strength actually assigned to a committed operation; the available army when
+        // nothing is committed or no node has been tasked yet.
+        private static float OperationStrength(TacticalOperationDirectorInput input)
+        {
+            if (input.Current.Phase == TacticalOperationPhase.Committed && input.OperationAssignedStrength > 0f)
+                return input.OperationAssignedStrength;
+            return input.OwnStrength;
         }
 
         private static TacticalOperationDirectorDecision SoftAbort(

@@ -33,6 +33,8 @@ namespace WhiskeyRealism.Patches
         // CheckGlobalAIStrategyPostfix fires once per AI side per tick (~2× per frame when both
         // sides are AI-controlled); the two-tick hysteresis in the detector handles this safely.
         private static readonly TacticalBattleLifecycleDetector _lifecycleDetector = new TacticalBattleLifecycleDetector();
+        private static BattleUnits _observedBattleUnits;
+        private static float _lastMonitorCycleHours = float.NaN;
 
         private static FieldInfo _macroAiField;
         private static FieldInfo _sideOfAiField;
@@ -43,8 +45,6 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _orderedStanceField;
         private static FieldInfo _parentRegimentField;
         private static FieldInfo _allianceField;
-        private static FieldInfo _sideField;
-        private static bool _sideFieldResolved;
         private static FieldInfo _orderStateField;
         private static FieldInfo _chainCenterUnitField;
         private static FieldInfo _currentSetObjectiveField;
@@ -258,78 +258,151 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void CheckGlobalAIStrategyPostfix(AIBattle __instance)
         {
-            Observe(__instance, TacticalObservedEvent.Macro, null, null);
-            Observe(__instance, TacticalObservedEvent.Odds, null, null);
-
-            // Orchestrator lifecycle: count units in battle, detect start/end transitions,
-            // then drive TacticalBattleCoordinator. Anchored here because
-            // CheckGlobalAIStrategy is the macro-strategy entry — fires once per AI side
-            // per tick, giving us a consistent per-tick observation cadence.
-            try
+            using (TelemetryPerf.Scope("tactical.patch.observer.check-global", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                if (Plugin.EnableTacticalBattleOrchestrator.Value)
+                // One battle context per vanilla call, shared by both observed events.
+                var context = BuildContextIfEnabled(__instance);
+                Observe(__instance, TacticalObservedEvent.Macro, null, null, context);
+                Observe(__instance, TacticalObservedEvent.Odds, null, null, context);
+
+                // Orchestrator lifecycle: observe the battle identity, detect start/restart
+                // transitions, then drive TacticalBattleCoordinator. Anchored here because
+                // CheckGlobalAIStrategy runs once per AIBattle per vanilla side-stat cycle
+                // (UpdateAITasks 5857 from CalculateSideStatsAndUpdateAITasks 84864). The end
+                // of a battle is observed by BattleUnitsOnDestroyPostfix below; the identity /
+                // clock checks here catch a new battle or reload when that end was missed.
+                try
                 {
-                    int unitsInBattle = CountUnitsInBattleAcrossSides();
-                    var ev = _lifecycleDetector.Observe(unitsInBattle);
-                    switch (ev)
+                    if (Plugin.EnableTacticalBattleOrchestrator.Value
+                        && __instance != null
+                        && TacticalBattleCoordinator.DrivesOrchestrator(__instance.isplayeraiorfeud))
                     {
-                        case BattleLifecycleEvent.BattleStart:
-                            ResetOperationsTelemetry();
-                            TacticalBattleCoordinator.OnBattleStart(__instance);
-                            break;
-                        case BattleLifecycleEvent.BattleEnd:
-                            TacticalBattleCoordinator.OnBattleEnd();
-                            ResetOperationsTelemetry();
-                            break;
-                    }
-                    // First Tick is intentionally colocated with OnBattleStart to give the coordinator
-                    // a zero-latency cold start (observer-driven cadence; we don't want to wait for the
-                    // next CheckGlobalAIStrategy invocation to fire the first tick telemetry).
-                    if (TacticalBattleCoordinator.IsActive)
-                    {
-                        TacticalBattleCoordinator.Tick(__instance);
-                        EmitOperationsMonitorTelemetry();
+                        var decision = _lifecycleDetector.Observe(BuildLifecycleObservation(__instance));
+                        switch (decision.Transition)
+                        {
+                            case BattleLifecycleTransition.Start:
+                                ResetOperationsTelemetry();
+                                TacticalBattleCoordinator.OnBattleStart(__instance);
+                                break;
+                            case BattleLifecycleTransition.End:
+                                TacticalBattleCoordinator.OnBattleEnd();
+                                ResetOperationsTelemetry();
+                                break;
+                            case BattleLifecycleTransition.Restart:
+                                // One line per detected restart (bounded by the detector's identity changes).
+                                TelemetryRouter.LegacyInfo("[TacticalOrchestrator] battle restart detected reason="
+                                    + decision.Reason, TelemetryLayer.Tactical);
+                                TacticalBattleCoordinator.OnBattleEnd();
+                                ResetOperationsTelemetry();
+                                TacticalBattleCoordinator.OnBattleStart(__instance);
+                                break;
+                        }
+                        // First Tick is intentionally colocated with OnBattleStart to give the coordinator
+                        // a zero-latency cold start (observer-driven cadence; we don't want to wait for the
+                        // next CheckGlobalAIStrategy invocation to fire the first tick telemetry).
+                        if (TacticalBattleCoordinator.IsActive)
+                        {
+                            TacticalBattleCoordinator.Tick(__instance);
+                            EmitOperationsMonitorTelemetryOncePerCycle();
+                        }
                     }
                 }
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] observer wiring skipped: " + e.GetType().Name + " " + e.Message);
+                catch (Exception e)
+                {
+                    OnceLog.Warning("orch-observer-wiring", "[TacticalOrchestrator] observer wiring skipped: "
+                        + e.GetType().Name + " " + e.Message);
+                }
             }
         }
 
+        // Per-battle dedupe state; cleared at every battle start/end/restart so the
+        // signature-keyed dictionaries (which embed instance ids) never grow across battles.
         private static void ResetOperationsTelemetry()
         {
             _operationsTelemetrySignatures.Clear();
             _operationsPendingTelemetrySignatures.Clear();
             _operationsSummaryEmittedAt.Clear();
+            _lastEmittedAt.Clear();
+            _lastMonitorCycleHours = float.NaN;
+            _chargeBeforeId = 0;
+            _chargeBefore = TacticalObserverSnapshot.Empty();
+            _feudBefore = TacticalObserverSnapshot.Empty();
+        }
+
+        // Battle scene teardown. Vanilla quits a battle by rebuilding the scene
+        // (BattleController quit flow 24095-24113: bo_rebuildscene /
+        // ExitCampaignBattleAndRebuildCampaign), which destroys BattleUnits; its
+        // OnDestroy (79207; nulls completeunitlist at 79219) and AI ticks stop for good. The
+        // detector ignores the campaign-map BattleUnits instance (InitCampaignBattleUnits
+        // 79044), which is destroyed when a campaign battle loads.
+        [HarmonyPatch(typeof(BattleUnits), "OnDestroy")]
+        [HarmonyPostfix]
+        internal static void BattleUnitsOnDestroyPostfix(BattleUnits __instance)
+        {
+            using (TelemetryPerf.Scope("tactical.patch.observer.battle-units-destroy", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                try
+                {
+                    int id = __instance != null ? __instance.GetInstanceID() : 0;
+                    if (ReferenceEquals(_observedBattleUnits, __instance)) _observedBattleUnits = null;
+                    var decision = _lifecycleDetector.NotifyBattleUnitsDestroyed(id);
+                    if (decision.Transition != BattleLifecycleTransition.End) return;
+                    TacticalBattleCoordinator.OnBattleEnd();
+                    ResetOperationsTelemetry();
+                }
+                catch (Exception e)
+                {
+                    OnceLog.Warning("orch-lifecycle:destroy", "[TacticalOrchestrator] battle teardown on BattleUnits.OnDestroy failed: "
+                        + e.GetType().Name + " " + e.Message);
+                }
+            }
         }
 
         /// <summary>
-        /// Returns a positive value when a battle scene is loaded, 0 otherwise. Used by
-        /// the lifecycle detector as the "battle is running" signal.
-        ///
-        /// Vanilla nullifies `BattleUnits.completeunitlist` on battle end (decompile line
-        /// 79219) and treats `completeunitlist == null` as "no battle" in many call sites
-        /// (lines 11306, 36228, 36316, 65947, 105437, 210259, 210294). The presence of a
-        /// non-empty list is therefore the canonical signal that a tactical battle scene
-        /// is currently loaded — irrespective of `Regiment.inbattle` (which tracks
-        /// campaign-side engagement state and does not necessarily flip true on
-        /// battle-instance Regiments). Returns 0 on any exception so a vanilla rename
-        /// fails gracefully.
+        /// Reads the battle identity for the lifecycle detector. completeunitlist is null
+        /// once BattleUnits.OnDestroy (79207-79219) ran; GameVars.currenttimefromstart is the
+        /// battle clock (SetTimeVariables 93545). The calendar day (BattleUnits.uniStormSystem
+        /// 78968) separates a midnight wrap of that clock from a reload. Degrades to an empty
+        /// observation on any exception.
         /// </summary>
-        private static int CountUnitsInBattleAcrossSides()
+        private static BattleLifecycleObservation BuildLifecycleObservation(AIBattle battle)
         {
             try
             {
                 var all = BattleUnits.completeunitlist;
-                if (all == null || all.Count == 0) return 0;
-                return all.Count;
+                int units = all != null ? all.Count : 0;
+                var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
+                _observedBattleUnits = bunits;
+                int bunitsId = bunits != null ? bunits.GetInstanceID() : 0;
+                int sceneHash = SceneIdentityHash();
+                return new BattleLifecycleObservation(bunitsId, sceneHash, CalendarDayIndex(bunits), GameVars.currenttimefromstart, units);
             }
             catch (Exception e)
             {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] CountUnitsInBattle: " + e.GetType().Name + " " + e.Message);
-                return 0;
+                OnceLog.Warning("orch-lifecycle:observe", "[TacticalOrchestrator] lifecycle observation failed: "
+                    + e.GetType().Name + " " + e.Message);
+                return new BattleLifecycleObservation(0, 0, 0, 0f, 0);
+            }
+        }
+
+        private static int CalendarDayIndex(BattleUnits bunits)
+        {
+            var clock = bunits != null ? bunits.uniStormSystem : null;
+            if (clock == null) return 0;
+            return clock.yearCounter * 400 + clock.monthCounter * 32 + clock.dayCounter;
+        }
+
+        // SceneManagement.currentoperation is deliberately excluded: vanilla flips 8 -> 3
+        // during battle init (BattleController frame loop ~24000).
+        private static int SceneIdentityHash()
+        {
+            unchecked
+            {
+                int hash = 17;
+                hash = hash * 31 + (GamePrefs.leveltoload?.GetHashCode() ?? 0);
+                hash = hash * 31 + (GamePrefs.subleveltoload?.GetHashCode() ?? 0);
+                hash = hash * 31 + (SceneManagement.currentcampaignscenario?.GetHashCode() ?? 0);
+                return hash;
             }
         }
 
@@ -337,9 +410,13 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void AdjustGroupAIStancePostfix(AIBattle __instance)
         {
-            Observe(__instance, TacticalObservedEvent.Group, null, null);
-            Observe(__instance, TacticalObservedEvent.Sector, null, null);
-            Observe(__instance, TacticalObservedEvent.Order, null, null);
+            using (TelemetryPerf.Scope("tactical.patch.observer.adjust-group-stance", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                var context = BuildContextIfEnabled(__instance);
+                Observe(__instance, TacticalObservedEvent.Group, null, null, context);
+                Observe(__instance, TacticalObservedEvent.Sector, null, null, context);
+                Observe(__instance, TacticalObservedEvent.Order, null, null, context);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "MicroAICheckForCharges")]
@@ -347,15 +424,18 @@ namespace WhiskeyRealism.Patches
         internal static void MicroAICheckForChargesPrefix(AIBattle __instance, Regiment aigroup)
         {
             if (!Enabled()) return;
-            try
+            using (TelemetryPerf.Scope("tactical.patch.observer.charges.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                int key = SafeInstanceId(aigroup);
-                _chargeBeforeId = key;
-                _chargeBefore = key != 0 ? SnapshotGroup(aigroup) : TacticalObserverSnapshot.Empty();
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-observer:charge-prefix", "Tactical charge observer Prefix failed: " + ex.Message);
+                try
+                {
+                    int key = SafeInstanceId(aigroup);
+                    _chargeBeforeId = key;
+                    _chargeBefore = key != 0 ? SnapshotGroup(aigroup) : TacticalObserverSnapshot.Empty();
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-observer:charge-prefix", "Tactical charge observer Prefix failed: " + ex.Message);
+                }
             }
         }
 
@@ -363,18 +443,22 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void MicroAICheckForChargesPostfix(AIBattle __instance, Regiment aigroup)
         {
-            TacticalObserverSnapshot before = null;
-            try
+            if (!Enabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.charges", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                int key = SafeInstanceId(aigroup);
-                if (key != 0 && key == _chargeBeforeId) before = _chargeBefore;
-            }
-            catch
-            {
-                before = null;
-            }
+                TacticalObserverSnapshot before = null;
+                try
+                {
+                    int key = SafeInstanceId(aigroup);
+                    if (key != 0 && key == _chargeBeforeId) before = _chargeBefore;
+                }
+                catch
+                {
+                    before = null;
+                }
 
-            Observe(__instance, TacticalObservedEvent.Charge, before, aigroup);
+                Observe(__instance, TacticalObservedEvent.Charge, before, aigroup);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckForFeudGroupActions")]
@@ -382,13 +466,16 @@ namespace WhiskeyRealism.Patches
         internal static void CheckForFeudGroupActionsPrefix(AIBattle __instance)
         {
             if (!Enabled()) return;
-            try
+            using (TelemetryPerf.Scope("tactical.patch.observer.feud.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                _feudBefore = SnapshotBattle(__instance);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-observer:feud-prefix", "Tactical feud observer Prefix failed: " + ex.Message);
+                try
+                {
+                    _feudBefore = SnapshotBattle(__instance);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-observer:feud-prefix", "Tactical feud observer Prefix failed: " + ex.Message);
+                }
             }
         }
 
@@ -396,56 +483,89 @@ namespace WhiskeyRealism.Patches
         [HarmonyPostfix]
         internal static void CheckForFeudGroupActionsPostfix(AIBattle __instance)
         {
-            Observe(__instance, TacticalObservedEvent.Feud, _feudBefore, null);
+            if (!Enabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.feud", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                Observe(__instance, TacticalObservedEvent.Feud, _feudBefore, null);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
         [HarmonyPostfix]
         internal static void CheckUseOfReservesPostfix(AIBattle __instance, Regiment aigroup)
         {
-            Observe(__instance, TacticalObservedEvent.Reserve, null, aigroup);
+            if (!Enabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.use-reserves", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                Observe(__instance, TacticalObservedEvent.Reserve, null, aigroup);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "LinkReservesToLineGroup")]
         [HarmonyPostfix]
         internal static void LinkReservesToLineGroupPostfix(AIBattle __instance)
         {
-            Observe(__instance, TacticalObservedEvent.Reserve, null, null);
+            if (!Enabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.link-reserves", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                Observe(__instance, TacticalObservedEvent.Reserve, null, null);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "AssignReserves")]
         [HarmonyPostfix]
         internal static void AssignReservesPostfix(AIBattle __instance)
         {
-            Observe(__instance, TacticalObservedEvent.Reserve, null, null);
+            if (!Enabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.assign-reserves", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                Observe(__instance, TacticalObservedEvent.Reserve, null, null);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckAIBombardment")]
         [HarmonyPostfix]
         internal static void CheckAIBombardmentPostfix(AIBattle __instance, Regiment aigroup)
         {
-            Observe(__instance, TacticalObservedEvent.Artillery, null, aigroup);
+            if (!Enabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.bombardment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                Observe(__instance, TacticalObservedEvent.Artillery, null, aigroup);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckLineFallbacks")]
         [HarmonyPostfix]
         internal static void CheckLineFallbacksPostfix(AIBattle __instance, Regiment aigroup)
         {
-            Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
+            if (!Enabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.line-fallbacks", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "MicroAICheckForRetreats")]
         [HarmonyPostfix]
         internal static void MicroAICheckForRetreatsPostfix(AIBattle __instance, Regiment aigroup)
         {
-            Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
+            if (!Enabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.retreats", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckCurrentOrderUpdate")]
         [HarmonyPrefix]
         internal static void CheckCurrentOrderUpdatePrefix(out CurrentOrderState __state)
         {
-            __state = new CurrentOrderState(ReadGivenOrderSignature(), ReadGivenOrdersSession());
+            __state = default(CurrentOrderState);
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.current-order.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                __state = new CurrentOrderState(ReadGivenOrderSignature(), ReadGivenOrdersSession());
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckCurrentOrderUpdate")]
@@ -460,39 +580,41 @@ namespace WhiskeyRealism.Patches
             CurrentOrderState __state)
         {
             if (!BugTelemetryEnabled()) return;
-
-            try
+            using (TelemetryPerf.Scope("tactical.patch.observer.current-order", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                var next = ReadGivenOrderSignature();
-                if (next.IsEmpty)
-                    next = new TacticalCurrentOrderSignature(SafeInstanceId(unit), type, position.x, position.z, rotation, destinationname);
+                try
+                {
+                    var next = ReadGivenOrderSignature();
+                    if (next.IsEmpty)
+                        next = new TacticalCurrentOrderSignature(SafeInstanceId(unit), type, position.x, position.z, rotation, destinationname);
 
-                var decision = TacticalBattlefieldBugDiagnostics.ClassifyCurrentOrderReplacement(
-                    calledfromcampaign,
-                    __state.Order,
-                    next,
-                    nearDistance: 110f,
-                    nearRotationDegrees: 35f);
-                int sessionAfter = ReadGivenOrdersSession();
-                bool sessionChanged = __state.Session != sessionAfter;
+                    var decision = TacticalBattlefieldBugDiagnostics.ClassifyCurrentOrderReplacement(
+                        calledfromcampaign,
+                        __state.Order,
+                        next,
+                        nearDistance: 110f,
+                        nearRotationDegrees: 35f);
+                    int sessionAfter = ReadGivenOrdersSession();
+                    bool sessionChanged = __state.Session != sessionAfter;
 
-                if (!decision.IsRisk && !calledfromcampaign && !sessionChanged) return;
+                    if (!decision.IsRisk && !calledfromcampaign && !sessionChanged) return;
 
-                EmitDirect(
-                    "TacticalCurrentOrder",
-                    "current-order|" + SafeInstanceId(unit) + "|" + type + "|" + __state.Session + "|" + sessionAfter + "|" + decision.Reason,
-                    "[TacticalCurrentOrder] calledFromCampaign=" + calledfromcampaign +
-                    " unit=" + SafeUnitName(unit) +
-                    " oldType=" + __state.Order.Type +
-                    " newType=" + next.Type +
-                    " duplicateRisk=" + decision.IsRisk +
-                    " reason=" + decision.Reason +
-                    " sessionBefore=" + __state.Session +
-                    " sessionAfter=" + sessionAfter);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-current-order", "Tactical current-order observer failed: " + ex.Message);
+                    EmitDirect(
+                        "TacticalCurrentOrder",
+                        "current-order|" + SafeInstanceId(unit) + "|" + type + "|" + __state.Session + "|" + sessionAfter + "|" + decision.Reason,
+                        "[TacticalCurrentOrder] calledFromCampaign=" + calledfromcampaign +
+                        " unit=" + SafeUnitName(unit) +
+                        " oldType=" + __state.Order.Type +
+                        " newType=" + next.Type +
+                        " duplicateRisk=" + decision.IsRisk +
+                        " reason=" + decision.Reason +
+                        " sessionBefore=" + __state.Session +
+                        " sessionAfter=" + sessionAfter);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("tactical-current-order", "Tactical current-order observer failed: " + ex.Message);
+                }
             }
         }
 
@@ -513,15 +635,24 @@ namespace WhiskeyRealism.Patches
             bool _usecover,
             bool _newpath)
         {
-            ObserveQueuedOrder(__instance, advisedunit, queueprocessingtime, ordertype, timetomove, modifylastwaypoint, _newpath);
+            if (!Enabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.order-queue", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                ObserveQueuedOrder(__instance, advisedunit, queueprocessingtime, ordertype, timetomove, modifylastwaypoint, _newpath);
+            }
         }
 
         [HarmonyPatch(typeof(Regiment), "AddOrderCourierline")]
         [HarmonyPrefix]
         internal static void AddOrderCourierlinePrefix(Regiment __instance, bool secondarycourier, out CourierQueueState __state)
         {
-            int count = __instance != null && __instance.orderqueue != null ? __instance.orderqueue.Count : 0;
-            __state = new CourierQueueState(count, count - 1);
+            __state = default(CourierQueueState);
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.courier.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                int count = __instance != null && __instance.orderqueue != null ? __instance.orderqueue.Count : 0;
+                __state = new CourierQueueState(count, count - 1);
+            }
         }
 
         [HarmonyPatch(typeof(Regiment), "AddOrderCourierline")]
@@ -534,8 +665,12 @@ namespace WhiskeyRealism.Patches
             bool secondarycourier,
             CourierQueueState __state)
         {
-            ObserveCourierLine(__instance, sourceunit, _targetunit, secondarycourier);
-            ObserveCourierQueue(__instance, secondarycourier, __state);
+            if (!Enabled() && !BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.courier", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                ObserveCourierLine(__instance, sourceunit, _targetunit, secondarycourier);
+                ObserveCourierQueue(__instance, secondarycourier, __state);
+            }
         }
 
         [HarmonyPatch(typeof(BattleUnits), "SetWaypoint", new[]
@@ -547,25 +682,30 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void SetWaypointPrefix(Regiment reg, Vector3 targetpos, out WaypointState __state)
         {
-            __state = new WaypointState(
-                SafeRegimentPaths(reg),
-                SafeOrderQueueCount(reg),
-                HasActiveMoveOrder(reg),
-                SafeLastWaypointX(reg),
-                SafeLastWaypointZ(reg),
-                SafePositionX(reg),
-                SafePositionZ(reg),
-                targetpos.x,
-                targetpos.z,
-                SafeMovementMode(reg),
-                SafeFormation(reg),
-                SafeFormationOrdered(reg),
-                SafeLastFormation(reg),
-                SafeGroupFormation(reg),
-                SafeMarchColumnActive(reg),
-                SafeDistanceMarchColumn(reg),
-                SafeOrderState(reg),
-                SafePathId(reg, ignoreOrderDelay: false));
+            __state = default(WaypointState);
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.set-waypoint.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                __state = new WaypointState(
+                    SafeRegimentPaths(reg),
+                    SafeOrderQueueCount(reg),
+                    HasActiveMoveOrder(reg),
+                    SafeLastWaypointX(reg),
+                    SafeLastWaypointZ(reg),
+                    SafePositionX(reg),
+                    SafePositionZ(reg),
+                    targetpos.x,
+                    targetpos.z,
+                    SafeMovementMode(reg),
+                    SafeFormation(reg),
+                    SafeFormationOrdered(reg),
+                    SafeLastFormation(reg),
+                    SafeGroupFormation(reg),
+                    SafeMarchColumnActive(reg),
+                    SafeDistanceMarchColumn(reg),
+                    SafeOrderState(reg),
+                    SafePathId(reg, ignoreOrderDelay: false));
+            }
         }
 
         [HarmonyPatch(typeof(BattleUnits), "SetWaypoint", new[]
@@ -584,47 +724,65 @@ namespace WhiskeyRealism.Patches
             bool showmovementoptions,
             WaypointState __state)
         {
-            ObserveWaypointDrift(reg, useorderdelay, __state);
-            ObservePathShape(reg, newpath, modifylastwaypoint, useorderdelay, direction, showmovementoptions, __state);
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.set-waypoint", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                ObserveWaypointDrift(reg, useorderdelay, __state);
+                ObservePathShape(reg, newpath, modifylastwaypoint, useorderdelay, direction, showmovementoptions, __state);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
         [HarmonyPrefix]
         internal static void CheckUseOfReservesPrefix(Regiment aigroup, out WaypointState __state)
         {
-            __state = new WaypointState(
-                CountGroupPaths(aigroup),
-                SafeOrderQueueCount(aigroup),
-                HasActiveMoveOrder(aigroup),
-                SafeLastWaypointX(aigroup),
-                SafeLastWaypointZ(aigroup),
-                SafePositionX(aigroup),
-                SafePositionZ(aigroup),
-                0f,
-                0f,
-                SafeMovementMode(aigroup),
-                SafeFormation(aigroup),
-                SafeFormationOrdered(aigroup),
-                SafeLastFormation(aigroup),
-                SafeGroupFormation(aigroup),
-                SafeMarchColumnActive(aigroup),
-                SafeDistanceMarchColumn(aigroup),
-                SafeOrderState(aigroup),
-                SafePathId(aigroup, ignoreOrderDelay: false));
+            __state = default(WaypointState);
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.reserve-move.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                __state = new WaypointState(
+                    CountGroupPaths(aigroup),
+                    SafeOrderQueueCount(aigroup),
+                    HasActiveMoveOrder(aigroup),
+                    SafeLastWaypointX(aigroup),
+                    SafeLastWaypointZ(aigroup),
+                    SafePositionX(aigroup),
+                    SafePositionZ(aigroup),
+                    0f,
+                    0f,
+                    SafeMovementMode(aigroup),
+                    SafeFormation(aigroup),
+                    SafeFormationOrdered(aigroup),
+                    SafeLastFormation(aigroup),
+                    SafeGroupFormation(aigroup),
+                    SafeMarchColumnActive(aigroup),
+                    SafeDistanceMarchColumn(aigroup),
+                    SafeOrderState(aigroup),
+                    SafePathId(aigroup, ignoreOrderDelay: false));
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
         [HarmonyPostfix]
         internal static void CheckUseOfReservesBugPostfix(Regiment aigroup, WaypointState __state)
         {
-            ObserveReserveMove(aigroup, __state);
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.reserve-move", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                ObserveReserveMove(aigroup, __state);
+            }
         }
 
         [HarmonyPatch(typeof(Regiment), "ChangeRegimentFormation")]
         [HarmonyPrefix]
         internal static void ChangeRegimentFormationPrefix(Regiment __instance, out FormationChangeState __state)
         {
-            __state = SnapshotFormationChange(__instance);
+            __state = default(FormationChangeState);
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.formation.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                __state = SnapshotFormationChange(__instance);
+            }
         }
 
         [HarmonyPatch(typeof(Regiment), "ChangeRegimentFormation")]
@@ -634,25 +792,54 @@ namespace WhiskeyRealism.Patches
             GameVars.FormationParam fparam,
             FormationChangeState __state)
         {
-            ObserveFormationChange(__instance, fparam, __state);
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.formation", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                ObserveFormationChange(__instance, fparam, __state);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "UpdateMovingTargets")]
         [HarmonyPrefix]
         internal static void UpdateMovingTargetsPrefix(AIBattle __instance, out ObjectiveMoveState __state)
         {
-            __state = CaptureObjectiveMoveState(__instance);
+            __state = null;
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.moving-targets.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                __state = CaptureObjectiveMoveState(__instance);
+            }
         }
 
         [HarmonyPatch(typeof(AIBattle), "UpdateMovingTargets")]
         [HarmonyPostfix]
         internal static void UpdateMovingTargetsPostfix(AIBattle __instance, ObjectiveMoveState __state)
         {
-            ObserveObjectiveChainMove(__instance);
-            ObserveObjectiveChainMutation(__state);
+            if (!BugTelemetryEnabled()) return;
+            using (TelemetryPerf.Scope("tactical.patch.observer.moving-targets", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                ObserveObjectiveChainMove(__instance);
+                ObserveObjectiveChainMutation(__state);
+            }
         }
 
-        private static void Observe(AIBattle battle, TacticalObservedEvent eventType, TacticalObserverSnapshot before, Regiment group)
+        private static TacticalBattleContext BuildContextIfEnabled(AIBattle battle)
+        {
+            if (!Enabled()) return null;
+            try { return BuildContext(battle, null); }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-observer:context", "Tactical observer context failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static void Observe(
+            AIBattle battle,
+            TacticalObservedEvent eventType,
+            TacticalObserverSnapshot before,
+            Regiment group,
+            TacticalBattleContext sharedContext = null)
         {
             if (!Enabled()) return;
 
@@ -662,7 +849,7 @@ namespace WhiskeyRealism.Patches
                 {
                     OnceLog.Info("tactical-observer", "TacticalObserverPatch wired");
 
-                    var context = BuildContext(battle, group);
+                    var context = group == null && sharedContext != null ? sharedContext : BuildContext(battle, group);
                     EmitDecisionMatrix(eventType, battle, group, context);
                     string signature = TacticalTelemetry.Signature(eventType, context);
                     bool verbose = Plugin.Instance != null && Plugin.Instance.TacticalObserverVerboseLogging.Value;
@@ -686,19 +873,28 @@ namespace WhiskeyRealism.Patches
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("tactical-observer:" + eventType, "Tactical observer " + eventType + " failed: " + ex.Message);
+                    OnceLog.Warning("tactical-observer:observe", "Tactical observer " + eventType + " failed: " + ex.Message);
                 }
             }
         }
 
-        private static void EmitOperationsMonitorTelemetry()
+        // CheckGlobalAIStrategy fires for every AIBattle instance in the same vanilla
+        // side-stat cycle (up to 3 in W&L, CalculateSideStatsAndUpdateAITasks 84864);
+        // the coordinator Tick dedupes on that cycle, so the monitor does too
+        // (GameVars.currenttimefromstart is identical within one cycle).
+        private static void EmitOperationsMonitorTelemetryOncePerCycle()
         {
             if (!DecisionMatrixEnabled()) return;
 
             try
             {
-                EmitOperationsMonitorTelemetryForSide(0, TacticalBattleCoordinator.GetSideOrchestrator(0));
-                EmitOperationsMonitorTelemetryForSide(1, TacticalBattleCoordinator.GetSideOrchestrator(1));
+                float cycleHours = GameVars.currenttimefromstart;
+                if (cycleHours == _lastMonitorCycleHours) return;
+                _lastMonitorCycleHours = cycleHours;
+
+                var regimentsByInstanceId = BuildRegimentInstanceMap();
+                EmitOperationsMonitorTelemetryForSide(0, TacticalBattleCoordinator.GetSideOrchestrator(0), regimentsByInstanceId);
+                EmitOperationsMonitorTelemetryForSide(1, TacticalBattleCoordinator.GetSideOrchestrator(1), regimentsByInstanceId);
             }
             catch (Exception ex)
             {
@@ -706,7 +902,10 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static void EmitOperationsMonitorTelemetryForSide(int side, TacticalBattleOrchestrator orchestrator)
+        private static void EmitOperationsMonitorTelemetryForSide(
+            int side,
+            TacticalBattleOrchestrator orchestrator,
+            Dictionary<int, Regiment> regimentsByInstanceId)
         {
             if (orchestrator == null || orchestrator.Army == null) return;
 
@@ -770,7 +969,7 @@ namespace WhiskeyRealism.Patches
                     EmitCommandAssignmentTelemetry(side, state, operation, doctrineOrder, assignmentSignature);
                 }
 
-                Regiment group = FindCommandNodeGroup(state.NodeId);
+                Regiment group = FindCommandNodeGroup(state.NodeId, regimentsByInstanceId);
                 var physical = BuildCommandPhysicalState(group);
                 var idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
                 PostureExecutionDecision decision;
@@ -962,29 +1161,34 @@ namespace WhiskeyRealism.Patches
                 formation: SafeFormation(group));
         }
 
-        private static Regiment FindCommandNodeGroup(string nodeId)
+        private static Regiment FindCommandNodeGroup(string nodeId, Dictionary<int, Regiment> regimentsByInstanceId)
         {
             int instanceId = ParseCommandNodeInstanceId(nodeId);
-            if (instanceId == 0) return null;
+            if (instanceId == 0 || regimentsByInstanceId == null) return null;
+            return regimentsByInstanceId.TryGetValue(instanceId, out Regiment reg) ? reg : null;
+        }
 
+        // Node ids carry either the GameObject or the Regiment component InstanceID;
+        // index both once per monitor pass instead of a completeunitlist walk per node.
+        private static Dictionary<int, Regiment> BuildRegimentInstanceMap()
+        {
+            var map = new Dictionary<int, Regiment>();
             try
             {
                 var all = BattleUnits.completeunitlist;
-                if (all == null) return null;
+                if (all == null) return map;
                 for (int i = 0; i < all.Count; i++)
                 {
-                    var reg = all[i] as Regiment;
+                    var reg = all[i];
                     if (reg == null) continue;
-                    if (SafeInstanceId(reg) == instanceId || TacticalPatchIds.GameObjectInstanceId(reg) == instanceId)
-                        return reg;
+                    int componentId = SafeInstanceId(reg);
+                    int gameObjectId = TacticalPatchIds.GameObjectInstanceId(reg);
+                    if (componentId != 0) map[componentId] = reg;
+                    if (gameObjectId != 0) map[gameObjectId] = reg;
                 }
             }
-            catch
-            {
-                return null;
-            }
-
-            return null;
+            catch { }
+            return map;
         }
 
         private static int ParseCommandNodeInstanceId(string nodeId)
@@ -1799,8 +2003,7 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (group == null) return false;
-                var field = AccessTools.Field(group.GetType(), "receivedfire");
-                var received = field != null ? field.GetValue(group) as IList : null;
+                var received = group.receivedfire;
                 return received != null && received.Count > 0;
             }
             catch
@@ -1987,8 +2190,7 @@ namespace WhiskeyRealism.Patches
                 if (unit == null) continue;
                 try
                 {
-                    var field = AccessTools.Field(unit.GetType(), "receivedfire");
-                    var received = field != null ? field.GetValue(unit) as IList : null;
+                    var received = unit.receivedfire;
                     if (received != null && received.Count > 0) return true;
                 }
                 catch
@@ -2180,11 +2382,9 @@ namespace WhiskeyRealism.Patches
         {
             try
             {
-                Type givenOrdersType = typeof(DLC_WL).GetNestedType("GivenOrders", BindingFlags.Public | BindingFlags.NonPublic);
-                FieldInfo sessionField = givenOrdersType != null
-                    ? givenOrdersType.GetField("givenorderssession", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                    : null;
-                return sessionField != null ? Convert.ToInt32(sessionField.GetValue(null)) : -1;
+                // Public static (DLC_WL.GivenOrders.givenorderssession, 41736; vanilla
+                // increments it at 8651) — read directly instead of GetNestedType per call.
+                return DLC_WL.GivenOrders.givenorderssession;
             }
             catch
             {
@@ -2510,18 +2710,16 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // Regiment has no "side" field; vanilla maps alliance -> battle side with
+        // BattleUnits.GetSideFromAlliance (91699: alliance[0] -> 0, otherwise 1).
         private static int SafeSide(Regiment unit)
         {
             try
             {
                 if (unit == null) return -1;
-                if (!_sideFieldResolved)
-                {
-                    _sideField = typeof(Regiment).GetField("side", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    _sideFieldResolved = true;
-                }
-
-                return _sideField != null ? (int)_sideField.GetValue(unit) : -1;
+                var bunits = _observedBattleUnits;
+                if (bunits == null || bunits.alliance == null || bunits.alliance.Length < 2) return -1;
+                return bunits.GetSideFromAlliance(unit.alliance);
             }
             catch
             {

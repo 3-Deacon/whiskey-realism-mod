@@ -40,10 +40,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // then ALWAYS pairs it with fresh live vanilla reads for positions, pathinterrupted, groupsubordinatesmoving,
     // local contacts, recent formation/order state (see full list in TacticalBattleRuntimeSnapshot.cs boundary doc).
     //
-    // DriveTickCycle / DriveDirectChildCycle / DriveOperationsLedger all follow the same pattern:
+    // DriveTickCycle / DriveDirectChildCycle / DriveOperationsLedger share one heavy-gate
+    // evaluation per side per Tick (EnsureSideSnapshot):
     //   if (!IsHeavyThrottlingEnabled()) { full build for compat }
-    //   else { sig = Extract...; dec = Decide(...); if (Run) Build+publish else reuse lastPublished (may be !HasData) }
-    //   then synthesize bundle/objectives from snap (degrade safe on Empty)
+    //   else { snap = EnsureSideSnapshot(side) — Extract + Decide once, Build+publish on Run,
+    //          else the last published snapshot (may be !HasData) }
+    //   then synthesize bundle/objectives from snap (degrade safe on Empty).
+    //   The operations ledger additionally only re-ticks on a new snapshot, new command
+    //   intents, a mode change or OperationsLedgerMaxIntervalBattleSeconds.
     //
     // All paths are try/catch guarded, degrade on error (per Tactical/AGENTS.md), use bounded OnceLog/Telemetry.
     // Battle-level dedup prevents duplicate heavy work for the two sides in one vanilla CalculateSideStats cycle.
@@ -60,9 +64,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static float _lastTickTimeSeconds;
         private static int _battleSequence;
         private static int _playerAllianceId = -1;
+        private static int _activeBattleUnitsId;
         private static readonly HashSet<string> _tickWarningKeys = new HashSet<string>();
         private static readonly HashSet<int> _directChildDeferLogged = new HashSet<int>();
-        private static readonly Dictionary<string, string> _commandTreeTelemetrySignatures = new Dictionary<string, string>();
+        private static readonly Dictionary<int, int> _commandTreeTelemetrySignatures = new Dictionary<int, int>();
 
         // Task 6 heavy-path gate + battle-level dedup caches (per AGENTS.md runtime safety: try/catch guarded, degrade, never throw).
         // Battle-level dedup keyed by BattleUnits owner (GetInstanceID) per revised plan (not per-AIBattle lastsidestatupdate).
@@ -77,6 +82,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // wallclock pace. Distinct from _lastHeavyReviewHours (the heavy-
         // throttle gate's last review time).
         private static readonly float[] _lastTickBattleHours = { -1f, -1f };
+        private static readonly bool[] _replanAfterNight = { false, false };
         private static readonly TacticalBattleStateSignature[] _lastSignatures = new TacticalBattleStateSignature[2];
         private static readonly TacticalBattleRuntimeSnapshot[] _lastPublishedSnapshots = { TacticalBattleRuntimeSnapshot.Empty, TacticalBattleRuntimeSnapshot.Empty };
         private static readonly bool[] _hasPendingChange = { false, false };
@@ -86,6 +92,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Defense against signature-mutation churn — even when N legitimate
         // mutations happen in one frame, we build ONCE.
         private static readonly int[] _lastHeavyBuildFrame = { -1, -1 };
+        // Per-Tick memo of the heavy gate (one evaluation per side per Tick).
+        private static int _tickSerial;
+        private static readonly int[] _sideSnapshotTickSerial = { -1, -1 };
+        // Operations-ledger change gate (ShouldTickOperationsLedger).
+        // Incremented on every heavy build per side (the snapshot is a struct, so the
+        // ledger change gate compares generations, not references).
+        private static readonly int[] _snapshotGeneration = { 0, 0 };
+        private static readonly int[] _lastLedgerSnapshotGeneration = { -1, -1 };
+        private static readonly int[] _directChildrenRegisteredGeneration = { -1, -1 };
+        private static readonly int[] _lastLedgerIntentsHash = { 0, 0 };
+        private static readonly TacticalCommanderMode[] _lastLedgerMode = new TacticalCommanderMode[2];
+        private static readonly float[] _lastLedgerTickBattleSeconds = { -1f, -1f };
+        // Per-battle dedupe for the intent / replan info lines (keys embed battle
+        // state, so they are not OnceLog keys).
+        private static readonly HashSet<long> _battleInfoLogged = new HashSet<long>();
 
         // "Cheap per-group" cache (2026-05-20). Populated in DriveTickCycle on
         // every heavy-gate-fire — one entry per commandable Regiment in
@@ -95,9 +116,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // call. Doctrine/ledger resolver walks, sector rebuild, and
         // DecideGroupStance recompute all move to the gate-fire boundary.
         //
-        // Keyed by Regiment.GetInstanceID() — same key the worker-thread
-        // group-stance dicts use, so cache misses route to the legacy
-        // ApplyGroup path identically.
+        // Keyed by Regiment.GetInstanceID(); cache misses route to the legacy
+        // ApplyGroup path.
         //
         // Indexed by allianceId (0/1). Reset in ResetRuntimeTickState so
         // stale entries never leak between battles.
@@ -129,30 +149,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // snapshot is staggered). Reset to 0 in ResetRuntimeTickState.
         private static int _heavyTickParity = 0;
 
-        // Slice 2 parity window: compare worker-published decisions against the
-        // synchronous orchestrator state for the first N cycles per (battleSeq,
-        // alliance). After N clean compares, the window logs "window-clean" and
-        // subsequent cycles no longer touch the comparator path. On any mismatch:
-        // emit TacticalOrchestratorParityMismatch (registered in Task 6) and stop
-        // comparing for that key to avoid log spam.
-        // Key formula: _battleSequence * 10 + allianceId.
-        // Budget cut 20 → 5 (2026-05-20) → 0 (2026-05-21). Matches TacticalBattleSnapshotBuilder.ParityCompareBudget retirement.
-        private static readonly Dictionary<int, int> _workerParityComparesRemaining = new Dictionary<int, int>();
-        private static readonly HashSet<int> _workerParityMismatchObserved = new HashSet<int>();
-        private const int WorkerParityCompareBudget = 0;
-
-        // Slice 2: dedicated worker thread for tactical orchestrator analysis.
-        // Started in OnBattleStart, joined in OnBattleEnd. Disabled when
-        // EnableTacticalOrchestratorWorker is false. Currently runs as a non-skipping
-        // shadow — sync path still owns behavior; worker produces partial decisions
-        // that patches don't yet consume (Task 14 will wire fallback-to-legacy lookups).
-        private static TacticalOrchestratorWorker _worker;
-
         /// <summary>
-        /// Battle sequence integer used as the parity-window key in
-        /// TacticalBattleSnapshotBuilder. Increments on each OnBattleStart;
-        /// reset to 0 in ClearForFailure. Public so the snapshot builder can
-        /// dedupe parity state per battle.
+        /// Per-session battle counter, incremented on each successful OnBattleStart and
+        /// never reset (so a value never identifies two battles). Still read by
+        /// BattleGroupStancePatch's worker-snapshot check, which is dead since the
+        /// worker thread was removed and goes away with it at integration.
         /// </summary>
         public static int BattleSequenceForParity
         {
@@ -178,8 +179,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public static void OnBattleStart(AIBattle battle)
         {
-            if (active) return;
+            // A start for a different BattleUnits instance while still active means the
+            // previous battle's teardown was missed (scene rebuilt without an observed
+            // BattleUnits.OnDestroy 79207): tear it down first so no orchestrator, cache
+            // or clock state leaks into the new battle.
+            int battleUnitsId = GetBattleKeyFromBunits(battle);
+            if (active)
+            {
+                if (battleUnitsId == _activeBattleUnitsId) return;
+                OnBattleEnd();
+            }
             if (!Plugin.EnableTacticalBattleOrchestrator.Value) return;
+            _activeBattleUnitsId = battleUnitsId;
 
             try
             {
@@ -192,8 +203,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return;
                 }
 
-                int playerCicAllianceId = aiVsAi ? -1 : ResolvePlayerCicAllianceId();
-                int suppressedAllianceId = aiVsAi ? -1 : playerAllianceId;
+                int suppressedAllianceId = ResolveSuppressedAllianceId(aiVsAi, playerAllianceId, ResolvePlayerCicAllianceId());
                 var commanders = DiscoverCommandersFromVanilla(battle);
                 // 2026-05-18: prior code called BuildFromSynthetic here, which was a stub path
                 // that bypassed HistoricalFigureRegistry entirely and silently degraded every
@@ -202,6 +212,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // routes through HistoricalFigureRegistry.Resolve(commanderObj, allianceId, nameHint)
                 // so registered figures pick up their personality vector.
                 var roster = TacticalCommanderRoster.BuildFromVanilla(commanders);
+                StartDoctrineClock(SafeCurrentBattleHours());
                 BuildAndActivate(suppressedAllianceId, roster);
                 _playerAllianceId = playerAllianceId;
                 _battleSequence++;
@@ -230,8 +241,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (!entry.MatchedHistoricalRegistry)
                         TelemetryRouter.LegacyInfoToMainLogIfAllowed("[TacticalCommanderUnknown] echelon=" + entry.Echelon
                             + " name=" + (string.IsNullOrEmpty(entry.Name) ? "<null>" : entry.Name), TelemetryLayer.Tactical);
-                OnceLog.Info("orch-bootstrap", "[TacticalOrchestrator] bootstrap sidesActive=" + activated
-                    + " sidesSuppressed=" + suppressed);
+                // Lifecycle lines are emitted once per battle (not once per session) so every
+                // battle, reload and restart in a session is visible in the log.
+                TelemetryRouter.LegacyInfo("[TacticalOrchestrator] bootstrap battle=" + _battleSequence
+                    + " sidesActive=" + activated + " sidesSuppressed=" + suppressed, TelemetryLayer.Tactical);
             }
             catch (Exception e)
             {
@@ -240,30 +253,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ClearForFailure();
             }
 
-            // Slice 2: start the worker thread once bootstrap has settled.
-            // If bootstrap above failed ClearForFailure already nulled state out;
-            // we still attempt worker start (Tick won't dispatch if !active).
-            try
-            {
-                if (IsWorkerEnabled())
-                {
-                    _worker = new TacticalOrchestratorWorker();
-                    _worker.Start();
-                }
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] worker start failed: "
-                    + ex.GetType().Name + " " + ex.Message);
-                _worker = null;
-            }
+            // A failed bootstrap leaves the coordinator inactive; do not populate battle
+            // caches nothing will consume (and nothing would clear on OnBattleEnd, which
+            // early-outs while inactive).
+            if (!active) return;
 
             // Stage A perf cache (2026-05-21): populate battle-lifetime scene-scan cache
             // after vanilla has built the battle scene. Subsequent heavy-gate fires read
             // from this cache instead of re-scanning the scene every cycle. Populate is
             // try/catch-safe internally; on failure the cache stays empty and live-scan
             // fallback engages (strict no-regression contract).
-            try { TacticalStableSceneCache.Populate(); }
+            try { TacticalStableSceneCache.Populate(ResolveBattleUnits(battle)); }
             catch (Exception sce)
             {
                 Plugin.Log.LogWarning("[TacticalOrchestrator] scene-cache populate threw: "
@@ -284,41 +284,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static bool IsWorkerEnabled()
-        {
-            try
-            {
-                return Plugin.EnableTacticalOrchestratorWorker != null
-                    && Plugin.EnableTacticalOrchestratorWorker.Value;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         public static void OnBattleEnd()
         {
             if (!active) return;
             try
             {
-                // Slice 2: stop the worker before tearing down orchestrator state.
-                // RequestStop + bounded Join so we don't block teardown if the worker
-                // is wedged. Background thread will die on AppDomain unload regardless.
-                try
-                {
-                    if (_worker != null)
-                    {
-                        _worker.RequestStop();
-                        _worker.Join(250);
-                        _worker = null;
-                    }
-                }
-                catch (Exception we)
-                {
-                    Plugin.Log.LogWarning("[TacticalOrchestrator] worker stop failed: "
-                        + we.GetType().Name + " " + we.Message);
-                }
 
                 ClearLedgersBetweenBattles();
                 ResetRuntimeTickState();
@@ -348,6 +318,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // starts fresh and the next validation cycle isn't skipped due to a
                 // stale lastValidationRealtimeSeconds value.
                 try { TacticalCacheValidator.ResetForBattleEnd(); } catch { }
+                try { DirectChildDiscovery.ResetForBattleEnd(); } catch { }
 
                 // Regimental control state (2026-05-22, Scope B): claim-set
                 // tracking removed. Reset now only clears the artillery-action
@@ -360,8 +331,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 side0 = null;
                 side1 = null;
                 _playerAllianceId = -1;
+                _activeBattleUnitsId = 0;
                 active = false;
-                OnceLog.Info("orch-teardown", "[TacticalOrchestrator] teardown");
+                TelemetryRouter.LegacyInfo("[TacticalOrchestrator] teardown battle=" + _battleSequence, TelemetryLayer.Tactical);
             }
             catch (Exception e)
             {
@@ -394,16 +366,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     }
 
                     OnceLog.Info("orch-coordinator", "[TacticalOrchestrator] coordinator first tick");
+                    EndOfDayPhase dayPhase = AdvanceDoctrineClock(SafeCurrentBattleHours(), SafeEodCycle(battle));
+                    if (dayPhase == EndOfDayPhase.Suspended)
+                    {
+                        MarkSideStatCycleProcessed(battleKey, vanillaLastSideStat);
+                        return;
+                    }
+                    if (dayPhase == EndOfDayPhase.Resumed) PrepareForNewBattleDay();
+                    unchecked { _tickSerial++; }
                     bool aiVsAi = SafeAiVsAi();
                     float deltaSeconds = ComputeTickDeltaSeconds();
 
-                    // Drive synchronous per-side tick FIRST. This publishes into
-                    // _lastPublishedSnapshots[s] whenever the heavy-gate fires
-                    // (DriveTickCycle line ~457). Worker capture below reads
-                    // that published snapshot — never calls Build itself —
-                    // eliminating the double-build that occurred when both
-                    // worker-capture and DriveTickCycle independently consulted
-                    // TacticalHeavyPathGate and both built on the same tick.
+                    // Drive each side; the heavy-gate publishes into
+                    // _lastPublishedSnapshots[s] when it fires.
                     DriveTacticalCommanderSide(side0, battle, aiVsAi, deltaSeconds);
                     DriveTacticalCommanderSide(side1, battle, aiVsAi, deltaSeconds);
 
@@ -420,73 +395,63 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     try { TacticalCacheValidator.ValidateIfDue(); }
                     catch (Exception cve)
                     {
-                        Plugin.Log.LogWarning("[TacticalOrchestrator] cache-validator threw: "
+                        OnceLog.Warning("orch-cache-validator", "[TacticalOrchestrator] cache-validator threw: "
                             + cve.GetType().Name + " " + cve.Message);
                     }
 
-                    // Slice 2: capture worker input and enqueue. Worker is async
-                    // by design — being one tick behind on data is fine. Worker
-                    // capture reads the snapshots Drive* just published; if
-                    // neither side has published yet (very first tick), capture
-                    // returns null and the worker waits one more tick. Patches
-                    // fall through to legacy in the meantime.
-                    bool workerActive = IsWorkerEnabled() && _worker != null;
-                    if (workerActive)
-                    {
-                        try
-                        {
-                            var workerInput = CaptureWorkerInputOnMain(battle, deltaSeconds);
-                            if (workerInput != null) _worker.Enqueue(workerInput);
-                        }
-                        catch (Exception ce)
-                        {
-                            Plugin.Log.LogWarning("[TacticalOrchestrator] worker capture skipped: "
-                                + ce.GetType().Name + " " + ce.Message);
-                        }
-                    }
-
-                    // Slice 2 parity window: compare worker-published vs synchronous
-                    // state for the first N cycles per (battleSeq, alliance). The
-                    // sync path above has already run ArmyTickCycle (which calls
-                    // ObserveIntent), so side.Army.CurrentIntentModel now reflects
-                    // the synchronous tick — safe to snapshot here for comparison.
-                    if (workerActive)
-                    {
-                        try
-                        {
-                            if (side0 != null && side0.Army != null)
-                            {
-                                var sync0 = SnapshotSideDecisionForParity(side0);
-                                CompareWorkerVsSynchronous(side0.AllianceId, sync0);
-                            }
-                            if (side1 != null && side1.Army != null)
-                            {
-                                var sync1 = SnapshotSideDecisionForParity(side1);
-                                CompareWorkerVsSynchronous(side1.AllianceId, sync1);
-                            }
-                        }
-                        catch (Exception pe)
-                        {
-                            Plugin.Log.LogWarning("[TacticalOrchestrator] parity compare failed: "
-                                + pe.GetType().Name + " " + pe.Message);
-                        }
-                    }
-
-                    // Mark as processed for this vanilla side-stat cycle (using the value the vanilla set before calling CheckGlobal)
-                    if (battleKey != 0 && vanillaLastSideStat > 0f)
-                    {
-                        _lastProcessedSideStatUpdateByBunitsId[battleKey] = vanillaLastSideStat;
-                    }
+                    MarkSideStatCycleProcessed(battleKey, vanillaLastSideStat);
                 }
                 catch (Exception e)
                 {
-                    Plugin.Log.LogWarning("[TacticalOrchestrator] Tick skipped: "
+                    OnceLog.Warning("orch-tick-skipped", "[TacticalOrchestrator] Tick skipped: "
                         + e.GetType().Name + " " + e.Message);
                 }
             }
         }
 
         // ---- Private runtime helpers ----
+
+        // Mark as processed for this vanilla side-stat cycle (the lastsidestatupdate value
+        // vanilla set before calling CheckGlobalAIStrategy, 84572-84574).
+        private static void MarkSideStatCycleProcessed(int battleKey, float vanillaLastSideStat)
+        {
+            if (battleKey != 0 && vanillaLastSideStat > 0f)
+            {
+                _lastProcessedSideStatUpdateByBunitsId[battleKey] = vanillaLastSideStat;
+            }
+        }
+
+        private static int SafeEodCycle(AIBattle battle)
+        {
+            try
+            {
+                var bunits = ResolveBattleUnits(battle);
+                return bunits != null ? bunits.eodcycle : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// First fighting cycle of a new battle day: force a heavy rebuild for both sides
+        /// (AI groups may have been redeployed by DoPlacementAIUnitsWithinDeploymentzoneNew,
+        /// 85524, when the deployment panel closed) and queue a replan on the fresh
+        /// evidence. Orchestrators, ledgers and plan memory are kept, as vanilla keeps its
+        /// AI state.
+        /// </summary>
+        private static void PrepareForNewBattleDay()
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                _lastHeavyReviewHours[i] = 0f;
+                _lastHeavyReviewRealtimeSeconds[i] = 0f;
+                _lastHeavyBuildFrame[i] = -1;
+                _replanAfterNight[i] = true;
+            }
+            TelemetryRouter.LegacyInfo("[TacticalOrchestrator] new battle day: snapshots rebuilt and plans re-evaluated", TelemetryLayer.Tactical);
+        }
 
         private static bool SafeAiVsAi()
         {
@@ -555,113 +520,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                if (side == null || side.Army == null || !side.Army.HasPlan) return;
-
-                ArmyEvidenceBuilder.Bundle bundleForReplan;
-                if (!IsHeavyThrottlingEnabled())
+                if (side == null || side.Army == null) return;
+                int sideIdx = side.AllianceId;
+                if (sideIdx < 0 || sideIdx > 1) sideIdx = 0;
+                TickReplanStep step = DecideTickReplanStep(_replanAfterNight[sideIdx], side.Army.HasPlan);
+                if (step == TickReplanStep.None)
                 {
-                    // Preserve exact pre-Task-6 behavior when feature disabled (or config missing)
-                    bundleForReplan = ArmyEvidenceBuilder.Build(battle, side.AllianceId);
+                    _replanAfterNight[sideIdx] = false; // no plan to re-evaluate
+                    return;
                 }
-                else
-                {
-                    // Heavy path gated: cheap signature extract + gate decide + reuse or build snapshot once
-                    float nowH = SafeCurrentBattleHours();
-                    var currSig = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(battle, nowH);
-                    int s = side.AllianceId;
-                    if (s < 0 || s > 1) s = 0;
-                    float lastH = _lastHeavyReviewHours[s];
-                    float nowReal = SafeRealtimeSeconds();
-                    float lastReal = _lastHeavyReviewRealtimeSeconds[s];
-                    var lastS = _lastSignatures[s];
-                    bool hasP = _hasPendingChange[s];
-                    float cycle = ComputeCompressionAdjustedCycle(s, nowH, nowReal, lastReal);
-                    float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
-                    var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
-                    var dec = TacticalHeavyPathGate.Decide(input);
-                    EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
-                    TacticalBattleRuntimeSnapshot snap;
-                    // Plan F (2026-05-20): the heavy build is alternated between
-                    // sides via _heavyTickParity (flipped at end of Tick body).
-                    // If parity is not this side's turn AND we have a cached
-                    // snapshot for it, defer the build so the per-Update-frame
-                    // hitch doesn't pile both sides' BuildObjectiveRecords walks
-                    // on the same frame. We do NOT update _lastHeavyReview* on
-                    // stagger-skip so the gate keeps signaling ShouldRun next cycle.
-                    bool staggerSkip = dec.ShouldRun
-                        && s != _heavyTickParity
-                        && _lastPublishedSnapshots[s].HasData;
-                    if (staggerSkip)
-                    {
-                        OnceLog.Info(
-                            "tactical-orch:side-stagger:" + s,
-                            "[TacticalOrchestrator] side-stagger-skip side=" + s
-                            + " parity=" + _heavyTickParity
-                            + " (reusing cached snapshot; other side gets this build slot)");
-                    }
-                    // Layer 2 frame-coalescing (2026-05-22). If we already built
-                    // a heavy snapshot for this side IN THIS FRAME, skip the
-                    // rebuild even on ShouldRun. Defense against multiple Tick
-                    // calls per frame producing redundant heavy work — even
-                    // legitimate signature mutations from different sources
-                    // (mass rout + objective change + reinforcement) coalesce
-                    // into ONE build per frame per side.
-                    int frameNow = UnityEngine.Time.frameCount;
-                    bool sameFrameAsLastBuild = _lastHeavyBuildFrame[s] == frameNow;
-                    if (dec.ShouldRun && !staggerSkip && sameFrameAsLastBuild)
-                    {
-                        OnceLog.Info(
-                            "tactical-orch:frame-coalesce:" + s,
-                            "[TacticalOrchestrator] frame-coalesce side=" + s
-                            + " frame=" + frameNow + " — already built this frame, reusing snapshot");
-                    }
-                    if (dec.ShouldRun && !staggerSkip && !sameFrameAsLastBuild)
-                    {
-                        _lastHeavyBuildFrame[s] = frameNow;
-                        using (TelemetryPerf.Scope("tactical.snapshot-build.tick-cycle", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
-                        {
-                            snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
-                        }
-                        _lastHeavyReviewHours[s] = nowH;
-                        _lastHeavyReviewRealtimeSeconds[s] = nowReal;
-                        _lastSignatures[s] = currSig;
-                        _lastPublishedSnapshots[s] = snap;
-                        _hasPendingChange[s] = false;
 
-                        // "Cheap per-group" pre-compute (2026-05-20). Build
-                        // resolved per-Regiment decisions for every commandable
-                        // group in bunits.unitsused for this side. The patch
-                        // reads from _resolvedDecisionsBySide via
-                        // TryGetResolvedGroupDecision so per-tick work
-                        // collapses to dict lookup + cheap safety gates.
-                        using (TelemetryPerf.Scope("tactical.resolved-group-decisions.build", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
-                        {
-                            PopulateResolvedDecisionsForSide(side, battle);
-                        }
-                    }
-                    else
-                    {
-                        snap = _lastPublishedSnapshots[s];
-                        if (!currSig.SignatureEquals(lastS) && !hasP)
-                        {
-                            _hasPendingChange[s] = true;
-                        }
-                    }
-                    // Synthesize bundle-like data from snapshot (reuses the expensive data built only when gate allowed).
-                    // Readiness fields propagate so the throttled tick keeps the
-                    // same fresh-troops decision as the direct path.
-                    bundleForReplan = new ArmyEvidenceBuilder.Bundle(
-                        snap.OwnEvidence,
-                        snap.EnemyVisible,
-                        snap.OwnMainEffortStrength,
-                        snap.OwnArmyMorale,
-                        snap.OwnReservesCommittedFraction,
-                        snap.ReinforcementsArrivingDelta,
-                        ownAvgFatigue01: snap.OwnAvgFatigue01,
-                        ownAvgAmmo01: snap.OwnAvgAmmo01,
-                        nearestReinforcementHours: snap.NearestReinforcementHours,
-                        nearestReinforcementStrength: snap.NearestReinforcementStrength);
-                }
+                ArmyEvidenceBuilder.Bundle bundleForReplan = IsHeavyThrottlingEnabled()
+                    ? BundleFromSnapshot(EnsureSideSnapshot(side, battle))
+                    // Throttling off: pre-Task-6 behaviour, full build every tick.
+                    : ArmyEvidenceBuilder.Build(battle, side.AllianceId);
 
                 int minReplanSeconds = (Plugin.TacticalOrchestratorMinReplanSeconds != null)
                     ? Plugin.TacticalOrchestratorMinReplanSeconds.Value
@@ -672,9 +544,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // proportionally faster than wallclock deltaSeconds. Drives
                 // phase progression budgets so commander decisions track
                 // battle pace, not wallclock pace. Hours→seconds conversion.
-                int sideIdx = side.AllianceId;
-                if (sideIdx < 0 || sideIdx > 1) sideIdx = 0;
-                float nowBattleHours = SafeCurrentBattleHours();
+                float nowBattleHours = (float)DoctrineBattleHours;
                 float lastBattleHours = _lastTickBattleHours[sideIdx];
                 float battleDeltaSeconds;
                 if (lastBattleHours < 0f)
@@ -689,6 +559,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     battleDeltaSeconds = deltaHours * 3600f;
                 }
                 _lastTickBattleHours[sideIdx] = nowBattleHours;
+
+                if (step == TickReplanStep.NightReplan)
+                {
+                    ReplanForNewBattleDay(side.Army, bundleForReplan.OwnEvidence, bundleForReplan.EnemyVisible);
+                    // Cleared only once the replan has run; a throw retries next tick.
+                    _replanAfterNight[sideIdx] = false;
+                    TelemetryRouter.LegacyInfo("[TacticalReplan] side=" + side.AllianceId
+                        + " trigger=NewBattleDay newPlan=" + side.Army.CurrentPlan.PlanId
+                        + " phase=" + side.Army.CurrentPlan.Phase, TelemetryLayer.Tactical);
+                    return;
+                }
 
                 var trigger = ArmyTickCycle.MaybeReplan(
                     side.Army,
@@ -709,20 +590,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var intent = side.Army.CurrentIntentModel;
                 if (intent.PrimaryIntent != InferredIntent.Unknown)
                 {
-                    OnceLog.Info("orch-intent:" + _battleSequence + ":" + side.AllianceId + ":" + intent.PrimaryIntent + ":" + intent.InferredMainEffort,
-                        "[TacticalIntent] side=" + side.AllianceId
+                    long intentKey = ((long)side.AllianceId << 56) ^ ((long)(int)intent.PrimaryIntent << 32) ^ (uint)intent.InferredMainEffort;
+                    if (_battleInfoLogged.Add(intentKey))
+                        TelemetryRouter.LegacyInfo("[TacticalIntent] side=" + side.AllianceId
                         + " seesEnemy=" + intent.PrimaryIntent
                         + " mainEffort=" + intent.InferredMainEffort
-                        + " confidence=" + intent.Confidence01.ToString("0.00"));
+                        + " confidence=" + intent.Confidence01.ToString("0.00"), TelemetryLayer.Tactical);
                 }
 
                 if (trigger != ReplanTrigger.None)
                 {
-                    OnceLog.Info("orch-replan:" + _battleSequence + ":" + side.AllianceId + ":" + trigger + ":" + side.Army.CurrentPlan.PlanId,
-                        "[TacticalReplan] side=" + side.AllianceId
+                    long replanKey = (1L << 62) ^ ((long)side.AllianceId << 56) ^ ((long)(int)trigger << 32) ^ (uint)(int)side.Army.CurrentPlan.PlanId;
+                    if (_battleInfoLogged.Add(replanKey))
+                        TelemetryRouter.LegacyInfo("[TacticalReplan] side=" + side.AllianceId
                         + " trigger=" + trigger
                         + " newPlan=" + side.Army.CurrentPlan.PlanId
-                        + " phase=" + side.Army.CurrentPlan.Phase);
+                        + " phase=" + side.Army.CurrentPlan.Phase, TelemetryLayer.Tactical);
                 }
             }
             catch (Exception e)
@@ -756,7 +639,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     TacticalCommanderMode mode = plugin.TacticalCommanderModeValue;
                     if (!TacticalCommanderModePolicy.RunsLedger(mode))
                     {
-                        side.OperationsLedger.SetRuntimeClock(SafeRealtimeSeconds());
+                        int offSide = side.AllianceId;
+                        if (offSide >= 0 && offSide <= 1) _lastLedgerMode[offSide] = mode;
+                        side.OperationsLedger.SetRuntimeClock(LedgerClockSecondsFromBattleHours((float)DoctrineBattleHours));
                         side.TickOperationsLedger(
                             mode,
                             Array.Empty<ObjectiveRecord>(),
@@ -769,6 +654,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     IReadOnlyList<ObjectiveRecord> objectivesToUse;
                     ArmyEvidenceBuilder.Bundle bundleForStrategic;
                     float forceMain, forceReserveAvail;
+                    int s = side.AllianceId;
+                    if (s < 0 || s > 1) s = 0;
+                    float nowBattleSeconds = LedgerClockSecondsFromBattleHours((float)DoctrineBattleHours);
                     if (!IsHeavyThrottlingEnabled())
                     {
                         // Preserve exact pre-Task-6 behavior (builds every ledger tick)
@@ -781,74 +669,200 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     }
                     else
                     {
-                        // Gated: use cached snapshot (built only when Decide says Run); objectives + scalars from snapshot
-                        float nowH = SafeCurrentBattleHours();
-                        var currSig = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(battle, nowH);
-                        int s = side.AllianceId;
-                        if (s < 0 || s > 1) s = 0;
-                        float lastH = _lastHeavyReviewHours[s];
-                        float nowReal = SafeRealtimeSeconds();
-                        float lastReal = _lastHeavyReviewRealtimeSeconds[s];
-                        var lastS = _lastSignatures[s];
-                        bool hasP = _hasPendingChange[s];
-                        float cycle = ComputeCompressionAdjustedCycle(s, nowH, nowReal, lastReal);
-                        float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
-                        var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
-                        var dec = TacticalHeavyPathGate.Decide(input);
-                        EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
-                        TacticalBattleRuntimeSnapshot snap;
-                        // Plan F stagger — same logic as DriveTickCycle.
-                        bool staggerSkip = dec.ShouldRun
-                            && s != _heavyTickParity
-                            && _lastPublishedSnapshots[s].HasData;
-                        if (dec.ShouldRun && !staggerSkip)
-                        {
-                            using (TelemetryPerf.Scope("tactical.snapshot-build.operations-ledger", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
-                            {
-                                snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
-                            }
-                            _lastHeavyReviewHours[s] = nowH;
-                            _lastHeavyReviewRealtimeSeconds[s] = nowReal;
-                            _lastSignatures[s] = currSig;
-                            _lastPublishedSnapshots[s] = snap;
-                            _hasPendingChange[s] = false;
-                        }
-                        else
-                        {
-                            snap = _lastPublishedSnapshots[s];
-                            if (!currSig.SignatureEquals(lastS) && !hasP)
-                            {
-                                _hasPendingChange[s] = true;
-                            }
-                        }
+                        // Gated: the side's snapshot for this Tick (heavy gate evaluated once).
+                        var snap = EnsureSideSnapshot(side, battle);
+                        int intentsHash = CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents);
+                        bool inputsChanged = _snapshotGeneration[s] != _lastLedgerSnapshotGeneration[s]
+                            || intentsHash != _lastLedgerIntentsHash[s];
+                        if (!ShouldTickOperationsLedger(inputsChanged, mode != _lastLedgerMode[s], nowBattleSeconds, _lastLedgerTickBattleSeconds[s]))
+                            return;
+                        _lastLedgerSnapshotGeneration[s] = _snapshotGeneration[s];
+                        _lastLedgerIntentsHash[s] = intentsHash;
                         objectivesToUse = snap.Objectives;
-                        bundleForStrategic = new ArmyEvidenceBuilder.Bundle(
-                            snap.OwnEvidence,
-                            snap.EnemyVisible,
-                            snap.OwnMainEffortStrength,
-                            snap.OwnArmyMorale,
-                            snap.OwnReservesCommittedFraction,
-                            snap.ReinforcementsArrivingDelta);
+                        bundleForStrategic = BundleFromSnapshot(snap);
                         forceMain = snap.OwnMainEffortStrength;
                         forceReserveAvail = Math.Max(0f, 1f - Clamp01(snap.OwnReservesCommittedFraction));
                     }
+                    _lastLedgerMode[s] = mode;
+                    _lastLedgerTickBattleSeconds[s] = nowBattleSeconds;
 
                     var strategic = BuildStrategicBattleIntentSnapshot(side, bundleForStrategic);
                     var force = new ForceAvailabilitySnapshot(forceMain, forceReserveAvail);
 
-                    side.OperationsLedger.SetRuntimeClock(SafeRealtimeSeconds());
+                    side.OperationsLedger.SetRuntimeClock(nowBattleSeconds);
                     side.TickOperationsLedger(
                         mode,
                         objectivesToUse,
                         strategic,
                         force,
                         side.Army.CommanderPersonality);
+                    side.OperationsLedger.SetOperationAssignedStrength(
+                        MeasureOperationAssignedStrength(side.Army.CurrentCommandOperations));
                 }
                 catch (Exception e)
                 {
                     WarnTickCycleOnce(side, e);
                 }
             }
+        }
+
+        /// <summary>
+        /// T14: live strength of the command nodes the current operation has tasked to
+        /// attack or support. Each node's units are summed once (a corps and its division
+        /// may both be tasked) from Regiment.allattachedunits (vanilla's attachment list,
+        /// UpdateAllAttachedUnits 129573), filtered by CountsTowardOperationStrength.
+        /// 0 when no node is tasked.
+        /// </summary>
+        private static float MeasureOperationAssignedStrength(IReadOnlyList<CommandNodeOperationalState> states)
+        {
+            try
+            {
+                if (states == null || states.Count == 0) return 0f;
+                bool mapBuilt = false;
+                _countedUnitIds.Clear();
+                float total = 0f;
+                for (int i = 0; i < states.Count; i++)
+                {
+                    var task = states[i].Task;
+                    if (task != CommandTaskType.AttackObjective && task != CommandTaskType.SupportAttack) continue;
+                    int instanceId = ParseCommandNodeInstanceId(states[i].NodeId);
+                    if (instanceId == 0) continue;
+                    if (!mapBuilt)
+                    {
+                        FillGameObjectInstanceMap(_regimentByGameObjectId);
+                        mapBuilt = true;
+                    }
+                    if (!_regimentByGameObjectId.TryGetValue(instanceId, out Regiment group) || group == null) continue;
+                    var units = group.allattachedunits;
+                    if (units == null) continue;
+                    for (int u = 0; u < units.Length; u++)
+                    {
+                        var unit = units[u];
+                        if (unit == null) continue;
+                        if (!CountsTowardOperationStrength(
+                                unit.unittyp,
+                                unit.permanentlydetached,
+                                unit.isrouted,
+                                unit.markedforrout,
+                                unit.gameObject.activeInHierarchy,
+                                unit.dlcw_isundercommander))
+                            continue;
+                        if (!_countedUnitIds.Add(unit.GetInstanceID())) continue;
+                        total += Math.Max(0f, unit.strength);
+                    }
+                }
+                return total;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        // Reused across ledger ticks (main thread only) to avoid per-tick allocation.
+        private static readonly Dictionary<int, Regiment> _regimentByGameObjectId = new Dictionary<int, Regiment>();
+        private static readonly HashSet<int> _countedUnitIds = new HashSet<int>();
+
+        private static void FillGameObjectInstanceMap(Dictionary<int, Regiment> map)
+        {
+            map.Clear();
+            var units = BattleUnits.completeunitlist;
+            if (units == null) return;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var reg = units[i];
+                if (reg == null) continue;
+                map[reg.gameObject.GetInstanceID()] = reg;
+            }
+        }
+
+        /// <summary>
+        /// The side's runtime snapshot for the current Tick. The heavy gate (cheap
+        /// signature extract + Decide + telemetry) is evaluated once per side per Tick
+        /// and shared by DriveTickCycle, DriveDirectChildCycle and DriveOperationsLedger
+        /// (previously each re-evaluated it). On ShouldRun — unless it is the other
+        /// side's stagger slot or this side already built in this frame — the heavy
+        /// snapshot is rebuilt, published and the per-group resolved decisions refreshed.
+        /// </summary>
+        private static TacticalBattleRuntimeSnapshot EnsureSideSnapshot(TacticalBattleOrchestrator side, AIBattle battle)
+        {
+            int s = side.AllianceId;
+            if (s < 0 || s > 1) s = 0;
+            if (_sideSnapshotTickSerial[s] == _tickSerial) return _lastPublishedSnapshots[s];
+            _sideSnapshotTickSerial[s] = _tickSerial;
+
+            float nowH = (float)DoctrineBattleHours;
+            var currSig = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(battle, nowH);
+            float lastH = _lastHeavyReviewHours[s];
+            float nowReal = SafeRealtimeSeconds();
+            float lastReal = _lastHeavyReviewRealtimeSeconds[s];
+            var lastS = _lastSignatures[s];
+            bool hasP = _hasPendingChange[s];
+            float cycle = ComputeCompressionAdjustedCycle(s, nowH, nowReal, lastReal);
+            float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
+            var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
+            var dec = TacticalHeavyPathGate.Decide(input);
+            EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
+
+            // Plan F (2026-05-20): the heavy build alternates between sides via
+            // _heavyTickParity (flipped at the end of Tick). Off-slot with a cached
+            // snapshot: defer; _lastHeavyReview* stay put so the gate re-signals next Tick.
+            // A clock rewind never defers (the cached snapshot belongs to the old clock).
+            bool staggerSkip = dec.ShouldRun
+                && dec.Reason != "clock-rewind"
+                && dec.Reason != "first-tick"
+                && s != _heavyTickParity
+                && _lastPublishedSnapshots[s].HasData;
+            // Layer 2 frame-coalescing (2026-05-22): at most one heavy build per side per frame.
+            int frameNow = UnityEngine.Time.frameCount;
+            bool sameFrameAsLastBuild = _lastHeavyBuildFrame[s] == frameNow;
+
+            if (dec.ShouldRun && !staggerSkip && !sameFrameAsLastBuild)
+            {
+                _lastHeavyBuildFrame[s] = frameNow;
+                TacticalBattleRuntimeSnapshot snap;
+                using (TelemetryPerf.Scope("tactical.snapshot-build", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                {
+                    snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
+                }
+                _lastHeavyReviewHours[s] = nowH;
+                _lastHeavyReviewRealtimeSeconds[s] = nowReal;
+                _lastSignatures[s] = currSig;
+                _lastPublishedSnapshots[s] = snap;
+                _hasPendingChange[s] = false;
+                unchecked { _snapshotGeneration[s]++; }
+
+                // "Cheap per-group" pre-compute (2026-05-20): resolved per-Regiment
+                // decisions read by BattleGroupStancePatch tier-1.
+                using (TelemetryPerf.Scope("tactical.resolved-group-decisions.build", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+                {
+                    PopulateResolvedDecisionsForSide(side, battle);
+                }
+                return snap;
+            }
+
+            if (!currSig.SignatureEquals(lastS) && !hasP)
+            {
+                _hasPendingChange[s] = true;
+            }
+            return _lastPublishedSnapshots[s];
+        }
+
+        private static ArmyEvidenceBuilder.Bundle BundleFromSnapshot(TacticalBattleRuntimeSnapshot snap)
+        {
+            // Readiness fields propagate so the throttled path keeps the same
+            // fresh-troops decision as the direct path.
+            return new ArmyEvidenceBuilder.Bundle(
+                snap.OwnEvidence,
+                snap.EnemyVisible,
+                snap.OwnMainEffortStrength,
+                snap.OwnArmyMorale,
+                snap.OwnReservesCommittedFraction,
+                snap.ReinforcementsArrivingDelta,
+                ownAvgFatigue01: snap.OwnAvgFatigue01,
+                ownAvgAmmo01: snap.OwnAvgAmmo01,
+                nearestReinforcementHours: snap.NearestReinforcementHours,
+                nearestReinforcementStrength: snap.NearestReinforcementStrength);
         }
 
         /// <summary>
@@ -984,143 +998,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
             if (value < 0f) return 0f;
             return value > 1f ? 1f : value;
-        }
-
-        // ---- Slice 2 parity window: worker vs synchronous decision compare ----
-        //
-        // Snapshot the live (post-sync-tick) orchestrator state into a
-        // TacticalSideDecision so it can be compared against the worker's
-        // published decision. We mirror only the worker-populated fields:
-        //   AllianceId, CurrentIntent (via Army.CurrentIntentModel, set by
-        //   ArmyTickCycle.ObserveIntent during the sync tick), CommandTree,
-        //   CommanderPersonality (via FindArmyEntry).
-        //
-        // Skipped fields (worker doesn't populate, comparator skips):
-        //   LastReplanTrigger, StrategicIntent text.
-        //   (Gap-fill chunk 3 (2026-05-19): HasPlan + CurrentPlan now populated
-        //   on both sides; comparator covers HasPlan + CurrentPlan.MainEffortSector
-        //   when HasPlan is true. PlanAgeSeconds drifts continuously and stays
-        //   out of the comparator.)
-        //
-        // Skipped field — ForceAvailability: ArmyOrchestrator does NOT cache the
-        // last ArmyEvidenceBuilder.Bundle that the worker used for its force
-        // computation. Recomputing ArmyEvidenceBuilder.Build per parity cycle
-        // would double the sync path's heaviest call (it already builds once in
-        // DriveOperationsLedger). Intent divergence catches the same bug class
-        // (stale input / ordering / config drift), so we accept the gap.
-        private static TacticalSideDecision SnapshotSideDecisionForParity(TacticalBattleOrchestrator side)
-        {
-            try
-            {
-                if (side == null || side.Army == null) return TacticalSideDecision.Empty;
-
-                var entry = FindArmyEntry(side);
-                PersonalityVector personality = entry != null
-                    ? entry.PersonalityVector
-                    : side.Army.CommanderPersonality;
-
-                // Gap-fill chunk 3: capture sync-side plan state so the
-                // comparator's two inputs populate HasPlan + CurrentPlan
-                // identically. Without this the worker's chunk-3 population
-                // would fire a parity mismatch on every cycle for any side
-                // with a plan.
-                bool syncHasPlan = side.Army.HasPlan;
-                var syncPlan = syncHasPlan ? side.Army.CurrentPlan : default(TacticalBattlePlan);
-
-                return new TacticalSideDecision(
-                    allianceId: side.AllianceId,
-                    currentPlan: syncPlan,                                     // chunk 3
-                    currentIntent: side.Army.CurrentIntentModel,
-                    commandTree: side.Army.CurrentCommandTree ?? CommandTreeSnapshot.Empty,
-                    strategicIntent: default,                                  // skipped (text fields)
-                    forceAvailability: new ForceAvailabilitySnapshot(0f, 0f),  // skipped (see note above)
-                    commanderPersonality: personality,
-                    lastReplanTrigger: ReplanTrigger.None,                     // skipped
-                    hasPlan: syncHasPlan);                                     // chunk 3
-            }
-            catch
-            {
-                return TacticalSideDecision.Empty;
-            }
-        }
-
-        private static void CompareWorkerVsSynchronous(int allianceId, TacticalSideDecision synchronous)
-        {
-            var current = TacticalDecisionSnapshot.Current;
-            if (current == null || current == TacticalDecisionSnapshot.Empty) return;
-            var workerDecision = current.GetSide(allianceId);
-
-            int key = _battleSequence * 10 + allianceId;
-            if (_workerParityMismatchObserved.Contains(key)) return;
-
-            if (!SideDecisionsEqual(synchronous, workerDecision))
-            {
-                _workerParityMismatchObserved.Add(key);
-                EmitWorkerParityMismatch(allianceId, synchronous, workerDecision);
-                return;
-            }
-
-            int remaining;
-            if (!_workerParityComparesRemaining.TryGetValue(key, out remaining)) remaining = WorkerParityCompareBudget;
-            if (remaining > 0)
-            {
-                _workerParityComparesRemaining[key] = remaining - 1;
-                if (remaining == 1)
-                {
-                    OnceLog.Info("orch-worker-parity:" + key,
-                        "[TacticalOrchestratorWorkerParity] window-clean battleSeq="
-                        + _battleSequence + " alliance=" + allianceId
-                        + " compares=" + WorkerParityCompareBudget);
-                }
-            }
-        }
-
-        private static bool SideDecisionsEqual(TacticalSideDecision a, TacticalSideDecision b)
-        {
-            if (a.AllianceId != b.AllianceId) return false;
-            // CurrentIntent: compare PrimaryIntent + InferredMainEffort — the
-            // substantive fields both sides derive from ArmyIntentInference.Build.
-            // Confidence/age skipped because floating-point ordering may drift.
-            if (a.CurrentIntent.PrimaryIntent != b.CurrentIntent.PrimaryIntent) return false;
-            if (a.CurrentIntent.InferredMainEffort != b.CurrentIntent.InferredMainEffort) return false;
-            // Gap-fill chunk 3 (2026-05-19): plan-state parity coverage.
-            // HasPlan must match; when both are HasPlan==true we also compare
-            // the plan's MainEffortSector (stable, integer-valued). PlanId /
-            // Phase / AgeSeconds intentionally skipped — phase progression and
-            // age drift on the sync side every tick, and PlanId is set on
-            // replan which the worker doesn't drive (LastReplanTrigger still
-            // deferred).
-            if (a.HasPlan != b.HasPlan) return false;
-            if (a.HasPlan && b.HasPlan)
-            {
-                if (a.CurrentPlan.MainEffortSector != b.CurrentPlan.MainEffortSector) return false;
-            }
-            // Skipped (worker doesn't populate yet — remaining gap-fills):
-            //   LastReplanTrigger, StrategicIntent text fields,
-            //   ForceAvailability (Army doesn't cache the bundle; see SnapshotSideDecisionForParity).
-            return true;
-        }
-
-        private static void EmitWorkerParityMismatch(int allianceId, TacticalSideDecision synchronous, TacticalSideDecision worker)
-        {
-            try
-            {
-                TelemetryRouter.Emit(
-                    TelemetryLayer.Tactical,
-                    TelemetryCategory.Gate,
-                    "TacticalOrchestratorParityMismatch",
-                    TelemetrySeverity.Warning,
-                    ev => ev
-                        .WithSide(allianceId)
-                        .WithDecision("mismatch", "side-decision", "battleSeq=" + _battleSequence + "|alliance=" + allianceId)
-                        .WithField("allianceId", allianceId)
-                        .WithField("battleSequence", _battleSequence)
-                        .WithField("syncIntent", synchronous.CurrentIntent.PrimaryIntent.ToString())
-                        .WithField("workerIntent", worker.CurrentIntent.PrimaryIntent.ToString())
-                        .WithField("syncMainEffort", synchronous.CurrentIntent.InferredMainEffort)
-                        .WithField("workerMainEffort", worker.CurrentIntent.InferredMainEffort));
-            }
-            catch { }
         }
 
         private static int ResolvePlayerCicAllianceId()
@@ -1283,10 +1160,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 if (side == null || side.Army == null || !side.Army.HasPlan) return;
+                int s = side.AllianceId;
+                if (s < 0 || s > 1) s = 0;
                 IReadOnlyList<DirectChildSnapshot> snapshots;
-                using (TelemetryPerf.Scope("tactical.direct-child-discovery-snapshot", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+                if (IsHeavyThrottlingEnabled() && _lastPublishedSnapshots[s].HasData)
                 {
-                    snapshots = DirectChildDiscovery.Snapshot(side.AllianceId);
+                    // The heavy snapshot already carries this side's direct-child
+                    // discovery (GetAttachedUnitsReg walk); re-register only when a new
+                    // snapshot was built instead of re-walking the hierarchy every Tick.
+                    if (_directChildrenRegisteredGeneration[s] == _snapshotGeneration[s]
+                        && side.Army.CurrentDirectChildIntents.Count > 0)
+                        return;
+                    _directChildrenRegisteredGeneration[s] = _snapshotGeneration[s];
+                    snapshots = _lastPublishedSnapshots[s].DirectChildSnapshots;
+                }
+                else
+                {
+                    using (TelemetryPerf.Scope("tactical.direct-child-discovery-snapshot", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+                    {
+                        snapshots = DirectChildDiscovery.Snapshot(side.AllianceId);
+                    }
                 }
                 if (snapshots.Count == 0)
                 {
@@ -1294,8 +1187,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         !_directChildDeferLogged.Contains(side.AllianceId))
                     {
                         _directChildDeferLogged.Add(side.AllianceId);
-                        OnceLog.Info("o3-defer-discovery:" + side.AllianceId,
-                            "side=" + side.AllianceId + " reason=empty-or-no-command-units");
+                        TelemetryRouter.LegacyInfo("[TacticalDirectChildDiscovery] deferred side=" + side.AllianceId
+                            + " reason=empty-or-no-command-units", TelemetryLayer.Tactical);
                     }
                     return;
                 }
@@ -1346,11 +1239,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return;
                 }
 
-                if (current.HasNodes
-                    && string.Equals(CommandTreeSignature(current), CommandTreeSignature(tree), StringComparison.Ordinal))
-                {
-                    return;
-                }
+                if (ReferenceEquals(current, tree)) return;
+                if (current.HasNodes && CommandTreeHash(current) == CommandTreeHash(tree)) return;
 
                 side.Army.RegisterCommandTree(tree);
                 LogCommandTreeTelemetry(side.AllianceId, tree);
@@ -1361,33 +1251,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     + (side == null ? "null" : side.AllianceId.ToString())
                     + ": " + e.GetType().Name + " " + e.Message);
             }
-        }
-
-        private static string CommandTreeSignature(CommandTreeSnapshot tree)
-        {
-            if (tree == null || !tree.HasNodes)
-            {
-                return string.Empty;
-            }
-
-            var signature = new StringBuilder();
-            signature.Append(tree.RootNodeId).Append(':')
-                .Append(tree.Nodes.Count).Append(':')
-                .Append(tree.MaxDepth).Append(':')
-                .Append(tree.RawUnitTypDistribution).Append(':')
-                .Append(tree.MissingParentCount);
-
-            for (int i = 0; i < tree.Nodes.Count; i++)
-            {
-                var node = tree.Nodes[i];
-                signature.Append('|')
-                    .Append(node.NodeId).Append('<')
-                    .Append(node.ParentNodeId).Append(':')
-                    .Append(node.RawUnitTyp).Append(':')
-                    .Append(node.Depth);
-            }
-
-            return signature.ToString();
         }
 
         private static bool IsSyntheticOnlyCommandTree(CommandTreeSnapshot tree)
@@ -1409,17 +1272,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 if (tree == null || !tree.HasNodes) return;
-                string key = _battleSequence + ":" + allianceId;
-                string signature = CommandTreeSignature(tree);
-
-                string existing;
-                if (_commandTreeTelemetrySignatures.TryGetValue(key, out existing)
-                    && string.Equals(existing, signature, StringComparison.Ordinal))
+                int signature = CommandTreeHash(tree);
+                if (_commandTreeTelemetrySignatures.TryGetValue(allianceId, out int existing) && existing == signature)
                 {
                     return;
                 }
 
-                _commandTreeTelemetrySignatures[key] = signature;
+                _commandTreeTelemetrySignatures[allianceId] = signature;
                 var root = ResolveRootCommandLabel(tree);
                 TelemetryRouter.LegacyInfo("[TacticalCommandTree] " + SideLogContext(allianceId, root, root)
                     + " nodes=" + tree.Nodes.Count
@@ -1582,57 +1441,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 int childCount = side.Army.CurrentDirectChildIntents.Count;
 
-                EnemyVisibleState enemyVisForChildren;
-                if (!IsHeavyThrottlingEnabled())
-                {
-                    // Preserve exact pre-Task-6 behavior
-                    var bundle = ArmyEvidenceBuilder.Build(battle, side.AllianceId);
-                    enemyVisForChildren = bundle.EnemyVisible;
-                }
-                else
-                {
-                    // Gated heavy snapshot reuse for DirectChild evidence/intent (EnemyVisible is the needed part)
-                    float nowH = SafeCurrentBattleHours();
-                    var currSig = TacticalBattleSnapshotBuilder.ExtractCurrentSignature(battle, nowH);
-                    int s = side.AllianceId;
-                    if (s < 0 || s > 1) s = 0;
-                    float lastH = _lastHeavyReviewHours[s];
-                    float nowReal = SafeRealtimeSeconds();
-                    float lastReal = _lastHeavyReviewRealtimeSeconds[s];
-                    var lastS = _lastSignatures[s];
-                    bool hasP = _hasPendingChange[s];
-                    float cycle = ComputeCompressionAdjustedCycle(s, nowH, nowReal, lastReal);
-                    float minReal = (Plugin.Instance != null ? Plugin.Instance.HeavyReviewMinRealtimeSeconds : 2.0f);
-                    var input = new TacticalHeavyPathGate.Input(currSig, nowH, lastH, lastS, cycle, hasP, nowReal, lastReal, minReal);
-                    var dec = TacticalHeavyPathGate.Decide(input);
-                    EmitHeavyGateTelemetry(s, dec, nowH, lastH, cycle, hasP, currSig, nowReal, lastReal, minReal);
-                    TacticalBattleRuntimeSnapshot snap;
-                    // Plan F stagger — same logic as DriveTickCycle.
-                    bool staggerSkip = dec.ShouldRun
-                        && s != _heavyTickParity
-                        && _lastPublishedSnapshots[s].HasData;
-                    if (dec.ShouldRun && !staggerSkip)
-                    {
-                        using (TelemetryPerf.Scope("tactical.snapshot-build.direct-child-cycle", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
-                        {
-                            snap = TacticalBattleSnapshotBuilder.Build(battle, s, currSig, nowH);
-                        }
-                        _lastHeavyReviewHours[s] = nowH;
-                        _lastHeavyReviewRealtimeSeconds[s] = nowReal;
-                        _lastSignatures[s] = currSig;
-                        _lastPublishedSnapshots[s] = snap;
-                        _hasPendingChange[s] = false;
-                    }
-                    else
-                    {
-                        snap = _lastPublishedSnapshots[s];
-                        if (!currSig.SignatureEquals(lastS) && !hasP)
-                        {
-                            _hasPendingChange[s] = true;
-                        }
-                    }
-                    enemyVisForChildren = snap.EnemyVisible;
-                }
+                EnemyVisibleState enemyVisForChildren = IsHeavyThrottlingEnabled()
+                    ? EnsureSideSnapshot(side, battle).EnemyVisible
+                    // Throttling off: pre-Task-6 behaviour.
+                    : ArmyEvidenceBuilder.Build(battle, side.AllianceId).EnemyVisible;
 
                 // Build instanceId → sector-index map matching ArmyEvidenceBuilder's iteration
                 // (BattleUnits.completeunitlist filtered by IsUsableOwnGroup). The post-filter
@@ -1711,8 +1523,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     var dci = side.Army.CurrentDirectChildIntents[i];
                     if (dci.Role == DirectChildRole.Unknown) continue;
-                    OnceLog.Info("o3-direct-child-intent:" + _battleSequence + ":" + side.AllianceId + ":" + dci.ChildId + ":" + dci.Role,
-                        "[TacticalDirectChildIntent] " + SideLogContext(side.AllianceId)
+                    // Per-battle dedupe on (alliance, child, role); OnceLog keys must be static.
+                    long childKey = (2L << 62) ^ ((long)side.AllianceId << 56) ^ ((long)(int)dci.Role << 40)
+                        ^ (uint)ParseInstanceIdFromChildId(dci.ChildId);
+                    if (!_battleInfoLogged.Add(childKey)) continue;
+                    TelemetryRouter.LegacyInfo("[TacticalDirectChildIntent] " + SideLogContext(side.AllianceId)
                         + " child=" + dci.ChildId
                         + " childName=" + SafeLog(dci.DisplayName)
                         + " raw=" + dci.RawUnitTyp
@@ -1721,7 +1536,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         + " sector=" + dci.PrimarySector
                         + " support=" + dci.SupportPriority01.ToString("0.00")
                         + " enemyIntent=" + dci.EnemyIntent.PrimaryIntent
-                        + " confidence=" + dci.EnemyIntent.Confidence01.ToString("0.00"));
+                        + " confidence=" + dci.EnemyIntent.Confidence01.ToString("0.00"), TelemetryLayer.Tactical);
                 }
             }
             catch (Exception e)
@@ -1765,363 +1580,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // Empty map → primary sectors fall back to existing.PrimarySector per child.
             }
             return map;
-        }
-
-        // ---- Slice 2: worker input capture (runs on main thread) ----
-
-        /// <summary>
-        /// Builds a TacticalOrchestratorWorkerInput from live vanilla state. All
-        /// reflection / Unity API touches happen here on the main thread; the worker
-        /// only reads the resulting immutable container. Returns null on failure so
-        /// the caller can skip enqueue without breaking the sync drive path.
-        /// </summary>
-        private static TacticalOrchestratorWorkerInput CaptureWorkerInputOnMain(AIBattle battle, float deltaSeconds)
-        {
-            try
-            {
-                var bunits = ResolveBattleUnits(battle);
-                if (bunits == null) return null;
-
-                int allianceA = SafeAllianceForSide(bunits, 0);
-                int allianceB = SafeAllianceForSide(bunits, 1);
-                if (allianceA < 0 || allianceB < 0) return null;
-
-                float nowH = SafeCurrentBattleHours();
-                float nowReal = SafeRealtimeSeconds();
-                // Worker-input battleDeltaSeconds: kept at 0 in Slice 2. The per-side
-                // _lastTickBattleHours scratch state used by DriveTickCycle is owned
-                // by the sync path; threading a battle-time delta through here without
-                // disturbing it is a Task 14+ concern.
-                float battleDelta = 0f;
-
-                // Worker capture reads the snapshots Drive* just published into
-                // _lastPublishedSnapshots[s]. Drive* runs before this in Tick(),
-                // and TacticalBattleSnapshotBuilder.Build mutates
-                // TacticalUnitObservationAggregate.Shared (line 263) during the
-                // sync build — by the time we're here, the aggregate's last
-                // mutation is from whichever side actually built this Tick.
-                //
-                // Pre-existing bug fix (2026-05-21): the prior ClearForBattleEnd()
-                // call here reset CapturedForAlliance to -1 BEFORE SnapshotAggregateForWorker
-                // could read it, which made the alliance filter `CapturedForAlliance != allianceId`
-                // ALWAYS true. Result: obs0/obs1 always empty → worker had no observations
-                // to compute group stance decisions OR (chunk 3) objective records. The clear
-                // was originally added to prevent side-A from receiving side-B's stale data
-                // when both sides built per Tick — but with F-stagger (2026-05-20) only one
-                // side builds per Tick, so the agg's CapturedForAlliance correctly identifies
-                // the building side and SnapshotAggregateForWorker naturally returns empty
-                // for the non-building side.
-                TacticalBattleRuntimeSnapshot snap0;
-                ArmyEvidenceBuilder.Bundle bundle0;
-                CaptureSideForWorker(battle, allianceA, nowH, out snap0, out bundle0);
-                var obs0 = SnapshotAggregateForWorker(allianceA);
-                TacticalBattleRuntimeSnapshot snap1;
-                ArmyEvidenceBuilder.Bundle bundle1;
-                CaptureSideForWorker(battle, allianceB, nowH, out snap1, out bundle1);
-                var obs1 = SnapshotAggregateForWorker(allianceB);
-
-                // First-tick fallback: if neither side has a published snapshot
-                // (Drive* hasn't fired the heavy-gate for either side yet),
-                // skip enqueue. The worker waits one more tick. Patches fall
-                // through to legacy in the meantime.
-                if (!snap0.HasData && !snap1.HasData)
-                {
-                    return null;
-                }
-
-                // Per-side macroAI snapshot — sourced from bunits.sideinformation
-                // so the worker's DecideGroupStance sees the same vanilla state
-                // BattleGroupStancePatch reads from AIBattle.macroai for the side.
-                int macro0 = SafeMacroAiForSide(bunits, 0);
-                int macro1 = SafeMacroAiForSide(bunits, 1);
-
-                CommandTreeSnapshot tree0 = SafeCommandTreeSnapshot(allianceA);
-                CommandTreeSnapshot tree1 = SafeCommandTreeSnapshot(allianceB);
-                IReadOnlyList<DirectChildSnapshot> dc0 = SafeDirectChildSnapshot(allianceA);
-                IReadOnlyList<DirectChildSnapshot> dc1 = SafeDirectChildSnapshot(allianceB);
-
-                var sectorMap0 = BuildInstanceToSectorIndexMap(battle, allianceA);
-                var sectorMap1 = BuildInstanceToSectorIndexMap(battle, allianceB);
-
-                CommanderRosterEntry entry0 = FindArmyEntry(side0);
-                CommanderRosterEntry entry1 = FindArmyEntry(side1);
-
-                // Gap-fill chunk 3: snapshot ArmyOrchestrator plan state for
-                // each side. Each side may be null (suppressed). Plan state is
-                // value-typed; default() == Empty when no plan is fielded.
-                var planState0 = CaptureArmyPlanState(side0);
-                var planState1 = CaptureArmyPlanState(side1);
-
-                // Worker-migration (2026-05-21): per-side ObjectiveRecordsCaptureContext.
-                // Only capture when the feature flag is on; empty context otherwise so
-                // the worker.BuildObjectivesForSide short-circuits and main's
-                // TryGetObjectiveRecords returns false, routing snapshot.Build back to
-                // the legacy on-main BuildObjectiveRecordsFromAggregate path.
-                ObjectiveRecordsCaptureContext objCtx0 = ObjectiveRecordsCaptureContext.Empty;
-                ObjectiveRecordsCaptureContext objCtx1 = ObjectiveRecordsCaptureContext.Empty;
-                if (Plugin.EnableWorkerObjectiveRecords != null && Plugin.EnableWorkerObjectiveRecords.Value)
-                {
-                    objCtx0 = TacticalVisionRuntimeAdapter.CaptureObjectiveRecordsContextForSide(battle, allianceA);
-                    objCtx1 = TacticalVisionRuntimeAdapter.CaptureObjectiveRecordsContextForSide(battle, allianceB);
-                }
-
-                var config = BuildWorkerConfigSnapshot();
-
-                return new TacticalOrchestratorWorkerInput(
-                    battleSequence: _battleSequence,
-                    playerAllianceId: _playerAllianceId,
-                    aiVsAi: SafeAiVsAi(),
-                    battleHours: nowH,
-                    realtimeSeconds: nowReal,
-                    deltaSeconds: deltaSeconds,
-                    battleDeltaSeconds: battleDelta,
-                    side0Snapshot: snap0,
-                    side1Snapshot: snap1,
-                    side0Bundle: bundle0,
-                    side1Bundle: bundle1,
-                    side0CommandTree: tree0,
-                    side1CommandTree: tree1,
-                    side0DirectChildren: dc0,
-                    side1DirectChildren: dc1,
-                    side0CommanderEntry: entry0,
-                    side1CommanderEntry: entry1,
-                    side0InstanceToSectorMap: sectorMap0,
-                    side1InstanceToSectorMap: sectorMap1,
-                    config: config,
-                    side0Observations: obs0,
-                    side1Observations: obs1,
-                    side0AllianceId: allianceA,
-                    side1AllianceId: allianceB,
-                    side0MacroAi: macro0,
-                    side1MacroAi: macro1,
-                    side0PlanState: planState0,
-                    side1PlanState: planState1,
-                    side0ObjectiveCaptureContext: objCtx0,
-                    side1ObjectiveCaptureContext: objCtx1);
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] CaptureWorkerInputOnMain failed: "
-                    + e.GetType().Name + " " + e.Message);
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Read the snapshot just published by <c>DriveTacticalCommanderSide</c>
-        /// for the given alliance and synthesize an evidence bundle from the
-        /// snapshot fields. Never calls
-        /// <see cref="TacticalBattleSnapshotBuilder.Build"/> or
-        /// <see cref="ArmyEvidenceBuilder.Build"/> — that work is owned by the
-        /// synchronous Drive* path, and the worker reads the cached result so
-        /// no double-build occurs when both consult <c>TacticalHeavyPathGate</c>.
-        ///
-        /// Worker is async by design: being one tick behind on data is fine
-        /// because the worker writes its decisions another tick later. The
-        /// bundle synthesis mirrors the post-gate synthesis inside
-        /// <see cref="DriveTickCycle"/> (search for "Synthesize bundle-like
-        /// data from snapshot") — same fields, same constructor.
-        ///
-        /// First-tick fallback: if Drive* hasn't published yet (<c>snap.HasData
-        /// == false</c>), return <see cref="TacticalBattleRuntimeSnapshot.Empty"/>
-        /// + <c>default(Bundle)</c>. The caller short-circuits the enqueue when
-        /// both sides come back empty, so the worker waits one more tick.
-        ///
-        /// Out-of-range alliance (Europe / unmapped, allianceId &gt; 1): the
-        /// snapshot/cache arrays are sized 2, so we return Empty rather than
-        /// touch them. The worker has no role for Europe alliances anyway.
-        /// </summary>
-        private static void CaptureSideForWorker(
-            AIBattle battle,
-            int allianceId,
-            float nowH,
-            out TacticalBattleRuntimeSnapshot snap,
-            out ArmyEvidenceBuilder.Bundle bundle)
-        {
-            try
-            {
-                int s = allianceId;
-                if (s < 0 || s > 1)
-                {
-                    snap = TacticalBattleRuntimeSnapshot.Empty;
-                    bundle = default(ArmyEvidenceBuilder.Bundle);
-                    return;
-                }
-
-                // Read the snapshot Drive* just published (or the prior cached
-                // value if the heavy-gate skipped this tick). If Drive* hasn't
-                // run yet for this side (first tick, or
-                // ShouldRunTacticalCommanderForSide returned false), HasData is
-                // false and the caller skips enqueue.
-                snap = _lastPublishedSnapshots[s];
-                if (!snap.HasData)
-                {
-                    bundle = default(ArmyEvidenceBuilder.Bundle);
-                    return;
-                }
-
-                // Synthesize a Bundle from snapshot fields — same shape as the
-                // synthesis DriveTickCycle does internally (search for
-                // "Synthesize bundle-like data from snapshot").
-                bundle = new ArmyEvidenceBuilder.Bundle(
-                    snap.OwnEvidence,
-                    snap.EnemyVisible,
-                    snap.OwnMainEffortStrength,
-                    snap.OwnArmyMorale,
-                    snap.OwnReservesCommittedFraction,
-                    snap.ReinforcementsArrivingDelta,
-                    ownAvgFatigue01: snap.OwnAvgFatigue01,
-                    ownAvgAmmo01: snap.OwnAvgAmmo01,
-                    nearestReinforcementHours: snap.NearestReinforcementHours,
-                    nearestReinforcementStrength: snap.NearestReinforcementStrength);
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] CaptureSideForWorker failed: "
-                    + e.GetType().Name + " " + e.Message);
-                snap = TacticalBattleRuntimeSnapshot.Empty;
-                bundle = default(ArmyEvidenceBuilder.Bundle);
-            }
-        }
-
-        /// <summary>
-        /// Gap-fill chunk 3: snapshot the current <see cref="ArmyOrchestrator"/>
-        /// plan-state for a side into an immutable
-        /// <see cref="TacticalArmyPlanStateSnapshot"/>. Reads happen on the
-        /// main thread (Plugin/Unity safe), then the worker reads the snapshot
-        /// later off-thread.
-        ///
-        /// Returns <see cref="TacticalArmyPlanStateSnapshot.Empty"/> when the
-        /// side is null/suppressed or has no plan. All reads are try/catch
-        /// guarded per runtime safety; reflection-style failures degrade to
-        /// Empty rather than throwing from the capture path.
-        /// </summary>
-        private static TacticalArmyPlanStateSnapshot CaptureArmyPlanState(TacticalBattleOrchestrator side)
-        {
-            try
-            {
-                if (side == null || side.Army == null) return TacticalArmyPlanStateSnapshot.Empty;
-                var army = side.Army;
-                bool hasPlan = army.HasPlan;
-                if (!hasPlan) return TacticalArmyPlanStateSnapshot.Empty;
-                var plan = army.CurrentPlan;
-                return new TacticalArmyPlanStateSnapshot(
-                    hasPlan: true,
-                    currentPlan: plan,
-                    planAgeSeconds: army.PlanAgeSeconds,
-                    phaseAgeSeconds: army.PhaseAgeSeconds,
-                    historyGlobalOdds: army.HistoryGlobalOdds,
-                    mainEffortSector: plan.MainEffortSector);
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] CaptureArmyPlanState failed: "
-                    + e.GetType().Name + " " + e.Message);
-                return TacticalArmyPlanStateSnapshot.Empty;
-            }
-        }
-
-        /// <summary>
-        /// Snapshots TacticalUnitObservationAggregate.Shared into an immutable
-        /// per-side array. Called immediately after each side's heavy-snapshot
-        /// Build so the next side's Build doesn't overwrite our observations.
-        /// Filters to units captured for the requested alliance — defends
-        /// against the singleton holding a stale capture from a prior cycle.
-        /// </summary>
-        private static IReadOnlyList<TacticalUnitObservation> SnapshotAggregateForWorker(int allianceId)
-        {
-            try
-            {
-                var agg = TacticalUnitObservationAggregate.Shared;
-                if (agg == null || agg.CapturedForAlliance != allianceId)
-                    return Array.Empty<TacticalUnitObservation>();
-                var src = agg.AllUnits;
-                if (src == null || src.Count == 0)
-                    return Array.Empty<TacticalUnitObservation>();
-                var copy = new TacticalUnitObservation[src.Count];
-                for (int i = 0; i < src.Count; i++) copy[i] = src[i];
-                return copy;
-            }
-            catch
-            {
-                return Array.Empty<TacticalUnitObservation>();
-            }
-        }
-
-        /// <summary>
-        /// Reads bunits.sideinformation[side].macroai with defensive guards.
-        /// Returns -1 on failure (matches BattleGroupStancePatch's fallback).
-        /// </summary>
-        private static int SafeMacroAiForSide(BattleUnits bunits, int side)
-        {
-            try
-            {
-                if (bunits == null || bunits.sideinformation == null) return -1;
-                if (side < 0 || side >= bunits.sideinformation.Length) return -1;
-                var info = bunits.sideinformation[side];
-                if (info == null) return -1;
-                return info.macroai;
-            }
-            catch
-            {
-                return -1;
-            }
-        }
-
-        private static CommandTreeSnapshot SafeCommandTreeSnapshot(int allianceId)
-        {
-            try { return CommandTreeRuntime.Snapshot(allianceId); }
-            catch { return CommandTreeSnapshot.Empty; }
-        }
-
-        private static IReadOnlyList<DirectChildSnapshot> SafeDirectChildSnapshot(int allianceId)
-        {
-            try { return DirectChildDiscovery.Snapshot(allianceId); }
-            catch { return Array.Empty<DirectChildSnapshot>(); }
-        }
-
-        private static TacticalOrchestratorWorkerConfigSnapshot BuildWorkerConfigSnapshot()
-        {
-            try
-            {
-                var p = Plugin.Instance;
-                bool heavy = false;
-                float heavyMin = 0f;
-                float heavyCycle = 0f;
-                TacticalCommanderMode mode = default;
-                if (p != null)
-                {
-                    try { heavy = p.EnableTacticalHeavyPathThrottling != null && p.EnableTacticalHeavyPathThrottling.Value; } catch { }
-                    try { heavyMin = p.HeavyReviewMinRealtimeSeconds; } catch { }
-                    try { heavyCycle = p.HeavyReviewCycleHours; } catch { }
-                    try { mode = p.TacticalCommanderModeValue; } catch { }
-                }
-
-                return new TacticalOrchestratorWorkerConfigSnapshot(
-                    enableHeavyPathThrottling: heavy,
-                    enableIntentInference: SafeStaticBool(Plugin.EnableTacticalOrchestratorIntentInference),
-                    heavyReviewMinRealtimeSeconds: heavyMin,
-                    heavyReviewCycleHours: heavyCycle,
-                    minReplanSeconds: SafeStaticInt(Plugin.TacticalOrchestratorMinReplanSeconds, 60),
-                    enableSinglePassObjectiveRecords: SafeStaticBool(Plugin.EnableSinglePassObjectiveRecords),
-                    commanderMode: mode);
-            }
-            catch
-            {
-                return TacticalOrchestratorWorkerConfigSnapshot.Empty;
-            }
-        }
-
-        private static bool SafeStaticBool(BepInEx.Configuration.ConfigEntry<bool> e)
-        {
-            try { return e != null && e.Value; }
-            catch { return false; }
-        }
-
-        private static int SafeStaticInt(BepInEx.Configuration.ConfigEntry<int> e, int fallback)
-        {
-            try { return e != null ? e.Value : fallback; }
-            catch { return fallback; }
         }
 
         private static ArmyEvidence BuildArmyEvidenceForSide(int allianceId, AIBattle battle)
@@ -2191,23 +1649,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     try { _resolvedDecisionsBySide[i]?.Clear(); } catch { }
                 }
                 _heavyTickParity = 0;
+                for (int i = 0; i < 2; i++)
+                {
+                    _sideSnapshotTickSerial[i] = -1;
+                    _snapshotGeneration[i] = 0;
+                    _lastLedgerSnapshotGeneration[i] = -1;
+                    _directChildrenRegisteredGeneration[i] = -1;
+                    _lastLedgerIntentsHash[i] = 0;
+                    _lastLedgerMode[i] = TacticalCommanderMode.Off;
+                    _lastLedgerTickBattleSeconds[i] = -1f;
+                    _lastHeavyBuildFrame[i] = -1;
+                }
+                _battleInfoLogged.Clear();
+                _regimentByGameObjectId.Clear();
+                _countedUnitIds.Clear();
+                ResetDoctrineClock();
+                _replanAfterNight[0] = false;
+                _replanAfterNight[1] = false;
             }
             catch { }
-            // Tasks 10/11: clear aggregate pool and parity window state for new battle
-            // (global singletons — outside per-side loop)
+            // Clear the shared observation aggregate (global singleton) for the next battle.
             try { TacticalUnitObservationAggregate.Shared.ClearForBattleEnd(); } catch { }
-            try { TacticalBattleSnapshotBuilder.ClearParityState(); } catch { }
-            // Slice 2: reset the worker decision snapshot so stale per-cycle data
-            // from the previous battle never leaks to readers in the next one.
-            try { TacticalDecisionSnapshot.ResetForBattleEnd(); } catch { }
-            // Slice 2 parity window: reset per-battle compare counters so the
-            // next battle starts a fresh 20-cycle window per side.
-            try
-            {
-                _workerParityComparesRemaining.Clear();
-                _workerParityMismatchObserved.Clear();
-            }
-            catch { }
         }
 
         /// <summary>
@@ -2242,18 +1704,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (gcDelta < 0) gcDelta = 0;
                 _lastGen0CountBySide[sideIdx] = gcCountNow;
 
-                // Time-bucketed input signature (coarse BattleHourBucket changes over time)
-                string inputSig = "TacticalHeavyGate|side=" + side +
-                    "|nowH=" + nowH.ToString("F4") +
-                    "|lastH=" + lastH.ToString("F4") +
-                    "|cycle=" + cycle.ToString("F4") +
-                    "|real=" + nowReal.ToString("F2") +
-                    "|minReal=" + minReal.ToString("F2") +
-                    "|pending=" + hasP +
-                    "|units=" + currSig.ActiveUnitCount +
-                    "|objHash=" + currSig.MajorObjectiveAnchorHash +
-                    "|bucket=" + currSig.BattleHourBucket;
-
+                // The input-signature string is built inside the configure callback, which
+                // TelemetryRouter only invokes when the active profile emits this event.
                 TelemetryRouter.Emit(
                     TelemetryLayer.Tactical,
                     TelemetryCategory.Gate,
@@ -2261,7 +1713,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     TelemetrySeverity.Info,
                     ev => ev
                         .WithSide(side)
-                        .WithDecision(dec.ShouldRun ? "executed" : "skipped", dec.Reason, inputSig)
+                        .WithDecision(dec.ShouldRun ? "executed" : "skipped", dec.Reason,
+                            "TacticalHeavyGate|side=" + side +
+                            "|nowH=" + nowH.ToString("F4") +
+                            "|lastH=" + lastH.ToString("F4") +
+                            "|cycle=" + cycle.ToString("F4") +
+                            "|real=" + nowReal.ToString("F2") +
+                            "|minReal=" + minReal.ToString("F2") +
+                            "|pending=" + hasP +
+                            "|units=" + currSig.ActiveUnitCount +
+                            "|objHash=" + currSig.MajorObjectiveAnchorHash +
+                            "|bucket=" + currSig.BattleHourBucket)
                         .WithField("cycleHours", cycle)
                         .WithField("battleHours", nowH)
                         .WithField("lastHeavyHours", lastH)
@@ -2285,10 +1747,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static void ClearForFailure()
         {
+            // ResetRuntimeTickState clears the resolved-decision caches; the battle-lifetime
+            // scene and command-tree caches are cleared here too because OnBattleEnd
+            // early-outs once active is false.
             ResetRuntimeTickState();
+            try { TacticalStableSceneCache.Clear(); } catch { }
+            try { CommandTreeRuntime.InvalidateAll(); } catch { }
             side0 = null;
             side1 = null;
             _playerAllianceId = -1;
+            _activeBattleUnitsId = 0;
             active = false;
         }
 
@@ -2355,7 +1823,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (counts[s] > 0)
                     {
                         OnceLog.Info(
-                            "tactical-resolved-cache:prepopulated:" + s,
+                            "tactical-resolved-cache:prepopulated",
                             "[TacticalResolvedCache] pre-populated alliance=" + s
                             + " count=" + counts[s]
                             + " — battle-start gap closed; tier-1 hits begin immediately");
@@ -2425,7 +1893,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // AIBattle that fired Tick, which may not match the side
                 // we're pre-computing. Pull from bunits.sideinformation
                 // indexed by the side whose alliance == allianceId.
-                // Mirrors CaptureWorkerInputOnMain's SafeMacroAiForSide.
                 int macro = SafeMacroAiForSideByAlliance(bunits, allianceId);
 
                 bool chargeDenialOn = false;
@@ -2459,6 +1926,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     try { instanceId = group.GetInstanceID(); }
                     catch { continue; }
                     if (instanceId == 0) continue;
+
+                    // Player-owned group (W&L: the player's command is detached from AI
+                    // control but stays in the hierarchy): cache a no-op so the per-group
+                    // patch never resolves doctrine for it.
+                    if (group.dlcw_isundercommander)
+                    {
+                        cache[instanceId] = new TacticalResolvedGroupDecision(
+                            finalStance: -1,
+                            kind: TacticalDoctrineDecisionKind.Skip,
+                            reason: "player-owned",
+                            fromDoctrine: false,
+                            fromLedger: false,
+                            isChargeOverride: false,
+                            chargeAction: ChargeOverrideAction.None);
+                        continue;
+                    }
 
                     int vanillaOrdered;
                     try { vanillaOrdered = group.ai_stanceordered; }
