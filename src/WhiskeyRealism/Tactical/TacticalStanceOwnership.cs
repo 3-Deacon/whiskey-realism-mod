@@ -225,6 +225,22 @@ namespace WhiskeyRealism.Tactical
 
         public const int VanillaStanceUnknown = -1;
 
+        // Battle-core intent sources on the ownership ladder: the explicit charge
+        // denial outranks everything, the #45 scorer is the lowest rung, every
+        // other battle-core source holds a stance like the executor (#61).
+        public static StanceWriteSource SourceFor(Battle.IntentSource source)
+        {
+            switch (source)
+            {
+                case Battle.IntentSource.ChargeDemotion:
+                    return StanceWriteSource.ChargeDemotion;
+                case Battle.IntentSource.GroupStanceScorer:
+                    return StanceWriteSource.Scorer;
+                default:
+                    return StanceWriteSource.Executor;
+            }
+        }
+
         // Port of the per-group lines of AdjustGroupAIStance (4239-4252); the
         // side-level lines 4248 and 4256 and the retreat line 4258 are left out
         // (see header). Mirrors vanilla's local variable: 4252 tests the

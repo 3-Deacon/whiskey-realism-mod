@@ -636,6 +636,18 @@ namespace WhiskeyRealism.Tactical.Battle
             return SkipReason.None;
         }
 
+        /// <summary>
+        /// A retry runs only while the source that failed still holds the (group,
+        /// Move) claim this tick; any other winner, or none, supersedes it.
+        /// </summary>
+        public static bool RetryStillClaimed(OrderArbiter arbiter, in BattleOrderIntent retry)
+        {
+            return arbiter != null &&
+                arbiter.TryGetClaim(retry.GroupId, OrderChannel.Move, out BattleOrderIntent claim) &&
+                claim.Source == retry.Source &&
+                claim.Priority == retry.Priority;
+        }
+
         /// <summary>Step 9: one W&amp;L dispatch per executed plan, not per fanned-out target.</summary>
         public static bool ShouldDispatch(in ExecutionPlan plan, int executedTargets)
         {

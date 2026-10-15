@@ -39,6 +39,8 @@ internal static class OrderArbiterTests
             ("battle-core SelfOnlyChainFailsClosedForPlayerAncestor", SelfOnlyChainFailsClosedForPlayerAncestor),
             ("battle-core AncestorFanOutDispatchesOnce", AncestorFanOutDispatchesOnce),
             ("battle-core StanceRecordUsesDoctrineClock", StanceRecordUsesDoctrineClock),
+            ("battle-core StanceSourceMapsIntentLadder", StanceSourceMapsIntentLadder),
+            ("battle-core RetryRunsOnlyWhileItsSourceStillClaims", RetryRunsOnlyWhileItsSourceStillClaims),
         });
     }
 
@@ -590,6 +592,33 @@ internal static class OrderArbiterTests
         AssertNear(19.50f + TacticalStanceOwnership.HoldHours + 1f, stamp, 0.0001f, "vanilla's 4264 stamp stays on the raw clock");
         var next = TacticalStanceOwnership.Next(new StanceWriteDecision(StanceWriteAction.Write, "write"), nightInput);
         AssertNear(10.10f, next.WrittenAtHours, 0.0001f, "records are written in doctrine hours");
+    }
+
+    private static void StanceSourceMapsIntentLadder()
+    {
+        AssertEqual(StanceWriteSource.ChargeDemotion, TacticalStanceOwnership.SourceFor(IntentSource.ChargeDemotion), "charge denial");
+        AssertEqual(StanceWriteSource.Scorer, TacticalStanceOwnership.SourceFor(IntentSource.GroupStanceScorer), "#45 scorer");
+        AssertEqual(StanceWriteSource.Executor, TacticalStanceOwnership.SourceFor(IntentSource.PostureExecutor), "#61 posture");
+        AssertEqual(StanceWriteSource.Executor, TacticalStanceOwnership.SourceFor(IntentSource.Withdrawal), "safety sources hold like the executor");
+    }
+
+    private static void RetryRunsOnlyWhileItsSourceStillClaims()
+    {
+        var arbiter = new OrderArbiter();
+        var retry = Move(4, 600f, -600f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        arbiter.BeginTick();
+        arbiter.Submit(Move(4, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor));
+        arbiter.Resolve(new BattleOrderIntent[4]);
+        AssertTrue(OrderExecutor.RetryStillClaimed(arbiter, retry), "the source still wants (group, Move)");
+
+        arbiter.BeginTick();
+        arbiter.Submit(Move(4, 100f, -100f, IntentPriority.Safety, IntentSource.Withdrawal));
+        arbiter.Resolve(new BattleOrderIntent[4]);
+        AssertFalse(OrderExecutor.RetryStillClaimed(arbiter, retry), "superseded by a Safety withdrawal");
+
+        arbiter.BeginTick();
+        arbiter.Resolve(new BattleOrderIntent[4]);
+        AssertFalse(OrderExecutor.RetryStillClaimed(arbiter, retry), "the source dropped the move");
     }
 
     // ------------------------------------------------------------------ helpers
