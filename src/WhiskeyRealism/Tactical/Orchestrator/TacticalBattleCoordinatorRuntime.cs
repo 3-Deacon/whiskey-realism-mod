@@ -656,7 +656,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         snap.OwnMainEffortStrength,
                         snap.OwnArmyMorale,
                         snap.OwnReservesCommittedFraction,
-                        snap.ReinforcementsArrivingDelta,
+                        snap.OwnReinforcementsArriving,
                         ownAvgFatigue01: snap.OwnAvgFatigue01,
                         ownAvgAmmo01: snap.OwnAvgAmmo01,
                         nearestReinforcementHours: snap.NearestReinforcementHours,
@@ -698,7 +698,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     ownMainEffortStrength: bundleForReplan.OwnMainEffortStrength,
                     ownArmyMorale: bundleForReplan.OwnArmyMorale,
                     ownReservesCommittedFraction: bundleForReplan.OwnReservesCommittedFraction,
-                    reinforcementsArrivingDelta: bundleForReplan.ReinforcementsArrivingDelta,
+                    ownReinforcementsArriving: bundleForReplan.OwnReinforcementsArriving,
                     minReplanSeconds: minReplanSeconds,
                     ownAvgFatigue01: bundleForReplan.OwnAvgFatigue01,
                     ownAvgAmmo01: bundleForReplan.OwnAvgAmmo01,
@@ -828,7 +828,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                             snap.OwnMainEffortStrength,
                             snap.OwnArmyMorale,
                             snap.OwnReservesCommittedFraction,
-                            snap.ReinforcementsArrivingDelta);
+                            snap.OwnReinforcementsArriving);
                         forceMain = snap.OwnMainEffortStrength;
                         forceReserveAvail = Math.Max(0f, 1f - Clamp01(snap.OwnReservesCommittedFraction));
                     }
@@ -1957,7 +1957,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     snap.OwnMainEffortStrength,
                     snap.OwnArmyMorale,
                     snap.OwnReservesCommittedFraction,
-                    snap.ReinforcementsArrivingDelta,
+                    snap.OwnReinforcementsArriving,
                     ownAvgFatigue01: snap.OwnAvgFatigue01,
                     ownAvgAmmo01: snap.OwnAvgAmmo01,
                     nearestReinforcementHours: snap.NearestReinforcementHours,

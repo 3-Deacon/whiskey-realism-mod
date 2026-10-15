@@ -43,7 +43,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float armyMoraleCurrent,
             float armyMoraleFloor,
             float reservesCommittedFraction,
-            float reinforcementsArrivingDelta,
+            float ownReinforcementsArriving,
             float enemyMainEffortShiftConfidenceWeighted,
             float mainEffortLocalOdds = 1f,
             float mainEffortLocalOddsHistory = 1f,
@@ -67,7 +67,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             ArmyMoraleCurrent = armyMoraleCurrent;
             ArmyMoraleFloor = armyMoraleFloor;
             ReservesCommittedFraction = reservesCommittedFraction;
-            ReinforcementsArrivingDelta = reinforcementsArrivingDelta;
+            OwnReinforcementsArriving = ownReinforcementsArriving;
             EnemyMainEffortShiftConfidenceWeighted = enemyMainEffortShiftConfidenceWeighted;
             MainEffortLocalOdds = mainEffortLocalOdds;
             MainEffortLocalOddsHistory = mainEffortLocalOddsHistory;
@@ -92,7 +92,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float ArmyMoraleCurrent { get; }
         public float ArmyMoraleFloor { get; }
         public float ReservesCommittedFraction { get; }
-        public float ReinforcementsArrivingDelta { get; }
+        /// <summary>
+        /// Own reinforcement strength due within 24 h
+        /// (sideinformation.reinforcementarrivalswithin24hrs). Own side only:
+        /// the enemy's schedule is not known; enemy arrivals count once in
+        /// range, through the contact ledger.
+        /// </summary>
+        public float OwnReinforcementsArriving { get; }
         public float EnemyMainEffortShiftConfidenceWeighted { get; }
 
         // Offensive-trigger inputs (added 2026-05-19 for probe-then-exploit
@@ -117,16 +123,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // caller without a snapshot still sees the first crossing.
         public float ArmyMoraleAtLastReplan { get; }
         public float ReservesCommittedAtLastReplan { get; }
-        /// <summary>Own strength; the reinforcement delta is judged as a share of it.</summary>
+        /// <summary>Own strength; own arriving reinforcements are judged as a share of it.</summary>
         public float OwnStrength { get; }
         public float ReinforcementShareAtLastReplan { get; }
         /// <summary>Inferred enemy intent now; null = not supplied (level behaviour).</summary>
         public InferredIntent? CurrentEnemyIntent { get; }
         public InferredIntent EnemyIntentAtLastReplan { get; }
 
-        /// <summary>Net reinforcement delta as a share of own strength.</summary>
+        /// <summary>Own arriving reinforcements as a share of own strength.</summary>
         public float ReinforcementShare =>
-            ReinforcementsArrivingDelta / (OwnStrength > 1f ? OwnStrength : 1f);
+            OwnReinforcementsArriving / (OwnStrength > 1f ? OwnStrength : 1f);
     }
 
     public static class ArmyReplanTriggers

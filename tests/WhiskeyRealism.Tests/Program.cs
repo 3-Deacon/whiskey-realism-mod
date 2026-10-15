@@ -23461,7 +23461,7 @@ static class Program
             mainEffortOwnStrength: 5000f, mainEffortHistoryOwnStrength: 5000f,
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 1.0f, armyMoraleFloor: 0.4f,
-            reservesCommittedFraction: 0.5f, reinforcementsArrivingDelta: 0f,
+            reservesCommittedFraction: 0.5f, ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0f);
         AssertEqual(ReplanTrigger.PhaseDeadline, ArmyReplanTriggers.Evaluate(input), "age past the battle-time plan deadline fires PhaseDeadline");
     }
@@ -23473,7 +23473,7 @@ static class Program
             mainEffortOwnStrength: 1500f, mainEffortHistoryOwnStrength: 5000f,  // 30% of historic
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 1.0f, armyMoraleFloor: 0.4f,
-            reservesCommittedFraction: 0.5f, reinforcementsArrivingDelta: 0f,
+            reservesCommittedFraction: 0.5f, ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0f);
         AssertEqual(ReplanTrigger.MainEffortSectorLoss, ArmyReplanTriggers.Evaluate(input), "main-effort below 50% fires MainEffortSectorLoss");
     }
@@ -23500,7 +23500,7 @@ static class Program
 
     private static void ArmyReplanTriggersReinforcementArrivalFiresOnNonzeroDelta()
     {
-        var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, reinforcementsArrivingDelta: 2500f, 0f);
+        var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, ownReinforcementsArriving: 2500f, 0f);
         AssertEqual(ReplanTrigger.ReinforcementArrival, ArmyReplanTriggers.Evaluate(input), "reinforcements arrival fires ReinforcementArrival");
     }
 
@@ -23528,7 +23528,7 @@ static class Program
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 0.9f, armyMoraleFloor: 0.4f,
             reservesCommittedFraction: 0.35f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0.0f);
         AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(input),
             "0.35 unknown sentinel must not trip ReserveExhaustion");
@@ -23543,7 +23543,7 @@ static class Program
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 0.9f, armyMoraleFloor: 0.4f,
             reservesCommittedFraction: 0.90f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0.0f);
         AssertEqual(ReplanTrigger.ReserveExhaustion, ArmyReplanTriggers.Evaluate(input),
             "known fraction >= 0.85 still fires ReserveExhaustion");
@@ -24759,7 +24759,7 @@ static class Program
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 10f, evidence, visible,
             ownMainEffortStrength: 8000f, ownArmyMorale: 1.0f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.1f, ownAvgAmmo01: 0.95f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -24799,7 +24799,7 @@ static class Program
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 8000f, 5000f),
             ownMainEffortStrength: 20000f, ownArmyMorale: 0.7f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.7f, ownAvgAmmo01: 0.5f,
             nearestReinforcementHours: 2f, nearestReinforcementStrength: 15000f);
@@ -24825,7 +24825,7 @@ static class Program
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local
             ownMainEffortStrength: 18000f, ownArmyMorale: 0.8f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.4f, ownAvgAmmo01: 0.7f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -24851,7 +24851,7 @@ static class Program
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local
             ownMainEffortStrength: 18000f, ownArmyMorale: 0.8f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.4f, ownAvgAmmo01: 0.7f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -24877,7 +24877,7 @@ static class Program
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local, no intent shift
             ownMainEffortStrength: 8000f, ownArmyMorale: 1.0f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase,
@@ -24911,7 +24911,7 @@ static class Program
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 5f, evidence, visible,
             ownMainEffortStrength: 12000f, ownArmyMorale: 1.0f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -24979,7 +24979,7 @@ static class Program
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 1.5f, new ArmyEvidence(1.0f, TerrainKind.Open, 0), visible,
             ownMainEffortStrength: 10000f, ownArmyMorale: 1.0f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 600,
             ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f,
@@ -25015,7 +25015,7 @@ static class Program
             orch, deltaSeconds: 5f, evidence, visible,
             ownMainEffortStrength: 12000f, ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,  // above exploit-gate min 0.4
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 0,
             ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -26031,7 +26031,7 @@ static class Program
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 0.9f, armyMoraleFloor: 0.4f,
             reservesCommittedFraction: 0.35f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0.0f);
         AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(atSentinel),
             "at sentinel boundary: no trigger");
@@ -26053,7 +26053,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.None, trigger, "normal conditions do not replan");
@@ -26077,7 +26077,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.PhaseDeadline, trigger, "age beyond budget replans on phase deadline");
@@ -26101,7 +26101,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
         orch.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
         var second = ArmyTickCycle.MaybeReplan(
@@ -26112,7 +26112,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.PhaseDeadline, first, "first over-budget tick replans");
@@ -26183,7 +26183,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.None, trigger, "normal tick does not replan");
@@ -26217,7 +26217,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.EnemyIntentShift, trigger, "confident enemy attack signal replans");
@@ -26237,7 +26237,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.None, trigger, "no active plan cannot replan");
@@ -26761,7 +26761,7 @@ static class Program
         AssertEqual(0f, snap.OwnMainEffortStrength, "negative main effort sanitized");
         AssertEqual(1f, snap.OwnArmyMorale, " >1 morale clamped");
         AssertEqual(0f, snap.OwnReservesCommittedFraction, "negative reserves sanitized");
-        AssertEqual(500f, snap.ReinforcementsArrivingDelta, "positive delta stored");
+        AssertEqual(500f, snap.OwnReinforcementsArriving, "positive delta stored");
     }
 
     private static void TacticalBattleRuntimeSnapshotCopiesObjectivesDefensively()

@@ -53,12 +53,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownMainEffortStrength,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
-            float reinforcementsArrivingDelta,
+            float ownReinforcementsArriving,
             int minReplanSeconds) =>
             MaybeReplan(
                 orchestrator, deltaSeconds, ownEvidence, enemyVisible,
                 ownMainEffortStrength, ownArmyMorale, ownReservesCommittedFraction,
-                reinforcementsArrivingDelta, minReplanSeconds,
+                ownReinforcementsArriving, minReplanSeconds,
                 ownAvgFatigue01: 0.2f,
                 ownAvgAmmo01: 0.9f,
                 nearestReinforcementHours: 0f,
@@ -72,7 +72,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownMainEffortStrength,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
-            float reinforcementsArrivingDelta,
+            float ownReinforcementsArriving,
             int minReplanSeconds,
             float ownAvgFatigue01,
             float ownAvgAmmo01,
@@ -269,7 +269,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float mainOddsHistory = baseline.MainEffortSector == currentMainEffortSector && baseline.MainEffortOdds > 0f
                 ? baseline.MainEffortOdds
                 : currentMainEffortOdds;
-            float reinforcementShare = reinforcementsArrivingDelta / Math.Max(1f, ownMainEffortStrength);
+            float reinforcementShare = ownReinforcementsArriving / Math.Max(1f, ownMainEffortStrength);
 
             // ---- Phase progression evaluator ----
             //
@@ -298,7 +298,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 armyMoraleCurrent: ownArmyMorale,
                 armyMoraleFloor: 0.4f,
                 reservesCommittedFraction: ownReservesCommittedFraction,
-                reinforcementsArrivingDelta: reinforcementsArrivingDelta,
+                ownReinforcementsArriving: ownReinforcementsArriving,
                 enemyMainEffortShiftConfidenceWeighted: ConfidenceWeightedShift(intent),
                 mainEffortLocalOdds: currentMainEffortOdds,
                 mainEffortLocalOddsHistory: mainOddsHistory,

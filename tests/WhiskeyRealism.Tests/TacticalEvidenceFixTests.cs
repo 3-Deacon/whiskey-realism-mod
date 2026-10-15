@@ -625,7 +625,7 @@ internal static class TacticalEvidenceFixTests
             mainEffortOwnStrength: 5000f, mainEffortHistoryOwnStrength: 5000f,
             globalOddsCurrent: 1f, globalOddsHistory: 1f,
             armyMoraleCurrent: morale, armyMoraleFloor: 0.4f,
-            reservesCommittedFraction: reserves, reinforcementsArrivingDelta: reinforcements,
+            reservesCommittedFraction: reserves, ownReinforcementsArriving: reinforcements,
             enemyMainEffortShiftConfidenceWeighted: enemyShift,
             armyMoraleAtLastReplan: moraleAtLast,
             reservesCommittedAtLastReplan: reservesAtLast,

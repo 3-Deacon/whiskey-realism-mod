@@ -35,10 +35,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float ownMainEffortStrength,
                 float ownArmyMorale,
                 float ownReservesCommittedFraction,
-                float reinforcementsArrivingDelta)
+                float ownReinforcementsArriving)
                 : this(ownEvidence, enemyVisible, ownMainEffortStrength,
                        ownArmyMorale, ownReservesCommittedFraction,
-                       reinforcementsArrivingDelta,
+                       ownReinforcementsArriving,
                        ownAvgFatigue01: 0.2f,
                        ownAvgAmmo01: 0.9f,
                        nearestReinforcementHours: 0f,
@@ -51,7 +51,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float ownMainEffortStrength,
                 float ownArmyMorale,
                 float ownReservesCommittedFraction,
-                float reinforcementsArrivingDelta,
+                float ownReinforcementsArriving,
                 float ownAvgFatigue01,
                 float ownAvgAmmo01,
                 float nearestReinforcementHours,
@@ -62,7 +62,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 OwnMainEffortStrength = ownMainEffortStrength;
                 OwnArmyMorale = ownArmyMorale;
                 OwnReservesCommittedFraction = ownReservesCommittedFraction;
-                ReinforcementsArrivingDelta = reinforcementsArrivingDelta;
+                OwnReinforcementsArriving = ownReinforcementsArriving;
                 OwnAvgFatigue01 = ClampUnit(ownAvgFatigue01, 0.2f);
                 OwnAvgAmmo01 = ClampUnit(ownAvgAmmo01, 0.9f);
                 NearestReinforcementHours = SanitizeNonNeg(nearestReinforcementHours);
@@ -76,10 +76,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public float OwnReservesCommittedFraction { get; }
             /// <summary>
             /// Own reinforcement strength due within 24 h
-            /// (sideinformation.reinforcementarrivalswithin24hrs). The enemy's
-            /// schedule is not known; enemy arrivals count once in range.
+            /// (sideinformation.reinforcementarrivalswithin24hrs). Own side only:
+            /// the enemy's schedule is not known; enemy arrivals count once in
+            /// range, through the contact ledger.
             /// </summary>
-            public float ReinforcementsArrivingDelta { get; }
+            public float OwnReinforcementsArriving { get; }
             // Readiness fields (added 2026-05-19 for fresh-troops decision).
             // Army-wide averages, not sector-specific — first cut. Future
             // refinement: aggregate by main-effort-sector brigade membership.
@@ -296,7 +297,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ownMainEffortStrength: 1f,
                 ownArmyMorale: 1f,
                 ownReservesCommittedFraction: 0f,
-                reinforcementsArrivingDelta: 0f);
+                ownReinforcementsArriving: 0f);
         }
 
         // Last bare (un-banded) front axis per alliance, kept so centroid jitter
