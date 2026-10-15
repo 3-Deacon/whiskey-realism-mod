@@ -250,7 +250,15 @@ namespace WhiskeyRealism.Strategic
             {
                 // Fresh campaign state (reset or no sidecar era): derive the era from the date.
                 for (int a = 0; a < _work.Eras.Length; a++)
-                    (_work.Eras[a] ?? (_work.Eras[a] = new EraStageManager())).ResetToDate(gameMonth, gameYear);
+                    (_work.Eras[a] ?? (_work.Eras[a] = new EraStageManager())).ResetToDate(gameMonth, gameYear, SafePolicyChapter());
+            }
+            else if (firstCall)
+            {
+                // Sidecar migration: an era saved under the old calendar rule says TotalWar1864 from
+                // 1 Jan 1864; the stage is vanilla's chapter 3 now (the chapter is known here, the
+                // tick waits for vanilla's update).
+                for (int a = 0; a < _work.Eras.Length; a++)
+                    _work.Eras[a]?.ResetStaleLateWar(gameMonth, gameYear, SafePolicyChapter());
             }
 
             // Fire on first valid call (campaign just started / save just loaded)
@@ -679,7 +687,7 @@ namespace WhiskeyRealism.Strategic
                 {
                     var cicEra = _work.Eras[alliance];
                     var cicWs = ObserveWarStateCached(day, month, year);
-                    cicEra.CheckTransition(month, year, cicWs.VicksburgFallen, cicWs.AtlantaThreatened);
+                    cicEra.CheckTransition(month, year, cicWs.VicksburgFallen, SafePolicyChapter());
                     a.Era = cicEra;
                     a.Mode = AllianceReviewMode.PlayerCic;
                 }
@@ -689,7 +697,7 @@ namespace WhiskeyRealism.Strategic
 
             var era = _work.Eras[alliance];
             var ws = ObserveWarStateCached(day, month, year);
-            era.CheckTransition(month, year, ws.VicksburgFallen, ws.AtlantaThreatened);
+            era.CheckTransition(month, year, ws.VicksburgFallen, SafePolicyChapter());
 
             var fired = Succession.CheckEvents(BuildSchedulerView(month, year, alliance, ws));
             foreach (var e in fired)

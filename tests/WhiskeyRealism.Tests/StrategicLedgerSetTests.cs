@@ -151,7 +151,7 @@ internal static class StrategicLedgerSetTests
             plan.Phases[0].Fallback.TargetObjectiveId = 98;
             plan.Phases.Add(new Phase { TargetObjectiveId = 50 });
             working.CICs[a].OfficerName = "replaced";
-            working.Eras[a].CheckTransition(1, 1864, false, false);
+            working.Eras[a].CheckTransition(11, 1864, false, 3);
             working.DirectorMemories[a].LastPosture = new DirectorPosture { Pace = CampaignPace.Overheated };
             working.DirectorMemories[a].CapitalDangerStreakDays = 9;
             working.DirectorMemories[a].RecentEventSummaries.Add("e2");

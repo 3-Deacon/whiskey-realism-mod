@@ -369,7 +369,7 @@ internal static class DailyReviewSchedulerTests
                     plan.Phases[plan.CurrentPhaseIndex].PhaseStartedDaySerial = _day;
 
                     Work.Eras[a] = Work.Eras[a] ?? new EraStageManager();
-                    View.Eras[a].CheckTransition(1 + _day % 12, 1861 + _day / 12, false, false);
+                    View.Eras[a].CheckTransition(1 + _day % 12, 1861 + _day / 12, false, 1);
 
                     // Posture from yesterday's front (the front job runs later today).
                     var memory = View.DirectorMemories[a];
