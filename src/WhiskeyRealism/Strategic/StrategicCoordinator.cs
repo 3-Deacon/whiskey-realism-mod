@@ -460,47 +460,53 @@ namespace WhiskeyRealism.Strategic
 
         // Builds a PhaseTruthInput from live game state and evaluates it.
         // Returns null when the plan or phase is absent (ReviewPlanWithTruth falls back to
-        // the deadline-only ReviewPlan path on null).
+        // the deadline-only baseline on null).
+        // Force inputs are LOCAL (R3): own/enemy campaign strength within the near-target
+        // radius around the phase objective, not the whole-theater sector totals.
         private PhaseTruthOutput BuildPhaseTruth(CIC cic, int alliance, int day, int month, int year)
         {
             if (cic?.ActivePlan?.CurrentPhase == null) return null;
             var phase = cic.ActivePlan.CurrentPhase;
             var fronts = alliance < Fronts.Length ? Fronts[alliance] : null;
             var targetPos = ObjectiveAdapter.ResolveObjectivePosition(phase.TargetObjectiveId);
-            string sectorKey = targetPos.HasValue ? FrontSectorRuntime.SectorKey(targetPos.Value) : null;
-            var sector = fronts?.GetSector(sectorKey);
             int daySerial = year * 372 + month * 31 + day;
+
+            HistoricalOperationProfile profile = null;
+            if (!string.IsNullOrEmpty(cic.ActivePlan.OperationId))
+                HistoricalOperationCatalog.TryGetById(cic.ActivePlan.OperationId, out profile);
+            float radius = HistoricalOperationContextBuilder.NearTargetRadius(profile);
+
             bool engagedRecently = false;
+            int lastEngagementDay = -1;
+            float localOwn = 0f, localEnemy = 0f;
             if (targetPos.HasValue)
             {
-                foreach (var _ in BattleHistoryQuery.Near(
-                    BattleHistory,
-                    targetPos.Value,
-                    GamePrefs.aimaximumdistancetosearchforunitrelocations,
-                    daySerial,
-                    14))
+                foreach (var battle in BattleHistoryQuery.Near(BattleHistory, targetPos.Value, radius, daySerial, 14))
                 {
-                    engagedRecently = true; break;
+                    if (battle == null || !battle.IsLandBattle) continue;
+                    engagedRecently = true;
+                    int battleDay = battle.Year * 372 + battle.Month * 31 + battle.Day;
+                    if (battleDay > lastEngagementDay) lastEngagementDay = battleDay;
                 }
+                ReadLocalForceBalance(alliance, targetPos.Value, radius, out localOwn, out localEnemy);
             }
+
             var input = new PhaseTruthInput
             {
-                Plan                     = cic.ActivePlan,
-                AllianceId               = alliance,
-                DaySerial                = daySerial,
-                TargetAccomplished       = ObjectiveAdapter.IsAccomplished(phase.TargetObjectiveId),
-                ObjectiveAvailable       = ObjectiveAdapter.IsAvailable(phase.TargetObjectiveId, alliance),
-                TargetPositionResolves   = targetPos.HasValue,
-                TargetEngagedRecently    = engagedRecently,
-                TargetSectorOwnStrength  = sector?.OwnStrength ?? 0f,
-                TargetSectorEnemyStrength = sector?.EnemyStrength ?? 0f,
-                RequiredForce            = phase.ForceFractionRequired *
-                                           ((sector?.OwnStrength ?? 0f) + (sector?.EnemyStrength ?? 0f)),
-                CurrentMonth             = month,
-                CurrentYear              = year
+                Plan                          = cic.ActivePlan,
+                AllianceId                    = alliance,
+                DaySerial                     = daySerial,
+                TargetAccomplished            = ObjectiveAdapter.IsAccomplished(phase.TargetObjectiveId),
+                ObjectiveAvailable            = ObjectiveAdapter.IsAvailable(phase.TargetObjectiveId, alliance),
+                TargetPositionResolves        = targetPos.HasValue,
+                TargetEngagedRecently         = engagedRecently,
+                LastTargetEngagementDaySerial = lastEngagementDay,
+                TargetSectorOwnStrength       = localOwn,
+                TargetSectorEnemyStrength     = localEnemy,
+                CurrentMonth                  = month,
+                CurrentYear                   = year
             };
-            if (!string.IsNullOrEmpty(cic.ActivePlan.OperationId) &&
-                HistoricalOperationCatalog.TryGetById(cic.ActivePlan.OperationId, out var profile))
+            if (profile != null)
             {
                 input.OperationProfile = profile;
                 input.OperationContext = HistoricalOperationContextBuilder.Build(
@@ -520,6 +526,57 @@ namespace WhiskeyRealism.Strategic
             }
             return PhaseTruthLedger.Evaluate(input);
         }
+
+        // Sums own / enemy campaign strength (groupstrengthactive, same field FrontSectorRuntime
+        // reads) for units of this alliance's AIFaction ownunits/enemyunits lists within
+        // `radius` of `center`. Zeroes on any reflection failure.
+        private static void ReadLocalForceBalance(int alliance, Vector3 center, float radius, out float own, out float enemy)
+        {
+            own = 0f;
+            enemy = 0f;
+            try
+            {
+                int index = ResolveAifactionIndexForAlliance(alliance);
+                if (index < 0) return;
+                var faction = AICampaignReflect.GetFaction(index);
+                if (faction == null) return;
+                var factionType = faction.GetType();
+                if (_ownUnitsField == null || _ownUnitsField.DeclaringType != factionType)
+                {
+                    _ownUnitsField = AccessTools.Field(factionType, "ownunits");
+                    _enemyUnitsField = AccessTools.Field(factionType, "enemyunits");
+                }
+                own = SumStrengthWithin(_ownUnitsField?.GetValue(faction) as IList, center, radius);
+                enemy = SumStrengthWithin(_enemyUnitsField?.GetValue(faction) as IList, center, radius);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("coordinator:local-force", "[Coordinator] local force read failed: " + ex.Message);
+                own = 0f;
+                enemy = 0f;
+            }
+        }
+
+        private static float SumStrengthWithin(IList units, Vector3 center, float radius)
+        {
+            if (units == null) return 0f;
+            float radiusSq = radius * radius;
+            float total = 0f;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var unit = units[i] as Regiment;
+                if (unit == null) continue;
+                var pos = unit.transform.position;
+                float dx = pos.x - center.x;
+                float dz = pos.z - center.z;
+                if (dx * dx + dz * dz > radiusSq) continue;
+                total += Math.Max(0f, unit.groupstrengthactive);
+            }
+            return total;
+        }
+
+        private static FieldInfo _ownUnitsField;
+        private static FieldInfo _enemyUnitsField;
 
         private static bool ShouldLogStrategicPerf(double elapsedMs)
         {

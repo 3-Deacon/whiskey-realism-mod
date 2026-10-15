@@ -14903,14 +14903,19 @@ static class Program
 
     private static void HistoricalOperationDynamicActionMutatesPhasePosture()
     {
+        // R3: posture actions still run the deadline baseline, so the fixture needs live deadlines.
         var plan = new OperationalPlan
         {
             OperationPosture = OperationPosture.ProbeAndDevelop,
-            CurrentPhaseIndex = 0
+            CurrentPhaseIndex = 0,
+            PlanDeadlineMonth = 12,
+            PlanDeadlineYear = 1864
         };
         plan.Phases.Add(new Phase
         {
             TargetObjectiveId = 3,
+            DeadlineMonth = 12,
+            DeadlineYear = 1864,
             OperationPosture = OperationPosture.ProbeAndDevelop,
             AllowCoordinatedAttack = false,
             AllowReinforcementPackage = false,
@@ -20153,7 +20158,7 @@ static class Program
             TargetAccomplished = true,
             ObjectiveAvailable = true,
             TargetSectorOwnStrength = 10000f,
-            RequiredForce = 5000f,
+            TargetSectorEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20169,7 +20174,7 @@ static class Program
             TargetAccomplished = false,
             ObjectiveAvailable = false,
             TargetSectorOwnStrength = 10000f,
-            RequiredForce = 5000f,
+            TargetSectorEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20177,15 +20182,17 @@ static class Program
         AssertEqual(PhaseTruthAction.Replan, output.RecommendedAction);
     }
 
+    // R3: force is a LOCAL own:enemy ratio (0.5 + ForceFractionRequired) and is only
+    // checked while the phase deadline has not expired (see CampaignLifecycleFixTests).
     private static void PhaseTruthRecoversWhenForceBelowThreshold()
     {
         var input = new PhaseTruthInput
         {
-            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, ForceFractionRequired = 0.5f, DeadlineMonth = 12, DeadlineYear = 1862 } } },
             TargetAccomplished = false,
             ObjectiveAvailable = true,
             TargetSectorOwnStrength = 1000f,
-            RequiredForce = 5000f,
+            TargetSectorEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20201,7 +20208,7 @@ static class Program
             TargetAccomplished = false,
             ObjectiveAvailable = true,
             TargetSectorOwnStrength = 10000f,
-            RequiredForce = 5000f,
+            TargetSectorEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20219,7 +20226,7 @@ static class Program
             TargetAccomplished = false,
             ObjectiveAvailable = true,
             TargetSectorOwnStrength = 10000f,
-            RequiredForce = 5000f,
+            TargetSectorEnemyStrength = 5000f,
             TargetEngagedRecently = false,
             CurrentMonth = 6, CurrentYear = 1862
         };

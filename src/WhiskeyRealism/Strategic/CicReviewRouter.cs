@@ -54,21 +54,69 @@ namespace WhiskeyRealism.Strategic
                 case PhaseTruthAction.Pause:
                 case PhaseTruthAction.ScreenAndDelay:
                     MarkOperationDecision(plan, truth, daySerial, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true);
-                    return CicRouteOutcome.KeepPlan;
+                    return ToOutcome(ReviewPlanBaseline(plan, daySerial, currentMonth, currentYear));
                 case PhaseTruthAction.Exploit:
                     MarkOperationDecision(plan, truth, daySerial, OperationPosture.ExploitBreakthrough, allowAttack: true, allowReinforce: true, probeOnly: false);
-                    return CicRouteOutcome.KeepPlan;
+                    return ToOutcome(ReviewPlanBaseline(plan, daySerial, currentMonth, currentYear));
                 case PhaseTruthAction.Counterstroke:
                     MarkOperationDecision(plan, truth, daySerial, OperationPosture.Counterstroke, allowAttack: true, allowReinforce: true, probeOnly: false);
-                    return CicRouteOutcome.KeepPlan;
+                    return ToOutcome(ReviewPlanBaseline(plan, daySerial, currentMonth, currentYear));
                 case PhaseTruthAction.Recover:
                     MarkOperationDecision(plan, truth, daySerial, OperationPosture.Recover, allowAttack: false, allowReinforce: true, probeOnly: true);
-                    return CicRouteOutcome.KeepPlan;
+                    return ToOutcome(ReviewPlanBaseline(plan, daySerial, currentMonth, currentYear));
 
                 case PhaseTruthAction.Continue:
                 default:
+                    // Posture overrides (Recover, ScreenAndDelay, ...) are level conditions:
+                    // once the truth is back to Continue the phase returns to its template.
+                    RestorePhaseTemplate(plan);
                     return ToOutcome(ReviewPlanBaseline(plan, daySerial, currentMonth, currentYear));
             }
+        }
+
+        // Re-derives the current phase's posture/permission flags from its source template:
+        // the HistoricalOperationCatalog profile phase (matched by PhaseId) for historical
+        // operations, or GenericPhaseFlags for legacy generic plans (no OperationId).
+        internal static void RestorePhaseTemplate(OperationalPlan plan)
+        {
+            var phase = plan?.CurrentPhase;
+            if (phase == null) return;
+
+            if (string.IsNullOrEmpty(plan.OperationId))
+            {
+                GenericPhaseFlags(phase.Transition, out bool attack, out bool reinforce, out bool probeOnly);
+                plan.OperationPosture = OperationPosture.ProbeAndDevelop;
+                phase.OperationPosture = OperationPosture.ProbeAndDevelop;
+                phase.AllowCoordinatedAttack = attack;
+                phase.AllowReinforcementPackage = reinforce;
+                phase.AllowProbeOnly = probeOnly;
+                return;
+            }
+
+            if (!HistoricalOperationCatalog.TryGetById(plan.OperationId, out var profile) || profile.Phases == null)
+                return;
+            for (int i = 0; i < profile.Phases.Length; i++)
+            {
+                var template = profile.Phases[i];
+                if (template == null || !string.Equals(template.PhaseId, phase.PhaseId, System.StringComparison.Ordinal))
+                    continue;
+                plan.OperationPosture = profile.Posture;
+                phase.OperationPosture = template.Posture == OperationPosture.Inherit ? profile.Posture : template.Posture;
+                phase.AllowCoordinatedAttack = template.AllowCoordinatedAttack;
+                phase.AllowReinforcementPackage = template.AllowReinforcementPackage;
+                phase.AllowProbeOnly = template.AllowProbeOnly;
+                return;
+            }
+        }
+
+        // Permission flags of a legacy generic phase (CIC.BuildLegacyGenericPlan): a
+        // TargetEngaged lead-in phase is probe-only; every other phase may attack.
+        internal static void GenericPhaseFlags(PhaseTransition transition, out bool allowAttack, out bool allowReinforce, out bool probeOnly)
+        {
+            bool leadIn = transition == PhaseTransition.TargetEngaged;
+            allowAttack = !leadIn;
+            allowReinforce = true;
+            probeOnly = leadIn;
         }
 
         // Legacy bool shape kept for existing harness callers: true = keep plan.

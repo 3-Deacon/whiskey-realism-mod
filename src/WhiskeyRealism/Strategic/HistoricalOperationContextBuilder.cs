@@ -107,7 +107,7 @@ namespace WhiskeyRealism.Strategic
             int daySerial,
             IReadOnlyList<BattleHistoryRecord> battleHistory)
         {
-            float radius = NearTargetRadius();
+            float radius = NearTargetRadius(null);
             foreach (var battle in BattleHistoryQuery.Near(battleHistory, position, radius, daySerial, 14))
             {
                 if (battle == null || !battle.IsLandBattle)
@@ -124,16 +124,24 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        private static float NearTargetRadius()
+        // Near-target radius shared by PhaseTruth (local force, engagement) and this context
+        // builder. Vanilla's own "nearby" notion for campaign AI relocations is
+        // GamePrefs.aimaximumdistancetosearchforunitrelocations (campaignprefs.txt, 275);
+        // a profile's NearTargetRadius narrows it when set.
+        internal static float NearTargetRadius(HistoricalOperationProfile profile)
         {
+            float vanilla;
             try
             {
-                return Math.Max(1f, GamePrefs.aimaximumdistancetosearchforunitrelocations);
+                vanilla = Math.Max(1f, GamePrefs.aimaximumdistancetosearchforunitrelocations);
             }
             catch
             {
-                return 500f;
+                vanilla = 275f;
             }
+            if (profile != null && profile.NearTargetRadius > 0f)
+                return Math.Min(profile.NearTargetRadius, vanilla);
+            return vanilla;
         }
 
         private static Vector3? ResolveObjectivePosition(int objectiveId)

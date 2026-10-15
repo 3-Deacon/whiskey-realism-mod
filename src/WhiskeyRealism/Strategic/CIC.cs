@@ -419,8 +419,10 @@ namespace WhiskeyRealism.Strategic
                 IsDirty              = false
             };
 
+            int planStartSerial = currentYear * 372 + currentMonth * 31 + 1;
             plan.Phases.Add(new Phase
             {
+                PhaseStartedDaySerial  = planStartSerial,
                 TargetAreaId           = -1,
                 TargetObjectiveId      = objId,
                 ForceFractionRequired  = forceFraction,
@@ -428,15 +430,15 @@ namespace WhiskeyRealism.Strategic
                 DeadlineMonth          = deadline.month,
                 DeadlineYear           = deadline.year,
                 OperationPosture        = OperationPosture.ProbeAndDevelop,
-                AllowCoordinatedAttack  = true,
-                AllowReinforcementPackage = true,
                 Fallback               = null
             });
+            ApplyGenericFlags(plan.Phases[plan.Phases.Count - 1]);
 
             if (phaseCount >= 3)
             {
                 plan.Phases.Insert(0, new Phase
                 {
+                    PhaseStartedDaySerial = planStartSerial,
                     TargetAreaId          = -1,
                     TargetObjectiveId     = objId,
                     ForceFractionRequired = Math.Max(0.2f, forceFraction - 0.2f),
@@ -444,15 +446,21 @@ namespace WhiskeyRealism.Strategic
                     DeadlineMonth         = AddMonths(currentMonth, currentYear, monthsAhead / 3).month,
                     DeadlineYear          = AddMonths(currentMonth, currentYear, monthsAhead / 3).year,
                     OperationPosture       = OperationPosture.ProbeAndDevelop,
-                    AllowCoordinatedAttack = false,
-                    AllowReinforcementPackage = true,
-                    AllowProbeOnly         = true,
                     Fallback              = null
                 });
+                ApplyGenericFlags(plan.Phases[0]);
                 plan.CurrentPhaseIndex = 0;
             }
 
             return plan;
+        }
+
+        private static void ApplyGenericFlags(Phase phase)
+        {
+            CicReviewRouter.GenericPhaseFlags(phase.Transition, out bool attack, out bool reinforce, out bool probeOnly);
+            phase.AllowCoordinatedAttack = attack;
+            phase.AllowReinforcementPackage = reinforce;
+            phase.AllowProbeOnly = probeOnly;
         }
 
         private static (int month, int year) AddMonths(int month, int year, int delta)
