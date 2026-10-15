@@ -48,7 +48,8 @@ namespace WhiskeyRealism.Tactical.Battle
     //     regiment, groupexperience / grouptraining for a group (UpdateGroupStrength
     //     120473 / 120508). Never GetTraining(): it adds the W&L drill effect to training on
     //     every call (140537-140549). Own infantry/cavalry regiments also get their loss
-    //     fraction (losses, LossesAreUnbearable 139831) and break point
+    //     fraction (losses and the detached regiment's strength, LossesAreUnbearable
+    //     139829-139843) and break point
     //     (TroopQuality.BreakLossFraction over alliance militaryexperience 62122,
     //     GetCommanderLeadership 61134 cached per commander, bunits.battlepasseddays).
     //   - Leaf-slot inputs (BC5a): lastsetwaypointrotation (stored with the group's
@@ -327,7 +328,7 @@ namespace WhiskeyRealism.Tactical.Battle
             float militaryExperience, int battleDays, double doctrineHours)
         {
             if (record.UnitTyp != TacticalUnitType.Infantry && record.UnitTyp != TacticalUnitType.Cavalry) return;
-            record.LossFraction = TroopQuality.LossFraction(reg.losses, reg.strength);
+            record.LossFraction = TroopQuality.LossFraction(reg.losses, reg.strength, DetachedStrength(reg));
             var input = new BreakToleranceInput
             {
                 MilitaryExperience = militaryExperience,
@@ -339,6 +340,16 @@ namespace WhiskeyRealism.Tactical.Battle
                 BattlePassedDays = battleDays,
             };
             record.BreakLossFraction = TroopQuality.BreakLossFraction(in rules, in input);
+        }
+
+        // LossesAreUnbearable's second check (139834-139839): the strength of the regiment's
+        // detached regiment (detachedregiment 111134, a GameObject; GetComponent only when set).
+        private static int DetachedStrength(Regiment reg)
+        {
+            var detached = reg.detachedregiment;
+            if (detached == null) return 0;
+            var unit = detached.GetComponent<Regiment>();
+            return unit != null ? unit.strength : 0;
         }
 
         // GameVars.alliance[alliance].militaryexperience (62122): campaign-public, the

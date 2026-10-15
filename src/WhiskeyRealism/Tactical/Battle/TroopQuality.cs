@@ -17,8 +17,11 @@
 //   enemymorale × mi) (6052-6055, includemorale) × (1 - ei + groupexperience × ei) /
 //   max(0.01, 1 - ei + enemyexp × ei) (6056-6057, includeexp); mi / ei =
 //   moraleinfluenceonaidecisions / expinfluenceonaidecisions (54712 / 54714, both 0.25).
-//   The enemy morale term is the closest enemy group's unitrange.ownmoraleinrange, a
-//   strength-weighted mean (122750 / 122892); here the perceived morale. The enemy term is the closest enemy
+//   The enemy morale term is the closest enemy group's unitrange.ownmoraleinrange:
+//   Σ morale × strength over its units in range (122750) divided by ownstrengthinrange
+//   (122892), which for a group also adds the group's own groupstrengthdirect (122886-122889),
+//   so it is not a plain strength-weighted mean; here the perceived morale (the blend's
+//   intended shape, as for experience). The enemy experience term is the closest enemy
 //   group's unitrange.ownexpinrange (6039-6042), which vanilla accumulates as
 //   Σ Experience() × morale without a strength factor (122751) and divides by
 //   ownstrengthinrange (122894), so it is ≈ 0 for any real force. Not ported: the enemy
@@ -231,17 +234,23 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>
         /// A regiment's loss fraction as vanilla's rout-on-losses test reads it
-        /// (LossesAreUnbearable 139831): (Σ losses − losses[3]) / max(1, that + strength);
-        /// losses[3] (the missing) does not count. No allocation.
+        /// (LossesAreUnbearable 139829-139843): with L = Σ losses − losses[3] (the missing do
+        /// not count), vanilla routs only when L / max(1, L + strength) AND
+        /// L / max(1, L + strength + detached regiment's strength) both exceed the trigger
+        /// (139832, 139834-139839), so the smaller of the two is the fraction compared with
+        /// the trigger. No allocation.
         /// </summary>
-        public static float LossFraction(int[] losses, int strength)
+        public static float LossFraction(int[] losses, int strength, int detachedStrength)
         {
             if (losses == null) return 0f;
             float sum = 0f;
             for (int i = 0; i < losses.Length; i++)
                 if (i != 3) sum += losses[i];
             if (!(sum > 0f)) return 0f;
-            return sum / Math.Max(1f, sum + Math.Max(0, strength));
+            float own = sum + Math.Max(0, strength);
+            float first = sum / Math.Max(1f, own);
+            float second = sum / Math.Max(1f, own + Math.Max(0, detachedStrength));
+            return Math.Min(first, second);
         }
 
         /// <summary>

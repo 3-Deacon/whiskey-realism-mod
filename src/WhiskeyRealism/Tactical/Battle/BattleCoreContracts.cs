@@ -57,7 +57,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public float GroupMorale;
         // BC8 break tolerance, own infantry/cavalry regiments only (0 otherwise or with the
         // weighting off): the loss fraction vanilla's rout test reads (LossesAreUnbearable
-        // 139831) and the fraction at which it routs (GetUnbearableLossesTrigger 113363-113400,
+        // 139829-139843, the detached regiment's strength included) and the fraction at which it routs (GetUnbearableLossesTrigger 113363-113400,
         // TroopQuality.BreakLossFraction).
         public float LossFraction, BreakLossFraction;
         public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;

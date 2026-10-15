@@ -623,7 +623,8 @@ namespace WhiskeyRealism
                 "sees: the experience stars of enemy regiments while they are visible, remembered after they drop out of sight. Reads only. " +
                 "Campaign: a coordinated offensive package (#38, which replaces vanilla's offensive gathering) needs its attack and reinforce " +
                 "ratios x (1 + (1 - lead commander initiative) x vanilla's 0.25), as vanilla scales its own. Off: headcount ratios and " +
-                "sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter, unscaled offensive ratios.");
+                "sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter, unscaled offensive ratios. The battle " +
+                "rules read this flag once per battle (a change applies from the next battle); the campaign scaling reads it on each call.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",

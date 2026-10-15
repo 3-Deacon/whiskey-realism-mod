@@ -53,6 +53,9 @@ internal static class TroopQualityTests
             ("troop-quality LadderWithdrawalIsUndividedLikeVanillaRetreat", LadderWithdrawalIsUndividedLikeVanillaRetreat),
             ("troop-quality LadderProlongedEscalationIsUndivided", LadderProlongedEscalationIsUndivided),
             ("troop-quality LadderDefensiveHoldAboveTheDividedThreshold", LadderDefensiveHoldAboveTheDividedThreshold),
+            ("troop-quality ParityHoursUseOwnEquivalentMen", ParityHoursUseOwnEquivalentMen),
+            ("troop-quality AttackWindowParityUsesOwnEquivalentMen", AttackWindowParityUsesOwnEquivalentMen),
+            ("troop-quality SectorLineContactEnemyIsBlended", SectorLineContactEnemyIsBlended),
         });
     }
 
@@ -477,10 +480,15 @@ internal static class TroopQualityTests
     // LossesAreUnbearable 139831: (Σ losses - losses[3]) / max(1, that + strength).
     private static void LossFractionMatchesVanilla()
     {
-        AssertNear(200f / 600f, TroopQuality.LossFraction(new[] { 100, 60, 40, 999 }, 400), 1e-6f, "missing (losses[3]) excluded");
-        AssertNear(0f, TroopQuality.LossFraction(new[] { 0, 0, 0, 0 }, 400), 1e-6f, "no losses");
-        AssertNear(0f, TroopQuality.LossFraction(null, 400), 1e-6f, "no array");
-        AssertNear(30f / 30f, TroopQuality.LossFraction(new[] { 30 }, 0), 1e-6f, "short array, destroyed unit");
+        AssertNear(200f / 600f, TroopQuality.LossFraction(new[] { 100, 60, 40, 999 }, 400, 0), 1e-6f, "missing (losses[3]) excluded");
+        AssertNear(0f, TroopQuality.LossFraction(new[] { 0, 0, 0, 0 }, 400, 0), 1e-6f, "no losses");
+        AssertNear(0f, TroopQuality.LossFraction(null, 400, 0), 1e-6f, "no array");
+        AssertNear(30f / 30f, TroopQuality.LossFraction(new[] { 30 }, 0, 0), 1e-6f, "short array, destroyed unit");
+        // 139834-139839: vanilla routs only when the fraction ALSO exceeds the trigger with the
+        // detached regiment's strength in the denominator, so that smaller fraction is the one
+        // compared with the trigger.
+        AssertNear(200f / 700f, TroopQuality.LossFraction(new[] { 100, 60, 40, 999 }, 400, 100), 1e-6f, "detached strength counts");
+        AssertNear(200f / 600f, TroopQuality.LossFraction(new[] { 100, 60, 40, 999 }, 400, -5), 1e-6f, "negative detached strength ignored");
     }
 
     // Shipped unitprefs: trigger0 0.8, trigger100 0.55, influences 0.91 / 0.9 / 0.75,
@@ -799,5 +807,41 @@ internal static class TroopQualityTests
         // CheckGlobalAIStrategy decides (it attacks there, 6403-6406).
         AssertEqual(ReinforcementOpportunity.DefensiveHold, Decide(Ladder(8000f, 10000f, 0.5f)), "0.8 >= 0.741, outnumbered, no arrivals");
         AssertEqual(ReinforcementOpportunity.DelayingDefense, Decide(Ladder(8000f, 10000f, 0f)), "same ratio at initiative 0: below 1, defend");
+    }
+
+    // ---------------------------------------------------------------- verify landing items
+
+    // Each parity test on its own (verify M16): the enemy counts in own-equivalent men.
+    private static void ParityHoursUseOwnEquivalentMen()
+    {
+        // Headcount enemy 10000 > own 9000, but quality factor 1.575 → effective 6349 < 9000.
+        var veteran = Evidence(9000f, 10000f, new SideQuality(0.75f, 0.7f), new SideQuality(0.7f, 0.2f));
+        AssertEqual(999f, veteran.ParityHoursForEnemy(), "enemy never reaches parity in own-equivalent men");
+        AssertEqual(0f, veteran.ParityHoursForOwn(), "own already at parity in own-equivalent men");
+        // Headcount own 11000 > enemy 10000, but factor 0.5 → effective 20000.
+        var green = Evidence(11000f, 10000f, new SideQuality(0.7f, 0.1f), new SideQuality(0.7f, 0.6f));
+        AssertEqual(0f, green.ParityHoursForEnemy(), "veteran enemy already at parity");
+        AssertEqual(999f, green.ParityHoursForOwn(), "own never catches up without arrivals");
+    }
+
+    // The attack-window parity test on its own (verify M23): enemyNotGrowing is false
+    // (effective enemy 9091 >= own 8000), own arrivals bring 9200 inside the window, which
+    // clears the effective enemy but not the headcount 10000.
+    private static void AttackWindowParityUsesOwnEquivalentMen()
+    {
+        var ev = new TacticalForceBalanceEvidence(8000f, 10000f, new[] { new ReinforcementArrival(0.5f, 1200f) },
+            0.5f, 0.5f, 0.8f, ownQuality: new SideQuality(0.7f, 0.3f), enemyQuality: new SideQuality(0.7f, 0.2f),
+            initiativeTriggerInfluence: 0.7f);
+        AssertNear(10000f / 1.1f, ev.EffectiveEnemyStrength, 0.5f, "factor 1.1");
+        AssertEqual(ReinforcementOpportunity.AttackNow, Decide(ev), "parity holds through the window in own-equivalent men");
+    }
+
+    // The line-contact closest-enemy term is blended too (verify M19).
+    private static void SectorLineContactEnemyIsBlended()
+    {
+        var input = new TacticalGroupContactInput(1, 4000f, 0f, 3000f, 5000f, TacticalUnitType.Infantry, "1st Line", false, false, false, false,
+            ownExperienceBlend: 1f, enemyExperienceBlend: 0.75f);
+        AssertTrue(TacticalGroupSectorEstimator.IsVisibleLineContact(input), "line contact");
+        AssertNear(5000f * 0.75f, TacticalGroupSectorEstimator.BuildSector(input).EnemyStrength, 1e-3f, "closest line enemy x enemy blend");
     }
 }
