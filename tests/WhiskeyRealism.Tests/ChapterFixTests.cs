@@ -42,6 +42,7 @@ internal static class ChapterFixTests
             ("chapter militia act one leaves vanilla's fallback walk with or without a need vector", WarStartLeavesTheFallbackWalk),
             ("chapter militia act one hold follows the selection flag and never an emergency", WarStartHoldFollowsTheFlag),
             ("chapter militia act one pick filter and fallback hold share one predicate", WarStartPredicateIsShared),
+            ("chapter fiscal and construction inputs carry no chapter nobody reads", FiscalAndConstructionInputsCarryNoChapter),
             ("chapter era callers pass the live chapter and migrate a seeded sidecar era once", CoordinatorPassesTheChapterToTheEra),
         });
     }
@@ -413,5 +414,17 @@ internal static class ChapterFixTests
         string patch = Flat("src/WhiskeyRealism/Patches/PolicySelectionPatch.cs");
         AssertContains(patch, "WarStartHeld = PolicyEligibility.HoldsScriptedWarStart(Policy.CurrentChapter)", "the call facts carry the chapter");
         AssertContains(patch, "PolicyListOverride.HeldIdsToRemove(need, personality.policies, Policy.CurrentChapter)", "the hold removes the war start");
+    }
+
+    // ---- dead fields ----
+
+    private static void FiscalAndConstructionInputsCarryNoChapter()
+    {
+        // FiscalInput.CurrentChapter and ConstructionInput.CurrentChapter were written every review and
+        // read by nothing (vanilla's chapter-0 ship and POW-camp gates already hold: 12012, 15155).
+        AssertTrue(typeof(WhiskeyRealism.Strategic.Fiscal.FiscalInput).GetField("CurrentChapter") == null, "FiscalInput.CurrentChapter is gone");
+        AssertTrue(typeof(WhiskeyRealism.Strategic.Construction.ConstructionInput).GetField("CurrentChapter") == null, "ConstructionInput.CurrentChapter is gone");
+        AssertFalse(Flat("src/WhiskeyRealism/Strategic/Fiscal/FiscalRuntime.cs").Contains("SafePolicyChapter"), "fiscal runtime no longer reads the chapter");
+        AssertFalse(Flat("src/WhiskeyRealism/Strategic/Construction/ConstructionRuntime.cs").Contains("SafePolicyChapter"), "construction runtime no longer reads the chapter");
     }
 }

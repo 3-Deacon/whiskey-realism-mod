@@ -44,7 +44,6 @@ namespace WhiskeyRealism.Strategic.Construction
     {
         public int AllianceId;
         public EraStage EraStage;
-        public int CurrentChapter;
         public int CurrentYear = 1861;
         public FiscalPosture FiscalPosture = FiscalPosture.BalancedWar;
         public FiscalGate FiscalDefendedGate = FiscalGate.None;

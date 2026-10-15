@@ -203,7 +203,6 @@ internal static class CampaignEconomyFixTests
         {
             AllianceId = 0,
             EraStage = EraStage.Amateur1861,
-            CurrentChapter = 1,
             CurrentRating = 4,
             RatingNotches = 12,
             EmergencyPolicyFailureRating = 7,
