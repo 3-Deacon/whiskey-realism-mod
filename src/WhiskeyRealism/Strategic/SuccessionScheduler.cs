@@ -16,7 +16,6 @@ namespace WhiskeyRealism.Strategic
             public string ReplacementName;
             public string ReplacedRole;
             public Func<WarStateView, bool> WarStateGate;
-            public bool   Fired;
         }
 
         internal class WarStateView
@@ -37,6 +36,9 @@ namespace WhiskeyRealism.Strategic
             public bool ValleyOpsNeeded;
             public bool WarClearlyLost;
         }
+
+        // Refreshed from Plugin config by StrategicCoordinator (keeps this file BepInEx-free).
+        internal static bool TraceEnabled;
 
         private readonly List<Event> _events = new List<Event>();
 
@@ -67,9 +69,17 @@ namespace WhiskeyRealism.Strategic
         // Diagnostic: bypass gates and mark all events as fired. Used by the
         // ForceAllSuccessionEvents config flag so smoke-testers can exercise
         // the apply mechanic without waiting for in-game dates.
+        // Ids added only by ForceAllFired; excluded from the sidecar (PER-force) so a test-mode
+        // session doesn't permanently mark every historical event as fired.
+        internal HashSet<int> ForcedEventIds = new HashSet<int>();
+
         internal void ForceAllFired()
         {
-            foreach (var e in _events) FiredEventIds.Add(e.Id);
+            foreach (var e in _events)
+            {
+                if (FiredEventIds.Add(e.Id))
+                    ForcedEventIds.Add(e.Id);
+            }
         }
 
         internal SuccessionScheduler()
@@ -99,7 +109,7 @@ namespace WhiskeyRealism.Strategic
                               (w.CurrentYear == e.EarliestYear && w.CurrentMonth >= e.EarliestMonth);
                 bool warStateOk = e.WarStateGate(w);
 
-                if (Plugin.Instance.SuccessionTrace.Value)
+                if (TraceEnabled)
                 {
                     TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Succession", TelemetrySeverity.Info, ev => ev
                         .WithAlliance(e.AllianceId)

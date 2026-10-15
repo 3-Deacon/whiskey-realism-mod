@@ -941,7 +941,7 @@ static class Program
             ("director blocks preserve intent for late csa under elevated risk", DirectorBlocksPreserveForLateCsaUnderElevatedRisk),
             ("director memory round trips through dto", DirectorMemoryRoundTripsThroughDto),
             ("cic review plan replans when phase truth says target accomplished", CicReviewPlanReplansWhenPhaseTruthSaysAccomplished),
-            ("director publish clamp suppresses second publish in same real second", DirectorPublishClampSuppressesSecondPublishInSameRealSecond),
+            ("director publish clamp suppresses second publish on the same game day", DirectorPublishClampSuppressesSecondPublishOnSameGameDay),
             ("director raises csa hold ratio under too fast collapse", DirectorRaisesCsaHoldRatioUnderTooFastCollapse),
             ("director raises recover floor under overheated", DirectorRaisesRecoverFloorUnderOverheated),
             ("director relaxes union mass ratio under late war pressure", DirectorRelaxesUnionMassRatioUnderLateWarPressure),
@@ -1392,6 +1392,7 @@ static class Program
         ObjectiveRecordsFromAggregateTests.Run();
         CommanderModeParseTests.Run();
         CampaignEconomyFixTests.Run();
+        CampaignLifecycleFixTests.Run();
         TacticalDecisionSnapshotTests.Run();
         TacticalResolvedGroupDecisionTests.Run();
 
@@ -14868,9 +14869,9 @@ static class Program
             new HistoricalOperationContext
             {
                 MajorFriendlyVictoryNearTarget = true,
-                TargetSectorOwnStrength = 20000f,
-                TargetSectorEnemyStrength = 10000f,
-                TargetSectorRatio = 2f
+                TargetLocalOwnStrength = 20000f,
+                TargetLocalEnemyStrength = 10000f,
+                TargetLocalRatio = 2f
             },
             allianceId: 0,
             daySerial: 1864 * 372);
@@ -14902,21 +14903,26 @@ static class Program
 
     private static void HistoricalOperationDynamicActionMutatesPhasePosture()
     {
+        // R3: posture actions still run the deadline baseline, so the fixture needs live deadlines.
         var plan = new OperationalPlan
         {
             OperationPosture = OperationPosture.ProbeAndDevelop,
-            CurrentPhaseIndex = 0
+            CurrentPhaseIndex = 0,
+            PlanDeadlineMonth = 12,
+            PlanDeadlineYear = 1864
         };
         plan.Phases.Add(new Phase
         {
             TargetObjectiveId = 3,
+            DeadlineMonth = 12,
+            DeadlineYear = 1864,
             OperationPosture = OperationPosture.ProbeAndDevelop,
             AllowCoordinatedAttack = false,
             AllowReinforcementPackage = false,
             AllowProbeOnly = true
         });
 
-        bool keepPlan = CicReviewRouter.RouteAction(
+        bool keepPlan = CicReviewRouter.Route(
             plan,
             new PhaseTruthOutput
             {
@@ -14924,8 +14930,9 @@ static class Program
                 RecommendedAction = PhaseTruthAction.Exploit,
                 RuleId = "friendly-victory-exploit"
             },
+            1864 * 372 + 7 * 31 + 1,
             7,
-            1864);
+            1864) == CicRouteOutcome.KeepPlan;
 
         AssertEqual(true, keepPlan);
         AssertEqual(OperationPosture.ExploitBreakthrough, plan.OperationPosture);
@@ -20123,8 +20130,8 @@ static class Program
             Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
             TargetAccomplished = true,
             ObjectiveAvailable = true,
-            TargetSectorOwnStrength = 10000f,
-            RequiredForce = 5000f,
+            TargetLocalOwnStrength = 10000f,
+            TargetLocalEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20139,8 +20146,8 @@ static class Program
             Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
             TargetAccomplished = false,
             ObjectiveAvailable = false,
-            TargetSectorOwnStrength = 10000f,
-            RequiredForce = 5000f,
+            TargetLocalOwnStrength = 10000f,
+            TargetLocalEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20148,15 +20155,17 @@ static class Program
         AssertEqual(PhaseTruthAction.Replan, output.RecommendedAction);
     }
 
+    // R3: force is a LOCAL own:enemy ratio (0.5 + ForceFractionRequired) and is only
+    // checked while the phase deadline has not expired (see CampaignLifecycleFixTests).
     private static void PhaseTruthRecoversWhenForceBelowThreshold()
     {
         var input = new PhaseTruthInput
         {
-            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
+            Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, ForceFractionRequired = 0.5f, DeadlineMonth = 12, DeadlineYear = 1862 } } },
             TargetAccomplished = false,
             ObjectiveAvailable = true,
-            TargetSectorOwnStrength = 1000f,
-            RequiredForce = 5000f,
+            TargetLocalOwnStrength = 1000f,
+            TargetLocalEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20171,8 +20180,8 @@ static class Program
             Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 1, DeadlineYear = 1862 } } },
             TargetAccomplished = false,
             ObjectiveAvailable = true,
-            TargetSectorOwnStrength = 10000f,
-            RequiredForce = 5000f,
+            TargetLocalOwnStrength = 10000f,
+            TargetLocalEnemyStrength = 5000f,
             CurrentMonth = 6, CurrentYear = 1862
         };
         var output = PhaseTruthLedger.Evaluate(input);
@@ -20189,8 +20198,8 @@ static class Program
             Plan = new OperationalPlan { Phases = { new Phase { TargetObjectiveId = 29, DeadlineMonth = 12, DeadlineYear = 1862 } } },
             TargetAccomplished = false,
             ObjectiveAvailable = true,
-            TargetSectorOwnStrength = 10000f,
-            RequiredForce = 5000f,
+            TargetLocalOwnStrength = 10000f,
+            TargetLocalEnemyStrength = 5000f,
             TargetEngagedRecently = false,
             CurrentMonth = 6, CurrentYear = 1862
         };
@@ -20525,7 +20534,7 @@ static class Program
         AssertEqual(1, rebuilt.RecentEventSummaries.Count);
     }
 
-    // Task 13: CicReviewRouter.RouteAction routes Advance → AdvancePhase, which exhausts the
+    // Task 13: CicReviewRouter.Route routes Advance → AdvancePhase, which exhausts the
     // last phase and marks the plan dirty. Single-phase plan: after accomplished truth,
     // IsDirty=true, return false (signals replan to caller).
     // CIC.ReviewPlanWithTruth delegates to CicReviewRouter, so this exercises the real routing
@@ -20556,18 +20565,19 @@ static class Program
             Reason = "target-accomplished"
         };
 
-        bool result = CicReviewRouter.RouteAction(plan, truth, 6, 1862);
-        AssertTrue(!result, "RouteAction should return false when last phase is exhausted by Advance");
+        bool result = CicReviewRouter.Route(plan, truth, 1862 * 372 + 6 * 31 + 1, 6, 1862) == CicRouteOutcome.KeepPlan;
+        AssertTrue(!result, "Route should not keep the plan when last phase is exhausted by Advance");
         AssertTrue(plan.IsDirty, "plan.IsDirty should be true after last phase exhausted by Advance");
     }
 
-    private static void DirectorPublishClampSuppressesSecondPublishInSameRealSecond()
+    // R16: the clamp is per alliance per game day (no wall clock).
+    private static void DirectorPublishClampSuppressesSecondPublishOnSameGameDay()
     {
         var clamp = new DirectorPublishClamp();
-        var stamp = new System.DateTime(2026, 5, 5, 12, 0, 0);
-        AssertTrue(clamp.TryPublish(stamp), "first publish in second should succeed");
-        AssertTrue(!clamp.TryPublish(stamp.AddMilliseconds(50)), "second publish 50ms later should be suppressed");
-        AssertTrue(clamp.TryPublish(stamp.AddSeconds(1).AddMilliseconds(1)), "publish past 1s boundary should succeed");
+        int day = 1862 * 372 + 5 * 31 + 5;
+        AssertTrue(clamp.TryPublish(0, day), "first publish on the day should succeed");
+        AssertTrue(!clamp.TryPublish(0, day), "second publish same alliance same day should be suppressed");
+        AssertTrue(clamp.TryPublish(0, day + 1), "publish on the next game day should succeed");
     }
 
     private static void DirectorRaisesCsaHoldRatioUnderTooFastCollapse()

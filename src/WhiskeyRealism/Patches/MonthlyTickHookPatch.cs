@@ -11,13 +11,27 @@ namespace WhiskeyRealism.Patches
     internal static class MonthlyTickHookPatch
     {
         [HarmonyPostfix]
-        internal static void Postfix()
+        internal static void Postfix(AICampaign __instance)
         {
             using (TelemetryPerf.Scope("campaign.patch.monthly-tick-hook", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
             OnceLog.Info("strategic-cadence", "Strategic cadence hook wired (monthly heartbeat + weekly CIC review)");
             try
             {
+                // R15: a campaign scene whose AICampaign instance was never loaded from a save
+                // is a new campaign -> reset the singleton coordinator's state.
+                if (StrategicCoordinator.Epoch.ShouldResetOnUpdate(__instance))
+                {
+                    if (StrategicCoordinator.Instance == null) StrategicCoordinator.Bootstrap();
+                    StrategicCoordinator.Instance?.ResetAll(CampaignEpochTracker.ResetReason(SceneManagement.currentoperation));
+                }
+
+                if (!ReviewCadenceCatchUp.CampaignIsLive(SceneManagement.currentoperation))
+                {
+                    OnceLog.Info("strategic-cadence:not-live", "[MonthlyTickHookPatch] waiting for SceneManagement.currentoperation == 2 (campaign live)");
+                    return;
+                }
+
                 int day = ReadGameDay();
                 int month = ReadGameMonth();
                 int year  = ReadGameYear();
@@ -57,7 +71,18 @@ namespace WhiskeyRealism.Patches
         private static int _lastNotifiedDay = -1;
         private static int _lastNotifiedMonth = -1;
         private static int _lastNotifiedYear = -1;
-        private static readonly OperationalStartupGate _startupGate = new OperationalStartupGate();
+        private static OperationalStartupGate _startupGate = new OperationalStartupGate();
+
+        // Called by StrategicCoordinator.ResetAll: the next campaign may start on the same
+        // date the previous one was last notified on.
+        internal static void ResetCadence()
+        {
+            _lastNotifiedDay = -1;
+            _lastNotifiedMonth = -1;
+            _lastNotifiedYear = -1;
+            _startupGate = new OperationalStartupGate();
+            _bunitsCached = null;
+        }
 
         private static UnityEngine.Component ResolveBunits()
         {

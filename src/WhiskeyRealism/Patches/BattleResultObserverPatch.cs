@@ -12,6 +12,8 @@ namespace WhiskeyRealism.Patches
     // through BattleMonument.UpdateAllianceWon after battle-result import.
     // We record only final result updates (_alliancewon >= 0), not initial
     // battle-start monument creation, so open battles do not enter history.
+    // The coordinator re-plans only on decisive battles in/near the operation's target
+    // (R4; StrategicCoordinator.DirtyPlanIfBattleInvalidates).
     [HarmonyPatch]
     internal static class BattleResultObserverPatch
     {
@@ -36,7 +38,7 @@ namespace WhiskeyRealism.Patches
             object __instance,
             int _alliancewon = -1)
         {
-            using (TelemetryPerf.Scope("tactical.patch.battle-result-observer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope("campaign.patch.battle-result-observer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
                 if (_alliancewon < 0) return;

@@ -21,20 +21,33 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        public void CheckTransition(int currentMonth, int currentYear,
-                                    bool vicksburgFallenEarly, bool atlantaFallenEarly)
+        // Pure era for a date (non-monotonic). Calendar years set the stage; Vicksburg falling
+        // before July 1863 / Atlanta before September 1864 pull the next stage early.
+        public static EraStage ForDate(int currentMonth, int currentYear, bool vicksburgFallenEarly, bool atlantaFallenEarly)
         {
-            EraStage target = Stage;
-
-            if (currentYear >= 1862 && target < EraStage.Operational1862) target = EraStage.Operational1862;
-            if (currentYear >= 1863 && target < EraStage.Decisive1863)    target = EraStage.Decisive1863;
-            if (currentYear >= 1864 && target < EraStage.TotalWar1864)    target = EraStage.TotalWar1864;
+            EraStage target = EraStage.Amateur1861;
+            if (currentYear >= 1862) target = EraStage.Operational1862;
+            if (currentYear >= 1863) target = EraStage.Decisive1863;
+            if (currentYear >= 1864) target = EraStage.TotalWar1864;
 
             if (vicksburgFallenEarly && currentYear == 1863 && currentMonth < 7 && target < EraStage.Decisive1863)
                 target = EraStage.Decisive1863;
             if (atlantaFallenEarly && currentYear == 1864 && currentMonth < 9 && target < EraStage.TotalWar1864)
                 target = EraStage.TotalWar1864;
+            return target;
+        }
 
+        // Re-derives the stage from the date in either direction (used on campaign reset).
+        public void ResetToDate(int currentMonth, int currentYear)
+        {
+            Stage = ForDate(currentMonth, currentYear, false, false);
+        }
+
+        // Within one campaign the era only moves forward.
+        public void CheckTransition(int currentMonth, int currentYear,
+                                    bool vicksburgFallenEarly, bool atlantaFallenEarly)
+        {
+            EraStage target = ForDate(currentMonth, currentYear, vicksburgFallenEarly, atlantaFallenEarly);
             if (target > Stage)
             {
                 var prev = Stage;

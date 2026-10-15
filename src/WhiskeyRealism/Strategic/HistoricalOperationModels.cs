@@ -78,9 +78,9 @@ namespace WhiskeyRealism.Strategic
         public bool MajorFriendlyDefeatNearTarget;
         public bool EnemyThreatensCapitalCorridor;
         public bool EnemyConcentratesInTheater;
-        public float TargetSectorOwnStrength;
-        public float TargetSectorEnemyStrength;
-        public float TargetSectorRatio;
+        public float TargetLocalOwnStrength;
+        public float TargetLocalEnemyStrength;
+        public float TargetLocalRatio;
         public float TheaterOwnPressure;
         public float TheaterEnemyPressure;
         public CampaignPace Pace;
