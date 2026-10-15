@@ -37,6 +37,11 @@ campaign.patch.project-appoint-observer.*          # Projects.AppointProject: on
 campaign.patch.recruitment.state-steer             # AIArea.GetBestRecruitingState: only when ZoneRecruiting picks a state to recruit in
 campaign.patch.arty-combine-gun-transfer.postfix   # BattleUnits.CombineUnits: only when two units are merged
 campaign.patch.fleet-patrol-reset                  # Regiment.StopRegiment on a fleet: naval patrol orders only
+campaign.patch.raid-supply-threshold.*            # AICampaign.RaidForce.SearchObjective: only while a raid force exists (CheckCreationOfRaidForces raises them at random)
+campaign.patch.supply-depot-fix.enemy-held        # CBuilding.EnemyUnitsInRange: only for a low-supply unit searching for a depot, or a weak defensive operation
+campaign.patch.subordinate-strength-grab.postfix  # BattleUnits.GrabSubordinateByStrength: only when CheckTransferOfUnits finds a deficit and a surplus army
+campaign.patch.offensive-weapon-trim.hook         # CheckOffensiveMovements trim loop: only when an offensive gathered more units than it needs
+campaign.patch.random-candidate-pick.hook         # AICampaign random picks: only when a fleet, ship, raid force or recruit group is raised
 
 # Battle paths a single battle may not reach.
 tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # AIBattle.MicroAICheckForRetreats: vanilla calls it only with macroai 3 (retreat) and ai_stance 1
