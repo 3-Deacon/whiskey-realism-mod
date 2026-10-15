@@ -377,11 +377,12 @@ internal static class TelemetrySessionTests
                 warningCallback: null);
 
             TelemetryRuntime runtime = TelemetryRuntime.Start(config);
-            var probe = TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Tactical, TelemetryCategory.Write, "BudgetFiller", TelemetrySeverity.Info).WithField("payload", "");
+            // A Warning row fills up to the total cap (B6: Info Write rows stop at 98%).
+            var probe = TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Tactical, TelemetryCategory.Write, "BudgetFiller", TelemetrySeverity.Warning).WithField("payload", "");
             int fillerOverhead = System.Text.Encoding.UTF8.GetByteCount(TelemetryJson.ToJsonLine(probe));
             string filler = new string('x', (int)Math.Max(1L, config.MaxTuningLogBytes - fillerOverhead - 40L));
 
-            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Tactical, TelemetryCategory.Write, "BudgetFiller", TelemetrySeverity.Info).WithField("payload", filler)), "filler row queues before writer consumes budget");
+            AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.Tactical, TelemetryCategory.Write, "BudgetFiller", TelemetrySeverity.Warning).WithField("payload", filler)), "filler row queues before writer consumes budget");
             AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.System, TelemetryCategory.Failure, "RawFailureDetail", TelemetrySeverity.Warning).WithField("payload", new string('d', 128))), "raw failure detail queues before writer cap check");
             AssertTrue(runtime.TryEmit(TelemetryEvent.Create(runtime.SessionId, runtime.Profile, TelemetryLayer.System, TelemetryCategory.Failure, "FailureSummary", TelemetrySeverity.Warning).WithField("protectedSummary", true).WithField("reason", "after-cap")), "failure summary queues before writer cap check");
 

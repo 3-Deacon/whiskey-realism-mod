@@ -56,7 +56,7 @@ namespace WhiskeyRealism.Strategic.BugFixes
                 if (candidate.Method != methodName) continue;
                 site = candidate;
                 var code = new List<CodeInstruction>(vanilla.Count);
-                foreach (var ci in vanilla) code.Add(ci.Clone());
+                foreach (var ci in vanilla) code.Add(new CodeInstruction(ci));
                 matches = Rewrite(code, randomRangeInt, upperOffsetHook, candidate.Expected);
                 return matches == candidate.Expected ? code : vanilla;
             }

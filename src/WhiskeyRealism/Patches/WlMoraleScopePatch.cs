@@ -38,13 +38,16 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(Regiment __instance, Regiment parentcampaignunit, out OwnershipRaise<Regiment> __state)
         {
+            __state = default;
+            // Outside a W&L career the patch has nothing to do: return before the scope, so
+            // the per-regiment hook costs one static read in every other campaign (perf L3).
+            if (!DLC_WL.dlc_scenarioactive) return;
             using (TelemetryPerf.Scope("campaign.patch.wl-morale-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.wl-morale-scope.prefix");
-                __state = default;
                 try
                 {
-                    if (!DLC_WL.dlc_scenarioactive || (UnityEngine.Object)parentcampaignunit == null || (UnityEngine.Object)__instance == null) return;
+                    if ((UnityEngine.Object)parentcampaignunit == null || (UnityEngine.Object)__instance == null) return;
                     if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value || !Flag()) return;
                     if (!WlEconomyFixes.RaiseGroupForPlayerUnit(true, parentcampaignunit.dlcw_isundercommander,
                             __instance.dlcw_isundercommander, WlPlayerMapGroup.Is(parentcampaignunit))) return;
@@ -68,6 +71,8 @@ namespace WhiskeyRealism.Patches
         [HarmonyFinalizer]
         internal static void Finalizer(OwnershipRaise<Regiment> __state)
         {
+            // Nothing stored and no W&L career: nothing to restore (perf L3).
+            if (!__state.Active && !DLC_WL.dlc_scenarioactive) return;
             using (TelemetryPerf.Scope("campaign.patch.wl-morale-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.wl-morale-scope.finalizer");

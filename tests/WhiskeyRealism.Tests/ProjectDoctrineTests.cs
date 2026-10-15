@@ -41,6 +41,7 @@ internal static class ProjectDoctrineTests
             ("project doctrine scorer rejects stale candidate lane metadata", ProjectDoctrineScorerRejectsStaleCandidateLane),
             ("project doctrine scorer will not replace out of window with out of window", ProjectDoctrineScorerRejectsOutOfWindowReplacement),
             ("project doctrine scorer sanitizes public signal inputs", ProjectDoctrineScorerSanitizesPublicSignals),
+            ("project doctrine arms imports follow the blockade's import cut", ProjectDoctrineArmsImportsFollowBlockade),
             ("project doctrine scorer keeps lane intent numeric fields finite", ProjectDoctrineScorerKeepsLaneIntentFinite),
             ("project doctrine scorer does not mark high vanilla only lane critical", ProjectDoctrineScorerIgnoresVanillaOnlyCriticality),
             ("project doctrine scorer marks best doctrine replacement critical", ProjectDoctrineScorerMarksBestDoctrineReplacementCritical),
@@ -404,6 +405,19 @@ internal static class ProjectDoctrineTests
 
         AssertEqual(false, decision.ShouldReplace);
         AssertEqual(35, decision.ProjectId);
+    }
+
+    // Vanilla scales weapon import availability from 1 (no blockade) to 0.1 (full) (64120-64124).
+    private static void ProjectDoctrineArmsImportsFollowBlockade()
+    {
+        var open = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals { Alliance = 1, WeaponDeficit = 0.5f };
+        TestHarness.AssertNear(1.3f, WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.ScoreDoctrineOnly(1, open), 0.001f, "open ports: vanilla-era score");
+        var blockaded = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals { Alliance = 1, WeaponDeficit = 0.5f, ArmsImportViability = 0.28f };
+        TestHarness.AssertNear(1.3f * 0.28f, WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.ScoreDoctrineOnly(1, blockaded), 0.001f, "80 % blockade");
+        var broken = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals { Alliance = 1, WeaponDeficit = 0.5f, ArmsImportViability = float.NaN };
+        TestHarness.AssertNear(1.3f, WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.ScoreDoctrineOnly(1, broken), 0.001f, "non-finite viability is neutral");
+        var domestic = new WhiskeyRealism.Strategic.Projects.ProjectDoctrineSignals { Alliance = 1, ArtilleryDeficit = 1f, ArmsImportViability = 0.1f };
+        TestHarness.AssertNear(0.5f, WhiskeyRealism.Strategic.Projects.ProjectDoctrineScorer.ScoreDoctrineOnly(8, domestic), 0.001f, "domestic guns: artillery deficit, no import cut");
     }
 
     private static void ProjectDoctrineScorerSanitizesPublicSignals()

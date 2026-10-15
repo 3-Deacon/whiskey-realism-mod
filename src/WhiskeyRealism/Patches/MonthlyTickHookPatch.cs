@@ -50,7 +50,11 @@ namespace WhiskeyRealism.Patches
                 bool dateChanged = day != _lastNotifiedDay || month != _lastNotifiedMonth || year != _lastNotifiedYear;
                 bool runtimeReady = OperationalRuntimeReady() && !StrategicCoordinator.WlCareerStartPending();
                 if (!_startupGate.ShouldNotify(dateChanged, runtimeReady))
+                {
+                    // Continue a time-sliced daily review started on an earlier frame.
+                    StrategicCoordinator.Instance?.PumpDailyReview();
                     return;
+                }
 
                 _lastNotifiedDay = day;
                 _lastNotifiedMonth = month;

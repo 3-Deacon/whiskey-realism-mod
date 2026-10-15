@@ -405,7 +405,7 @@ namespace WhiskeyRealism.Telemetry
                     row.Json = TelemetryJson.ToJsonLine(row.Event);
                     row.Bytes = Utf8NoBom.GetByteCount(row.Json);
                     string fileName = FileNameForNextWrite(row.Event, row.Bytes);
-                    if (!_budget.TryReserve(row.Event.Category, row.Bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(row.Event)))
+                    if (!_budget.TryReserve(row.Event.Category, row.Bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(row.Event), severity: row.Event.Severity))
                     {
                         row.Done = true;
                         if (IsFileWritePerfRow(row.Event))
@@ -853,7 +853,7 @@ namespace WhiskeyRealism.Telemetry
                 string json = TelemetryJson.ToJsonLine(ev);
                 long bytes = Utf8NoBom.GetByteCount(json);
                 string fileName = FileNameForNextWrite(ev, bytes);
-                if (!_budget.TryReserve(ev.Category, bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(ev)))
+                if (!_budget.TryReserve(ev.Category, bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(ev), severity: ev.Severity))
                     return RowWriteResult.Dropped;
 
                 // Same torn-write handling as row chunks; one immediate retry (the fragment has

@@ -98,6 +98,12 @@ internal static class WlEconomyPatchPinTests
         default(OwnershipRaise<Unit>).Restore(set);
     }
 
+    private static readonly string[] L3FinalizerGates =
+    {
+        "if (!__state.Group.Active && !__state.Attrition.Active && !DLC_WL.dlc_scenarioactive) return;",
+        "if (!__state.Active && !DLC_WL.dlc_scenarioactive) return;",
+    };
+
     // file -> (state store, write) pairs in the Prefix, and calls the Finalizer must make.
     private static readonly (string File, (string Store, string Write)[] Pairs, string[] Restores)[] Writers =
     {
@@ -141,7 +147,11 @@ internal static class WlEconomyPatchPinTests
             foreach (string restore in w.Restores)
                 AssertTrue(finalizer.Contains(restore), w.File + ": Finalizer restores " + restore);
             AssertFalse(finalizer.Contains("Plugin."), w.File + ": Finalizer restores whatever the flags say");
-            AssertFalse(finalizer.Contains("return"), w.File + ": Finalizer has no early return");
+            // Perf L3: the only early return allowed is "nothing stored and no W&L career".
+            string restoring = finalizer;
+            foreach (string gate in L3FinalizerGates)
+                restoring = restoring.Replace(gate, string.Empty);
+            AssertFalse(restoring.Contains("return"), w.File + ": Finalizer has no early return");
         }
         foreach (string file in new[] { "WlUnitStatsScopePatch.cs", "WlMoraleScopePatch.cs", "WlSupplyStaffScopePatch.cs" })
             AssertTrue(Patch(file).Contains("SetOwned = (unit, owned) => unit.dlcw_isundercommander = owned;"), file + ": the raise writes the ownership flag");

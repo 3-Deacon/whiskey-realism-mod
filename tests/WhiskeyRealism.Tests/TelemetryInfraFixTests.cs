@@ -23,6 +23,7 @@ internal static class TelemetryInfraFixTests
         QueueProtectedRowDoesNotEvictDetailRows();
         QueuePerformanceDoesNotEvictDecisionOrState();
         QueueEvictsTraceBeforePerformance();
+        QueueShedsTraceThenInfoNeverWarning();
         QueueDrainPreservesFifoAcrossCategories();
         QueueCountersStayExactUnderChurn();
         QueueEnqueueIsConstantTimeWhenFull();
@@ -34,6 +35,8 @@ internal static class TelemetryInfraFixTests
         PerfSlowRowsAreBoundedPerWindow();
         PerfWarningsOffFoldsSlowCallsIntoAggregate();
         PerfAggregateWindowFlushesAutomatically();
+        PerfPerCallScopeNameSharesOneAggregate();
+        ProbeStateMatchesScopeNamesByValue();
         WriterDoesNotRewriteManifestPerBatch();
         WriterRewritesManifestOnTimer();
         WriterKeepsOneOpenStreamPerFileAndClosesOnStop();
@@ -213,18 +216,26 @@ internal static class TelemetryInfraFixTests
         LogPass("queue protected row does not evict detail rows");
     }
 
+    private static TelemetryEvent Ev(TelemetryCategory category, string name, TelemetrySeverity severity)
+    {
+        return TelemetryEvent.Create("s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical, category, name, severity);
+    }
+
+    // B6 shedding order (user direction 2026-10-15): Trace first, then Info rows, never
+    // Performance or Warning rows.
     private static void QueuePerformanceDoesNotEvictDecisionOrState()
     {
         var queue = new TelemetryQueue(capacity: 2);
         queue.Enqueue(Ev(TelemetryCategory.Decision, "decision-a"));
         queue.Enqueue(Ev(TelemetryCategory.State, "state-a"));
-        TestHarness.AssertEqual(TelemetryQueueResult.Dropped, queue.Enqueue(Ev(TelemetryCategory.Performance, "perf-a")), "performance dropped when only decision/state queued");
-        TestHarness.AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.Performance), "performance drop counted");
-        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Decision, "decision-b")), "decision evicts state");
+        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Performance, "perf-a")), "performance evicts an info state row");
+        TestHarness.AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.State), "state info row shed");
+        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Gate, "gate-a")), "gate info evicts decision info");
+        TestHarness.AssertEqual(TelemetryQueueResult.Dropped, queue.Enqueue(Ev(TelemetryCategory.Gate, "gate-b")), "gate info cannot evict performance");
         var drained = queue.Drain(10);
         TestHarness.AssertEqual(2, drained.Count, "count");
-        TestHarness.AssertEqual("decision-a", drained[0].EventName, "decision-a kept");
-        TestHarness.AssertEqual("decision-b", drained[1].EventName, "decision-b kept");
+        TestHarness.AssertEqual("perf-a", drained[0].EventName, "performance kept");
+        TestHarness.AssertEqual("gate-a", drained[1].EventName, "gate kept");
         LogPass("queue performance does not evict decision or state");
     }
 
@@ -234,14 +245,33 @@ internal static class TelemetryInfraFixTests
         queue.Enqueue(Ev(TelemetryCategory.Performance, "perf-a"));
         queue.Enqueue(Ev(TelemetryCategory.Trace, "trace-a"));
         TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Performance, "perf-b")), "performance evicts trace");
-        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Gate, "gate-a")), "gate evicts performance");
+        TestHarness.AssertEqual(TelemetryQueueResult.Dropped, queue.Enqueue(Ev(TelemetryCategory.Gate, "gate-a")), "gate info never evicts performance");
+        TestHarness.AssertEqual(TelemetryQueueResult.Dropped, queue.Enqueue(Ev(TelemetryCategory.Gate, "gate-w", TelemetrySeverity.Warning)), "a warning row does not evict performance either");
         var drained = queue.Drain(10);
         TestHarness.AssertEqual(2, drained.Count, "count");
-        TestHarness.AssertEqual("perf-a", drained[0].EventName, "oldest performance kept (newest evicted)");
-        TestHarness.AssertEqual("gate-a", drained[1].EventName, "gate kept");
+        TestHarness.AssertEqual("perf-a", drained[0].EventName, "performance kept");
+        TestHarness.AssertEqual("perf-b", drained[1].EventName, "performance kept");
         TestHarness.AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.Trace), "trace evicted");
-        TestHarness.AssertEqual(1L, queue.DroppedCountFor(TelemetryCategory.Performance), "performance evicted");
+        TestHarness.AssertEqual(0L, queue.DroppedCountFor(TelemetryCategory.Performance), "performance never evicted");
         LogPass("queue evicts trace before performance");
+    }
+
+    private static void QueueShedsTraceThenInfoNeverWarning()
+    {
+        var queue = new TelemetryQueue(capacity: 3);
+        queue.Enqueue(Ev(TelemetryCategory.State, "state-warning", TelemetrySeverity.Warning));
+        queue.Enqueue(Ev(TelemetryCategory.Decision, "decision-info"));
+        queue.Enqueue(Ev(TelemetryCategory.Trace, "trace-info"));
+        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.State, "state-info")), "state info evicts trace");
+        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Trace, "trace-warning", TelemetrySeverity.Warning)), "a warning trace row evicts an info row");
+        TestHarness.AssertEqual(TelemetryQueueResult.Enqueued, queue.Enqueue(Ev(TelemetryCategory.Write, "write-info")), "write info evicts decision info");
+        TestHarness.AssertEqual(TelemetryQueueResult.Dropped, queue.Enqueue(Ev(TelemetryCategory.Write, "write-info-2")), "info never evicts warning rows");
+        var drained = queue.Drain(10);
+        TestHarness.AssertEqual(3, drained.Count, "count");
+        TestHarness.AssertEqual("state-warning", drained[0].EventName, "warning state kept");
+        TestHarness.AssertEqual("trace-warning", drained[1].EventName, "warning trace kept");
+        TestHarness.AssertEqual("write-info", drained[2].EventName, "highest info kept");
+        LogPass("queue sheds trace then info, never warning");
     }
 
     private static void QueueDrainPreservesFifoAcrossCategories()
@@ -549,6 +579,55 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(gameRoot);
         }
         LogPass("perf warnings off folds slow calls into aggregate");
+    }
+
+    // F3 two-tier lookup: a scope name built per call (a new string instance each time)
+    // must still land on one aggregate, and must not use up the per-thread name cap so
+    // that later literal scopes are dropped.
+    private static void PerfPerCallScopeNameSharesOneAggregate()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            string dir = SessionDir(gameRoot, runtime);
+            const int calls = TelemetryPerf.MaxScopesPerThread + TelemetryPerf.MaxAliasesPerThread + 100;
+            char[] text = "p-test.per-call-name".ToCharArray();
+            for (int i = 0; i < calls; i++)
+            {
+                using (TelemetryPerf.Scope(new string(text), TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+                {
+                }
+            }
+            using (TelemetryPerf.Scope("p-test.after-per-call-name", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1000.0))
+            {
+            }
+            TelemetryRouter.Shutdown("p-test");
+
+            var rows = RowsForScope(dir, "p-test.per-call-name", "PerformanceAggregate");
+            TestHarness.AssertEqual(1, rows.Count, "one aggregate for a per-call name");
+            TestHarness.AssertEqual((long)calls, (long)rows[0]["fields"]["count"], "every per-call scope counted once");
+            TestHarness.AssertEqual(1, RowsForScope(dir, "p-test.after-per-call-name", "PerformanceAggregate").Count,
+                "a later literal scope still gets its aggregate");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf per-call scope name shares one aggregate");
+    }
+
+    // The frame probe's per-frame table matches by reference first, then by value.
+    private static void ProbeStateMatchesScopeNamesByValue()
+    {
+        var state = new FrameProbeState();
+        state.RecordScope("p-test.probe.value", 100.0);
+        state.RecordScope(new string("p-test.probe.value".ToCharArray()), 200.0);
+        TelemetryFrameHitch hitch;
+        TestHarness.AssertTrue(state.Observe(400.0, 0, 0, 0, out hitch), "hitch frame");
+        TestHarness.AssertEqual("p-test.probe.value:300.0x2", hitch.TopScopes, "equal names share one slot");
+        LogPass("probe state matches scope names by value");
     }
 
     private static void PerfAggregateWindowFlushesAutomatically()

@@ -40,6 +40,15 @@ namespace WhiskeyRealism.Patches
         private static TacticalObserverSnapshot _chargeBefore = TacticalObserverSnapshot.Empty();
         private static TacticalObserverSnapshot _feudBefore = TacticalObserverSnapshot.Empty();
 
+        // Perf slice F1. The side-wide odds evaluation is shared by every observer call of
+        // one AIBattle in one frame (OddsMemoKey); the decision matrix is written once per
+        // AIBattle per frame, with only the group rows whose decision inputs changed.
+        private static readonly OddsMemo<TacticalOddsAssessment> _oddsMemo = new OddsMemo<TacticalOddsAssessment>();
+        private static readonly MatrixRowDedupe _matrixRows = new MatrixRowDedupe();
+        private static readonly MatrixCycleGate _matrixCycle = new MatrixCycleGate();
+        // Command-node ids the snapshots do not hold, resolved once per monitor cycle.
+        private static readonly Dictionary<int, Regiment> _nodeScanResults = new Dictionary<int, Regiment>();
+
         // Per-session lifecycle detector. Static so it preserves state across observer ticks.
         // CheckGlobalAIStrategyPostfix fires once per AI side per tick (~2× per frame when both
         // sides are AI-controlled); the two-tick hysteresis in the detector handles this safely.
@@ -53,7 +62,6 @@ namespace WhiskeyRealism.Patches
         private static FieldInfo _unitsUsedField;
         private static FieldInfo _allGroupsAssignedField;
         private static FieldInfo _objectiveChainField;
-        private static FieldInfo _orderedStanceField;
         private static FieldInfo _parentRegimentField;
         private static FieldInfo _allianceField;
         private static FieldInfo _orderStateField;
@@ -343,6 +351,10 @@ namespace WhiskeyRealism.Patches
             _chargeBeforeId = 0;
             _chargeBefore = TacticalObserverSnapshot.Empty();
             _feudBefore = TacticalObserverSnapshot.Empty();
+            _oddsMemo.Clear();
+            _matrixRows.Clear();
+            _matrixCycle.Clear();
+            _nodeScanResults.Clear();
         }
 
         // Battle scene teardown. Vanilla quits a battle by rebuilding the scene
@@ -440,7 +452,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void MicroAICheckForChargesPrefix(AIBattle __instance, Regiment aigroup)
         {
-            if (!Enabled()) return;
+            if (!Enabled() || !WritesRows()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.charges.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("tactical.patch.observer.charges.prefix");
@@ -484,7 +496,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void CheckForFeudGroupActionsPrefix(AIBattle __instance)
         {
-            if (!Enabled()) return;
+            if (!Enabled() || !WritesRows()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.feud.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("tactical.patch.observer.feud.prefix");
@@ -865,7 +877,7 @@ namespace WhiskeyRealism.Patches
 
         private static TacticalBattleContext BuildContextIfEnabled(AIBattle battle)
         {
-            if (!Enabled()) return null;
+            if (!Enabled() || !WritesRows()) return null;
             try { return BuildContext(battle, null); }
             catch (Exception ex)
             {
@@ -882,12 +894,15 @@ namespace WhiskeyRealism.Patches
             TacticalBattleContext sharedContext = null)
         {
             if (!Enabled()) return;
+            OnceLog.Info("tactical-observer", "TacticalObserverPatch wired");
+            // Every observer and matrix row is a tactical sidecar row: with a profile that
+            // writes none (Off, CampaignTuning) nothing is built (perf slice F1).
+            if (!WritesRows()) return;
 
             using (TelemetryPerf.Scope("tactical.observer-pass", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 try
                 {
-                    OnceLog.Info("tactical-observer", "TacticalObserverPatch wired");
 
                     var context = group == null && sharedContext != null ? sharedContext : BuildContext(battle, group);
                     EmitDecisionMatrix(eventType, battle, group, context);
@@ -924,17 +939,17 @@ namespace WhiskeyRealism.Patches
         // (GameVars.currenttimefromstart is identical within one cycle).
         private static void EmitOperationsMonitorTelemetryOncePerCycle()
         {
-            if (!DecisionMatrixEnabled()) return;
+            if (!DecisionMatrixEnabled() || !WritesRows()) return;
 
             try
             {
                 float cycleHours = GameVars.currenttimefromstart;
                 if (cycleHours == _lastMonitorCycleHours) return;
                 _lastMonitorCycleHours = cycleHours;
+                _nodeScanResults.Clear();
 
-                var regimentsByInstanceId = BuildRegimentInstanceMap();
-                EmitOperationsMonitorTelemetryForSide(0, TacticalBattleCoordinator.GetSideOrchestrator(0), regimentsByInstanceId);
-                EmitOperationsMonitorTelemetryForSide(1, TacticalBattleCoordinator.GetSideOrchestrator(1), regimentsByInstanceId);
+                EmitOperationsMonitorTelemetryForSide(0, TacticalBattleCoordinator.GetSideOrchestrator(0));
+                EmitOperationsMonitorTelemetryForSide(1, TacticalBattleCoordinator.GetSideOrchestrator(1));
             }
             catch (Exception ex)
             {
@@ -944,8 +959,7 @@ namespace WhiskeyRealism.Patches
 
         private static void EmitOperationsMonitorTelemetryForSide(
             int side,
-            TacticalBattleOrchestrator orchestrator,
-            Dictionary<int, Regiment> regimentsByInstanceId)
+            TacticalBattleOrchestrator orchestrator)
         {
             if (orchestrator == null || orchestrator.Army == null) return;
 
@@ -1009,7 +1023,7 @@ namespace WhiskeyRealism.Patches
                     EmitCommandAssignmentTelemetry(side, state, operation, doctrineOrder, assignmentSignature);
                 }
 
-                Regiment group = FindCommandNodeGroup(state.NodeId, regimentsByInstanceId);
+                Regiment group = FindCommandNodeGroup(state.NodeId);
                 var physical = BuildCommandPhysicalState(group);
                 var idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
                 // BC5a: the posture producer decides and the order executor
@@ -1216,34 +1230,44 @@ namespace WhiskeyRealism.Patches
                 formation: SafeFormation(group));
         }
 
-        private static Regiment FindCommandNodeGroup(string nodeId, Dictionary<int, Regiment> regimentsByInstanceId)
+        // Node ids carry either the GameObject or the Regiment component InstanceID. The
+        // sides' battle snapshots index units by GameObject id (BattleSnapshot.IndexOfOwn,
+        // BattleSnapshotBuilder.UnitAt); an id they do not hold (a component id, or a unit
+        // outside both sides) is matched over completeunitlist by either id, as the
+        // per-cycle map this replaced did (perf slice F1).
+        private static Regiment FindCommandNodeGroup(string nodeId)
         {
             int instanceId = ParseCommandNodeInstanceId(nodeId);
-            if (instanceId == 0 || regimentsByInstanceId == null) return null;
-            return regimentsByInstanceId.TryGetValue(instanceId, out Regiment reg) ? reg : null;
-        }
-
-        // Node ids carry either the GameObject or the Regiment component InstanceID;
-        // index both once per monitor pass instead of a completeunitlist walk per node.
-        private static Dictionary<int, Regiment> BuildRegimentInstanceMap()
-        {
-            var map = new Dictionary<int, Regiment>();
+            if (instanceId == 0) return null;
+            for (int alliance = 0; alliance < 2; alliance++)
+            {
+                if (!BattleCore.TryGetSnapshot(alliance, out BattleSnapshot snapshot)) continue;
+                int index = snapshot.IndexOfOwn(instanceId);
+                if (index < 0) continue;
+                Regiment unit = WhiskeyRealism.Tactical.Battle.BattleSnapshotBuilder.UnitAt(snapshot, index, enemy: false);
+                if (unit != null) return unit;
+            }
+            if (_nodeScanResults.TryGetValue(instanceId, out Regiment cached)) return cached;
+            Regiment found = null;
             try
             {
                 var all = BattleUnits.completeunitlist;
-                if (all == null) return map;
-                for (int i = 0; i < all.Count; i++)
+                if (all != null)
                 {
-                    var reg = all[i];
-                    if (reg == null) continue;
-                    int componentId = SafeInstanceId(reg);
-                    int gameObjectId = TacticalPatchIds.GameObjectInstanceId(reg);
-                    if (componentId != 0) map[componentId] = reg;
-                    if (gameObjectId != 0) map[gameObjectId] = reg;
+                    for (int i = 0; i < all.Count; i++)
+                    {
+                        var reg = all[i];
+                        if (reg == null) continue;
+                        if (SafeInstanceId(reg) == instanceId || TacticalPatchIds.GameObjectInstanceId(reg) == instanceId) found = reg;
+                    }
                 }
             }
-            catch { }
-            return map;
+            catch
+            {
+                found = null;
+            }
+            _nodeScanResults[instanceId] = found;
+            return found;
         }
 
         private static int ParseCommandNodeInstanceId(string nodeId)
@@ -1783,6 +1807,17 @@ namespace WhiskeyRealism.Patches
             TelemetryRouter.LegacyInfo(message, TelemetryLayer.Tactical);
         }
 
+        // The decision matrix (perf slice F1). Side-wide: written once per AIBattle per
+        // frame, at AdjustGroupAIStance (after the snapshot rebuild in CheckGlobalAIStrategy
+        // and vanilla's stance pass); the group rows do not depend on the event. `events`
+        // names the side-wide events observed in that frame up to and including the Group
+        // event. Sector and Order (observed after it inside AdjustGroupAIStancePostfix) and
+        // Feud (CheckForFeudGroupActions, later in UpdateAITasks, decompile 5857-5868) come
+        // after the write, so they never appear there and write no side-wide matrix of their
+        // own; their observer summaries (Feud with its delta=) are unchanged. Micro-AI: the battle row and the focus
+        // group's row. A group row is written only when its decision inputs changed
+        // (MatrixRowDedupe, 30 s keep-alive); the battle row keeps the per-signature
+        // throttle (Tactical Decision Matrix Min Seconds Between Snapshots).
         private static void EmitDecisionMatrix(
             TacticalObservedEvent eventType,
             AIBattle battle,
@@ -1794,10 +1829,15 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (context == null) context = TacticalBattleContext.Empty();
-
-                IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
-                if (units == null || units.Count <= 0)
-                    units = SafeList(battle, ref _allGroupsAssignedField, "allgroupsassigned");
+                float now = Time.realtimeSinceStartup;
+                string events = eventType.ToString();
+                if (focusGroup == null)
+                {
+                    int frame = Time.frameCount;
+                    int mask = _matrixCycle.Note(battle, frame, 1 << (int)eventType);
+                    if (eventType != TacticalObservedEvent.Group || !_matrixCycle.TryWrite(battle, frame)) return;
+                    events = EventNames(mask);
+                }
 
                 int maxRows = Plugin.Instance != null
                     ? Mathf.Clamp(Plugin.Instance.TacticalDecisionMatrixMaxRows.Value, 1, 300)
@@ -1808,33 +1848,34 @@ namespace WhiskeyRealism.Patches
                 bool verbose = Plugin.Instance != null && Plugin.Instance.TacticalObserverVerboseLogging.Value;
                 string baseSignature = eventType + "|" + TacticalTelemetry.Signature(eventType, context);
 
-                if (!TacticalTelemetry.ShouldEmit(_lastEmittedAt, "DecisionMatrixSummary", baseSignature, Time.realtimeSinceStartup, minSeconds, verbose))
-                    return;
-
-                EmitDecisionMatrixBattle(eventType, context, maxRows);
+                if (TacticalTelemetry.ShouldEmit(_lastEmittedAt, "DecisionMatrixSummary", baseSignature, now, minSeconds, verbose))
+                    EmitDecisionMatrixBattle(eventType, events, context, maxRows);
 
                 if (focusGroup != null)
                 {
-                    EmitDecisionMatrixRow(eventType, context, focusGroup, 0, true);
+                    EmitDecisionMatrixRow(eventType, context, focusGroup, 0, true, now);
                     return;
                 }
 
+                IList units = SafeList(battle, ref _unitsUsedField, "unitsused");
+                if (units == null || units.Count <= 0)
+                    units = SafeList(battle, ref _allGroupsAssignedField, "allgroupsassigned");
                 if (units == null || units.Count <= 0) return;
 
-                int emitted = 0;
-                for (int i = 0; i < units.Count && emitted < maxRows; i++)
+                int rows = 0;
+                for (int i = 0; i < units.Count && rows < maxRows; i++)
                 {
                     var group = units[i] as Regiment;
                     if (group == null || group.unittyp <= 13) continue;
-                    EmitDecisionMatrixRow(eventType, context, group, i, false);
-                    emitted++;
+                    EmitDecisionMatrixRow(eventType, context, group, i, false, now);
+                    rows++;
                 }
 
                 if (units.Count > maxRows)
                 {
                     TelemetryRouter.LegacyInfo("[TacticalDecisionMatrix] event=" + eventType +
                         " row=truncated totalCandidates=" + units.Count +
-                        " emitted=" + emitted +
+                        " emitted=" + rows +
                         " cap=" + maxRows, TelemetryLayer.Tactical);
                 }
             }
@@ -1844,12 +1885,27 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        private static string EventNames(int mask)
+        {
+            var names = new System.Text.StringBuilder(64);
+            foreach (TacticalObservedEvent e in ObservedEvents)
+            {
+                if ((mask & (1 << (int)e)) == 0) continue;
+                if (names.Length > 0) names.Append('|');
+                names.Append(e.ToString());
+            }
+            return names.ToString();
+        }
+
+        private static readonly TacticalObservedEvent[] ObservedEvents = (TacticalObservedEvent[])Enum.GetValues(typeof(TacticalObservedEvent));
+
         private static void EmitDecisionMatrixRow(
             TacticalObservedEvent eventType,
             TacticalBattleContext context,
             Regiment group,
             int index,
-            bool focus)
+            bool focus,
+            float now)
         {
             if (group == null || context == null) return;
 
@@ -1859,7 +1915,7 @@ namespace WhiskeyRealism.Patches
             // exposed player-owned descendant, is not Whiskey's to change.
             bool wlAllows = !TacticalWriteGuard.IsPlayerProtected(group, out string wlReason);
             bool orderFrictionAllows = MatrixOrderFrictionAllowsChange(group);
-            int vanillaStance = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
+            int vanillaStance = group.ai_stanceordered;
             var stanceDecision = TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)
                 ? TacticalDoctrineScorer.DecideGroupStance(new TacticalGroupStanceDecisionInput(
                     vanillaStance,
@@ -1870,11 +1926,34 @@ namespace WhiskeyRealism.Patches
                     sideDefending: TacticalBattleCoordinator.GetSideOrchestrator(group.alliance)?.Army?.CurrentBattleStance == BattleStance.Defender))
                 : new TacticalGroupStanceDecision(TacticalDoctrineDecisionKind.Skip, vanillaStance, "command-scope");
 
+            // The row's decision inputs (DecisionInputSignature's fields without the event,
+            // floats in its 0.5 buckets) plus the decision: unchanged means no row.
+            int groupId = SafeInstanceId(group);
+            int orderState = SafeOrderState(group);
+            int signature = 17;
+            signature = MatrixRowDedupe.Combine(signature, context.Side);
+            signature = MatrixRowDedupe.Combine(signature, context.MacroAi);
+            signature = MatrixRowDedupe.Combine(signature, group.unittyp);
+            signature = MatrixRowDedupe.Combine(signature, group.ai_stance);
+            signature = MatrixRowDedupe.Combine(signature, vanillaStance);
+            signature = MatrixRowDedupe.Combine(signature, sector.SectorId);
+            signature = MatrixRowDedupe.Combine(signature, (int)sector.Mission);
+            signature = MatrixRowDedupe.Combine(signature, MatrixRowDedupe.Bucket(sector.Odds));
+            signature = MatrixRowDedupe.Combine(signature, MatrixRowDedupe.Bucket(sector.Confidence));
+            signature = MatrixRowDedupe.Combine(signature, wlAllows ? 1 : 0);
+            signature = MatrixRowDedupe.Combine(signature, orderFrictionAllows ? 1 : 0);
+            signature = MatrixRowDedupe.Combine(signature, orderState);
+            signature = MatrixRowDedupe.Combine(signature, (int)stanceDecision.Kind);
+            signature = MatrixRowDedupe.Combine(signature, stanceDecision.GroupStance);
+            signature = MatrixRowDedupe.Combine(signature, focus ? 1 : 0);
+            if (!_matrixRows.ShouldEmit(groupId, signature, now)) return;
+
             EmitDecisionMatrixGroup(eventType, context, group, index, focus, sector, wlAllows, wlReason, orderFrictionAllows, vanillaStance, stanceDecision);
         }
 
         private static void EmitDecisionMatrixBattle(
             TacticalObservedEvent eventType,
+            string events,
             TacticalBattleContext context,
             int maxRows)
         {
@@ -1932,6 +2011,7 @@ namespace WhiskeyRealism.Patches
                     .WithField("decisive", context.DecisiveSectorId)
                     .WithField("odds", TacticalCurrentOrderSignature.Safe(context.OddsSummary))
                     .WithField("cap", maxRows)
+                    .WithField("events", events)
                     .WithField("dlcWl", SafeDlcWlActive()));
         }
 
@@ -2142,7 +2222,7 @@ namespace WhiskeyRealism.Patches
             if (groupScoped) MergeGroupCounts(group, context);
             else CountUnits(unitsUsed, context);
 
-            var odds = BuildOddsDoctrine(battle, bunits, unitsUsed, side);
+            var odds = SideOdds(battle, bunits, unitsUsed, side, context.Alliance);
             context.CurrentGlobalOdds = odds.CurrentGlobalOdds;
             context.ProjectedGlobalOdds = odds.ProjectedGlobalOdds;
             context.DecisiveSectorId = odds.DecisiveSectorId;
@@ -2155,6 +2235,21 @@ namespace WhiskeyRealism.Patches
                 + ",assault=" + (odds.AllowAssault ? "1" : "0");
 
             return context;
+        }
+
+        // BuildOddsDoctrine is side-wide (it ignores the observed group) and costs a sector
+        // assessment per group; every observer call of one AIBattle in one frame shares it
+        // (OddsMemoKey). The counts and order signature stay live per call, so the feud
+        // before/after delta and the charge snapshots keep their meaning.
+        private static TacticalOddsAssessment SideOdds(AIBattle battle, BattleUnits bunits, IList unitsUsed, int side, int alliance)
+        {
+            BattleCore.TryGetSnapshot(alliance, out BattleSnapshot snapshot);
+            var key = new OddsMemoKey(battle, Time.frameCount, snapshot, snapshot != null ? snapshot.TickId : -1L,
+                unitsUsed, unitsUsed != null ? unitsUsed.Count : -1);
+            if (_oddsMemo.TryGet(in key, out TacticalOddsAssessment odds)) return odds;
+            odds = BuildOddsDoctrine(battle, bunits, unitsUsed, side);
+            _oddsMemo.Store(in key, odds);
+            return odds;
         }
 
         private static TacticalOddsAssessment BuildOddsDoctrine(
@@ -2298,6 +2393,14 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.EnableTacticalObserver.Value;
         }
 
+        // Observer, decision-matrix and ops-monitor rows are tactical sidecar rows (State,
+        // Gate, Write, Decision; TelemetryTagPolicy AddTactical): a profile that writes no
+        // tactical rows (Off, CampaignTuning) writes none of them, so none are built.
+        private static bool WritesRows()
+        {
+            return TelemetryRouter.ShouldEmit(TelemetryRouter.CurrentProfile, TelemetryLayer.Tactical, TelemetryCategory.State);
+        }
+
         private static bool BugTelemetryEnabled()
         {
             return Plugin.Instance != null &&
@@ -2339,7 +2442,7 @@ namespace WhiskeyRealism.Patches
             if (unit.movementmode == 5 || unit.movementmode == 6) context.RetreatingCount++;
             if (unit.ai_feudstance >= 0) context.FeudGroupCount++;
             if (unit.unittyp == 2) context.ArtilleryGroupCount++;
-            if (unit.unittyp > 13 && SafeIntField(unit, ref _orderedStanceField, "ai_" + "stanceordered", -1) == 1)
+            if (unit.unittyp > 13 && unit.ai_stanceordered == 1)
                 context.ReserveGroupCount++;
                 if (TacticalFogOfWarContact.HasVisibleEnemy(unit)) context.VisibleEnemyCount++;
         }

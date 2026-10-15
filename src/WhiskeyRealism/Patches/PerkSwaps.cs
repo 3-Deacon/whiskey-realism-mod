@@ -165,4 +165,18 @@ namespace WhiskeyRealism.Patches
             return Expression.Lambda<Func<object, TValue>>(read, instance).Compile();
         }
     }
+
+    // The matching compiled setter (a field of TValue's exact type on a reference-type
+    // instance): no FieldInfo.SetValue and no boxing per call.
+    internal static class CompiledFieldSetter
+    {
+        internal static Action<object, TValue> Build<TValue>(FieldInfo field)
+        {
+            if (field == null || field.FieldType != typeof(TValue) || field.DeclaringType == null || field.DeclaringType.IsValueType) return null;
+            ParameterExpression instance = Expression.Parameter(typeof(object), "instance");
+            ParameterExpression value = Expression.Parameter(typeof(TValue), "value");
+            Expression target = Expression.Field(Expression.Convert(instance, field.DeclaringType), field);
+            return Expression.Lambda<Action<object, TValue>>(Expression.Assign(target, value), instance, value).Compile();
+        }
+    }
 }

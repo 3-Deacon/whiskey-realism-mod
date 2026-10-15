@@ -7,7 +7,7 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // #105 (ordinal assigned at merge to main), step A: arrival re-path SIZING only.
+    // #112, step A: arrival re-path SIZING only.
     //
     // Vanilla BattleUnits.SetInitialPathForEntryPoint (decompile 87967-88003), called from
     // SetGroupArrival (87662) once per queued unit of a reinforcement group, sends the whole

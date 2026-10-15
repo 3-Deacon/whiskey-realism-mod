@@ -1,6 +1,6 @@
 namespace WhiskeyRealism.Tactical.Battle
 {
-    // The arrival re-path decision of #105 (ReinforcementArrivalGuardPatch), pure.
+    // The arrival re-path decision of #112 (ReinforcementArrivalGuardPatch), pure.
     //
     // Vanilla anchors (decompile, build 14703111):
     //   CheckReinforcementArrivals 87554-87604 -> SetGroupArrival 87606-87663: each queued

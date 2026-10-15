@@ -86,40 +86,57 @@ namespace WhiskeyRealism.Strategic
             CoordinatedCommitMode commitMode)
         {
             if (assignment == null) return null;
-            return new CoordinatedOperationCandidate
-            {
-                StableUnitId = assignment.StableUnitId,
-                DisplayUnitKey = assignment.UnitKey,
-                AllianceId = assignment.AllianceId,
-                Level = assignment.Level,
-                Directive = assignment.Directive,
-                AreaKey = assignment.AreaKey,
-                SectorKey = assignment.SectorKey,
-                X = assignment.X,
-                Z = assignment.Z,
-                CombatAvailability = assignment.CombatAvailability,
-                ExchangePressure = assignment.ExchangePressure,
-                LocalFriendlySupport = assignment.LocalFriendlySupport,
-                LocalEnemyStrength = assignment.LocalEnemyStrength,
-                Readiness = assignment.Readiness,
-                Morale = assignment.Morale,
-                Ammo = assignment.Ammo,
-                Supply = assignment.Supply,
-                Fatigue = assignment.Fatigue,
-                OffensiveAllowed = assignment.OffensiveAllowed ||
-                    assignment.Directive == FormationDirective.Probe ||
-                    assignment.Directive == FormationDirective.Counterstroke,
-                DefensiveAllowed = assignment.DefensiveAllowed,
-                TransferDonorAllowed = assignment.TransferDonorAllowed,
-                DirectMovementAllowed = assignment.DirectMovementAllowed,
-                InheritsFromParent = assignment.InheritsFromParent,
-                CriticalSector = false,
-                FrontPosture = FrontPosture.Counterstroke,
-                InOffensiveOperation = inOffensive,
-                InDefensiveOperation = inDefensive,
-                ConstructingSupplyDepot = constructingSupplyDepot,
-                CommitMode = commitMode
-            };
+            return FillCandidateFromAssignment(
+                new CoordinatedOperationCandidate(),
+                assignment,
+                inOffensive,
+                inDefensive,
+                constructingSupplyDepot,
+                commitMode);
+        }
+
+        // Writes every candidate field, so a pooled candidate (#38's per-call scratch)
+        // carries nothing over from its previous use.
+        internal static CoordinatedOperationCandidate FillCandidateFromAssignment(
+            CoordinatedOperationCandidate candidate,
+            FormationDirectiveAssignment assignment,
+            bool inOffensive,
+            bool inDefensive,
+            bool constructingSupplyDepot,
+            CoordinatedCommitMode commitMode)
+        {
+            candidate.StableUnitId = assignment.StableUnitId;
+            candidate.DisplayUnitKey = assignment.UnitKey;
+            candidate.AllianceId = assignment.AllianceId;
+            candidate.Level = assignment.Level;
+            candidate.Directive = assignment.Directive;
+            candidate.AreaKey = assignment.AreaKey;
+            candidate.SectorKey = assignment.SectorKey;
+            candidate.X = assignment.X;
+            candidate.Z = assignment.Z;
+            candidate.CombatAvailability = assignment.CombatAvailability;
+            candidate.ExchangePressure = assignment.ExchangePressure;
+            candidate.LocalFriendlySupport = assignment.LocalFriendlySupport;
+            candidate.LocalEnemyStrength = assignment.LocalEnemyStrength;
+            candidate.Readiness = assignment.Readiness;
+            candidate.Morale = assignment.Morale;
+            candidate.Ammo = assignment.Ammo;
+            candidate.Supply = assignment.Supply;
+            candidate.Fatigue = assignment.Fatigue;
+            candidate.OffensiveAllowed = assignment.OffensiveAllowed ||
+                assignment.Directive == FormationDirective.Probe ||
+                assignment.Directive == FormationDirective.Counterstroke;
+            candidate.DefensiveAllowed = assignment.DefensiveAllowed;
+            candidate.TransferDonorAllowed = assignment.TransferDonorAllowed;
+            candidate.DirectMovementAllowed = assignment.DirectMovementAllowed;
+            candidate.InheritsFromParent = assignment.InheritsFromParent;
+            candidate.CriticalSector = false;
+            candidate.FrontPosture = FrontPosture.Counterstroke;
+            candidate.InOffensiveOperation = inOffensive;
+            candidate.InDefensiveOperation = inDefensive;
+            candidate.ConstructingSupplyDepot = constructingSupplyDepot;
+            candidate.CommitMode = commitMode;
+            return candidate;
         }
 
         internal static string ResolveTargetName(int objectiveId, string fallbackAreaKey, CampaignMapLedger map, Vector3 target)
@@ -492,6 +509,10 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
+        // A unit's stable id is its Unity instance id. Tests replace the reader: outside
+        // the engine GetInstanceID cannot be compiled (it references an engine call).
+        internal static Func<UnityEngine.Object, int> InstanceIdOf = unit => unit.GetInstanceID();
+
         internal static Regiment FindUnitById(IList ownUnits, int stableUnitId)
         {
             if (ownUnits == null || stableUnitId == 0) return null;
@@ -499,7 +520,7 @@ namespace WhiskeyRealism.Strategic
             {
                 var unit = ownUnits[i] as Regiment;
                 if (unit == null) continue;
-                if (((UnityEngine.Object)unit).GetInstanceID() == stableUnitId) return unit;
+                if (InstanceIdOf(unit) == stableUnitId) return unit;
             }
             return null;
         }

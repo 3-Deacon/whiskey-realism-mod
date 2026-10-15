@@ -8,7 +8,7 @@ using static TestFixtures;
 
 // BC10 (docs/superpowers/plans/2026-10-15-battle-core.md § BC10): deployment and
 // movement honesty. Red first: this file does not compile before the BC10 types exist.
-// Sections: arrival re-path sizing (#105 step A), terrain grid, covered crossings,
+// Sections: arrival re-path sizing (#112 step A), terrain grid, covered crossings,
 // perceived outflanking, path probe scores, road routing, fog-honest deployment,
 // executor, avenues, write gate.
 internal static partial class BattleMovementHonestyTests
@@ -17,7 +17,7 @@ internal static partial class BattleMovementHonestyTests
     {
         RunAll(new (string, Action)[]
         {
-            // arrival re-path sizing (#105 step A)
+            // arrival re-path sizing (#112 step A)
             ("bc10 ShieldOnlyLiveExecutorMoves", ShieldOnlyLiveExecutorMoves),
             ("bc10 ShieldNeverPlayerOwnedOrFeud", ShieldNeverPlayerOwnedOrFeud),
             ("bc10 ShieldSkipsTopGroup", ShieldSkipsTopGroup),
@@ -180,7 +180,7 @@ internal static partial class BattleMovementHonestyTests
         executor.RecordIssued(intent, now, _issued, 1, null, 0, 0, 1);
     }
 
-    // ------------------------------------------------------------------ arrival re-path sizing (#105 step A)
+    // ------------------------------------------------------------------ arrival re-path sizing (#112 step A)
 
     // ArrivalShield.Select names the arrived members of an arriving group that a Whiskey
     // order is walking (the ones vanilla's entry re-path, SetInitialPathForEntryPoint

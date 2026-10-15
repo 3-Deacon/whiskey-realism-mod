@@ -892,13 +892,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 try
                 {
                     PostureTargets.EnsureNavFilter(t);
-                    var path = new NavMeshPath();
+                    NavMeshPath path = PostureTargets.SharedPath();
                     var from = new Vector3(rec.X, rec.Y, rec.Z);
                     var to = new Vector3(x, 0f, z);
                     if (NavMesh.CalculatePath(from, to, t.NavFilter, path) && path.status == NavMeshPathStatus.PathComplete)
                     {
-                        Vector3[] corners = path.corners;
-                        int count = corners != null ? corners.Length : 0;
+                        int count = PostureTargets.ReadCorners(path, out Vector3[] corners);
                         if (_pathX.Length < count)
                         {
                             _pathX = new float[count * 2];
@@ -950,6 +949,35 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         private static FieldInfo _bfsField;
         private static bool _bfsResolved;
+
+        // Nav probes (perf slice F5), main thread only: one reused NavMeshPath (it owns a
+        // native handle and a finalizer) read with GetCornersNonAlloc, the three samples
+        // TacticalNavMeshPlanner.Plan reads during the call (it keeps none), and the area
+        // indices, which are fixed project settings, resolved once.
+        private static NavMeshPath _navPath;
+
+        // One reused path for every probe and every route plan (single-threaded, consumed at once).
+        internal static NavMeshPath SharedPath()
+        {
+            return _navPath ?? (_navPath = new NavMeshPath());
+        }
+
+        // Every corner of the path into one reused buffer: a full buffer may have cut the list short,
+        // so grow and read again.
+        internal static int ReadCorners(NavMeshPath path, out Vector3[] corners)
+        {
+            int count = path.GetCornersNonAlloc(_corners);
+            while (count == _corners.Length)
+            {
+                _corners = new Vector3[_corners.Length * 2];
+                count = path.GetCornersNonAlloc(_corners);
+            }
+            corners = _corners;
+            return count;
+        }
+        private static Vector3[] _corners = new Vector3[32];
+        private static readonly TacticalPathQualitySample[] _samples = new TacticalPathQualitySample[3];
+        private static int[] _areaIndex;
 
         internal static bool TryResolve(BattleSnapshot s, PostureTick.State t, int i, TacticalBattleOrchestrator side,
             CommandNodeOperationalState state, CommandDoctrineOrder order, PostureExecutionTarget kind, out float x, out float z)
@@ -1168,12 +1196,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             var waypoint = new Vector3(rec.LastWaypointX, 0f, rec.LastWaypointZ);
             EnsureNavFilter(t);
             BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
-            return new[]
-            {
-                Sample(t, grid, rec.InstanceId, own, target, task, hasThreat, threat, hasWaypoint, waypoint),
-                Sample(t, grid, rec.InstanceId, own, target + lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint),
-                Sample(t, grid, rec.InstanceId, own, target - lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint),
-            };
+            _samples[0] = Sample(t, grid, rec.InstanceId, own, target, task, hasThreat, threat, hasWaypoint, waypoint);
+            _samples[1] = Sample(t, grid, rec.InstanceId, own, target + lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint);
+            _samples[2] = Sample(t, grid, rec.InstanceId, own, target - lateral * 120f, task, hasThreat, threat, hasWaypoint, waypoint);
+            return _samples;
         }
 
         // R5 / BC10 decision 4: AddPath's battle costs (roads, bridges, fences, rivers) for the
@@ -1189,10 +1215,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             {
                 bool frozen = GameVars.isfrozen();
                 for (int a = 0; a < NavAreaCount; a++) filter.SetAreaCost(a, NavMesh.GetAreaCost(a));
-                for (int k = 0; k < PostureNavAreaCosts.AreaNames.Length; k++)
+                if (_areaIndex == null)
                 {
-                    int area = NavMesh.GetAreaFromName(PostureNavAreaCosts.AreaNames[k]);
-                    if (area >= 0 && area < NavAreaCount) filter.SetAreaCost(area, PostureNavAreaCosts.Cost(k, frozen));
+                    var areas = new int[PostureNavAreaCosts.AreaNames.Length];
+                    for (int a = 0; a < areas.Length; a++) areas[a] = NavMesh.GetAreaFromName(PostureNavAreaCosts.AreaNames[a]);
+                    _areaIndex = areas;
+                }
+                for (int a = 0; a < _areaIndex.Length; a++)
+                {
+                    int area = _areaIndex[a];
+                    if (area >= 0 && area < NavAreaCount) filter.SetAreaCost(area, PostureNavAreaCosts.Cost(a, frozen));
                 }
             }
             catch (Exception ex)
@@ -1213,10 +1245,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             float fallbackLaneConflict = 0f, artilleryDanger = 0f;
             try
             {
-                var path = new NavMeshPath();
+                NavMeshPath path = SharedPath();
                 bool found = NavMesh.CalculatePath(own, candidate, t.NavFilter, path);
-                Vector3[] corners = path.corners;
-                int count = corners != null ? corners.Length : 0;
+                int count = ReadCorners(path, out Vector3[] corners);
                 if (!found || path.status != NavMeshPathStatus.PathComplete || count <= 0)
                 {
                     terrainRisk = 1f;
