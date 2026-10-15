@@ -19,14 +19,6 @@ internal static class TacticalLifecycleFixTests
         Pass("t9 lifecycle scene change restarts", T9SceneChangeRestarts);
         Pass("t9 heavy gate clock rewind runs immediately", T9HeavyGateClockRewindRuns);
 
-        Pass("brm2 publish for stale battle sequence rejected", BrM2PublishForStaleBattleRejected);
-        Pass("brm2 publish for live battle sequence accepted", BrM2PublishForLiveBattleAccepted);
-        Pass("brm2 current hides snapshot after battle closed", BrM2CurrentHiddenAfterBattleClosed);
-        Pass("brm2 carry-forward requires same battle and bounded age", BrM2CarryForwardBounded);
-        Pass("brm2 snapshot keeps per-side data age", BrM2SnapshotKeepsPerSideDataAge);
-        Pass("brm2 worker starts only after successful bootstrap", BrM2WorkerStartsOnlyWhenActive);
-        Pass("brm2 worker capture only on heavy build", BrM2WorkerCaptureOnlyOnHeavyBuild);
-
         Pass("brh5 roster signature tracks rout and list identity", BrH5RosterSignatureTracksRoutAndListIdentity);
         Pass("brh5 command tree rebuilds on roster or shift change", BrH5CommandTreeRebuildPolicy);
         Pass("brh5 map objective content hash sees owner and active", BrH5MapObjectiveContentHash);
@@ -155,92 +147,6 @@ internal static class TacticalLifecycleFixTests
         var dec = TacticalHeavyPathGate.Decide(input);
         TestHarness.AssertTrue(dec.ShouldRun, "runs");
         TestHarness.AssertEqual("clock-rewind", dec.Reason, "reason");
-    }
-
-    // ---- BR-M2 worker lifecycle ----
-
-    private static TacticalDecisionSnapshot Snap(int seq, float hours = 1f)
-    {
-        return new TacticalDecisionSnapshot(seq, 1L, hours, 0f,
-            TacticalSideDecision.Empty, TacticalSideDecision.Empty, null, null);
-    }
-
-    private static void WithLiveBattle(int seq, Action body)
-    {
-        try
-        {
-            TacticalDecisionSnapshot.SetLiveBattleSequence(seq);
-            body();
-        }
-        finally
-        {
-            TacticalDecisionSnapshot.ResetForBattleEnd();
-            TacticalDecisionSnapshot.SetLiveBattleSequence(TacticalDecisionSnapshot.UngatedBattleSequence);
-        }
-    }
-
-    private static void BrM2PublishForStaleBattleRejected()
-    {
-        WithLiveBattle(5, () =>
-        {
-            TestHarness.AssertFalse(TacticalDecisionSnapshot.TryPublish(Snap(4)), "stale rejected");
-            TestHarness.AssertTrue(ReferenceEquals(TacticalDecisionSnapshot.Empty, TacticalDecisionSnapshot.Current), "current empty");
-        });
-    }
-
-    private static void BrM2PublishForLiveBattleAccepted()
-    {
-        WithLiveBattle(5, () =>
-        {
-            TestHarness.AssertTrue(TacticalDecisionSnapshot.TryPublish(Snap(5)), "live accepted");
-            TestHarness.AssertEqual(5, TacticalDecisionSnapshot.Current.BattleSequence, "current");
-        });
-    }
-
-    private static void BrM2CurrentHiddenAfterBattleClosed()
-    {
-        // A worker that outlived Join(250) publishes after teardown: readers
-        // (BattleGroupStancePatch tier-2) must never see it.
-        WithLiveBattle(5, () =>
-        {
-            TacticalDecisionSnapshot.TryPublish(Snap(5));
-            TacticalDecisionSnapshot.SetLiveBattleSequence(TacticalDecisionSnapshot.ClosedBattleSequence);
-            TacticalDecisionSnapshot.Publish(Snap(5));
-            TestHarness.AssertTrue(ReferenceEquals(TacticalDecisionSnapshot.Empty, TacticalDecisionSnapshot.Current), "hidden");
-        });
-    }
-
-    private static void BrM2CarryForwardBounded()
-    {
-        float max = TacticalDecisionSnapshot.MaxCarryForwardBattleHours;
-        TestHarness.AssertTrue(TacticalDecisionSnapshot.IsCarryForwardFresh(3, 3, 10.00f, 10.05f, max), "fresh");
-        TestHarness.AssertFalse(TacticalDecisionSnapshot.IsCarryForwardFresh(3, 3, 10.00f, 10.00f + max + 0.01f, max), "too old");
-        TestHarness.AssertFalse(TacticalDecisionSnapshot.IsCarryForwardFresh(2, 3, 10.00f, 10.01f, max), "other battle");
-        TestHarness.AssertFalse(TacticalDecisionSnapshot.IsCarryForwardFresh(3, 3, 12.00f, 10.00f, max), "clock rewound");
-    }
-
-    private static void BrM2SnapshotKeepsPerSideDataAge()
-    {
-        var s = new TacticalDecisionSnapshot(1, 1L, 10f, 0f,
-            TacticalSideDecision.Empty, TacticalSideDecision.Empty, null, null,
-            side0DataBattleHours: 9.5f, side1DataBattleHours: 10f);
-        TestHarness.AssertEqual(9.5f, s.GetSideDataBattleHours(0), "side0");
-        TestHarness.AssertEqual(10f, s.GetSideDataBattleHours(1), "side1");
-        TestHarness.AssertEqual(10f, Snap(1, 10f).GetSideDataBattleHours(0), "defaults to capture time");
-    }
-
-    private static void BrM2WorkerStartsOnlyWhenActive()
-    {
-        TestHarness.AssertTrue(TacticalBattleCoordinator.ShouldStartWorker(workerEnabled: true, coordinatorActive: true), "start");
-        TestHarness.AssertFalse(TacticalBattleCoordinator.ShouldStartWorker(workerEnabled: true, coordinatorActive: false), "failed bootstrap");
-        TestHarness.AssertFalse(TacticalBattleCoordinator.ShouldStartWorker(workerEnabled: false, coordinatorActive: true), "disabled");
-    }
-
-    private static void BrM2WorkerCaptureOnlyOnHeavyBuild()
-    {
-        TestHarness.AssertTrue(TacticalBattleCoordinator.ShouldCaptureWorkerInput(workerRunning: true, heavyBuiltThisTick: true), "capture");
-        TestHarness.AssertFalse(TacticalBattleCoordinator.ShouldCaptureWorkerInput(workerRunning: true, heavyBuiltThisTick: false), "reuse");
-        TestHarness.AssertFalse(TacticalBattleCoordinator.ShouldCaptureWorkerInput(workerRunning: false, heavyBuiltThisTick: true), "no worker");
     }
 
     // ---- BR-H5 caches ----

@@ -240,7 +240,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalSideLogFormatter.cs" Link="Orchestrator\TacticalSideLogFormatter.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalFogOfWarContact.cs" Link="Orchestrator\TacticalFogOfWarContact.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalVisionRuntimeAdapter.cs" Link="Orchestrator\TacticalVisionRuntimeAdapter.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ObjectiveRecordsCaptureContext.cs" Link="Orchestrator\ObjectiveRecordsCaptureContext.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\MapObjectiveCapture.cs" Link="Orchestrator\MapObjectiveCapture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalRegimentalIntelligence.cs" Link="Orchestrator\TacticalRegimentalIntelligence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalRegimentalIntelligenceDoctrine.cs" Link="Orchestrator\TacticalRegimentalIntelligenceDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalRegimentalThreatComputer.cs" Link="Orchestrator\TacticalRegimentalThreatComputer.cs" />

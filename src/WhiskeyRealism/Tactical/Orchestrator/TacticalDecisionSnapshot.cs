@@ -7,6 +7,12 @@ using WhiskeyRealism.Tactical.Operations;
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
+    /// NO PRODUCER since the orchestrator worker thread was removed (2026-10-14):
+    /// Current is always Empty. Kept only because BattleGroupStancePatch (T4) still
+    /// reads it (regimental-intelligence pass ~199-201, tier-2 lookup ~1027-1066);
+    /// delete this type, TacticalSideDecision and TacticalDecisionSnapshotTests with
+    /// those reads at integration.
+    ///
     /// Per-cycle immutable snapshot of all per-side and per-unit decisions
     /// produced by the worker thread. Read by main-thread Harmony patches
     /// via <see cref="Current"/>. Atomic publish via Interlocked.Exchange.
@@ -36,12 +42,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public long CycleId { get; }
         public float CapturedAtBattleHours { get; }
         public float CapturedAtRealtimeSeconds { get; }
-
-        // Battle hours at which each alliance's per-unit dictionaries/records were
-        // actually produced. A side carried forward from a prior cycle keeps the prior
-        // cycle's value so carry-forward age stays bounded (BR-M2).
-        private readonly float _side0DataBattleHours;
-        private readonly float _side1DataBattleHours;
 
         // Per-unit lookup tables — separate dict per alliance for index density.
         // Ownership transferred from constructor caller; never mutated after construction.
@@ -95,9 +95,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             ObjectiveRecord[] objectiveRecords0 = null,
             ObjectiveRecord[] objectiveRecords1 = null,
             Dictionary<int, TacticalRegimentalDecision> regimentalDecisions0 = null,
-            Dictionary<int, TacticalRegimentalDecision> regimentalDecisions1 = null,
-            float side0DataBattleHours = float.NaN,
-            float side1DataBattleHours = float.NaN)
+            Dictionary<int, TacticalRegimentalDecision> regimentalDecisions1 = null)
         {
             BattleSequence = battleSequence;
             CycleId = cycleId;
@@ -113,75 +111,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _objectiveRecords1 = objectiveRecords1 ?? Array.Empty<ObjectiveRecord>();
             _regimentalDecisions0 = regimentalDecisions0 ?? new Dictionary<int, TacticalRegimentalDecision>(0);
             _regimentalDecisions1 = regimentalDecisions1 ?? new Dictionary<int, TacticalRegimentalDecision>(0);
-            _side0DataBattleHours = float.IsNaN(side0DataBattleHours) ? capturedAtBattleHours : side0DataBattleHours;
-            _side1DataBattleHours = float.IsNaN(side1DataBattleHours) ? capturedAtBattleHours : side1DataBattleHours;
-        }
-
-        public float GetSideDataBattleHours(int allianceId)
-        {
-            return allianceId == 1 ? _side1DataBattleHours : _side0DataBattleHours;
-        }
-
-        // ---- Battle gating (BR-M2) ----
-        //
-        // The coordinator opens a battle sequence at OnBattleStart and closes it at
-        // teardown. A worker that outlived its Join timeout, or a snapshot published for
-        // a previous battle, is never visible to readers: Current returns Empty unless
-        // the published snapshot belongs to the live battle. This covers every reader
-        // (BattleGroupStancePatch tier-2, snapshot builder objective records, parity).
-
-        /// <summary>No battle tracking (harness / before the first battle): no gating.</summary>
-        public const int UngatedBattleSequence = 0;
-        /// <summary>Between battles: every publish rejected, Current is Empty.</summary>
-        public const int ClosedBattleSequence = -1;
-
-        /// <summary>Upper bound on how long a side's per-unit data may be carried forward
-        /// across worker cycles. One F-stagger round is two side-stat cycles (0.015 h each,
-        /// sidestatupdatecycle, CalculateSideStatsAndUpdateAITasks 84572); allow ~3 rounds.</summary>
-        public const float MaxCarryForwardBattleHours = 0.1f;
-
-        private static int _liveBattleSequence = UngatedBattleSequence;
-
-        internal static void SetLiveBattleSequence(int battleSequence)
-        {
-            Volatile.Write(ref _liveBattleSequence, battleSequence);
-        }
-
-        private static bool BelongsToLiveBattle(TacticalDecisionSnapshot snapshot)
-        {
-            int live = Volatile.Read(ref _liveBattleSequence);
-            if (live == UngatedBattleSequence) return true;
-            return snapshot != null && live > 0 && snapshot.BattleSequence == live;
-        }
-
-        /// <summary>
-        /// Worker-side publish. Rejects snapshots that do not belong to the live battle.
-        /// A teardown between the check and the exchange is still safe: Current filters.
-        /// </summary>
-        internal static bool TryPublish(TacticalDecisionSnapshot next)
-        {
-            if (next == null || !BelongsToLiveBattle(next)) return false;
-            Interlocked.Exchange(ref _current, next);
-            return true;
-        }
-
-        /// <summary>
-        /// True when data a prior snapshot produced for one side at
-        /// <paramref name="priorDataBattleHours"/> may be carried into a new snapshot
-        /// captured at <paramref name="nowBattleHours"/>: same battle, clock not rewound,
-        /// age within <paramref name="maxAgeBattleHours"/>.
-        /// </summary>
-        internal static bool IsCarryForwardFresh(
-            int priorBattleSequence,
-            int inputBattleSequence,
-            float priorDataBattleHours,
-            float nowBattleHours,
-            float maxAgeBattleHours)
-        {
-            if (priorBattleSequence != inputBattleSequence) return false;
-            if (float.IsNaN(priorDataBattleHours) || float.IsNaN(nowBattleHours)) return false;
-            float age = nowBattleHours - priorDataBattleHours;
-            return age >= 0f && age <= maxAgeBattleHours;
         }
 
         public static TacticalDecisionSnapshot Empty { get; } = new TacticalDecisionSnapshot(
@@ -288,11 +217,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public static TacticalDecisionSnapshot Current
         {
-            get
-            {
-                var current = Volatile.Read(ref _current) ?? Empty;
-                return BelongsToLiveBattle(current) ? current : Empty;
-            }
+            get { return Volatile.Read(ref _current) ?? Empty; }
         }
 
         /// <summary>

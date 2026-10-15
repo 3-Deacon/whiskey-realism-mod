@@ -372,6 +372,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
 
                 AddMapObjectiveObservations(
+                    TacticalStableSceneCache.GetOrCaptureMapObjectives(),
                     allianceId,
                     observations,
                     statuses,
@@ -468,6 +469,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
 
                 AddMapObjectiveObservations(
+                    TacticalStableSceneCache.GetOrCaptureMapObjectives(),
                     allianceId,
                     observations,
                     statuses,
@@ -525,211 +527,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        // ====================================================================
-        // Worker-migration path (2026-05-21). Splits BuildObjectiveRecordsFromAggregate
-        // into a main-thread capture step (CaptureObjectiveRecordsContextForSide) and
-        // a pure-data builder (BuildObjectiveRecordsFromContext). Capture remains on
-        // main where Unity APIs (FindObjectsOfType + reflection) are mandatory; the
-        // builder runs on the worker thread off the frame budget. The legacy
-        // BuildObjectiveRecordsFromAggregate above is retained as a fallback when the
-        // worker has no published records yet (first cycle of a battle, suppressed
-        // side, or worker fault).
-        // ====================================================================
-
-        // Main-thread capture. Snapshots every Unity-bound input the aggregate-form
-        // builder needs into immutable structs. Called once per side per heavy-gate
-        // fire on main. Cost dominated by FindObjectsOfType<Objectives> and the
-        // BattleUnits.scheduledarrival reflection — these remain on main because
-        // Unity API is not thread-safe.
-        internal static ObjectiveRecordsCaptureContext CaptureObjectiveRecordsContextForSide(
-            AIBattle battle,
-            int allianceId)
-        {
-            try
-            {
-                // Stage A (2026-05-21): map objectives + approach avenues are stable
-                // scene scans (Unity FindObjectsOfType + EntryPoint reflection). We
-                // populate them ONCE at battle start into TacticalStableSceneCache;
-                // each heavy-gate fire reads from the cache instead of re-scanning
-                // the scene. Cache.Populate() falls back to a live scan on cache
-                // miss so suppressed-battle / pre-init paths still work.
-                var mapObjectives = TacticalStableSceneCache.GetOrCaptureMapObjectives();
-                var objectiveChains = CaptureObjectiveChains(battle);
-                var approachAvenues = TacticalStableSceneCache.GetOrCaptureApproachAvenues(allianceId);
-                return new ObjectiveRecordsCaptureContext(
-                    mapObjectives,
-                    objectiveChains,
-                    approachAvenues,
-                    allianceId);
-            }
-            catch (Exception e)
-            {
-                OnceLog.Warning("tactical-orch:objective-records-capture",
-                    "CaptureObjectiveRecordsContextForSide degraded for alliance=" + allianceId
-                    + ": " + e.GetType().Name + " " + e.Message);
-                return ObjectiveRecordsCaptureContext.Empty;
-            }
-        }
-
-        // Pure-data builder. Mirrors BuildObjectiveRecordsFromAggregate's logic but
-        // every Unity-touching call (FindObjectsOfType, SafeObjectiveChains, etc.)
-        // is replaced with a read from the captured context. Safe to call from any
-        // thread provided source and context were captured on main.
-        internal static ObjectiveRecord[] BuildObjectiveRecordsFromContext(
-            IObservationSource source,
-            ObjectiveRecordsCaptureContext context,
-            int allianceId)
-        {
-            try
-            {
-                if (source == null || context == null) return Array.Empty<ObjectiveRecord>();
-
-                var observations = new List<ObjectiveObservationInput>();
-                var statuses = new List<TacticalObjectiveStatus>();
-                var enemyStrengths = new List<float>();
-                var friendlyStrengths = new List<float>();
-                var seenObjectiveIds = new HashSet<string>(StringComparer.Ordinal);
-
-                // Replaces AddObjectiveChainObservations(battle, ...). Same logic;
-                // reads from captured chain data instead of the live AIBattle.
-                AddObjectiveChainObservationsFromCapture(
-                    context.ObjectiveChains,
-                    observations,
-                    statuses,
-                    enemyStrengths,
-                    friendlyStrengths,
-                    seenObjectiveIds);
-
-                // Allied-units loop — already pure (reads from IObservationSource).
-                for (int ai = 0; ai < source.AlliedIndices.Count; ai++)
-                {
-                    int idx = source.AlliedIndices[ai];
-                    var own = source.AllUnits[idx];
-                    if (own.IsRouted) continue;
-                    if (own.PermanentlyDetached) continue;
-                    if (!own.HasCurrentSetObjective) continue;
-                    var point = new TacticalMapPoint(own.ObjectiveX, own.ObjectiveZ);
-                    if (!IsUsableMapPoint(point)) continue;
-
-                    string objectiveId = string.IsNullOrWhiteSpace(own.ObjectiveName)
-                        ? "objective-" + observations.Count
-                        : own.ObjectiveName;
-                    if (!seenObjectiveIds.Add(objectiveId)) continue;
-
-                    observations.Add(new ObjectiveObservationInput(
-                        objectiveId,
-                        TacticalObjectiveType.UnknownVanillaObjective,
-                        TacticalObjectiveSource.CurrentSetObjective,
-                        point,
-                        sourceConfidence: 0.65f,
-                        value: 0.5f,
-                        typeAnchorVerified: false));
-                    statuses.Add(TacticalObjectiveStatus.Scouting);
-                    enemyStrengths.Add(own.VisibleEnemyStrength);
-                    friendlyStrengths.Add(own.Strength);
-                }
-
-                // Replaces AddMapObjectiveObservations(allianceId, ...). Reads from
-                // captured map-objective list; the friendlyOwned check is applied here.
-                AddMapObjectiveObservationsFromCapture(
-                    context.MapObjectives,
-                    allianceId,
-                    observations,
-                    statuses,
-                    enemyStrengths,
-                    friendlyStrengths,
-                    seenObjectiveIds);
-
-                // Replaces ApplyApproachAvenues(...). Captured avenues array drops in.
-                ApplyApproachAvenues(observations, allianceId, context.ApproachAvenues);
-
-                bool haveVisibleEnemy = TryVisibleEnemyLineFromAggregate(
-                    source,
-                    allianceId,
-                    out TacticalMapPoint visibleEnemyPoint,
-                    out float visibleEnemyStrength,
-                    out float visibleFriendlyStrength);
-                TacticalMapPoint? visibleEnemyLine = haveVisibleEnemy
-                    ? visibleEnemyPoint
-                    : (TacticalMapPoint?)null;
-
-                bool haveMovementAnchor = TryMovementAnchorLineFromAggregate(
-                    source,
-                    allianceId,
-                    out TacticalMapPoint movementAnchorPoint,
-                    out float movementAnchorFriendlyStrength);
-                TacticalMapPoint? movementAnchor = haveMovementAnchor
-                    ? movementAnchorPoint
-                    : (TacticalMapPoint?)null;
-
-                return BuildObjectiveRecordsWithMovementFallback(
-                    observations,
-                    statuses,
-                    enemyStrengths,
-                    friendlyStrengths,
-                    visibleEnemyLine,
-                    visibleEnemyStrength,
-                    visibleFriendlyStrength,
-                    movementAnchor,
-                    movementAnchorFriendlyStrength,
-                    allianceId);
-            }
-            catch (Exception e)
-            {
-                // Worker-thread-safe warning — OnceLog dedup state is not proven
-                // thread-safe; use the BepInEx ManualLogSource directly.
-                Plugin.Log.LogWarning("[BuildObjectiveRecordsFromContext] degraded for alliance="
-                    + allianceId + ": " + e.GetType().Name + " " + e.Message);
-                return Array.Empty<ObjectiveRecord>();
-            }
-        }
-
-        // Pure helper — same body as AddObjectiveChainObservations but reading from
-        // ObjectiveChainCapture[] instead of live AIBattle reflection.
-        private static void AddObjectiveChainObservationsFromCapture(
-            IReadOnlyList<ObjectiveChainCapture> chains,
-            List<ObjectiveObservationInput> observations,
-            List<TacticalObjectiveStatus> statuses,
-            List<float> enemyStrengths,
-            List<float> friendlyStrengths,
-            HashSet<string> seenObjectiveIds)
-        {
-            if (chains == null) return;
-
-            for (int i = 0; i < chains.Count; i++)
-            {
-                var chain = chains[i];
-                if (chain.UsedStrategyId < 0) continue;
-                if (chain.Objectives == null || chain.Objectives.Count == 0) continue;
-
-                for (int j = 0; j < chain.Objectives.Count; j++)
-                {
-                    var inner = chain.Objectives[j];
-                    if (!IsUsableMapPoint(inner.Point)) continue;
-
-                    string id = string.IsNullOrWhiteSpace(inner.ObjectiveId)
-                        ? "objective-" + observations.Count
-                        : inner.ObjectiveId;
-                    if (!seenObjectiveIds.Add(id)) continue;
-
-                    observations.Add(new ObjectiveObservationInput(
-                        id,
-                        TacticalObjectiveType.UnknownVanillaObjective,
-                        TacticalObjectiveSource.ObjectiveChain,
-                        inner.Point,
-                        sourceConfidence: 0.75f,
-                        value: 0.65f,
-                        typeAnchorVerified: false));
-                    statuses.Add(TacticalObjectiveStatus.Scouting);
-                    enemyStrengths.Add(chain.EnemyStrength);
-                    friendlyStrengths.Add(chain.FriendlyStrength);
-                }
-            }
-        }
-
-        // Pure helper — same body as AddMapObjectiveObservations but reading from
-        // MapObjectiveCapture[] instead of live FindObjectsOfType<Objectives>().
-        private static void AddMapObjectiveObservationsFromCapture(
+        // Map objectives come from TacticalStableSceneCache (vanilla objective references
+        // cached per battle; owner and active state read live on every capture, BR-H5)
+        // instead of a FindObjectsOfType<Objectives>() scan per heavy build.
+        private static void AddMapObjectiveObservations(
             IReadOnlyList<MapObjectiveCapture> mapObjectives,
             int allianceId,
             List<ObjectiveObservationInput> observations,
@@ -847,66 +648,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        // Main-thread objective-chain capture. Reflects AIBattle.objectivechain once
-        // per side per heavy-gate fire (chain contents are mutable per cycle as AI
-        // moves units, so no caching across cycles).
-        private static ObjectiveChainCapture[] CaptureObjectiveChains(AIBattle battle)
-        {
-            try
-            {
-                var chains = SafeObjectiveChains(battle);
-                if (chains == null || chains.Count == 0) return Array.Empty<ObjectiveChainCapture>();
-
-                var result = new ObjectiveChainCapture[chains.Count];
-                int written = 0;
-                for (int i = 0; i < chains.Count; i++)
-                {
-                    object chain = chains[i];
-                    if (chain == null) continue;
-                    int usedStrategyId = SafeIntField(chain, "usedstrategyid", 0);
-                    var innerList = SafeObjectList(chain, "objectives");
-                    int innerCount = innerList?.Count ?? 0;
-                    ObjectiveChainObjective[] innerObjectives;
-                    if (innerCount == 0)
-                    {
-                        innerObjectives = Array.Empty<ObjectiveChainObjective>();
-                    }
-                    else
-                    {
-                        innerObjectives = new ObjectiveChainObjective[innerCount];
-                        int innerWritten = 0;
-                        for (int j = 0; j < innerCount; j++)
-                        {
-                            object objective = innerList[j];
-                            if (objective == null) continue;
-                            TacticalMapPoint point = SafeObjectivePoint(objective);
-                            string id = SafeObjectiveId(objective, innerWritten);
-                            innerObjectives[innerWritten++] = new ObjectiveChainObjective(id, point);
-                        }
-                        if (innerWritten != innerObjectives.Length)
-                        {
-                            Array.Resize(ref innerObjectives, innerWritten);
-                        }
-                    }
-
-                    float enemyStrength = EstimateChainEnemyStrength(chain);
-                    float friendlyStrength = EstimateChainFriendlyStrength(chain);
-                    result[written++] = new ObjectiveChainCapture(
-                        usedStrategyId,
-                        innerObjectives,
-                        enemyStrength,
-                        friendlyStrength);
-                }
-                if (written == result.Length) return result;
-                Array.Resize(ref result, written);
-                return result;
-            }
-            catch
-            {
-                return Array.Empty<ObjectiveChainCapture>();
-            }
-        }
-
         private static void CopyObjectiveInputs(
             IReadOnlyList<ObjectiveObservationInput> sourceObservations,
             IReadOnlyList<TacticalObjectiveStatus> sourceStatuses,
@@ -952,51 +693,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch
             {
                 return false;
-            }
-        }
-
-        private static void AddMapObjectiveObservations(
-            int allianceId,
-            List<ObjectiveObservationInput> observations,
-            List<TacticalObjectiveStatus> statuses,
-            List<float> enemyStrengths,
-            List<float> friendlyStrengths,
-            HashSet<string> seenObjectiveIds)
-        {
-            try
-            {
-                var mapObjectives = SceneObjectives();
-                if (mapObjectives.Length == 0) return;
-
-                for (int i = 0; i < mapObjectives.Length; i++)
-                {
-                    Objectives objective = mapObjectives[i];
-                    if (objective == null || !objective.isActiveAndEnabled) continue;
-
-                    TacticalMapPoint point = SafeObjectivePoint(objective);
-                    if (!IsUsableMapPoint(point)) continue;
-
-                    string id = SafeObjectiveId(objective, observations.Count);
-                    if (!seenObjectiveIds.Add(id)) continue;
-
-                    int owner = SafeIntField(objective, "owner", -2);
-                    bool friendlyOwned = owner == allianceId;
-                    observations.Add(new ObjectiveObservationInput(
-                        id,
-                        TacticalObjectiveType.VictoryPoint,
-                        TacticalObjectiveSource.VerifiedSceneObject,
-                        point,
-                        sourceConfidence: 0.90f,
-                        value: friendlyOwned ? 0.45f : 0.80f,
-                        typeAnchorVerified: true));
-                    statuses.Add(friendlyOwned ? TacticalObjectiveStatus.Secured : TacticalObjectiveStatus.Scouting);
-                    enemyStrengths.Add(0f);
-                    friendlyStrengths.Add(0f);
-                }
-            }
-            catch
-            {
-                // Runtime objective extraction must never destabilize the battle loop.
             }
         }
 
