@@ -1116,8 +1116,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Array.Empty<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver>();
         private int _maneuverHash;
 
-        public IReadOnlyList<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver> CurrentManeuvers => _maneuvers;
-
         /// <summary>A hash of the maneuver orders; the ledger gate ticks when it changes (a phase change must reach the doctrine orders).</summary>
         internal int ManeuverHash => _maneuverHash;
 

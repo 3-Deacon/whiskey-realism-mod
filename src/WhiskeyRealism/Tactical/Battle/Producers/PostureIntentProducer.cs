@@ -420,22 +420,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
     }
 
-    /// <summary>
-    /// BC11 decision 2: which posture NoWrite verdicts a due refused flank may override. A group that is
-    /// already doing its task (formation right, idle where idle is the task) has nothing else to write;
-    /// every other NoWrite (moving, order pending, routed, protected) keeps its verdict.
-    /// </summary>
-    internal static class PostureRefuse
-    {
-        internal const string PromotedReason = "refuse-flank";
-
-        internal static bool PromotesNoWrite(string reason)
-        {
-            return string.Equals(reason, "already-correct", StringComparison.Ordinal) ||
-                string.Equals(reason, "already-valid", StringComparison.Ordinal);
-        }
-    }
-
     // #61 TryApplyGroup minus the division-play override (D8: the division play
     // is its own Priority.Play producer): doctrine-order task, GT recon, cavalry
     // follow, local flank emergency, army opportunity override, then
@@ -570,9 +554,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
-                if (refuseDue && PostureRefuse.PromotesNoWrite(decision.Reason))
+                if (refuseDue && PostureSense.RefusePromotesNoWrite(decision.Reason))
                 {
-                    decision = new PostureExecutionDecision(PostureExecutionAction.SetFormation, PostureRefuse.PromotedReason,
+                    decision = new PostureExecutionDecision(PostureExecutionAction.SetFormation, PostureSense.RefusePromotedReason,
                         PostureExecutionTarget.CurrentPosition);
                 }
                 else

@@ -914,6 +914,19 @@ namespace WhiskeyRealism.Tactical.Operations
             });
         }
 
+        public const string RefusePromotedReason = "refuse-flank";
+
+        /// <summary>
+        /// BC11 decision 2: which posture NoWrite verdicts a due refused flank may override. A group that is already
+        /// doing its task (formation right, idle where idle is the task) has nothing else to write; every other NoWrite
+        /// (moving, order pending, routed, protected) keeps its verdict.
+        /// </summary>
+        public static bool RefusePromotesNoWrite(string reason)
+        {
+            return string.Equals(reason, "already-correct", StringComparison.Ordinal) ||
+                string.Equals(reason, "already-valid", StringComparison.Ordinal);
+        }
+
         /// <summary>
         /// #61 ResolveRefusedFlank, BC11 decision 2: a group with flank risk on a holding/guarding task refuses
         /// the flank that is under threat; vanilla skews the slots (SetGroupFormation refuseflank, 92095-92097).
