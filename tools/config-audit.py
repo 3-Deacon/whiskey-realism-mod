@@ -4,6 +4,8 @@
 For every `Field = Config.Bind(section, key, default, description...)`:
   UNREAD     the field is never read outside its own Bind statement
   DUPLICATE  the same section/key is bound more than once
+  OFF        a bool defaults to false (everything defaults on; only the debug
+             cheats in DEFAULT_OFF_ALLOWED may stay off)
   DESC       the description states a default that contradicts the code default
              ("Default ON"/"default-on" on a false bool, "Default OFF" on a true
              bool, or "Default <n>" that differs from a numeric default)
@@ -14,6 +16,9 @@ import glob
 import os
 import re
 import sys
+
+# Debug cheats that would corrupt a real playthrough. Nothing else may default off.
+DEFAULT_OFF_ALLOWED = {"ForceAllSuccessionEvents"}
 
 
 def read(path):
@@ -93,6 +98,9 @@ def main():
         # The field declaration itself is one occurrence in Plugin.cs.
         if reads <= 1 and not re.search(r"\b%s\b" % re.escape(field), other_text):
             findings.append(("UNREAD", line, field, "%s/%s has no reader" % (section, key)))
+
+        if default == "false" and field not in DEFAULT_OFF_ALLOWED:
+            findings.append(("OFF", line, field, "%s/%s defaults to false" % (section, key)))
 
         lowered = description.lower()
         if default in ("true", "false"):
