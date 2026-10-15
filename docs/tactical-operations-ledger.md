@@ -181,7 +181,7 @@ The full ordered battle-core smoke checklist is in the battle-core plan (`docs/s
 - objective movement continues past the first short leg; no stale `activeMove=true` with zero paths blocking reissue.
 - illegal idle trends down or stays explainably bounded.
 - no player-side or player-subordinate retasking; no arbiter writes during the end-of-day phase or vanilla army retreat.
-- groups in contact are rotated in place, not re-laid; a regiment the executor rotated and that is later found settled away from that rotation (vanilla's micro turn, which sees enemies the side does not, or the player, turned it back) is left alone for 0.1 doctrine-h or until the rotation wanted moves by the facing tolerance (`RefuseTurnBackMemory`).
+- groups in contact are rotated in place, not re-laid; a regiment the executor rotated and that is later found settled away from that rotation (vanilla's micro turn, which sees enemies the side does not, or the player, turned it back) is left alone for 0.1 doctrine-h or until the rotation wanted moves by the facing tolerance (`RefuseTurnBackMemory`; on a full table an expired back-off is evicted first, then a plain remembered rotation, and only when all 64 are active the back-off closest to expiry).
 - formed regiments commit only when the enemy line is exposed; screen/skirmisher contact does not pull the main line into an assault.
 - doctrine reserve deny removes the reserve path rather than leaving a stale active path.
 - corridor defense shows `approach-intercept` / `objective-lane`; wide or nested lines show `scourge-slot-*` reasons and a retained parent/HQ anchor.
