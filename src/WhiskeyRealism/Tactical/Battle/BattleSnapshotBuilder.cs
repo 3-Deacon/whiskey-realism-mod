@@ -251,6 +251,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (go.activeInHierarchy) flags |= UnitFlags.Active;
             if (group || reg.strength > 0) flags |= UnitFlags.Alive; // a group lives while it exists
             if (reg.isrouted) flags |= UnitFlags.Routed;
+            if (reg.markedforrout) flags |= UnitFlags.MarkedForRout;
             if (reg.onretreat) flags |= UnitFlags.OnRetreat;
             if (reg.inmelee > 0f) flags |= UnitFlags.InMelee;
             if (reg.liedown) flags |= UnitFlags.LiedDown;

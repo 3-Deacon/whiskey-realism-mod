@@ -31,6 +31,7 @@ internal static class BattleSnapshotTests
             ("battle snapshot begin build resets the perception summary to nothing seen", BeginBuildResetsPerceptionSummary),
             ("battle snapshot front axis group fallback weights by ai-group strength", FrontAxisGroupFallbackWeightsByAiGroupStrength),
             ("battle snapshot front axis group fallback filter matches the shipped sample", FrontAxisGroupFallbackFilterMatchesShippedSample),
+            ("battle snapshot front axis leaf sample excludes units marked for rout", FrontAxisLeafSampleExcludesMarkedForRout),
         });
     }
 
@@ -548,5 +549,19 @@ internal static class BattleSnapshotTests
         // Shift 0: brigades (14) are command level; the routed one still is not sampled.
         var unshifted = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, TacticalFrontAxis.None, commandHierarchyShift: 0);
         AssertNear((100f * 10f - 500f * 5000f) / 5010f, unshifted.OriginX, 0.01f, "brigade joins at shift 0");
+    }
+
+    // The shipped leaf sample treated isrouted || markedforrout as routed
+    // (ArmyEvidenceBuilder 615b672 ~665, ~688). Rout sets markedforrout on a cavalry leaf
+    // that must mount before it routs (123555-123559), so it is not routed yet but left out.
+    private static void FrontAxisLeafSampleExcludesMarkedForRout()
+    {
+        var f = new Fixture();
+        f.Add(R1, TacticalUnitType.Infantry, 0f, 0f, 500);
+        f.Add(R2, TacticalUnitType.Cavalry, 1000f, 0f, 500, UnitFlags.MarkedForRout);
+        f.Load(); f.Assemble();
+        f.Snapshot.SetEnemySummary(5000f, 0f, 0f, 1000f);
+        var axis = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, TacticalFrontAxis.None, commandHierarchyShift: 0);
+        AssertNear(0f, axis.OriginX, 0.01f, "a leaf marked for rout is not sampled");
     }
 }

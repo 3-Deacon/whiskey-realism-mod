@@ -28,6 +28,7 @@ namespace WhiskeyRealism.Tactical.Battle
         IsInfantry = 16384,
         PlayerCommand = 32768,
         LiedDown = 65536,
+        MarkedForRout = 131072, // vanilla markedforrout: a cavalry leaf mounting up to rout (Rout 123555-123559)
     }
 
     public struct UnitRecord

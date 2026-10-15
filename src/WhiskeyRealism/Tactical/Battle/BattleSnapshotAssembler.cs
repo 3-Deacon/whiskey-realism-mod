@@ -182,13 +182,11 @@ namespace WhiskeyRealism.Tactical.Battle
         // needs map data the snapshot does not carry. Must run after perception has set
         // the visible-enemy summary for the tick.
         //
-        // The group sample is the shipped one (ArmyEvidenceBuilder 615b672, ~668-683):
-        // unittyp at or above the shifted command level (ClampShiftedMin), not routed, and
-        // not under the W&L player's command. The shipped "routed" also counted
-        // markedforrout, which Rout sets only on leaves after returning for unittyp > 13
-        // (123547-123555), so for a group isrouted alone is the same test. The player-command
-        // test reads UnitFlags.PlayerOwned (BattleSnapshotBuilder.OwnershipFlags; BC3's
-        // PlayerOwnership.Compute at its merge) instead of dlcw_isundercommander.
+        // Samples are the shipped ones (ArmyEvidenceBuilder 615b672, ~665-690). "Routed" is
+        // isrouted || markedforrout for both (Routed | MarkedForRout). Groups: unittyp at
+        // or above the shifted command level (ClampShiftedMin), not under the W&L player's
+        // command, read as UnitFlags.PlayerOwned (BattleSnapshotBuilder.OwnershipFlags;
+        // BC3's PlayerOwnership.Compute at its merge) instead of dlcw_isundercommander.
         internal static TacticalFrontAxis FitFrontAxis(BattleSnapshot s, TacticalFrontAxis previous, int commandHierarchyShift)
         {
             if (s == null) return previous;
@@ -250,7 +248,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static bool InFrontSample(in UnitRecord u, bool leaves, int commandMin)
         {
-            if ((u.Flags & UnitFlags.Routed) != 0) return false;
+            if ((u.Flags & (UnitFlags.Routed | UnitFlags.MarkedForRout)) != 0) return false;
             if (leaves)
             {
                 if ((u.Flags & UnitFlags.IsGroup) != 0) return false;
@@ -307,9 +305,9 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        // CommandTreeBuilder input. markedforrout is passed false: vanilla sets it only on
-        // cavalry leaves and clears it before routing (Rout 123547-123595), and groups
-        // return before it (unittyp > 13), so it never applies to a command-level node.
+        // CommandTreeBuilder input. markedforrout is passed through as the shipped probe
+        // did; vanilla sets it only on cavalry leaves (Rout 123555-123559, after the
+        // unittyp > 13 return at 123547), so it never marks a command-level node.
         internal static void ToCommandProbes(BattleSnapshot s, IReadOnlyDictionary<int, string> names, int commandHierarchyShift,
             List<CommandTreeBuilder.CommandProbe> into)
         {
@@ -334,7 +332,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 displayName: name,
                 active: IsOperationallyPresent(in u, commandMin),
                 routed: (u.Flags & UnitFlags.Routed) != 0,
-                markedForRout: false);
+                markedForRout: (u.Flags & UnitFlags.MarkedForRout) != 0);
         }
 
         // Present on the field: active, or a command-level group that has not routed

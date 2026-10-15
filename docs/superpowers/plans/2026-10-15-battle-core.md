@@ -88,7 +88,8 @@ Merge order into `feat/battle-core`: BC0, BC1, BC3, BC4, BC2a, BC2b, BC6a, BC5c,
 namespace WhiskeyRealism.Tactical.Battle {
   [System.Flags] public enum UnitFlags : uint { None = 0, Alive = 1, Active = 2, Routed = 4, OnRetreat = 8, InMelee = 16,
     PlayerOwned = 32, AncestorOfPlayerCommand = 64, PlayerCommandDetached = 128, Feud = 256, PermanentlyDetached = 512,
-    Garrisoned = 1024, IsGroup = 2048, IsArtillery = 4096, IsCavalry = 8192, IsInfantry = 16384, PlayerCommand = 32768, LiedDown = 65536 }
+    Garrisoned = 1024, IsGroup = 2048, IsArtillery = 4096, IsCavalry = 8192, IsInfantry = 16384, PlayerCommand = 32768, LiedDown = 65536,
+    MarkedForRout = 131072 /* added in BC1: vanilla markedforrout, excluded from the front-axis leaf sample as shipped */ }
   public struct UnitRecord {
     public int InstanceId; public int UnitTyp; public int Alliance; public int Commander;
     public float X, Y, Z, RotationY; public int Strength; public float GroupStrengthDirect;
@@ -194,6 +195,7 @@ internal static class BattleSnapshotBuilder { // runtime
   - `BeginBuildResetsPerceptionSummary`: `NearestVisibleReinforcementHours` resets to `float.MaxValue` ("none seen", BC2a's sentinel), never 0
   - `FrontAxisGroupFallbackWeightsByAiGroupStrength`: with no combat leaf, groups weigh `max(1, max(0, groupstrengthaigroup))`, as the shipped `ArmyEvidenceBuilder` group samples and `Centroid` did
   - `FrontAxisGroupFallbackFilterMatchesShippedSample`: the group fallback samples units at or above the shifted command level, not routed and not `PlayerOwned` (shipped `ArmyEvidenceBuilder` filter); a player-owned division is excluded
+  - `FrontAxisLeafSampleExcludesMarkedForRout`: a leaf with vanilla `markedforrout` (cavalry mounting to rout, `Rout` 123555-123559) is left out of the front-axis sample, as the shipped `isrouted || markedforrout` test did
   - `StrengthBucketReadsAiGroupAndInRangeStrength`: the extended probe keeps the shipped bucket source `max(groupowninrange, groupstrengthaigroup)` (vanilla 120297, 120559-120564), so `ChooseEnvelopmentAnchorIndices` sees unchanged strengths; a non-AI-group division out of contact stays bucket 0
 - [ ] Implement `BattleSnapshot` with grow-only pooled arrays. Growth allocates only when the roster exceeds capacity, which the allocation test accepts as warm-up.
 - [ ] Implement the runtime builder. It does one pass over `BattleUnits.completeunitlist` (as `IList`, no LINQ). Own units of `alliance` go into `Own` and enemies into `EnemyRecords`. It caches `allattachedunits` id lists only when the roster signature changes. It sets `FirstEnemyInRangeId` from `unitrange.enemyinrangereg[0]`. On ancestry, it counts disagreements between the D5 parent map and `transform.IsChildOf` for the player chain only (cheap), and emits `OnceLog.Info("tactical-battle-core:ancestry-mismatch", …)` once per battle when the count is > 0. The key must start with `tactical` (`OnceLog.TacticalKeyPrefix`): `OnceLog.ResetTactical` releases only those keys at battle end, so a key without the prefix would fire once per process.
