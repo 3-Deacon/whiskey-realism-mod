@@ -224,6 +224,14 @@ namespace WhiskeyRealism.Tactical.Battle
                 ignoredisabledships: false,
                 checkforreadiness: true,
                 clearinterruptionpaths: true);
+            // An in-contact withdrawal of an infantry/cavalry regiment is vanilla's
+            // tactical fallback, which ends in SetMovementMode(2) (CheckLineFallbacks
+            // 5178, MicroAICheckForRetreats 4898; mounted units map 2 to 4, 124714-124718):
+            // the fallback walk facing the enemy, and the movementmode != 0 mark both
+            // vanilla's filter (5137) and the Withdrawal producer read. SetWaypoint
+            // leaves movementmode alone (its ResetMovementMode(0) acts only on 5, 124661).
+            if ((w.Flags & IntentFlags.InContactWithdrawal) != 0 && unit.unittyp <= TacticalUnitType.Cavalry)
+                unit.SetMovementMode(2);
             return true;
         }
 
