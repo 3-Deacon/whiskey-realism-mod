@@ -133,6 +133,8 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> FixPontoonTrainCreekSpeed;
         internal static ConfigEntry<bool> FixEngineerBranchBonus;
         internal static ConfigEntry<bool> FixGoodGroundCoverCap;
+        internal static ConfigEntry<bool> FixAutoresolveEntrenchmentSide;
+        internal static ConfigEntry<bool> FixPlayerEntrenchmentPoints;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -447,6 +449,13 @@ namespace WhiskeyRealism
                 "resupply). Left vanilla because their texts promise something else: the attrition values of Harsh Punishments, Ample " +
                 "Rewards and Purge, and the prestige values on items, injuries and one career event; three companions' rank values use a " +
                 "quality type vanilla has no meaning for. Off: vanilla.");
+            FixPlayerEntrenchmentPoints = Config.Bind(
+                "Tactical",
+                "Fix Player Entrenchment Points",
+                true,
+                "Default ON. At battle start the player's engineering points get a bonus for the army's campaign entrenchment, " +
+                "but vanilla multiplies it by the entrenchment level twice, so the player gets less than the AI for the same works " +
+                "(the AI's bonus is linear). With this on the player's bonus is linear too. Set false for rollback to vanilla.");
             EnableBattleEntrenchmentAverageFix = Config.Bind(
                 "Tactical",
                 "Enable Battle Entrenchment Average Fix",
@@ -930,6 +939,11 @@ namespace WhiskeyRealism
                 "army or army group with the perk (or under an army that has it) crosses creeks 1.25/1.5/1.75 times as fast, and its creek " +
                 "path cost is 1/1.25, 1/1.5, 1/1.75 so routes are chosen by real travel time. Every side, including the W&L player. Set " +
                 "false for rollback to vanilla.");
+            FixAutoresolveEntrenchmentSide = Config.Bind(
+                "Campaign", "Fix Autoresolve Entrenchment Side", true,
+                "Default ON. In an autoresolved battle a defending side's entrenchments reduce the fire it takes, but vanilla always " +
+                "reads side 1's engineering points, so when side 0 defends it is protected by its attacker's works. With this on each " +
+                "defending side uses its own engineering points. Set false for rollback to vanilla.");
             FixEngineerBranchBonus = Config.Bind(
                 "Campaign", "Fix Engineer Branch Bonus", true,
                 "Default ON. The engineering-point bonus for an engineer regiment whose commander is an engineer officer (unitprefs " +

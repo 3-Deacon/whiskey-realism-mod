@@ -41,7 +41,9 @@ namespace WhiskeyRealism.Patches
         internal static void Postfix(Regiment __instance)
         {
             // Every company-cover update of every battle unit: return before the scope unless
-            // the W&L incident can have applied.
+            // the W&L incident can have applied (early field-compare return before
+            // TelemetryPerf.Scope, accepted by the integrator 2026-10-15; precedent:
+            // TacticalObserverPatch).
             if (!DLC_WL.dlc_scenarioactive || !__instance.dlcw_isundercommander) return;
             using (TelemetryPerf.Scope("tactical.patch.good-ground-cover-cap", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {

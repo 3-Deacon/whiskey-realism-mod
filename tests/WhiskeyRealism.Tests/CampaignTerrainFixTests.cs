@@ -39,12 +39,14 @@ internal static class CampaignTerrainFixTests
             ("PontoonLevelFollowsAddPathPrecedence", PontoonLevelFollowsAddPathPrecedence),
             ("PontoonPathCostIsInverseSpeed", PontoonPathCostIsInverseSpeed),
             ("PontoonRouteChoiceIsTimeOptimalWithFix", PontoonRouteChoiceIsTimeOptimalWithFix),
-            ("EngineerBranchSwapMapsEngineerToVanillaTest", EngineerBranchSwapMapsEngineerToVanillaTest),
-            ("FieldValueSwapRestoresOnlyItsOwnWrites", FieldValueSwapRestoresOnlyItsOwnWrites),
-            ("StaticRefSwapRestoresOnlyItsOwnReplacement", StaticRefSwapRestoresOnlyItsOwnReplacement),
+            ("EngineerBranchMasksSelectEngineersForVanillaTest", EngineerBranchMasksSelectEngineersForVanillaTest),
+            ("EngineerBranchMasksRestoreOnlyTheirOwnWrites", EngineerBranchMasksRestoreOnlyTheirOwnWrites),
             ("GoodGroundCoverCappedAtNinetyPercent", GoodGroundCoverCappedAtNinetyPercent),
             ("PerceptionMasksPlayerIntelIncidentsOnlyForFogGrid", PerceptionMasksPlayerIntelIncidentsOnlyForFogGrid),
             ("IncidentMaskWorksOnRealIncidentType", IncidentMaskWorksOnRealIncidentType),
+            ("AutoresolveDefenderUsesOwnEngineeringPoints", AutoresolveDefenderUsesOwnEngineeringPoints),
+            ("PlayerEntrenchmentTermBecomesLinear", PlayerEntrenchmentTermBecomesLinear),
+            ("EntrenchmentPatchesPassTheirFlagAndRestore", EntrenchmentPatchesPassTheirFlagAndRestore),
             ("TerrainFixPatchTargetsExist", TerrainFixPatchTargetsExist),
             ("TerrainFixPatchesPassTheirFlagAndRestore", TerrainFixPatchesPassTheirFlagAndRestore),
             ("PerkSelectionPatchUsesFullRangeWithFlag", PerkSelectionPatchUsesFullRangeWithFlag),
@@ -196,65 +198,8 @@ internal static class CampaignTerrainFixTests
         AssertTrue(vanillaSlowerSeen, "vanilla: the perk can make a march slower than without it");
     }
 
-    private static void EngineerBranchSwapMapsEngineerToVanillaTest()
-    {
-        AssertEqual(4, TerrainBugFixes.SwapEngineerNavy(TerrainBugFixes.BranchEngineer), "engineer reads as 4 for the call");
-        AssertEqual(3, TerrainBugFixes.SwapEngineerNavy(TerrainBugFixes.BranchNavy), "navy no longer matches 4");
-        for (int b = -1; b <= 2; b++) AssertEqual(b, TerrainBugFixes.SwapEngineerNavy(b), "branch " + b + " untouched");
-        AssertTrue(TerrainBugFixes.NeedsBranchSwap(3) && TerrainBugFixes.NeedsBranchSwap(4), "3 and 4 swap");
-        AssertFalse(TerrainBugFixes.NeedsBranchSwap(0) || TerrainBugFixes.NeedsBranchSwap(-1), "others do not");
 
-        // Vanilla's test at 87443 / 22578 is historicalbranch == 4; over the swapped values it
-        // selects exactly the engineers.
-        int[] branches = { -1, 0, 1, 2, 3, 4, 3 };
-        int hits = branches.Count(b => TerrainBugFixes.SwapEngineerNavy(b) == 4);
-        AssertEqual(2, hits, "both engineers, no navy officer");
-    }
 
-    private static void FieldValueSwapRestoresOnlyItsOwnWrites()
-    {
-        var swap = new FieldValueSwap<FakeCommander, int>(c => c.Branch, (c, v) => c.Branch = v);
-        var lee = new FakeCommander { Branch = 3 };
-        var porter = new FakeCommander { Branch = 4 };
-        var other = new FakeCommander { Branch = 0 };
-        swap.Set(lee, 4);
-        swap.Set(porter, 3);
-        AssertTrue(swap.Active, "active");
-        AssertEqual(4, lee.Branch, "lee swapped");
-        AssertEqual(3, porter.Branch, "porter swapped");
-        AssertEqual(0, other.Branch, "other untouched");
-        AssertEqual(null, swap.Restore(), "clean restore");
-        AssertEqual(3, lee.Branch, "lee restored");
-        AssertEqual(4, porter.Branch, "porter restored");
-        AssertFalse(swap.Active, "inactive");
-        AssertEqual(null, swap.Restore(), "second restore is a no-op");
-
-        swap.Set(lee, 4);
-        lee.Branch = 2; // vanilla wrote during the call
-        swap.Restore();
-        AssertEqual(2, lee.Branch, "a value vanilla wrote is kept");
-    }
-
-    private static void StaticRefSwapRestoresOnlyItsOwnReplacement()
-    {
-        float[] prefs = { 0.75f, 0.5f, 0.25f };
-        float[] original = prefs;
-        float[] ours = { 0.8f, 0.6f, 0.5f };
-        var swap = new StaticRefSwap<float[]>(() => prefs, v => prefs = v);
-        swap.Set(ours);
-        AssertTrue(swap.Active && ReferenceEquals(ours, prefs), "replacement in place");
-        AssertEqual(null, swap.Restore(), "clean restore");
-        AssertTrue(ReferenceEquals(original, prefs), "original back");
-        AssertFalse(swap.Active, "inactive");
-
-        swap.Set(ours);
-        float[] reloaded = { 1f, 1f, 1f };
-        prefs = reloaded; // prefs reloaded during the call
-        swap.Restore();
-        AssertTrue(ReferenceEquals(reloaded, prefs), "a reload during the call is kept");
-        swap.Set(null);
-        AssertFalse(swap.Active, "null replacement ignored");
-    }
 
     private static void GoodGroundCoverCappedAtNinetyPercent()
     {
@@ -284,15 +229,113 @@ internal static class CampaignTerrainFixTests
         AssertFalse(BattlePerception.IncidentLaunched(BattlePerception.IncidentNotLaunched), "masked value reads not launched");
     }
 
+
+    private static FakeCommander[] Commanders(params int[] branches)
+    {
+        return branches.Select(b => new FakeCommander { Branch = b }).ToArray();
+    }
+
+    // Vanilla's test at 87443 / 22578 is historicalbranch == 4; during the call it must select
+    // exactly the engineers (3), never a navy officer (4).
+    private static void EngineerBranchMasksSelectEngineersForVanillaTest()
+    {
+        var masks = new EngineerBranchMasks<FakeCommander>(c => c.Branch, (c, v) => c.Branch = v);
+        FakeCommander[] all = Commanders(-1, 0, 1, 2, 3, 4, 3, 4);
+        AssertEqual(2, masks.Apply(all), "two engineers now read as 4");
+        AssertTrue(masks.Active, "active");
+        AssertEqual("4,6", string.Join(",", Enumerable.Range(0, all.Length).Where(i => all[i].Branch == 4)), "vanilla's == 4 selects the engineers only");
+        AssertEqual(TerrainBugFixes.NavyMaskedBranch, all[5].Branch, "navy masked");
+        AssertEqual(null, masks.Restore(), "clean restore");
+        AssertEqual("-1,0,1,2,3,4,3,4", string.Join(",", all.Select(c => c.Branch)), "all branches back");
+        AssertFalse(masks.Active, "inactive");
+        AssertEqual(null, masks.Restore(), "second restore is a no-op");
+        AssertEqual(0, masks.Apply(null), "no commander list");
+    }
+
+    private static void EngineerBranchMasksRestoreOnlyTheirOwnWrites()
+    {
+        var masks = new EngineerBranchMasks<FakeCommander>(c => c.Branch, (c, v) => c.Branch = v);
+        FakeCommander[] all = Commanders(3, 4, 0);
+        masks.Apply(all);
+        all[0].Branch = 2; // vanilla wrote during the call
+        all[1].Branch = 1;
+        masks.Restore();
+        AssertEqual(2, all[0].Branch, "engineer: vanilla's value kept");
+        AssertEqual(1, all[1].Branch, "navy: vanilla's value kept");
+        AssertEqual(0, all[2].Branch, "untouched");
+        AssertEqual(4, TerrainBugFixes.BranchNavy, "vanilla's tested value");
+        AssertEqual(3, TerrainBugFixes.BranchEngineer, "engineer (branchtext 65091)");
+    }
+
     private static void IncidentMaskWorksOnRealIncidentType()
     {
         var incident = (DLC_WL.Incident)RuntimeHelpers.GetUninitializedObject(typeof(DLC_WL.Incident));
+        var idle = (DLC_WL.Incident)RuntimeHelpers.GetUninitializedObject(typeof(DLC_WL.Incident));
         incident.launchedtime = 12.5f;
-        var mask = new FieldValueSwap<DLC_WL.Incident, float>(i => i.launchedtime, (i, v) => i.launchedtime = v);
-        mask.Set(incident, BattlePerception.IncidentNotLaunched);
+        idle.launchedtime = -1f;
+        var mask = new FieldMask<DLC_WL.Incident, float>(i => i.launchedtime, (i, v) => i.launchedtime = v, BattlePerception.IncidentNotLaunched);
+        AssertEqual(1, mask.Mask(new[] { incident, null, idle }, i => BattlePerception.IncidentLaunched(i.launchedtime)), "only the launched one");
         AssertFalse(BattlePerception.IncidentLaunched(incident.launchedtime), "masked");
-        AssertEqual(null, mask.Restore(), "clean restore");
+        AssertEqual(null, mask.Restore(i => i == null), "clean restore");
         AssertNear(12.5f, incident.launchedtime, 1e-6f, "launch time back");
+        AssertNear(-1f, idle.launchedtime, 1e-6f, "idle untouched");
+    }
+
+    // FightUnit 21075-21077: protection = 1 - engineeringpoints[1] / 100 x experience when the
+    // side fired at (num2) defends. Points 40 for side 0, 10 for side 1, experience 1.
+    private static void AutoresolveDefenderUsesOwnEngineeringPoints()
+    {
+        float[] points = { 40f, 10f };
+        AssertEqual(1, TerrainBugFixes.DefendingSide(true), "unit0 on side 0 fires at side 1");
+        AssertEqual(0, TerrainBugFixes.DefendingSide(false), "unit0 on side 1 fires at side 0");
+        AssertFalse(TerrainBugFixes.EntrenchmentReadNeedsFix(true, 1), "side 1 defending: vanilla already right");
+        AssertTrue(TerrainBugFixes.EntrenchmentReadNeedsFix(true, 0), "side 0 defending: fix");
+        AssertFalse(TerrainBugFixes.EntrenchmentReadNeedsFix(false, 0), "flag off: vanilla");
+
+        int defender = TerrainBugFixes.DefendingSide(false);
+        float vanilla = 1f - points[TerrainBugFixes.VanillaEntrenchmentReadSide] / 100f;
+        AssertNear(0.9f, vanilla, 1e-6f, "vanilla: side 0 protected by side 1's works");
+        // The patch writes a two-slot array of the defender's points, so index 1 reads them.
+        float[] masked = { points[defender], points[defender] };
+        AssertNear(0.6f, 1f - masked[TerrainBugFixes.VanillaEntrenchmentReadSide] / 100f, 1e-6f, "fix: side 0 protected by its own works");
+    }
+
+    // ResetEngineeringPoints 87475-87481 with battleprefs k = 0.00125 (622) and an effect factor.
+    private static void PlayerEntrenchmentTermBecomesLinear()
+    {
+        const float k = 0.00125f, effect = 1.5f, strength = 20000f, engineers = 30f;
+        foreach (float level in new[] { 0f, 0.25f, 0.5f, 0.8f, 1f })
+        {
+            float scale = 1f + (effect - 1f) * level;
+            float vanillaPlayer = (engineers + level * strength * k * level) * scale;
+            float aiSameWorks = (engineers + strength * k * level) * scale;
+            float fixedPlayer = vanillaPlayer + TerrainBugFixes.LinearEntrenchmentDelta(level, strength, k, effect);
+            AssertNear(aiSameWorks, fixedPlayer, 1e-2f, "player equals the AI's linear rule at level " + level);
+        }
+        AssertNear(0f, TerrainBugFixes.LinearEntrenchmentDelta(0f, strength, k, effect), 1e-6f, "no works");
+        AssertNear(0f, TerrainBugFixes.LinearEntrenchmentDelta(1f, strength, k, effect), 1e-6f, "full works: square equals linear");
+        AssertTrue(TerrainBugFixes.LinearEntrenchmentDelta(0.5f, strength, k, effect) > 0f, "half works: the player gains");
+        AssertNear(0f, TerrainBugFixes.LinearEntrenchmentDelta(float.NaN, strength, k, effect), 1e-6f, "NaN: vanilla");
+    }
+
+    private static void EntrenchmentPatchesPassTheirFlagAndRestore()
+    {
+        string dir = TestFixtures.FindRepoPath("src/WhiskeyRealism/Patches");
+        string side = File.ReadAllText(Path.Combine(dir, "AutocalcEntrenchmentSidePatch.cs"));
+        string prefix = Body(side, "internal static void Prefix(Autocalc __instance, Regiment unit0, Regiment unit1)");
+        AssertTrue(prefix.Contains("EntrenchmentReadNeedsFix(Enabled(), defending)"), "autoresolve passes the flag");
+        AssertTrue(prefix.Contains("TerrainBugFixes.DefendingSide(unit0.alliance == __instance.alliance[0])"), "defender side as vanilla's num2");
+        int restore = prefix.IndexOf("Swap.Restore(", StringComparison.Ordinal);
+        AssertTrue(restore >= 0 && restore < prefix.IndexOf("Swap.Mask(", StringComparison.Ordinal), "autoresolve Prefix restores before it masks");
+        AssertTrue(Body(side, "internal static void Finalizer()").Contains("Swap.Restore("), "autoresolve Finalizer restores");
+
+        string points = File.ReadAllText(Path.Combine(dir, "PlayerEntrenchmentPointsPatch.cs"));
+        string postfix = Body(points, "internal static void Postfix(BattleUnits __instance)");
+        AssertTrue(postfix.Contains("if (!Enabled() ||"), "player entrenchment passes the flag");
+        AssertTrue(postfix.Contains("LinearEntrenchmentDelta(__instance.entrenchmentlevel, __instance.allunitsofalliance[side].totalstrength,"), "uses vanilla's player fields");
+        AssertTrue(postfix.Contains("GamePrefs.influenceofentrenchmentlevelonengineeringpoints, GamePrefs.effectentrenchmentonengineeringpoints"), "uses vanilla's prefs");
+        AssertTrue(postfix.Contains("__instance.GetSideFromAlliance(GameVars.playeralliance)"), "player side as vanilla");
+        AssertTrue(postfix.Contains("bui.deploymentavailabletime += delta;"), "adds to the player's pool");
     }
 
     private static void TerrainFixPatchTargetsExist()
@@ -306,6 +349,13 @@ internal static class CampaignTerrainFixTests
         AssertEqual(typeof(float[]), AccessTools.Field(typeof(GamePrefs), "movementcostpontoontrain").FieldType, "pontoon cost prefs");
         AssertEqual(typeof(int), AccessTools.Field(typeof(GameVars.Commander), "historicalbranch").FieldType, "commander branch");
         AssertEqual(typeof(float), AccessTools.Field(typeof(DLC_WL.Incident), "launchedtime").FieldType, "incident launch time");
+        var fight = AccessTools.Method(typeof(Autocalc), "FightUnit");
+        AssertTrue(fight != null, "FightUnit");
+        AssertEqual("unit0,unit1", string.Join(",", fight.GetParameters().Take(2).Select(p => p.Name)), "FightUnit parameter names");
+        AssertEqual(typeof(float[]), AccessTools.Field(typeof(Autocalc), "engineeringpoints").FieldType, "autoresolve engineering points");
+        AssertTrue(AccessTools.Method(typeof(BattleUnits), "ResetEngineeringPoints") != null, "ResetEngineeringPoints");
+        AssertEqual(typeof(BattleUI), AccessTools.Field(typeof(BattleUnits), "bui").FieldType, "BattleUnits.bui");
+        AssertEqual(typeof(float), AccessTools.Field(typeof(BattleUI), "deploymentavailabletime").FieldType, "player deployment points");
     }
 
     private static void TerrainFixPatchesPassTheirFlagAndRestore()
@@ -315,11 +365,11 @@ internal static class CampaignTerrainFixTests
         AssertTrue(Body(pontoon, "internal static void Postfix(Regiment __instance, ref float __result)").Contains("PontoonApplies(Enabled(),"), "speed passes the flag");
         string pathPrefix = Body(pontoon, "internal static void Prefix(Regiment __instance)");
         AssertTrue(pathPrefix.Contains("PontoonApplies(Enabled(),"), "path cost passes the flag");
-        AssertTrue(pathPrefix.IndexOf("Swap.Restore()", StringComparison.Ordinal) < pathPrefix.IndexOf("Swap.Set(", StringComparison.Ordinal), "path Prefix restores before it sets");
+        AssertTrue(pathPrefix.IndexOf("Swap.Restore()", StringComparison.Ordinal) < pathPrefix.IndexOf("Swap.Apply(", StringComparison.Ordinal), "path Prefix restores before it applies");
         AssertTrue(Body(pontoon, "internal static void Finalizer()").Contains("Swap.Restore()"), "path Finalizer restores");
 
         string engineer = File.ReadAllText(Path.Combine(dir, "EngineerBranchBonusPatch.cs"));
-        AssertEqual(2, Regex.Matches(engineer, @"if \(!Enabled\(\)\) return;\s*if \(SwapAll\(Swap\)").Count, "both engineer Prefixes gate on the flag before swapping");
+        AssertEqual(2, Regex.Matches(engineer, @"if \(!Enabled\(\)\) return;\s*if \(Swap\.Apply\(GameVars\.commander\)").Count, "both engineer Prefixes gate on the flag before swapping");
         var finalizers = Regex.Matches(engineer, @"\[HarmonyFinalizer\]");
         AssertEqual(2, finalizers.Count, "two engineer Finalizers");
         foreach (Match f in finalizers)
@@ -354,7 +404,7 @@ internal static class CampaignTerrainFixTests
         int reinforcements = fill.IndexOf("AddReinforcements(", StringComparison.Ordinal);
         AssertTrue(mask >= 0 && mask < enemies && mask < reinforcements, "masked before both UnitIsHidden paths");
         int finallyAt = fill.IndexOf("finally", StringComparison.Ordinal);
-        AssertTrue(finallyAt > reinforcements && fill.IndexOf("_incidentMask.Restore()", finallyAt, StringComparison.Ordinal) > finallyAt, "restored in finally");
+        AssertTrue(finallyAt > reinforcements && fill.IndexOf("_incidentMask.Restore(", finallyAt, StringComparison.Ordinal) > finallyAt, "restored in finally");
         AssertTrue(Body(probe, "private static void MaskPlayerIntelIncidents(").Contains("BattlePerception.MasksPlayerIntelIncidents(mode, DLC_WL.dlc_scenarioactive)"), "mask only for the AI side's fog grid");
     }
 

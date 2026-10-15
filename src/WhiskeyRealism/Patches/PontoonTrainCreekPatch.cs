@@ -19,10 +19,13 @@ namespace WhiskeyRealism.Patches
     //   tooltip factor (TerrainBugFixes.PontoonCreekSpeedMultiplier) for a campaign-table group
     //   holding the perk, by AddPath's precedence. The method runs per unit per frame (also in
     //   battle), so the Postfix returns on its first field compare unless the unit stands on a
-    //   creek on the campaign map; only then does it open its perf scope.
+    //   creek on the campaign map; only then does it open its perf scope (the early return
+    //   before TelemetryPerf.Scope was accepted by the integrator 2026-10-15; precedent:
+    //   TacticalObserverPatch's Enabled() returns).
     // Route: vanilla moves at 1/cost and prices at cost (55843, 132900); a Prefix points
     //   movementcostpontoontrain at 1/factor for a campaign-table group's AddPath call so routes
-    //   are priced at their real travel time, and a Finalizer restores it.
+    //   are priced at their real travel time, and a Finalizer restores it (LogisticsSwaps'
+//   ValueSwap: restored only while the static still holds our array).
     // Every side, the W&L player's command included (the tooltip rule). Rollback: Campaign /
     // Fix Pontoon Train Creek Speed.
     internal static class PontoonTrainCreekPatch
@@ -79,7 +82,7 @@ namespace WhiskeyRealism.Patches
         internal static class CreekPathCost
         {
             private static readonly float[] PathCost = NewPathCost();
-            private static readonly StaticRefSwap<float[]> Swap = new StaticRefSwap<float[]>(
+            private static readonly ValueSwap<float[]> Swap = new ValueSwap<float[]>(
                 () => GamePrefs.movementcostpontoontrain, v => GamePrefs.movementcostpontoontrain = v);
 
             private static float[] NewPathCost()
@@ -101,7 +104,7 @@ namespace WhiskeyRealism.Patches
                         if (!TerrainBugFixes.PontoonApplies(Enabled(), __instance.calledfromcampaign, __instance.unittyp)) return;
                         float[] vanilla = GamePrefs.movementcostpontoontrain;
                         if (vanilla == null || vanilla.Length != PathCost.Length) return;
-                        Swap.Set(PathCost);
+                        Swap.Apply(PathCost);
                         OnceLog.Info("pontoon-creek:path", "[Patch:Pontoon] creek path cost for Pontoon Train groups priced at 1/speed");
                     }
                     catch (Exception ex)

@@ -51,6 +51,7 @@ campaign.patch.orphan-camp-cleanup.postfix        # Regiment.OnDestroy: only whe
 tactical.patch.perk-ids.hq.engineers-choose       # Regiment.ChoosePerk: only when a unit picks a perk (an open slot with full perk experience)
 campaign.patch.pontoon-creek.speed                 # Regiment.GetTerrainSpeedAdjustment: only while a campaign group stands on a creek cell
 campaign.patch.engineer-branch.autocalc.*          # Autocalc.CalculateEngineeringPoints: only when a battle is autoresolved
+campaign.patch.autocalc-entrenchment-side.*        # Autocalc.FightUnit: only when a battle is autoresolved
 
 # Battle paths a single battle may not reach.
 tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # AIBattle.MicroAICheckForRetreats: vanilla calls it only with macroai 3 (retreat) and ai_stance 1

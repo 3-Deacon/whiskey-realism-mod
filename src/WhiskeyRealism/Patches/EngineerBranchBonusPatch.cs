@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Telemetry;
@@ -14,10 +13,12 @@ namespace WhiskeyRealism.Patches
     // Autocalc.CalculateEngineeringPoints (22578, autoresolve). Branch 4 is navy
     // (branchtext 65091, fleet commanders 59162); engineer is 3 (W&L attribute 19 Engineer 42526,
     // 61 commanders in commanders.txt such as Lee, McClellan, Meade, Beauregard). Neither method
-    // reads historicalbranch anywhere else. The test is an inline constant, so a Prefix swaps
-    // 3 <-> 4 on every commander for the call (vanilla's own status and unit conditions still
-    // decide who gets it) and a Finalizer swaps back, even if vanilla throws. Both methods run
-    // a few times per battle / autoresolve day. Rollback: Campaign / Fix Engineer Branch Bonus.
+    // reads historicalbranch anywhere else. The test is an inline constant, so for the call a
+    // Prefix writes every navy officer's branch as -4 and every engineer's as 4 (vanilla's own
+    // status and unit conditions still decide who gets it), two FieldMasks (LogisticsSwaps);
+    // the Finalizer restores engineers, then navy, each only where the mask value is still
+    // there, even if vanilla throws. Both methods run a few times per battle / autoresolve day.
+    // Rollback: Campaign / Fix Engineer Branch Bonus.
     internal static class EngineerBranchBonusPatch
     {
         internal static bool Enabled()
@@ -26,25 +27,9 @@ namespace WhiskeyRealism.Patches
             catch { return false; }
         }
 
-        internal static FieldValueSwap<GameVars.Commander, int> NewSwap()
+        internal static EngineerBranchMasks<GameVars.Commander> NewMasks()
         {
-            return new FieldValueSwap<GameVars.Commander, int>(c => c.historicalbranch, (c, v) => c.historicalbranch = v);
-        }
-
-        // Swaps engineer and navy on every commander; returns how many were swapped.
-        internal static int SwapAll(FieldValueSwap<GameVars.Commander, int> swap)
-        {
-            List<GameVars.Commander> commanders = GameVars.commander;
-            if (commanders == null) return 0;
-            int swapped = 0;
-            for (int i = 0; i < commanders.Count; i++)
-            {
-                GameVars.Commander c = commanders[i];
-                if (c == null || !TerrainBugFixes.NeedsBranchSwap(c.historicalbranch)) continue;
-                swap.Set(c, TerrainBugFixes.SwapEngineerNavy(c.historicalbranch));
-                swapped++;
-            }
-            return swapped;
+            return new EngineerBranchMasks<GameVars.Commander>(c => c.historicalbranch, (c, v) => c.historicalbranch = v);
         }
 
         private static void LogRestore(string failure, string key)
@@ -55,7 +40,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyPatch(typeof(BattleUnits), nameof(BattleUnits.CalculateAllUnitsOfAlliance))]
         internal static class BattlePool
         {
-            private static readonly FieldValueSwap<GameVars.Commander, int> Swap = NewSwap();
+            private static readonly EngineerBranchMasks<GameVars.Commander> Swap = NewMasks();
 
             [HarmonyPrefix]
             internal static void Prefix()
@@ -67,7 +52,7 @@ namespace WhiskeyRealism.Patches
                     {
                         LogRestore(Swap.Restore(), "engineer-branch:battle:restore");
                         if (!Enabled()) return;
-                        if (SwapAll(Swap) > 0)
+                        if (Swap.Apply(GameVars.commander) > 0)
                             OnceLog.Info("engineer-branch:battle", "[Patch:EngineerBranch] battle engineering points: branch bonus tests the engineer branch");
                     }
                     catch (Exception ex)
@@ -92,7 +77,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyPatch(typeof(Autocalc), "CalculateEngineeringPoints")]
         internal static class Autoresolve
         {
-            private static readonly FieldValueSwap<GameVars.Commander, int> Swap = NewSwap();
+            private static readonly EngineerBranchMasks<GameVars.Commander> Swap = NewMasks();
 
             [HarmonyPrefix]
             internal static void Prefix()
@@ -104,7 +89,7 @@ namespace WhiskeyRealism.Patches
                     {
                         LogRestore(Swap.Restore(), "engineer-branch:autocalc:restore");
                         if (!Enabled()) return;
-                        if (SwapAll(Swap) > 0)
+                        if (Swap.Apply(GameVars.commander) > 0)
                             OnceLog.Info("engineer-branch:autocalc", "[Patch:EngineerBranch] autoresolve engineering points: branch bonus tests the engineer branch");
                     }
                     catch (Exception ex)

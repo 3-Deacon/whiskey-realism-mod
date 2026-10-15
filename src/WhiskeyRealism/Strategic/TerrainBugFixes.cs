@@ -3,7 +3,7 @@ using System;
 namespace WhiskeyRealism.Strategic
 {
     // Pure decisions for the campaign terrain and engineer bug fixes (BUG-AI-013, BUG-AI-014,
-    // BUG-WL-015). Anchors are lines of the build 14703111 decompile.
+    // BUG-AI-016, BUG-TAC-021, BUG-WL-015). Anchors are lines of the build 14703111 decompile.
     internal static class TerrainBugFixes
     {
         // NavMesh area "Small Rivers" (creek), campaignprefs.txt 711-714.
@@ -66,18 +66,9 @@ namespace WhiskeyRealism.Strategic
         internal const int BranchEngineer = 3;
         internal const int BranchNavy = 4;
 
-        internal static bool NeedsBranchSwap(int branch)
-        {
-            return branch == BranchEngineer || branch == BranchNavy;
-        }
-
-        // The value written for one call so vanilla's "== 4" test means "engineer": 3 <-> 4.
-        internal static int SwapEngineerNavy(int branch)
-        {
-            if (branch == BranchEngineer) return BranchNavy;
-            if (branch == BranchNavy) return BranchEngineer;
-            return branch;
-        }
+        // For the call vanilla's "== 4" test must mean "engineer": engineers are written as 4
+        // and navy officers as this value, which no read in either method matches.
+        internal const int NavyMaskedBranch = -4;
 
         // ---- BUG-WL-015: incident 18 "A Good Ground" ----------------------------------------
         // Integrator decision 2026-10-15: the doubled cover never exceeds 0.9, so ranged losses
@@ -90,6 +81,37 @@ namespace WhiskeyRealism.Strategic
             if (float.IsNaN(doubled) || float.IsInfinity(doubled) || !(multiplier > 1f)) return doubled;
             float undoubled = doubled / multiplier;
             return Math.Min(doubled, Math.Max(cap, undoubled));
+        }
+
+        // ---- BUG-AI-016: autoresolve entrenchment protection ------------------------------
+        // Autocalc.FightUnit (21050) sets num2 = the side of unit1 (the unit fired at): 1 when
+        // unit0 is on side 0 (alliance[0]), else 0 (21061-21070). When that side defends
+        // (usedstance[num2] == 2) incoming fire is scaled by 1 - engineeringpoints[1] / 100 x
+        // militaryexperience of unit1's alliance (21075-21077): the literal 1 instead of num2,
+        // so a defending side 0 is protected by side 1's (its attacker's) entrenchments.
+        internal const int VanillaEntrenchmentReadSide = 1;
+
+        internal static int DefendingSide(bool firingUnitOnSide0)
+        {
+            return firingUnitOnSide0 ? 1 : 0;
+        }
+
+        internal static bool EntrenchmentReadNeedsFix(bool fixOn, int defendingSide)
+        {
+            return fixOn && defendingSide != VanillaEntrenchmentReadSide;
+        }
+
+        // ---- BUG-TAC-021: the player's entrenchment term in the battle engineering pool -----
+        // BattleUnits.ResetEngineeringPoints (87465): the player's pool adds
+        // entrenchmentlevel x totalstrength x k x entrenchmentlevel (87476), the AI's adds
+        // totalstrength x k x enemyentrenchmentlevel (87480); both are then scaled by
+        // 1 + (effect - 1) x level (87477, 87481). Entrenchment is at most the alliance's
+        // military experience (115450-115453), so the square shrinks the player's term.
+        // Returns what the linear term adds on top of vanilla's squared one, after the scale.
+        internal static float LinearEntrenchmentDelta(float level, float strength, float influence, float effect)
+        {
+            float delta = (level - level * level) * strength * influence * (1f + (effect - 1f) * level);
+            return float.IsNaN(delta) || float.IsInfinity(delta) ? 0f : delta;
         }
     }
 }
