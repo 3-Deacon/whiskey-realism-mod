@@ -28,6 +28,7 @@ internal static class BattleSnapshotTests
             ("battle snapshot front axis stabilized across ticks", FrontAxisStabilizedAcrossTicks),
             ("battle snapshot direct-child and command-tree probes agree on parents", DirectChildAndCommandTreeAgreeOnParents),
             ("battle snapshot strength bucket reads ai-group and in-range strength", StrengthBucketReadsAiGroupAndInRangeStrength),
+            ("battle snapshot begin build resets the perception summary to nothing seen", BeginBuildResetsPerceptionSummary),
         });
     }
 
@@ -486,5 +487,20 @@ internal static class BattleSnapshotTests
         r.GroupOwnInRange = ownInRange;
         r.GroupStrengthAiGroup = aiGroup;
         f.Records[i] = r;
+    }
+
+    // float.MaxValue is "no visible reinforcement" (BC2a's convention); 0 would read as a
+    // column arriving now.
+    private static void BeginBuildResetsPerceptionSummary()
+    {
+        var f = SmallArmy();
+        var s = f.Snapshot;
+        s.SetReinforcementSummary(800f, 0.5f);
+        s.SetEnemySummary(5000f, 1200f, 10f, 20f);
+        f.Load(tickId: 2);
+        AssertEqual(float.MaxValue, s.NearestVisibleReinforcementHours, "no reinforcement seen");
+        AssertEqual(0f, s.VisibleReinforcementStrength, "no reinforcement strength");
+        AssertEqual(0f, s.VisibleEnemyStrength, "no visible enemy");
+        AssertEqual(0, s.ObservationCount, "no observations");
     }
 }

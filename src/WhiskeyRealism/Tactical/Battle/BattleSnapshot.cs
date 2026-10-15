@@ -160,7 +160,7 @@ namespace WhiskeyRealism.Tactical.Battle
             VisibleEnemyCentroidX = 0f;
             VisibleEnemyCentroidZ = 0f;
             VisibleReinforcementStrength = 0f;
-            NearestVisibleReinforcementHours = 0f;
+            NearestVisibleReinforcementHours = float.MaxValue; // none seen (BC2a's sentinel)
         }
 
         internal void AddOwn(in UnitRecord record)
