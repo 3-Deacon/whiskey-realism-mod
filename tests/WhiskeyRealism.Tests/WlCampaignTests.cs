@@ -62,7 +62,8 @@ internal static class WlCampaignTests
             ("wl chain CIC player: Whiskey stands down for the side", WlChainCicPlayer),
             ("wl chain ordinary units are movable and count", WlChainOrdinaryUnits),
             ("wl bridge moves the AI group carrying a player below map-group level", WlBridgeMovesCarryingGroup),
-            ("wl defense package never counts a player-controlled candidate", WlDefensePackageSkipsPlayerControlled),
+            ("wl chain classification does no reflection lookups", WlChainClassificationDoesNoReflection),
+            ("wl defense ledger never counts a player-controlled candidate (threat and guard pools)", WlDefenseLedgerSkipsPlayerControlled),
             ("wl camp short camp credits normal rest", WlCampShortCampCreditsNormalRest),
             ("wl camp short camp credits wounded rest", WlCampShortCampCreditsWoundedRest),
             ("wl camp short camp credits preserve minimum proportions", WlCampShortCampCreditsPreserveMinimumProportions),
@@ -877,16 +878,81 @@ internal static class WlCampaignTests
         AssertEqual("carrying-group", decision.Reason);
     }
 
-    private static void WlDefensePackageSkipsPlayerControlled()
+    // F-extra-4: DefenseIntentRuntime marks the player's command and map group
+    // PlayerControlled (WlChainRules.CountsAsCommittedDefender); the ledger keeps
+    // them out of both pools (DefenseIntentLedger threat pre-suppression and
+    // FilterGuardCandidates), so no must-hold coverage rests on the player.
+    private static void WlDefenseLedgerSkipsPlayerControlled()
     {
-        var candidates = new List<DefenseCandidate>
+        var threat = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f };
+        threat.Threats.Add(new DefenseThreatSource
         {
-            new DefenseCandidate { UnitInstanceId = 1, ActiveStrength = 9000f, Morale = 1f, ReadinessStep = 2f, PlayerControlled = true },
-            new DefenseCandidate { UnitInstanceId = 2, ActiveStrength = 3000f, Morale = 1f, ReadinessStep = 2f },
-        };
-        var result = DefensePackageAggregator.Select(candidates, desiredStrength: 2000f, caution: 0f, aggression: 0f);
-        AssertEqual(1, result.SelectedPackage.Count);
-        AssertEqual(2, result.SelectedPackage[0].UnitInstanceId);
-        AssertTrue(result.Suppressed.Exists(x => x.UnitInstanceId == 1 && x.Reason == "player-controlled"), "player map group suppressed");
+            Kind = DefenseThreatSourceKind.SeaInvasion, InvasionForceInstanceId = 30, SpotName = "spot",
+            SourcePortName = "port", LandedSignal = true, AssetName = "harbor",
+            AssetRole = AssetStrategicRole.BlockadeRunnerPort, EnemyStrength = 6000f
+        });
+        threat.Candidates.Add(PlayerMapGroupCandidate());
+        threat.Candidates.Add(AiCandidate());
+        AssertPlayerNeverSelected(DefenseIntentLedger.Build(threat), "threat pool");
+
+        var guard = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f };
+        guard.GuardCandidateAssets.Add(new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor, Name = "harbor", Owner = 1, StrategicRole = AssetStrategicRole.BlockadeRunnerPort
+        });
+        guard.Candidates.Add(PlayerMapGroupCandidate());
+        guard.Candidates.Add(new DefenseCandidate { UnitInstanceId = 2, ActiveStrength = 2500f, Morale = 0.9f, ReadinessStep = 2f, Tier = CandidateTier.Local, DistanceToThreat = 50f });
+        var output = DefenseIntentLedger.Build(guard);
+        AssertTrue(output.Responses.Exists(r => r.SelectedPackage.Exists(c => c.UnitInstanceId == 2)), "guard pool picks the AI unit");
+        AssertPlayerNeverSelected(output, "guard pool");
+    }
+
+    private static DefenseCandidate PlayerMapGroupCandidate()
+    {
+        return new DefenseCandidate { UnitInstanceId = 1, ActiveStrength = 20000f, Morale = 1f, ReadinessStep = 2f, Tier = CandidateTier.Local, DistanceToThreat = 10f, PlayerControlled = true };
+    }
+
+    private static DefenseCandidate AiCandidate()
+    {
+        return new DefenseCandidate { UnitInstanceId = 2, ActiveStrength = 8000f, Morale = 0.9f, ReadinessStep = 2f, Tier = CandidateTier.Local, DistanceToThreat = 50f };
+    }
+
+    private static void AssertPlayerNeverSelected(DefenseIntentLedgerOutput output, string pool)
+    {
+        AssertTrue(output.Responses.Count >= 1, pool + ": a response");
+        AssertFalse(output.Responses.Exists(r => r.SelectedPackage.Exists(c => c.UnitInstanceId == 1)), pool + ": the player's map group is no committed defender");
+    }
+
+    // F1 (verify round 2): ChainClassOf runs per unit in DefenseIntentRuntime,
+    // DefensiveOpsPatch, #25 and the coastal runner. AccessTools.TypeByName misses
+    // Type.GetType and scans every loaded type (~6 ms), so neither the bridge nor
+    // StrategicCoordinator.IsPlayerCICOf (every Whiskey CIC gate) may reflect, and
+    // the loops capture the player-level context once per pass.
+    private static void WlChainClassificationDoesNoReflection()
+    {
+        string bridge = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Strategic/WlStrategicOrderBridge.cs"));
+        foreach (string banned in new[] { "TypeByName", "GetMethod(", ".Invoke(", "AccessTools", "System.Reflection" })
+            AssertFalse(bridge.Contains(banned), "bridge uses " + banned);
+
+        string coordinator = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs"));
+        int start = coordinator.IndexOf("public static bool IsPlayerCICOf(", StringComparison.Ordinal);
+        AssertTrue(start >= 0, "IsPlayerCICOf found");
+        int end = coordinator.IndexOf("\n        }\n", start, StringComparison.Ordinal);
+        string body = coordinator.Substring(start, end - start);
+        foreach (string banned in new[] { "TypeByName", "AccessTools", ".Invoke(" })
+            AssertFalse(body.Contains(banned), "IsPlayerCICOf uses " + banned);
+
+        foreach (string loop in new[]
+        {
+            "src/WhiskeyRealism/Strategic/DefenseIntentRuntime.cs",
+            "src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs",
+            "src/WhiskeyRealism/Patches/CheckForDefensiveOperationsCandidateFilterPatch.cs",
+            "src/WhiskeyRealism/Strategic/CoastalDefenseCustomOrderRunner.cs",
+        })
+        {
+            string text = File.ReadAllText(FindRepoPath(loop));
+            AssertTrue(text.Contains("WlChainContext.Capture()"), loop + " captures the context once");
+            AssertTrue(text.Contains("ChainClassOf(in "), loop + " classifies with the captured context");
+        }
     }
 }

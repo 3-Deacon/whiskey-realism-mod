@@ -295,13 +295,14 @@ namespace WhiskeyRealism.Patches
             float desiredStrength = Math.Max(GamePrefs.aiminimumstrengthformovement, requiredStrength);
             float bestScore = float.MaxValue;
             Regiment best = null;
+            var chain = WlChainContext.Capture();
 
             for (int i = 0; i < ownUnits.Count; i++)
             {
                 var unit = ownUnits[i] as Regiment;
                 if (!EligibleForCapitalDefense(aifactionIndex, unit, capitalDefenders, defensiveOps, supplyOps, capitalPosition, maxDistance)) continue;
                 if (CoastalDefenseCustomOrderRunner.IsCustomOrdered(allianceId, ((UnityEngine.Object)unit).GetInstanceID())) continue;
-                if (!WlChainRules.CountsAsCommittedDefender(WlStrategicOrderBridge.ChainClassOf(allianceId, unit))) continue;
+                if (!WlChainRules.CountsAsCommittedDefender(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit))) continue;
 
                 float distance = Tools.GetXZDistance(((Component)unit).transform.position, capitalPosition);
                 float readiness = ReadinessStep(unit);

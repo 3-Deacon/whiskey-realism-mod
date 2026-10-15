@@ -14,6 +14,7 @@ internal static class CicFactionAiGuardTests
             ("cic faction guard rollback leaves vanilla's guard", RollbackLeavesVanillaGuard),
             ("cic faction guard consumes only the default-argument call", ConsumesOnlyDefaultArgumentCall),
             ("cic faction guard decides from the prefix capture, not the overwritten argument", DecidesFromPrefixCapture),
+            ("cic faction guard patch wires the prefix capture into the postfix", PatchWiresPrefixCapture),
             ("cic faction guard reports whether vanilla's guard still blocks", ReportsVanillaGuardBlocks),
         });
     }
@@ -66,5 +67,17 @@ internal static class CicFactionAiGuardTests
         AssertTrue(CicFactionAiGuard.VanillaGuardBlocks(false, wlActive: true, playerIsCic: true, cicAlliance: 0, factionAlliance: 1), "rollback: vanilla blocks every faction");
         AssertFalse(CicFactionAiGuard.VanillaGuardBlocks(true, wlActive: true, playerIsCic: false, cicAlliance: 0, factionAlliance: 0), "no CIC career");
         AssertFalse(CicFactionAiGuard.VanillaGuardBlocks(false, wlActive: false, playerIsCic: true, cicAlliance: 0, factionAlliance: 0), "no career");
+    }
+
+    // R1b wiring (runtime file, not compiled into the harness): the Prefix stores
+    // IsDefaultArgumentCall(manualcommander) in __state and the Postfix consumes
+    // __state, never its own (overwritten) argument.
+    private static void PatchWiresPrefixCapture()
+    {
+        string patch = System.IO.File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Patches/CicFactionAiBugGuardPatch.cs"));
+        AssertTrue(patch.Contains("internal static void Prefix(int manualcommander, out bool __state)"), "prefix signature");
+        AssertTrue(patch.Contains("__state = CicFactionAiGuard.IsDefaultArgumentCall(manualcommander);"), "prefix capture");
+        AssertTrue(patch.Contains("internal static void Postfix(bool __state, ref bool __result)"), "postfix reads the capture, not the argument");
+        AssertTrue(patch.Contains("ConsumeIfGuardCall(__state, ref __result);"), "postfix consumes the capture");
     }
 }

@@ -54,6 +54,7 @@ namespace WhiskeyRealism.Strategic
         private static WlMoveSource _moveSource;
         private static readonly HashSet<string> _loggedSignatures = new HashSet<string>(StringComparer.Ordinal);
         private static readonly WlDispatchHistory _history = new WlDispatchHistory();
+        private static readonly WlCorrectionMemory _corrections = new WlCorrectionMemory();
         private static CareerInformationPanel _panel;
         private static bool _terrainResolved;
         private static PropertyInfo _activeTerrain;
@@ -70,6 +71,7 @@ namespace WhiskeyRealism.Strategic
             _moveSource = WlMoveSource.Other;
             _loggedSignatures.Clear();
             _history.Clear();
+            _corrections.Clear();
             _panel = null;
         }
 
@@ -198,6 +200,8 @@ namespace WhiskeyRealism.Strategic
                 Source = move.Source,
                 Queued = move.Queued,
                 QueuedStillRunning = move.Queued && AICampaign.DefensiveMovingOrder.OrderRunning(move.Unit),
+                ExecutesSkippedCorrection = !move.Queued && move.Source == WlMoveSource.Other
+                    && _corrections.ConsumeExecution(move.Unit.GetInstanceID(), move.Destination.x, move.Destination.z),
                 WasInOffensive = move.WasInOffensive,
                 InOffensive = ListContains(faction, "unitsinoffensiveoperations", move.Unit),
                 InDefensive = ListContains(faction, "unitsindefensiveoperations", move.Unit),
@@ -207,6 +211,8 @@ namespace WhiskeyRealism.Strategic
             string skip = WlCampaignDispatchPolicy.PendingSkipReason(in context);
             if (skip != null)
             {
+                if (move.Source == WlMoveSource.FinalPositions && skip == WlCampaignDispatchPolicy.PositionCorrection)
+                    _corrections.Record(move.Unit.GetInstanceID(), move.Destination.x, move.Destination.z);
                 LogBounded(VanillaMoveTrigger + ":" + skip,
                     "[W&LCampaignDispatch] trigger=" + VanillaMoveTrigger + " unit=" + SafeName(move.Unit) +
                     " target=" + Fmt(move.Destination) + " action=skip reason=" + skip);

@@ -601,6 +601,7 @@ namespace WhiskeyRealism.Strategic
             FrontSectorLedger frontLedger = input.FrontLedger;
             FormationDirectiveLedger formationLedger = input.FormationDirectives;
 
+            var chain = WlChainContext.Capture(); // once per pass: WlChainRules below
             for (int i = 0; i < ownUnits.Count; i++)
             {
                 var unit = ownUnits[i];
@@ -668,7 +669,7 @@ namespace WhiskeyRealism.Strategic
                 // coverage never rests on the player. The AI group carrying a player
                 // below map-group level counts like any AI unit.
                 bool playerControlled = regiment != null &&
-                    !WlChainRules.CountsAsCommittedDefender(WlStrategicOrderBridge.ChainClassOf(allianceId, regiment));
+                    !WlChainRules.CountsAsCommittedDefender(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, regiment));
 
                 // Single-pass tier + closest-threat classification.
                 // Tracks (minDist, closestIndex) to eliminate the float-equality fragility of a

@@ -34,6 +34,7 @@ internal static class PlayerComplianceTests
             ("player compliance a different order ends the repeat", DifferentOrderEndsRepeat),
             ("player compliance same order needs the same group, type and target", SameOrderIdentity),
             ("player compliance first look sets the baseline", FirstLookSetsBaseline),
+            ("player compliance runtime keys the career on the campaign scenario", RuntimeKeysOnCampaignScenario),
         });
     }
 
@@ -318,5 +319,15 @@ internal static class PlayerComplianceTests
         AssertEqual(ComplianceOrderEvent.Repeat, stream.See(true, 41, in standing), "its re-issue is not new");
         stream.Reset();
         AssertEqual(ComplianceOrderEvent.None, stream.See(true, 42, in standing), "reset: a new baseline");
+    }
+
+    // R2 wiring (runtime file, not compiled into the harness): the career key's
+    // source is SceneManagement.currentcampaignscenario; GamePrefs.leveltoload is
+    // the battlefield during a campaign battle (36650-36651).
+    private static void RuntimeKeysOnCampaignScenario()
+    {
+        string runtime = System.IO.File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Strategic/PlayerComplianceRuntime.cs"));
+        AssertTrue(runtime.Contains("_careers.Ensure(DLC_WL.dlc_chosencommander, SceneManagement.currentcampaignscenario)"), "key source");
+        AssertFalse(runtime.Contains("leveltoload"), "never the level to load");
     }
 }

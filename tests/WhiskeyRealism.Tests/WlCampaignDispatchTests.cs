@@ -39,6 +39,9 @@ internal static class WlCampaignDispatchTests
             ("wl campaign dispatch enemy at target is vanilla's num2", EnemyAtTargetIsVanillaNum2),
             ("wl campaign dispatch keeps only the last move of a corps in one pass", KeepsLastMoveOfCorps),
             ("wl campaign dispatch issue line reaches the main log", IssueLineReachesMainLog),
+            ("wl campaign dispatch skips the queued execution of a skipped terrain correction", SkipsQueuedCorrectionExecution),
+            ("wl campaign dispatch correction memory matches unit and target once", CorrectionMemoryMatchesOnce),
+            ("wl campaign dispatch #69 Prefix hands the caller's target to the Postfix", MoveUnitToPrefixWiring),
         });
     }
 
@@ -294,5 +297,50 @@ internal static class WlCampaignDispatchTests
         string runtime = File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Strategic/WlCampaignDispatchRuntime.cs"));
         AssertTrue(Regex.IsMatch(runtime, @"TelemetryRouter\.LegacyInfoToMainLogIfAllowed\(\s*""\[W&LCampaignDispatch\] trigger="""),
             "the runtime writes the issue line through LegacyInfoToMainLogIfAllowed");
+    }
+
+    // n2: CheckFinalPositions queues its move (17928); UpdateOrders re-enters
+    // MoveUnitTo for it as a direct move (10048) with no source mark.
+    private static void SkipsQueuedCorrectionExecution()
+    {
+        var memory = new WlCorrectionMemory();
+        var first = new WlMoveContext { Source = WlMoveSource.FinalPositions, Queued = true, QueuedStillRunning = true };
+        AssertEqual(WlCampaignDispatchPolicy.PositionCorrection, WlCampaignDispatchPolicy.PendingSkipReason(in first));
+        memory.Record(unit: 7, x: 500f, z: 500f);
+
+        var execution = new WlMoveContext
+        {
+            Source = WlMoveSource.Other,
+            Queued = false,
+            ExecutesSkippedCorrection = memory.ConsumeExecution(7, 512f, 497f), // re-stacked destination
+        };
+        AssertEqual(WlCampaignDispatchPolicy.PositionCorrection, WlCampaignDispatchPolicy.PendingSkipReason(in execution));
+
+        var later = new WlMoveContext { Source = WlMoveSource.Other, ExecutesSkippedCorrection = memory.ConsumeExecution(7, 512f, 497f) };
+        AssertEqual(null, WlCampaignDispatchPolicy.PendingSkipReason(in later), "a later move to the same spot is an order again");
+    }
+
+    private static void CorrectionMemoryMatchesOnce()
+    {
+        var memory = new WlCorrectionMemory();
+        memory.Record(7, 0f, 0f);
+        AssertFalse(memory.ConsumeExecution(8, 0f, 0f), "another unit");
+        AssertFalse(memory.ConsumeExecution(7, 200f, 0f), "another target");
+        AssertTrue(memory.ConsumeExecution(7, 50f, 0f), "same unit, same target");
+        AssertFalse(memory.ConsumeExecution(7, 50f, 0f), "consumed");
+        for (int i = 0; i < WlCorrectionMemory.Capacity + 1; i++) memory.Record(100 + i, 0f, 0f);
+        AssertFalse(memory.ConsumeExecution(100, 0f, 0f), "oldest overwritten");
+        AssertTrue(memory.ConsumeExecution(100 + WlCorrectionMemory.Capacity, 0f, 0f), "newest kept");
+        memory.Clear();
+        AssertFalse(memory.ConsumeExecution(101, 0f, 0f), "cleared");
+    }
+
+    // R16 wiring: vanilla reassigns `position` (14498) before the Postfix reads it,
+    // so the Prefix must capture it and the Postfix must use the capture.
+    private static void MoveUnitToPrefixWiring()
+    {
+        string patch = File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Patches/WlCampaignMoveDispatchPatch.cs"));
+        AssertTrue(Regex.IsMatch(patch, @"Prefix\(Vector3 position, out Vector3 __state\)[\s\S]*?__state = position;"), "the Prefix captures the caller's target");
+        AssertTrue(patch.Contains("WlCampaignDispatchRuntime.OnMoveUnitTo(unit, __state, movearoundenemyunits, __result)"), "the Postfix records the captured target");
     }
 }

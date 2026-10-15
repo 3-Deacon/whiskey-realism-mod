@@ -619,6 +619,30 @@ internal static class TelemetryInfraFixTests
         return condition();
     }
 
+    // The writer's retry/manifest clock (TelemetryWriter.Clock), advanced only by
+    // the test: retry and timer outcomes then do not depend on machine speed.
+    private sealed class FakeWriterClock
+    {
+        private long _ticks = 1L;
+
+        public long Now()
+        {
+            return System.Threading.Interlocked.Read(ref _ticks);
+        }
+
+        public void AdvanceMs(long ms)
+        {
+            System.Threading.Interlocked.Add(ref _ticks, ms * System.Diagnostics.Stopwatch.Frequency / 1000L);
+        }
+    }
+
+    private static bool AdvanceAndSignal(FakeWriterClock clock, TelemetryWriter writer)
+    {
+        clock.AdvanceMs(5000);
+        writer.Signal();
+        return true;
+    }
+
     private static void WriterDoesNotRewriteManifestPerBatch()
     {
         string dir = TempDir();
@@ -647,8 +671,11 @@ internal static class TelemetryInfraFixTests
     {
         string dir = TempDir();
         int savedInterval = TelemetryWriter.ManifestIntervalMs;
+        var savedClock = TelemetryWriter.Clock;
         try
         {
+            var clock = new FakeWriterClock();
+            TelemetryWriter.Clock = clock.Now;
             TelemetryWriter.ManifestIntervalMs = 40;
             var queue = new TelemetryQueue(capacity: 64);
             var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
@@ -656,18 +683,30 @@ internal static class TelemetryInfraFixTests
             var writer = new TelemetryWriter(queue, budget, dir, delegate { System.Threading.Interlocked.Increment(ref manifestCalls); },
                 "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 16);
             writer.Start();
-            for (int i = 0; i < 6; i++)
+
+            queue.Enqueue(Decision("w", 0));
+            writer.Signal();
+            TestHarness.AssertTrue(WaitUntil(() => System.Threading.Volatile.Read(ref manifestCalls) >= 1, 5000), "new output file writes the manifest");
+
+            for (int i = 1; i <= 5; i++)
             {
+                int before = System.Threading.Volatile.Read(ref manifestCalls);
                 queue.Enqueue(Decision("w", i));
+                clock.AdvanceMs(41);
                 writer.Signal();
-                System.Threading.Thread.Sleep(60);
+                TestHarness.AssertTrue(WaitUntil(() => System.Threading.Volatile.Read(ref manifestCalls) > before, 5000), "interval elapsed: manifest rewritten, round " + i.ToString(CultureInfo.InvariantCulture));
             }
+
+            queue.Enqueue(Decision("w", 6));
+            writer.Signal();
+            TestHarness.AssertTrue(WaitUntil(() => CountLines(Path.Combine(dir, "tactical.jsonl")) == 7, 5000), "rows written");
             TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
-            TestHarness.AssertTrue(manifestCalls >= 4, "timer rewrites manifest while rows keep arriving, got " + manifestCalls.ToString(CultureInfo.InvariantCulture));
+            TestHarness.AssertEqual(7, manifestCalls, "new file + five elapsed intervals + shutdown; a batch inside the interval writes none");
         }
         finally
         {
             TelemetryWriter.ManifestIntervalMs = savedInterval;
+            TelemetryWriter.Clock = savedClock;
             DeleteQuietly(dir);
         }
         LogPass("writer rewrites manifest on timer");
@@ -703,8 +742,11 @@ internal static class TelemetryInfraFixTests
     {
         string dir = TempDir();
         int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
+        var savedClock = TelemetryWriter.Clock;
         try
         {
+            var clock = new FakeWriterClock();
+            TelemetryWriter.Clock = clock.Now;
             TelemetryWriter.RetryBaseMilliseconds = 20;
             Directory.Delete(dir, true);
             var warnings = new List<string>();
@@ -715,9 +757,12 @@ internal static class TelemetryInfraFixTests
             for (int i = 0; i < 3; i++)
                 queue.Enqueue(Decision("w", i));
             writer.Signal();
-            TestHarness.AssertTrue(WaitUntil(() => writer.SinkFailureCount >= 1, 2000), "transient failure observed");
+            TestHarness.AssertTrue(WaitUntil(() => writer.SinkFailureCount >= 1, 5000), "transient failure observed");
+            TestHarness.AssertEqual(1L, writer.SinkFailureCount, "no retry before the backoff elapses");
             Directory.CreateDirectory(dir);
-            TestHarness.AssertTrue(WaitUntil(() => CountLines(Path.Combine(dir, "tactical.jsonl")) == 3, 3000), "rows retried and written after the sink recovers");
+            // The failure is counted before the writer sets its retry deadline
+            // (OnWriteFailure), so advance on every poll, past whatever deadline it set.
+            TestHarness.AssertTrue(WaitUntil(() => AdvanceAndSignal(clock, writer) && CountLines(Path.Combine(dir, "tactical.jsonl")) == 3, 5000), "rows retried and written after the sink recovers");
             TestHarness.AssertFalse(writer.FileSinkDisabled, "transient failure does not disable the sink");
             queue.Enqueue(Decision("w", 99));
             TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
@@ -727,6 +772,7 @@ internal static class TelemetryInfraFixTests
         finally
         {
             TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
+            TelemetryWriter.Clock = savedClock;
             DeleteQuietly(dir);
         }
         LogPass("writer retries transient failure without disabling sink");
@@ -736,8 +782,11 @@ internal static class TelemetryInfraFixTests
     {
         string dir = TempDir();
         int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
+        var savedClock = TelemetryWriter.Clock;
         try
         {
+            var clock = new FakeWriterClock();
+            TelemetryWriter.Clock = clock.Now;
             TelemetryWriter.RetryBaseMilliseconds = 5;
             Directory.Delete(dir, true);
             var queue = new TelemetryQueue(capacity: 64);
@@ -746,7 +795,7 @@ internal static class TelemetryInfraFixTests
             writer.Start();
             queue.Enqueue(Decision("w", 0));
             writer.Signal();
-            TestHarness.AssertTrue(WaitUntil(() => writer.FileSinkDisabled, 3000), "sink disabled after repeated failures");
+            TestHarness.AssertTrue(WaitUntil(() => AdvanceAndSignal(clock, writer) && writer.FileSinkDisabled, 10000), "sink disabled after repeated failures");
             TestHarness.AssertTrue(writer.SinkFailureCount >= TelemetryWriter.MaxConsecutiveWriteFailures, "each failed attempt counted");
             writer.StopAndFlush(2000);
             TestHarness.AssertFalse(Directory.Exists(dir), "writer never recreates the session directory");
@@ -754,6 +803,7 @@ internal static class TelemetryInfraFixTests
         finally
         {
             TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
+            TelemetryWriter.Clock = savedClock;
             DeleteQuietly(dir);
         }
         LogPass("writer disables sink after consecutive failures");
@@ -1469,9 +1519,12 @@ internal static class TelemetryInfraFixTests
         string dir = TempDir();
         var saved = TelemetryWriter.OpenFileStream;
         int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
+        var savedClock = TelemetryWriter.Clock;
         bool failing = true;
         try
         {
+            var clock = new FakeWriterClock();
+            TelemetryWriter.Clock = clock.Now;
             TelemetryWriter.RetryBaseMilliseconds = 20;
             TelemetryWriter.OpenFileStream = (path, mode) =>
             {
@@ -1487,10 +1540,10 @@ internal static class TelemetryInfraFixTests
             for (int i = 0; i < 3; i++)
                 queue.Enqueue(Decision("w", i));
             writer.Signal();
-            TestHarness.AssertTrue(WaitUntil(() => writer.SinkFailureCount >= 1, 2000), "failure observed");
+            TestHarness.AssertTrue(WaitUntil(() => writer.SinkFailureCount >= 1, 5000), "failure observed");
             TestHarness.AssertFalse(writer.OutputFilesSnapshot().Contains("tactical.jsonl"), "failed rows are not accounted as written output");
             System.Threading.Volatile.Write(ref failing, false);
-            TestHarness.AssertTrue(WaitUntil(() => writer.OutputFilesSnapshot().Contains("tactical.jsonl"), 3000), "accounted once the write succeeds");
+            TestHarness.AssertTrue(WaitUntil(() => AdvanceAndSignal(clock, writer) && writer.OutputFilesSnapshot().Contains("tactical.jsonl"), 5000), "accounted once the write succeeds");
             TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
             TestHarness.AssertEqual(3, CountLines(Path.Combine(dir, "tactical.jsonl")), "rows written once");
         }
@@ -1499,6 +1552,7 @@ internal static class TelemetryInfraFixTests
             System.Threading.Volatile.Write(ref failing, false);
             TelemetryWriter.OpenFileStream = saved;
             TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
+            TelemetryWriter.Clock = savedClock;
             DeleteQuietly(dir);
         }
         LogPass("writer counts rows only after their write succeeds");

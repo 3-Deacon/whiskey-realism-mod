@@ -62,6 +62,7 @@ namespace WhiskeyRealism.Strategic
         public WlMoveSource Source;
         public bool Queued;             // MoveUnitTo queued a DefensiveMovingOrder (14517-14523)
         public bool QueuedStillRunning; // DefensiveMovingOrder.OrderRunning at flush (9933)
+        public bool ExecutesSkippedCorrection; // the queued execution of a skipped CheckFinalPositions move (WlCorrectionMemory)
         public bool WasInOffensive;
         public bool InOffensive;
         public bool InDefensive;
@@ -106,6 +107,54 @@ namespace WhiskeyRealism.Strategic
         public void Clear()
         {
             _count = 0;
+            _next = 0;
+        }
+    }
+
+    // Terrain corrections #69 skipped, by unit and target. CheckFinalPositions
+    // queues its move (17928, movearoundenemyunits: true), and UpdateOrders later
+    // re-enters MoveUnitTo for it as a direct move (10048) with no vanilla caller to
+    // mark it: that execution is the same correction and gives no dispatch either.
+    internal sealed class WlCorrectionMemory
+    {
+        public const int Capacity = 4;
+
+        private readonly int[] _unit = new int[Capacity];
+        private readonly float[] _x = new float[Capacity];
+        private readonly float[] _z = new float[Capacity];
+        private readonly bool[] _used = new bool[Capacity];
+        private int _next;
+
+        public void Record(int unit, float x, float z)
+        {
+            _unit[_next] = unit;
+            _x[_next] = x;
+            _z[_next] = z;
+            _used[_next] = true;
+            _next = (_next + 1) % Capacity;
+        }
+
+        // True (and forgotten) when this direct move executes a remembered correction:
+        // same unit, target within the same-target radius (the queued destination is
+        // re-stacked, 14498).
+        public bool ConsumeExecution(int unit, float x, float z)
+        {
+            float r = WlCampaignDispatchPolicy.DedupeUnits;
+            for (int i = 0; i < Capacity; i++)
+            {
+                if (!_used[i] || _unit[i] != unit) continue;
+                float dx = x - _x[i];
+                float dz = z - _z[i];
+                if (dx * dx + dz * dz >= r * r) continue;
+                _used[i] = false;
+                return true;
+            }
+            return false;
+        }
+
+        public void Clear()
+        {
+            for (int i = 0; i < Capacity; i++) _used[i] = false;
             _next = 0;
         }
     }
@@ -168,7 +217,7 @@ namespace WhiskeyRealism.Strategic
         public static string PendingSkipReason(in WlMoveContext context)
         {
             if (context.Queued && !context.QueuedStillRunning) return QueuedOrderCancelled;
-            if (context.Source == WlMoveSource.FinalPositions) return PositionCorrection;
+            if (context.Source == WlMoveSource.FinalPositions || context.ExecutesSkippedCorrection) return PositionCorrection;
             return null;
         }
 

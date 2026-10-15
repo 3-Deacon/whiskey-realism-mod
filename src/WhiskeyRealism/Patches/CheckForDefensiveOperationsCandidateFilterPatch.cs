@@ -228,6 +228,7 @@ namespace WhiskeyRealism.Patches
 
                                 if (defOps != null)
                                 {
+                                    var chain = WlChainContext.Capture();
                                     for (int i = defOps.Count - 1; i >= 0; i--)
                                     {
                                         var unityObj = defOps[i] as UnityEngine.Object;
@@ -244,7 +245,7 @@ namespace WhiskeyRealism.Patches
 
                                         // The W&L player's own command keeps vanilla's commit whole
                                         // (list and queued march); see WlChainRules.
-                                        if (!WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(allianceId, unit)))
+                                        if (!WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, allianceId, unit)))
                                         {
                                             EmitDefenseIntentSkipRevert(allianceId, id, SafeUnitName(unit, id), sig, "player-chain");
                                             continue;

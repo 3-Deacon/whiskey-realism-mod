@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using UnityEngine;
 
 namespace WhiskeyRealism.Strategic
@@ -124,6 +123,44 @@ namespace WhiskeyRealism.Strategic
         }
     }
 
+    // The W&L player's side of the chain, read once per pass (the per-unit facts
+    // are in WlStrategicOrderBridge.FactsFor). Direct reads of vanilla statics, no
+    // reflection: DLC_WL.dlc_scenarioactive, IsCommanderInChief (47475), the chosen
+    // commander's currentcommand, its campaign group (82991) and parent (93883).
+    internal struct WlChainContext
+    {
+        public bool WlActive;
+        public int PlayerAlliance;
+        public bool PlayerIsCic;
+        public Regiment Command;
+        public Regiment CampaignGroup;
+        public Regiment CommandParent;
+        public bool CommandIsCampaignGroup;
+
+        internal static WlChainContext Capture()
+        {
+            var context = new WlChainContext { PlayerAlliance = -1 };
+            try
+            {
+                context.WlActive = DLC_WL.dlc_scenarioactive;
+                if (!context.WlActive) return context;
+                context.PlayerAlliance = GameVars.playeralliance;
+                context.PlayerIsCic = DLC_WL.IsCommanderInChief();
+                int chosen = DLC_WL.dlc_chosencommander;
+                if (chosen < 0 || GameVars.commander == null || chosen >= GameVars.commander.Count) return context;
+                context.Command = GameVars.commander[chosen].currentcommand;
+                if ((UnityEngine.Object)context.Command == null) return context;
+                context.CampaignGroup = BattleUnits.GetCampaignGroup(context.Command);
+                context.CommandParent = BattleUnits.GetParentUnit(context.Command);
+                context.CommandIsCampaignGroup = (UnityEngine.Object)context.CampaignGroup == (UnityEngine.Object)context.Command;
+            }
+            catch
+            {
+            }
+            return context;
+        }
+    }
+
     internal readonly struct WlStrategicOrderDecision
     {
         internal WlStrategicOrderDecision(
@@ -209,93 +246,52 @@ namespace WhiskeyRealism.Strategic
         }
 
         // The unit's chain class for code that changes vanilla state without an
-        // order of its own (capital pre-pledge, #25 revert, probe stop, defense
-        // coverage). Cheap exit outside a W&L career or the player's alliance.
+        // order of its own (capital pre-pledge, #25 revert, probe stop, coastal
+        // runner, defense coverage). Loops capture the context once per pass.
         internal static WlChainClass ChainClassOf(int allianceId, Regiment unit)
         {
-            if (unit == null) return WlChainClass.None;
-            if (!SafeBool(() => DLC_WL.dlc_scenarioactive)) return WlChainClass.None;
-            if (!SafeBool(() => unit.alliance == GameVars.playeralliance)) return WlChainClass.None;
-            return WlChainRules.Classify(BuildFacts(new WlStrategicOrderRequest { AllianceId = allianceId, Unit = unit }));
+            return ChainClassOf(WlChainContext.Capture(), allianceId, unit);
+        }
+
+        internal static WlChainClass ChainClassOf(in WlChainContext context, int allianceId, Regiment unit)
+        {
+            if (unit == null || !context.WlActive) return WlChainClass.None;
+            return WlChainRules.Classify(FactsFor(in context, allianceId, unit));
         }
 
         private static WlStrategicRoleFacts BuildFacts(WlStrategicOrderRequest request)
         {
-            bool wlActive = SafeBool(() => DLC_WL.dlc_scenarioactive);
-            bool isPlayerAlliance = SafeBool(() =>
-                request.Unit != null &&
-                request.Unit.alliance == GameVars.playeralliance &&
-                request.AllianceId == GameVars.playeralliance);
-            bool isPlayerCic =
-                SafeBool(() => DLC_WL.IsCommanderInChief()) ||
-                SafeBool(() => IsPlayerCICViaCoordinator(request.AllianceId, GameVars.playeralliance));
-            bool isMovedByPlayer = SafeBool(() => DLC_WL.IsMovedByPlayer(request.Unit));
-            bool isUnderCommander = SafeBool(() => request.Unit != null && request.Unit.dlcw_isundercommander);
-            bool isPartOfPlayerUnit = SafeBool(() => DLC_WL.IsPlayerPartOfUnit(request.Unit));
-            bool currentCommandIsCampaignGroup = false;
-            bool currentCommandParentIsUnderTargetUnit = false;
-            bool isPlayerCampaignGroup = false;
+            return FactsFor(WlChainContext.Capture(), request.AllianceId, request.Unit);
+        }
 
+        // Per-unit facts: unit fields and vanilla's own DLC_WL helpers only, no
+        // reflection (the player-level facts come from the context).
+        private static WlStrategicRoleFacts FactsFor(in WlChainContext context, int allianceId, Regiment unit)
+        {
+            var facts = new WlStrategicRoleFacts { WlActive = context.WlActive, IsPlayerCic = context.PlayerIsCic };
+            if (unit == null) return facts;
             try
             {
-                Regiment current = GameVars.commander[DLC_WL.dlc_chosencommander].currentcommand;
-                Regiment campaignGroup = BattleUnits.GetCampaignGroup(current);
-                Regiment parent = BattleUnits.GetParentUnit(current);
-
-                currentCommandIsCampaignGroup = current != null && campaignGroup == current;
-                isPlayerCampaignGroup = current != null && request.Unit != null && campaignGroup == request.Unit;
-                currentCommandParentIsUnderTargetUnit =
-                    parent != null &&
-                    request.Unit != null &&
-                    parent.transform.IsChildOf(request.Unit.transform);
+                facts.IsPlayerAlliance = unit.alliance == context.PlayerAlliance && allianceId == context.PlayerAlliance;
+                if (!context.WlActive || !facts.IsPlayerAlliance) return facts;
+                facts.IsMovedByPlayer = DLC_WL.IsMovedByPlayer(unit);
+                facts.IsUnderCommander = unit.dlcw_isundercommander;
+                facts.IsPartOfPlayerUnit = DLC_WL.IsPlayerPartOfUnit(unit);
+                facts.CurrentCommandIsCampaignGroup = context.CommandIsCampaignGroup;
+                facts.IsPlayerCampaignGroup = (UnityEngine.Object)context.Command != null && (UnityEngine.Object)context.CampaignGroup == (UnityEngine.Object)unit;
+                facts.CurrentCommandParentIsUnderTargetUnit = (UnityEngine.Object)context.CommandParent != null
+                    && context.CommandParent.transform.IsChildOf(unit.transform);
             }
             catch
             {
-                currentCommandIsCampaignGroup = false;
-                currentCommandParentIsUnderTargetUnit = false;
-                isPlayerCampaignGroup = false;
+                facts.IsMovedByPlayer = false;
+                facts.IsUnderCommander = false;
+                facts.IsPartOfPlayerUnit = false;
+                facts.IsPlayerCampaignGroup = false;
+                facts.CurrentCommandParentIsUnderTargetUnit = false;
             }
-
-            return new WlStrategicRoleFacts(
-                wlActive,
-                isPlayerAlliance,
-                isPlayerCic,
-                isMovedByPlayer,
-                isUnderCommander,
-                isPartOfPlayerUnit,
-                currentCommandIsCampaignGroup,
-                currentCommandParentIsUnderTargetUnit,
-                isPlayerCampaignGroup);
+            return facts;
         }
-
-        private static bool SafeBool(Func<bool> read)
-        {
-            try { return read(); }
-            catch { return false; }
-        }
-
-        // StrategicCoordinator is not compiled into the test harness; reflection keeps
-        // this file harness-buildable.
-        private static bool IsPlayerCICViaCoordinator(int allianceId, int playerAlliance)
-        {
-            try
-            {
-                Type coordinatorType = typeof(WlStrategicOrderBridge).Assembly.GetType("WhiskeyRealism.Strategic.StrategicCoordinator");
-                MethodInfo method = coordinatorType?.GetMethod(
-                    "IsPlayerCICOf",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                    binder: null,
-                    types: new[] { typeof(int), typeof(int) },
-                    modifiers: null);
-                if (method == null) return false;
-                return Convert.ToBoolean(method.Invoke(null, new object[] { allianceId, playerAlliance }));
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
 
         internal static WlStrategicOrderDecision Classify(
             WlStrategicIntent intent,

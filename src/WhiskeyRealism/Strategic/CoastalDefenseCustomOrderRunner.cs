@@ -107,6 +107,7 @@ namespace WhiskeyRealism.Strategic
                 // Populated during the assignment loop below; used afterwards for release tracking.
                 var thisTick = new Dictionary<string, HashSet<int>>();
 
+                var chainContext = WlChainContext.Capture();
                 foreach (var response in responses)
                 {
                     if (response?.SelectedPackage == null || response.SelectedPackage.Count == 0) continue;
@@ -122,7 +123,7 @@ namespace WhiskeyRealism.Strategic
                         // WlChainRules: the player's own command and a CIC side are never
                         // tasked; his map group gets the order as a dispatch (bridge);
                         // the AI group carrying him is queued like any AI unit.
-                        var chain = WlStrategicOrderBridge.ChainClassOf(allianceId, unit);
+                        var chain = WlStrategicOrderBridge.ChainClassOf(in chainContext, allianceId, unit);
                         if (!WlChainRules.MayMove(chain) && !WlChainRules.OrderOnly(chain)) continue;
                         string wlCurrentOrderKey = $"{allianceId}|{sig}|{candidate.UnitInstanceId}";
                         if (_wlCurrentOrderAttempts.Contains(wlCurrentOrderKey))

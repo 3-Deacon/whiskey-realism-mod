@@ -34,14 +34,6 @@ namespace WhiskeyRealism.Strategic
             foreach (var c in candidates)
             {
                 if (c == null) continue;
-                // The W&L player's command or map group is no committed defender
-                // (WlChainRules.CountsAsCommittedDefender, set by DefenseIntentRuntime):
-                // no package's coverage rests on it, whichever ledger built the pool.
-                if (c.PlayerControlled)
-                {
-                    result.Suppressed.Add(new DefenseSuppression { UnitInstanceId = c.UnitInstanceId, Reason = "player-controlled" });
-                    continue;
-                }
                 c.EffectiveStrength = DefenseForceSizer.ComputeEffective(c.ActiveStrength, c.Morale, c.ReadinessStep);
                 c.Score = DefenseForceSizer.ScoreCandidate(
                     activeStrength: c.ActiveStrength,
