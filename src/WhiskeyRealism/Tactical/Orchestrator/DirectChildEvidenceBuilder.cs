@@ -9,7 +9,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// flank-exposure buckets, and the army-level EnemyVisibleState, produces a
     /// parallel DirectChildEvidence[] keyed by snapshot index.
     /// Bucket scheme mirrors the 0.5-ratio buckets used by FrontSectorRuntime
-    /// in the strategic Defense Intent Ledger.
+    /// in the strategic Defense Intent Ledger. The optional deployedReserve list (BC10) carries
+    /// the executor's deployment-reserve outcome per snapshot.
     /// </summary>
     public static class DirectChildEvidenceBuilder
     {
@@ -17,7 +18,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<DirectChildSnapshot> snapshots,
             IReadOnlyList<int> primarySectorPerSnapshot,
             IReadOnlyList<int> flankExposureBucketPerSnapshot,
-            EnemyVisibleState enemy)
+            EnemyVisibleState enemy,
+            IReadOnlyList<bool> deployedReservePerSnapshot = null)
         {
             if (snapshots == null || snapshots.Count == 0) return Array.Empty<DirectChildEvidence>();
             if (primarySectorPerSnapshot == null || primarySectorPerSnapshot.Count != snapshots.Count
@@ -45,7 +47,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     contactFlag: contact,
                     primarySector: sector,
                     flankExposureBucket: flankExposureBucketPerSnapshot[i],
-                    confidence01: confidence);
+                    confidence01: confidence,
+                    deployedReserve: deployedReservePerSnapshot != null && i < deployedReservePerSnapshot.Count && deployedReservePerSnapshot[i]);
             }
             return result;
         }

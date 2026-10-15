@@ -36,6 +36,11 @@ namespace WhiskeyRealism.Tactical.Battle
     //     leaves it pending (OrderExecutor.ObserveOutcomes).
     //     Without a perceived covered point (an empty list) the move is a plain
     //     SetWaypoint with its courier delay (OrderExecutor.TakesBlockedMovingOrder).
+    //   Move with IntentFlags.ImmediatePlacement (#60 deployment, BC10): SetGroupFormation(
+    //     immediateplacement: true, newpath: true, ignoredeplyomentzone: false) at the line
+    //     front, then the cleanup vanilla's own pass ends with - lastsetwaypointposition and
+    //     immediateunitplacement cleared on the placed tree (85873-85883). No courier, no
+    //     waypoint: the outcome is the group's position at the next observation.
     //   Stance: Util/TacticalStanceWriter (the one ChangeStance caller, 90772).
     //   Formation: BattleUnits.SetFormation (90971, courier) only when
     //     CommandFormationWritePolicy allows it — vanilla re-forms only a settled,
@@ -154,7 +159,14 @@ namespace WhiskeyRealism.Tactical.Battle
 
                 bool wrote;
                 _layoutTouched = false;
-                if (winner.Channel == OrderChannel.Move)
+                if (OrderExecutor.IsImmediatePlacement(winner))
+                {
+                    // A deployment placement: one SetGroupFormation, judged by where the group
+                    // stands (the executor compares the placed headquarters, not a waypoint).
+                    wrote = IssueImmediatePlacement(bunits, unit, winner, x, z, out float hqX, out float hqZ);
+                    if (wrote) _issued[issued++] = new IssuedTarget { InstanceId = own[targetIndex].InstanceId, X = hqX, Z = hqZ };
+                }
+                else if (winner.Channel == OrderChannel.Move)
                 {
                     int waypointsAt = waypoints;
                     RecordWaypointsBefore(unit, issued, ref waypoints);
@@ -357,6 +369,48 @@ namespace WhiskeyRealism.Tactical.Battle
             if ((w.Flags & IntentFlags.InContactWithdrawal) != 0 && unit.unittyp <= TacticalUnitType.Cavalry)
                 unit.SetMovementMode(2);
             return true;
+        }
+
+        // #60's deployment write. The target is a LINE FRONT (SetGroupFormation puts the
+        // headquarters depth + groupunitdistancetoback behind it, 92044-92058); the returned
+        // point is that headquarters, which the executor's outcome check compares.
+        private static bool IssueImmediatePlacement(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, float x, float z, out float hqX, out float hqZ)
+        {
+            hqX = x;
+            hqZ = z;
+            if (unit.unittyp <= TacticalUnitType.MaxCombat || w.Heading < 0f) return false;
+            float depth = unit.groupposition != null ? unit.groupposition.groupdepth : unit.depth;
+            BattleWriterPolicy.DeploymentHqFromLineFront(x, z, w.Heading, depth, GamePrefs.groupunitdistancetoback, out hqX, out hqZ);
+            bunits.SetGroupFormation(
+                unit,
+                unit.groupformation,
+                manualfinalrotation: w.Heading,
+                targetpos: TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z)),
+                immediateplacement: true,
+                newpath: true,
+                modifylastwaypoint: false,
+                newstate: 2,
+                refuseflank: -1,
+                ignoredeplyomentzone: false,
+                skiprotation: false,
+                showmovementoptions: false,
+                placeentrenchments: false,
+                adjustbyterrainshape: true);
+            ClearImmediatePlacementState(unit, new HashSet<int>());
+            NoteLayout(unit, RefuseFlank.None);
+            return true;
+        }
+
+        // Vanilla ends its placement pass by clearing these on every unit (85873-85883); a
+        // group placed after that pass needs the same, or the next order reads a stale waypoint.
+        private static void ClearImmediatePlacementState(Regiment unit, HashSet<int> visited)
+        {
+            if ((UnityEngine.Object)unit == null || !visited.Add(unit.GetInstanceID())) return;
+            unit.lastsetwaypointposition = default(Vector3);
+            unit.immediateunitplacement = false;
+            if (unit.groupposition == null || unit.groupposition.attachedunitreg == null) return;
+            int attached = Math.Min(unit.groupposition.attachedunits, unit.groupposition.attachedunitreg.Length);
+            for (int i = 0; i < attached; i++) ClearImmediatePlacementState(unit.groupposition.attachedunitreg[i], visited);
         }
 
         // One SetWaypoint call of a move: the target (or a via point) at terrain height.

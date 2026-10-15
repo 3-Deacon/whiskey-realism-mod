@@ -167,6 +167,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (roles[i] != DirectChildRole.Unknown) continue;
                 var ev = evidence[i];
 
+                // BC10: a child the executor placed as a deployment reserve stays one until
+                // ReleaseReserves (crisis, Exploit, odds) changes it, or another source moves it.
+                if (ev.DeployedReserve)
+                {
+                    roles[i] = DirectChildRole.Reserve;
+                    continue;
+                }
+
                 if (ShouldFallbackUnderSevereOvermatch(ev, perChildEnemyIntent[i]))
                 {
                     roles[i] = DirectChildRole.Fallback;
@@ -433,6 +441,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int bestScore = -1;
             for (int i = 0; i < snaps.Count; i++)
             {
+                if (ev[i].DeployedReserve) continue;
                 if (ev[i].PrimarySector != plan.MainEffortSector) continue;
                 // Local-odds gate (2026-05-22): cautious/mid-band commanders
                 // refuse Main assignment to a brigade that is locally
@@ -467,7 +476,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int bestScore = -1;
             for (int i = 0; i < snaps.Count; i++)
             {
-                if (!snaps[i].Active) continue;
+                if (!snaps[i].Active || ev[i].DeployedReserve) continue;
                 if (Contains(plan.FixingSectors, ev[i].PrimarySector)) continue;
                 if (Contains(plan.ScreeningSectors, ev[i].PrimarySector)) continue;
                 if (!ev[i].ContactFlag && ev[i].Confidence01 < 0.6f) continue;
@@ -502,7 +511,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int bestScore = -1;
             for (int i = 0; i < snaps.Count; i++)
             {
-                if (!snaps[i].Active) continue;
+                if (!snaps[i].Active || ev[i].DeployedReserve) continue;
                 if (Contains(plan.FixingSectors, ev[i].PrimarySector)) continue;
                 if (Contains(plan.ScreeningSectors, ev[i].PrimarySector)) continue;
                 // Provisional attack axis allows EnemyBucket = OwnBucket+1 only

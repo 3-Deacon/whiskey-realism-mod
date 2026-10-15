@@ -199,6 +199,8 @@ namespace WhiskeyRealism.Tactical.Battle
         ChargeDoctrine,
         FeudReplay,
         Recon, // BC9: the recon producer's scout moves and stops
+        Deployment,        // BC10: #60's fog-honest deployment placement (an immediate-placement Move)
+        DeploymentReserve, // BC10: #60's deployment reserve echelon placement; the allocator reads its outcome
     }
 
     [System.Flags]
@@ -222,6 +224,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // executor also leaves charge movement mode 3 with SetMovementMode(0), as
         // vanilla's own refusal does (122290); behavior alone never ends mode 3.
         LeaveChargeMode = 512,
+        // BC10, Move only: the executor issues SetGroupFormation(immediateplacement: true,
+        // newpath: true, ignoredeplyomentzone: false) and clears the placed tree's
+        // lastsetwaypointposition and immediateunitplacement (85873-85883), #60's call.
+        ImmediatePlacement = 1024,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).

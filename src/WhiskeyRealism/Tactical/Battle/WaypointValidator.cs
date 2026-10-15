@@ -45,7 +45,8 @@ namespace WhiskeyRealism.Tactical.Battle
     //      area over the river, 26601-26618, and lists 5/6 as crossings, 26628),
     //      so a group on a ford never trips the {4, 8} line at its start.
     //   3. Move only: a target inside another own group's footprint is rejected
-    //      unless ReliefOrSupport. The group's own ancestors and descendants are not
+    //      unless ReliefOrSupport or ImmediatePlacement (a deployment pass lays its groups out
+    //      itself, and the snapshot is stale after its first placement). The group's own ancestors and descendants are not
     //      blockers.
     //   4. ArtilleryFirePosition: a visible enemy within 60 m of the target →
     //      PointBlank; the segment from the target to FireTargetId passing within
@@ -95,7 +96,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
             }
 
-            if (i.Channel == OrderChannel.Move && (i.Flags & IntentFlags.ReliefOrSupport) == 0 &&
+            if (i.Channel == OrderChannel.Move && (i.Flags & (IntentFlags.ReliefOrSupport | IntentFlags.ImmediatePlacement)) == 0 &&
                 InsideFriendlyFootprint(s, groupIndex, x, z))
                 return SkipReason.FriendlyFootprint;
 

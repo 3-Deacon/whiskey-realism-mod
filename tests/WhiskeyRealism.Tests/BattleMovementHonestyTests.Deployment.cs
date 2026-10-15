@@ -1,0 +1,595 @@
+using System;
+using System.Collections.Generic;
+using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
+using static TestHarness;
+
+// BC10 decisions 7-8: fog-honest deployment and the deployment reserve echelon. Vanilla's
+// DoPlacementAIUnitsWithinDeploymentzoneNew (85524-85892) chooses objectives and facing from the
+// true enemy; DeploymentDoctrine plans the same choices from what the side can know.
+internal static partial class BattleMovementHonestyTests
+{
+    private static readonly float[] NoEntries = new float[0];
+
+    private static BattleSnapshot DeploySnapshot(PerceptionMode mode, float visibleStrength = 0f, float cx = 0f, float cz = 0f, params EnemyObservation[] observations)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.IndexCommandTree(null);
+        s.SetPerception(mode, mode == PerceptionMode.RangeOnly ? PerceptionFallbackReason.GridNotPainted : PerceptionFallbackReason.None);
+        foreach (EnemyObservation o in observations) s.AddObservation(in o);
+        s.SetEnemySummary(visibleStrength, 0f, cx, cz);
+        return s;
+    }
+
+    private static DeploymentGroup Placed(int id, float x, float z, float heading = 0f, int child = 0, int brigades = 1)
+    {
+        return new DeploymentGroup
+        {
+            GroupId = id, DirectChildId = child, VanillaX = x, VanillaZ = z, VanillaHeading = heading,
+            OldX = x, OldZ = z, Brigades = brigades,
+        };
+    }
+
+    private static bool[,] Matrix(int objectives, int groups, bool value)
+    {
+        var m = new bool[objectives, groups];
+        for (int o = 0; o < objectives; o++)
+            for (int g = 0; g < groups; g++) m[o, g] = value;
+        return m;
+    }
+
+    private static DeploymentPlan Plan(BattleSnapshot s, DeploymentGroup[] groups, DeploymentObjective[] objectives, bool firstDay,
+        float[] entryX, float[] entryZ, out int replaced, float centreX = 500f, float centreZ = -500f)
+    {
+        var plan = new DeploymentPlan();
+        replaced = DeploymentDoctrine.PlanPlacements(s, groups, groups.Length, objectives, objectives.Length,
+            Matrix(objectives.Length, groups.Length, true), Matrix(objectives.Length, groups.Length, false),
+            0, firstDay, entryX, entryZ, entryX.Length, centreX, centreZ, plan);
+        return plan;
+    }
+
+    // RangeOnly (every day-1 deployment): vanilla's range lists admit enemies within 150-450 m
+    // with no fog test (122650), so no observation is used; the point is the nearest enemy-owned
+    // entry point.
+    private static void Day1RangeOnlyIgnoresVisibleUsesEntryPoint()
+    {
+        BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly, 500f, 0f, -900f,
+            Obs(1, 0f, -900f, 0f, 30f));
+        DeploymentDoctrine.AssumedEnemyPoint(s, 0f, 0f, new[] { 1000f, -3000f }, new[] { -1000f, 3000f }, 2, 500f, -500f,
+            out float x, out float z, out AssumedEnemySource source);
+        AssertEqual(AssumedEnemySource.EntryPoint, source, "the nearest entry point, not the visible centroid");
+        AssertNear(1000f, x, 0.001f, "x");
+        AssertNear(-1000f, z, 0.001f, "z");
+
+        // The nearest entry point per group: a group near the second entry point reads that one.
+        DeploymentDoctrine.AssumedEnemyPoint(s, -2900f, 2900f, new[] { 1000f, -3000f }, new[] { -1000f, 3000f }, 2, 500f, -500f,
+            out x, out z, out _);
+        AssertNear(-3000f, x, 0.001f, "the second entry point is nearer this group: x");
+    }
+
+    private static void FogGridAssumedEnemyVisibleThenEntryPointThenCentre()
+    {
+        BattleSnapshot seen = DeploySnapshot(PerceptionMode.FogGrid, 800f, 40f, -700f, Obs(1, 40f, -700f, 0f, 30f));
+        DeploymentDoctrine.AssumedEnemyPoint(seen, 0f, 0f, new[] { 1000f }, new[] { -1000f }, 1, 500f, -500f,
+            out float x, out float z, out AssumedEnemySource source);
+        AssertEqual(AssumedEnemySource.Visible, source, "a painted grid and a visible enemy");
+        AssertNear(40f, x, 0.001f, "centroid x");
+        AssertNear(-700f, z, 0.001f, "centroid z");
+
+        BattleSnapshot blind = DeploySnapshot(PerceptionMode.FogGrid);
+        DeploymentDoctrine.AssumedEnemyPoint(blind, 0f, 0f, new[] { 1000f }, new[] { -1000f }, 1, 500f, -500f, out x, out z, out source);
+        AssertEqual(AssumedEnemySource.EntryPoint, source, "nothing visible: the entry point");
+        AssertNear(1000f, x, 0.001f, "entry x");
+
+        DeploymentDoctrine.AssumedEnemyPoint(blind, 0f, 0f, NoEntries, NoEntries, 0, 500f, -500f, out x, out z, out source);
+        AssertEqual(AssumedEnemySource.MapCentre, source, "no entry point: the map centre DoUnitPositioning used");
+        AssertNear(500f, x, 0.001f, "centre x");
+        AssertNear(-500f, z, 0.001f, "centre z");
+    }
+
+    // Day 1 (GetSuitableObjectiveForInitialAIPlacement 86260-86281) picks the candidate nearest
+    // the enemy. The true enemy sits next to B in the true records; the side assumes the entry
+    // point, which is next to A.
+    private static void Day1PicksObjectiveNearestAssumedEnemyNotTrueEnemy()
+    {
+        BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly);
+        s.AddEnemy(new UnitRecord { InstanceId = 77, UnitTyp = TacticalUnitType.Infantry, X = -300f, Z = -120f, Alliance = 1, Flags = UnitFlags.Alive | UnitFlags.Active });
+        var objectives = new[]
+        {
+            new DeploymentObjective { X = 300f, Z = -100f, Owner = -1 },   // A
+            new DeploymentObjective { X = -300f, Z = -100f, Owner = -1 },  // B
+        };
+        DeploymentGroup[] groups = { Placed(1, 0f, -500f) };
+        DeploymentPlan plan = Plan(s, groups, objectives, true, new[] { 1000f }, new[] { -100f }, out int replaced);
+        AssertEqual(0, plan.Placements[0].ObjectiveIndex, "A: nearest the entry point the side assumes");
+        AssertEqual(1, replaced, "vanilla's spot at (0, -500) is not within 25 m of A");
+        AssertNear(300f, plan.Placements[0].X, 0.001f, "placed on A (x)");
+        AssertNear(-100f, plan.Placements[0].Z, 0.001f, "placed on A (z)");
+        AssertEqual(PlacementKind.Replaced, plan.Placements[0].Kind, "kind");
+    }
+
+    // Candidates: a Visible observation within 50 m excludes an objective under a painted grid;
+    // a Remembered one does not (the fog-honest filter reads what the side sees now).
+    private static void FogGridObjectiveFilterUsesVisibleOnly()
+    {
+        var objectives = new[]
+        {
+            new DeploymentObjective { X = 300f, Z = -100f, Owner = -1 },   // A, nearest the enemy
+            new DeploymentObjective { X = -300f, Z = -100f, Owner = -1 },  // B
+        };
+        DeploymentGroup[] groups = { Placed(1, 0f, -500f) };
+
+        BattleSnapshot visible = DeploySnapshot(PerceptionMode.FogGrid, 500f, 320f, -100f, Obs(1, 320f, -100f, 0f, 30f));
+        DeploymentPlan plan = Plan(visible, groups, objectives, true, new[] { 1000f }, new[] { -100f }, out _);
+        AssertEqual(1, plan.Placements[0].ObjectiveIndex, "a visible enemy within 50 m of A excludes A");
+
+        BattleSnapshot remembered = DeploySnapshot(PerceptionMode.FogGrid, 500f, 900f, -100f,
+            Obs(1, 320f, -100f, 0f, 30f, ObservationState.Remembered, 0.9f), Obs(2, 900f, -100f, 0f, 30f));
+        plan = Plan(remembered, groups, objectives, true, new[] { 1000f }, new[] { -100f }, out _);
+        AssertEqual(0, plan.Placements[0].ObjectiveIndex, "a remembered enemy does not exclude A");
+    }
+
+    private static void RangeOnlyObjectiveFilterUsesEntryPointsOnly()
+    {
+        var objectives = new[]
+        {
+            new DeploymentObjective { X = 300f, Z = -100f, Owner = -1 },   // A, nearest the entry point
+            new DeploymentObjective { X = -300f, Z = -100f, Owner = -1 },  // B
+        };
+        DeploymentGroup[] groups = { Placed(1, 0f, -500f) };
+        // A visible observation on A changes nothing under RangeOnly (no observation is used).
+        BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly, 500f, 300f, -100f, Obs(1, 300f, -100f, 0f, 30f));
+        DeploymentPlan plan = Plan(s, groups, objectives, true, new[] { 1000f }, new[] { -100f }, out _);
+        AssertEqual(0, plan.Placements[0].ObjectiveIndex, "the visible observation is ignored");
+
+        // An entry point within 50 m of A excludes A.
+        plan = Plan(s, groups, objectives, true, new[] { 330f }, new[] { -100f }, out _);
+        AssertEqual(1, plan.Placements[0].ObjectiveIndex, "an enemy entry point within 50 m excludes the objective");
+    }
+
+    // Later days (GetSuitableObjectiveForAIPlacement 86285-86301) have no enemy input: the
+    // nearest candidate to the group.
+    private static void LaterDaysPickNearestToGroup()
+    {
+        BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly);
+        var objectives = new[]
+        {
+            new DeploymentObjective { X = 300f, Z = -100f, Owner = -1 },   // A, nearest the entry point
+            new DeploymentObjective { X = -300f, Z = -100f, Owner = -1 },  // B, nearest the group
+        };
+        DeploymentGroup[] groups = { Placed(1, -250f, -400f) };
+        DeploymentPlan plan = Plan(s, groups, objectives, false, new[] { 1000f }, new[] { -100f }, out _);
+        AssertEqual(1, plan.Placements[0].ObjectiveIndex, "B: nearest the group, not the enemy");
+        // The later-day front stands one group depth behind the objective along the facing (85795-85803).
+        groups[0].DepthMeters = 40f;
+        plan = Plan(s, groups, objectives, false, new[] { 1000f }, new[] { -100f }, out _);
+        AssertTrue(plan.Placements[0].X < -300f, "the front stands behind the objective, away from the enemy side (x " + plan.Placements[0].X + ")");
+    }
+
+    private static void KeepsVanillaPlacementWhenSameObjectiveAndFacing()
+    {
+        BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly);
+        var objectives = new[] { new DeploymentObjective { X = 300f, Z = -100f, Owner = -1 } };
+        // The entry point lies due east of the objective: the facing is 90.
+        float[] ex = { 1000f }, ez = { -100f };
+        DeploymentGroup[] kept = { Placed(1, 310f, -100f, 90f) };
+        DeploymentPlan plan = Plan(s, kept, objectives, true, ex, ez, out int replaced);
+        AssertEqual(0, replaced, "within the spacing radius of the same objective, same facing");
+        AssertEqual(PlacementKind.Kept, plan.Placements[0].Kind, "kept");
+        AssertNear(310f, plan.Placements[0].X, 0.001f, "vanilla's spot stands");
+
+        DeploymentGroup[] turned19 = { Placed(1, 310f, -100f, 109f) };
+        Plan(s, turned19, objectives, true, ex, ez, out replaced);
+        AssertEqual(0, replaced, "19 degrees off is inside the 20 degree tolerance");
+        DeploymentGroup[] turned21 = { Placed(1, 310f, -100f, 111f) };
+        plan = Plan(s, turned21, objectives, true, ex, ez, out replaced);
+        AssertEqual(1, replaced, "21 degrees off is re-placed");
+        AssertNear(90f, plan.Placements[0].Heading, 0.5f, "facing the assumed enemy");
+
+        DeploymentGroup[] farOff = { Placed(1, 400f, -100f, 90f) };
+        Plan(s, farOff, objectives, true, ex, ez, out replaced);
+        AssertEqual(1, replaced, "100 m from the objective is outside one brigade's 25 m spacing radius");
+    }
+
+    // Every position the deployment plan holds is a line front (the targetpos SetGroupFormation
+    // takes, 92044-92058); the headquarters stands depth + back behind it. The conversions the
+    // runtime uses are inverses at any facing.
+    private static void DeploymentFramesRoundTripAtAnyFacing()
+    {
+        for (float facing = 0f; facing < 360f; facing += 37f)
+        {
+            BattleWriterPolicy.DeploymentLineFrontFromHq(321f, -654f, facing, 24f, 11f, out float fx, out float fz);
+            BattleWriterPolicy.DeploymentHqFromLineFront(fx, fz, facing, 24f, 11f, out float hx, out float hz);
+            AssertNear(321f, hx, 0.01f, "hq x at facing " + facing);
+            AssertNear(-654f, hz, 0.01f, "hq z at facing " + facing);
+            AssertNear(35f, (float)Math.Sqrt((fx - 321f) * (fx - 321f) + (fz + 654f) * (fz + 654f)), 0.01f, "front is depth + back from the hq");
+        }
+        // A placement planned on the front frame lands the headquarters behind the objective,
+        // facing the assumed enemy (due +x here): hq = front minus 35 m along +x.
+        BattleWriterPolicy.DeploymentHqFromLineFront(300f, -100f, 90f, 24f, 11f, out float qx, out float qz);
+        AssertNear(265f, qx, 0.01f, "hq stands behind the front, away from the enemy");
+        AssertNear(-100f, qz, 0.01f, "same z");
+    }
+
+    // CheckForSimilarPositions compares against the groups vanilla RE-deployed in this call (list5);
+    // a group whose placement stood is not in that list. A front within half a spacing radius of
+    // a re-deployed group is moved a radius away; one beside a kept group is not.
+    private static void SpacingCountsOnlyRedeployedGroups()
+    {
+        BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly);
+        var objectives = new[]
+        {
+            new DeploymentObjective { X = 300f, Z = -100f, Owner = -1 },
+            new DeploymentObjective { X = 308f, Z = -100f, Owner = -1 },
+        };
+        float[] ex = { 3000f }, ez = { -100f };
+        // Both groups start far away, so both are re-placed; the second front is 8 m (< 12.5 m) from the first.
+        DeploymentPlan both = Plan(s, new[] { Placed(1, 0f, -500f, 90f), Placed(2, 0f, -600f, 90f) }, objectives, true, ex, ez, out int replaced);
+        AssertEqual(2, replaced, "both re-placed");
+        float gap = Dist(both.Placements[0].X, both.Placements[0].Z, both.Placements[1].X, both.Placements[1].Z);
+        AssertTrue(gap >= 24f, "the second group stands a spacing radius (25 m) from the first: " + gap);
+
+        // The first group already stands on its objective facing the enemy: it is kept, so it is not
+        // in vanilla's list and the second group is placed on its own objective.
+        DeploymentPlan kept = Plan(s, new[] { Placed(1, 300f, -100f, 90f), Placed(2, 0f, -600f, 90f) }, objectives, true, ex, ez, out replaced);
+        AssertEqual(1, replaced, "only the second is re-placed");
+        // (group 1 took the objective nearest the enemy, x 308, and is kept; group 2 takes the other one)
+        AssertEqual(PlacementKind.Kept, kept.Placements[0].Kind, "group 1 is kept");
+        AssertNear(300f, kept.Placements[1].X, 0.001f, "group 2 stands on its objective, 8 m from the kept group, undisplaced");
+    }
+
+    // ------------------------------------------------------------------ reserve echelon
+
+    // A line of single-group children along +x at z = 0 facing an enemy assumed due +z far away.
+    // Child k stands at z = -100 * k, so the larger the id, the farther from the enemy.
+    private static DeploymentGroup[] LineOfChildren(int children)
+    {
+        var groups = new DeploymentGroup[children];
+        for (int k = 0; k < children; k++)
+            groups[k] = Placed(100 + k, 20f * k, -100f * k, 0f, child: 1 + k);
+        return groups;
+    }
+
+    private static DeploymentPlan ReservePlan(DeploymentGroup[] groups, out int moved)
+    {
+        BattleSnapshot s = DeploySnapshot(PerceptionMode.RangeOnly);
+        DeploymentPlan plan = Plan(s, groups, new DeploymentObjective[0], true, new[] { 500f }, new[] { 3000f }, out _);
+        moved = DeploymentDoctrine.ProposeReserve(plan, groups, groups.Length);
+        return plan;
+    }
+
+    private static int Reserved(DeploymentPlan plan)
+    {
+        int n = 0;
+        for (int i = 0; i < plan.Count; i++)
+            if (plan.Placements[i].Kind == PlacementKind.Reserve) n++;
+        return n;
+    }
+
+    private static void ReserveIsFloorThirdOfEligibleChildren()
+    {
+        DeploymentGroup[] groups = LineOfChildren(7);
+        DeploymentPlan plan = ReservePlan(groups, out int moved);
+        AssertEqual(2, moved, "floor(7 / 3) = 2 children");
+        AssertEqual(PlacementKind.Reserve, plan.Placements[6].Kind, "the farthest child from the enemy");
+        AssertEqual(PlacementKind.Reserve, plan.Placements[5].Kind, "the next farthest");
+        AssertEqual(PlacementKind.Kept, plan.Placements[4].Kind, "the rest stay in line");
+        ReservePlan(LineOfChildren(3), out moved);
+        AssertEqual(1, moved, "exactly three children give one reserve");
+        ReservePlan(LineOfChildren(6), out moved);
+        AssertEqual(2, moved, "six give two");
+    }
+
+    private static void NoReserveBelowThreeChildren()
+    {
+        DeploymentPlan plan = ReservePlan(LineOfChildren(2), out int moved);
+        AssertEqual(0, moved, "two children");
+        AssertEqual(0, Reserved(plan), "nobody is marked");
+        // Three children but one holds a player-owned unit: two are eligible.
+        DeploymentGroup[] groups = LineOfChildren(3);
+        groups[2].PlayerOwned = true;
+        plan = ReservePlan(groups, out moved);
+        AssertEqual(0, moved, "two eligible children");
+    }
+
+    private static void ReserveNeverPlayerOwnedOrCavalryOnly()
+    {
+        DeploymentGroup[] groups = LineOfChildren(6);
+        groups[5].PlayerOwned = true;       // the farthest child holds the player's unit
+        groups[4].CavalryOnly = true;       // the next is cavalry only
+        groups[3].WlCommandAncestor = true; // and the next is the W&L command's ancestor
+        DeploymentPlan plan = ReservePlan(groups, out int moved);
+        AssertEqual(1, moved, "three eligible children: one reserve");
+        AssertEqual(PlacementKind.Reserve, plan.Placements[2].Kind, "the farthest eligible child");
+        AssertEqual(PlacementKind.Kept, plan.Placements[5].Kind, "player-owned stays");
+        AssertEqual(PlacementKind.Kept, plan.Placements[4].Kind, "cavalry-only stays");
+        AssertEqual(PlacementKind.Kept, plan.Placements[3].Kind, "the command ancestor stays");
+
+        groups = LineOfChildren(4);
+        groups[3].ArtilleryOnly = true;
+        plan = ReservePlan(groups, out moved);
+        AssertEqual(1, moved, "an artillery-only child is not eligible: three remain, one reserve");
+        AssertEqual(PlacementKind.Kept, plan.Placements[3].Kind, "the artillery child stays though it is farthest");
+        AssertEqual(PlacementKind.Reserve, plan.Placements[2].Kind, "the farthest eligible child goes");
+    }
+
+    // The reserve stands ReserveDepthMeters behind the line centroid of the other children,
+    // along the axis away from the assumed enemy (here +z, so behind is -z).
+    private static void ReserveDepth425mClampedToZoneElseKept()
+    {
+        DeploymentGroup[] groups = LineOfChildren(6);
+        DeploymentPlan plan = ReservePlan(groups, out _);
+        float lineZ = 0f;
+        int line = 0;
+        for (int i = 0; i < 4; i++) { lineZ += plan.Placements[i].Z; line++; }
+        lineZ /= line;
+        for (int i = 4; i < 6; i++)
+        {
+            AssertEqual(PlacementKind.Reserve, plan.Placements[i].Kind, "reserve " + i);
+            // (the assumed enemy is (500, 3000); the axis from it to the line is almost -z)
+            float behind = (float)Math.Sqrt(Math.Pow(plan.Placements[i].X - plan.LineCentroidX, 2) + Math.Pow(plan.Placements[i].Z - plan.LineCentroidZ, 2));
+            AssertTrue(behind > 400f && behind < 460f, "about 425 m behind the line centroid: " + behind);
+        }
+
+        // The runtime clamps the proposed targets into the deployment zone; a clamp that keeps
+        // the depth is applied as the placement.
+        var cx = new float[groups.Length];
+        var cz = new float[groups.Length];
+        for (int i = 0; i < groups.Length; i++) { cx[i] = plan.Placements[i].X + 3f; cz[i] = plan.Placements[i].Z - 1f; }
+        int remaining = DeploymentDoctrine.ApplyReserveClamp(plan, groups, groups.Length, cx, cz);
+        AssertEqual(2, remaining, "both children stay in reserve");
+        AssertNear(cx[4], plan.Placements[4].X, 0.001f, "the clamped point is the placement");
+        AssertNear(cz[5], plan.Placements[5].Z, 0.001f, "the clamped point is the placement (z)");
+    }
+
+    private static void ReserveClampRevertsChildUnder150m()
+    {
+        DeploymentGroup[] groups = LineOfChildren(6);
+        DeploymentPlan plan = ReservePlan(groups, out _);
+        float oldX4 = plan.Base[4].X, oldZ4 = plan.Base[4].Z;
+        var cx = new float[groups.Length];
+        var cz = new float[groups.Length];
+        for (int i = 0; i < groups.Length; i++) { cx[i] = plan.Placements[i].X; cz[i] = plan.Placements[i].Z; }
+        // Child 5's zone clamp leaves only 100 m of depth behind the line centroid.
+        cx[4] = plan.LineCentroidX + plan.AxisX * 100f;
+        cz[4] = plan.LineCentroidZ + plan.AxisZ * 100f;
+        int remaining = DeploymentDoctrine.ApplyReserveClamp(plan, groups, groups.Length, cx, cz);
+        AssertEqual(1, remaining, "one child keeps its reserve");
+        AssertEqual(PlacementKind.Kept, plan.Placements[4].Kind, "the shallow child reverts to its fog-honest placement");
+        AssertNear(oldX4, plan.Placements[4].X, 0.001f, "reverted x");
+        AssertNear(oldZ4, plan.Placements[4].Z, 0.001f, "reverted z");
+        AssertEqual(PlacementKind.Reserve, plan.Placements[5].Kind, "the other stays");
+        // Just under 150 m reverts, just over stays (the bar is "at least 150 m").
+        foreach ((float depth, int expected) in new[] { (149f, 1), (151f, 2) })
+        {
+            plan = ReservePlan(groups, out _);
+            for (int i = 0; i < groups.Length; i++) { cx[i] = plan.Placements[i].X; cz[i] = plan.Placements[i].Z; }
+            cx[4] = plan.LineCentroidX + plan.AxisX * depth;
+            cz[4] = plan.LineCentroidZ + plan.AxisZ * depth;
+            AssertEqual(expected, DeploymentDoctrine.ApplyReserveClamp(plan, groups, groups.Length, cx, cz), depth + " m deep");
+        }
+    }
+
+    // One translation vector per child: the child's groups keep their relative offsets.
+    private static void ReserveChildGroupsKeepRelativeSpacing()
+    {
+        var groups = new List<DeploymentGroup>();
+        for (int k = 0; k < 3; k++)
+        {
+            groups.Add(Placed(100 + 10 * k, 20f * k, -100f * k, 0f, child: 1 + k));
+            groups.Add(Placed(101 + 10 * k, 20f * k + 60f, -100f * k - 30f, 0f, child: 1 + k));
+        }
+        DeploymentGroup[] arr = groups.ToArray();
+        DeploymentPlan plan = ReservePlan(arr, out int moved);
+        AssertEqual(2, moved, "one child, two groups");
+        // Child 3 is the farthest (z -200): groups 4 and 5.
+        AssertEqual(PlacementKind.Reserve, plan.Placements[4].Kind, "child 3 group a");
+        AssertEqual(PlacementKind.Reserve, plan.Placements[5].Kind, "child 3 group b");
+        AssertNear(60f, plan.Placements[5].X - plan.Placements[4].X, 0.01f, "x offset kept");
+        AssertNear(-30f, plan.Placements[5].Z - plan.Placements[4].Z, 0.01f, "z offset kept");
+
+        // Two reserve children sit on the +-90 m lanes across the axis.
+        DeploymentGroup[] six = LineOfChildren(6);
+        DeploymentPlan two = ReservePlan(six, out _);
+        float across = Math.Abs(two.Placements[5].X - two.Placements[4].X);
+        AssertTrue(across > 170f && across < 190f, "the two reserve children stand 180 m apart across the axis: " + across);
+    }
+
+    // ------------------------------------------------------------------ deployed reserve outcome
+
+    private static void OrderedFrom(OrderExecutor executor, int unitId, IntentSource source)
+    {
+        _issued[0] = new IssuedTarget { InstanceId = unitId, X = 500f, Z = -500f };
+        var intent = new BattleOrderIntent
+        {
+            GroupId = unitId, Channel = OrderChannel.Move, TargetX = 500f, TargetZ = -500f, Heading = -1f,
+            Priority = IntentPriority.Executor, Source = source, Task = CommandTaskType.ReserveWait, Reason = "test",
+        };
+        executor.RecordIssued(intent, 1.0, _issued, 1, null, 0, 0, 1);
+    }
+
+    private static void DeployedReserveFromExecutorOutcomeSource()
+    {
+        BattleSnapshot s = ArrivalFixture(out int[] ix);
+        var executor = new OrderExecutor();
+        AssertFalse(DeploymentDoctrine.IsDeployedReserve(s, executor, ix[0]), "no outcome");
+        OrderedFrom(executor, SubGroup, IntentSource.Deployment);
+        AssertFalse(DeploymentDoctrine.IsDeployedReserve(s, executor, ix[0]), "an ordinary deployment placement is not a reserve");
+        OrderedFrom(executor, Mem2, IntentSource.DeploymentReserve);
+        AssertTrue(DeploymentDoctrine.IsDeployedReserve(s, executor, ix[0]), "a reserve placement of a group under the child");
+        AssertTrue(DeploymentDoctrine.IsDeployedReserve(s, executor, ix[1]), "the sub group is an ancestor of Mem2");
+        AssertFalse(DeploymentDoctrine.IsDeployedReserve(s, executor, ix[2]), "Mem1 is a sibling, not a descendant");
+        AssertFalse(DeploymentDoctrine.IsDeployedReserve(null, executor, 0), "null snapshot");
+        AssertFalse(DeploymentDoctrine.IsDeployedReserve(s, executor, -1), "no child");
+    }
+
+    // ------------------------------------------------------------------ immediate placement (executor)
+
+    private static BattleOrderIntent Placement(int group, float x, float z, float heading, IntentSource source = IntentSource.Deployment)
+    {
+        return new BattleOrderIntent
+        {
+            GroupId = group, Channel = OrderChannel.Move, TargetX = x, TargetZ = z, Heading = heading, Task = CommandTaskType.None,
+            Priority = IntentPriority.Executor, Source = source, Reason = "deployment", Flags = IntentFlags.ImmediatePlacement,
+        };
+    }
+
+    // The placement has no courier and no W&L dispatch; the executor judges it by where the
+    // group stands at the next observation (the placed tree's lastsetwaypointposition is
+    // cleared again, 85873-85883), Moved within DedupeMeters of the target, else Failed with
+    // no retry and no backoff (the arbiter is not running at deployment).
+    private static void ImmediatePlacementIssuesSetGroupFormationOnceAndPlacedOutcome()
+    {
+        var view = new FixtureView();
+        int g = view.Add(1, 100f, -600f);
+        OrderExecutor executor = ExecutorOver(null);
+        BattleOrderIntent placement = Placement(1, 500f, -500f, 90f);
+
+        ExecutionPlan plan = executor.Plan(view, placement, 1.0);
+        AssertTrue(plan.Execute, "the placement executes");
+        AssertFalse(plan.UseOrderDelay, "an immediate placement has no courier");
+        AssertEqual(OrderExecutor.NoDispatch, plan.DispatchType, "and sends no W&L dispatch");
+
+        _issued[0] = new IssuedTarget { InstanceId = 1, X = 500f, Z = -500f };
+        executor.RecordIssued(placement, 1.0, _issued, 1, null, 0, 0, 0);
+        var outcomes = new OrderOutcome[4];
+        view.Own[g].X = 520f;
+        view.Own[g].Z = -480f;
+        executor.ObserveOutcomes(view, 1.01, outcomes, out int count);
+        AssertEqual(1, count, "one outcome");
+        AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "28 m from the target is placed");
+        AssertEqual(IntentSource.Deployment, outcomes[0].Source, "the outcome keeps the deployment source");
+
+        // A group that is not near its target at the next observation failed, once, with no retry or backoff.
+        var executor2 = ExecutorOver(null);
+        view.Own[g].X = 100f;
+        view.Own[g].Z = -600f;
+        executor2.RecordIssued(placement, 1.0, _issued, 1, null, 0, 0, 0);
+        executor2.ObserveOutcomes(view, 1.01, outcomes, out count);
+        AssertEqual(1, count, "failure is one outcome, no Retried or GaveUp");
+        AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "failed");
+        AssertEqual(0, executor2.TakeRetries(new BattleOrderIntent[4]), "no retry ticket");
+        AssertTrue(executor2.Plan(view, Placement(1, 500f, -500f, 90f), 1.02).Execute, "no failed-write backoff either");
+
+        // The write itself is one SetGroupFormation call in the runtime (source pin).
+        string runtime = StripComments(System.IO.File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs")));
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(runtime, @"immediateplacement:\s*true").Count, "one immediate-placement SetGroupFormation in the executor runtime");
+    }
+
+    private static void ImmediatePlacementAcceptedBesideSamePassPlacement()
+    {
+        var view = new FixtureView();
+        view.Add(1, 100f, -600f);
+        view.Add(2, 500f, -500f); // another group of the same pass already stands on the target
+        OrderExecutor executor = ExecutorOver(null);
+
+        BattleOrderIntent plain = Placement(1, 510f, -500f, 90f);
+        plain.Flags = IntentFlags.None;
+        AssertEqual(SkipReason.FriendlyFootprint, executor.Plan(view, plain, 1.0).Skip, "a plain move onto another group is refused");
+        ExecutionPlan plan = executor.Plan(view, Placement(1, 510f, -500f, 90f), 1.0);
+        AssertTrue(plan.Execute, "an immediate placement skips the friendly-footprint rule (the pass lays groups out by decision 7's spacing)");
+
+        _issued[0] = new IssuedTarget { InstanceId = 1, X = 510f, Z = -500f };
+        executor.RecordIssued(Placement(1, 510f, -500f, 90f), 1.0, _issued, 1, null, 0, 0, 0);
+        view.Own[0].LastWaypointX = 510f;
+        view.Own[0].LastWaypointZ = -500f;
+        AssertTrue(executor.Plan(view, Placement(1, 512f, -502f, 90f), 1.0).Execute,
+            "a corrective re-placement in the same pass is neither Duplicate nor in Cooldown");
+    }
+
+    private static void ImmediatePlacementRefusesPlayerOwned()
+    {
+        var view = new FixtureView();
+        view.Add(1, 100f, -600f, UnitFlags.PlayerOwned);
+        AssertEqual(SkipReason.PlayerOwned, ExecutorOver(null).Plan(view, Placement(1, 500f, -500f, 90f), 1.0).Skip, "the player's own unit is never placed");
+        var feud = new FixtureView();
+        feud.Add(1, 100f, -600f, UnitFlags.Feud);
+        AssertEqual(SkipReason.Feud, ExecutorOver(null).Plan(feud, Placement(1, 500f, -500f, 90f), 1.0).Skip, "nor the feud instance");
+    }
+
+    // ------------------------------------------------------------------ allocator alignment
+
+    private static TacticalBattlePlan MainSector2Plan()
+    {
+        return new TacticalBattlePlan(BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort, mainEffortSector: 2,
+            fixingSectors: new int[0], screeningSectors: new int[0], reserveCommitTriggerOdds: 1.6f, ageSeconds: 0f, jitterSeed: 0);
+    }
+
+    private static DirectChildSnapshot[] Children(int n)
+    {
+        var snaps = new DirectChildSnapshot[n];
+        for (int i = 0; i < n; i++) snaps[i] = new DirectChildSnapshot("c" + i, "a", 15, 0, "Corps " + i, true);
+        return snaps;
+    }
+
+    // At the side's first allocation after the deployment pass a child the executor placed as
+    // a reserve is Reserve before the main-effort pick and the SupportMain fall-through. Without
+    // the flag the strongest brigade on the main sector would have been Main.
+    private static void DeployedReserveEvidenceGivesReserveRoleFirst()
+    {
+        var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
+        DirectChildEvidence[] evidence =
+        {
+            new DirectChildEvidence(2, 1, false, 2, 0, 0.7f),
+            new DirectChildEvidence(4, 1, false, 2, 0, 0.7f),
+            new DirectChildEvidence(2, 1, false, 1, 0, 0.7f),
+        };
+        var plain = DirectChildAllocator.AllocateWithZones(MainSector2Plan(), personality, Children(3), evidence, null, null);
+        AssertEqual(DirectChildRole.Main, plain[1].Role, "without the flag the strongest main-sector brigade is Main");
+
+        DirectChildEvidence[] flagged =
+        {
+            evidence[0],
+            new DirectChildEvidence(4, 1, false, 2, 0, 0.7f, deployedReserve: true),
+            evidence[2],
+        };
+        var intents = DirectChildAllocator.AllocateWithZones(MainSector2Plan(), personality, Children(3), flagged, null, null);
+        AssertEqual(DirectChildRole.Reserve, intents[1].Role, "the deployed reserve keeps the Reserve role though it is the strongest on the main sector");
+        AssertEqual(DirectChildRole.Main, intents[0].Role, "the main pick takes the next brigade");
+        AssertEqual(DirectChildRole.SupportMain, intents[2].Role, "and the SupportMain fall-through skips the reserve");
+
+        // The flag is part of the evidence signature, so the allocator re-runs when it clears.
+        AssertFalse(evidence[1].SignatureEquals(flagged[1]), "DeployedReserve changes the signature");
+    }
+
+    // ReleaseReserves still applies to a deployed reserve: a crisis on an adjacent sector
+    // (own line engaged and outmatched by two buckets) turns it into Fix on that band.
+    private static void DeployedReserveReleasedByCrisis()
+    {
+        var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
+        DirectChildEvidence[] evidence =
+        {
+            new DirectChildEvidence(3, 1, true, 2, 0, 0.8f),                                   // main
+            new DirectChildEvidence(3, 1, false, 1, 0, 0.7f, deployedReserve: true),           // the reserve behind the left
+            new DirectChildEvidence(1, 4, true, 0, 0, 0.8f),                                   // sector 0 in crisis: 1 vs 4
+        };
+        var intents = DirectChildAllocator.AllocateWithZones(MainSector2Plan(), personality, Children(3), evidence, null, null);
+        AssertEqual(DirectChildRole.Fix, intents[1].Role, "a crisis on the adjacent sector releases the deployed reserve");
+        AssertEqual(0, intents[1].AxisSector, "onto the crisis band");
+
+        // Without a crisis (and no Exploit, odds below the trigger) it stays Reserve.
+        evidence[2] = new DirectChildEvidence(1, 1, false, 0, 0, 0.8f);
+        intents = DirectChildAllocator.AllocateWithZones(MainSector2Plan(), personality, Children(3), evidence, null, null,
+            new ReserveReleaseContext(0.5f));
+        AssertEqual(DirectChildRole.Reserve, intents[1].Role, "stays in reserve when nothing releases it");
+    }
+
+    private static void DeployedReserveFlowsThroughTheEvidenceBuilder()
+    {
+        var enemy = new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 1000f, 1000f, false) }, 0.3f, false, false);
+        var snaps = new[]
+        {
+            new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
+            new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
+        };
+        var evidence = DirectChildEvidenceBuilder.BuildAll(snaps, new[] { 2, 2 }, new[] { 0, 0 }, enemy, new[] { false, true });
+        AssertFalse(evidence[0].DeployedReserve, "child 0");
+        AssertTrue(evidence[1].DeployedReserve, "child 1 was placed as a reserve");
+        evidence = DirectChildEvidenceBuilder.BuildAll(snaps, new[] { 2, 2 }, new[] { 0, 0 }, enemy);
+        AssertFalse(evidence[1].DeployedReserve, "no list: nobody is a deployed reserve");
+    }
+}

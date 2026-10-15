@@ -625,9 +625,15 @@ namespace WhiskeyRealism.Tactical.Battle
             SkipReason exit = SilentExitPrecheck.Check(rec, w.Channel);
             if (exit != SkipReason.None) return Skip(plan, exit);
 
-            // 5. Dedupe. 6. Cooldown.
-            if (IsDuplicate(s, idx, rec, w, x, z)) return Skip(plan, SkipReason.Duplicate);
-            if (!retry && InCooldown(rec, w, nowHours)) return Skip(plan, SkipReason.Cooldown);
+            // 5. Dedupe. 6. Cooldown. Neither applies to an immediate placement: the snapshot
+            //    is stale after the pass's first re-placement and a corrective re-placement of
+            //    the same group is a new write, not a repeat (BC10 decision 9).
+            bool immediate = IsImmediatePlacement(w);
+            if (!immediate)
+            {
+                if (IsDuplicate(s, idx, rec, w, x, z)) return Skip(plan, SkipReason.Duplicate);
+                if (!retry && InCooldown(rec, w, nowHours)) return Skip(plan, SkipReason.Cooldown);
+            }
 
             plan.Execute = true;
             plan.Skip = SkipReason.None;
@@ -641,7 +647,7 @@ namespace WhiskeyRealism.Tactical.Battle
             //    hold, courier cadence, dedupe; a retry skips the first two once)
             //    are its throttle; Emit's 110 m record and vanilla's own repeat
             //    check (8643) sit behind it.
-            if (w.Channel == OrderChannel.Move && plan.Targets.PlayerShareNeedsDispatch)
+            if (w.Channel == OrderChannel.Move && !immediate && plan.Targets.PlayerShareNeedsDispatch)
                 plan.DispatchType = TacticalDispatchTypeMapper.Map(w.Task, EnemyObservedNear(s, x, z), rec.AiStanceOrdered == AssaultStance);
             return plan;
         }
@@ -743,6 +749,16 @@ namespace WhiskeyRealism.Tactical.Battle
                     continue;
 
                 IssuedTarget[] targets = _pendingTargets[p];
+                if (IsImmediatePlacement(pm.Intent))
+                {
+                    // The placed tree's lastsetwaypointposition is cleared again (85873-85883), so
+                    // the placement is judged by where the group stands. No retry and no backoff:
+                    // the arbiter is not running at deployment.
+                    bool placed = StandsNearTarget(s, targets, pm.TargetCount);
+                    Emit(outcomes, ref count, pm, placed ? OrderOutcomeKind.Moved : OrderOutcomeKind.Failed, SkipReason.None, nowHours, 0);
+                    RemovePending(p);
+                    continue;
+                }
                 if (pm.MovedAtCall ||
                     MovingUnits(s, targets, pm.TargetCount) > pm.PathsBefore ||
                     TargetTaken(s, targets, pm.TargetCount, _pendingAlreadyThere[p], pm.AlreadyThereCount))
@@ -978,6 +994,20 @@ namespace WhiskeyRealism.Tactical.Battle
             return false;
         }
 
+        // An immediate placement took when a target group stands within DedupeMeters of the
+        // position the runtime recorded for it (the placed headquarters).
+        private static bool StandsNearTarget(IBattleUnitView s, IssuedTarget[] targets, int count)
+        {
+            float r2 = OrderArbiter.DedupeMeters * OrderArbiter.DedupeMeters;
+            UnitRecord[] own = s.Own;
+            for (int t = 0; t < count; t++)
+            {
+                int idx = s.IndexOfOwn(targets[t].InstanceId);
+                if (idx >= 0 && DistSq(own[idx].X, own[idx].Z, targets[t].X, targets[t].Z) <= r2) return true;
+            }
+            return false;
+        }
+
         // Vanilla took a target when the unit's or a descendant's last waypoint is
         // now within DedupeMeters of it and that unit's waypoint was not already
         // there before the call.
@@ -1149,7 +1179,13 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static bool UsesOrderDelay(in BattleOrderIntent i)
         {
-            return (i.Flags & IntentFlags.UseOrderDelay) != 0 && (i.Flags & IntentFlags.InContactWithdrawal) == 0;
+            return (i.Flags & IntentFlags.UseOrderDelay) != 0 && (i.Flags & IntentFlags.InContactWithdrawal) == 0 && !IsImmediatePlacement(i);
+        }
+
+        /// <summary>A deployment placement (SetGroupFormation with immediateplacement), not a march order.</summary>
+        public static bool IsImmediatePlacement(in BattleOrderIntent i)
+        {
+            return i.Channel == OrderChannel.Move && (i.Flags & IntentFlags.ImmediatePlacement) != 0;
         }
 
         private static bool DescendantMoving(IBattleUnitView s, int idx)
