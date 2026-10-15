@@ -134,6 +134,12 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\ConfiscationSupplyFlow.cs" Link="BugFixes\ConfiscationSupplyFlow.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\FoggedModelRule.cs" Link="BugFixes\FoggedModelRule.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\OffensiveWeaponTrimIl.cs" Link="BugFixes\OffensiveWeaponTrimIl.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\AutoresolveWeaponGateIl.cs" Link="BugFixes\AutoresolveWeaponGateIl.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\CombineWeaponLedger.cs" Link="BugFixes\CombineWeaponLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\ArmsRules.cs" Link="BugFixes\ArmsRules.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WeaponOrderability.cs" Link="WeaponOrderability.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmsCoverage.cs" Link="ArmsCoverage.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\ArmsSwaps.cs" Link="Patches\ArmsSwaps.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\RaidSupplyThreshold.cs" Link="BugFixes\RaidSupplyThreshold.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\RandomPickRangeIl.cs" Link="BugFixes\RandomPickRangeIl.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\SubordinateStrengthSelector.cs" Link="BugFixes\SubordinateStrengthSelector.cs" />
