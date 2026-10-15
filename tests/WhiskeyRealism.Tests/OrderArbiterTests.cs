@@ -20,7 +20,7 @@ internal static class OrderArbiterTests
             ("battle-core InlineIntentRefusedUnderHigherClaim", InlineIntentRefusedUnderHigherClaim),
             ("battle-core ArbiterResolveAllocatesNothingAfterWarmup", ArbiterResolveAllocatesNothingAfterWarmup),
             ("battle-core ArbiterForAllianceBoundsChecked", ArbiterForAllianceBoundsChecked),
-            ("battle-core DedupeWithin15m", DedupeWithin15m),
+            ("battle-core DedupeWithin60m", DedupeWithin60m),
             ("battle-core SafetyBypassesRecentOrderButNotDedupe", SafetyBypassesRecentOrderButNotDedupe),
             ("battle-core TaskHoldBlocksSameTaskOnly", TaskHoldBlocksSameTaskOnly),
             ("battle-core ClampMatchesVanillaBoundsNegativeZ", ClampMatchesVanillaBoundsNegativeZ),
@@ -177,7 +177,9 @@ internal static class OrderArbiterTests
 
     // ----------------------------------------------------------------- executor
 
-    private static void DedupeWithin15m()
+    // #61 MinWaypointDistance (60 m since the 2026-05-21 microshift fix,
+    // BattleCommandPostureExecutorPatch.cs:36-43): probe targets drift 20-50 m.
+    private static void DedupeWithin60m()
     {
         var view = new FixtureBattleView();
         int g = view.AddGroup(1, 100f, -100f);
@@ -186,12 +188,12 @@ internal static class OrderArbiterTests
         view.Own[g].RegimentPaths = 1;
         var executor = NewExecutor();
 
-        var near = executor.Plan(view, Move(1, 510f, -505f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0);
-        AssertFalse(near.Execute, "11 m from the active waypoint");
+        var near = executor.Plan(view, Move(1, 540f, -520f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0);
+        AssertFalse(near.Execute, "45 m from the active waypoint (probe drift)");
         AssertEqual(SkipReason.Duplicate, near.Skip, "deduped");
 
-        var far = executor.Plan(view, Move(1, 530f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0);
-        AssertTrue(far.Execute, "30 m away is a new target");
+        var far = executor.Plan(view, Move(1, 580f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0);
+        AssertTrue(far.Execute, "80 m away is a new target");
 
         view.Own[g].RegimentPaths = 0;
         view.Own[g].QueuedOrders = 0;

@@ -25,7 +25,10 @@ namespace WhiskeyRealism.Tactical.Battle
     // dictionary buckets, so a steady battle allocates nothing per tick.
     public sealed class OrderArbiter : IIntentSink
     {
-        public const float DedupeMeters = 15f;
+        // = #61 MinWaypointDistance (BattleCommandPostureExecutorPatch.cs:36-43):
+        // raised 15 → 60 m on 2026-05-21 because probe targets drift 20-50 m as a
+        // group moves and every re-issue made vanilla re-path it (microshift).
+        public const float DedupeMeters = 60f;
 
         private static readonly OrderChannel[] ExecutionOrder =
         {

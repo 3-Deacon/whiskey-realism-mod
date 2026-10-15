@@ -672,13 +672,19 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 case OrderChannel.Move:
                 {
-                    float r2 = OrderArbiter.DedupeMeters * OrderArbiter.DedupeMeters;
-                    if (HasPoint(rec.LastWaypointX, rec.LastWaypointZ) &&
-                        DistSq(rec.LastWaypointX, rec.LastWaypointZ, x, z) <= r2 &&
-                        (IsMoving(rec) || DistSq(rec.X, rec.Z, x, z) <= WaypointValidator.FriendlyFootprintRadiusMeters * WaypointValidator.FriendlyFootprintRadiusMeters))
+                    // #61's rule (ShouldSkipDuplicateWaypoint at the 60 m
+                    // MinWaypointDistance): same target while the group moves, or
+                    // while it already stands there. Its wider radius for an
+                    // interrupted path (InterruptedReissueDistance 60 m) equals the
+                    // base radius since the 60 m bump, and the snapshot carries no
+                    // pathinterrupted, so the interrupted flag is false here.
+                    if (CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint(
+                            rec.LastWaypointX, rec.LastWaypointZ, x, z, OrderArbiter.DedupeMeters,
+                            pathInterrupted: false, rec.RegimentPaths, IsMoving(rec), rec.X, rec.Z))
                         return true;
                     int p = FindPending(w.GroupId);
-                    return p >= 0 && DistSq(_pending[p].Intent.TargetX, _pending[p].Intent.TargetZ, x, z) <= r2;
+                    return p >= 0 &&
+                        DistSq(_pending[p].Intent.TargetX, _pending[p].Intent.TargetZ, x, z) <= OrderArbiter.DedupeMeters * OrderArbiter.DedupeMeters;
                 }
                 case OrderChannel.Stance:
                     return rec.AiStanceOrdered == w.Value;

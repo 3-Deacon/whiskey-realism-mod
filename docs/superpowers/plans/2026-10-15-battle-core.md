@@ -393,7 +393,7 @@ internal static class TacticalPlayerDispatchRuntime { // runtime, BattleScope-re
 **Interfaces — Produces:**
 ```csharp
 public sealed class OrderArbiter : IIntentSink {
-  public const float DedupeMeters = 15f;
+  public const float DedupeMeters = 60f;   // = #61 MinWaypointDistance (2026-05-21 microshift fix, patch :36-43)
   public void BeginTick(BattleSnapshot s);
   public void Submit(in BattleOrderIntent intent);
   public int Resolve(BattleOrderIntent[] winners);                 // one per (group, channel); ties keep the previous tick's source (hysteresis)
@@ -441,7 +441,7 @@ internal static class OrderExecutorRuntime {
    - Reject a target inside a friendly group's footprint unless `ReliefOrSupport`.
    - For `ArtilleryFirePosition`, reject when the segment from the target to `FireTargetId` passes within 40 m of a friendly group, and reject when a visible enemy is within 60 m.
 4. Silent-exit pre-check.
-5. Dedupe: same target within 15 m while the group's last waypoint matches, or there is an active or pending move; or the same stance, formation or behavior already ordered.
+5. Dedupe: same target within 60 m (#61's `CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint` at `MinWaypointDistance`) while the group's last waypoint matches and it is moving or already standing there, or a pending move has that target; or the same stance, formation or behavior already ordered. #61's interrupted-path radius (`InterruptedReissueDistance` 60 m) equals the base radius, and the snapshot carries no `pathinterrupted`, so it adds nothing.
 6. Cooldown: recent-order 180 battle-s (#61's 0.05 h), task hold, courier 0.25 h, failed backoff. `Safety` bypasses recent-order and task-hold only.
 7. Vanilla call:
    - Stance runs before Move, and Move before Formation (#61 L768-774, L976-988).
@@ -455,7 +455,7 @@ internal static class OrderExecutorRuntime {
   - `HigherPriorityWinsPerChannel`
   - `ChannelsResolveIndependently`
   - `TieKeepsPreviousWinner`
-  - `DedupeWithin15m`
+  - `DedupeWithin60m`
   - `SafetyBypassesRecentOrderButNotDedupe`
   - `TaskHoldBlocksSameTaskOnly`
   - `ClampMatchesVanillaBoundsNegativeZ`
