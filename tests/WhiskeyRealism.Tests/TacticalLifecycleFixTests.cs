@@ -55,6 +55,8 @@ internal static class TacticalLifecycleFixTests
         Pass("dead w&l subordinate career suppresses nothing", WlSubordinateCareerSuppressesNothing);
 
         Pass("t14 operation strength counts AI combat units only", OperationStrengthCountsAiCombatUnitsOnly);
+
+        Pass("t9 feud instance never drives the orchestrator", FeudInstanceNeverDrivesOrchestrator);
     }
 
     private static void Pass(string name, Action test)
@@ -489,5 +491,13 @@ internal static class TacticalLifecycleFixTests
         TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(0, true, false, false, true, false), "dechained");
         TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(0, false, true, false, true, false), "routed");
         TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(0, false, false, false, false, false), "inactive");
+    }
+
+    private static void FeudInstanceNeverDrivesOrchestrator()
+    {
+        // AIBattle.SetSide (3408): 0 = enemy AI, 1 = player side, 2 = feud instance.
+        TestHarness.AssertTrue(TacticalBattleCoordinator.DrivesOrchestrator(0), "enemy ai");
+        TestHarness.AssertTrue(TacticalBattleCoordinator.DrivesOrchestrator(1), "player side (ai_vs_ai)");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.DrivesOrchestrator(2), "feud");
     }
 }

@@ -80,6 +80,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
+        /// The feud instance (AIBattle.isplayeraiorfeud == 2, SetSide 3408) runs the macro
+        /// cycle under ai_vs_ai but commands only feuding groups; it never drives the
+        /// battle lifecycle or the orchestrator Tick.
+        /// </summary>
+        public static bool DrivesOrchestrator(int isPlayerAiOrFeud)
+        {
+            return isPlayerAiOrFeud != 2;
+        }
+
+        /// <summary>
         /// Alliance whose orchestrator is not built. W&amp;L forces ai_vs_ai (29789), so a
         /// W&amp;L Commander-in-Chief player (DLC_WL.IsCommanderInChief, 47475) owns every
         /// unit of their alliance and that alliance is suppressed. Outside W&amp;L the

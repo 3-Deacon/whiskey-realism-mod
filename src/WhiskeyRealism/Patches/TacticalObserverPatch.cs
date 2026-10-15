@@ -273,7 +273,9 @@ namespace WhiskeyRealism.Patches
                 // clock checks here catch a new battle or reload when that end was missed.
                 try
                 {
-                    if (Plugin.EnableTacticalBattleOrchestrator.Value)
+                    if (Plugin.EnableTacticalBattleOrchestrator.Value
+                        && __instance != null
+                        && TacticalBattleCoordinator.DrivesOrchestrator(__instance.isplayeraiorfeud))
                     {
                         var decision = _lifecycleDetector.Observe(BuildLifecycleObservation(__instance));
                         switch (decision.Transition)
