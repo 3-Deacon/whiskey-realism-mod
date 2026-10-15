@@ -20,8 +20,11 @@ namespace WhiskeyRealism.Patches
     // counter-battery fire (8 -> 7) once no enemy battery is in fire range:
     // vanilla's own release branch in CheckCounterBatteryFire is unreachable
     // because its loop skips units already at 8 (3834).
-    // Writes go through TacticalWriteGuard (Commander Mode Active + W&L/player)
-    // plus vanilla's per-unit envelope (feud rule, PerformAIActionDLCWL 5101).
+    // Every write is behind TacticalWriteGuard.CanWrite (Commander Mode Active +
+    // W&L/player protection: MonitorOnly and Off write nothing), checked for the
+    // group on entry before any write (and again per battery for the
+    // micro-doctrine writes in TacticalArtilleryApplier), plus vanilla's per-unit
+    // envelope (feud rule, PerformAIActionDLCWL 5101).
     // Default ON behind Plugin.EnableTacticalArtilleryDoctrine.
     [HarmonyPatch(typeof(AIBattle), "CheckAIBombardment")]
     public static class B7CheckAIBombardmentPatch
@@ -35,6 +38,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.b7-bombardment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.b7-bombardment");
             if (Plugin.EnableTacticalArtilleryDoctrine == null) return;
             if (!Plugin.EnableTacticalArtilleryDoctrine.Value) return;
             if (aigroup == null) return;

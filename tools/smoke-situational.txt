@@ -1,0 +1,48 @@
+# Situational patch ids for tools/smoke-check.py.
+#
+# The reference smoke session is: launch GTCW, start or load a campaign, let the
+# campaign AI run for some in-game days, then fight one battle on the tactical
+# map with AI-controlled formations on both sides. Every patch id NOT listed
+# here must log a "[first-fire] <id>" line in that session; smoke-check exits 1
+# otherwise.
+#
+# An entry is "<id-or-glob>  # reason". A trailing * matches any suffix. Each
+# reason names the vanilla call path that a normal session may not reach.
+
+# New-campaign setup screen (MainMenu); skipped when loading a save.
+campaign.patch.aggressiveness-lock                 # MainMenu.SwitchAIMode: only when the aggressiveness arrow is clicked
+campaign.patch.difficulty-lock                     # MainMenu.ChangeBonus: only when the difficulty slider is moved
+campaign.patch.campaign-params-lock                # MainMenu.SetCampaignParameters: only when a new campaign is created
+campaign.patch.historic-checkbox-lock              # MainMenu.CheckForCheckBoxUpdates: new-campaign setup screen only
+campaign.patch.realism-checkboxes-lock             # MainMenu.CheckForCheckBoxUpdates: new-campaign setup screen only
+campaign.patch.project-unlock-observer.*           # Projects.CheckProjectUnlocks: called only at frame 32 of a NEW campaign
+
+# Save / load.
+campaign.patch.save-load.save                      # AICampaign.Save: only when the game saves (manual or autosave)
+campaign.patch.save-load.load                      # AICampaign.Load: only when a save is loaded
+
+# W&L career (DLC_WL) only.
+campaign.patch.wl-camp-realism.*                   # Camp/Station/Diary: W&L career camp and diary only
+campaign.patch.wl-operation-null-guard             # DLC_WL.CommanderRelations.Operation.UpdateOperation: W&L operations only
+campaign.patch.dispatch-sanitizer                  # Messages.Message.GenerateMessageContent: W&L dispatches only
+
+# Campaign events that need not happen in a short session.
+campaign.patch.commander-prev-command.*            # Commander.AssignCommando: only when a commander is assigned to a unit
+campaign.patch.construction-observer.building      # CBuilding.Place: only when a building is placed
+campaign.patch.construction-observer.railroad      # Railroad.StartConstruction: only when railroad construction starts
+campaign.patch.telegraph-place                     # CBuilding.Place: only when a building is placed
+campaign.patch.militia-act-handover-scope.*        # Policies.LaunchPolicyEffect: only when a policy takes effect
+campaign.patch.militia-act-handover-guard          # GameVars.SetNationToNewAlliance: only when a state changes alliance
+campaign.patch.project-appoint-observer.*          # Projects.AppointProject: only when a project is appointed
+campaign.patch.recruitment.state-steer             # AIArea.GetBestRecruitingState: only when ZoneRecruiting picks a state to recruit in
+campaign.patch.arty-combine-gun-transfer.postfix   # BattleUnits.CombineUnits: only when two units are merged
+campaign.patch.fleet-patrol-reset                  # Regiment.StopRegiment on a fleet: naval patrol orders only
+
+# Battle paths a single battle may not reach.
+tactical.patch.b8-retreats-observer                # AIBattle.MicroAICheckForRetreats: vanilla calls it only with macroai 3 (retreat) and ai_stance 1
+tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # same MicroAICheckForRetreats gate
+tactical.patch.observer.retreats                   # same MicroAICheckForRetreats gate
+tactical.patch.observer.order-queue                # Regiment.AddToOrderQueue: player/UI order path; the battle AI does not call it
+tactical.patch.observer.courier*                   # Regiment.AddOrderCourierline: courier-delivered (player) orders only
+tactical.patch.observer.battle-units-destroy       # BattleUnits.OnDestroy: only when the battle scene is left
+campaign.patch.battle-result-observer              # BattleMonument.UpdateAllianceWon: only when a finished battle is imported back to the campaign

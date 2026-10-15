@@ -47,6 +47,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.deployment-terrain", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.deployment-terrain");
                 if (!Enabled()) return;
 
                 try

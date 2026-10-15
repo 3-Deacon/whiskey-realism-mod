@@ -63,6 +63,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.pick-campaign-objective", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.pick-campaign-objective");
                 OnceLog.Info("pickcampobj", "PickCampaignObjectivePatch wired");
                 try
                 {

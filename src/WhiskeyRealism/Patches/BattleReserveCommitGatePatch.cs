@@ -304,6 +304,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.reserve-commit-gate-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.reserve-commit-gate-prefix");
                 __state = null;
                 try
                 {
@@ -337,6 +338,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.reserve-commit-gate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.reserve-commit-gate");
                 try
                 {
                     if (__state == null || __state.Units == null || aigroup == null) return;

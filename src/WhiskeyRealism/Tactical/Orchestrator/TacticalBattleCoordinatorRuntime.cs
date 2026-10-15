@@ -57,10 +57,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // ============================================================
     public static partial class TacticalBattleCoordinator
     {
-        // Cached AIBattle.bunits FieldInfo — avoids reflection cost on every battle bootstrap.
-        // The field is static (decompile 3306), so it also serves the doctrine clock
-        // sampler without an AIBattle instance.
+        // AIBattle.bunits FieldInfo, looked up once per process. The field is static
+        // (decompile 3306), so it also serves the per-frame doctrine clock sampler
+        // without an AIBattle instance. A failed lookup is not retried: a field a game
+        // update removed does not come back, and retrying would run AccessTools.Field
+        // every frame.
         private static FieldInfo _bunitsFieldCache;
+        private static bool _bunitsFieldResolved;
+
+        private static FieldInfo BunitsField
+        {
+            get
+            {
+                if (_bunitsFieldResolved) return _bunitsFieldCache;
+                _bunitsFieldResolved = true;
+                try
+                {
+                    _bunitsFieldCache = AccessTools.Field(typeof(AIBattle), "bunits");
+                }
+                catch
+                {
+                    _bunitsFieldCache = null;
+                }
+                if (_bunitsFieldCache == null)
+                    OnceLog.Warning("orch-bunits-field-missing",
+                        "[TacticalOrchestrator] AIBattle.bunits not found; doctrine clock and battle lookup disabled");
+                return _bunitsFieldCache;
+            }
+        }
 
         static TacticalBattleCoordinator()
         {
@@ -79,9 +103,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         private static DoctrineClockSample SampleVanillaBattleClock()
         {
-            if (_bunitsFieldCache == null)
-                _bunitsFieldCache = AccessTools.Field(typeof(AIBattle), "bunits");
-            var bunits = _bunitsFieldCache?.GetValue(null) as BattleUnits;
+            var field = BunitsField;
+            if (field == null) return default(DoctrineClockSample);
+            var bunits = field.GetValue(null) as BattleUnits;
             if ((UnityEngine.Object)bunits == null || bunits.IsCampaign) return default(DoctrineClockSample);
             return new DoctrineClockSample(bunits.GetInstanceID(), GameVars.currenttimefromstart, bunits.eodcycle);
         }
@@ -1012,9 +1036,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 if (battle == null) return null;
-                if (_bunitsFieldCache == null)
-                    _bunitsFieldCache = AccessTools.Field(typeof(AIBattle), "bunits");
-                return _bunitsFieldCache?.GetValue(battle) as BattleUnits;
+                return BunitsField?.GetValue(battle) as BattleUnits;
             }
             catch
             {

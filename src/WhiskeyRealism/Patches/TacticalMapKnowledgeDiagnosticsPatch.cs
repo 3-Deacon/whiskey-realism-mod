@@ -75,6 +75,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.map-knowledge-diag", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.map-knowledge-diag");
                 try
                 {
                     if (Plugin.EnableTacticalMapKnowledgeDiagnostics == null || !Plugin.EnableTacticalMapKnowledgeDiagnostics.Value)

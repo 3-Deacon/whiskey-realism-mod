@@ -20,6 +20,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.army-area-theater", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.army-area-theater");
                 OnceLog.Info("army-area", "ArmyAreaTheaterPatch wired (historical operating-area steering)");
 
                 try

@@ -92,6 +92,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.battle-macro-strategy.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.battle-macro-strategy.prefix");
                 try
                 {
                     if (__instance == null || !_shadows.TryGetValue(__instance, out MacroShadow shadow)) return;
@@ -111,6 +112,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.battle-macro-strategy.postfix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.battle-macro-strategy.postfix");
                 if (!Enabled() || __instance == null) return;
 
                 try

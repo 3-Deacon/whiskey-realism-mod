@@ -265,6 +265,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.observer.check-global", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.check-global");
                 // One battle context per vanilla call, shared by both observed events.
                 var context = BuildContextIfEnabled(__instance);
                 Observe(__instance, TacticalObservedEvent.Macro, null, null, context);
@@ -276,10 +277,13 @@ namespace WhiskeyRealism.Patches
                 // (UpdateAITasks 5857 from CalculateSideStatsAndUpdateAITasks 84864). The end
                 // of a battle is observed by BattleUnitsOnDestroyPostfix below; the identity /
                 // clock checks here catch a new battle or reload when that end was missed.
+                // The detector runs whatever the orchestrator flag says: battle teardown
+                // (OnBattleEnd -> BattleScope.ResetAll) releases per-battle state that
+                // other patches fill too. OnBattleStart itself honors the flag, and Tick
+                // only runs once a start activated the coordinator.
                 try
                 {
-                    if (Plugin.EnableTacticalBattleOrchestrator.Value
-                        && __instance != null
+                    if (__instance != null
                         && TacticalBattleCoordinator.DrivesOrchestrator(__instance.isplayeraiorfeud))
                     {
                         var decision = _lifecycleDetector.Observe(BuildLifecycleObservation(__instance));
@@ -343,6 +347,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.observer.battle-units-destroy", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.battle-units-destroy");
                 try
                 {
                     int id = __instance != null ? __instance.GetInstanceID() : 0;
@@ -413,6 +418,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.observer.adjust-group-stance", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.adjust-group-stance");
                 var context = BuildContextIfEnabled(__instance);
                 Observe(__instance, TacticalObservedEvent.Group, null, null, context);
                 Observe(__instance, TacticalObservedEvent.Sector, null, null, context);
@@ -427,6 +433,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.charges.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.charges.prefix");
                 try
                 {
                     int key = SafeInstanceId(aigroup);
@@ -447,6 +454,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.charges", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.charges");
                 TacticalObserverSnapshot before = null;
                 try
                 {
@@ -469,6 +477,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.feud.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.feud.prefix");
                 try
                 {
                     _feudBefore = SnapshotBattle(__instance);
@@ -487,6 +496,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.feud", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.feud");
                 Observe(__instance, TacticalObservedEvent.Feud, _feudBefore, null);
             }
         }
@@ -498,6 +508,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.use-reserves", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.use-reserves");
                 Observe(__instance, TacticalObservedEvent.Reserve, null, aigroup);
             }
         }
@@ -509,6 +520,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.link-reserves", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.link-reserves");
                 Observe(__instance, TacticalObservedEvent.Reserve, null, null);
             }
         }
@@ -520,6 +532,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.assign-reserves", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.assign-reserves");
                 Observe(__instance, TacticalObservedEvent.Reserve, null, null);
             }
         }
@@ -531,6 +544,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.bombardment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.bombardment");
                 Observe(__instance, TacticalObservedEvent.Artillery, null, aigroup);
             }
         }
@@ -542,6 +556,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.line-fallbacks", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.line-fallbacks");
                 Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
             }
         }
@@ -553,6 +568,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.retreats", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.retreats");
                 Observe(__instance, TacticalObservedEvent.Fallback, null, aigroup);
             }
         }
@@ -565,6 +581,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.current-order.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.current-order.prefix");
                 __state = new CurrentOrderState(ReadGivenOrderSignature(), ReadGivenOrdersSession());
             }
         }
@@ -583,6 +600,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.current-order", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.current-order");
                 try
                 {
                     var next = ReadGivenOrderSignature();
@@ -639,6 +657,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.order-queue", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.order-queue");
                 ObserveQueuedOrder(__instance, advisedunit, queueprocessingtime, ordertype, timetomove, modifylastwaypoint, _newpath);
             }
         }
@@ -651,6 +670,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.courier.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.courier.prefix");
                 int count = __instance != null && __instance.orderqueue != null ? __instance.orderqueue.Count : 0;
                 __state = new CourierQueueState(count, count - 1);
             }
@@ -669,6 +689,7 @@ namespace WhiskeyRealism.Patches
             if (!Enabled() && !BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.courier", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.courier");
                 ObserveCourierLine(__instance, sourceunit, _targetunit, secondarycourier);
                 ObserveCourierQueue(__instance, secondarycourier, __state);
             }
@@ -687,6 +708,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.set-waypoint.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.set-waypoint.prefix");
                 __state = new WaypointState(
                     SafeRegimentPaths(reg),
                     SafeOrderQueueCount(reg),
@@ -728,6 +750,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.set-waypoint", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.set-waypoint");
                 ObserveWaypointDrift(reg, useorderdelay, __state);
                 ObservePathShape(reg, newpath, modifylastwaypoint, useorderdelay, direction, showmovementoptions, __state);
             }
@@ -741,6 +764,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.reserve-move.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.reserve-move.prefix");
                 __state = new WaypointState(
                     CountGroupPaths(aigroup),
                     SafeOrderQueueCount(aigroup),
@@ -770,6 +794,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.reserve-move", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.reserve-move");
                 ObserveReserveMove(aigroup, __state);
             }
         }
@@ -782,6 +807,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.formation.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.formation.prefix");
                 __state = SnapshotFormationChange(__instance);
             }
         }
@@ -796,6 +822,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.formation", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.formation");
                 ObserveFormationChange(__instance, fparam, __state);
             }
         }
@@ -808,6 +835,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.moving-targets.prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.moving-targets.prefix");
                 __state = CaptureObjectiveMoveState(__instance);
             }
         }
@@ -819,6 +847,7 @@ namespace WhiskeyRealism.Patches
             if (!BugTelemetryEnabled()) return;
             using (TelemetryPerf.Scope("tactical.patch.observer.moving-targets", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.observer.moving-targets");
                 ObserveObjectiveChainMove(__instance);
                 ObserveObjectiveChainMutation(__state);
             }

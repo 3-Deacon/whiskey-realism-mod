@@ -33,6 +33,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.coord-offensive-micro.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.coord-offensive-micro.prefix");
                 try
                 {
                     var faction = AICampaignReflect.GetFaction(_aifaction);
@@ -73,6 +74,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.coord-offensive-micro.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.coord-offensive-micro.finalizer");
                 RestoreSnapshot(_aifaction);
                 return __exception;
             }

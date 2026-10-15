@@ -24,6 +24,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.financial-ai", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.financial-ai");
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;

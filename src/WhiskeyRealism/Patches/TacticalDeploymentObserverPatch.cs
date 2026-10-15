@@ -38,6 +38,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DoUnitPositioning-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.deployment-observer.DoUnitPositioning-prefix");
                 if (!Enabled()) return;
                 __state = SafeCaptureState(__instance, "pre-unit-positioning", -1, TacticalDeploymentTelemetry.PhaseInitialPositioning);
             }
@@ -49,6 +50,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DoUnitPositioning", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.deployment-observer.DoUnitPositioning");
                 if (!Enabled()) return;
                 EmitDelta(__instance, "DoUnitPositioning", -1, __state);
             }
@@ -60,6 +62,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DoPlacement-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.deployment-observer.DoPlacement-prefix");
                 if (!Enabled()) return;
                 var skipped = IsDoPlacementSkipped(foralliance);
                 var eod = ReadInt(__instance, EodCycleField, "eodcycle", "eodcycle");
@@ -75,6 +78,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DoPlacement", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.deployment-observer.DoPlacement");
                 if (!Enabled()) return;
                 EmitDelta(__instance, "DoPlacementAIUnitsWithinDeploymentzoneNew", foralliance, __state);
             }
@@ -91,6 +95,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DeploymentPhase-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.deployment-observer.DeploymentPhase-prefix");
                 if (!Enabled()) return;
                 if ((object)__instance == null || __instance.IsCampaign)
                 {
@@ -119,6 +124,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.deployment-observer.DeploymentPhase", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.deployment-observer.DeploymentPhase");
                 if (!Enabled()) return;
                 if (__state == null || __state.Noop || (object)__instance == null || __instance.IsCampaign) return;
                 try

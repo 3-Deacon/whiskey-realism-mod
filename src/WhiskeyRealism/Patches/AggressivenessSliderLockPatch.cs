@@ -7,7 +7,7 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Patches
 {
     // Bridge layer patch #11 — Postfix on MainMenu.SwitchAIMode
-    // (decompile line ~193739). Visually grey-out the campaign-aggressiveness
+    // (decompile line 193709). Visually grey-out the campaign-aggressiveness
     // slider by snapping `aimode` back to 1.0 and overwriting the displayed
     // label to "Locked by Whiskey Realism" each time the user clicks an arrow.
     //
@@ -30,6 +30,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.aggressiveness-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.aggressiveness-lock");
                 if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
                 try
                 {

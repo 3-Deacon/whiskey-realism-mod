@@ -34,6 +34,7 @@ namespace WhiskeyRealism.Patches
             {
                 using (TelemetryPerf.Scope("campaign.patch.save-load.save", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
+                    PatchFirstFire.Mark("campaign.patch.save-load.save");
                     OnceLog.Info("save", "AICampaign.Save Postfix wired");
                     try
                     {
@@ -55,6 +56,7 @@ namespace WhiskeyRealism.Patches
             {
                 using (TelemetryPerf.Scope("campaign.patch.save-load.load", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
+                    PatchFirstFire.Mark("campaign.patch.save-load.load");
                     OnceLog.Info("load", "AICampaign.Load Postfix wired");
                     try
                     {

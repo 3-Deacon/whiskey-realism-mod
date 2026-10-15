@@ -41,6 +41,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-career-start-retry.ai", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.wl-career-start-retry.ai");
                 try
                 {
                     if (!RetryActive()) return;
@@ -196,6 +197,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-career-start-retry.campaign", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.wl-career-start-retry.campaign");
                 try
                 {
                     if (!WlCareerStartSelectionRetryPatch.RetryActive()) return;

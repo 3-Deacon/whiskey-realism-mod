@@ -39,6 +39,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.player-subordinate-order-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.player-subordinate-order-prefix");
                 __state = default(PatchState);
                 if (!MasterEnabled()) return;
 
@@ -57,6 +58,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.player-subordinate-order", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.player-subordinate-order");
             try
             {
                 if (!MasterEnabled()) return;

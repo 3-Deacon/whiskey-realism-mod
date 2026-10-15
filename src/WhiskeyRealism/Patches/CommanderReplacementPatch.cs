@@ -42,6 +42,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.commander-replacement", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.commander-replacement");
                 OnceLog.Info("replace", "CommanderReplacementPatch wired (role-resolved AppointCommander swap)");
                 try
                 {

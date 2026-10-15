@@ -50,6 +50,7 @@ namespace WhiskeyRealism.Patches
             {
                 using (TelemetryPerf.Scope("tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
                 {
+                    PatchFirstFire.Mark("tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats");
                     return Handle("MicroAICheckForRetreats", __exception);
                 }
             }
@@ -63,6 +64,7 @@ namespace WhiskeyRealism.Patches
             {
                 using (TelemetryPerf.Scope("tactical.patch.fallback-retreat-guard.CheckLineFallbacks", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
                 {
+                    PatchFirstFire.Mark("tactical.patch.fallback-retreat-guard.CheckLineFallbacks");
                     return Handle("CheckLineFallbacks", __exception);
                 }
             }
@@ -87,6 +89,7 @@ namespace WhiskeyRealism.Patches
             {
                 using (TelemetryPerf.Scope("tactical.patch.fallback-retreat-guard.CheckOutOfFireRange", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
                 {
+                    PatchFirstFire.Mark("tactical.patch.fallback-retreat-guard.CheckOutOfFireRange");
                     return Handle("CheckOutOfFireRange", __exception);
                 }
             }

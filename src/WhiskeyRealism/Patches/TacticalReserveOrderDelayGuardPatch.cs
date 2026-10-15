@@ -58,6 +58,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.reserve-order-delay-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.reserve-order-delay-prefix");
                 __state = null;
                 if (!Enabled()) return;
                 if (!TacticalWriteGuard.CanWrite(aigroup)) return;
@@ -81,6 +82,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.reserve-order-delay", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.reserve-order-delay");
             if (!Enabled()) return;
 
             try

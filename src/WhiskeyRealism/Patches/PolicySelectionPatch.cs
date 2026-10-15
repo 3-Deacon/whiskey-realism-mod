@@ -24,6 +24,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.policy-selection", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.policy-selection");
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return true;

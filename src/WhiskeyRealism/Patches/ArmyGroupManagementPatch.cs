@@ -32,6 +32,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.army-group-management", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.army-group-management");
                 OnceLog.Info("armygroup", "ArmyGroupManagementPatch wired (historical army-group steering)");
 
                 try

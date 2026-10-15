@@ -29,6 +29,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.campaign-ai-governor", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.campaign-ai-governor");
                 try
                 {
                     if (__instance == null) return true;

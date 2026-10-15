@@ -6,11 +6,12 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Patches
 {
     // Bridge layer patch #10 — Postfix on MainMenu.SetCampaignParameters
-    // (decompile line 193675). Vanilla writes player-picked Aggressiveness +
-    // Historic AI Personality into GameVars at campaign create. We override
-    // Aggressiveness back to neutral 1.0 (our personality system carries that
-    // dimension) and Historic to true (required for scripted succession).
-    // Difficulty is intentionally left alone — it's skill-level preference.
+    // (decompile line 193677). Vanilla writes player-picked Aggressiveness +
+    // Historic AI Personality + difficulty bonus into GameVars at campaign create.
+    // We override Aggressiveness back to neutral 1.0 (our personality system
+    // carries that dimension), Historic to true (required for scripted
+    // succession), and the difficulty bonus (usedcampaignbonus, its running copy
+    // and casualtiesmodifier) to the `Locked Difficulty` index (default 3, Hard).
     [HarmonyPatch]
     internal static class CampaignParametersLockPatch
     {
@@ -26,6 +27,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.campaign-params-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.campaign-params-lock");
                 if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
                 OnceLog.Info("settings:finalize", "CampaignParametersLockPatch wired");
                 try

@@ -22,6 +22,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.telegraph-workdown", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.telegraph-workdown");
                 try
                 {
                     TelegraphConstructionRuntime.OnConstructionWishesWorkedDown();

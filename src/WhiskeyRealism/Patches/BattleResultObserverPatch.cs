@@ -40,6 +40,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.battle-result-observer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.battle-result-observer");
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
                 if (_alliancewon < 0) return;
 

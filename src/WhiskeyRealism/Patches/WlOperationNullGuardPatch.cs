@@ -26,6 +26,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-operation-null-guard", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.wl-operation-null-guard");
             if (__exception == null) return null;
             if (!Enabled()) return __exception;
             if (!VanillaFaultSite.IsNullOrMissingReference(__exception) || VanillaFaultSite.IsModFault(__exception))

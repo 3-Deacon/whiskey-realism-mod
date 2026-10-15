@@ -78,6 +78,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.coord-offensive-ops.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.coord-offensive-ops.prefix");
             if (!_wiredLogged)
             {
                 _wiredLogged = true;
@@ -217,6 +218,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.coord-offensive-ops.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.coord-offensive-ops.finalizer");
                 RestoreSnapshot(_aifaction);
                 return __exception;
             }

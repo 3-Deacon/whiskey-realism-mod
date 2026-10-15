@@ -103,6 +103,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.regiment-diag", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.regiment-diag");
                 try
                 {
                     if (!Plugin.EnableTacticalRegimentDiagnostics.Value) return;

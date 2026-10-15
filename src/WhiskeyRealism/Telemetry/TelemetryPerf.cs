@@ -35,8 +35,9 @@ namespace WhiskeyRealism.Telemetry
         [ThreadStatic] private static int t_depth;
         [ThreadStatic] private static ThreadAggregates t_aggregates;
 
-        // Every thread's accumulator, so shutdown and the per-frame probe tick can flush
-        // windows of threads that stopped calling scopes (orchestrator worker, writer).
+        // Every thread's accumulator (the Unity main thread and the telemetry writer
+        // thread), so shutdown and the per-frame probe tick can flush windows of a
+        // thread that stopped calling scopes.
         private static readonly object RegistryGate = new object();
         private static readonly List<ThreadAggregates> Registry = new List<ThreadAggregates>();
 

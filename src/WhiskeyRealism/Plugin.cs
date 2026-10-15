@@ -312,7 +312,7 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Fallback Retreat Null Guard",
                 true,
-                "Default ON. Suppresses NullReferenceException from two vanilla tactical fallback/retreat methods during focused bug-smoke runs; all non-null exceptions still propagate.");
+                "Default ON. Suppresses NullReferenceException from three vanilla tactical fallback/retreat methods (MicroAICheckForRetreats, CheckLineFallbacks, CheckOutOfFireRange) during focused bug-smoke runs; all non-null exceptions still propagate.");
             EnableTacticalPathfinderDiscipline = Config.Bind(
                 "Tactical",
                 "Enable Tactical Pathfinder Discipline",
@@ -365,7 +365,7 @@ namespace WhiskeyRealism
                 "Enable Tactical Group Sector Stance",
                 true,
                 "Default ON. Lets the sector-odds scorer bias ai_stance (1-3) of AI brigade groups that have no doctrine or ledger task. Stance " +
-                "writes only, no movement. Doctrine and ledger-task stance writes run regardless of this flag.");
+                "writes only, no movement. Doctrine and ledger-task stance writes do not depend on this flag; they follow Tactical Commander Mode (written only when Active).");
             EnableTacticalCommanderIntentDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Commander Intent Doctrine",
