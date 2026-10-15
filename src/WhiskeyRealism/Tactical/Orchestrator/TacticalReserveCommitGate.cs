@@ -11,12 +11,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // #59 deny (BattleReserveCommitGatePatch on vanilla AIBattle.CheckUseOfReserves
     // 6062-6170): vanilla commits one idle reserve regiment toward an outflanked
     // sibling with a direct RegimentSetPath (6170), so only a rollback can deny it.
-    // Two rules deny, merged here from #59 and the deleted B8 patch:
-    //   - the group's resolved role is Reserve (ledger state first, then the
-    //     command-node intent), unless the direct-child allocator released it
-    //     (T15: crisis Fix, Exploit or trigger odds) before the ledger caught up;
-    //   - the ledger's doctrine order says hold (DoctrineConsumerDecisions.DecideReserve
-    //     == Deny, B8's rule), again unless the allocator released the group.
+    // The rule: the group's resolved role is Reserve (ledger state first, then the
+    // command-node intent) denies, unless the direct-child allocator released it
+    // (T15: crisis Fix, Exploit or trigger odds) before the ledger caught up, or the
+    // committed unit is already engaged. The deleted B8 patch's doctrine deny
+    // (DoctrineConsumerDecisions.DecideReserve == Deny) is covered by it: Deny needs
+    // order.Role == Reserve, and the order's role is the ledger node's role
+    // (CommandDoctrineAssignment.Build; ArmyOrchestrator 1072-1084), which the
+    // ledger-first resolution already reads as Reserve.
     //
     // #56 courier parity: vanilla's reserve path ignores the order delay (6170);
     // with GameVars.useorderdelays the path is removed and the same target is
@@ -58,8 +60,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 bool committedUnitAlreadyEngaged,
                 float ownStrengthRatio,
                 float localOdds,
-                bool reserveReleased = false,
-                bool doctrineDeny = false)
+                bool reserveReleased = false)
             {
                 VanillaCommitted = vanillaCommitted;
                 Resolution = resolution;
@@ -68,7 +69,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 OwnStrengthRatio = SanitizeRatio(ownStrengthRatio, 1f);
                 LocalOdds = SanitizeRatio(localOdds, 1f);
                 ReserveReleased = reserveReleased;
-                DoctrineDeny = doctrineDeny;
             }
 
             public bool VanillaCommitted { get; }
@@ -78,7 +78,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public float OwnStrengthRatio { get; }
             public float LocalOdds { get; }
             public bool ReserveReleased { get; }
-            public bool DoctrineDeny { get; }
         }
 
         public readonly struct Decision
@@ -101,14 +100,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return Observe("no-vanilla-commit", DirectChildRole.Unknown);
             if (input.PlayerControlled)
                 return Observe("player-controlled", DirectChildRole.Unknown);
-            if (!input.Resolution.Found && !input.DoctrineDeny)
+            if (!input.Resolution.Found)
                 return Observe(input.Resolution.Reason, DirectChildRole.Unknown);
 
-            DirectChildRole role = input.Resolution.Found ? input.Resolution.Intent.Role : DirectChildRole.Unknown;
+            DirectChildRole role = input.Resolution.Intent.Role;
             if (input.CommittedUnitAlreadyEngaged)
                 return Allow("already-committed-contact", role);
-            if (input.DoctrineDeny && !input.ReserveReleased)
-                return new Decision(Action.Deny, "doctrine-reserve-hold", role);
 
             switch (role)
             {
@@ -201,6 +198,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return total;
         }
 
+        /// <summary>
+        /// Own over visible enemy strength for a group, from the snapshot only: own =
+        /// the command-tree strength bucket (groupowninrange / groupstrengthaigroup,
+        /// own-side), enemy = <see cref="VisibleAngleStrength"/>. Nothing seen (or no
+        /// snapshot record): 1.
+        /// </summary>
+        public static float LocalOdds(BattleSnapshot s, int ownIndex)
+        {
+            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount) return 1f;
+            float enemy = VisibleAngleStrength(s, ownIndex);
+            if (enemy <= 0f) return 1f;
+            float own = Math.Max(0f, Math.Max(s.Own[ownIndex].GroupOwnInRange, s.Own[ownIndex].GroupStrengthAiGroup));
+            return own / Math.Max(1f, enemy);
+        }
+
         /// <summary>#56's re-issue of vanilla's reserve move (6170: target, facing, doublequick 6171).</summary>
         public static BattleOrderIntent CourierParityIntent(int unitId, float x, float z, float heading)
         {
@@ -248,13 +260,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// The band the allocator sent a released direct child to: its
-        /// DirectChildIntent.AxisSector (the crisis band, or the main effort's band;
-        /// DirectChildAllocator.ReleaseReserves). The command-node intent carries only
-        /// the child's own band. Child ids are "child-" / "synth-army-" + the group's
-        /// GameObject instance id (CommandIntentResolver).
+        /// #56 removes vanilla's immediate path only when the screen converts and the
+        /// executor's inline plan will execute; otherwise vanilla's commit stands.
         /// </summary>
-        public static bool TryReleaseSector(IReadOnlyList<DirectChildIntent> intents, int instanceId, out int sector)
+        public static bool RemoveVanillaPath(CourierParityAction action, in ExecutionPlan plan)
+        {
+            return action == CourierParityAction.Convert && plan.Execute;
+        }
+
+        /// <summary>
+        /// The reserve-release producer's allocator view, without allocating: the
+        /// direct child's intent (ArmyOrchestrator.CurrentDirectChildIntents; ids are
+        /// "child-" / "synth-army-" + the group's GameObject instance id,
+        /// CommandIntentResolver) re-roled out of Reserve, and the band it was sent to,
+        /// DirectChildIntent.AxisSector (the crisis band or the main effort's band,
+        /// DirectChildAllocator.ReleaseReserves). The command-node intent carries only
+        /// the child's own band. Pair with a ledger state that HeldInReserve.
+        /// </summary>
+        public static bool TryReleasedDirectChild(IReadOnlyList<DirectChildIntent> intents, int instanceId, out int sector)
         {
             sector = 0;
             if (intents == null || instanceId == 0) return false;
@@ -262,6 +285,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 string id = intents[i].ChildId;
                 if (!SuffixIs(id, "child-", instanceId) && !SuffixIs(id, "synth-army-", instanceId)) continue;
+                DirectChildRole role = intents[i].Role;
+                if (role == DirectChildRole.Reserve || role == DirectChildRole.Unknown) return false;
                 sector = intents[i].AxisSector;
                 return true;
             }
@@ -348,7 +373,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     supportPriority: 0,
                     aggressionBias01: 0f,
                     depth: 0),
-                "operations-ledger-command-state");
+                "operations-ledger-command-state:" + state.Role + ":" + state.Task);
         }
 
         /// <summary>The ledger holds the node in Reserve (Reserve role or ReserveWait task).</summary>

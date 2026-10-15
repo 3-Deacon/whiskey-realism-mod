@@ -15,7 +15,8 @@ internal static class ReserveMigrationTests
     {
         RunAll(new (string name, Action run)[]
         {
-            ("reserve deny rolls back for doctrine and role reserve", ReserveDenyRollsBackForDoctrineAndRoleReserve),
+            ("reserve deny rolls back for role reserve", ReserveDenyRollsBackForRoleReserve),
+            ("reserve courier parity removes vanilla's path only for an executing plan", CourierParityRemovesPathOnlyForExecutingPlan),
             ("reserve courier parity inline uses order delay", ReserveCourierParityInlineUsesOrderDelay),
             ("reserve courier parity skipped under safety claim", ReserveCourierParitySkippedUnderSafetyClaim),
             ("withdrawal fallback is a safety move validated", WithdrawalFallbackIsSafetyMoveValidated),
@@ -36,32 +37,23 @@ internal static class ReserveMigrationTests
 
     // ---------------------------------------------------------------- #59 + B8
 
-    private static void ReserveDenyRollsBackForDoctrineAndRoleReserve()
+    private static void ReserveDenyRollsBackForRoleReserve()
     {
-        // B8's doctrine deny (DoctrineConsumerDecisions.DecideReserve == Deny) now
-        // denies inside #59 for any resolved role, and without a resolution.
-        AssertEqual(TacticalReserveCommitGate.Action.Deny,
-            Gate(Resolved(DirectChildRole.Main), doctrineDeny: true).Action, "doctrine deny on a main-role group");
-        AssertEqual(TacticalReserveCommitGate.Action.Deny,
-            Gate(NotFound(), doctrineDeny: true).Action, "doctrine deny without a command-node resolution");
-        AssertEqual(TacticalReserveCommitGate.Action.Deny,
-            Gate(Resolved(DirectChildRole.Reserve)).Action, "role reserve still holds");
-        AssertEqual("doctrine-reserve-hold",
-            Gate(Resolved(DirectChildRole.Main), doctrineDeny: true).Reason, "doctrine reason");
-
-        // A reserve the allocator released goes, whatever the stale ledger doctrine says.
+        // A Reserve role holds (the deleted B8 doctrine deny implied the same role:
+        // DecideReserve denies only order.Role == Reserve, and order.Role is the ledger
+        // node's role, which HeldResolution reads first).
+        AssertEqual(TacticalReserveCommitGate.Action.Deny, Gate(Resolved(DirectChildRole.Reserve)).Action, "role reserve holds");
+        AssertEqual("role-reserve-hold", Gate(Resolved(DirectChildRole.Reserve)).Reason, "reason");
         AssertEqual(TacticalReserveCommitGate.Action.Allow,
-            Gate(Resolved(DirectChildRole.Reserve), doctrineDeny: true, released: true).Action, "released beats stale doctrine");
-        // Player-owned and no-vanilla-commit stay observe-only.
-        AssertEqual(TacticalReserveCommitGate.Action.Observe,
-            Gate(Resolved(DirectChildRole.Main), doctrineDeny: true, playerControlled: true).Action, "player");
-        AssertEqual(TacticalReserveCommitGate.Action.Observe,
-            Gate(Resolved(DirectChildRole.Main), doctrineDeny: true, vanillaCommitted: false).Action, "no vanilla commit");
-        // No deny opinion: vanilla's commit stands.
+            Gate(Resolved(DirectChildRole.Reserve), released: true).Action, "released by the allocator");
         AssertEqual(TacticalReserveCommitGate.Action.Allow,
-            Gate(Resolved(DirectChildRole.Main)).Action, "main, no doctrine deny");
+            Gate(Resolved(DirectChildRole.Reserve), engaged: true).Action, "already engaged");
         AssertEqual(TacticalReserveCommitGate.Action.Observe,
-            Gate(NotFound()).Action, "nothing resolved, no doctrine");
+            Gate(Resolved(DirectChildRole.Reserve), playerControlled: true).Action, "player-owned unit or group");
+        AssertEqual(TacticalReserveCommitGate.Action.Observe,
+            Gate(Resolved(DirectChildRole.Reserve), vanillaCommitted: false).Action, "no vanilla commit");
+        AssertEqual(TacticalReserveCommitGate.Action.Allow, Gate(Resolved(DirectChildRole.Main)).Action, "main role");
+        AssertEqual(TacticalReserveCommitGate.Action.Observe, Gate(NotFound()).Action, "nothing resolved");
 
         // The rollback set: units vanilla gave a direct path (paths rose, no courier queued).
         AssertTrue(TacticalReserveCommitGate.VanillaCommittedUnit(0, 1, 0, 0, useOrderDelays: true), "direct path");
@@ -76,6 +68,7 @@ internal static class ReserveMigrationTests
         };
         CommandIntentResolution held = TacticalReserveCommitGate.HeldResolution(ops, Reserve, 0, Resolved(DirectChildRole.SupportMain));
         AssertTrue(held.Found, "ledger state found");
+        AssertEqual("operations-ledger-command-state:SupportingAttack:ReserveWait", held.Reason, "reason keeps role and task");
         AssertEqual(DirectChildRole.Reserve, held.Intent.Role, "ReserveWait task holds in reserve");
         AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain)), "allocator released it");
         CommandIntentResolution noLedger = TacticalReserveCommitGate.HeldResolution(ops, LeftLine, 0, Resolved(DirectChildRole.Fix));
@@ -149,6 +142,34 @@ internal static class ReserveMigrationTests
             Parity(arbiter, intent, afterPaths: 0), "vanilla added no path (or #59 rolled it back)");
     }
 
+    private static void CourierParityRemovesPathOnlyForExecutingPlan()
+    {
+        BattleOrderIntent intent = TacticalReserveCommitGate.CourierParityIntent(Leaf, 520f, -480f, -1f);
+        OrderExecutor executor = NewExecutor(new Terrain());
+
+        // A plan that executes: vanilla's immediate path goes, the delayed order replaces it.
+        ExecutionPlan fresh = executor.Plan(LeafSnapshot(morale: 1f), intent, 1.0);
+        AssertTrue(fresh.Execute, "fresh plan executes");
+        AssertTrue(TacticalReserveCommitGate.RemoveVanillaPath(TacticalReserveCommitGate.CourierParityAction.Convert, fresh), "remove then execute");
+
+        // The unit already stands at the target with that waypoint: the plan dedupes,
+        // so vanilla's commit is left untouched rather than lost.
+        BattleSnapshot there = LeafSnapshot(morale: 1f, leafX: 515f, leafZ: -485f, waypointX: 520f, waypointZ: -480f);
+        ExecutionPlan duplicate = executor.Plan(there, intent, 1.0);
+        AssertFalse(duplicate.Execute, "duplicate refused");
+        AssertEqual(SkipReason.Duplicate, duplicate.Skip, "skip reason");
+        AssertFalse(TacticalReserveCommitGate.RemoveVanillaPath(TacticalReserveCommitGate.CourierParityAction.Convert, duplicate),
+            "refused plan keeps vanilla's path");
+
+        // A water target the validator cannot step back from: refused, path kept.
+        ExecutionPlan water = NewExecutor(new Terrain { WaterBelowZ = float.MaxValue }).Plan(LeafSnapshot(morale: 1f), intent, 1.0);
+        AssertEqual(SkipReason.Water, water.Skip, "water");
+        AssertFalse(TacticalReserveCommitGate.RemoveVanillaPath(TacticalReserveCommitGate.CourierParityAction.Convert, water), "water keeps path");
+
+        AssertFalse(TacticalReserveCommitGate.RemoveVanillaPath(TacticalReserveCommitGate.CourierParityAction.Leave, fresh),
+            "screened out: never removed");
+    }
+
     // ---------------------------------------------------------------- withdrawal
 
     private static void WithdrawalFallbackIsSafetyMoveValidated()
@@ -187,6 +208,13 @@ internal static class ReserveMigrationTests
         BattleSnapshot moving = LeafSnapshot(morale: 0.3f, paths: 1);
         AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
             WithdrawalIntentProducer.PlanUnit(moving, moving.IndexOfOwn(Leaf), Settings(), out _, out _), "moving");
+        // A move the validator refuses (water everywhere) is not produced, nor its behavior.
+        var refused = WithdrawalIntentProducer.PlanUnit(s, leaf, Settings(new Terrain { WaterBelowZ = float.MaxValue }),
+            out BattleOrderIntent noMove, out BattleOrderIntent noBehavior);
+        AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None, refused, "validator-refused fallback");
+        AssertEqual(0, noMove.GroupId, "no move");
+        AssertEqual(0, noBehavior.GroupId, "no combat behavior 2 for a move that will not happen");
+
         BattleSnapshot steady = LeafSnapshot(morale: 0.9f);
         AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
             WithdrawalIntentProducer.PlanUnit(steady, steady.IndexOfOwn(Leaf), Settings(), out _, out _), "steady");
@@ -242,6 +270,18 @@ internal static class ReserveMigrationTests
         AssertTrue(WithdrawalIntentProducer.TryRetreatBearing(blind, blind.IndexOfOwn(Leaf), out float rear), "front axis");
         AssertNear(180f, rear, 0.01f, "front axis heading + 180");
 
+        // A remembered enemy is not a bearing source, however close: the closest VISIBLE one is.
+        BattleSnapshot mixed = LeafSnapshot(morale: 0.3f, enemyVisible: false);
+        mixed.AddObservation(new EnemyObservation { InstanceId = 901, X = 560f, Z = -500f, Strength = 500f, State = ObservationState.Remembered, Confidence01 = 1f });
+        mixed.AddObservation(new EnemyObservation { InstanceId = Enemy, X = 500f, Z = -400f, Strength = 500f, State = ObservationState.Visible, Confidence01 = 1f });
+        mixed.SetClosestVisibleEnemy(1, 1, 100f);
+        AssertTrue(WithdrawalIntentProducer.TryRetreatBearing(mixed, 1, out float awayVisible), "visible enemy present");
+        AssertNear(180f, awayVisible, 0.01f, "away from the visible enemy, not the closer remembered one");
+        BattleSnapshot rememberedOnly = LeafSnapshot(morale: 0.3f, enemyVisible: false);
+        rememberedOnly.AddObservation(new EnemyObservation { InstanceId = 901, X = 560f, Z = -500f, Strength = 500f, State = ObservationState.Remembered, Confidence01 = 1f });
+        AssertTrue(WithdrawalIntentProducer.TryRetreatBearing(rememberedOnly, 1, out float awayAxis), "front axis");
+        AssertNear(180f, awayAxis, 0.01f, "only remembered enemies: away from the front axis");
+
         BattleSnapshot none = LeafSnapshot(morale: 0.3f, enemyVisible: false, axis: false);
         AssertFalse(WithdrawalIntentProducer.TryRetreatBearing(none, none.IndexOfOwn(Leaf), out _), "no direction known");
         AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
@@ -280,12 +320,14 @@ internal static class ReserveMigrationTests
             ChildIntent("child-" + LeftLine, DirectChildRole.Main, primarySector: 0, axisSector: 0),
             ChildIntent("child-" + Reserve, DirectChildRole.Fix, primarySector: 2, axisSector: leftSector),
         };
-        AssertTrue(TacticalReserveCommitGate.TryReleaseSector(intents, Reserve, out int band), "found");
+        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve, out int band), "found");
         AssertEqual(leftSector, band, "crisis band");
-        AssertFalse(TacticalReserveCommitGate.TryReleaseSector(intents, Reserve + 1000, out _), "unknown child");
-        AssertFalse(TacticalReserveCommitGate.TryReleaseSector(new[] { ChildIntent("child-" + Reserve + "0", DirectChildRole.Fix, 0, 1) },
+        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve + 1000, out _), "unknown child");
+        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("child-" + Reserve, DirectChildRole.Reserve, 0, 1) },
+            Reserve, out _), "allocator still holds it in reserve");
+        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("child-" + Reserve + "0", DirectChildRole.Fix, 0, 1) },
             Reserve, out _), "prefix of a longer id is not a match");
-        AssertTrue(TacticalReserveCommitGate.TryReleaseSector(new[] { ChildIntent("synth-army--" + Reserve, DirectChildRole.Fix, 0, 3) },
+        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("synth-army--" + Reserve, DirectChildRole.Fix, 0, 3) },
             -Reserve, out int synth) && synth == 3, "synthetic army id, negative instance id");
 
         BattleSnapshot owned = ArmySnapshot(reserveFlags: UnitFlags.PlayerOwned);
@@ -313,6 +355,10 @@ internal static class ReserveMigrationTests
             "standing short but not interrupted: #61's move owns it");
         AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(ArmySnapshot(reserveFlags: UnitFlags.PathInterrupted, reserveQueued: 1),
             reserve, order, out _), "a courier order is already in flight");
+        AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(ArmySnapshot(reserveFlags: UnitFlags.PathInterrupted | UnitFlags.PlayerOwned),
+            reserve, order, out _), "player-owned group: never re-issued");
+        AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(ArmySnapshot(reserveFlags: UnitFlags.PathInterrupted | UnitFlags.Feud),
+            reserve, order, out _), "feuding group");
         AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(stalled, reserve, FallbackOrder(500f, -830f), out _), "already there");
         AssertFalse(WithdrawalIntentProducer.TryPlanStalledFallback(stalled, reserve,
             TestFixtures.DoctrineOrder(CommandTaskType.FallBackToLine), out _), "no fallback target");
@@ -345,6 +391,12 @@ internal static class ReserveMigrationTests
         AssertNear(500f, TacticalReserveCommitGate.VisibleAngleStrength(s, leaf), 0.01f, "sum of the fog-honest slices");
         AssertEqual(0f, TacticalReserveCommitGate.VisibleAngleStrength(s, -1), "unknown unit");
         AssertEqual(0f, TacticalReserveCommitGate.VisibleAngleStrength(null, leaf), "no snapshot: nothing seen");
+
+        // #59's odds: own strength bucket over that visible pressure, nothing else.
+        s.Own[leaf].GroupOwnInRange = 1000;
+        s.Own[leaf].GroupStrengthAiGroup = 800;
+        AssertNear(2f, TacticalReserveCommitGate.LocalOdds(s, leaf), 0.001f, "1000 / 500");
+        AssertEqual(1f, TacticalReserveCommitGate.LocalOdds(LeafSnapshot(morale: 1f), leaf), "nothing visible: even");
     }
 
     private static void WithdrawalReadsOwnSideCoverAndRouts()
@@ -357,6 +409,13 @@ internal static class ReserveMigrationTests
         BattleSnapshot exposed = LeafSnapshot(morale: 0.45f, flank: 50f, cover: 0.6f, coverObject: 3);
         AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.Fallback,
             WithdrawalIntentProducer.PlanUnit(exposed, exposed.IndexOfOwn(Leaf), Settings(), out _, out _), "coverobject 3 is no cover");
+
+        // Under fire needs the range-list enemy to be visible: the same picture with that
+        // enemy hidden (only remembered) and another visible one is not under fire,
+        // so morale 0.45 above the 0.4 trigger holds.
+        BattleSnapshot hidden = LeafSnapshot(morale: 0.45f, flank: 50f, rangeEnemyVisible: false);
+        AssertEqual(TacticalWithdrawalDoctrine.FallbackKind.None,
+            WithdrawalIntentProducer.PlanUnit(hidden, hidden.IndexOfOwn(Leaf), Settings(), out _, out _), "hidden range enemy: not under fire");
 
         // friendlyroutednear is a morale penalty in [-1, 0] (128253): its magnitude is the pressure.
         AssertEqual(0.5f, WithdrawalIntentProducer.FriendlyRoutPressure(-0.5f), "magnitude");
@@ -435,14 +494,14 @@ internal static class ReserveMigrationTests
 
     private static TacticalReserveCommitGate.Decision Gate(
         CommandIntentResolution resolution,
-        bool doctrineDeny = false,
         bool released = false,
         bool playerControlled = false,
-        bool vanillaCommitted = true)
+        bool vanillaCommitted = true,
+        bool engaged = false)
     {
         return TacticalReserveCommitGate.Decide(new TacticalReserveCommitGate.Input(
-            vanillaCommitted, resolution, playerControlled, committedUnitAlreadyEngaged: false,
-            ownStrengthRatio: 1f, localOdds: 1f, reserveReleased: released, doctrineDeny: doctrineDeny));
+            vanillaCommitted, resolution, playerControlled, committedUnitAlreadyEngaged: engaged,
+            ownStrengthRatio: 1f, localOdds: 1f, reserveReleased: released));
     }
 
     private static TacticalReserveCommitGate.CourierParityAction Parity(
@@ -473,10 +532,11 @@ internal static class ReserveMigrationTests
         return TestFixtures.DoctrineOrder(CommandTaskType.FallBackToLine, fallback: DoctrineTargetPoint.From(x, z));
     }
 
-    private static WithdrawalIntentProducer.Settings Settings()
+    private static WithdrawalIntentProducer.Settings Settings(ITerrainProbe terrain = null)
     {
         return new WithdrawalIntentProducer.Settings(
-            fallbackDistance: 100f, retreatDistance: 200f, moraleTriggerByStance: new[] { 0.4f, 0.4f, 0.4f, 0.4f, 0.4f });
+            fallbackDistance: 100f, retreatDistance: 200f, moraleTriggerByStance: new[] { 0.4f, 0.4f, 0.4f, 0.4f, 0.4f },
+            terrain: terrain, mapSizeX: 2000f, mapSizeZ: 2000f);
     }
 
     private static OrderExecutor NewExecutor(ITerrainProbe terrain)
@@ -492,7 +552,8 @@ internal static class ReserveMigrationTests
     private static BattleSnapshot LeafSnapshot(
         float morale, float flank = 0f, int paths = 0, UnitFlags leafFlags = UnitFlags.None,
         bool enemyVisible = true, bool axis = true, int groupStance = 1, UnitFlags groupFlags = UnitFlags.None,
-        float cover = 0f, int coverObject = 0, float friendlyRoutedNear = 0f)
+        float cover = 0f, int coverObject = 0, float friendlyRoutedNear = 0f, bool rangeEnemyVisible = true,
+        float leafX = 500f, float leafZ = -500f, float waypointX = 0f, float waypointZ = 0f)
     {
         var s = new BattleSnapshot();
         s.BeginBuild(1, 0, 0, 1, 1.0);
@@ -505,7 +566,7 @@ internal static class ReserveMigrationTests
         s.AddOwn(new UnitRecord
         {
             CoverValue = cover, CoverObject = coverObject, FriendlyRoutedNear = friendlyRoutedNear,
-            InstanceId = Leaf, UnitTyp = 0, X = 500f, Z = -500f, RotationY = 45f, Strength = 400,
+            InstanceId = Leaf, UnitTyp = 0, X = leafX, Z = leafZ, LastWaypointX = waypointX, LastWaypointZ = waypointZ, RotationY = 45f, Strength = 400,
             Morale = morale, BattleStartMorale = 1f, Fatigue = 0.1f, RegimentPaths = paths, CombatBehaviorOrdered = 1,
             FirstEnemyInRangeId = Enemy,
             Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry | leafFlags,
@@ -514,11 +575,19 @@ internal static class ReserveMigrationTests
         s.IndexCommandTree(null);
         if (enemyVisible)
         {
+            // rangeEnemyVisible false: the range-list enemy is only remembered and a
+            // different enemy at the same place is the visible one.
             s.AddObservation(new EnemyObservation
             {
-                InstanceId = Enemy, UnitTyp = 0, X = 500f, Z = -400f, Strength = 500f,
+                InstanceId = rangeEnemyVisible ? Enemy : 902, UnitTyp = 0, X = 500f, Z = -400f, Strength = 500f,
                 State = ObservationState.Visible, Confidence01 = 1f,
             });
+            if (!rangeEnemyVisible)
+                s.AddObservation(new EnemyObservation
+                {
+                    InstanceId = Enemy, UnitTyp = 0, X = 500f, Z = -400f, Strength = 500f,
+                    State = ObservationState.Remembered, Confidence01 = 1f,
+                });
             s.SetClosestVisibleEnemy(1, 0, 100f);
         }
         if (flank > 0f) s.SetFlankPressure(1, 0, flank);

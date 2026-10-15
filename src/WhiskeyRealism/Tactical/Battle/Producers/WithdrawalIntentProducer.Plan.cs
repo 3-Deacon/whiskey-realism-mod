@@ -58,19 +58,29 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static float[] _slices = new float[0];
 
-        /// <summary>Vanilla distances and the morale trigger per group stance (GamePrefs).</summary>
+        /// <summary>
+        /// Vanilla distances and the morale trigger per group stance (GamePrefs), and
+        /// the executor's waypoint seams (terrain probe, map size; null / 0 = unknown).
+        /// </summary>
         internal readonly struct Settings
         {
-            public Settings(float fallbackDistance, float retreatDistance, float[] moraleTriggerByStance)
+            public Settings(float fallbackDistance, float retreatDistance, float[] moraleTriggerByStance,
+                ITerrainProbe terrain = null, float mapSizeX = 0f, float mapSizeZ = 0f)
             {
                 FallbackDistance = fallbackDistance;
                 RetreatDistance = retreatDistance;
                 MoraleTriggerByStance = moraleTriggerByStance;
+                Terrain = terrain;
+                MapSizeX = mapSizeX;
+                MapSizeZ = mapSizeZ;
             }
 
             public float FallbackDistance { get; }
             public float RetreatDistance { get; }
             public float[] MoraleTriggerByStance { get; }
+            public ITerrainProbe Terrain { get; }
+            public float MapSizeX { get; }
+            public float MapSizeZ { get; }
         }
 
         /// <summary>
@@ -128,6 +138,17 @@ namespace WhiskeyRealism.Tactical.Battle
                 Task = CommandTaskType.FallBackToLine,
                 Reason = fallback ? "withdrawal-fallback" : "withdrawal-retreat",
             };
+            // Vanilla sets combat behavior 2 right after its fallback path (CheckLineFallbacks
+            // 5176-5180) because RegimentSetPath never refuses. The executor's Move can:
+            // a move WaypointValidator or the silent-exit pre-check would refuse is not
+            // produced, and neither is its behavior, so a unit never switches to
+            // fallback fire while standing.
+            if (SilentExitPrecheck.Check(rec, OrderChannel.Move) != SkipReason.None ||
+                WaypointValidator.Validate(s, index, move, settings.MapSizeX, settings.MapSizeZ, settings.Terrain, out _, out _) != SkipReason.None)
+            {
+                move = default;
+                return TacticalWithdrawalDoctrine.FallbackKind.None;
+            }
             if (fallback)
             {
                 behavior = new BattleOrderIntent
@@ -168,7 +189,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             move = default;
             if (s == null || groupIndex < 0 || groupIndex >= s.OwnCount) return false;
-            if (order.Task != CommandTaskType.FallBackToLine || !order.FallbackTarget.HasValue) return false;
+            if (!order.HasPurpose || order.Task != CommandTaskType.FallBackToLine || !order.FallbackTarget.HasValue) return false;
             UnitRecord rec = s.Own[groupIndex];
             UnitFlags f = rec.Flags;
             if ((f & (UnitFlags.PlayerOwned | UnitFlags.Feud | UnitFlags.Routed)) != 0) return false;

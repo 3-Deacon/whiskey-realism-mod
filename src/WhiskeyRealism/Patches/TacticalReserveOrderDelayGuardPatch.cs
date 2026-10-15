@@ -14,17 +14,21 @@ namespace WhiskeyRealism.Patches
     // immune to order delay there; doublequick 6171). When order delays are
     // enabled, this Postfix removes the immediate path and re-issues the same
     // target through the battle-core inline executor
-    // (OrderExecutorRuntime.ExecuteInline, plan D4) as a ReserveCourierParity
+    // (OrderExecutorRuntime.TryPlanInline + ExecutePlannedInline, plan D4) as a ReserveCourierParity
     // Support Move with UseOrderDelay and DoubleQuick: BattleUnits.SetWaypoint
     // (91232) then queues the courier (AddToOrderQueue 91483-91510). Only units
     // SetWaypoint actually queues are converted (it forces the delay off without a
     // groupposition, 91449, or for unittyp 5 / a parentregiment, 91463;
     // BattleWriterPolicy.ReserveDelayConversionApplies).
     //
-    // TacticalReserveCommitGate.PlanCourierParity decides before the path is
-    // removed: a unit Whiskey may not write (W&L player-owned, feud), one missing
-    // from the side's battle snapshot, or one whose Move channel a higher-priority
-    // arbiter claim owns keeps vanilla's own move untouched. Vanilla picks the reserve itself (PerformAIActionDLCWL 6129).
+    // Nothing is removed until the re-issue is known to execute:
+    // TacticalReserveCommitGate.PlanCourierParity screens first (a unit Whiskey may
+    // not write, W&L player-owned or feud; one missing from the side's battle
+    // snapshot; a higher-priority arbiter claim on its Move channel), then
+    // OrderExecutorRuntime.TryPlanInline runs the executor's plan (chain,
+    // WaypointValidator, silent-exit pre-check, dedupe, cooldown). Only a plan that
+    // executes removes vanilla's path (RemoveVanillaPath) before
+    // ExecutePlannedInline; any refusal keeps vanilla's own move untouched. Vanilla picks the reserve itself (PerformAIActionDLCWL 6129).
     //
     // No stance is written: the reserve is an attached sub-unit (ChangeStance
     // 90772 would set permanentlydetached).
@@ -134,9 +138,20 @@ namespace WhiskeyRealism.Patches
                 useOrderDelays);
             if (action != TacticalReserveCommitGate.CourierParityAction.Convert) return;
 
+            // Plan the re-issue first (claim, guard, chain, validation, silent-exit
+            // pre-check, dedupe, cooldown). Vanilla's path is removed only when the
+            // delayed order will be issued; a refused plan leaves vanilla's commit.
+            bool planned = OrderExecutorRuntime.TryPlanInline(battleUnits, unit, intent, out ExecutionPlan plan, out OrderOutcome outcome);
+            if (!TacticalReserveCommitGate.RemoveVanillaPath(action, planned ? plan : default))
+            {
+                OnceLog.Info(
+                    "tactical-reserve-delay-guard:refused",
+                    "[TacticalReserveOrderDelayGuard] delayed re-issue refused, vanilla's reserve move kept reason=" + outcome.Reason);
+                return;
+            }
+
             BattleReserveCommitGatePatch.RemoveAddedPaths(unit, before.Paths, afterPaths);
-            bool issued = OrderExecutorRuntime.ExecuteInline(battleUnits, unit, intent, out OrderOutcome outcome);
-            if (issued)
+            if (OrderExecutorRuntime.ExecutePlannedInline(battleUnits, unit, intent, plan, ref outcome))
             {
                 OnceLog.Info(
                     "tactical-reserve-delay-guard:converted",
@@ -148,11 +163,9 @@ namespace WhiskeyRealism.Patches
             }
             else
             {
-                // The inline pipeline skipped it after the path was removed (water,
-                // duplicate, cooldown): the commit lapses like any skipped order.
-                OnceLog.Info(
-                    "tactical-reserve-delay-guard:skipped",
-                    "[TacticalReserveOrderDelayGuard] delayed re-issue skipped reason=" + outcome.Reason);
+                OnceLog.Warning(
+                    "tactical-reserve-delay-guard:execute-failed",
+                    "[TacticalReserveOrderDelayGuard] planned delayed re-issue did not reach SetWaypoint; the reserve move lapses");
             }
         }
 

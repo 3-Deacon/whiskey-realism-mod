@@ -39,10 +39,14 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 if (snapshot == null || sink == null || !Enabled()) return;
 
+                WaypointValidatorRuntime.TryMapSize(out float sizeX, out float sizeZ);
                 var settings = new Settings(
                     GamePrefs.standardfallbackdistance,
                     GamePrefs.standardretreatdistance,
-                    GamePrefs.moraletriggerforfallbackifenemyclose);
+                    GamePrefs.moraletriggerforfallbackifenemyclose,
+                    WaypointValidatorRuntime.Instance,
+                    sizeX,
+                    sizeZ);
                 UnitRecord[] own = snapshot.Own;
                 for (int i = 0; i < snapshot.OwnCount; i++)
                 {

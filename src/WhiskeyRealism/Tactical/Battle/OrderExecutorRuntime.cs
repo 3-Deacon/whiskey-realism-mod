@@ -161,10 +161,26 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>
         /// D4: a patch acting inside a vanilla micro call (#56 courier parity, #42
         /// feud replay) runs its intent through the same pipeline, refused under a
-        /// higher-priority arbiter claim on the same (group, channel).
+        /// higher-priority arbiter claim on the same (group, channel). Composed of
+        /// TryPlanInline and ExecutePlannedInline.
         /// </summary>
         internal static bool ExecuteInline(BattleUnits bunits, Regiment group, in BattleOrderIntent intent, out OrderOutcome outcome)
         {
+            if (!TryPlanInline(bunits, group, intent, out ExecutionPlan plan, out outcome)) return false;
+            return ExecutePlannedInline(bunits, group, intent, plan, ref outcome);
+        }
+
+        /// <summary>
+        /// The inline pipeline up to the vanilla call: claim check, then guard, chain,
+        /// waypoint validation, silent-exit pre-check, dedupe and cooldown
+        /// (OrderExecutor.Plan) against the side's latest snapshot. Writes nothing, so
+        /// a caller (#56) can decide whether to touch vanilla state before executing.
+        /// The plan's targets stay valid until the executor's next Plan call.
+        /// </summary>
+        internal static bool TryPlanInline(BattleUnits bunits, Regiment group, in BattleOrderIntent intent,
+            out ExecutionPlan plan, out OrderOutcome outcome)
+        {
+            plan = default;
             outcome = new OrderOutcome
             {
                 GroupId = intent.GroupId, Channel = intent.Channel, Kind = OrderOutcomeKind.Skipped, Source = intent.Source,
@@ -185,15 +201,36 @@ namespace WhiskeyRealism.Tactical.Battle
                 double now = TacticalDoctrineTime.NowBattleHours;
                 outcome.AtHours = now;
                 BindForTick(executor);
-                ExecutionPlan plan = executor.Plan(view, intent, now);
+                plan = executor.Plan(view, intent, now);
                 if (!plan.Execute)
                 {
                     outcome.Kind = plan.Skip == SkipReason.Duplicate ? OrderOutcomeKind.Deduped : OrderOutcomeKind.Skipped;
                     outcome.Reason = plan.Skip;
                     return false;
                 }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                plan = default;
+                OnceLog.Warning("tactical-battle-core:inline-failed",
+                    "[OrderArbiter] ExecuteInline threw: " + ex.GetType().Name + " " + ex.Message);
+                return false;
+            }
+        }
 
-                int executed = Execute(bunits, view, executor, intent, plan, now);
+        /// <summary>Issues a plan TryPlanInline returned for the same group and intent.</summary>
+        internal static bool ExecutePlannedInline(BattleUnits bunits, Regiment group, in BattleOrderIntent intent,
+            in ExecutionPlan plan, ref OrderOutcome outcome)
+        {
+            try
+            {
+                if (!plan.Execute || bunits == null || (UnityEngine.Object)group == null) return false;
+                int alliance = group.alliance;
+                OrderExecutor executor = OrderExecutor.ForAlliance(alliance);
+                if (executor == null || !BattleCore.TryGetSnapshot(alliance, out BattleSnapshot view)) return false;
+
+                int executed = Execute(bunits, view, executor, intent, plan, outcome.AtHours);
                 outcome.Kind = executed > 0 ? OrderOutcomeKind.Issued : OrderOutcomeKind.Skipped;
                 return executed > 0;
             }

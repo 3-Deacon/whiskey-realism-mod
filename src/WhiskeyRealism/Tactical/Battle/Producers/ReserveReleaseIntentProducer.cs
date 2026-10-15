@@ -54,10 +54,8 @@ namespace WhiskeyRealism.Tactical.Battle
                     int index = snapshot.IndexOfOwn(id);
                     if (index < 0) continue;
 
-                    CommandIntentResolution allocator = army.ResolveCommandIntentForGroup(0, id);
-                    CommandIntentResolution held = TacticalReserveCommitGate.HeldResolution(operations, id, 0, allocator);
-                    if (!TacticalReserveCommitGate.ReleasedByAllocator(held, allocator)) continue;
-                    if (!TacticalReserveCommitGate.TryReleaseSector(army.CurrentDirectChildIntents, id, out int sector)) continue;
+                    // No per-tick strings: the direct child's intent is matched by id in place.
+                    if (!TacticalReserveCommitGate.TryReleasedDirectChild(army.CurrentDirectChildIntents, id, out int sector)) continue;
                     if (TacticalReserveCommitGate.TryPlanRelease(snapshot, index, sector, out BattleOrderIntent move))
                         sink.Submit(move);
                 }
