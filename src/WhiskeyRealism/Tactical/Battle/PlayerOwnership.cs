@@ -18,6 +18,12 @@
 //     ai_vs_ai / debug_allarmiesai; otherwise the player alliance is the human's.
 //   Regiment.ai_feudstance: −1 = no feud (112841, 116559); CalculateFeud sets
 //     0..3 (116613); feuding groups run in the feud AIBattle (UpdateMicroAI 5549).
+//     Feud is a GROUP state: ActivateFeud (116613) sets it on the group and its
+//     AddUnitToPool(overwriteaigroups: true) points every descendant's groupaiobject
+//     at that group (7637-7648); the micro AI tests aigroup.ai_feudstance for each
+//     unit (4917/4922, 3789/3834/3890/3928). So a unit is feuding when it, its AI
+//     group (groupaiobject) or a command ancestor (ParentIndex) feuds
+//     (ApplyFeudGroups; DirectFeudFlags for the Regiment overloads).
 //   Deployment detach 85321-85336 and TakeOverUnitBattle 164455: vanilla detaches
 //     the player's command and taken-over units (permanentlydetached);
 //     ChangeStance(…, 0) clears it (90786-90793).
@@ -180,6 +186,52 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             if (s == null) return;
             ApplyChainFlags(s.Own, s.OwnCount, input);
+        }
+
+        // Propagates Feud (set per unit by Compute from its own ai_feudstance) to every
+        // unit whose command ancestor (ParentIndex chain), AI group (UnitRecord.AiGroupId)
+        // or that group's ancestor feuds itself. Only the units' own marks are sources, so the result does
+        // not depend on roster order and never climbs to an ancestor. source is the
+        // caller's grow-only scratch.
+        public static void ApplyFeudGroups(BattleSnapshot s, ref bool[] source)
+        {
+            if (s == null) return;
+            UnitRecord[] own = s.Own;
+            int count = s.OwnCount;
+            if (source == null || source.Length < count) source = new bool[System.Math.Max(count, BattleSnapshot.InitialCapacity)];
+            bool any = false;
+            for (int i = 0; i < count; i++)
+            {
+                source[i] = (own[i].Flags & UnitFlags.Feud) != 0;
+                any |= source[i];
+            }
+            if (!any) return;
+            for (int i = 0; i < count; i++)
+            {
+                if (source[i]) continue;
+                int group = own[i].AiGroupId != 0 ? s.IndexOfOwn(own[i].AiGroupId) : -1;
+                if (SourceOnChain(own, count, own[i].ParentIndex, source) || SourceOnChain(own, count, group, source))
+                    own[i].Flags |= UnitFlags.Feud;
+            }
+        }
+
+        // The node or any of its ParentIndex ancestors feuds itself (bounded walk).
+        private static bool SourceOnChain(UnitRecord[] own, int count, int node, bool[] source)
+        {
+            for (int steps = 0; node >= 0 && node < count && steps < count; steps++)
+            {
+                if (source[node]) return true;
+                node = own[node].ParentIndex;
+            }
+            return false;
+        }
+
+        // The Regiment overloads' feud rule (no snapshot pass): the unit's own
+        // ai_feudstance, its AI group's (groupaiobject), or the side's snapshot Feud
+        // flag for it (the ancestor propagation of ApplyFeudGroups).
+        public static UnitFlags DirectFeudFlags(int aiFeudStance, int aiGroupFeudStance, bool snapshotFeud)
+        {
+            return aiFeudStance >= 0 || aiGroupFeudStance >= 0 || snapshotFeud ? UnitFlags.Feud : UnitFlags.None;
         }
     }
 }

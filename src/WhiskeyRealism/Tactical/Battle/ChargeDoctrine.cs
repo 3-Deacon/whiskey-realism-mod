@@ -1,7 +1,7 @@
-// Infantry charge doctrine (battle-core BC6a, spec §4b, plan decision D10). Pure: no Unity or
-// vanilla types. The runtime producer (BC6b, Producers/ChargeIntentProducer.cs) fills ChargeInput
-// from the BattleSnapshot and submits the result on the CombatBehavior channel, PerRegiment,
-// Priority.Executor, IntentSource.ChargeDoctrine.
+// Infantry charge doctrine (battle-core BC6a/BC6b, spec §4b, plan decision D10). Pure: no Unity or
+// vanilla types. The producer (BC6b, Producers/ChargeIntentProducer(.Plan).cs) fills ChargeInput
+// from the BattleSnapshot and its per-regiment memory and submits the result on the
+// CombatBehavior channel, PerRegiment, Priority.Executor, IntentSource.ChargeDoctrine.
 //
 // Vanilla (Assembly-CSharp build 14703111):
 // - AI infantry never charges on its own. MicroAICheckForCharges (4905, sole caller 5647) compares
@@ -16,7 +16,13 @@
 //   weightingfactorsformicroaicharge[0..3], 54777-54781). Pass: infantry with behavior 3 fires a
 //   volley first (122270: StopRegiment, which zeroes regimentpaths at 132397 and keeps movementmode
 //   3), then SetMovementMode(6) (122286). Fail: SetMovementMode() back to 0 and lastaichargetime
-//   stamped (122290-122292); with behavior still 3 and paths > 0 the 122214 gate re-arms next frame.
+//   stamped (122290-122292).
+// - SetMovementMode(3) zeroes combatbehavior and combatbehaviorordered of infantry/cavalry
+//   (124770-124774). So the 122214 gate fires once per behavior-3 write: an armed regiment reads
+//   behavior 0 in modes 3/6 (the producer remembers who armed it), a refusal does not re-arm
+//   (behavior is 0, not 3) and leaves the regiment at behavior 0 until it is re-ordered (the
+//   doctrine's revert restores 2), and the volley-before-the-charge branch (122267, needs
+//   combatbehavior == 3 while in mode 3) is unreachable for an AI regiment armed through the gate.
 // - The assault ends 6 -> 3: target routed (122298-122302) or target reached (122318-122326, old
 //   path restored). Mode 3 then stays armed: the 122226 evaluation does not read combatbehavior, and
 //   vanilla's intended disarm (4922-4924, movementmode == 3 && stance != 4 -> SetMovementMode())
@@ -49,11 +55,13 @@ namespace WhiskeyRealism.Tactical.Battle
         public bool Moving;                    // regimentpaths > 0
         public int MovementMode;
         // The producer saw this regiment's charge cycle end since the doctrine armed it: a
-        // ChargeCycleEnded transition between ticks, or vanilla's refusal stamp lastaichargetime
-        // (122292) newer than the charge order (the refusal re-arms within a frame, so a per-tick
-        // mode sample can miss it).
+        // ChargeCycleEnded transition between ticks, a new refusal stamp lastaichargetime (122292;
+        // arm and refusal can both happen between two ticks), or mode 0 without behavior 3.
         public bool ChargeResolved;
-        public int CurrentBehaviorOrdered;     // combatbehaviorordered; 3 means the doctrine armed it
+        // Producer memory: the executor issued the doctrine's behavior 3 to this regiment and
+        // nothing has reverted it. Not combatbehaviorordered, which vanilla zeroes on arming
+        // (124770-124774).
+        public bool WhiskeyArmed;
         public bool IsLeading;                 // IsLeading over the group's per-regiment target distances
         // Producer flag: the doctrine reverted a regiment it armed while in mode 6 and has not yet
         // disarmed it (PendingDisarmAfter).
@@ -61,6 +69,16 @@ namespace WhiskeyRealism.Tactical.Battle
         // Doctrine-clock seconds since the producer saw vanilla refuse a charge on odds (a new
         // lastaichargetime value, 122292); +Infinity when it never has.
         public double SecondsSinceLastAiChargeRefusal;
+        // RefusalBackoffSeconds(GamePrefs.timetorenewaichargecheck); below the floor (0 when
+        // unset) RearmAfterRefusalBattleSeconds applies.
+        public double RefusalBackoffSeconds;
+        // permanentlydetached, isrouted, markedforrout or a feuding group: MicroAICheckForCharges'
+        // own unit filter (4917, 4922) bars arming and the stance-drop cancel.
+        public bool ExcludedByVanillaFilter;
+        // GamePrefs.nomicroaichargeifunitisoutflanked (54784, "outflanked or receiving
+        // flanking fire") is set and the regiment's own outflanked or firefromflank is
+        // non-zero: no new charge.
+        public bool OutflankedBarsCharge;
     }
 
     public enum ChargeAction
@@ -82,14 +100,27 @@ namespace WhiskeyRealism.Tactical.Battle
         public const int MaxLeadingRegimentsPerGroup = 2;
         public const double RearmAfterRefusalBattleSeconds = 120.0;
 
+        // The refusal back-off: vanilla's intended renew interval
+        // (GamePrefs.timetorenewaichargecheck, game hours; battleprefs "a renewed charge
+        // order is not given if it was broken up before due to bad conditions", shipped
+        // 0.5 h) with RearmAfterRefusalBattleSeconds as the floor. Vanilla's own check
+        // (4917) is dead code and compares lastaichargetime < now + renew, which always
+        // holds. A non-finite or non-positive renew keeps the floor.
+        public static double RefusalBackoffSeconds(float vanillaRenewHours)
+        {
+            double renew = (double)vanillaRenewHours * 3600.0;
+            return renew > RearmAfterRefusalBattleSeconds && !double.IsInfinity(renew) ? renew : RearmAfterRefusalBattleSeconds;
+        }
+
         public const int NormalMovementMode = 0;
         public const int ArmedMovementMode = 3;   // set by the 122214 gate
         public const int AssaultMovementMode = 6; // set after vanilla's odds check passes (122286)
 
         // Phased on who armed the regiment and its movement mode:
         // - not armed by the doctrine: Charge only at movementmode 0 while moving (the 122214 gate)
-        //   with every condition met and the refusal backoff elapsed; a mode 3/6 the doctrine did
-        //   not arm is vanilla's own.
+        //   with every condition met and the refusal backoff elapsed; mode 3 with the group out of
+        //   assault is Disarm (vanilla's dead 4922-4924 cancel); any other mode 3/6 the doctrine
+        //   did not arm is vanilla's own (4919's intent: AI regiments charge in assault stance).
         // - armed, any mode: revert on a resolved cycle or a demoted stance (charge denial wins).
         // - armed, mode 6: hold; vanilla's odds check already passed and the assault resolves itself.
         // - armed, mode 0 (courier carrying the order) or 3 (armed, including the stationary volley
@@ -108,17 +139,29 @@ namespace WhiskeyRealism.Tactical.Battle
             if (input.WhiskeyArmedPendingDisarm)
                 return input.MovementMode == ArmedMovementMode ? ChargeAction.Disarm : ChargeAction.None;
 
-            bool armed = input.CurrentBehaviorOrdered == ChargeBehavior;
+            bool armed = input.WhiskeyArmed;
             if (!input.ConfigOn)
                 return armed ? RevertAt(input.MovementMode) : ChargeAction.None;
 
             if (!armed)
             {
+                if (input.ExcludedByVanillaFilter)
+                    return ChargeAction.None;
+                // Vanilla's intended stance-drop cancel (MicroAICheckForCharges 4922-4924, dead
+                // behind 4910): any AI regiment of the group in mode 3 while the group is out of
+                // assault. It also catches a charge courier that lands after the doctrine's
+                // revert (the 122214 gate fires on the next slow tick).
+                if (input.MovementMode == ArmedMovementMode && input.GroupAiStance >= 0 && input.GroupAiStance != AssaultStance)
+                    return ChargeAction.Disarm;
                 bool atGate = input.MovementMode == NormalMovementMode && input.Moving;
-                // Vanilla's own renew check (timetorenewaichargecheck, 4917) is dead code, and a
-                // refusal (122290-122292) would re-arm at the 122214 gate on the next frame.
-                bool backoffElapsed = input.SecondsSinceLastAiChargeRefusal >= RearmAfterRefusalBattleSeconds;
-                return atGate && backoffElapsed && input.GroupAiStance == AssaultStance && ConditionsHold(in input)
+                // Vanilla's own renew check (timetorenewaichargecheck, 4917) is dead code, so a
+                // fresh behavior 3 right after a refusal (122290-122292) would re-arm the 122214
+                // gate at once.
+                double backoff = input.RefusalBackoffSeconds > RearmAfterRefusalBattleSeconds
+                    ? input.RefusalBackoffSeconds
+                    : RearmAfterRefusalBattleSeconds;
+                bool backoffElapsed = input.SecondsSinceLastAiChargeRefusal >= backoff;
+                return atGate && backoffElapsed && !input.OutflankedBarsCharge && input.GroupAiStance == AssaultStance && ConditionsHold(in input)
                     ? ChargeAction.Charge
                     : ChargeAction.None;
             }

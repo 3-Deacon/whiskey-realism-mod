@@ -44,7 +44,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //     SetGroupFormation(modifylastwaypoint, newpath:false) wheel out of contact
     //     (91822-92110; skips ClearTargets, re-paths children to rotated slots).
     //   CombatBehavior: Util/TacticalCombatBehaviorWriter (ChangeCombatBehavior
-    //     90944-90966), per regiment for PerRegiment intents (D10).
+    //     90944-90966), per regiment for PerRegiment intents (D10); a charge Disarm
+    //     (IntentFlags.LeaveChargeMode) also leaves charge mode 3 with
+    //     Regiment.SetMovementMode(0) (124704; vanilla's refusal does the same, 122290).
     //   Stop: PerformActionForGroupForAllUnitsOnLevel(go, -1, "StopRegiment",
     //     StopOrder(true, true, false, false, true), sameaigrouponly:true) — the
     //     vanilla manual stop (117198).
@@ -351,11 +353,25 @@ namespace WhiskeyRealism.Tactical.Battle
                 case OrderChannel.Stance:
                     return TacticalStanceWriter.EnsureStance(bunits, unit, w.Value, w.Reason, w.Source);
                 case OrderChannel.CombatBehavior:
-                    if (!TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0)) return false;
+                {
+                    bool wrote = TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0);
+                    // Charge doctrine Disarm (BC6b): behavior alone never ends charge mode 3
+                    // (UpdateChargeTarget re-evaluates mode 3 whatever the behavior,
+                    // 122226), so leave it as vanilla's own refusal does (SetMovementMode()
+                    // 122290), also when behavior 2 was already ordered. Regiments only.
+                    if ((w.Flags & IntentFlags.LeaveChargeMode) != 0 &&
+                        unit.unittyp <= TacticalUnitType.MaxCombat &&
+                        unit.movementmode == ChargeDoctrine.ArmedMovementMode)
+                    {
+                        unit.SetMovementMode(ChargeDoctrine.NormalMovementMode);
+                        wrote = true;
+                    }
+                    if (!wrote) return false;
                     // The artillery doctrine's cease-bombardment: vanilla pairs 7 with
                     // bombardstarttime = 0 (CheckAIBombardment 3904).
                     if (BattleWriterPolicy.ResetsBombardStart(w)) unit.bombardstarttime = 0f;
                     return true;
+                }
                 case OrderChannel.Formation:
                     if ((w.Flags & (IntentFlags.Limber | IntentFlags.Unlimber)) != 0) return IssueMount(bunits, unit, (w.Flags & IntentFlags.Limber) != 0);
                     return IssueFormation(bunits, unit, w, nowHours, enemiesInRange, lastShapeWriteHours);

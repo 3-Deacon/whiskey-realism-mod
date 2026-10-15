@@ -62,6 +62,18 @@ namespace WhiskeyRealism.Tactical.Battle
         public float CoverValue;
         public int CoverObject;
         public float FriendlyRoutedNear;
+        // Charge doctrine inputs (BC6b): lastaichargetime (110798), the battle hour of
+        // vanilla's last odds refusal (UpdateChargeTarget 122290-122292; 0 = never), and
+        // outflanked (111488), the flank-sector code UpdateFlanking sets from the unit's
+        // own enemyinrangereg and facing (122959-123175; 0 = not outflanked).
+        public float LastAiChargeTime;
+        public int Outflanked;
+        // firefromflank (111492): flank code of fire this unit received recently
+        // (receivedfire within timetolastfireforflank, UpdateFlanking 123208-123264).
+        public int FireFromFlank;
+        // groupaiobject (110820) instance id, 0 = none: the unit's vanilla AI group, the
+        // group AddUnitToPool(overwriteaigroups) assigns to every descendant (7637-7648).
+        public int AiGroupId;
         public int ParentIndex;         // -1 = root
         public int FirstEnemyInRangeId; // enemyinrangereg[0], or 0
         public UnitFlags Flags;
@@ -162,6 +174,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // side's blockedcrossings, then SetWaypoint two frames later, UpdateOrders
         // 3382), as vanilla's own line-group moves over 150 m do (6953-6956).
         AvoidCoveredCrossings = 256,
+        // CombatBehavior, charge doctrine Disarm (BC6b): after the behavior write the
+        // executor also leaves charge movement mode 3 with SetMovementMode(0), as
+        // vanilla's own refusal does (122290); behavior alone never ends mode 3.
+        LeaveChargeMode = 512,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
