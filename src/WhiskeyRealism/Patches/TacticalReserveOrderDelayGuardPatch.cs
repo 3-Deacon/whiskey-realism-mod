@@ -1,10 +1,8 @@
 using System;
-using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
-using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
-using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -13,32 +11,35 @@ namespace WhiskeyRealism.Patches
 {
     // #56 — Vanilla AIBattle.CheckUseOfReserves (6062) issues reserve support
     // movement with a direct RegimentSetPath at decompile line 6170 (the AI is
-    // immune to order delay there). When order delays are enabled, this Postfix
-    // removes the immediate path and reissues the same target through
-    // BattleUnits.SetWaypoint(useorderdelay: true) (91232, courier queue
-    // 91455-91487) - only for units SetWaypoint actually queues (it forces
-    // the delay off without a groupposition, 91449, or for unittyp 5 / a
-    // parentregiment, 91463; BattleWriterPolicy.ReserveDelayConversionApplies).
-    // It also re-issues a stalled doctrine fallback for the group.
+    // immune to order delay there; doublequick 6171). When order delays are
+    // enabled, this Postfix removes the immediate path and re-issues the same
+    // target through the battle-core inline executor
+    // (OrderExecutorRuntime.TryPlanInline + ExecutePlannedInline, plan D4) as a ReserveCourierParity
+    // Support Move with UseOrderDelay and DoubleQuick: BattleUnits.SetWaypoint
+    // (91232) then queues the courier (AddToOrderQueue 91483-91510). Only units
+    // SetWaypoint actually queues are converted (it forces the delay off without a
+    // groupposition, 91449, or for unittyp 5 / a parentregiment, 91463;
+    // BattleWriterPolicy.ReserveDelayConversionApplies).
+    //
+    // Nothing is removed until the re-issue is known to execute:
+    // TacticalReserveCommitGate.PlanCourierParity screens first (a unit Whiskey may
+    // not write, W&L player-owned or feud; one missing from the side's battle
+    // snapshot; a higher-priority arbiter claim on its Move channel), then
+    // OrderExecutorRuntime.TryPlanInline runs the executor's plan (chain,
+    // WaypointValidator, silent-exit pre-check, dedupe, cooldown). Only a plan that
+    // executes removes vanilla's path (RemoveVanillaPath) before
+    // ExecutePlannedInline; any refusal keeps vanilla's own move untouched. Vanilla picks the reserve itself (PerformAIActionDLCWL 6129).
+    //
     // No stance is written: the reserve is an attached sub-unit (ChangeStance
-    // 90772 would set permanentlydetached), and vanilla's own group retreat
-    // (CheckIfOutflanked 6235) moves without a stance change either.
-    // Writes go through TacticalWriteGuard.CanWrite (Commander Mode Active,
-    // W&L/player protection); the snapshot is taken only when vanilla can
-    // commit a reserve this call (CheckUseOfReserves 6084-6113).
+    // 90772 would set permanentlydetached).
+    //
+    // Ordering: #59 (BattleReserveCommitGatePatch) runs first (Priority.High). A
+    // denied commit is rolled back to its pre-call path count, so it is not
+    // converted here. The stalled FallBackToLine re-issue that used to live here
+    // is the Withdrawal producer's (WithdrawalIntentProducer).
     [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
     internal static class TacticalReserveOrderDelayGuardPatch
     {
-        private static FieldInfo _bunitsField;
-
-        internal sealed class ReserveState
-        {
-            public UnitState[] Units;
-            public bool HasDoctrineDecision;
-            public DoctrineReserveDecision DoctrineDecision;
-            public CommandDoctrineOrder DoctrineOrder;
-        }
-
         internal readonly struct UnitState
         {
             public UnitState(Regiment unit, int paths, int queueCount)
@@ -54,162 +55,117 @@ namespace WhiskeyRealism.Patches
         }
 
         [HarmonyPrefix]
-        internal static void Prefix(Regiment aigroup, out ReserveState __state)
+        internal static void Prefix(Regiment aigroup, out UnitState[] __state)
         {
             using (TelemetryPerf.Scope("tactical.patch.reserve-order-delay-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("tactical.patch.reserve-order-delay-prefix");
                 __state = null;
-                if (!Enabled()) return;
-                if (!TacticalWriteGuard.CanWrite(aigroup)) return;
-
-                __state = BattleReserveCommitGatePatch.VanillaMayCommitReserve(aigroup)
-                    ? Snapshot(aigroup)
-                    : new ReserveState { Units = Array.Empty<UnitState>() };
-                if (TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder order))
+                try
                 {
-                    __state.HasDoctrineDecision = true;
-                    __state.DoctrineOrder = order;
-                    __state.DoctrineDecision = DoctrineConsumerDecisions.DecideReserve(
-                        order,
-                        BuildOperationalReserveInput(aigroup));
+                    if (!Enabled() || !SafeUseOrderDelays()) return;
+                    if (!TacticalWriteGuard.CanWrite(aigroup)) return;
+                    if (!BattleReserveCommitGatePatch.VanillaMayCommitReserve(aigroup)) return;
+                    __state = Snapshot(aigroup);
+                }
+                catch (Exception ex)
+                {
+                    __state = null;
+                    OnceLog.Warning(
+                        "tactical-reserve-delay-guard:prefix",
+                        "[TacticalReserveOrderDelayGuard] Prefix failed; vanilla reserve movement remains active: " + ex.Message);
                 }
             }
         }
 
         [HarmonyPostfix]
-        internal static void Postfix(AIBattle __instance, Regiment aigroup, ReserveState __state)
+        internal static void Postfix(Regiment aigroup, UnitState[] __state)
         {
             using (TelemetryPerf.Scope("tactical.patch.reserve-order-delay", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("tactical.patch.reserve-order-delay");
-            if (!Enabled()) return;
-
-            try
-            {
-                if (__state == null || __state.Units == null) return;
-
-                bool doctrineDeny = __state.HasDoctrineDecision &&
-                    __state.DoctrineDecision.Action == DoctrineConsumerAction.Deny;
-                bool doctrineFallback = __state.HasDoctrineDecision &&
-                    __state.DoctrineDecision.Action == DoctrineConsumerAction.Allow &&
-                    __state.DoctrineDecision.Task == CommandTaskType.FallBackToLine;
-                bool useOrderDelays = SafeUseOrderDelays();
-
-                if (doctrineDeny) return;
-                if (!useOrderDelays) return;
-
-                BattleUnits battleUnits = ResolveBattleUnits(__instance);
-                if (battleUnits == null) return;
-
-                for (int i = 0; i < __state.Units.Length; i++)
+                try
                 {
-                    UnitState before = __state.Units[i];
-                    Regiment unit = before.Unit;
-                    if (unit == null) continue;
-                    if (!BattleWriterPolicy.ReserveDelayConversionApplies(
-                            unit.groupposition != null,
-                            unit.unittyp,
-                            (UnityEngine.Object)unit.parentregiment != null))
-                        continue;
+                    if (__state == null || __state.Length == 0 || aigroup == null) return;
+                    if (!Enabled()) return;
 
-                    int afterPaths = SafePathCount(unit);
-                    int afterQueue = SafeQueueCount(unit);
-                    if (!TacticalReservePolicyLedger.ShouldDelayGuardConsumeReserveMovement(
-                        doctrineDeny,
-                        before.Paths,
-                        afterPaths,
-                        before.QueueCount,
-                        afterQueue,
-                        useOrderDelays))
-                    {
-                        continue;
-                    }
+                    BattleUnits battleUnits = BattleCoreTick.ResolveBattleUnits();
+                    if (battleUnits == null) return;
+                    OrderArbiter arbiter = OrderArbiter.ForAlliance(aigroup.alliance);
+                    if (arbiter == null) return;
+                    // The inline executor plans against the side's snapshot; without one
+                    // (orchestrator off, before its first tick) vanilla's move stays.
+                    if (!BattleCore.TryGetSnapshot(aigroup.alliance, out BattleSnapshot snapshot)) return;
+                    bool useOrderDelays = SafeUseOrderDelays();
 
-                    Vector3 target = unit.lastsetwaypointposition;
-                    float rotation = SafeTargetAngle(unit, target);
-                    RemoveAddedPaths(unit, before.Paths, afterPaths);
-
-                    battleUnits.SetWaypoint(
-                        unit,
-                        target,
-                        newpath: true,
-                        doublequick: true,
-                        manualfinalrotation: rotation,
-                        modifylastwaypoint: false,
-                        useorderdelay: true,
-                        timetomove: -1f,
-                        direction: -1,
-                        showmovementoptions: false,
-                        ignorebattlemonuments: false,
-                        groupmoveonly: false,
-                        ignoredisabledships: false,
-                        checkforreadiness: true,
-                        clearinterruptionpaths: true);
-                    unit.doublequick = true;
-
-                    OnceLog.Info(
-                        "tactical-reserve-delay-guard:converted",
-                        "[TacticalReserveOrderDelayGuard] converted direct reserve path to delayed order unit=" +
-                        SafeUnitName(unit) +
-                        " group=" + SafeUnitName(aigroup) +
-                        " paths=" + before.Paths + "->" + afterPaths +
-                        " queue=" + before.QueueCount + "->" + SafeQueueCount(unit));
+                    for (int i = 0; i < __state.Length; i++)
+                        Convert(battleUnits, arbiter, snapshot, aigroup, __state[i], useOrderDelays);
                 }
-
-                if (doctrineFallback)
-                    TryClearStalledFallbackOrder(battleUnits, aigroup, __state.DoctrineOrder);
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "tactical-reserve-delay-guard:failed",
+                        "[TacticalReserveOrderDelayGuard] failed; vanilla reserve movement remains active: " + ex.Message);
+                }
             }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-reserve-delay-guard:failed",
-                    "[TacticalReserveOrderDelayGuard] failed; vanilla reserve movement remains active: " + ex.Message);
-            }
-            } // end using TelemetryPerf.Scope
         }
 
-        private static void TryClearStalledFallbackOrder(
-            BattleUnits battleUnits,
-            Regiment group,
-            CommandDoctrineOrder order)
+        private static void Convert(BattleUnits battleUnits, OrderArbiter arbiter, BattleSnapshot snapshot, Regiment group, UnitState before, bool useOrderDelays)
         {
-            try
+            Regiment unit = before.Unit;
+            if (unit == null) return;
+
+            int afterPaths = SafePathCount(unit);
+            int afterQueue = SafeQueueCount(unit);
+            // Vanilla's own target and facing, as RegimentSetPath stamped them
+            // (131254-131259; the facing is GetAngle(target, endangered unit), 6168).
+            Vector3 target = unit.lastsetwaypointposition;
+            int unitId = TacticalPatchIds.GameObjectInstanceId(unit);
+            BattleOrderIntent intent = TacticalReserveCommitGate.CourierParityIntent(
+                unitId, target.x, target.z, unit.lastsetwaypointrotation);
+
+            var action = TacticalReserveCommitGate.PlanCourierParity(
+                arbiter,
+                intent,
+                unitWritable: TacticalWriteGuard.CanWrite(unit),
+                unitInSnapshot: snapshot.IndexOfOwn(unitId) >= 0,
+                conversionApplies: BattleWriterPolicy.ReserveDelayConversionApplies(
+                    unit.groupposition != null, unit.unittyp, (UnityEngine.Object)unit.parentregiment != null),
+                before.Paths,
+                afterPaths,
+                before.QueueCount,
+                afterQueue,
+                useOrderDelays);
+            if (action != TacticalReserveCommitGate.CourierParityAction.Convert) return;
+
+            // Plan the re-issue first (claim, guard, chain, validation, silent-exit
+            // pre-check, dedupe, cooldown). Vanilla's path is removed only when the
+            // delayed order will be issued; a refused plan leaves vanilla's commit.
+            bool planned = OrderExecutorRuntime.TryPlanInline(battleUnits, unit, intent, out ExecutionPlan plan, out OrderOutcome outcome);
+            if (!TacticalReserveCommitGate.RemoveVanillaPath(action, planned ? plan : default))
             {
-                if (battleUnits == null || group == null) return;
-                if (!group.pathinterrupted || HasActiveMoveOrder(group)) return;
-                if (!order.FallbackTarget.HasValue) return;
-
-                Vector3 target = new Vector3(order.FallbackTarget.X, 0f, order.FallbackTarget.Z);
-                if (!IsSafeTarget(group, target)) return;
-
-                battleUnits.SetWaypoint(
-                    group,
-                    target,
-                    newpath: true,
-                    doublequick: false,
-                    manualfinalrotation: -1f,
-                    modifylastwaypoint: false,
-                    useorderdelay: true,
-                    timetomove: -1f,
-                    direction: -1,
-                    showmovementoptions: false,
-                    ignorebattlemonuments: false,
-                    groupmoveonly: false,
-                    ignoredisabledships: false,
-                    checkforreadiness: true,
-                    clearinterruptionpaths: true);
-
                 OnceLog.Info(
-                    "tactical-reserve-delay-guard:fallback-clear",
-                    "[TacticalReserveOrderDelayGuard] cleared stalled fallback order reason=fallback-relief group=" +
-                    SafeUnitName(group));
+                    "tactical-reserve-delay-guard:refused",
+                    "[TacticalReserveOrderDelayGuard] delayed re-issue refused, vanilla's reserve move kept reason=" + outcome.Reason);
+                return;
             }
-            catch (Exception ex)
+
+            BattleReserveCommitGatePatch.RemoveAddedPaths(unit, before.Paths, afterPaths);
+            if (OrderExecutorRuntime.ExecutePlannedInline(battleUnits, unit, intent, plan, ref outcome))
+            {
+                OnceLog.Info(
+                    "tactical-reserve-delay-guard:converted",
+                    "[TacticalReserveOrderDelayGuard] converted direct reserve path to delayed order unit=" +
+                    SafeUnitName(unit) +
+                    " group=" + SafeUnitName(group) +
+                    " paths=" + before.Paths + "->" + afterPaths +
+                    " queue=" + before.QueueCount + "->" + SafeQueueCount(unit));
+            }
+            else
             {
                 OnceLog.Warning(
-                    "tactical-reserve-delay-guard:fallback-clear-failed",
-                    "[TacticalReserveOrderDelayGuard] fallback clear skipped: " + ex.Message);
+                    "tactical-reserve-delay-guard:execute-failed",
+                    "[TacticalReserveOrderDelayGuard] planned delayed re-issue did not reach SetWaypoint; the reserve move lapses");
             }
         }
 
@@ -222,77 +178,25 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.EnableTacticalReserveOrderDelayGuard.Value;
         }
 
-        private static ReserveState Snapshot(Regiment group)
+        // Only the units CheckUseOfReserves 6121 could send.
+        private static UnitState[] Snapshot(Regiment group)
         {
-            try
-            {
-                if (group == null || group.allattachedunits == null)
-                    return new ReserveState { Units = Array.Empty<UnitState>() };
+            Regiment[] attached = group != null ? group.allattachedunits : null;
+            if (attached == null) return null;
 
-                var units = new System.Collections.Generic.List<UnitState>();
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    Regiment unit = group.allattachedunits[i];
-                    if ((UnityEngine.Object)unit == null) continue;
-                    if (!BattleWriterPolicy.IsReserveSupportCandidate(
-                            unit.unittyp, unit.regimentpaths, unit.isrouted, unit.outflanked, unit.inengagement))
-                        continue;
-                    units.Add(new UnitState(unit, SafePathCount(unit), SafeQueueCount(unit)));
-                }
-
-                return new ReserveState { Units = units.ToArray() };
-            }
-            catch
+            System.Collections.Generic.List<UnitState> units = null;
+            for (int i = 0; i < attached.Length; i++)
             {
-                return new ReserveState { Units = Array.Empty<UnitState>() };
-            }
-        }
-
-        private static BattleUnits ResolveBattleUnits(AIBattle battle)
-        {
-            try
-            {
-                if (battle == null) return null;
-                if (_bunitsField == null)
-                    _bunitsField = AccessTools.Field(typeof(AIBattle), "bunits");
-                if (_bunitsField == null)
-                {
-                    OnceLog.Warning(
-                        "tactical-reserve-delay-guard:missing-bunits",
-                        "[TacticalReserveOrderDelayGuard] missing AIBattle.bunits anchor.");
-                    return null;
-                }
-
-                return _bunitsField.GetValue(battle) as BattleUnits;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-reserve-delay-guard:bunits",
-                    "[TacticalReserveOrderDelayGuard] failed reading AIBattle.bunits: " + ex.Message);
-                return null;
-            }
-        }
-
-        private static void RemoveAddedPaths(Regiment unit, int before, int after)
-        {
-            int safeBefore = Math.Max(0, before);
-            int safeAfter = Math.Max(safeBefore, after);
-            if (unit.regimentpath != null)
-            {
-                int max = Math.Min(safeAfter, unit.regimentpath.Length);
-                for (int i = safeBefore; i < max; i++)
-                    unit.regimentpath[i] = new NavMeshPath();
+                Regiment unit = attached[i];
+                if ((UnityEngine.Object)unit == null) continue;
+                if (!BattleWriterPolicy.IsReserveSupportCandidate(
+                        unit.unittyp, unit.regimentpaths, unit.isrouted, unit.outflanked, unit.inengagement))
+                    continue;
+                if (units == null) units = new System.Collections.Generic.List<UnitState>();
+                units.Add(new UnitState(unit, SafePathCount(unit), SafeQueueCount(unit)));
             }
 
-            if (unit.pathstatus != null)
-            {
-                int max = Math.Min(safeAfter, unit.pathstatus.Length);
-                for (int i = safeBefore; i < max; i++)
-                    unit.pathstatus[i] = 0;
-            }
-
-            unit.regimentpaths = safeBefore;
+            return units?.ToArray();
         }
 
         private static int SafePathCount(Regiment unit)
@@ -307,266 +211,10 @@ namespace WhiskeyRealism.Patches
             catch { return 0; }
         }
 
-        private static bool TryResolveDoctrineOrder(Regiment group, out CommandDoctrineOrder order)
-        {
-            order = default(CommandDoctrineOrder);
-
-            try
-            {
-                if (group == null) return false;
-                TacticalBattleOrchestrator side = TacticalBattleCoordinator.GetSideOrchestrator(group.alliance);
-                ArmyOrchestrator army = side?.Army;
-                var orders = army?.CurrentDoctrineOrders;
-                if (orders == null || orders.Count == 0) return false;
-
-                int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
-                int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
-                for (int i = 0; i < orders.Count; i++)
-                {
-                    CommandDoctrineOrder candidate = orders[i];
-                    if (!TacticalPatchIds.NodeIdMatches(candidate.NodeId, gameObjectInstanceId, componentInstanceId))
-                        continue;
-                    if (!candidate.HasPurpose) return false;
-
-                    order = candidate;
-                    return true;
-                }
-            }
-            catch { }
-
-            return false;
-        }
-
-        private static float LocalOdds(Regiment group)
-        {
-            try
-            {
-                if (group == null) return 1f;
-                float own = Math.Max(Sanitize(group.groupowninrange), Sanitize(group.groupstrengthaigroup));
-                float enemy = Math.Max(Sanitize(group.groupenemiesinrange), SumEnemyStrengthWithinAngle(group));
-                if (enemy <= 0f) return own > 0f ? 2f : 1f;
-                return own / Math.Max(1f, enemy);
-            }
-            catch
-            {
-                return 1f;
-            }
-        }
-
-        private static float ReserveFraction(Regiment group)
-        {
-            try
-            {
-                if (group == null || group.allattachedunits == null || group.allattachedunits.Length == 0)
-                    return 0f;
-
-                float total = 0f;
-                float reserve = 0f;
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    Regiment unit = group.allattachedunits[i];
-                    if (unit == null) continue;
-                    if (unit.isrouted || unit.markedforrout || unit.permanentlydetached) continue;
-                    if (unit.unittyp > TacticalUnitType.Cavalry) continue;
-
-                    float strength = Sanitize(unit.groupstrengthactive);
-                    total += strength;
-                    if (unit.regimentpaths <= 0 && !unit.inengagement)
-                        reserve += strength;
-                }
-
-                if (total <= 0f) return 0f;
-                return reserve / total;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static float SumEnemyStrengthWithinAngle(Regiment group)
-        {
-            try
-            {
-                if (group == null ||
-                    group.unitrange == null ||
-                    group.unitrange.enemystrengthwithinangle == null ||
-                    !TacticalFogOfWarContact.HasVisibleEnemy(group))
-                    return 0f;
-
-                float total = 0f;
-                for (int i = 0; i < group.unitrange.enemystrengthwithinangle.Length; i++)
-                    total += Math.Max(0f, group.unitrange.enemystrengthwithinangle[i]);
-                return total;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static OperationalReserveInput BuildOperationalReserveInput(Regiment group)
-        {
-            float odds = LocalOdds(group);
-            float reserveFraction = ReserveFraction(group);
-            float flankThreat = FlankThreat(group, odds);
-            float endurance = ReserveEndurance(group);
-
-            return new OperationalReserveInput(
-                reserveFraction,
-                odds,
-                flankThreat,
-                endurance,
-                assaultAuthorized: odds >= 1.60f && flankThreat < 0.70f && endurance >= 0.35f,
-                fallbackPressure: odds < 0.75f || flankThreat >= 0.85f);
-        }
-
-        private static float FlankThreat(Regiment group, float odds)
-        {
-            try
-            {
-                if (group == null) return 0f;
-                float threat = 0f;
-                if (group.outflanked > 0) threat = Math.Max(threat, 0.80f);
-                if (group.friendlyroutednear > 0f) threat = Math.Max(threat, 0.65f);
-
-                float enemy = Math.Max(Sanitize(group.groupenemiesinrange), SumEnemyStrengthWithinAngle(group));
-                float own = Math.Max(1f, Math.Max(Sanitize(group.groupowninrange), Sanitize(group.groupstrengthaigroup)));
-                if (enemy > own) threat = Math.Max(threat, Math.Min(1f, enemy / Math.Max(1f, own * 1.5f)));
-                if (odds < 0.70f) threat = Math.Max(threat, 0.70f);
-                return Clamp01(threat);
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static float ReserveEndurance(Regiment group)
-        {
-            try
-            {
-                if (group == null || group.allattachedunits == null || group.allattachedunits.Length == 0)
-                    return 0f;
-
-                float total = 0f;
-                int count = 0;
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    Regiment unit = group.allattachedunits[i];
-                    if (unit == null) continue;
-                    if (unit.isrouted || unit.markedforrout || unit.permanentlydetached) continue;
-                    if (unit.unittyp > TacticalUnitType.Cavalry) continue;
-                    if (unit.regimentpaths > 0 || unit.inengagement) continue;
-
-                    total += 0.40f * AverageAmmoRatio(unit) +
-                        0.30f * (1f - Clamp01(unit.fatigue)) +
-                        0.30f * MoraleRatio(unit);
-                    count++;
-                }
-
-                return count > 0 ? Clamp01(total / count) : 0f;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static float AverageAmmoRatio(Regiment unit)
-        {
-            try
-            {
-                if (unit == null || unit.ammo == null || unit.ammo.Length == 0) return 0f;
-                float total = 0f;
-                for (int i = 0; i < unit.ammo.Length; i++) total += Math.Max(0f, unit.ammo[i]);
-                return Clamp01(total / unit.ammo.Length);
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static float MoraleRatio(Regiment unit)
-        {
-            try
-            {
-                if (unit == null) return 0f;
-                if (unit.battlestartmorale > 0f)
-                    return Clamp01(unit.morale / Math.Max(0.01f, unit.battlestartmorale));
-                return Clamp01(unit.morale);
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static bool HasActiveMoveOrder(Regiment unit)
-        {
-            try
-            {
-                return unit != null &&
-                    unit.ordertypeactive != null &&
-                    unit.ordertypeactive.Length > 1 &&
-                    (unit.ordertypeactive[0] || unit.ordertypeactive[1]);
-            }
-            catch
-            {
-                return true;
-            }
-        }
-
-        private static bool IsSafeTarget(Regiment group, Vector3 target)
-        {
-            try
-            {
-                if (!IsFinite(target.x) || !IsFinite(target.z)) return false;
-                Vector3 position = ((Component)group).transform.position;
-                if (!IsFinite(position.x) || !IsFinite(position.z)) return false;
-                return Vector3.Distance(position, target) > 5f;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static float Sanitize(float value)
-        {
-            if (!IsFinite(value) || value < 0f) return 0f;
-            return value;
-        }
-
-        private static float Clamp01(float value)
-        {
-            if (!IsFinite(value) || value < 0f) return 0f;
-            return value > 1f ? 1f : value;
-        }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
-
         private static bool SafeUseOrderDelays()
         {
             try { return GameVars.useorderdelays; }
             catch { return false; }
-        }
-
-        private static float SafeTargetAngle(Regiment unit, Vector3 target)
-        {
-            try
-            {
-                Vector3 position = ((Component)unit).transform.position;
-                return Tools.GetAngle(target, position);
-            }
-            catch
-            {
-                return -1f;
-            }
         }
 
         private static string SafeUnitName(Regiment unit)

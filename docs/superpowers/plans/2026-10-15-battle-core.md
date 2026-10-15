@@ -672,6 +672,43 @@ Every mover's private guard, dedupe, cooldown, waypoint and ownership code is de
 - [ ] Keep one `RemoveAddedPaths` (in #59), and replace the 5 copies of `SumEnemyStrengthWithinAngle` with `snapshot.SlicePressure`.
 - [ ] **Acceptance:** no `RegimentSetPath(` or `.combatbehavior =` in `src/WhiskeyRealism/Patches`; `CheckUseOfReserves` has exactly two Whiskey patches (#59, #56) plus the observer.
 
+**As built (BC5c):**
+```csharp
+internal static class TacticalReserveCommitGate { // pure, Tactical/Orchestrator
+  public const float ReleaseStandOffMeters = WaypointValidator.FriendlyFootprintRadiusMeters; // 60
+  public Input(bool playerControlled, bool reserveReleased);  // #59 admits only Reserve-role groups: Observe if player-owned, Allow if released, else Deny
+  public static Decision Decide(Input input);
+  public static bool GroupMayCommit(bool activeInHierarchy, int groupUnitTyp);             // 6084
+  public static bool VanillaCommittedUnit(int beforePaths, int afterPaths, int beforeQueue, int afterQueue, bool useOrderDelays);
+  public static bool HeldInReserve(in CommandNodeOperationalState state);
+  public static CommandIntentResolution HeldResolution(IReadOnlyList<CommandNodeOperationalState> ops, int goId, int componentId, CommandIntentResolution allocator);
+  public static bool RemoveVanillaPath(CourierParityAction action, in ExecutionPlan plan);  // #56: Convert && plan.Execute
+  public static BattleOrderIntent CourierParityIntent(int unitId, float x, float z, float heading); // Support, UseOrderDelay|DoubleQuick|ReliefOrSupport
+  public static CourierParityAction PlanCourierParity(OrderArbiter arbiter, in BattleOrderIntent intent, bool unitWritable,
+      bool unitInSnapshot, bool conversionApplies, int beforePaths, int afterPaths, int beforeQueue, int afterQueue, bool useOrderDelays); // Leave | Convert
+  public static bool TryReleasedDirectChild(IReadOnlyList<DirectChildIntent> intents, int instanceId, out int sector); // re-roled out of Reserve; AxisSector; no allocation
+  public static bool TryPlanRelease(BattleSnapshot s, int groupIndex, int targetSector, out BattleOrderIntent intent);
+}
+internal sealed partial class WithdrawalIntentProducer : IBattleIntentProducer { // Name "Withdrawal"
+  // pure half Producers/WithdrawalIntentProducer.Plan.cs (test csproj), runtime half Producers/WithdrawalIntentProducer.cs
+  internal readonly struct Settings { FallbackDistance; RetreatDistance; MoraleTriggerByStance; }
+  internal static TacticalWithdrawalDoctrine.FallbackKind PlanUnit(BattleSnapshot s, int index, in Settings settings,
+      out BattleOrderIntent move, out BattleOrderIntent behavior); // Safety Move InContactWithdrawal (+ CombatBehavior 2 PerRegiment for Fallback)
+  internal static bool TryRetreatBearing(BattleSnapshot s, int index, out float bearing);  // away from closest visible enemy, else front axis + 180
+  internal static bool TryPlanStalledFallback(BattleSnapshot s, int groupIndex, in CommandDoctrineOrder order, out BattleOrderIntent move); // PathInterrupted; Support, courier
+  internal static float FriendlyRoutPressure(float friendlyRoutedNear); // magnitude of the [-1, 0] penalty
+}
+internal sealed class ReserveReleaseIntentProducer : IBattleIntentProducer { /* Name "ReserveRelease", Support */ }
+```
+- `OrderExecutorRuntime.ExecuteInline` is now `TryPlanInline` (claim check + `OrderExecutor.Plan`, no writes) followed by `ExecutePlannedInline`; its signature and behaviour are unchanged for #42. #56 screens with `PlanCourierParity`, plans with `TryPlanInline`, and removes vanilla's path only when `RemoveVanillaPath` holds (the plan executes); any refusal (player-owned, no snapshot record, higher claim, validator, silent exit, dedupe, cooldown) leaves vanilla's own move.
+- #59 reads no enemy state. The doctrine branch (B8's deny: it needed `order.Role == Reserve`, which the ledger-first resolution already reads) and its `groupenemiesinrange`/`outflanked` inputs are deleted. The gate's non-Reserve arms, odds inputs and already-engaged exemption were unreachable (the Prefix admits only Reserve-role groups; vanilla commits only unengaged units, 6129, and `inengagement` is set only by `FireBullet`, 119050) and are deleted. So are the now-uncalled `DoctrineConsumerDecisions.DecideReserve` and `OperationalReserveDoctrine` / `OperationalReserveInput` / `Decision` / `Mission`. This also removes the last copies of `SumEnemyStrengthWithinAngle` in BC5c's files, so no `SlicePressure` substitute is needed.
+- The withdrawal Move is pre-checked in the producer for the silent exits (`SilentExitPrecheck`) and `WaypointValidator`; a move either refuses is not produced and neither is its CombatBehavior 2. A Move the executor skips later (dedupe, failed-write backoff) can still let behaviour 2 through, which is vanilla's default infantry combat behaviour (112945-112947). The parity intent also carries `ReliefOrSupport` (the target sits one regiment width behind the endangered sibling, inside its group's footprint).
+- `OrderExecutorRuntime.IssueMove`: an `InContactWithdrawal` Move on an infantry/cavalry regiment ends in `SetMovementMode(2)`, as vanilla's fallbacks do (5178, 4898).
+- `UnitRecord` gains own-side fallback inputs (builder field reads, roster signature unchanged): `CoverValue`, `CoverObject`, `FriendlyRoutedNear`, and `UnitFlags.PathInterrupted`. The withdrawal reads cover and friendly routs from them, and the stalled-fallback re-issue requires `PathInterrupted`. Enemy-derived inputs stay perceived: the retreat bearing is vanilla's `retreatangle` convention (GetAngle 151304 / 122833, walked by GetAngleTerrainPosStatic 26897-26906) from the closest visible enemy; outflanked is fog-honest flank pressure (vanilla's code 123145-123175 reads true positions); under fire is a visible first range-list enemy. B8's `lastfeudactiontime` stamp is dropped: its only reader is the feud icon (UpdateUnitIcon 121676, `ai_feudstance >= 0`), and units of a feuding group are never withdrawn.
+- Producers register from their static constructors; nothing in `src` touches the types yet, so BC7 adds the touch.
+
+PROVE-MODE: harness. Per-slice proof is `ReserveMigrationTests` (Reserve-role deny and release, courier-parity plan and refusal, withdrawal Safety move/behavior through `OrderExecutor.Plan`, fog-honest retreat bearing, release target and priority, stalled-fallback re-issue, vanilla early-exit parity, own-side snapshot fields). Runtime proof is the BC7 in-game smoke: a reserve commit converted to a courier order under order delays, a Reserve-role rollback (`[TacticalReserveDrift]`), and `[OrderArbiter]` rows with Withdrawal / ReserveRelease sources.
+
 ---
 
 ## BC6 — Infantry charge doctrine (spec §4b)

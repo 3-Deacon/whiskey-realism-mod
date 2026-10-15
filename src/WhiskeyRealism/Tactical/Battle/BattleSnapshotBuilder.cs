@@ -30,6 +30,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //   - groupowninrange (110894) / groupstrengthaigroup (110844), written by
     //     UpdateGroupStrength (120297, 120559-120564): the command-tree strength bucket.
     //   - SetWaypoint's garrison exit (91331): Garrisoned = garrisonreference != null.
+    //   - Fallback inputs (BC5c withdrawal producer): covervalue (111404), coverobject
+    //     (111408), friendlyroutednear (111158, <= 0 per 128253), pathinterrupted
+    //     (111012; set on contact 117330, cleared 117195/123680). Field reads only.
     //   - W&L ownership inputs: dlcw_isundercommander (110360, set by
     //     BattleUnits.IsUnitUnderCommander 91168-91222), DLC_WL.IsUnitTakenOver (45840),
     //     ai_feudstance (111248), permanentlydetached (111222; deployment detach
@@ -249,6 +252,9 @@ namespace WhiskeyRealism.Tactical.Battle
             record.CombatBehaviorOrdered = reg.combatbehaviorordered;
             record.LastWaypointX = reg.lastsetwaypointposition.x;
             record.LastWaypointZ = reg.lastsetwaypointposition.z;
+            record.CoverValue = reg.covervalue;
+            record.CoverObject = reg.coverobject;
+            record.FriendlyRoutedNear = reg.friendlyroutednear;
             record.ParentIndex = -1;
             record.FirstEnemyInRangeId = FirstEnemyInRangeId(reg);
 
@@ -262,6 +268,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (reg.liedown) flags |= UnitFlags.LiedDown;
             if (reg.permanentlydetached) flags |= UnitFlags.PermanentlyDetached;
             if (reg.garrisonreference != null) flags |= UnitFlags.Garrisoned;
+            if (reg.pathinterrupted) flags |= UnitFlags.PathInterrupted;
             if (group) flags |= UnitFlags.IsGroup;
             else if (reg.unittyp == TacticalUnitType.Infantry) flags |= UnitFlags.IsInfantry;
             else if (reg.unittyp == TacticalUnitType.Cavalry) flags |= UnitFlags.IsCavalry;
