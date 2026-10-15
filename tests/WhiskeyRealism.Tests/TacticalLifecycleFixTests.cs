@@ -53,6 +53,8 @@ internal static class TacticalLifecycleFixTests
         Pass("dead wl cic alliance suppressed under ai_vs_ai", WlCicAllianceSuppressedUnderAiVsAi);
         Pass("dead player alliance suppressed outside ai_vs_ai", PlayerAllianceSuppressedOutsideAiVsAi);
         Pass("dead w&l subordinate career suppresses nothing", WlSubordinateCareerSuppressesNothing);
+
+        Pass("t14 operation strength counts AI combat units only", OperationStrengthCountsAiCombatUnitsOnly);
     }
 
     private static void Pass(string name, Action test)
@@ -474,5 +476,18 @@ internal static class TacticalLifecycleFixTests
     {
         // Below CIC the player's own command is protected per unit (TacticalWriteGuard).
         TestHarness.AssertEqual(-1, TacticalBattleCoordinator.ResolveSuppressedAllianceId(true, -1, -1), "none");
+    }
+
+    private static void OperationStrengthCountsAiCombatUnitsOnly()
+    {
+        TestHarness.AssertTrue(TacticalBattleCoordinator.CountsTowardOperationStrength(0, false, false, false, true, false), "line infantry");
+        // The W&L player's own command stays in allattachedunits but is player-owned.
+        TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(0, false, false, false, true, true), "player-owned");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(3, false, false, false, true, false), "skirmishers");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(5, false, false, false, true, false), "unittyp 5");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(14, false, false, false, true, false), "group");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(0, true, false, false, true, false), "dechained");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(0, false, true, false, true, false), "routed");
+        TestHarness.AssertFalse(TacticalBattleCoordinator.CountsTowardOperationStrength(0, false, false, false, false, false), "inactive");
     }
 }

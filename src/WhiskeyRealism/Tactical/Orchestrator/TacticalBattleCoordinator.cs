@@ -168,6 +168,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
+        /// T14 operation strength filter for one unit of a tasked node's allattachedunits:
+        /// combat units only (unittyp &lt;= MaxCombat), with vanilla GetAttachedUnitsReg's
+        /// default filters (no dechained units, no skirmisher companies 3/4, no inactive or
+        /// routed units), no marked-for-rout, no unittyp 5 (stripped from completeunitlist
+        /// by UpdateUnitList 79984), and no player-owned units (dlcw_isundercommander: the
+        /// W&amp;L player's command stays in its parent's attachment list).
+        /// </summary>
+        internal static bool CountsTowardOperationStrength(
+            int unittyp,
+            bool permanentlyDetached,
+            bool routed,
+            bool markedForRout,
+            bool active,
+            bool underPlayerCommand)
+        {
+            if (unittyp > TacticalUnitType.MaxCombat) return false;
+            if (unittyp == 3 || unittyp == 4 || unittyp == 5) return false;
+            if (permanentlyDetached || routed || markedForRout || !active) return false;
+            return !underPlayerCommand;
+        }
+
+        /// <summary>
         /// Content hash of the command-node intents feeding the operations ledger
         /// (node, source, role, axis, sector, support priority, depth, aggression). The
         /// allocator returns a fresh list on every observe, so the ledger change gate

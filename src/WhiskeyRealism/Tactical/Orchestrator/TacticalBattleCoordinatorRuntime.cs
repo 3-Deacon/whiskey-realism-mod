@@ -706,12 +706,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// T14: live strength of the command nodes the current operation has tasked to
-        /// attack or support. Each node's combat units are summed once (a corps and its
-        /// division may both be tasked) from Regiment.allattachedunits (vanilla's
-        /// attachment list, UpdateAllAttachedUnits 129573), with the default filters of
-        /// vanilla GetAttachedUnitsReg: no dechained (permanentlydetached) units, no
-        /// skirmisher companies (unittyp 3/4), no inactive or routed units; plus
-        /// markedforrout. 0 when no node is tasked.
+        /// attack or support. Each node's units are summed once (a corps and its division
+        /// may both be tasked) from Regiment.allattachedunits (vanilla's attachment list,
+        /// UpdateAllAttachedUnits 129573), filtered by CountsTowardOperationStrength.
+        /// 0 when no node is tasked.
         /// </summary>
         private static float MeasureOperationAssignedStrength(IReadOnlyList<CommandNodeOperationalState> states)
         {
@@ -738,10 +736,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     for (int u = 0; u < units.Length; u++)
                     {
                         var unit = units[u];
-                        if (unit == null || unit.unittyp > TacticalUnitType.MaxCombat) continue;
-                        // unittyp 5 is dropped from completeunitlist by UpdateUnitList (79984).
-                        if (unit.unittyp == 3 || unit.unittyp == 4 || unit.unittyp == 5 || unit.permanentlydetached) continue;
-                        if (unit.isrouted || unit.markedforrout || !unit.gameObject.activeInHierarchy) continue;
+                        if (unit == null) continue;
+                        if (!CountsTowardOperationStrength(
+                                unit.unittyp,
+                                unit.permanentlydetached,
+                                unit.isrouted,
+                                unit.markedforrout,
+                                unit.gameObject.activeInHierarchy,
+                                unit.dlcw_isundercommander))
+                            continue;
                         if (!_countedUnitIds.Add(unit.GetInstanceID())) continue;
                         total += Math.Max(0f, unit.strength);
                     }
@@ -1929,6 +1932,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     try { instanceId = group.GetInstanceID(); }
                     catch { continue; }
                     if (instanceId == 0) continue;
+
+                    // Player-owned group (W&L: the player's command is detached from AI
+                    // control but stays in the hierarchy): cache a no-op so the per-group
+                    // patch never resolves doctrine for it.
+                    if (group.dlcw_isundercommander)
+                    {
+                        cache[instanceId] = new TacticalResolvedGroupDecision(
+                            finalStance: -1,
+                            kind: TacticalDoctrineDecisionKind.Skip,
+                            reason: "player-owned",
+                            fromDoctrine: false,
+                            fromLedger: false,
+                            isChargeOverride: false,
+                            chargeAction: ChargeOverrideAction.None);
+                        continue;
+                    }
 
                     int vanillaOrdered;
                     try { vanillaOrdered = group.ai_stanceordered; }
