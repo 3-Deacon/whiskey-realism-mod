@@ -1098,6 +1098,33 @@ namespace WhiskeyRealism.Tactical.Operations
     // where the executor's formation policy refuses them while the group moves —
     // vanilla re-forms only a settled group (AdjustGroupFormations 5886), and #61
     // re-formed only when no move went out (L976-988).
+    /// <summary>
+    /// BC9: the posture pipeline's and the leaf cascade's final stance guard
+    /// (TacticalDecisionDoctrine.TaskForStance), after every rewrite of the task:
+    /// a Defender's Probe becomes Screen and its attack tasks HoldObjective.
+    /// </summary>
+    public static class PostureStanceGuard
+    {
+        public const string ScreenReason = "defender-screen";
+        public const string HoldReason = "defender-hold";
+
+        /// <summary>The leaf cascade's guarded task.</summary>
+        public static CommandTaskType Task(CommandTaskType task, BattleStance stance) =>
+            TacticalDecisionDoctrine.TaskForStance(task, stance);
+
+        /// <summary>Rewrites the state's task (and the order's with it); true when it changed.</summary>
+        public static bool Apply(BattleStance stance, ref CommandNodeOperationalState state, bool hasOrder, ref CommandDoctrineOrder order)
+        {
+            CommandTaskType guarded = TacticalDecisionDoctrine.TaskForStance(state.Task, stance);
+            if (guarded == state.Task && (!hasOrder || TacticalDecisionDoctrine.TaskForStance(order.Task, stance) == order.Task))
+                return false;
+            state = new CommandNodeOperationalState(state.NodeId, state.Echelon, state.Role, guarded, state.TaskState,
+                state.X, state.Z, state.FacingDegrees);
+            if (hasOrder) order = order.WithTask(guarded, guarded == CommandTaskType.Screen ? ScreenReason : HoldReason);
+            return true;
+        }
+    }
+
     public static class PostureIntentPlan
     {
         public const string ExecutorReason = "posture-executor";

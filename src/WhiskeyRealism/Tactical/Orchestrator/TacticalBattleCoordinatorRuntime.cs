@@ -1741,6 +1741,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // scripted override, -1 unless set (CheckGlobalAIStrategy
                 // 6383-6386), so it never showed the army retreat (3).
                 int macro = SafeMacroAiOfOwnBattle(battle, bunits, allianceId);
+                // BC9: the ledger branch never escalates a Defender to attack stance.
+                BattleStance sideStance = side.Army != null ? side.Army.CurrentBattleStance : BattleStance.Meeting;
 
                 bool chargeDenialOn = false;
                 bool localReactionsOn = false;
@@ -1859,7 +1861,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (macro != 3 && TacticalLedgerStateResolver.TryResolve(group, out CommandNodeOperationalState state))
                     {
                         int lStance = TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(
-                            state.Task, TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector));
+                            state.Task, TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector), sideStance);
                         // The ledger claims ownership whenever it resolves
                         // (the former #45 rule) — even when the stance is
                         // invalid or equals vanillaOrdered. A Skip with

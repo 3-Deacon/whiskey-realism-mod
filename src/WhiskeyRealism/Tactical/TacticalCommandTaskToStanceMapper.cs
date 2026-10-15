@@ -82,7 +82,15 @@ namespace WhiskeyRealism.Tactical
         // writes the stance with its waypoint). Hold-type tasks commit to attack
         // when the sector shows a visible weak point (TacticalDoctrineScorer.
         // ShouldCommitVisibleWeakPoint). Values come from Map so both writers agree.
-        public static int MapForGroupStanceScorer(CommandTaskType task, bool visibleWeakPoint)
+        // BC9: a Defender's ledger stance is capped at defend (2): Whiskey never
+        // issues attack stance for a Defender (vanilla's own cascade still may).
+        public static int MapForGroupStanceScorer(CommandTaskType task, bool visibleWeakPoint, Orchestrator.BattleStance stance)
+        {
+            int mapped = MapForGroupStanceScorerAnyStance(task, visibleWeakPoint);
+            return stance == Orchestrator.BattleStance.Defender && mapped > StanceDefend ? StanceDefend : mapped;
+        }
+
+        private static int MapForGroupStanceScorerAnyStance(CommandTaskType task, bool visibleWeakPoint)
         {
             switch (task)
             {

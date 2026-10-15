@@ -19,11 +19,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     //   - the AI pool: the side's AIBattle.unitsused (85227-85262, the groups
     //     vanilla's own AI orders), which splits #61's group pass from its
     //     leaf-brigade pass;
-    //   - defending: GetBattleType(alliance, usereadinesswhendraw) == 2 (86095,
-    //     as AdjustGroupAIStance 4252 reads it), for the division play;
     //   - the battle stance: ArmyEvidenceBuilder.ReadBattleStance (GetBattleType
-    //     without the readiness tie-break) into ArmyOrchestrator.UpdateBattleStance,
-    //     ungated (BC9: a Defender never probes nor attacks);
+    //     86095, objective points held) into ArmyOrchestrator.UpdateBattleStance,
+    //     ungated: the side's one stance reader (BC9; the readiness tie-break the
+    //     division play used to read is gone);
     //   - live commander initiative: UpdateLiveCommanderInitiative;
     //   - reinforcement opportunity: UpdateReinforcementOpportunity from
     //     ArmyEvidenceBuilder.BuildForceBalance (gated by
@@ -61,9 +60,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (allianceId < 0 || allianceId >= 2) return;
 
                 RefreshAiPool(battle, allianceId);
-                _defending[allianceId] = bunits.GetBattleType(allianceId, usereadinesswhendraw: true) == 2;
-                // BC9: the battle stance the director, the doctrine assignment and the
-                // posture guard read, whatever the opportunity doctrine flag below.
+                // BC9: the side's one battle stance (the director, node and doctrine
+                // assignment, the posture guard, the probe gate, the division play and
+                // #45's ledger cap read it), whatever the opportunity doctrine flag below.
                 army.UpdateBattleStance(ArmyEvidenceBuilder.ReadBattleStance(bunits, allianceId));
 
                 var probes = ExtendedProbes(bunits, allianceId);
@@ -103,26 +102,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return allianceId >= 0 && allianceId < _aiPool.Length && _aiPool[allianceId].Contains(instanceId);
         }
 
-        /// <summary>The side holds the objectives (GetBattleType == 2, 86095).</summary>
-        public static bool SideDefending(int allianceId)
-        {
-            return allianceId >= 0 && allianceId < _defending.Length && _defending[allianceId];
-        }
-
         // Battle end (BattleScope).
         public static void ResetForBattleEnd()
         {
             _probeCache.Clear();
             _lastTelemetryAt.Clear();
-            for (int a = 0; a < _aiPool.Length; a++)
-            {
-                _aiPool[a].Clear();
-                _defending[a] = false;
-            }
+            for (int a = 0; a < _aiPool.Length; a++) _aiPool[a].Clear();
         }
 
         private static readonly HashSet<int>[] _aiPool = { new HashSet<int>(), new HashSet<int>() };
-        private static readonly bool[] _defending = new bool[2];
 
         // UnitRecord.InstanceId is the GameObject instance id (BattleSnapshotBuilder).
         private static void RefreshAiPool(AIBattle battle, int allianceId)

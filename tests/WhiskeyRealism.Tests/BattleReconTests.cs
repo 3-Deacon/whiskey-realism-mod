@@ -84,6 +84,11 @@ internal static class BattleReconTests
             ("recon never rides to a visible enemy as a remembered one", RememberedTargetIsNeverVisible),
             ("probe a band holding only remembered enemies", ProbeBandWithOnlyRememberedEnemy),
             ("probe hold: a new hold never overwrites another group's", ProbeHoldNeverOverwrites),
+            ("defender: ledger node tasks are guarded where they are planned", DefenderNodeTasksGuarded),
+            ("defender: #45 ledger stance never attack, a weak point included", DefenderLedgerStanceCapped),
+            ("defender: the posture stance guard rewrites state and order", PostureStanceGuardRewrites),
+            ("defender: the posture pipeline and the leaf cascade call the stance guard", PostureGuardCallSitesPinned),
+            ("defender: one stance reader for the division play", DivisionPlayReadsArmyStance),
         });
     }
 
@@ -1256,5 +1261,116 @@ internal static class BattleReconTests
             AssertTrue(m.TryGetHold(1000 + g, CommandTaskType.FormUp, out float x, out _, out _, out _), "hold " + g + " kept");
             AssertNear(g, x, 0.01f, "its own point");
         }
+    }
+
+    // ------------------------------------------------------------------ verify round 2
+
+    private static readonly CommandNodeIntent[] DefenderIntents =
+    {
+        new CommandNodeIntent("main", "army", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 0.5f, 3),
+        new CommandNodeIntent("support", "army", DirectChildRole.SupportMain, DirectChildAxis.SectorAxis, 2, 80, 0.4f, 3),
+        new CommandNodeIntent("fix", "army", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 0.3f, 3),
+        new CommandNodeIntent("screen", "army", DirectChildRole.Screen, DirectChildAxis.Hold, 4, 40, 0.2f, 3),
+    };
+
+    private static System.Collections.Generic.IReadOnlyList<CommandNodeOperationalState> NodeStates(TacticalOperationShape shape, BattleStance stance) =>
+        CommandNodeOperationsRuntime.Build(DefenderIntents, new OperationRecord(shape, TacticalOperationPhase.Forming, "ridge-a", 0f),
+            new[] { TestFixtures.ObjectiveRecordFor("ridge-a", enemyStrength: 900f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.WeaklyHeld) },
+            stance);
+
+    private static void DefenderNodeTasksGuarded()
+    {
+        var meeting = NodeStates(TacticalOperationShape.DefensiveNetwork, BattleStance.Meeting);
+        AssertEqual(CommandTaskType.SupportAttack, meeting[1].Task, "control: the planner gives support an attack task");
+        foreach (TacticalOperationShape shape in (TacticalOperationShape[])Enum.GetValues(typeof(TacticalOperationShape)))
+        {
+            var states = NodeStates(shape, BattleStance.Defender);
+            for (int i = 0; i < states.Count; i++)
+            {
+                CommandTaskType t = states[i].Task;
+                AssertTrue(t != CommandTaskType.Probe && t != CommandTaskType.AttackObjective && t != CommandTaskType.SupportAttack &&
+                    t != CommandTaskType.FixEnemy, shape + ": " + states[i].NodeId + " is " + t);
+            }
+        }
+        var defender = NodeStates(TacticalOperationShape.DefensiveNetwork, BattleStance.Defender);
+        AssertEqual(CommandTaskType.HoldObjective, defender[1].Task, "support holds");
+        AssertTrue(CommandNodeOperationsRuntime.TryBuildSingle(DefenderIntents[1], new OperationRecord(TacticalOperationShape.DefensiveNetwork,
+            TacticalOperationPhase.Forming, "ridge-a", 0f),
+            new[] { TestFixtures.ObjectiveRecordFor("ridge-a", 900f, 100f, TacticalObjectiveStatus.WeaklyHeld) },
+            BattleStance.Defender, out CommandNodeOperationalState single), "single");
+        AssertEqual(CommandTaskType.HoldObjective, single.Task, "the posture fallback path holds too");
+    }
+
+    private static void DefenderLedgerStanceCapped()
+    {
+        var states = NodeStates(TacticalOperationShape.DefensiveNetwork, BattleStance.Defender);
+        for (int i = 0; i < states.Count; i++)
+        {
+            foreach (bool weakPoint in new[] { false, true })
+            {
+                int stance = TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(states[i].Task, weakPoint, BattleStance.Defender);
+                AssertTrue(stance <= TacticalCommandTaskToStanceMapper.StanceDefend, states[i].NodeId + " weakPoint=" + weakPoint + " stance " + stance);
+            }
+        }
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend,
+            TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.HoldObjective, true, BattleStance.Defender), "a defender's hold is capped at defend");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceAttack,
+            TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.HoldObjective, true, BattleStance.Meeting), "control: a meeting side's hold commits on a weak point");
+    }
+
+    private static void PostureStanceGuardRewrites()
+    {
+        var op = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "obj-1", 900f);
+        CommandDoctrineOrder order = Orders(op, ExposedLine(), CommandNodeRole.MainEffort)[0];
+        AssertEqual(CommandTaskType.AttackObjective, order.Task, "control order");
+        var state = new CommandNodeOperationalState("node-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.Probe, CommandTaskState.Planning);
+        AssertTrue(PostureStanceGuard.Apply(BattleStance.Defender, ref state, hasOrder: true, ref order), "rewritten");
+        AssertEqual(CommandTaskType.Screen, state.Task, "state");
+        AssertEqual(CommandTaskType.Screen, order.Task, "order follows the state");
+        var keep = new CommandNodeOperationalState("node-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, CommandTaskState.Planning);
+        CommandDoctrineOrder keepOrder = Orders(op, ExposedLine(), CommandNodeRole.MainEffort)[0];
+        AssertFalse(PostureStanceGuard.Apply(BattleStance.Attacker, ref keep, hasOrder: true, ref keepOrder), "an attacker keeps its attack");
+        AssertEqual(CommandTaskType.AttackObjective, keep.Task, "unchanged");
+        AssertEqual(CommandTaskType.HoldObjective, PostureStanceGuard.Task(CommandTaskType.SupportAttack, BattleStance.Defender), "leaf task");
+    }
+
+    private static string MethodBody(string text, string start, string end)
+    {
+        int a = text.IndexOf(start, StringComparison.Ordinal);
+        int b = a < 0 ? -1 : text.IndexOf(end, a, StringComparison.Ordinal);
+        AssertTrue(a >= 0 && b > a, "found " + start);
+        return text.Substring(a, b - a);
+    }
+
+    private static string ProducerSource(string file) =>
+        System.IO.File.ReadAllText(System.IO.Path.Combine(TestFixtures.FindRepoPath("src/WhiskeyRealism"), "Tactical", "Battle", "Producers", file));
+
+    private static void AssertInOrder(string body, string label, params string[] marks)
+    {
+        int at = -1;
+        foreach (string mark in marks)
+        {
+            int next = body.IndexOf(mark, at + 1, StringComparison.Ordinal);
+            AssertTrue(next > at, label + ": " + mark + " in order");
+            at = next;
+        }
+    }
+
+    private static void PostureGuardCallSitesPinned()
+    {
+        string text = ProducerSource("PostureIntentProducer.cs");
+        string run = MethodBody(text, "internal static bool Run(", "private static bool CanBypassStaleQueuedOrder(");
+        AssertInOrder(run, "posture pipeline", "TacticalGrandTacticianReconDoctrine.Decide(", "TryCavalryFollow(",
+            "TaskForLocalFlankEmergency(", "TacticalOpportunityTaskOverride.Override(", "PostureStanceGuard.Apply(", "CommandPostureExecutor.Decide(");
+        string leaf = MethodBody(text, "private static void ProduceLeaf(", "private static CommandTaskType ResolveMainArrivalHold(");
+        AssertInOrder(leaf, "leaf cascade", "TacticalOpportunityTaskOverride.Override(", "ResolveMainArrivalHold(", "PostureStanceGuard.Task(",
+            "LeafBrigadeMovePolicy.Decide(");
+    }
+
+    private static void DivisionPlayReadsArmyStance()
+    {
+        string text = ProducerSource("PlayIntentProducer.cs");
+        AssertTrue(text.Contains("army.CurrentBattleStance == BattleStance.Defender"), "the division play reads the army's stance");
+        AssertFalse(text.Contains("ArmyPostureInputsRuntime.SideDefending"), "no second stance reader");
     }
 }

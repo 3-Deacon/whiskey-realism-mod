@@ -259,7 +259,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             // BC9 stance guard: a Defender's leaf brigade gets no Probe or attack task.
-            task = TacticalDecisionDoctrine.TaskForStance(task, army.CurrentBattleStance);
+            task = PostureStanceGuard.Task(task, army.CurrentBattleStance);
 
             if (overrideReason != null)
                 OnceLog.Info("tactical-leaf-cascade:opportunity-override",
@@ -378,7 +378,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 CommandIntentResolution resolution = army.ResolveCommandIntentForGroup(0, instanceId);
                 return resolution.Found &&
                     CommandNodeOperationsRuntime.TryBuildSingle(resolution.Intent, army.CurrentOperation,
-                        side.OperationsLedger?.CurrentObjectives, out state);
+                        side.OperationsLedger?.CurrentObjectives, army.CurrentBattleStance, out state);
             }
             catch
             {
@@ -442,7 +442,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             bool hasCavalry = ((rec.Flags | descendants) & UnitFlags.IsCavalry) != 0;
             bool visibleEnemy = s.ClosestVisibleEnemy(i, out _) >= 0;
-            bool defender = army != null && army.CurrentBattleStance == BattleStance.Defender;
+            BattleStance stance = army != null ? army.CurrentBattleStance : BattleStance.Meeting;
+            bool defender = stance == BattleStance.Defender;
 
             // BC9 reconnaissance in force: the recon planner nominated this group as its
             // band's probe in the Probe phase (BattleRecon.ProbeTick). The role is
@@ -491,12 +492,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             // BC9 stance guard, after every rewrite above (GT recon, cavalry follow, local
             // emergency, opportunity): a Defender gets no Probe and no attack task.
-            CommandTaskType guarded = TacticalDecisionDoctrine.TaskForStance(state.Task, defender ? BattleStance.Defender : BattleStance.Meeting);
-            if (guarded != state.Task)
-            {
-                state = WithRoleAndTask(state, state.Role, guarded);
-                if (hasOrder) order = order.WithTask(guarded, guarded == CommandTaskType.Screen ? "defender-screen" : "defender-hold");
-            }
+            PostureStanceGuard.Apply(stance, ref state, hasOrder, ref order);
 
             // BC9: a probe that ended short of a superior enemy holds the ground it gained
             // while the ledger keeps the task it probed under (BattleRecon.ProbeTick).

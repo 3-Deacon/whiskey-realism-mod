@@ -13,13 +13,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return Build(
                 intents,
                 new OperationRecord(operationShape, TacticalOperationPhase.Planning, "objective-unknown", 0f),
-                Array.Empty<ObjectiveRecord>());
+                Array.Empty<ObjectiveRecord>(),
+                BattleStance.Meeting);
         }
 
         public static IReadOnlyList<CommandNodeOperationalState> Build(
             IReadOnlyList<CommandNodeIntent> intents,
             OperationRecord operation,
-            IReadOnlyList<ObjectiveRecord> objectives)
+            IReadOnlyList<ObjectiveRecord> objectives,
+            BattleStance stance)
         {
             if (intents == null || intents.Count == 0) return Array.Empty<CommandNodeOperationalState>();
 
@@ -35,6 +37,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     operation.Shape,
                     contact,
                     atObjective);
+                // BC9 stance guard where node tasks are planned: every reader of the
+                // army's command operations (#45's ledger branch, the posture pipeline,
+                // TacticalCommandAssignment rows, the W&L player-order adapter) sees a
+                // Defender's task without Probe or attack.
+                task = TacticalDecisionDoctrine.TaskForStance(task, stance);
 
                 states[i] = new CommandNodeOperationalState(
                     intent.NodeId,
@@ -51,9 +58,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             CommandNodeIntent intent,
             OperationRecord operation,
             IReadOnlyList<ObjectiveRecord> objectives,
+            BattleStance stance,
             out CommandNodeOperationalState state)
         {
-            var states = Build(new[] { intent }, operation, objectives);
+            var states = Build(new[] { intent }, operation, objectives, stance);
             if (states.Count == 0)
             {
                 state = default(CommandNodeOperationalState);
