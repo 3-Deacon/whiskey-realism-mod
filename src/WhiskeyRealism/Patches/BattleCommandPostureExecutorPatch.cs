@@ -49,6 +49,12 @@ namespace WhiskeyRealism.Patches
         private static readonly Dictionary<int, float> _lastFireControlAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _lastFormationWriteAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _writeBackoffUntil = new Dictionary<int, float>();
+        private static readonly TacticalFriendlySpatialGrid _friendlyGrid = new TacticalFriendlySpatialGrid();
+        private static int _friendlyGridAlliance = -1;
+        // Up to 4 nav plans (12 NavMesh.CalculatePath) per Postfix call.
+        private static readonly NavPlanBudget _navBudget = new NavPlanBudget(4);
+        private static bool _navPlanDeferred;
+        private static FieldInfo _bfsField;
         private static readonly Dictionary<string, float> _lastCourierAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, string> _lastOutboundOrderSignatureByGroup = new Dictionary<string, string>();
         private static readonly Dictionary<string, float> _lastTelemetryAt = new Dictionary<string, float>();
@@ -65,24 +71,28 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.Last)]
         internal static void Postfix(AIBattle __instance)
         {
-            if (!EnabledForWrites() || __instance == null) return;
+            using (TelemetryPerf.Scope("tactical.patch.posture-executor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+            {
+                if (!EnabledForWrites() || __instance == null) return;
 
-            try
-            {
-                OnceLog.Info("tactical-command-posture-executor", "BattleCommandPostureExecutorPatch wired");
-                Apply(__instance);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-command-posture-executor:failed",
-                    "BattleCommandPostureExecutorPatch failed: " + ex.Message);
+                try
+                {
+                    OnceLog.Info("tactical-command-posture-executor", "BattleCommandPostureExecutorPatch wired");
+                    Apply(__instance);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "tactical-command-posture-executor:failed",
+                        "BattleCommandPostureExecutorPatch failed: " + ex.Message);
+                }
             }
         }
 
         private static void Apply(AIBattle battle)
         {
             _supportMainPositionsByAlliance.Clear();
+            _friendlyGridAlliance = -1;
 
             int state = SafeIntField(battle, ref _stateField, "state", -1);
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
@@ -98,14 +108,18 @@ namespace WhiskeyRealism.Patches
 
             Dictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders = BuildRuntimeDivisionPlayOrders(bunits, units);
             var iteratedInstanceIds = new HashSet<int>();
-            for (int i = 0; i < units.Count; i++)
+            // Start where the NavMesh budget stopped last time so groups the
+            // budget deferred are served first (resumable queue).
+            int start = _navBudget.StartIndex(units.Count);
+            for (int n = 0; n < units.Count; n++)
             {
-                var group = units[i] as Regiment;
+                var group = units[(start + n) % units.Count] as Regiment;
                 if (!IsEligibleCommandGroup(group)) continue;
                 int unitInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
                 if (unitInstanceId != 0) iteratedInstanceIds.Add(unitInstanceId);
                 TryApplyGroup(battle, bunits, side, group, runtimePlayOrders);
             }
+            _navBudget.NextApply(units.Count);
 
             // Second pass: walk leaf brigades nested inside divisions that
             // vanilla excluded from unitsused. These are the Union-AI-doesn't-
@@ -339,6 +353,11 @@ namespace WhiskeyRealism.Patches
             }
 
             bool hasTarget = TryResolveTarget(group, orchestrator, state, doctrineOrder, decision.Target, out Vector3 target);
+            if (!hasTarget && _navPlanDeferred)
+            {
+                EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "nav-budget-deferred");
+                return;
+            }
             string outboundSignature = OutboundOrderSignature(state, decision, targetFormation, hasTarget, target);
             if (!AllowsOutboundOrderLedger(
                     group,
@@ -1074,7 +1093,7 @@ namespace WhiskeyRealism.Patches
             {
                 int id = SafeInstanceId(group);
                 OnceLog.Info(
-                    "tactical-brigade-task-hold:suppressed:" + id + ":" + task,
+                    "tactical-brigade-task-hold:suppressed:" + task,
                     "[TacticalBrigadeTaskHold] suppressed " + task + " write for "
                     + SafeName(group) + " (id=" + id + ") — within hold window");
             }
@@ -1419,9 +1438,7 @@ namespace WhiskeyRealism.Patches
                     unit.combatbehaviorordered));
 
                 if (!decision.ShouldWrite) return false;
-                if (decision.RecommendedCombatBehavior == unit.combatbehaviorordered) return false;
-
-                bunits.ChangeCombatBehavior(gameObject, decision.RecommendedCombatBehavior);
+                if (!TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, decision.RecommendedCombatBehavior)) return false;
                 _lastFireControlAt[instanceId] = BattleHours();
                 return true;
             }
@@ -1440,6 +1457,7 @@ namespace WhiskeyRealism.Patches
             out Vector3 target)
         {
             target = default(Vector3);
+            _navPlanDeferred = false;
             bool resolved;
             switch (targetKind)
             {
@@ -1509,6 +1527,13 @@ namespace WhiskeyRealism.Patches
                 targetKind != PostureExecutionTarget.DoctrineFallbackTarget)
                 return IsSafeWaypoint(group, target);
 
+            if (!_navBudget.TryConsume())
+            {
+                _navPlanDeferred = true;
+                return false;
+            }
+
+            using (TelemetryPerf.Scope("tactical.patch.posture-executor.nav-plan", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             try
             {
                 Vector3 own = SafePosition(group);
@@ -1737,50 +1762,38 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // Friendly corridor blocker via a per-Postfix spatial grid of the
+        // group's alliance (built once, reused for every candidate path and
+        // fire-control check in this call).
         private static float EstimateFriendlyFrontBlocker(Regiment group, Vector3 own, Vector3 candidate)
         {
             try
             {
-                if (group == null || IsDefaultVector(own) || IsDefaultVector(candidate))
-                    return 0f;
-                var units = BattleUnits.completeunitlist as IList;
-                if (units == null || units.Count == 0) return 0f;
-
-                Vector3 axis = candidate - own;
-                axis.y = 0f;
-                float axisLength = axis.magnitude;
-                if (axisLength < 1f) return 0f;
-                axis.Normalize();
-
-                float worst = 0f;
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var friend = units[i] as Regiment;
-                    if (friend == null || friend == group) continue;
-                    if (friend.alliance != group.alliance) continue;
-                    if (friend.isrouted || friend.markedforrout || friend.permanentlydetached) continue;
-                    if (friend.unittyp > 14) continue;
-
-                    Vector3 pos = SafePosition(friend);
-                    if (IsDefaultVector(pos)) continue;
-                    Vector3 rel = pos - own;
-                    rel.y = 0f;
-                    float forward = Vector3.Dot(rel, axis);
-                    if (forward < 30f || forward > axisLength + 120f) continue;
-
-                    float lateral = (rel - axis * forward).magnitude;
-                    if (lateral > 120f) continue;
-                    float distanceToCandidate = Vector3.Distance(pos, candidate);
-                    float proximity = distanceToCandidate <= 80f ? 1f : Math.Max(0f, 1f - ((distanceToCandidate - 80f) / 220f));
-                    float lateralBlock = 1f - Math.Min(1f, lateral / 120f);
-                    worst = Math.Max(worst, Math.Max(proximity, lateralBlock * 0.8f));
-                }
-
-                return Math.Min(1f, worst);
+                if (group == null || IsDefaultVector(own) || IsDefaultVector(candidate)) return 0f;
+                if (_friendlyGridAlliance != group.alliance) BuildFriendlyGrid(group.alliance);
+                return _friendlyGrid.EstimateFrontBlocker(SafeInstanceId(group), own.x, own.z, candidate.x, candidate.z);
             }
             catch
             {
                 return 0f;
+            }
+        }
+
+        private static void BuildFriendlyGrid(int alliance)
+        {
+            _friendlyGrid.Clear();
+            _friendlyGridAlliance = alliance;
+            var units = BattleUnits.completeunitlist as IList;
+            if (units == null) return;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var friend = units[i] as Regiment;
+                if (friend == null || friend.alliance != alliance) continue;
+                if (friend.isrouted || friend.markedforrout || friend.permanentlydetached) continue;
+                if (friend.unittyp > 14) continue;
+                Vector3 pos = SafePosition(friend);
+                if (IsDefaultVector(pos)) continue;
+                _friendlyGrid.Add(SafeInstanceId(friend), pos.x, pos.z);
             }
         }
 
@@ -2687,15 +2700,20 @@ namespace WhiskeyRealism.Patches
             return HasPendingOrder(group, allowStaleQueuedBypass: false);
         }
 
+        // allattachedunits holds every descendant, so sub-units use their own
+        // fields only (no nested CountMovingPaths walk) — O(A), not O(A²).
         private static bool HasPendingOrder(Regiment group, bool allowStaleQueuedBypass)
         {
-            if (PendingOrderOn(group, allowStaleQueuedBypass)) return true;
+            if (PendingOrderOn(group, allowStaleQueuedBypass, HasActiveMoveMakingProgress(group))) return true;
             try
             {
                 if (group == null || group.allattachedunits == null) return false;
                 for (int i = 0; i < group.allattachedunits.Length; i++)
                 {
-                    if (PendingOrderOn(group.allattachedunits[i], allowStaleQueuedBypass)) return true;
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit == null) continue;
+                    bool activeMove = !unit.pathinterrupted && unit.regimentpaths > 0 && unit.movementmode > 0;
+                    if (PendingOrderOn(unit, allowStaleQueuedBypass, activeMove)) return true;
                 }
             }
             catch
@@ -2706,7 +2724,7 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        private static bool PendingOrderOn(Regiment unit, bool allowStaleQueuedBypass)
+        private static bool PendingOrderOn(Regiment unit, bool allowStaleQueuedBypass, bool activeMove)
         {
             try
             {
@@ -2718,7 +2736,7 @@ namespace WhiskeyRealism.Patches
                     RegimentPaths = unit.regimentpaths,
                     PathInterrupted = unit.pathinterrupted,
                     MovementMode = unit.movementmode,
-                    ActiveMove = HasActiveMoveMakingProgress(unit),
+                    ActiveMove = activeMove,
                     AllowStaleQueuedBypass = allowStaleQueuedBypass
                 });
             }
@@ -3366,12 +3384,15 @@ namespace WhiskeyRealism.Patches
             catch { return default(Vector3); }
         }
 
+        // BattleUnits keeps the scene's BattlefieldSetup in a private static
+        // (set at 79055/79132, nulled on destroy at 79230); read it instead of
+        // GameObject.Find("GameController") per call.
         private static BattlefieldSetup SafeBattlefieldSetup()
         {
             try
             {
-                GameObject controller = GameObject.Find("GameController");
-                return controller != null ? controller.GetComponent<BattlefieldSetup>() : null;
+                if (_bfsField == null) _bfsField = AccessTools.Field(typeof(BattleUnits), "bfs");
+                return _bfsField != null ? _bfsField.GetValue(null) as BattlefieldSetup : null;
             }
             catch
             {
@@ -3556,6 +3577,8 @@ namespace WhiskeyRealism.Patches
             _lastFireControlAt.Clear();
             _lastFormationWriteAt.Clear();
             _writeBackoffUntil.Clear();
+            _friendlyGrid.Clear();
+            _friendlyGridAlliance = -1;
             _brigadeTaskHoldState.Clear();
             _lastCourierAt.Clear();
             _lastOutboundOrderSignatureByGroup.Clear();

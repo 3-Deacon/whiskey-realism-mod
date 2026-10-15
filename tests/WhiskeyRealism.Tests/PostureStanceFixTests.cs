@@ -73,6 +73,10 @@ internal static class PostureStanceFixTests
 
         // B-61state / perf: probe cache keyed on roster, not frame
         Pass("roster signature changes with roster not with frame", RosterSignatureChangesWithRosterOnly);
+
+        // Perf
+        Pass("friendly spatial grid matches brute-force front blocker", FriendlySpatialGridMatchesBruteForce);
+        Pass("nav plan budget defers and rotates", NavPlanBudgetDefersAndRotates);
     }
 
     private static void Pass(string name, Action test)
@@ -572,5 +576,67 @@ internal static class PostureStanceFixTests
         AssertFalse(a.Equals(new TacticalRosterSignature(1, 120, 4, 7)), "unit routed");
         AssertFalse(a.Equals(new TacticalRosterSignature(1, 120, 3, 8)), "new battle (BattleUnits instance)");
         AssertFalse(a.Equals(new TacticalRosterSignature(0, 120, 3, 7)), "other alliance");
+    }
+
+    // Reference: the pre-grid EstimateFriendlyFrontBlocker walk (corridor 30 m
+    // ahead to target + 120 m, 120 m lateral, proximity 80..300 m).
+    private static float BruteForceBlocker(float ox, float oz, float cx, float cz, float[,] friends)
+    {
+        float ax = cx - ox, az = cz - oz;
+        float len = (float)Math.Sqrt(ax * ax + az * az);
+        if (len < 1f) return 0f;
+        ax /= len; az /= len;
+        float worst = 0f;
+        for (int i = 0; i < friends.GetLength(0); i++)
+        {
+            float rx = friends[i, 0] - ox, rz = friends[i, 1] - oz;
+            float forward = rx * ax + rz * az;
+            if (forward < 30f || forward > len + 120f) continue;
+            float lx = rx - ax * forward, lz = rz - az * forward;
+            float lateral = (float)Math.Sqrt(lx * lx + lz * lz);
+            if (lateral > 120f) continue;
+            float dx = friends[i, 0] - cx, dz = friends[i, 1] - cz;
+            float dist = (float)Math.Sqrt(dx * dx + dz * dz);
+            float proximity = dist <= 80f ? 1f : Math.Max(0f, 1f - ((dist - 80f) / 220f));
+            float lateralBlock = 1f - Math.Min(1f, lateral / 120f);
+            worst = Math.Max(worst, Math.Max(proximity, lateralBlock * 0.8f));
+        }
+        return Math.Min(1f, worst);
+    }
+
+    private static void FriendlySpatialGridMatchesBruteForce()
+    {
+        var rng = new Random(42);
+        var friends = new float[200, 2];
+        var grid = new TacticalFriendlySpatialGrid();
+        for (int i = 0; i < 200; i++)
+        {
+            friends[i, 0] = (float)(rng.NextDouble() * 3000.0);
+            friends[i, 1] = (float)(rng.NextDouble() * -3000.0);
+            grid.Add(i + 1, friends[i, 0], friends[i, 1]);
+        }
+        grid.Add(999, 1500f, -1500f); // the moving group itself
+        for (int t = 0; t < 50; t++)
+        {
+            float ox = (float)(rng.NextDouble() * 3000.0), oz = (float)(rng.NextDouble() * -3000.0);
+            float cx = (float)(rng.NextDouble() * 3000.0), cz = (float)(rng.NextDouble() * -3000.0);
+            float expected = BruteForceBlocker(ox, oz, cx, cz, friends);
+            float actual = grid.EstimateFrontBlocker(999, ox, oz, cx, cz);
+            AssertTrue(Math.Abs(expected - actual) < 0.0001f, "grid matches brute force, case " + t);
+        }
+    }
+
+    private static void NavPlanBudgetDefersAndRotates()
+    {
+        var budget = new NavPlanBudget(2);
+        AssertTrue(budget.TryConsume(), "first");
+        AssertTrue(budget.TryConsume(), "second");
+        AssertFalse(budget.TryConsume(), "third deferred");
+        budget.NextApply(5);
+        AssertTrue(budget.TryConsume(), "refilled next apply");
+        AssertEqual(2, budget.StartIndex(5), "start rotates by the work done");
+        budget.NextApply(5);
+        AssertEqual(3, budget.StartIndex(5), "rotates again");
+        AssertEqual(0, budget.StartIndex(0), "empty list");
     }
 }
