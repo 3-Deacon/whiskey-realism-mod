@@ -6,10 +6,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
     /// Cheap per-alliance roster fingerprint read in one pass over
-    /// BattleUnits.completeunitlist. completeunitlist is NOT immutable mid-battle:
-    /// UpdateUnitList (79974) replaces the list from CreateUnitDefault (89670),
-    /// DetachUnits (90239) and ReattachCompany (90609); isrouted / markedforrout /
-    /// activeInHierarchy change continuously (routs, reinforcement arrivals).
+    /// BattleUnits.completeunitlist. Structural part (list identity, unit count, id
+    /// hash): completeunitlist is NOT immutable mid-battle — UpdateUnitList (79974)
+    /// replaces the list from CreateUnitDefault (89670), DetachUnits (90239) and
+    /// ReattachCompany (90609). Live part (active / routed / marked-for-rout counts of
+    /// command-level units, the only ones the command tree keeps): changes on routs
+    /// and reinforcement arrivals.
     /// </summary>
     public readonly struct TacticalRosterSignature : IEquatable<TacticalRosterSignature>
     {
@@ -29,6 +31,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int RoutedCount { get; }
         public int MarkedForRoutCount { get; }
         public int IdHash { get; }
+
+        public bool StructurallyEquals(TacticalRosterSignature other)
+        {
+            return ListIdentity == other.ListIdentity
+                && UnitCount == other.UnitCount
+                && IdHash == other.IdHash;
+        }
 
         public bool Equals(TacticalRosterSignature other)
         {
@@ -97,22 +106,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
     }
 
+    public enum CommandTreeRefresh
+    {
+        Hit = 0,
+        // Same units, only live flags changed: re-filter the cached probes (no
+        // GetAttachedUnitsReg walk, no name reads).
+        RefreshLiveFlags = 1,
+        Rebuild = 2,
+    }
+
     /// <summary>
     /// Pure cache-validity decisions and content hashes shared by CommandTreeRuntime,
     /// TacticalStableSceneCache and TacticalCacheValidator (BR-H5).
     /// </summary>
     internal static class TacticalCacheSignatures
     {
-        public static bool ShouldRebuildCommandTree(
+        public static CommandTreeRefresh ClassifyCommandTreeRefresh(
             bool cacheValid,
             int cachedShift,
             int currentShift,
             TacticalRosterSignature cachedRoster,
             TacticalRosterSignature liveRoster)
         {
-            if (!cacheValid) return true;
-            if (cachedShift != currentShift) return true;
-            return !cachedRoster.Equals(liveRoster);
+            if (!cacheValid || cachedShift != currentShift) return CommandTreeRefresh.Rebuild;
+            if (!cachedRoster.StructurallyEquals(liveRoster)) return CommandTreeRefresh.Rebuild;
+            return cachedRoster.Equals(liveRoster) ? CommandTreeRefresh.Hit : CommandTreeRefresh.RefreshLiveFlags;
         }
 
         public static int MapObjectivesContentHash(IReadOnlyList<MapObjectiveCapture> objectives)

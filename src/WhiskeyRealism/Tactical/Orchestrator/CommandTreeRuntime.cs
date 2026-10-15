@@ -23,13 +23,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // ReattachCompany (90609), and each probe's Active/Routed/MarkedForRout flag is
         // live vanilla state (routs, reinforcement arrivals). Every Snapshot() therefore
         // reads a cheap roster signature (one pass over completeunitlist, plain field
-        // reads; no names, no GetAttachedUnitsReg) and rebuilds the tree whenever the
-        // list identity, unit/active/routed/marked counts or id set changed. A cache hit
-        // thus always carries the live routed/active flags.
+        // reads; no names, no GetAttachedUnitsReg):
+        //   - structural change (list identity, unit count, id set; incl. a new battle's
+        //     new list) or shift change: full rebuild (hierarchy walk + names);
+        //   - live-flag change only (active / routed / marked counts of command-level
+        //     units, the only ones CommandTreeBuilder keeps): re-read those flags for the
+        //     cached probes and re-run the pure builder — no hierarchy walk, no names.
+        // A cache hit thus always reflects the live routed/active state.
         //
         // Invalidation surface:
-        //   - Roster signature change (incl. a new battle's new list): rebuild
-        //   - Shift change: rebuild
+        //   - Structural roster change / shift change: rebuild
+        //   - Live-flag change: refresh
         //   - Battle end: TacticalBattleCoordinator.OnBattleEnd -> InvalidateAll()
         //
         // Indexed by allianceId 0/1; index 2+ (Europe) is intentionally not cached
@@ -42,6 +46,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static readonly int[] _cachedShifts = { int.MinValue, int.MinValue };
         private static readonly bool[] _cacheValid = { false, false };
         private static readonly TacticalRosterSignature[] _cachedRosters = new TacticalRosterSignature[2];
+        private static readonly CommandTreeBuilder.CommandProbe[][] _cachedProbes = new CommandTreeBuilder.CommandProbe[2][];
+        private static readonly Regiment[][] _cachedProbeUnits = new Regiment[2][];
 
         // Exposed counters for diagnostics — populated cheaply on hit/miss; emitted
         // periodically via TacticalCommandTreeCache events. Per-side so the dashboard
@@ -61,26 +67,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             TacticalRosterSignature liveRoster = default(TacticalRosterSignature);
             if (cacheable)
             {
-                liveRoster = ReadRosterSignature(allianceId);
-                if (!TacticalCacheSignatures.ShouldRebuildCommandTree(
-                        _cacheValid[allianceId],
-                        _cachedShifts[allianceId],
-                        commandHierarchyShift,
-                        _cachedRosters[allianceId],
-                        liveRoster))
+                liveRoster = ReadRosterSignature(allianceId, commandHierarchyShift);
+                var refresh = TacticalCacheSignatures.ClassifyCommandTreeRefresh(
+                    _cacheValid[allianceId],
+                    _cachedShifts[allianceId],
+                    commandHierarchyShift,
+                    _cachedRosters[allianceId],
+                    liveRoster);
+                if (refresh == CommandTreeRefresh.Hit)
                 {
                     _cacheHits[allianceId]++;
                     return _cachedSnapshots[allianceId];
+                }
+                if (refresh == CommandTreeRefresh.RefreshLiveFlags
+                    && TryRefreshLiveFlags(allianceId, commandHierarchyShift, liveRoster, out CommandTreeSnapshot refreshed))
+                {
+                    return refreshed;
                 }
             }
 
             try
             {
-                var probes = BuildProbes(allianceId, commandHierarchyShift);
+                var units = new List<Regiment>();
+                var probes = BuildProbes(allianceId, commandHierarchyShift, units);
                 var snapshot = CommandTreeBuilder.Build(probes, allianceId, commandHierarchyShift);
 
                 if (cacheable)
                 {
+                    _cachedProbes[allianceId] = ToArray(probes);
+                    _cachedProbeUnits[allianceId] = units.ToArray();
                     _cachedSnapshots[allianceId] = snapshot ?? CommandTreeSnapshot.Empty;
                     _cachedShifts[allianceId] = commandHierarchyShift;
                     _cachedRosters[allianceId] = liveRoster;
@@ -103,6 +118,53 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        // Same units as the cached build; only active/routed/marked changed. Re-read those
+        // flags for the cached probes and re-run the pure builder.
+        private static bool TryRefreshLiveFlags(int allianceId, int shift, TacticalRosterSignature liveRoster, out CommandTreeSnapshot snapshot)
+        {
+            snapshot = null;
+            try
+            {
+                var probes = _cachedProbes[allianceId];
+                var units = _cachedProbeUnits[allianceId];
+                if (probes == null || units == null || probes.Length != units.Length) return false;
+                var refreshedProbes = new CommandTreeBuilder.CommandProbe[probes.Length];
+                for (int i = 0; i < probes.Length; i++)
+                {
+                    var p = probes[i];
+                    var reg = units[i];
+                    if (reg == null) return false;
+                    refreshedProbes[i] = new CommandTreeBuilder.CommandProbe(
+                        p.InstanceId,
+                        p.ParentInstanceId,
+                        p.AllianceId,
+                        p.RawUnitTyp,
+                        p.DisplayName,
+                        IsOperationallyPresent(reg, reg.gameObject, shift),
+                        reg.isrouted,
+                        reg.markedforrout);
+                }
+
+                snapshot = CommandTreeBuilder.Build(refreshedProbes, allianceId, shift) ?? CommandTreeSnapshot.Empty;
+                _cachedProbes[allianceId] = refreshedProbes;
+                _cachedSnapshots[allianceId] = snapshot;
+                _cachedRosters[allianceId] = liveRoster;
+                _cacheHits[allianceId]++;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static CommandTreeBuilder.CommandProbe[] ToArray(IReadOnlyList<CommandTreeBuilder.CommandProbe> probes)
+        {
+            var array = new CommandTreeBuilder.CommandProbe[probes.Count];
+            for (int i = 0; i < probes.Count; i++) array[i] = probes[i];
+            return array;
+        }
+
         // Invalidate one alliance's cache. Called when a roster event (death,
         // reinforcement arrival) might have changed the tree structure. Stage C
         // will wire automatic invalidation; for now this is exposed so external
@@ -115,6 +177,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _cachedSnapshots[allianceId] = CommandTreeSnapshot.Empty;
             _cachedShifts[allianceId] = int.MinValue;
             _cachedRosters[allianceId] = default(TacticalRosterSignature);
+            _cachedProbes[allianceId] = null;
+            _cachedProbeUnits[allianceId] = null;
             if (wasValid)
             {
                 OnceLog.Info(
@@ -134,32 +198,42 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _cachedSnapshots[i] = CommandTreeSnapshot.Empty;
                 _cachedShifts[i] = int.MinValue;
                 _cachedRosters[i] = default(TacticalRosterSignature);
+                _cachedProbes[i] = null;
+                _cachedProbeUnits[i] = null;
                 _cacheHits[i] = 0;
                 _cacheMisses[i] = 0;
             }
         }
 
-        /// <summary>
-        /// One pass over completeunitlist for the alliance: list identity, unit count,
-        /// activeInHierarchy / isrouted / markedforrout counts and an order-independent
-        /// id hash. Plain field reads only.
-        /// </summary>
         internal static TacticalRosterSignature ReadRosterSignature(int allianceId)
+        {
+            return ReadRosterSignature(allianceId, ReadCommandHierarchyShift());
+        }
+
+        /// <summary>
+        /// One pass over completeunitlist for the alliance: list identity, unit count and
+        /// an order-independent id hash (structural), plus activeInHierarchy / isrouted /
+        /// markedforrout counts over command-level units only (live; leaf routs do not
+        /// change the command tree). Plain field reads only.
+        /// </summary>
+        private static TacticalRosterSignature ReadRosterSignature(int allianceId, int commandHierarchyShift)
         {
             try
             {
                 var units = BattleUnits.completeunitlist;
                 if (units == null) return default(TacticalRosterSignature);
+                int commandMin = ClampShiftedMin(commandHierarchyShift);
                 int count = 0, active = 0, routed = 0, marked = 0, idHash = 0;
                 for (int i = 0; i < units.Count; i++)
                 {
                     var reg = units[i];
                     if (reg == null || reg.alliance != allianceId) continue;
                     count++;
+                    unchecked { idHash += reg.GetInstanceID() * 16777619; }
+                    if (reg.unittyp < commandMin) continue;
                     if (reg.isrouted) routed++;
                     if (reg.markedforrout) marked++;
                     if (reg.gameObject.activeInHierarchy) active++;
-                    unchecked { idHash += reg.GetInstanceID() * 16777619; }
                 }
                 return new TacticalRosterSignature(
                     System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(units),
@@ -191,7 +265,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return (allianceId >= 0 && allianceId < _cacheMisses.Length) ? _cacheMisses[allianceId] : 0;
         }
 
-        private static IReadOnlyList<CommandTreeBuilder.CommandProbe> BuildProbes(int allianceId, int commandHierarchyShift)
+        private static IReadOnlyList<CommandTreeBuilder.CommandProbe> BuildProbes(int allianceId, int commandHierarchyShift, List<Regiment> probeUnits)
         {
             var units = BattleUnits.completeunitlist as System.Collections.IList;
             if (units == null || units.Count == 0)
@@ -222,6 +296,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     parentInstanceId = ResolveParentInstanceId(reg);
                 }
 
+                probeUnits.Add(reg);
                 probes.Add(new CommandTreeBuilder.CommandProbe(
                     instanceId: instanceId,
                     parentInstanceId: parentInstanceId,

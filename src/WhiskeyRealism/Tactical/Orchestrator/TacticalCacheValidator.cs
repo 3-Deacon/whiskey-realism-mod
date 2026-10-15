@@ -152,7 +152,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                             OnceLog.Info(
                                 "tactical-cache-validator:command-tree-roster-changed",
                                 "[TacticalCacheValidator] command tree roster changed since last build: cached="
-                                + cachedRoster + " live=" + liveRoster + " — next Snapshot() rebuilds");
+                                + cachedRoster + " live=" + liveRoster + " — next Snapshot() refreshes or rebuilds");
                         }
                     }
 

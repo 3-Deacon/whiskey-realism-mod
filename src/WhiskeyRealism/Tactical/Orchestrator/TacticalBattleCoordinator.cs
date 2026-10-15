@@ -139,9 +139,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Allocation-free structural hash of a command tree (root, counts, depth, and per
-        /// node id / parent / raw unittyp / depth / active), replacing the per-tick
-        /// StringBuilder signature used for "unchanged" checks. Active is included so a
-        /// tree whose live active flags changed is re-registered (BR-H5).
+        /// node id / parent / raw unittyp / depth), replacing the per-tick StringBuilder
+        /// signature used for "unchanged" checks. Live flags are excluded: the builder
+        /// already drops routed / inactive command units, so a rout that matters changes
+        /// the node set, while other flag changes do not reallocate intents.
         /// </summary>
         internal static int CommandTreeHash(CommandTreeSnapshot tree)
         {
@@ -161,7 +162,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     h = h * 31 + StableHash(node.ParentNodeId);
                     h = h * 31 + node.RawUnitTyp;
                     h = h * 31 + node.Depth;
-                    h = h * 31 + (node.Active ? 1 : 0);
                 }
                 return h;
             }

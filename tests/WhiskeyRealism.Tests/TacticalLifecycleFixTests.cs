@@ -223,10 +223,13 @@ internal static class TacticalLifecycleFixTests
     {
         var r = new TacticalRosterSignature(1, 40, 30, 2, 1, 99);
         var routed = new TacticalRosterSignature(1, 40, 30, 3, 1, 99);
-        TestHarness.AssertTrue(TacticalCacheSignatures.ShouldRebuildCommandTree(false, 0, 0, r, r), "invalid");
-        TestHarness.AssertTrue(TacticalCacheSignatures.ShouldRebuildCommandTree(true, 0, 1, r, r), "shift");
-        TestHarness.AssertTrue(TacticalCacheSignatures.ShouldRebuildCommandTree(true, 0, 0, r, routed), "roster");
-        TestHarness.AssertFalse(TacticalCacheSignatures.ShouldRebuildCommandTree(true, 0, 0, r, r), "hit");
+        var detached = new TacticalRosterSignature(2, 41, 30, 2, 1, 98);
+        TestHarness.AssertEqual(CommandTreeRefresh.Rebuild, TacticalCacheSignatures.ClassifyCommandTreeRefresh(false, 0, 0, r, r), "invalid");
+        TestHarness.AssertEqual(CommandTreeRefresh.Rebuild, TacticalCacheSignatures.ClassifyCommandTreeRefresh(true, 0, 1, r, r), "shift");
+        TestHarness.AssertEqual(CommandTreeRefresh.Rebuild, TacticalCacheSignatures.ClassifyCommandTreeRefresh(true, 0, 0, r, detached), "list replaced");
+        // A rout only changes live flags: re-filter the cached probes, no hierarchy walk.
+        TestHarness.AssertEqual(CommandTreeRefresh.RefreshLiveFlags, TacticalCacheSignatures.ClassifyCommandTreeRefresh(true, 0, 0, r, routed), "rout");
+        TestHarness.AssertEqual(CommandTreeRefresh.Hit, TacticalCacheSignatures.ClassifyCommandTreeRefresh(true, 0, 0, r, r), "hit");
     }
 
     private static void BrH5MapObjectiveContentHash()
