@@ -40,6 +40,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<RailLineRecord> Rails { get; } = new List<RailLineRecord>();
         public List<CommanderRecord> Commanders { get; } = new List<CommanderRecord>();
         public List<RankBand> RankBands { get; } = new List<RankBand>();             // 10..18
+        public List<ArmyGroupRecord> ArmyGroups { get; } = new List<ArmyGroupRecord>(); // G2 appointment targets
         public List<CrossingRecord> Crossings { get; } = new List<CrossingRecord>(); // fords and bridges (G3)
         public List<EnemyDetection> Detections { get; } = new List<EnemyDetection>(); // G1 EnemyDetectionRuntime
         public List<EnemyBelief> Beliefs { get; } = new List<EnemyBelief>();          // G1 EnemyArmyModel
@@ -71,6 +72,7 @@ namespace WhiskeyRealism.Strategic.Planner
             Rails.Clear();
             Commanders.Clear();
             RankBands.Clear();
+            ArmyGroups.Clear();
             Crossings.Clear();
             Detections.Clear();
             Beliefs.Clear();

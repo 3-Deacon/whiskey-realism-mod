@@ -39,8 +39,10 @@ namespace WhiskeyRealism.Strategic.Planner
     // 26628-26638). Commander records are read once per alliance and review day.
     // Rails: BattleUnits.railroad with StartConstruction(alliance, checkonly: true) (77818-77845).
     // Commanders: this alliance's GameVars.commander records with the live getters at their default
-    // arguments (as vanilla 14250 calls them) and GetAverageAttributeValue (59175). Rank bands:
+    // arguments (as vanilla 14250 calls them), GetAverageAttributeValue (59175) and vanilla's AI
+    // appointment pool CanBePickedForAIReplacement(alliance, true) (60748). Rank bands:
     // GetMin/MaxRankForUnittyp (67003-67058; checkforpromotion false, as CheckSuitableRank 60579).
+    // Army groups: BattleUnits.armygroups of this alliance (G2 appointment targets).
     internal static class CampaignSnapshotRuntime
     {
         private const int FactoryId = 5, FoundryId = 8, IronworksId = 10, ManufactoryId = 12; // CBuilding ids 95107-95113
@@ -131,6 +133,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 ReadCrossings(s);
                 ReadCommanders(s, alliance);
                 ReadRankBands(s, alliance);
+                ReadArmyGroups(s, alliance);
             }
             catch (Exception ex)
             {
@@ -708,6 +711,8 @@ namespace WhiskeyRealism.Strategic.Planner
                         RefreshCommand = c.refreshcommand,
                         ServingUnderPlayer = c.IsServingUnderPlayer(),
                         IsPlayer = career && id == chosen,
+                        Pickable = c.CanBePickedForAIReplacement(alliance, includeofficerswithcommand: true),
+                        FreeApartFromArmyGroup = CommanderAppointmentRuntime.FreeApartFromArmyGroup(c, alliance, id),
                         CommandInstanceId = hasCommand ? command.GetInstanceID() : -1,
                         CommandUnitTyp = hasCommand ? command.unittyp : -1,
                         Name = c.combinedname
@@ -729,6 +734,45 @@ namespace WhiskeyRealism.Strategic.Planner
                     UnitTyp = unitTyp,
                     MinRank = GameVars.GetMinRankForUnittyp(unitTyp, alliance),
                     MaxRank = GameVars.GetMaxRankForUnittyp(unitTyp, alliance, checkforpromotion: false)
+                });
+            }
+        }
+
+        // This alliance's vanilla army groups (BattleUnits.armygroups; GetAlliance 75528 reads the
+        // first member's alliance, else the commander's): commander, members, mean position and
+        // summed groupstrengthdirect of the members.
+        private static void ReadArmyGroups(CampaignSnapshot s, int alliance)
+        {
+            var groups = BattleUnits.armygroups;
+            if (groups == null) return;
+            for (int i = 0; i < groups.Count; i++)
+            {
+                var group = groups[i];
+                if ((UnityEngine.Object)group == null || group.GetAlliance() != alliance) continue;
+                var members = group.attachedunits;
+                int count = 0;
+                float x = 0f, z = 0f, strength = 0f;
+                var ids = new int[members != null ? members.Count : 0];
+                for (int m = 0; m < ids.Length; m++)
+                {
+                    var unit = members[m];
+                    if ((UnityEngine.Object)unit == null) continue;
+                    Vector3 p = unit.GetPosition();
+                    x += p.x;
+                    z += p.z;
+                    strength += unit.groupstrengthdirect;
+                    ids[count++] = unit.GetInstanceID();
+                }
+                if (count == 0) continue;
+                if (count < ids.Length) Array.Resize(ref ids, count);
+                s.ArmyGroups.Add(new ArmyGroupRecord
+                {
+                    InstanceId = group.GetInstanceID(),
+                    CommanderId = group.GetCommanderID(),
+                    X = x / count,
+                    Z = z / count,
+                    Strength = strength,
+                    MemberInstanceIds = ids
                 });
             }
         }

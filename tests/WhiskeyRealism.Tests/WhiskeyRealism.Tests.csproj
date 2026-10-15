@@ -75,6 +75,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignPlanStore.cs" Link="Planner\CampaignPlanStore.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyArmyModel.cs" Link="Planner\EnemyArmyModel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyBeliefReadings.cs" Link="Planner\EnemyBeliefReadings.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CommanderProfiles.cs" Link="Planner\CommanderProfiles.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CommanderAppointmentPlanner.cs" Link="Planner\CommanderAppointmentPlanner.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\AppointmentProtection.cs" Link="Planner\AppointmentProtection.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicFactionAiGuard.cs" Link="CicFactionAiGuard.cs" />

@@ -10,16 +10,19 @@ namespace WhiskeyRealism.Strategic.Planner
     //   ReviewPlan    after the fiscal and policy steps, before the front ledger: snapshot ->
     //                 G1 detection and beliefs -> (G2 profiles, G3 plan, G1b recon tasks, G4 allocation, G1b
     //                 recon mission sync) -> CampaignPlanStore.Publish.
-    //   ReviewExecute after the defense intent: (G2 appointments, then the G5b, G5a, G5c, G5d
-    //                 executors). Executors write vanilla state only from here.
+    //   ReviewExecute after the defense intent: G2 appointments (CommanderAppointmentRuntime, on
+    //                 this review's snapshot and plan), then the G5b, G5a, G5c, G5d executors.
+    //                 Executors write vanilla state only from here.
     // Both return for alliances other than 0 and 1 and before AICampaign.aifaction holds the
     // alliance's faction. For the W&L CIC player's own alliance (vanilla job 36 skips it,
     // 11620-11628) ReviewPlan keeps only the snapshot and the G1 detection/beliefs (bookkeeping,
     // integrator decision 2026-10-15) and ReviewExecute returns. While vanilla's job machine is
     // paused (UpdateUnitAI 11368: a W&L player with no command) every faction's jobs are frozen,
     // so ReviewExecute returns for every alliance and ReviewPlan keeps only its bookkeeping
-    // (snapshot, G1 detection and beliefs; ledger aging inserts before that return): no replan,
-    // no publish, and the last published plan ages out (spec C5).
+    // (snapshot, G1 detection and beliefs, the appointment protection windows' aging; the other
+    // ledger aging inserts before that return): no replan, no publish, and the last published
+    // plan ages out (spec C5). The commander profiles are G3's step: TheaterPlanner.Plan reads
+    // CommanderProfiles.ForSector.
     internal static class CampaignPlannerRuntime
     {
         private static readonly CampaignSnapshot[] Snapshots = { new CampaignSnapshot(), new CampaignSnapshot() };
@@ -48,6 +51,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     snapshot.Beliefs.AddRange(beliefs.Beliefs);
                     EnemyDetectionRuntime.Report(snapshot, beliefs);
                     if (mode == PlannerReviewMode.StandDown) return;
+                    CommanderAppointmentRuntime.Age(alliance, snapshot.DaySerial);
                     if (mode == PlannerReviewMode.Bookkeeping) return;
 
                     var sectors = SectorModel.Build(snapshot);
@@ -75,7 +79,8 @@ namespace WhiskeyRealism.Strategic.Planner
                     var chain = WlChainContext.Capture();
                     if (PlayerCommandClassifier.ReviewMode(ReadPlayerClass(in chain), GameVars.playeralliance, alliance) != PlannerReviewMode.Full) return;
                     if (FactionIndexOf(alliance) < 0) return;
-                    // Executors (G2 appointments, G5b, G5a, G5c, G5d) run here in that order.
+                    // Executors in plan order: G2 appointments, then G5b, G5a, G5c, G5d.
+                    CommanderAppointmentRuntime.Execute(alliance, Snapshots[alliance]);
                 }
                 catch (Exception ex)
                 {
