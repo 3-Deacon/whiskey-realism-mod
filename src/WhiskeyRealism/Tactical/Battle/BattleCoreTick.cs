@@ -61,7 +61,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static FieldInfo _bunitsField;
         private static bool _bunitsFieldResolved;
-        // Session latch for the once-per-session producer line (built only once).
+        // Per-battle latch for the producer line, so the message string is built
+        // once per battle (its OnceLog key re-arms at battle end too).
         private static bool _producersLogged;
 
         static BattleCoreTick()
@@ -110,7 +111,7 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("battle-core:snapshot-failed",
+                OnceLog.Warning("tactical-battle-core:snapshot-failed",
                     "[BattleCore] EnsureSnapshot threw: " + ex.GetType().Name + " " + ex.Message);
                 return null;
             }
@@ -141,7 +142,7 @@ namespace WhiskeyRealism.Tactical.Battle
             BattleUnits bunits = ResolveBattleUnits();
             if (view == null || (UnityEngine.Object)bunits == null)
             {
-                OnceLog.Warning("battle-core:snapshot-unavailable",
+                OnceLog.Warning("tactical-battle-core:snapshot-unavailable",
                     "[OrderArbiter] no battle snapshot; producers registered but the arbiter stands down");
                 return;
             }
@@ -149,7 +150,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (!_producersLogged)
             {
                 _producersLogged = true;
-                OnceLog.Info("battle-core:producers", "[BattleCore] producers count=" + _producerCount + " order=" + ProducerNames());
+                OnceLog.Info("tactical-battle-core:producers", "[BattleCore] producers count=" + _producerCount + " order=" + ProducerNames());
             }
             double now = TacticalDoctrineTime.NowBattleHours;
             ArbiterStats stats = _stats[alliance];
@@ -164,7 +165,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("battle-core:producer-threw:" + producer.Name,
+                    OnceLog.Warning("tactical-battle-core:producer-threw:" + producer.Name,
                         "[OrderArbiter] producer " + producer.Name + " threw: " + ex.GetType().Name + " " + ex.Message);
                 }
             }
@@ -249,7 +250,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     _bunitsFieldResolved = true;
                     _bunitsField = AccessTools.Field(typeof(AIBattle), "bunits");
                     if (_bunitsField == null)
-                        OnceLog.Warning("battle-core:bunits-missing", "[BattleCore] AIBattle.bunits not found; the arbiter stands down");
+                        OnceLog.Warning("tactical-battle-core:bunits-missing", "[BattleCore] AIBattle.bunits not found; the arbiter stands down");
                 }
                 return _bunitsField != null ? _bunitsField.GetValue(null) as BattleUnits : null;
             }
@@ -261,6 +262,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static void Reset()
         {
+            _producersLogged = false;
             for (int a = 0; a < _current.Length; a++)
             {
                 _current[a] = null;

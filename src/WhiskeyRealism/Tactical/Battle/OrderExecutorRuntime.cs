@@ -75,7 +75,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private static readonly Dictionary<int, Regiment> _regiments = new Dictionary<int, Regiment>(1024);
         // The units one Move reached (grown to the largest chain seen).
         private static IssuedTarget[] _issued = new IssuedTarget[64];
-        // Session latch for the first-fire line (built only once).
+        // Per-battle latch for the first-fire line, so the message string is built
+        // once per battle (its OnceLog key re-arms at battle end too).
         private static bool _firstFireLogged;
         private static int _lookupUnitCount = -1;
         private static int _lookupFrame = -1;
@@ -162,7 +163,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (executed > 0 && !_firstFireLogged)
             {
                 _firstFireLogged = true;
-                OnceLog.Info("battle-core:arbiter-first-fire",
+                OnceLog.Info("tactical-battle-core:arbiter-first-fire",
                     "[OrderArbiter] first vanilla order issued channel=" + winner.Channel + " source=" + winner.Source);
             }
 
@@ -175,7 +176,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("battle-core:dispatch-failed",
+                    OnceLog.Warning("tactical-battle-core:dispatch-failed",
                         "[OrderArbiter] W&L dispatch threw: " + ex.GetType().Name + " " + ex.Message);
                 }
             }
@@ -226,7 +227,7 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("battle-core:inline-failed",
+                OnceLog.Warning("tactical-battle-core:inline-failed",
                     "[OrderArbiter] ExecuteInline threw: " + ex.GetType().Name + " " + ex.Message);
                 return false;
             }
@@ -439,6 +440,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private static void Reset()
         {
             _regiments.Clear();
+            _firstFireLogged = false;
             _lookupUnitCount = -1;
             _lookupFrame = -1;
         }

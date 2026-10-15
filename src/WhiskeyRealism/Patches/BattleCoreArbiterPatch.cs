@@ -47,7 +47,7 @@ namespace WhiskeyRealism.Patches
                 }
                 catch (Exception ex)
                 {
-                    OnceLog.Warning("battle-core:arbiter-failed",
+                    OnceLog.Warning("tactical-battle-core:arbiter-failed",
                         "[OrderArbiter] arbiter tick threw: " + ex.GetType().Name + " " + ex.Message);
                 }
             }

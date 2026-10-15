@@ -47,7 +47,7 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("battle-core:terrain-point-failed",
+                OnceLog.Warning("tactical-battle-core:terrain-point-failed",
                     "[WaypointValidator] GetCurrentTerrainOnPos threw: " + ex.GetType().Name + " " + ex.Message);
                 return false;
             }
@@ -63,7 +63,7 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("battle-core:terrain-line-failed",
+                OnceLog.Warning("tactical-battle-core:terrain-line-failed",
                     "[WaypointValidator] CheckTerrainLine threw: " + ex.GetType().Name + " " + ex.Message);
                 return false;
             }
@@ -87,7 +87,7 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("battle-core:terrain-stepback-failed",
+                OnceLog.Warning("tactical-battle-core:terrain-stepback-failed",
                     "[WaypointValidator] CheckIfFinalWaypointIsOnTerrain threw: " + ex.GetType().Name + " " + ex.Message);
                 return false;
             }
@@ -109,7 +109,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     _terrainDataProperty = terrainType != null ? AccessTools.Property(terrainType, "terrainData") : null;
                     _terrainSizeProperty = terrainDataType != null ? AccessTools.Property(terrainDataType, "size") : null;
                     if (_activeTerrainProperty == null || _terrainDataProperty == null || _terrainSizeProperty == null)
-                        OnceLog.Warning("battle-core:terrain-size-missing",
+                        OnceLog.Warning("tactical-battle-core:terrain-size-missing",
                             "[WaypointValidator] Terrain size not readable; targets are not map-clamped");
                 }
 
@@ -137,7 +137,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     _bfsFieldResolved = true;
                     _bfsField = AccessTools.Field(typeof(BattleUnits), "bfs");
                     if (_bfsField == null)
-                        OnceLog.Warning("battle-core:bfs-missing",
+                        OnceLog.Warning("tactical-battle-core:bfs-missing",
                             "[WaypointValidator] BattleUnits.bfs not found; river and fence-line probes are skipped");
                 }
                 return _bfsField != null ? _bfsField.GetValue(null) as BattlefieldSetup : null;
