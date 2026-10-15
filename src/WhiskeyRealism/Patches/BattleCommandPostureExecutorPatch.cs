@@ -1634,6 +1634,7 @@ namespace WhiskeyRealism.Patches
 
                 direction.Normalize();
                 Vector3 lateral = new Vector3(-direction.z, 0f, direction.x);
+                ApplyVanillaPathAreaCosts();
                 return new[]
                 {
                     BuildPathQualitySample(group, own, target, task, hasThreat, threat, hasCurrentWaypoint, currentWaypoint),
@@ -1645,6 +1646,30 @@ namespace WhiskeyRealism.Patches
             {
                 return Array.Empty<TacticalPathQualitySample>();
             }
+        }
+
+        // Set the global NavMesh area costs AddPath would use for this move
+        // before probing; no restore needed, every AddPath sets them again.
+        private static void ApplyVanillaPathAreaCosts()
+        {
+            try
+            {
+                SetAreaCost(VanillaPathAreaCosts.RiversAreaName, VanillaPathAreaCosts.Rivers(GameVars.isfrozen()));
+                SetAreaCost(VanillaPathAreaCosts.RoadsAreaName, VanillaPathAreaCosts.Roads);
+                SetAreaCost(VanillaPathAreaCosts.BridgesAreaName, VanillaPathAreaCosts.Bridges);
+                SetAreaCost(VanillaPathAreaCosts.FencesWallsAreaName, VanillaPathAreaCosts.FencesWalls);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-command-posture:area-cost-failed",
+                    "BattleCommandPostureExecutorPatch area costs failed: " + ex.Message);
+            }
+        }
+
+        private static void SetAreaCost(string areaName, float cost)
+        {
+            int area = NavMesh.GetAreaFromName(areaName);
+            if (area >= 0) NavMesh.SetAreaCost(area, cost);
         }
 
         private static TacticalPathQualitySample BuildPathQualitySample(

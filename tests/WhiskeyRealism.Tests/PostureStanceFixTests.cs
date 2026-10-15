@@ -90,6 +90,7 @@ internal static class PostureStanceFixTests
         // Perf
         Pass("friendly spatial grid matches brute-force front blocker", FriendlySpatialGridMatchesBruteForce);
         Pass("nav plan budget defers and rotates", NavPlanBudgetDefersAndRotates);
+        Pass("path-quality probe uses vanilla battle AddPath area costs", PathProbeUsesVanillaAreaCosts);
     }
 
     private static void Pass(string name, Action test)
@@ -590,6 +591,17 @@ internal static class PostureStanceFixTests
     private static LeafMoveDecision Leaf(CommandTaskType task, bool parentActive = false, bool hasSlot = true, bool closeEngaged = false, bool pending = false, bool activeMove = false)
     {
         return LeafBrigadeMovePolicy.Decide(task, parentActive, hasSlot, closeEngaged, pending, activeMove);
+    }
+
+    private static void PathProbeUsesVanillaAreaCosts()
+    {
+        // Regiment.AddPath in battle, roads allowed, path not interrupted (130364-130394).
+        AssertEqual(1f, VanillaPathAreaCosts.Roads, "roads");
+        AssertEqual(1f, VanillaPathAreaCosts.Bridges, "bridges");
+        AssertEqual(2f, VanillaPathAreaCosts.FencesWalls, "fences/walls");
+        AssertEqual(500000f, VanillaPathAreaCosts.Rivers(frozen: false), "rivers impassable");
+        AssertEqual(2f, VanillaPathAreaCosts.Rivers(frozen: true), "frozen rivers walkable");
+        AssertEqual("FencesWalls, Sea (C)", VanillaPathAreaCosts.FencesWallsAreaName, "area name");
     }
 
     private static void WaypointClampMirrorsVanillaMapBounds()

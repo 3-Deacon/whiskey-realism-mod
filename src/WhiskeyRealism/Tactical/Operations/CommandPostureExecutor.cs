@@ -352,6 +352,27 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
+    // NavMesh area costs are global and Regiment.AddPath rewrites them for every
+    // path (130364-130394), so a Whiskey NavMesh.CalculatePath otherwise runs
+    // on whatever the last AddPath left (Roads/Bridges 1 or 2, fences 2 or
+    // 500). These are AddPath's battle values for a normal move: roads
+    // allowed, path not interrupted.
+    public static class VanillaPathAreaCosts
+    {
+        public const string RoadsAreaName = "Roads";
+        public const string BridgesAreaName = "Bridges";
+        public const string FencesWallsAreaName = "FencesWalls, Sea (C)";
+        public const string RiversAreaName = "Rivers";
+        public const float Roads = 1f;
+        public const float Bridges = 1f;
+        public const float FencesWalls = 2f;
+
+        public static float Rivers(bool frozen)
+        {
+            return frozen ? 2f : 500000f;
+        }
+    }
+
     // The map clamp vanilla applies to every path target in
     // Regiment.RegimentSetPath (131054-131071): x in [1, size.x - 2],
     // z in [-(size.z - 2), -1] (battle maps run along negative z).
