@@ -40,6 +40,11 @@ namespace WhiskeyRealism.Tactical.Battle
     //     player-alliance unit). PlayerOwnership.Compute turns them into PlayerOwned /
     //     Feud per unit, and ApplyChainFlags marks the player's command and its
     //     ancestors once the parent map is assembled.
+    //   - Leaf-slot inputs (BC5a): lastsetwaypointrotation (stored with the group's
+    //     waypoint, SetGroupFormation 92067-92068), groupposition.groupwidth /
+    //     groupdepth and each group's layout entries attachedunitid[k] /
+    //     unitoffsetposition[k] (GroupPosition 78370-78382; 92094 places child k from
+    //     them). Field reads only.
     //   - Vanilla's own ancestry test for the player's command is Transform.IsChildOf
     //     (CheckCurrentOrderUpdate 8272, IsUnitUnderCommander 91203); the parent map is
     //     compared against it for the player chain only and disagreements are counted.
@@ -201,6 +206,7 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             snapshot.SetAncestryMismatchCount(scratch.AncestryMismatchCount);
             snapshot.IndexCommandTree(scratch);
+            CaptureLayoutSlots(snapshot, ownUnits);
 
             RefitFrontAxis(snapshot);
         }
@@ -252,6 +258,16 @@ namespace WhiskeyRealism.Tactical.Battle
             record.CombatBehaviorOrdered = reg.combatbehaviorordered;
             record.LastWaypointX = reg.lastsetwaypointposition.x;
             record.LastWaypointZ = reg.lastsetwaypointposition.z;
+            record.LastWaypointRotation = reg.lastsetwaypointrotation;
+            if (group)
+            {
+                var layout = reg.groupposition;
+                if (layout != null)
+                {
+                    record.GroupWidth = layout.groupwidth;
+                    record.GroupDepth = layout.groupdepth;
+                }
+            }
             record.CoverValue = reg.covervalue;
             record.CoverObject = reg.coverobject;
             record.FriendlyRoutedNear = reg.friendlyroutednear;
@@ -276,6 +292,29 @@ namespace WhiskeyRealism.Tactical.Battle
             flags |= TacticalWriteGuard.OwnershipFlags(reg, in ownership);
             record.Flags = flags;
             return record;
+        }
+
+        // Each own group's formation layout entries, after the command tree is assembled
+        // (the assembler keeps an entry only for the child whose command parent is that
+        // group). Field reads and GetInstanceID only.
+        private static void CaptureLayoutSlots(BattleSnapshot snapshot, Regiment[] ownUnits)
+        {
+            for (int g = 0; g < snapshot.OwnCount; g++)
+            {
+                if ((snapshot.Own[g].Flags & UnitFlags.IsGroup) == 0) continue;
+                var reg = ownUnits[g];
+                if (reg == null) continue;
+                var layout = reg.groupposition;
+                if (layout == null || layout.attachedunitid == null || layout.unitoffsetposition == null) continue;
+                int n = Math.Min(layout.attachedunitid.Length, layout.unitoffsetposition.Length);
+                for (int k = 0; k < n; k++)
+                {
+                    var child = layout.attachedunitid[k];
+                    if (child == null) continue;
+                    Vector3 offset = layout.unitoffsetposition[k];
+                    BattleSnapshotAssembler.ApplyLayoutSlot(snapshot, g, child.GetInstanceID(), offset.x, offset.z);
+                }
+            }
         }
 
         // Courier orders in flight: the orders this unit is sending (its own

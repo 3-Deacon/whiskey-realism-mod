@@ -33,8 +33,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //     sees the move through the waypoint stamp (SetGroupFormation 92067) or
     //     the moving-unit count; a same-clock re-run (vanilla's override calls)
     //     leaves it pending (OrderExecutor.ObserveOutcomes).
-    //     Without crossing data (null on a map without river crossings,
-    //     7919-7920) the move is a plain SetWaypoint.
+    //     Without a covered crossing (a null list on a map without river
+    //     crossings, 7919-7920, or an empty one, 7936-7949) the move is a plain
+    //     SetWaypoint with its courier delay (OrderExecutor.TakesBlockedMovingOrder).
     //   Stance: Util/TacticalStanceWriter (the one ChangeStance caller, 90772).
     //   Formation: BattleUnits.SetFormation (90971, courier) only when
     //     CommandFormationWritePolicy allows it — vanilla re-forms only a settled,
@@ -287,12 +288,10 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             viaBlockedOrder = false;
             Vector3 target = TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z));
-            // UpdateOrders' SetWaypoint carries no heading or double-quick: only a
-            // move without them goes this way (posture moves carry neither).
-            if ((w.Flags & IntentFlags.AvoidCoveredCrossings) != 0 && w.Heading < 0f && (w.Flags & IntentFlags.DoubleQuick) == 0)
+            if ((w.Flags & IntentFlags.AvoidCoveredCrossings) != 0)
             {
                 List<Vector3> crossings = BlockedCrossings(bunits, unit.alliance);
-                if (crossings != null)
+                if (OrderExecutor.TakesBlockedMovingOrder(w, crossings != null ? crossings.Count : 0))
                 {
                     // A queued order for this unit sets its waypoint within two
                     // frames; vanilla never dedupes the list, so a second one would

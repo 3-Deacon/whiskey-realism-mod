@@ -374,6 +374,20 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
+        /// <summary>
+        /// A flagged move goes through vanilla BlockedMovingOrder only without heading
+        /// or double-quick (UpdateOrders' SetWaypoint carries neither, 3139) and when
+        /// the side's blockedcrossings lists at least one crossing: the order carves
+        /// obstacles only over listed crossings (3071-3083), so with none it would only
+        /// drop the courier delay. An empty or missing list (7919-7949) is a plain
+        /// SetWaypoint.
+        /// </summary>
+        public static bool TakesBlockedMovingOrder(in BattleOrderIntent w, int crossingCount)
+        {
+            return (w.Flags & IntentFlags.AvoidCoveredCrossings) != 0 && w.Heading < 0f &&
+                (w.Flags & IntentFlags.DoubleQuick) == 0 && crossingCount > 0;
+        }
+
         /// <summary>SetGroupFormation's refuseflank: -1 none, 0 left, 1 right.</summary>
         public static int VanillaRefuseFlank(RefuseFlank refuse)
         {
