@@ -63,9 +63,22 @@ namespace WhiskeyRealism.Patches
                 var mult = new float[slots];
                 var groups = new int[slots];
                 var reasons = new string[slots];
+                var inRolledLoop = new bool[slots];
+                var recentFoundings = new int[slots];
 
                 for (int buildingType = 0; buildingType < slots; buildingType++)
                 {
+                    // Vanilla num3 (15046-15048) divides for every rolled-loop slot, whatever
+                    // its prob or owner.
+                    if (buildingType < count && state.bestiipplaces[buildingType] != null)
+                    {
+                        var loopType = GameVars.buildingtypes[buildingType];
+                        inRolledLoop[buildingType] = loopType != null && loopType.aiplacement &&
+                            loopType.subsidytype < 0 && !loopType.needsunitforplacement;
+                        if (inRolledLoop[buildingType])
+                            recentFoundings[buildingType] = CountRecentFoundings(state, buildingType);
+                    }
+
                     mult[buildingType] = 1f;
                     groups[buildingType] = ConstructionProbabilityBias.NotCandidate;
                     float oldProb = state.bestiipplacesprob[buildingType];
@@ -117,13 +130,13 @@ namespace WhiskeyRealism.Patches
                     reasons[buildingType] = constructionReason;
                 }
 
-                var biased = ConstructionProbabilityBias.Bias(raw, mult, groups);
+                var weights = ConstructionProbabilityBias.RolledWeights(inRolledLoop, recentFoundings);
+                var biased = ConstructionProbabilityBias.Bias(raw, mult, groups, weights);
                 for (int buildingType = 0; buildingType < slots; buildingType++)
                 {
                     float rawProb = raw[buildingType];
                     float newProb = biased[buildingType];
-                    if (rawProb <= 0f || NearlyEqual(rawProb, newProb)) continue;
-                    if (ConstructionProbabilitySanitizer.Classify(newProb) != ConstructionProbabilityStatus.Valid) continue;
+                    if (!ConstructionProbabilityBias.ShouldWrite(rawProb, newProb)) continue;
 
                     state.bestiipplacesprob[buildingType] = newProb;
                     _pending.Add(new PendingRestore(buildingType, state.bestiipplaces[buildingType], rawProb, newProb));
@@ -179,6 +192,16 @@ namespace WhiskeyRealism.Patches
                 _pending.Clear();
                 _pendingAlliance = -1;
             }
+        }
+
+        private static int CountRecentFoundings(GameVars.Alliance state, int buildingType)
+        {
+            var list = state.lastmonthscompanyfoundings;
+            if (list == null) return 0;
+            int n = 0;
+            for (int i = 0; i < list.Count; i++)
+                if (list[i] == buildingType) n++;
+            return n;
         }
 
         private static bool ConstructionSteeringEnabled()
@@ -324,11 +347,6 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Warning("economy-construction:rating", "[Patch:EconomyConstruction] IsRatingOkForConstruction failed: " + ex.Message);
                 return false;
             }
-        }
-
-        private static bool NearlyEqual(float left, float right)
-        {
-            return Math.Abs(left - right) < 0.0001f;
         }
 
         private struct PendingRestore

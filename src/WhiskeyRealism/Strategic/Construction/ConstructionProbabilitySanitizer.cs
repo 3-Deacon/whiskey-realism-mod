@@ -38,13 +38,16 @@ namespace WhiskeyRealism.Strategic.Construction
 
         // raw[k] * multiplier[k], then rescaled per group with one common factor (argmax
         // within a group is unchanged by uniform scaling):
-        //  - rolled group: capped so max(biased) <= max(raw) -> ordering changes, the
-        //    build roll never gets likelier than vanilla's own best (dampening allowed);
+        //  - rolled group: vanilla compares and rolls prob * num3 (15049, 15056), so the
+        //    group is capped so max(biased*w) <= max(raw*w) with w = RolledWeights ->
+        //    ordering changes, the build roll never gets likelier than vanilla's own
+        //    best (dampening allowed);
         //  - each subsidy type: normalised so max(biased) == max(raw). Vanilla does not
         //    reset num after the subsidy loop (15018 vs 15042), so the last type's best
         //    prob is the rolled loop's entry threshold; keeping each type's max raw keeps
         //    that threshold exactly vanilla's.
-        public static float[] Bias(float[] raw, float[] multiplier, int[] group)
+        // A multiplier of 0 yields 0 and stays 0 under any scaling.
+        public static float[] Bias(float[] raw, float[] multiplier, int[] group, float[] rolledWeight = null)
         {
             if (raw == null) return null;
             var biased = new float[raw.Length];
@@ -62,8 +65,11 @@ namespace WhiskeyRealism.Strategic.Construction
                     ? multiplier[i]
                     : 1f;
                 biased[i] = raw[i] * m;
-                maxRaw[g] = maxRaw.TryGetValue(g, out float r) && r > raw[i] ? r : raw[i];
-                maxBiased[g] = maxBiased.TryGetValue(g, out float b) && b > biased[i] ? b : biased[i];
+                float w = g == RolledGroup ? WeightOf(rolledWeight, i) : 1f;
+                float rawValue = raw[i] * w;
+                float biasedValue = biased[i] * w;
+                maxRaw[g] = maxRaw.TryGetValue(g, out float r) && r > rawValue ? r : rawValue;
+                maxBiased[g] = maxBiased.TryGetValue(g, out float b) && b > biasedValue ? b : biasedValue;
             }
 
             for (int i = 0; i < biased.Length; i++)
@@ -77,6 +83,41 @@ namespace WhiskeyRealism.Strategic.Construction
                 biased[i] *= target / top;
             }
             return biased;
+        }
+
+        // Vanilla's num3 (15043-15048): starts at 1 and is divided, in index order, by
+        // max(1, 1 + recent foundings of that type) for every rolled-loop candidate. The
+        // value at index k is the weight vanilla applies to prob[k].
+        public static float[] RolledWeights(bool[] inRolledLoop, int[] recentFoundings)
+        {
+            int n = inRolledLoop != null ? inRolledLoop.Length : 0;
+            var weights = new float[n];
+            float num3 = 1f;
+            for (int i = 0; i < n; i++)
+            {
+                if (inRolledLoop[i])
+                {
+                    int count = recentFoundings != null && i < recentFoundings.Length ? recentFoundings[i] : 0;
+                    num3 /= System.Math.Max(1f, 1f + count);
+                }
+                weights[i] = num3;
+            }
+            return weights;
+        }
+
+        // Whether the biased value must be written into bestiipplacesprob for the
+        // vanilla call. A suppression to 0 must be written, or the raw value would
+        // still compete.
+        public static bool ShouldWrite(float raw, float biased)
+        {
+            return raw > 0f && IsFinite(biased) && biased >= 0f && System.Math.Abs(raw - biased) >= 0.0001f;
+        }
+
+        private static float WeightOf(float[] weights, int index)
+        {
+            return weights != null && index < weights.Length && IsFinite(weights[index]) && weights[index] > 0f
+                ? weights[index]
+                : 1f;
         }
 
         private static int GroupOf(int[] group, int index)

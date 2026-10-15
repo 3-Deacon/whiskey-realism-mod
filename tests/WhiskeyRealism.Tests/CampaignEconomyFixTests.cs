@@ -29,6 +29,9 @@ internal static class CampaignEconomyFixTests
         ConstructionBiasReordersWithoutInflatingRolledRate();
         ConstructionBiasNormalisesEachSubsidyTypeToItsRawMax();
         ConstructionBiasRestoreSkipsSlotsVanillaConsumed();
+        ConstructionRolledWeightsMirrorVanillaNum3();
+        ConstructionBiasCapsWeightedRollValue();
+        ConstructionZeroMultiplierIsWrittenAndStaysSuppressed();
 
         ConstructionSupplyCorridorMatchesAreaKeyAgainstAreaKey();
         ConstructionSupplyCorridorMatchesTheaterAgainstTheater();
@@ -382,6 +385,47 @@ internal static class CampaignEconomyFixTests
         TestHarness.AssertFalse(ConstructionProbabilityBias.ShouldRestore(0f, 0.35f, samePlace: false), "vanilla built it: slot cleared");
         TestHarness.AssertFalse(ConstructionProbabilityBias.ShouldRestore(0.5f, 0.35f, samePlace: true), "vanilla refreshed value: keep");
         LogPass("c2b construction bias restore skips slots vanilla consumed");
+    }
+
+    // Vanilla 15043-15055: num3 starts at 1 and, for every rolled-loop candidate in index
+    // order, is divided by max(1, 1 + recent foundings of that type); the candidate is
+    // compared as prob * num3 and that product is what the build roll uses (15056).
+    private static void ConstructionRolledWeightsMirrorVanillaNum3()
+    {
+        var w = ConstructionProbabilityBias.RolledWeights(new[] { true, true, false, true }, new[] { 0, 1, 5, 2 });
+        TestHarness.AssertTrue(Math.Abs(w[0] - 1f) < 1e-6f, "w0");
+        TestHarness.AssertTrue(Math.Abs(w[1] - 0.5f) < 1e-6f, "w1 = 1/(1+1)");
+        TestHarness.AssertTrue(Math.Abs(w[2] - 0.5f) < 1e-6f, "non-loop slot carries the running num3");
+        TestHarness.AssertTrue(Math.Abs(w[3] - 0.5f / 3f) < 1e-6f, "w3 = w1/(1+2)");
+        LogPass("c2b construction rolled weights mirror vanilla num3");
+    }
+
+    private static void ConstructionBiasCapsWeightedRollValue()
+    {
+        var raw = new[] { 0.1f, 0.4f };
+        var weight = new[] { 1f, 0.5f };
+        var mult = new[] { 4f, 1f };
+        var groups = new[] { ConstructionProbabilityBias.RolledGroup, ConstructionProbabilityBias.RolledGroup };
+        var biased = ConstructionProbabilityBias.Bias(raw, mult, groups, weight);
+        float rawTop = Math.Max(raw[0] * weight[0], raw[1] * weight[1]);
+        float biasedTop = Math.Max(biased[0] * weight[0], biased[1] * weight[1]);
+        TestHarness.AssertTrue(biased[0] * weight[0] > biased[1] * weight[1], "bias still reorders the weighted pick");
+        TestHarness.AssertTrue(biasedTop <= rawTop + 1e-6f, "weighted roll value never exceeds vanilla's (" + biasedTop + " vs " + rawTop + ")");
+        LogPass("c2b construction bias caps weighted roll value");
+    }
+
+    private static void ConstructionZeroMultiplierIsWrittenAndStaysSuppressed()
+    {
+        var biased = ConstructionProbabilityBias.Bias(
+            new[] { 0.4f, 0.3f }, new[] { 0f, 1f },
+            new[] { 3, 3 });
+        TestHarness.AssertEqual(0f, biased[0], "suppressed candidate stays 0 after normalisation");
+        TestHarness.AssertTrue(biased[1] > biased[0], "sibling wins");
+        TestHarness.AssertTrue(ConstructionProbabilityBias.ShouldWrite(0.4f, 0f), "a suppression to 0 must be written to the slot");
+        TestHarness.AssertFalse(ConstructionProbabilityBias.ShouldWrite(0.4f, 0.4f), "unchanged value not written");
+        TestHarness.AssertFalse(ConstructionProbabilityBias.ShouldWrite(0.4f, float.NaN), "invalid never written");
+        TestHarness.AssertFalse(ConstructionProbabilityBias.ShouldWrite(0f, 0f), "empty slot untouched");
+        LogPass("c2b construction zero multiplier is written and stays suppressed");
     }
 
     // ---------------------------------------------------------------- C-ConstrRuntime
