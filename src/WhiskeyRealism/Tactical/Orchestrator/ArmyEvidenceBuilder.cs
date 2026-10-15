@@ -116,7 +116,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var enemyVisible = BuildEnemyVisibleState(battle, bunits, side, allianceId);
                 EstimateOwnAverages(bunits, side, out float ownAvgFatigue, out float ownAvgAmmo, out float ownMoraleRatio);
 
-                // Odds against the enemy force this side has actually seen
+                // Odds against the enemy force this side has had in range
                 // (TacticalEnemyContactLedger), not the enemy's
                 // sideinformation.totalactiveforce, which the side cannot know.
                 // Unknown (1) until the ledger is confident and the seen force
@@ -511,9 +511,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Enemy strength is the union of vanilla's range-limited sight lists
         /// across the side's alive combat regiments (<c>unitrange.enemyinrangereg</c>
         /// within raycastrange[0], 122649, and <c>enemyinfirerangereg</c>, 122692),
-        /// each enemy counted once. The lists are not fog-filtered for the AI
-        /// (122650/122699 skip the fog test for player-alliance targets), so
-        /// this is "in range", not "seen". The old per-group sum of
+        /// each enemy counted once. The lists are range-limited, not fog-limited
+        /// (vanilla AI perception; 122650/122699 skip the fog test for
+        /// player-alliance targets); fog-honest perception arrives with the
+        /// battle-core snapshot. The old per-group sum of
         /// <c>unitrange.enemystrengthwithinangle</c> (122720-122732) holds
         /// every enemy within aidefensivemaxrange for EVERY
         /// regiment, so a brigade of four counted the same enemy four times and

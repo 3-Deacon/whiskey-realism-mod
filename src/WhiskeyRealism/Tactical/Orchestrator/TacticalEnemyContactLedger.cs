@@ -3,15 +3,17 @@ using System;
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// What one side knows about the enemy army from its own eyes. Fed once per
-    /// evidence build with the enemy strength in range of the side's regiments
-    /// (vanilla's range-limited sight lists, deduped — see
-    /// <see cref="FrontUnitSample"/> for what vanilla does and does not
-    /// filter) and the part of it already in fire range. Everything is on
-    /// doctrine time (<see cref="TacticalDoctrineClock"/>, game hours).
+    /// What one side has had of the enemy army within range of its own
+    /// regiments. Fed once per evidence build with the enemy strength in
+    /// vanilla's per-regiment sight lists (deduped) and the part of it already
+    /// in fire range. That picture is range-limited, not fog-limited (vanilla
+    /// AI perception); fog-honest perception arrives with the battle-core
+    /// snapshot. Everything is on doctrine time
+    /// (<see cref="TacticalDoctrineClock"/>, game hours).
     ///
-    /// Replaces omniscient reads: the enemy's <c>sideinformation.totalactiveforce</c>,
-    /// its <c>reinforcementarrivalswithin24hrs</c> and the enemy AIBattle's
+    /// Stands in for whole-army reads the side has no range-based access to:
+    /// the enemy's <c>sideinformation.totalactiveforce</c>, its
+    /// <c>reinforcementarrivalswithin24hrs</c> and the enemy AIBattle's
     /// <c>objectivechain[].reservegroups</c> designation.
     /// </summary>
     public sealed class TacticalEnemyContactLedger
@@ -91,7 +93,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Intel confidence on [0, 1]: how much of an expected-size enemy we have
-        /// actually seen (coverage), discounted by how stale the last contact is.
+        /// had in range (coverage), discounted by how stale the last contact is.
         /// Replaces the fixed 0.8 "enemy deployed" constant that let the
         /// opportunity doctrine act on deployment-list strength it never saw.
         /// </summary>

@@ -53,8 +53,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// </summary>
         /// <param name="frontAxis">The side's front axis from
         /// <see cref="EnemyVisibleState.FrontAxis"/>. The play faces the same
-        /// way the sector bands do, toward what the side can SEE — never the
-        /// omniscient centroid of every enemy command group on the map.</param>
+        /// way the sector bands do, toward the enemy in range of the side's
+        /// regiments rather than the centroid of every enemy command group on
+        /// the map. That picture is range-limited, not fog-limited (vanilla AI
+        /// perception); fog-honest perception arrives with the battle-core
+        /// snapshot.</param>
         public static IReadOnlyList<CorpsAssignment> ComputeZoneAssignments(
             int allianceId,
             BattlePlanId planId,
