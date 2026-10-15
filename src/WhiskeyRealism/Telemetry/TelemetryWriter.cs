@@ -241,6 +241,10 @@ namespace WhiskeyRealism.Telemetry
             {
                 FlushUntilEmpty();
                 EmitPendingFileWritePerf(force: true);
+                // Router.Shutdown flushed perf aggregates before stopping the writer; the scopes
+                // this drain just ran (telemetry.flush) would otherwise be lost. Flush them here,
+                // while the runtime still accepts rows, and write them in the last drain.
+                TelemetryPerf.FlushAggregates();
                 FlushUntilEmpty();
             }
             catch (Exception ex)

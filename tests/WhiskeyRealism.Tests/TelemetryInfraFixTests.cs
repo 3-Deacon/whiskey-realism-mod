@@ -54,6 +54,7 @@ internal static class TelemetryInfraFixTests
         PerfShutdownFlushesEveryThreadsAggregates();
         PerfProbeTickFlushesDueAggregateWindows();
         PerfTickBetweenThreadExitAndShutdownKeepsDeadThreadCounts();
+        PerfShutdownKeepsWriterFinalDrainScopes();
         PerfAggregateWindowDefaultsToFiveSeconds();
         WriterRetryAfterTornWriteDoesNotDuplicateRows();
         WriterCountsRowsOnlyAfterTheirWriteSucceeds();
@@ -1324,6 +1325,26 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(gameRoot);
         }
         LogPass("perf tick between thread exit and shutdown keeps dead thread counts");
+    }
+
+    private static void PerfShutdownKeepsWriterFinalDrainScopes()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            string dir = SessionDir(gameRoot, runtime);
+            // The only non-performance row is the TelemetryShutdown health row, so the writer's
+            // telemetry.flush scope runs only during the shutdown drain.
+            TelemetryRouter.Shutdown("p-test");
+            TestHarness.AssertTrue(RowsForScope(dir, "telemetry.flush", "PerformanceAggregate").Count >= 1, "writer's final-drain telemetry.flush scope is flushed and written");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("perf shutdown keeps writer final drain scopes");
     }
 
     // ---------------------------------------------------------------- L8

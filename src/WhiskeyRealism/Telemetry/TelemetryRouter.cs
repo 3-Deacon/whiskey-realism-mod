@@ -198,7 +198,8 @@ namespace WhiskeyRealism.Telemetry
         {
             try
             {
-                // Write every thread's final partial aggregate window before stopping.
+                // Write every thread's final partial aggregate window before stopping. The writer
+                // flushes again after its final drain (its own scopes run during that drain).
                 TelemetryPerf.FlushAggregates();
 
                 TelemetryRuntime runtime;
