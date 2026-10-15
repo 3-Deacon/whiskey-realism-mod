@@ -58,6 +58,7 @@ namespace WhiskeyRealism.Strategic
         private readonly string[] _formationDirectiveSignatures = new string[2];
         private readonly string[] _operationalProbeSignatures = new string[2];
         private readonly OperationalProbeState[] _operationalProbeStates = new OperationalProbeState[2];
+        private readonly ProbeHysteresis[] _probeHysteresis = { new ProbeHysteresis(), new ProbeHysteresis() };
         private readonly string[] _fiscalSignatures = new string[2];
         private readonly string[] _constructionSignatures = new string[2];
         private readonly string[] _formationSourceSignatures = new string[2];
@@ -147,6 +148,7 @@ namespace WhiskeyRealism.Strategic
                 _formationDirectiveSignatures[a] = null;
                 _operationalProbeSignatures[a] = null;
                 _operationalProbeStates[a] = null;
+                _probeHysteresis[a] = new ProbeHysteresis();
                 _fiscalSignatures[a] = null;
                 _constructionSignatures[a] = null;
                 _formationSourceSignatures[a] = null;
@@ -176,6 +178,7 @@ namespace WhiskeyRealism.Strategic
             Initialized = false;
             PickCampaignObjectivePatch.ResetForNewCampaign();
             MonthlyTickHookPatch.ResetCadence();
+            OperationalProbeRuntime.ResetForNewCampaign();
             OnceLog.Reset();
             EmitCampaignInfoToMainLogIfAllowed("[Coordinator] strategic state reset (" + reason + ")");
         }
@@ -1032,6 +1035,14 @@ namespace WhiskeyRealism.Strategic
                 int targetObjectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
                 var targetPosition = ObjectiveAdapter.ResolveObjectivePosition(targetObjectiveId);
                 int daySerial = year * 372 + month * 31 + day;
+                float localOwn = 0f, localEnemy = 0f;
+                if (targetPosition.HasValue)
+                {
+                    HistoricalOperationProfile profile = null;
+                    if (!string.IsNullOrEmpty(cic?.ActivePlan?.OperationId))
+                        HistoricalOperationCatalog.TryGetById(cic.ActivePlan.OperationId, out profile);
+                    ReadLocalForceBalance(alliance, targetPosition.Value, HistoricalOperationContextBuilder.NearTargetRadius(profile), out localOwn, out localEnemy);
+                }
                 var eraManager = alliance < Eras.Length ? Eras[alliance] : null;
                 EraStage era = eraManager != null ? eraManager.Stage : EraStage.Amateur1861;
                 PersonalityVector personality = cic != null && eraManager != null
@@ -1048,7 +1059,9 @@ namespace WhiskeyRealism.Strategic
                     SafePolicyChapter(),
                     month,
                     personality,
-                    BattleHistory);
+                    BattleHistory,
+                    localOwn,
+                    localEnemy);
 
                 var posture = DirectorMemories[alliance]?.LastPosture;
                 if (posture != null)
@@ -1058,6 +1071,17 @@ namespace WhiskeyRealism.Strategic
                     posture);
 
                 var output = OperationalProbeLedger.Build(input);
+                var filtered = _probeHysteresis[alliance].Filter(
+                    output.Decision,
+                    continuingProbe: input.Previous != null,
+                    targetAreaKey: output.TargetAreaKey ?? input.PlanTargetAreaKey,
+                    daySerial: daySerial);
+                if (filtered != output.Decision)
+                {
+                    output.Reason = filtered == OperationalProbeDecision.Pause ? "withdraw-confirming" : "reprobe-cooldown";
+                    output.Decision = filtered;
+                    if (filtered == OperationalProbeDecision.None) output.Package = null;
+                }
                 OperationalProbes[alliance] = output;
 
                 bool clearState =

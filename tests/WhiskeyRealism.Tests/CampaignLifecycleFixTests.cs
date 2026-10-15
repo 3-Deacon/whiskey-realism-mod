@@ -63,6 +63,12 @@ internal static class CampaignLifecycleFixTests
         Check("c1 r15 same campaign scene never resets twice", R15SameSceneNeverResetsTwice);
         Check("c1 r15 era derives from date in both directions", R15EraDerivesFromDateBothDirections);
         Check("c1 r15 era transition stays monotonic within a campaign", R15EraTransitionStaysMonotonic);
+
+        // C-Probe
+        Check("c1 probe withdraw needs confirmation day", ProbeWithdrawNeedsConfirmationDay);
+        Check("c1 probe new probe blocked during reprobe cooldown", ProbeNewProbeBlockedDuringCooldown);
+        Check("c1 probe state resets when plan target changes", ProbeStateResetsWhenTargetChanges);
+        Check("c1 probe stop mirrors vanilla operation-ended guard", ProbeStopMirrorsVanillaGuard);
     }
 
     private static void Check(string name, Action test)
@@ -709,6 +715,47 @@ internal static class CampaignLifecycleFixTests
         TestHarness.AssertEqual(EraStage.Decisive1863, era.Stage, "CheckTransition never regresses");
         era.CheckTransition(1, 1864, false, false);
         TestHarness.AssertEqual(EraStage.TotalWar1864, era.Stage, "advances");
+    }
+
+    // ------------------------------------------------------------------
+    // C-Probe
+    // ------------------------------------------------------------------
+
+    private static void ProbeWithdrawNeedsConfirmationDay()
+    {
+        var h = new ProbeHysteresis();
+        int day = Serial(1, 6, 1862);
+        TestHarness.AssertEqual(OperationalProbeDecision.Pause, h.Filter(OperationalProbeDecision.Withdraw, true, "a-1", day), "first withdraw holds");
+        TestHarness.AssertEqual(OperationalProbeDecision.Probe, h.Filter(OperationalProbeDecision.Probe, true, "a-1", day + 1), "probe resets the streak");
+        TestHarness.AssertEqual(OperationalProbeDecision.Pause, h.Filter(OperationalProbeDecision.Withdraw, true, "a-1", day + 2), "streak restarted");
+        TestHarness.AssertEqual(OperationalProbeDecision.Withdraw, h.Filter(OperationalProbeDecision.Withdraw, true, "a-1", day + 3), "second consecutive withdraw executes");
+    }
+
+    private static void ProbeNewProbeBlockedDuringCooldown()
+    {
+        var h = new ProbeHysteresis();
+        int day = Serial(1, 6, 1862);
+        h.Filter(OperationalProbeDecision.Withdraw, true, "a-1", day);
+        h.Filter(OperationalProbeDecision.Withdraw, true, "a-1", day + 1);
+        TestHarness.AssertEqual(OperationalProbeDecision.None, h.Filter(OperationalProbeDecision.Probe, false, "a-1", day + 2), "no immediate re-probe of the same target");
+        TestHarness.AssertEqual(OperationalProbeDecision.Probe, h.Filter(OperationalProbeDecision.Probe, false, "a-2", day + 2), "other target allowed");
+        TestHarness.AssertEqual(OperationalProbeDecision.Probe, h.Filter(OperationalProbeDecision.Probe, false, "a-1", day + 1 + ProbeHysteresis.ReprobeCooldownDays), "cooldown expires");
+    }
+
+    private static void ProbeStateResetsWhenTargetChanges()
+    {
+        TestHarness.AssertTrue(ProbeHysteresis.KeepPreviousState("a-1", "a-1"), "same target keeps state");
+        TestHarness.AssertFalse(ProbeHysteresis.KeepPreviousState("a-1", "a-9"), "target changed resets state");
+        TestHarness.AssertFalse(ProbeHysteresis.KeepPreviousState("a-1", null), "no target resets state");
+    }
+
+    private static void ProbeStopMirrorsVanillaGuard()
+    {
+        TestHarness.AssertTrue(ProbeHysteresis.ShouldStopUnit(inOffensive: true, inBattle: false, wlUnderCommander: false, wlScenarioActive: true), "AI unit stops");
+        TestHarness.AssertFalse(ProbeHysteresis.ShouldStopUnit(inOffensive: true, inBattle: false, wlUnderCommander: true, wlScenarioActive: true), "W&L under-commander unit is not stopped (vanilla 13840)");
+        TestHarness.AssertTrue(ProbeHysteresis.ShouldStopUnit(inOffensive: true, inBattle: false, wlUnderCommander: true, wlScenarioActive: false), "flag ignored outside W&L");
+        TestHarness.AssertFalse(ProbeHysteresis.ShouldStopUnit(inOffensive: true, inBattle: true, wlUnderCommander: false, wlScenarioActive: false), "never stop a unit in battle");
+        TestHarness.AssertFalse(ProbeHysteresis.ShouldStopUnit(inOffensive: false, inBattle: false, wlUnderCommander: false, wlScenarioActive: false), "already released");
     }
 
     // ------------------------------------------------------------------

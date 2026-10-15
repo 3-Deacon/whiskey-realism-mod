@@ -89,4 +89,62 @@ namespace WhiskeyRealism.Strategic
             return false;
         }
     }
+
+    // C-Probe hysteresis, kept by the coordinator per alliance (OperationalProbeLedger itself
+    // is stateless). A probe only withdraws after WithdrawConfirmDays consecutive Withdraw
+    // evaluations (the first is held as Pause), and the same target is not re-probed for
+    // ReprobeCooldownDays after a withdrawal, so Probe <-> Withdraw cannot flap daily.
+    public sealed class ProbeHysteresis
+    {
+        public const int WithdrawConfirmDays = 2;
+        public const int ReprobeCooldownDays = 3;
+
+        private int _withdrawStreak;
+        private int _cooldownUntilDay = int.MinValue;
+        private string _cooldownTargetKey;
+
+        public OperationalProbeDecision Filter(
+            OperationalProbeDecision proposed,
+            bool continuingProbe,
+            string targetAreaKey,
+            int daySerial)
+        {
+            if (proposed == OperationalProbeDecision.Withdraw)
+            {
+                _withdrawStreak++;
+                if (_withdrawStreak < WithdrawConfirmDays)
+                    return OperationalProbeDecision.Pause;
+                _withdrawStreak = 0;
+                _cooldownUntilDay = daySerial + ReprobeCooldownDays;
+                _cooldownTargetKey = targetAreaKey;
+                return OperationalProbeDecision.Withdraw;
+            }
+
+            _withdrawStreak = 0;
+            if (!continuingProbe &&
+                proposed == OperationalProbeDecision.Probe &&
+                daySerial < _cooldownUntilDay &&
+                string.Equals(targetAreaKey, _cooldownTargetKey, StringComparison.Ordinal))
+                return OperationalProbeDecision.None;
+            return proposed;
+        }
+
+        // A probe state belongs to one target area; when the plan target moves the old probe
+        // is not this operation's probe any more.
+        public static bool KeepPreviousState(string previousTargetAreaKey, string currentTargetAreaKey)
+        {
+            return !string.IsNullOrEmpty(currentTargetAreaKey) &&
+                string.Equals(previousTargetAreaKey, currentTargetAreaKey, StringComparison.Ordinal);
+        }
+
+        // Mirrors vanilla's "operation ended" stop (AICampaign defensive-operation upkeep,
+        // decompile 13838-13843): StopRegiment only when the unit is not a W&L
+        // under-commander unit in an active W&L scenario. Units in battle are never touched
+        // (vanilla's offensive upkeep skips inbattle units, 14004).
+        public static bool ShouldStopUnit(bool inOffensive, bool inBattle, bool wlUnderCommander, bool wlScenarioActive)
+        {
+            if (!inOffensive || inBattle) return false;
+            return !wlUnderCommander || !wlScenarioActive;
+        }
+    }
 }
