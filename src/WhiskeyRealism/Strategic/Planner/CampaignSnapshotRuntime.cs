@@ -301,7 +301,8 @@ namespace WhiskeyRealism.Strategic.Planner
                         SightRadius = SightRadiusOf(reg, weather, fixPerkIds, career),
                         ParentInstanceId = -1,
                         UseRails = reg.userails,
-                        UseRivers = reg.userivers
+                        UseRivers = reg.userivers,
+                        GroupSpeed = reg.groupspeed
                     });
                 }
                 catch (Exception ex)

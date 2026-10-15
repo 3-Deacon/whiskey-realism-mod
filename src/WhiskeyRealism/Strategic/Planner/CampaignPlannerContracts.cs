@@ -80,6 +80,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // player's alliance, including its AI-owned groups under ai_vs_ai, keeps its stored values
         // (field default false). G5a raises them to vanilla's AI default before a planner move.
         public bool UseRails, UseRivers;
+        // Regiment.groupspeed: the slowest member's unitbasicspeed[t, 1] (UpdateGroupStrength
+        // 120438-120440), starting at unitbasicspeed[15, 1] (120179); RegimentMove multiplies a
+        // campaign group's speed by it (133991). G3's march-time estimate.
+        public float GroupSpeed;
     }
 
     // No enemy aggregate (spec C25): points, distancepoints, enemycampaignunitsstrength* and
@@ -279,6 +283,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public int TargetObjectiveId;
         public float TargetX, TargetZ;
         public float RequiredRatio;
+        // (HoldRatio + Tempo.MinimumHoldRatioModifier) x the sector's river-weighted believed land
+        // threat (TheaterPlanner.SectorThreat): G4's hold need is this value, never recomputed (F9).
+        public float HoldNeed;
     }
 
     public sealed class DepotTask
@@ -300,6 +307,11 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<DepotTask> DepotTasks = new List<DepotTask>();
         public string SwitchReason;
         public string PriorId;
+        // The massable set the main effort's odds were judged on (TheaterPlanner.MassFor): own movable
+        // committed formations within MarchHorizonDays of the main target, net of the capital floor
+        // and of every other sector's hold. G4 assigns MainEffort to exactly these instance ids.
+        public List<int> MassInstanceIds = new List<int>();
+        public float MassStrength;
     }
 
     public struct CommanderProfile
