@@ -21,6 +21,26 @@ namespace WhiskeyRealism.Strategic
         }
     }
 
+    // Every vanilla assignment that makes a campaign formation "busy". Mirrors
+    // the exclusions vanilla applies before it moves a unit itself:
+    // IsUnitAvailableForOffensiveOperations (decompile 14080),
+    // AssignUnitToDefendCapital (11800), CheckForEndOfDefensiveOperations (13860).
+    internal struct AreaOrderBusyFlags
+    {
+        public bool InBattle;
+        public bool OnRetreat;
+        public bool HasPaths;
+        public bool InOffensiveOperation;
+        public bool InDefensiveOperation;
+        public bool DefendingCapital;      // aifaction.groupstodefendcapital
+        public bool BuildingSupplyDepot;   // aifaction.unitsconstructingsupplydepots
+        public bool BuildingFort;          // FortConstructionOrder.UnitAlreadyConstructing
+        public bool RaidForce;             // RaidForce.IsRaidUnit
+        public bool SeaInvasionForce;      // SeaInvasionForce.GetSeaInvasionForceReference != null
+        public bool DefensiveOrderQueued;  // DefensiveMovingOrder.OrderRunning
+        public bool TakingTown;            // AICampaign.IsUnitTakingTown
+    }
+
     internal static class CampaignMilitaryGates
     {
         // ---- C-DefIntent: sea-invasion landed signal -------------------------
@@ -185,6 +205,16 @@ namespace WhiskeyRealism.Strategic
         internal static bool ShouldPrePledgeCapitalDefender(float vanillaNeed, float personalityNeed)
         {
             return vanillaNeed > 0f && personalityNeed > 0f;
+        }
+
+        // ---- C-ArmyArea -----------------------------------------------------
+        internal static bool IsIdleForAreaOrder(AreaOrderBusyFlags busy)
+        {
+            return !busy.InBattle && !busy.OnRetreat && !busy.HasPaths &&
+                !busy.InOffensiveOperation && !busy.InDefensiveOperation &&
+                !busy.DefendingCapital && !busy.BuildingSupplyDepot && !busy.BuildingFort &&
+                !busy.RaidForce && !busy.SeaInvasionForce && !busy.DefensiveOrderQueued &&
+                !busy.TakingTown;
         }
 
         internal static float Clamp(float value, float min, float max)

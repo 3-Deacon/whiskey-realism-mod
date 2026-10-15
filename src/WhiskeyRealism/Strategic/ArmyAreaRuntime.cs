@@ -177,9 +177,11 @@ namespace WhiskeyRealism.Strategic
                     continue;
                 }
 
+                // No theaterposition write: vanilla UpdateCampaignTheaters (17034)
+                // resets/reassigns it from the unit's real position; forcing the
+                // anchor distorted CheckCombinationOfUnits (17141) for the cycle.
                 if (MoveUnitTo(unit, anchor))
                 {
-                    SetTheaterPosition(unit, anchor);
                     issued++;
                     EmitCampaignInfoOnce(
                         $"army-area:{allianceId}:{UnitKey(unit)}:{assignment.AssignedAreaKey}",
@@ -224,18 +226,56 @@ namespace WhiskeyRealism.Strategic
             catch { return false; }
         }
 
+        // 2026-10-14 (C-ArmyArea): reuse vanilla's full busy set so area orders
+        // never pull capital defenders, depot/fort builders, raid or sea-invasion
+        // forces, queued defensive movers or town-takers - vanilla would send
+        // them straight back (ping-pong).
         private static bool IsIdleForAreaOrder(object unit, object faction)
         {
             try
             {
-                if (Convert.ToBoolean(AccessTools.Field(unit.GetType(), "inbattle")?.GetValue(unit) ?? false)) return false;
-                if (Convert.ToBoolean(AccessTools.Field(unit.GetType(), "onretreat")?.GetValue(unit) ?? false)) return false;
-                if (Convert.ToInt32(AccessTools.Field(unit.GetType(), "regimentpaths")?.GetValue(unit) ?? 0) > 0) return false;
-                if (ContainsUnit(faction, "unitsinoffensiveoperations", unit)) return false;
-                if (ContainsUnit(faction, "unitsindefensiveoperations", unit)) return false;
-                return true;
+                var regiment = unit as Regiment;
+                if (regiment == null) return false;
+                var busy = new AreaOrderBusyFlags
+                {
+                    InBattle = regiment.inbattle,
+                    OnRetreat = regiment.onretreat,
+                    HasPaths = regiment.regimentpaths > 0,
+                    InOffensiveOperation = ContainsUnit(faction, "unitsinoffensiveoperations", unit),
+                    InDefensiveOperation = ContainsUnit(faction, "unitsindefensiveoperations", unit),
+                    DefendingCapital = ContainsUnit(faction, "groupstodefendcapital", unit),
+                    BuildingSupplyDepot = ContainsUnit(faction, "unitsconstructingsupplydepots", unit),
+                    BuildingFort = AICampaign.FortConstructionOrder.UnitAlreadyConstructing(regiment),
+                    RaidForce = AICampaign.RaidForce.IsRaidUnit(regiment),
+                    SeaInvasionForce = AICampaign.SeaInvasionForce.GetSeaInvasionForceReference(regiment) != null,
+                    DefensiveOrderQueued = AICampaign.DefensiveMovingOrder.OrderRunning(regiment),
+                    TakingTown = IsUnitTakingTown(regiment)
+                };
+                return CampaignMilitaryGates.IsIdleForAreaOrder(busy);
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("army-area:idle-check", "[Patch:ArmyArea] idle check failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool _isUnitTakingTownResolved;
+        private static System.Reflection.MethodInfo _isUnitTakingTown;
+
+        // Private static AICampaign.IsUnitTakingTown(Regiment) (decompile 13438).
+        // Unresolvable -> treat as busy (fail closed).
+        private static bool IsUnitTakingTown(Regiment unit)
+        {
+            if (!_isUnitTakingTownResolved)
+            {
+                _isUnitTakingTownResolved = true;
+                _isUnitTakingTown = AccessTools.Method(typeof(AICampaign), "IsUnitTakingTown", new[] { typeof(Regiment) });
+                if (_isUnitTakingTown == null)
+                    OnceLog.Warning("army-area:taking-town", "[Patch:ArmyArea] AICampaign.IsUnitTakingTown(Regiment) not found; area orders treat units as busy");
+            }
+            if (_isUnitTakingTown == null) return true;
+            return Convert.ToBoolean(_isUnitTakingTown.Invoke(null, new object[] { unit }));
         }
 
         private static bool ContainsUnit(object faction, string fieldName, object unit)
@@ -283,18 +323,6 @@ namespace WhiskeyRealism.Strategic
             }
             catch { }
             return null;
-        }
-
-        private static void SetTheaterPosition(object unit, Vector3 position)
-        {
-            try
-            {
-                AccessTools.Field(unit.GetType(), "theaterposition")?.SetValue(unit, position);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("army-area:theaterposition", "[Patch:ArmyArea] theaterposition write failed: " + ex.Message);
-            }
         }
 
         private static bool MoveUnitTo(object unit, Vector3 position)

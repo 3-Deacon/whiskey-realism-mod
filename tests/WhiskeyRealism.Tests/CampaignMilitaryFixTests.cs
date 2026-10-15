@@ -28,6 +28,7 @@ internal static class CampaignMilitaryFixTests
         CapitalNeedMatchesVanillaFormula();
         CapitalPrePledgeOnlyWhenVanillaAlsoNeedsDefenders();
         CapitalPersonalityNeedDoesNotDoubleCountPledgedDefenders();
+        AreaOrderSkipsEveryVanillaBusyAssignment();
     }
 
     private static void LogPass(string message)
@@ -348,5 +349,30 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertTrue(Math.Abs(baseNeed - arrived) < 0.01f, "arrived defender not subtracted twice");
         TestHarness.AssertTrue(Math.Abs((baseNeed - 3000f) - marching) < 0.01f, "marching defender counts at 0.75 strength");
         LogPass("c2a capital personality need does not double count pledged defenders");
+    }
+
+    // C-ArmyArea: IsIdleForAreaOrder only excluded battle/retreat/paths and the
+    // two operation lists, so capital defenders, depot/fort builders, raid and
+    // sea-invasion forces were sent "home" and vanilla sent them back: ping-pong.
+    // The busy set mirrors vanilla's own exclusions (IsUnitAvailableForOffensive
+    // Operations 14080, AssignUnitToDefendCapital 11800).
+    private static void AreaOrderSkipsEveryVanillaBusyAssignment()
+    {
+        TestHarness.AssertTrue(CampaignMilitaryGates.IsIdleForAreaOrder(new AreaOrderBusyFlags()), "idle unit");
+        string[] names =
+        {
+            "InBattle", "OnRetreat", "HasPaths", "InOffensiveOperation", "InDefensiveOperation",
+            "DefendingCapital", "BuildingSupplyDepot", "BuildingFort", "RaidForce", "SeaInvasionForce",
+            "DefensiveOrderQueued", "TakingTown"
+        };
+        foreach (var name in names)
+        {
+            object flags = new AreaOrderBusyFlags();
+            var field = typeof(AreaOrderBusyFlags).GetField(name);
+            TestHarness.AssertTrue(field != null, "flag " + name + " exists");
+            field.SetValue(flags, true);
+            TestHarness.AssertFalse(CampaignMilitaryGates.IsIdleForAreaOrder((AreaOrderBusyFlags)flags), name + " blocks area orders");
+        }
+        LogPass("c2a area order skips every vanilla busy assignment");
     }
 }
