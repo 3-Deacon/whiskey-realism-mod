@@ -1002,23 +1002,10 @@ namespace WhiskeyRealism.Patches
                 Regiment group = FindCommandNodeGroup(state.NodeId, regimentsByInstanceId);
                 var physical = BuildCommandPhysicalState(group);
                 var idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
-                PostureExecutionDecision decision;
-                using (TelemetryPerf.Scope("tactical.posture-executor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
-                {
-                    decision = CommandPostureExecutor.Decide(
-                        state,
-                        physical,
-                        new WriteEligibilitySnapshot(
-                            modeAllowsWrites: TacticalCommanderModePolicy.AllowsWrites(army.CommanderMode),
-                            playerProtected: physical.PlayerProtected,
-                            routed: physical.Routed,
-                            orderPending: group != null && (SafeOrderQueueCount(group) > 0 || SafeOrderState(group) > 0),
-                            recentOrder: false,
-                            alreadyDoingCorrectTask: false,
-                            atAssignedLocation: idle == TacticalIdleClassification.ValidIdle,
-                            missingLedgerAssignment: false,
-                            closeEngaged: false));
-                }
+                // BC5a: the posture producer decides and the order executor
+                // records what happened; the monitor reports that outcome
+                // instead of re-deciding with CommandPostureExecutor.Decide.
+                PostureExecutionDecision decision = ExecutorOutcomeDecision(side, group);
 
                 CountPosture(state, physical, idle, ref validIdle, ref illegalIdle, ref recoveringStuck, ref activeAttacks, ref reservesWaiting);
 
@@ -1055,6 +1042,34 @@ namespace WhiskeyRealism.Patches
                     recoveringStuck,
                     activeAttacks,
                     reservesWaiting), TelemetryLayer.Tactical);
+            }
+        }
+
+        // The order executor's last outcome on the group's Move channel, as a
+        // posture decision for the monitor rows: issued, moved or retried read as
+        // a write; skipped, deduped, failed, gave up or no order as NoWrite with
+        // the outcome as the reason.
+        private static PostureExecutionDecision ExecutorOutcomeDecision(int alliance, Regiment group)
+        {
+            var executor = WhiskeyRealism.Tactical.Battle.OrderExecutor.ForAlliance(alliance);
+            int id = group != null ? TacticalPatchIds.GameObjectInstanceId(group) : 0;
+            if (executor == null || id == 0 ||
+                !executor.TryGetLastOutcome(id, WhiskeyRealism.Tactical.Battle.OrderChannel.Move, out var outcome))
+                return new PostureExecutionDecision(PostureExecutionAction.NoWrite, "executor-no-order");
+            switch (outcome.Kind)
+            {
+                case WhiskeyRealism.Tactical.Battle.OrderOutcomeKind.Issued:
+                    return new PostureExecutionDecision(PostureExecutionAction.SetWaypoint, "executor-issued");
+                case WhiskeyRealism.Tactical.Battle.OrderOutcomeKind.Moved:
+                    return new PostureExecutionDecision(PostureExecutionAction.SetWaypoint, "executor-moved");
+                case WhiskeyRealism.Tactical.Battle.OrderOutcomeKind.Retried:
+                    return new PostureExecutionDecision(PostureExecutionAction.SetWaypoint, "executor-retried");
+                case WhiskeyRealism.Tactical.Battle.OrderOutcomeKind.Failed:
+                    return new PostureExecutionDecision(PostureExecutionAction.NoWrite, "executor-failed");
+                case WhiskeyRealism.Tactical.Battle.OrderOutcomeKind.GaveUp:
+                    return new PostureExecutionDecision(PostureExecutionAction.NoWrite, "executor-gave-up");
+                default:
+                    return new PostureExecutionDecision(PostureExecutionAction.NoWrite, "executor-skipped");
             }
         }
 

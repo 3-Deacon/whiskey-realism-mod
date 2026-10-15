@@ -124,7 +124,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 else
                 {
-                    wrote = IssueOther(bunits, unit, winner, feudReplay, nowHours);
+                    wrote = IssueOther(bunits, unit, winner, feudReplay, nowHours, EnemiesInRange(view, targetIndex, winner.Channel));
                 }
 
                 if (wrote) executed++;
@@ -227,7 +227,8 @@ namespace WhiskeyRealism.Tactical.Battle
             return true;
         }
 
-        private static bool IssueOther(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, bool feudReplay, double nowHours)
+        private static bool IssueOther(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, bool feudReplay, double nowHours,
+            float enemiesInRange)
         {
             switch (w.Channel)
             {
@@ -236,9 +237,9 @@ namespace WhiskeyRealism.Tactical.Battle
                 case OrderChannel.CombatBehavior:
                     return TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0);
                 case OrderChannel.Formation:
-                    return IssueFormation(bunits, unit, w.Value, nowHours);
+                    return IssueFormation(bunits, unit, w.Value, nowHours, enemiesInRange);
                 case OrderChannel.Facing:
-                    return IssueFacing(bunits, unit, w.Heading, feudReplay, nowHours);
+                    return IssueFacing(bunits, unit, w.Heading, feudReplay, nowHours, enemiesInRange);
                 case OrderChannel.Stop:
                     GameObject go = ((Component)unit).gameObject;
                     if (go == null) return false;
@@ -250,7 +251,7 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        private static bool IssueFormation(BattleUnits bunits, Regiment unit, int formation, double nowHours)
+        private static bool IssueFormation(BattleUnits bunits, Regiment unit, int formation, double nowHours, float enemiesInRange)
         {
             GameObject go = ((Component)unit).gameObject;
             if (go == null || formation < 0) return false;
@@ -270,7 +271,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 unit.covervaluesubordinates,
                 (float)nowHours,
                 lastWriteHours: -1f,
-                unit.groupenemiesinrange));
+                enemiesInRange));
             if (decision.Kind != FormationWriteKind.VanillaFormation) return false;
             int index = CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(formation);
             if (index < 0) return false;
@@ -278,7 +279,7 @@ namespace WhiskeyRealism.Tactical.Battle
             return true;
         }
 
-        private static bool IssueFacing(BattleUnits bunits, Regiment unit, float heading, bool feudReplay, double nowHours)
+        private static bool IssueFacing(BattleUnits bunits, Regiment unit, float heading, bool feudReplay, double nowHours, float enemiesInRange)
         {
             if (heading < 0f) return false;
             if (unit.unittyp <= TacticalUnitType.MaxCombat) return RotateInPlace(unit, heading);
@@ -293,7 +294,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 unit.covervaluesubordinates,
                 (float)nowHours,
                 lastWriteHours: -1f,
-                unit.groupenemiesinrange));
+                enemiesInRange));
             switch (decision.Kind)
             {
                 case FormationWriteKind.RotateInPlace:
@@ -339,6 +340,32 @@ namespace WhiskeyRealism.Tactical.Battle
                 default:
                     return false;
             }
+        }
+
+        // F7 (BC5a): the formation policy's "enemies in range" input, fog-honest.
+        // Vanilla groupenemiesinrange is the max of the subordinates'
+        // unitrange.enemiesinrange (120558-120563): enemy strength within
+        // max(maximumlineofsight[unittyp], distancetoenemytocancelinterruption)
+        // (InitMaxUnitRanges 122510, UpdateUnitRangeFast 122608/122650-122655),
+        // never fog-filtered for the AI side. Here: the strength this side
+        // perceives (snapshot observations) within that range of the unit or a
+        // descendant.
+        private static float EnemiesInRange(BattleSnapshot view, int index, OrderChannel channel)
+        {
+            if (channel != OrderChannel.Formation && channel != OrderChannel.Facing) return 0f;
+            return PostureSense.EnemyStrengthInRange(view, index, LineOfSightRange());
+        }
+
+        private static float LineOfSightRange()
+        {
+            float range = GamePrefs.distancetoenemytocancelinterruption;
+            float[] sight = GamePrefs.maximumlineofsight;
+            if (sight != null)
+            {
+                for (int t = 0; t <= TacticalUnitType.Skirmisher && t < sight.Length; t++)
+                    if (sight[t] > range) range = sight[t];
+            }
+            return range;
         }
 
         // Vanilla turns a settled unit toward an enemy with RotateRegiment

@@ -1,185 +1,10 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 
 namespace WhiskeyRealism.Tactical.Operations
 {
-    public enum TacticalOutboundCourierState
-    {
-        None = 0,
-        IssueCourier = 1,
-        Cooldown = 2,
-        ChildAlreadyOrdered = 3,
-        PlayerControlled = 4,
-        NoCommanderOrder = 5,
-        ObjectiveContinuation = 6
-    }
-
-    public readonly struct TacticalOutboundCourierInput
-    {
-        public TacticalOutboundCourierInput(
-            string parentNodeId,
-            string childNodeId,
-            float nowSeconds,
-            float lastCourierAtSeconds,
-            bool childHasOrders,
-            bool commanderHasOrder,
-            bool commanderHasPlay,
-            bool childIsPlayerControlled,
-            float courierIntervalSeconds,
-            bool allowObjectiveMovementContinuation = false,
-            bool childActiveMove = false)
-        {
-            ParentNodeId = string.IsNullOrWhiteSpace(parentNodeId) ? "parent-unknown" : parentNodeId.Trim();
-            ChildNodeId = string.IsNullOrWhiteSpace(childNodeId) ? "child-unknown" : childNodeId.Trim();
-            NowSeconds = SanitizeNonNegative(nowSeconds);
-            LastCourierAtSeconds = SanitizeNonNegative(lastCourierAtSeconds);
-            ChildHasOrders = childHasOrders;
-            CommanderHasOrder = commanderHasOrder;
-            CommanderHasPlay = commanderHasPlay;
-            ChildIsPlayerControlled = childIsPlayerControlled;
-            CourierIntervalSeconds = SanitizePositive(courierIntervalSeconds, 900f);
-            AllowObjectiveMovementContinuation = allowObjectiveMovementContinuation;
-            ChildActiveMove = childActiveMove;
-        }
-
-        public string ParentNodeId { get; }
-        public string ChildNodeId { get; }
-        public float NowSeconds { get; }
-        public float LastCourierAtSeconds { get; }
-        public bool ChildHasOrders { get; }
-        public bool CommanderHasOrder { get; }
-        public bool CommanderHasPlay { get; }
-        public bool ChildIsPlayerControlled { get; }
-        public float CourierIntervalSeconds { get; }
-        public bool AllowObjectiveMovementContinuation { get; }
-        public bool ChildActiveMove { get; }
-
-        private static float SanitizeNonNegative(float value)
-        {
-            return IsFinite(value) && value > 0f ? value : 0f;
-        }
-
-        private static float SanitizePositive(float value, float fallback)
-        {
-            return IsFinite(value) && value > 0f ? value : fallback;
-        }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
-    }
-
-    public readonly struct TacticalOutboundCourierDecision
-    {
-        public TacticalOutboundCourierDecision(bool allowIssue, TacticalOutboundCourierState state, string reason)
-        {
-            AllowIssue = allowIssue;
-            State = state;
-            Reason = string.IsNullOrWhiteSpace(reason) ? "courier-unspecified" : reason.Trim();
-        }
-
-        public bool AllowIssue { get; }
-        public TacticalOutboundCourierState State { get; }
-        public string Reason { get; }
-    }
-
-    public static class TacticalOutboundCourierCadence
-    {
-        public static TacticalOutboundCourierDecision Decide(TacticalOutboundCourierInput input)
-        {
-            if (input.ChildIsPlayerControlled)
-                return new TacticalOutboundCourierDecision(false, TacticalOutboundCourierState.PlayerControlled, "player-protected");
-            if (!input.CommanderHasOrder || !input.CommanderHasPlay)
-                return new TacticalOutboundCourierDecision(false, TacticalOutboundCourierState.NoCommanderOrder, "no-commander-play");
-            if (input.ChildHasOrders)
-                return new TacticalOutboundCourierDecision(false, TacticalOutboundCourierState.ChildAlreadyOrdered, "child-already-ordered");
-            if (input.LastCourierAtSeconds > 0f &&
-                input.NowSeconds < input.LastCourierAtSeconds + input.CourierIntervalSeconds)
-            {
-                if (input.AllowObjectiveMovementContinuation && !input.ChildActiveMove)
-                {
-                    return new TacticalOutboundCourierDecision(
-                        true,
-                        TacticalOutboundCourierState.ObjectiveContinuation,
-                        "objective-continuation");
-                }
-
-                return new TacticalOutboundCourierDecision(false, TacticalOutboundCourierState.Cooldown, "courier-cooldown");
-            }
-
-            return new TacticalOutboundCourierDecision(true, TacticalOutboundCourierState.IssueCourier, "courier-open");
-        }
-    }
-
-    public enum TacticalOutboundOrderLedgerState
-    {
-        Issue = 0,
-        ActiveMove = 1,
-        DuplicatePendingOrder = 2,
-        CommandChanged = 3
-    }
-
-    public readonly struct TacticalOutboundOrderLedgerInput
-    {
-        public TacticalOutboundOrderLedgerInput(
-            bool childHasOrders,
-            bool duplicatePendingSignature,
-            bool activeMove,
-            bool commandChanged)
-        {
-            ChildHasOrders = childHasOrders;
-            DuplicatePendingSignature = duplicatePendingSignature;
-            ActiveMove = activeMove;
-            CommandChanged = commandChanged;
-        }
-
-        public bool ChildHasOrders { get; }
-        public bool DuplicatePendingSignature { get; }
-        public bool ActiveMove { get; }
-        public bool CommandChanged { get; }
-    }
-
-    public readonly struct TacticalOutboundOrderLedgerDecision
-    {
-        public TacticalOutboundOrderLedgerDecision(
-            bool allowIssue,
-            TacticalOutboundOrderLedgerState state,
-            string reason)
-        {
-            AllowIssue = allowIssue;
-            State = state;
-            Reason = string.IsNullOrWhiteSpace(reason) ? "outbound-order" : reason.Trim();
-        }
-
-        public bool AllowIssue { get; }
-        public TacticalOutboundOrderLedgerState State { get; }
-        public string Reason { get; }
-    }
-
-    public static class TacticalOutboundOrderLedger
-    {
-        public static TacticalOutboundOrderLedgerDecision Decide(TacticalOutboundOrderLedgerInput input)
-        {
-            if (input.ActiveMove)
-                return new TacticalOutboundOrderLedgerDecision(false, TacticalOutboundOrderLedgerState.ActiveMove, "active-move");
-
-            if (input.ChildHasOrders && input.DuplicatePendingSignature && !input.CommandChanged)
-            {
-                return new TacticalOutboundOrderLedgerDecision(
-                    false,
-                    TacticalOutboundOrderLedgerState.DuplicatePendingOrder,
-                    "duplicate-pending-order");
-            }
-
-            if (input.ChildHasOrders && input.CommandChanged)
-                return new TacticalOutboundOrderLedgerDecision(true, TacticalOutboundOrderLedgerState.CommandChanged, "command-changed");
-
-            return new TacticalOutboundOrderLedgerDecision(true, TacticalOutboundOrderLedgerState.Issue, "issue");
-        }
-    }
-
     public readonly struct TacticalDivisionPlaySubordinate
     {
         public TacticalDivisionPlaySubordinate(
@@ -380,6 +205,51 @@ namespace WhiskeyRealism.Tactical.Operations
             if (child.Role == CommandNodeRole.FallbackGuard)
                 return CommandTaskType.FallBackToLine;
             return CommandTaskType.SupportAttack;
+        }
+    }
+
+    // BC5a: the division play's per-child input from the battle snapshot. #61
+    // read it from live vanilla fields (TacticalFogOfWarContact.HasVisibleEnemy,
+    // groupenemiesinrange, combatstatussubordinates, flanksthreated, morale,
+    // orderqueue) and found the parent through the scene graph; here every
+    // input is a PostureSense proxy and the parent is the snapshot's command
+    // parent (plan D5). Courier cadence is the order executor's (one courier
+    // move per group per OrderExecutor.CourierIntervalBattleHours).
+    public static class TacticalDivisionPlayInputs
+    {
+        /// <summary>The child's command parent (own index), or -1 at the root (no division).</summary>
+        public static int ParentIndex(IBattleUnitView s, int index)
+        {
+            if (s == null || index < 0 || index >= s.OwnCount) return -1;
+            int parent = s.Own[index].ParentIndex;
+            return parent >= 0 && parent < s.OwnCount && parent != index ? parent : -1;
+        }
+
+        public static TacticalDivisionPlaySubordinate FromSnapshot(
+            BattleSnapshot s,
+            int index,
+            UnitFlags descendantFlags,
+            int movingUnits,
+            string nodeId,
+            CommandNodeRole role,
+            CommandTaskType task)
+        {
+            ref UnitRecord unit = ref s.Own[index];
+            bool engaged = PostureSense.CloseEngaged(s, index, descendantFlags);
+            bool flankRisk = PostureSense.FlankRisk(s, index);
+            bool activeMove = PostureSense.ActiveMove(unit, movingUnits);
+            int closest = s.ClosestVisibleEnemy(index, out float distance);
+            return new TacticalDivisionPlaySubordinate(
+                nodeId,
+                role,
+                hasTargets: closest >= 0,
+                engagingEnemy: engaged,
+                underCloseFire: engaged || flankRisk,
+                inTrouble: flankRisk || unit.Morale < 0.35f,
+                isArtillery: ((unit.Flags | descendantFlags) & UnitFlags.IsArtillery) != 0,
+                enemyDistance: closest >= 0 ? distance : 0f,
+                hasOrders: PostureSense.PendingOrder(unit, activeMove, allowStaleQueuedBypass: false) || activeMove,
+                currentTask: task);
         }
     }
 

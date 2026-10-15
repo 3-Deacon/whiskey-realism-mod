@@ -65,6 +65,8 @@ Rules:
 - **Scourge conversions:** `TacticalDivisionPlayExecutor` (division play anchored on the best engaged subordinate), `TacticalCavalryFollowDoctrine` and `TacticalGrandTacticianReconDoctrine` (cavalry guard/scout/screen/raid; no blind assault without FOW contact), `TacticalFireControlDoctrine` (infantry long/medium/short and cavalry behavior from task, range and readiness).
 - **Facing pulse** (`Enable Tactical Contact Facing Pulse`) rotates regiments only and never touches artillery.
 
+**Battle core (BC5a, 2026-10-15):** #61 is no longer a patch. Its decisions are battle-core intent producers (`Tactical/Battle/Producers/`: `Posture` at Executor priority, `FacingPulse` at Scorer, `FireControl` at Executor, `DivisionPlay` at Play) run by the arbiter on the same `AdjustGroupFormations` hook; the order executor owns guards, dedupe, cooldowns, courier cadence and the vanilla calls. **Division play vs the executor (plan D8):** the spec ladder is binding, Executor beats Play. #61 used to replace a child's ledger task with the division-play task before deciding (the play overrode the ledger). Now the division play submits its own intents at `Play` priority, and a play order wins a channel only where the posture producer submitted nothing for that group on that channel.
+
 ## Other Doctrine Consumers
 
 | Gate | Whiskey owner | Write anchor | Behavior |

@@ -576,7 +576,7 @@ Every mover's private guard, dedupe, cooldown, waypoint and ownership code is de
 - Test file `PostureMigrationTests.cs`.
 
 **Steps:**
-- [ ] Tests first:
+- [x] Tests first:
   - `PostureProducerEmitsStanceMoveFormationForLedgerTask`
   - `PostureProducerLeafBrigadeTargetFromCommandParentMap` (replaces `GrabNextParentUnit`/`transform.parent` at patch L2557, L3330, and the spec's :2946)
   - `PostureProducerKeepsBattleNavMeshAreaCosts` (R5 pin: Roads 1, Bridges 1, FencesWalls 2, Rivers 500000/2)
@@ -587,20 +587,52 @@ Every mover's private guard, dedupe, cooldown, waypoint and ownership code is de
   - `PlayRecomputeGateOnDoctrineClock`
   - `ArmyPostureInputsExcludePlayerOwnedNotAncestors`
   - `BlockedMovingOrderPathIsSkippedOutcome`
-- [ ] Port each #61 decision path into the producer:
+- [x] Port each #61 decision path into the producer:
   - Task-rewrite chain (patch L156-255): division play, doctrine order, GT recon, cavalry follow, flank emergency, opportunity override.
   - `ResolveMainArrivalHold`, leaf brigades and nav plan.
   - Fire control → `CombatBehavior` intents with `PerRegiment`.
   - Facing pulse → `Facing` intents.
-- [ ] Delete from #61 without porting:
+- [x] Delete from #61 without porting:
   - `_lastExecutorOrderAt`, `_writeBackoffUntil`, `_brigadeTaskHoldState`, `_lastCourierAt`, `_lastOutboundOrderSignatureByGroup`, `ShouldSkipDuplicateWaypoint`, `IsSafeWaypoint`, `CanWrite`, `HasRecentExecutorOrder`, `AllowsOutboundCourier` and `AllowsOutboundOrderLedger` (the executor owns these now).
   - The `groupsubordinatesmoving` stamp (L1118). The executor's outcome tracking (D6) replaces it; vanilla recomputes the field itself.
   - The `BlockedMovingOrder` path (L1038). Keep it as executor option `IntentFlags`? **No.** Delete it, because vanilla's `UpdateBlockedCrossings` (7917) handles crossings. This is recorded in the commit.
-- [ ] Scopes `tactical.producer.posture` and `tactical.producer.play` (2.0).
+- [x] Scopes `tactical.producer.posture` and `tactical.producer.play` (2.0).
 - Scope note (BC3 verify r3): #61 `RotateRegimentsInPlace` rotates AI regiments inside detached AI sub-groups; when migrated to the arbiter it must follow vanilla's group-order exclusion of detached sub-groups (`GetAttachedUnitsReg(excludedechainedunits)` 119865).
-- [ ] **Acceptance:**
+- [x] **Acceptance:**
   - `rg -n "SetWaypoint\(|SetGroupFormation\(|RotateRegiment\(|ChangeCombatBehavior\(|EnsureStance" src/WhiskeyRealism/Tactical/Battle/Producers src/WhiskeyRealism/Tactical/Orchestrator` finds nothing.
   - No `GrabNextParentUnit` or `transform.parent` in the moved code.
+
+**As built (BC5a):**
+```csharp
+namespace WhiskeyRealism.Tactical.Battle.Producers {           // runtime, not in the test csproj
+  internal static class PostureProducers { internal static void EnsureRegistered(); } // runs the four static ctors; called from ArmyPostureInputsRuntime.Refresh (coordinator tick, 5866)
+  internal sealed class PostureIntentProducer : IBattleIntentProducer      // Name "Posture": AI-pool groups (Executor) + nested leaf brigades
+  internal sealed class FacingPulseIntentProducer : IBattleIntentProducer  // Name "FacingPulse": Scorer, Facing per regiment + brigade Formation
+  internal sealed class FireControlIntentProducer : IBattleIntentProducer  // Name "FireControl": Executor, CombatBehavior, PerRegiment
+  internal sealed class DivisionPlayIntentProducer : IBattleIntentProducer // Name "DivisionPlay": Play priority (D8)
+}
+namespace WhiskeyRealism.Tactical.Operations {                // pure, CommandPostureExecutor.cs
+  public static class PostureSense { CloseContactMeters = 250; AggregateDescendants; CloseEngaged; FlankRisk; Routed; ActiveMove; PendingOrder;
+    Physical; HeadingTo; NormalizeHeading; EnemyStrengthInRange; SubtreeAcceptsGroupFacing; CollectRotatableRegiments; }
+  public struct PostureIntentRequest { ... }  public static class PostureIntentPlan { Submit; LeafMove; FacingPulse; FacingPulseFormation; FireControl; IssuedWithin; }
+  public static class LeafSlotTarget { TryResolve(IBattleUnitView, leafIndex, out parent, out x, out z); }
+  public static class PostureProbeFilter { WithoutPlayerOwned(probes, IBattleUnitView); }   // replaces PlayerCommandProbeFilter
+  public static class PostureNavAreaCosts { AreaNames; Cost(area, frozen); }               // R5
+  public static class TacticalDivisionPlayInputs { ParentIndex; FromSnapshot; }            // TacticalScourgeInspiredDoctrine.cs
+}
+namespace WhiskeyRealism.Tactical.Orchestrator.Plays { public static class PlayAnchor { MinRecomputeHours; RecomputeDue; EnemyAnchor; CollectOwn; } } // pure, new file
+// ArmyPostureInputsRuntime: InAiPool(alliance, id) (AIBattle.unitsused captured on the coordinator tick), SideDefending(alliance) (GetBattleType == 2).
+// OrderExecutorRuntime (F7): Formation/Facing feed CommandFormationWritePolicy PostureSense.EnemyStrengthInRange(snapshot, target,
+//   max(maximumlineofsight[0..3], distancetoenemytocancelinterruption)) instead of live groupenemiesinrange.
+```
+- No "Play" producer: the geometric play (PlayExecutorRuntime) is not a mover — it feeds the allocator's zone roles, which reach the battle as ledger tasks the Posture producer executes. The ProducerOrder slot stays.
+- The group pass covers the side's AI pool (vanilla `unitsused`, captured in `ArmyPostureInputsRuntime.Refresh`), the leaf pass the leaf-map brigades outside it, as #61 did; producers read no live unit field (`PostureSense` proxies).
+- Group Facing goes to the group only when no descendant is `PlayerOwned` or `PermanentlyDetached` (`SubtreeAcceptsGroupFacing`); the facing pulse faces regiments one by one through `CollectRotatableRegiments`, which stops at detached and player-owned nodes (119865).
+- Doctrine cooldowns (facing pulse 12/5 s at 1x, fire control 45 s at 1x) read the executor's Issued outcome for that source (`PostureIntentPlan.IssuedWithin`), not producer stamps.
+- `LeafFormationSlot` is deleted (the snapshot carries no `groupposition` layout or `lastsetwaypointrotation`; `LeafSlotTarget` re-applies the leaf's current offset at the parent's last waypoint).
+- `TacticalBattleClock` and `CommandWaypointWritePolicy` forwarders stay in `CommandPostureExecutor.cs` while `BattleGroupStancePatch` (BC5b), `TacticalObserverPatch:2369` and `TacticalCommandTests` name them; BC7 deletes them.
+
+PROVE-MODE: harness. Per-slice proof is `PostureMigrationTests` (17 tests: intent mapping per decision, leaf target from the parent map, R5 area costs, facing/fire-control channel and priority, D8 against the real arbiter, fog-honest play anchor and doctrine-clock gate, PlayerOwned probe filter, BlockedMovingOrder replaced by a plain move with a Skipped outcome, detached-subtree exclusion, snapshot proxies, fog-honest enemies-in-range, executor-outcome cooldowns). Runtime proof is the BC7 in-game smoke: `[BattleCore] producers count=… order=…Posture,FacingPulse,FireControl,DivisionPlay…`, `[OrderArbiter]` rows with issued/moved for alliance 0/1, `TacticalCommandPosture`/`TacticalLeafCascade` rows with `writeResult=submitted`, and no W&L player unit moved.
 
 ### BC5b — #45 stance, charge demotion, artillery (B7, applier, veto), #42 feud
 

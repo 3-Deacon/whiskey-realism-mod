@@ -1,23 +1,29 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 {
     /// <summary>
-    /// Runtime wrapper: reads vanilla positions, computes army+enemy centroids,
-    /// projects the current play template, assigns corps to rects. Returns
-    /// the resulting <see cref="CorpsAssignment"/> list ready to feed
-    /// <see cref="ArmyOrchestrator.ObserveDirectChildEvidenceWithZones"/>.
+    /// Runtime wrapper: reads the side's battle snapshot, computes the army
+    /// centroid and the enemy anchor, projects the current play template and
+    /// assigns corps to rects. Returns the resulting <see cref="CorpsAssignment"/>
+    /// list ready to feed <see cref="ArmyOrchestrator.ObserveDirectChildEvidenceWithZones"/>.
+    /// The play is not a mover: its effect reaches the battle as ledger roles
+    /// and tasks, which the posture producer executes (plan BC5a).
     ///
-    /// Excluded from the test csproj — touches BattleUnits / Regiment / Unity
-    /// types. Pure logic lives in <see cref="PlayProjection"/> and
-    /// <see cref="PlayCorpsAssignment"/>.
+    /// Excluded from the test csproj (it reads the snapshot registry and the
+    /// doctrine clock). Pure logic lives in <see cref="PlayAnchor"/>,
+    /// <see cref="PlayProjection"/> and <see cref="PlayCorpsAssignment"/>.
+    /// BC5a: own positions come from the snapshot's own records instead of
+    /// BattleUnits.completeunitlist, the enemy anchor from the enemies the side
+    /// sees (fog-honest, spec §2), and the recompute gate runs on the doctrine
+    /// clock instead of Environment.TickCount.
     ///
     /// Performance: per-side signature cache. Skips full recompute when the
-    /// plan id + corps positions (bucketed to 50m) + enemy centroid bucket
+    /// plan id + corps positions (bucketed to 50m) + enemy anchor bucket
     /// haven't changed. Reuses pooled per-side scratch lists to avoid
     /// per-tick allocation. Wrapped in TelemetryPerf.Scope per AGENTS.md
     /// diagnostic-schema policy.
@@ -33,10 +39,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private const int SideCount = 2;
         private static readonly string[] _lastSignature = new string[SideCount];
         private static readonly IReadOnlyList<CorpsAssignment>[] _lastResult = new IReadOnlyList<CorpsAssignment>[SideCount];
-        private static readonly float[] _lastComputeRealtimeSeconds = { -1f, -1f };
+        private static readonly double[] _lastComputeHours = { -1.0, -1.0 };
         private static readonly BattlePlanId[] _lastComputePlan = { BattlePlanId.Unknown, BattlePlanId.Unknown };
-        /// <summary>Minimum real seconds between full recomputes on the same plan.</summary>
-        private const float MinRecomputeIntervalSeconds = 3f;
 
         // ---- Pooled scratch buffers (per-side; cleared per call) ----
         private static readonly List<float>[] _ownXsScratch = { new List<float>(64), new List<float>(64) };
@@ -56,13 +60,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// Skips full recompute when the per-side input signature is
         /// unchanged (cache hit). Wrapped in TelemetryPerf.Scope.
         /// </summary>
-        /// <param name="frontAxis">The side's front axis from
-        /// <see cref="EnemyVisibleState.FrontAxis"/>. The play faces the same
-        /// way the sector bands do, toward the enemy in range of the side's
-        /// regiments rather than the centroid of every enemy command group on
-        /// the map. That picture is range-limited, not fog-limited (vanilla AI
-        /// perception); fog-honest perception arrives with the battle-core
-        /// snapshot.</param>
+        /// <param name="frontAxis">The side's front axis, the play's heading when
+        /// the side sees no enemy (PlayAnchor.EnemyAnchor).</param>
         public static IReadOnlyList<CorpsAssignment> ComputeZoneAssignments(
             int allianceId,
             BattlePlanId planId,
@@ -91,23 +90,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 var template = PlayTemplateCatalog.Lookup(planId);
                 if (template == null) return null;
 
-                // CHEAP pre-gate: if we have a cached result for this plan
-                // AND we computed within the last MinRecomputeIntervalSeconds,
-                // return the cache without walking BattleUnits. Armies don't
-                // move dramatically in <3s and the signature check below would
-                // very likely produce the same answer.
-                float nowReal = System.Environment.TickCount * 0.001f;
+                // Cheap pre-gate on the doctrine clock: inside the window on the
+                // same plan, reuse the cache without reading the snapshot.
+                double now = TacticalDoctrineTime.NowBattleHours;
                 var cachedEarly = _lastResult[allianceId];
-                if (cachedEarly != null
-                    && _lastComputePlan[allianceId] == planId
-                    && _lastComputeRealtimeSeconds[allianceId] > 0f
-                    && nowReal - _lastComputeRealtimeSeconds[allianceId] < MinRecomputeIntervalSeconds)
-                {
+                if (!PlayAnchor.RecomputeDue(cachedEarly != null, _lastComputePlan[allianceId] == planId,
+                        _lastComputeHours[allianceId], now))
                     return cachedEarly;
-                }
 
-                var units = BattleUnits.completeunitlist as System.Collections.IList;
-                if (units == null || units.Count == 0) return null;
+                if (!BattleCore.TryGetSnapshot(allianceId, out BattleSnapshot snapshot)) return null;
                 int effectiveCommandMin = TacticalUnitType.MaxCombat + 1 + commandHierarchyShift;
                 if (effectiveCommandMin < 1) effectiveCommandMin = 1;
                 if (effectiveCommandMin > 18) effectiveCommandMin = 18;
@@ -116,56 +107,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 var ownXs = _ownXsScratch[allianceId]; ownXs.Clear();
                 var ownZs = _ownZsScratch[allianceId]; ownZs.Clear();
                 var corpsPositions = _corpsPosScratch[allianceId]; corpsPositions.Clear();
-
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var reg = units[i] as Regiment;
-                    if (reg == null) continue;
-                    var regGo = ((Component)reg).gameObject;
-                    if (regGo == null) continue;
-                    if (!regGo.activeInHierarchy) continue;
-                    float x = 0f, z = 0f;
-                    try
-                    {
-                        var pos = regGo.transform != null ? regGo.transform.position : default(Vector3);
-                        x = pos.x;
-                        z = pos.z;
-                    }
-                    catch { continue; }
-                    if (float.IsNaN(x) || float.IsInfinity(x)) continue;
-                    if (float.IsNaN(z) || float.IsInfinity(z)) continue;
-
-                    if (reg.alliance == allianceId)
-                    {
-                        // Own forces: collect all active brigades for centroid;
-                        // also collect command-level (corps/army) instances as
-                        // candidates for rect assignment.
-                        ownXs.Add(x);
-                        ownZs.Add(z);
-                        if (reg.unittyp >= effectiveCommandMin)
-                        {
-                            corpsPositions.Add(new CorpsPosition(
-                                "child-" + regGo.GetInstanceID(), x, z));
-                        }
-                    }
-                }
-
-                if (corpsPositions.Count == 0)
-                {
-                    return null;
-                }
+                if (PlayAnchor.CollectOwn(snapshot, effectiveCommandMin, ownXs, ownZs, corpsPositions) == 0) return null;
 
                 PlayProjection.ComputeCentroid(ownXs, ownZs, out float armyX, out float armyZ, out int ownN);
                 if (ownN == 0) return null;
-
-                // Face the side's front axis (visible enemy, else nearest open
-                // objective, else last heading). Without an axis, anchor the
-                // target forward along +Z so the projection stays coherent.
-                float engagement = frontAxis.IsValid && frontAxis.TargetDistance >= 1f
-                    ? frontAxis.TargetDistance
-                    : PlayProjection.DefaultEngagementDistanceMeters;
-                float enemyX = armyX + (frontAxis.IsValid ? frontAxis.ForwardX : 0f) * engagement;
-                float enemyZ = armyZ + (frontAxis.IsValid ? frontAxis.ForwardZ : 1f) * engagement;
+                PlayAnchor.EnemyAnchor(snapshot, frontAxis, armyX, armyZ, out float enemyX, out float enemyZ);
 
                 // ---- Signature-skip ----
                 // Build a per-side signature from plan + bucketed centroids +
@@ -198,7 +144,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
                 _lastSignature[allianceId] = sig;
                 _lastResult[allianceId] = assignments;
-                _lastComputeRealtimeSeconds[allianceId] = nowReal;
+                _lastComputeHours[allianceId] = now;
                 _lastComputePlan[allianceId] = planId;
                 EmitPlayExecutionTelemetry(allianceId, planId, template, assignments, armyX, armyZ, enemyX, enemyZ, frontage);
                 return assignments;
@@ -299,7 +245,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 _lastSignature[i] = null;
                 _lastResult[i] = null;
-                _lastComputeRealtimeSeconds[i] = -1f;
+                _lastComputeHours[i] = -1.0;
                 _lastComputePlan[i] = BattlePlanId.Unknown;
             }
             _lastPlayExecutionTelemetryAt.Clear();
