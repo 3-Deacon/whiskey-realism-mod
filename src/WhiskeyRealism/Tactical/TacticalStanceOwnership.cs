@@ -243,12 +243,17 @@ namespace WhiskeyRealism.Tactical
             if (input.TargetStance < 1 || input.TargetStance > 3) return Refuse("invalid-stance");
             if (input.MacroAi < 0) return Refuse("macro-inactive");
             if (input.MacroAi == 3) return new StanceWriteDecision(StanceWriteAction.Yield, "vanilla-retreat");
+            // An explicit charge denial (#45 DemoteCharge) precedes every yield:
+            // vanilla only reaches 4 on a strong group (4240), so its per-group
+            // stance is 4 at demotion time and the escalation yield would
+            // otherwise swallow the demotion.
+            if (input.CurrentOrderedStance == 4 && input.Source == StanceWriteSource.ChargeDemotion)
+                return new StanceWriteDecision(StanceWriteAction.Write, "charge-demotion");
             if (YieldsToVanilla(input.VanillaGroupStance, input.TargetStance))
                 return new StanceWriteDecision(
                     StanceWriteAction.Yield,
                     input.VanillaGroupStance == 4 ? "vanilla-assault-escalation" : "vanilla-weak-group");
-            if (input.CurrentOrderedStance == 4 && input.Source != StanceWriteSource.ChargeDemotion)
-                return Refuse("vanilla-assault");
+            if (input.CurrentOrderedStance == 4) return Refuse("vanilla-assault");
 
             StanceHoldRecord record = input.Record;
             if (record.HasValue && IsInsideHold(record, input.NowHours))

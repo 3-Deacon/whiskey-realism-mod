@@ -104,7 +104,7 @@ internal static class PostureStanceFixTests
         float now = 1.0f,
         StanceHoldRecord record = default,
         StanceWriteSource source = StanceWriteSource.Scorer,
-        int vanilla = 3)
+        int vanilla = TacticalStanceOwnership.VanillaStanceUnknown)
     {
         return new StanceWriteInput(isAiGroup, target, current, macroAi, now, record, source, vanilla);
     }
@@ -731,6 +731,15 @@ internal static class PostureStanceFixTests
         AssertEqual("vanilla-assault", exec.Reason, "reason");
         var demote = TacticalStanceOwnership.Decide(Input(target: 3, current: 4, source: StanceWriteSource.ChargeDemotion));
         AssertEqual(StanceWriteAction.Write, demote.Action, "explicit charge denial may demote");
+        // Vanilla only reaches 4 at 4240 on a strong group, so at demotion time
+        // its per-group stance is 4 too — the escalation yield must not swallow it.
+        var strong = TacticalStanceOwnership.Decide(Input(target: 3, current: 4, source: StanceWriteSource.ChargeDemotion, vanilla: 4));
+        AssertEqual(StanceWriteAction.Write, strong.Action, "current 4 + vanilla 4 + charge demotion writes");
+        AssertEqual("charge-demotion", strong.Reason, "reason");
+        var held = new StanceHoldRecord(3, 1.0f, StanceWriteSource.ChargeDemotion);
+        AssertEqual(StanceWriteAction.Write,
+            TacticalStanceOwnership.Decide(Input(target: 3, current: 4, now: 1.01f, record: held, source: StanceWriteSource.ChargeDemotion, vanilla: 4)).Action,
+            "a re-escalated group is demoted again inside the hold");
     }
 
     private static void WriteAndHealthyClaimStampVanillaHold()
@@ -738,7 +747,7 @@ internal static class PostureStanceFixTests
         var write = new StanceWriteDecision(StanceWriteAction.Write, "write");
         var claim = new StanceWriteDecision(StanceWriteAction.Claim, "held");
         AssertTrue(TacticalStanceOwnership.StampsVanillaHold(write, Input(target: 3, current: 2)), "write holds vanilla off");
-        AssertTrue(TacticalStanceOwnership.StampsVanillaHold(claim, Input(target: 3, current: 3)),
+        AssertTrue(TacticalStanceOwnership.StampsVanillaHold(claim, Input(target: 3, current: 3, vanilla: 3)),
             "agreement re-stamps so vanilla does not flip the group every 0.25 h (4264)");
         AssertFalse(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Refuse, "x"), Input(target: 3)), "refuse");
         AssertFalse(TacticalStanceOwnership.StampsVanillaHold(new StanceWriteDecision(StanceWriteAction.Yield, "x"), Input(target: 3)), "yield");
@@ -791,7 +800,7 @@ internal static class PostureStanceFixTests
         AssertEqual(StanceWriteAction.Yield, afterVanilla.Action, "no reassert over vanilla's weak-group screen");
 
         var demotion = TacticalStanceOwnership.Decide(Input(target: 3, current: 4, source: StanceWriteSource.ChargeDemotion, vanilla: 1));
-        AssertEqual(StanceWriteAction.Yield, demotion.Action, "a weak group's stale assault goes back to vanilla too");
+        AssertEqual(StanceWriteAction.Write, demotion.Action, "an explicit charge denial precedes every yield");
 
         var agree = TacticalStanceOwnership.Decide(Input(target: 2, current: 2, vanilla: 2));
         AssertEqual(StanceWriteAction.Claim, agree.Action, "Whiskey agrees with vanilla's defend");
