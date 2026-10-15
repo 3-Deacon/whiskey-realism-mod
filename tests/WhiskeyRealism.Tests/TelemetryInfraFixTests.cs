@@ -25,6 +25,9 @@ internal static class TelemetryInfraFixTests
         QueueDrainPreservesFifoAcrossCategories();
         QueueCountersStayExactUnderChurn();
         QueueEnqueueIsConstantTimeWhenFull();
+        RouterSeriousLineMatchesWholeTokens();
+        RouterBlankDecisionSignatureIsFlaggedNotDropped();
+        RouterEmitsDecisionWithBlankSignature();
     }
 
     private static void LogPass(string message)
@@ -260,5 +263,100 @@ internal static class TelemetryInfraFixTests
         TestHarness.AssertEqual(TelemetryRuntimeConfig.MaxQueueCapacity, queue.Count, "full queue count");
         TestHarness.AssertEqual(20000L, queue.DroppedCount, "drops counted");
         LogPass("queue enqueue is constant time when full");
+    }
+
+    // ---------------------------------------------------------------- Router
+
+    private static string TempDir()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "wr-p-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static void DeleteQuietly(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch { }
+    }
+
+    private static TelemetryRuntime StartRuntime(string gameRoot, bool performanceWarnings = true, TelemetryProfile profile = TelemetryProfile.FullTuning)
+    {
+        var config = TelemetryRuntimeConfig.Create(
+            gameRoot, "0.2.2-test", "abcdef1234567890", profile,
+            maxTuningLogMb: 8, fileRotateMb: 4, retainedSessions: 2,
+            emitHumanSummary: true, performanceWarnings: performanceWarnings,
+            createIssueBundleOnShutdown: false, warningCallback: null);
+        TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+        TelemetryRouter.AttachRuntime(runtime);
+        return runtime;
+    }
+
+    private static string SessionDir(string gameRoot, TelemetryRuntime runtime)
+    {
+        return Path.Combine(TelemetrySession.TuningLogRoot(gameRoot), runtime.SessionId);
+    }
+
+    private static string ReadIfExists(string path)
+    {
+        return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+    }
+
+    private static int CountOccurrences(string text, string token)
+    {
+        int count = 0;
+        int index = 0;
+        while ((index = text.IndexOf(token, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += token.Length;
+        }
+        return count;
+    }
+
+    private static void RouterSeriousLineMatchesWholeTokens()
+    {
+        TestHarness.AssertEqual(TelemetryCategory.Trace, TelemetryTagPolicy.Route("[TacticalPTest] errorBudget=0.3 failureRisk=0.1 terrain=ridge").Category, "embedded substrings are not serious");
+        TestHarness.AssertEqual(TelemetryCategory.Trace, TelemetryTagPolicy.Route("[TacticalPTest] flank=exceptional").Category, "exceptional is not exception");
+        TestHarness.AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[TacticalPTest] resolve failed for group").Category, "failed token");
+        TestHarness.AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[TacticalPTest] error: bad state").Category, "error token");
+        TestHarness.AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[TacticalPTest] caught NullReferenceException: x").Category, "exception type name");
+        TestHarness.AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[TacticalPTest] missing-anchor AIBattle.Foo").Category, "missing-anchor phrase");
+        TestHarness.AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[TacticalPTest] FATAL").Category, "fatal token case-insensitive");
+        LogPass("router serious line matches whole tokens");
+    }
+
+    private static void RouterBlankDecisionSignatureIsFlaggedNotDropped()
+    {
+        var ev = TelemetryEvent.Create("s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical, TelemetryCategory.Decision, "PTestDecision", TelemetrySeverity.Info)
+            .WithDecision("Attack", "test", "  ");
+        TestHarness.AssertEqual("Attack", ev.Decision, "decision kept");
+        TestHarness.AssertEqual(TelemetryEvent.MissingInputSignature, ev.InputSignature, "missing signature marker");
+        TestHarness.AssertTrue(ev.Fields.GetBool("inputSignatureMissing"), "missing signature flagged");
+        LogPass("router blank decision signature is flagged not dropped");
+    }
+
+    private static void RouterEmitsDecisionWithBlankSignature()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            TestHarness.AssertEqual(TelemetryProfile.FullTuning, TelemetryRouter.CurrentProfile, "profile attached");
+            bool emitted = TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "PTestBlankSig", TelemetrySeverity.Info,
+                ev => ev.WithDecision("Hold", "test", null));
+            string dir = SessionDir(gameRoot, runtime);
+            TelemetryRouter.Shutdown("p-test");
+            TestHarness.AssertTrue(emitted, "blank-signature decision still emitted");
+            string tactical = ReadIfExists(Path.Combine(dir, "tactical.jsonl"));
+            TestHarness.AssertTrue(tactical.Contains("\"event\":\"PTestBlankSig\""), "row written");
+            TestHarness.AssertTrue(tactical.Contains("\"inputSignatureMissing\":true"), "row flagged");
+            TestHarness.AssertEqual(TelemetryProfile.Off, TelemetryRouter.CurrentProfile, "profile off after shutdown");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("router emits decision with blank signature");
     }
 }

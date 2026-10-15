@@ -188,6 +188,11 @@ namespace WhiskeyRealism.Telemetry
         internal TelemetryProfile Profile { get; private set; }
         internal string SessionId { get; private set; }
 
+        internal bool PerformanceWarnings
+        {
+            get { return _config == null || _config.PerformanceWarnings; }
+        }
+
         internal bool IsRunning
         {
             get { return _writer != null && !_shutdown; }

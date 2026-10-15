@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace WhiskeyRealism.Telemetry
 {
@@ -26,11 +27,12 @@ namespace WhiskeyRealism.Telemetry
 
         internal long TotalBytes { get { lock (_gate) return _totalBytes; } }
         internal long RotateBytes { get { lock (_gate) return _rotateBytes; } }
-        internal long EmittedBytes { get { lock (_gate) return _emittedBytes; } }
+        // Lock-free reads for DiagnosticsSnapshot (written under _gate; 64-bit reads are atomic).
+        internal long EmittedBytes { get { return Volatile.Read(ref _emittedBytes); } }
         internal long CurrentFileBytes { get { lock (_gate) return _currentFileBytes; } }
         internal long ProtectedSummaryBytes { get { lock (_gate) return _protectedSummaryBytes; } }
         internal long ProtectedSummaryReserveBytes { get { lock (_gate) return _protectedSummaryReserveBytes; } }
-        internal long DroppedCount { get { lock (_gate) return _droppedCount; } }
+        internal long DroppedCount { get { return Volatile.Read(ref _droppedCount); } }
         internal int RotationIndex { get { lock (_gate) return _rotationIndex; } }
 
         internal bool Allow(TelemetryCategory category, long estimatedBytes)

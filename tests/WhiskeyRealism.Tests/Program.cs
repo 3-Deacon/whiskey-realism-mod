@@ -18602,19 +18602,14 @@ static class Program
 
     private static void TelemetryDecisionRequiresInputSignature()
     {
-        bool threw = false;
-        try
-        {
-            TelemetryEvent.Create(
-                "s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical,
-                TelemetryCategory.Decision, "DecisionWithoutSignature", TelemetrySeverity.Info)
-                .WithDecision("Attack", "test", "");
-        }
-        catch (ArgumentException)
-        {
-            threw = true;
-        }
-        AssertTrue(threw, "decision rows must reject blank input signatures");
+        // WS P Router: a blank signature is flagged on the row instead of throwing (the throw
+        // ran inside TelemetryRouter.Emit's configure callback and silently dropped the row).
+        var ev = TelemetryEvent.Create(
+            "s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical,
+            TelemetryCategory.Decision, "DecisionWithoutSignature", TelemetrySeverity.Info)
+            .WithDecision("Attack", "test", "");
+        AssertEqual(TelemetryEvent.MissingInputSignature, ev.InputSignature, "decision rows mark blank input signatures");
+        AssertTrue(ev.Fields.GetBool("inputSignatureMissing"), "decision rows flag blank input signatures");
     }
 
     private static void AssertEnumContract(Type enumType, params (string name, int value)[] expected)

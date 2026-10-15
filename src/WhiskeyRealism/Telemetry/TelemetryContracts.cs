@@ -40,6 +40,7 @@ namespace WhiskeyRealism.Telemetry
     internal sealed class TelemetryEvent
     {
         internal const string Schema = "wr.telemetry.v1";
+        internal const string MissingInputSignature = "missing-input-signature";
 
         private TelemetryEvent(
             string sessionId,
@@ -170,12 +171,19 @@ namespace WhiskeyRealism.Telemetry
 
         internal TelemetryEvent WithDecision(string decision, string reason, string inputSignature)
         {
-            if (string.IsNullOrWhiteSpace(inputSignature))
-                throw new ArgumentException("Decision telemetry requires a nonblank input signature.", nameof(inputSignature));
-
+            // A blank signature is a caller bug, but throwing here ran inside Emit's configure
+            // callback and silently dropped the whole row. Keep the row and flag it instead.
             Decision = Safe(decision);
             DecisionReason = Safe(reason);
-            InputSignature = inputSignature.Trim();
+            if (string.IsNullOrWhiteSpace(inputSignature))
+            {
+                InputSignature = MissingInputSignature;
+                Fields.Add("inputSignatureMissing", true);
+            }
+            else
+            {
+                InputSignature = inputSignature.Trim();
+            }
             return this;
         }
 
