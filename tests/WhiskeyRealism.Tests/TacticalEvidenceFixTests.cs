@@ -88,6 +88,7 @@ internal static class TacticalEvidenceFixTests
         Run("coverage bands span own and known enemy ground", CoverageBandsSpanKnownEnemy);
         Run("probe commits only on enough intel", ProbeCommitNeedsIntel);
         Run("enemy reinforcements count only once sighted", EnemyReinforcementsCountOnSighting);
+        Run("band recency follows lateral ground when the coverage bands re-fit", BandRecencyFollowsGroundNotIndex);
     }
 
     private static void Run(string name, Action test)
@@ -995,12 +996,33 @@ internal static class TacticalEvidenceFixTests
         return l;
     }
 
-    /// <summary>Own combat units sampled in the first <paramref name="bands"/> of five bands.</summary>
+    /// <summary>
+    /// Five 100 m coverage bands at lateral 0-500; own combat units sampled
+    /// in the first <paramref name="bands"/> of them.
+    /// </summary>
     private static void Cover(TacticalEnemyContactLedger l, float hours, int bands = 5, int watchedEntries = 0, int totalEntries = 0)
     {
         var mask = new bool[5];
-        for (int i = 0; i < bands && i < 5; i++) mask[i] = true;
-        l.ObserveCoverage(hours, mask, 5, watchedEntries, totalEntries);
+        var mins = new float[5];
+        var maxs = new float[5];
+        for (int i = 0; i < 5; i++)
+        {
+            mask[i] = i < bands;
+            mins[i] = i * 100f;
+            maxs[i] = (i + 1) * 100f;
+        }
+        l.ObserveCoverage(hours, mins, maxs, mask, 5, watchedEntries, totalEntries, 0f);
+    }
+
+    /// <summary>Production path: coverage bands from CoverageBands, then the ledger.</summary>
+    private static void CoverFromBands(TacticalEnemyContactLedger l, float hours, TacticalFrontAxis bare,
+        List<FrontUnitSample> own, List<FrontUnitSample> knownEnemy)
+    {
+        var observed = new bool[5];
+        var mins = new float[5];
+        var maxs = new float[5];
+        int n = EnemyVisibleSectorBuilder.CoverageBands(bare, own, knownEnemy, observed, mins, maxs);
+        l.ObserveCoverage(hours, mins, maxs, observed, n, 0, 0, bare.HeadingDegrees);
     }
 
     private static void ArmyOddsBlendWithConfidence()
@@ -1310,7 +1332,9 @@ internal static class TacticalEvidenceFixTests
         for (int i = 0; i < 5; i++) own.Add(new FrontUnitSample(100 + i, 500f, -400f + 200f * i, 1000f, false));
         var known = new List<FrontUnitSample> { new FrontUnitSample(900, 1500f, -800f, 500f, false), new FrontUnitSample(901, 1500f, -1200f, 500f, false) };
         var observed = new bool[5];
-        int bands = EnemyVisibleSectorBuilder.CoverageBands(bare, own, known, observed);
+        var mins = new float[5];
+        var maxs = new float[5];
+        int bands = EnemyVisibleSectorBuilder.CoverageBands(bare, own, known, observed, mins, maxs);
         int count = 0;
         for (int i = 0; i < bands; i++) if (observed[i]) count++;
         TestHarness.AssertEqual(5, bands, "five coverage bands");
@@ -1318,11 +1342,11 @@ internal static class TacticalEvidenceFixTests
 
         var ledger = new TacticalEnemyContactLedger();
         ledger.Observe(1f, 1000f, 0f);
-        ledger.ObserveCoverage(1f, observed, bands, 1, 1);
+        ledger.ObserveCoverage(1f, mins, maxs, observed, bands, 1, 1, bare.HeadingDegrees);
         TestHarness.AssertTrue(Near(ledger.Confidence(1f), 0.6f), "confidence drops to 3/5");
 
         var ownOnly = new bool[5];
-        EnemyVisibleSectorBuilder.CoverageBands(bare, own, new List<FrontUnitSample>(), ownOnly);
+        EnemyVisibleSectorBuilder.CoverageBands(bare, own, new List<FrontUnitSample>(), ownOnly, new float[5], new float[5]);
         int ownCount = 0;
         foreach (var b in ownOnly) if (b) ownCount++;
         TestHarness.AssertEqual(5, ownCount, "with no known enemy beyond the line every band is observed");
@@ -1361,5 +1385,48 @@ internal static class TacticalEvidenceFixTests
         var behind = new TacticalForceBalanceEvidence(5000f, enemy, own, 0.5f, 0.5f, conf);
         TestHarness.AssertEqual(0f, behind.ParityHoursForEnemy(), "enemy already ahead: parity now");
         TestHarness.AssertEqual(2f, behind.ParityHoursForOwn(), "own relief at 2 h catches the known enemy");
+    }
+
+    private static void BandRecencyFollowsGroundNotIndex()
+    {
+        // Facing east; own line spans 800 m north-south.
+        var bare = TacticalFrontAxis.FromCentroids(0f, 0f, 2000f, 0f);
+        var own = new List<FrontUnitSample>();
+        for (int i = 0; i < 5; i++) own.Add(new FrontUnitSample(100 + i, 500f, -400f + 200f * i, 1000f, false));
+        var none = new List<FrontUnitSample>();
+        var beyondFlank = new List<FrontUnitSample> { new FrontUnitSample(900, 1500f, -800f, 500f, false), new FrontUnitSample(901, 1500f, -1200f, 500f, false) };
+
+        // Before contact: own-only coverage, every band observed tick after tick.
+        var ledger = new TacticalEnemyContactLedger();
+        foreach (float t in new[] { 1.0f, 1.05f, 1.1f })
+        {
+            ledger.Observe(t, 0f, 0f);
+            CoverFromBands(ledger, t, bare, own, none);
+        }
+        // First contact: the enemy extends beyond a flank; the bands re-fit
+        // over own + enemy ground. Ground over the enemy was never observed.
+        ledger.Observe(1.2f, 1000f, 0f);
+        CoverFromBands(ledger, 1.2f, bare, own, beyondFlank);
+        float first = ledger.Confidence(1.2f);
+        TestHarness.AssertTrue(Near(first, 0.6f), "first widened tick: 3 of 5 bands, got " + first);
+
+        var fresh = new TacticalEnemyContactLedger();
+        fresh.Observe(1.2f, 1000f, 0f);
+        CoverFromBands(fresh, 1.2f, bare, own, beyondFlank);
+        TestHarness.AssertTrue(Near(fresh.Confidence(1.2f), first), "same as a ledger that never saw the narrow front");
+
+        // The line extends to cover the enemy flank, then pulls back.
+        var extended = new List<FrontUnitSample>(own)
+        {
+            new FrontUnitSample(105, 900f, -750f, 1000f, false),
+            new FrontUnitSample(106, 900f, -1100f, 1000f, false),
+        };
+        ledger.Observe(1.3f, 1000f, 0f);
+        CoverFromBands(ledger, 1.3f, bare, extended, beyondFlank);
+        TestHarness.AssertTrue(Near(ledger.Confidence(1.3f), 1f), "whole front observed");
+        ledger.Observe(2.3f, 1000f, 0f);
+        CoverFromBands(ledger, 2.3f, bare, own, beyondFlank);
+        float later = ledger.Confidence(2.3f);
+        TestHarness.AssertTrue(Near(later, 0.8f), "flank ground last seen an hour ago (recency 0.5): (3 + 2 x 0.5) / 5, got " + later);
     }
 }

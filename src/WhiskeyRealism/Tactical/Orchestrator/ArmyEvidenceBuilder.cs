@@ -329,7 +329,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         private static int[] _outflankedBuffer = new int[64];
-        private static bool[] _ownBandBuffer = new bool[TacticalFrontAxis.DefaultBandCount];
+        private static readonly bool[] _ownBandBuffer = new bool[TacticalFrontAxis.DefaultBandCount];
+        private static readonly float[] _bandMinBuffer = new float[TacticalFrontAxis.DefaultBandCount];
+        private static readonly float[] _bandMaxBuffer = new float[TacticalFrontAxis.DefaultBandCount];
 
         /// <summary>
         /// Mean vanilla outflanked weight over the group's combat regiments
@@ -689,8 +691,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // unit (each sampled above) stands; and the enemy-side
                     // entry points an own unit watches.
                     var knownEnemy = KnownEnemyPositions(ownAllianceId, enemyVisible, nowHours);
-                    int bandCount = EnemyVisibleSectorBuilder.CoverageBands(bare, ownCombat, knownEnemy, _ownBandBuffer);
-                    ledger.ObserveCoverage(nowHours, _ownBandBuffer, bandCount, visibleEntries.Count, enemyEntries.Count);
+                    int bandCount = EnemyVisibleSectorBuilder.CoverageBands(
+                        bare, ownCombat, knownEnemy, _ownBandBuffer, _bandMinBuffer, _bandMaxBuffer);
+                    ledger.ObserveCoverage(nowHours, _bandMinBuffer, _bandMaxBuffer, _ownBandBuffer, bandCount,
+                        visibleEntries.Count, enemyEntries.Count, bare.HeadingDegrees);
                     enemyReserveCommitFraction = ledger.ReserveCommitFraction(engagedStrength);
                     contactBroken = ledger.ContactBroken(nowHours, visibleStrength);
                     intelConfidence = ledger.Confidence(nowHours);
