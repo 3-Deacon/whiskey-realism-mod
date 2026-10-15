@@ -343,6 +343,24 @@ Full model and W&L notes: [`superpowers/specs/2026-10-14-need-driven-policy-desi
 | `CheckAIPolicyChange` fallback walk | 211076-211090 | Walks `personality.policies` from the head and starts the first available entry; Union Historical lists 33/39/40 and CSA Historical 139/140 early. #19 removes the held irreversible acts from the list for the call (snapshot restored in its Finalizer), never on an emergency personality. |
 | `Config/policies.dat` / `aipersonalities.dat` | `ImportPolicyData` 211717 / import 66144 | Record layouts (the harness fixture copies the 117 policy ids). |
 
+## Armament anchors (2026-10-15)
+
+Detail and fixes: [`bug-fixes/vanilla-armament.md`](bug-fixes/vanilla-armament.md).
+
+| Symbol | Line | Why it matters |
+|---|---|---|
+| `Autocalc.FightUnit` | 21050 (weapon tests 21085, 21089; casualties 21169) | `weapon > 0` leaves id 0 (6-pounder) without damage; IL `ldarg.1; ldfld Regiment::weapon; ldc.i4.0; ble(.s)` x2. Also transpiled by #74 (perk ids). |
+| `EnvolvedUnits.GetFortWeaponStrength` | 18482 | Sibling uses `weapon >= 0`. |
+| `BattleUnits.CombineUnits` | 93153 (weapons 93205-93241) | Stock bookkeeping on merges; men returned as guns at 93232. `DeleteUnit` 90631 and the tick 81586 count `statsguns` for artillery. |
+| `CampaignController` alliance tick | 81515-81605 | `weaponunitsequipped` rebuilt each tick (81520); `artilleryunits`/`otherunits`, `averageweaponstrengthguns`/`rifles` (unguarded `GetWeaponStrengthFactor(weapon)` 81592/81597). Purchases 81757, upgrades 81813, W&L budget growth 81839. |
+| `AICampaign.GetWeaponStrengthFactor(Regiment)` / `(int)` | 16195 / 16214 | Group mean (0/0 at 16211); WSF = range x rpm^0.2 x firepower/2 x accuracy^3 / 1000 (guns / tube weight^0.2 x 10). |
+| `AICampaign.CheckWeaponUpgrades` / `UpgradeWeaponForUnit` / `GetBestWeapon` | 16080 / 16155 / 16224 | Upgrades read stock, not research; W&L player units skipped (16137-16144). |
+| `AICampaign.CheckPurchaseWeapons` | 16259-16345 | Player gate 16263; coverage count 16287-16312 vs `aiminnumberofequippableunits` 16325/16335; candidates researched OR imported 16296/16313; dead `j == 37 \|\| j == 38` 16289; random pick 16328/16338. |
+| `GameVars.Weapon.AbleToOrder` / `GetAvailability` / `GetDeliveryTime` / `GetProductionFigures` | 63938 / 63962 / 63989 / 64074 | Order screen needs produced (pm > 0) or imported; `GetAvailability` reads the player alliance for every caller; availability floor 0.01 (64000); blockade import factor 64120-64124; identical relations branches 64110. |
+| `WeaponList.PlaceWeaponOrder` / `CheckWeaponOrders` / `AssignWeapon` / `IncreaseFiscalBudget` | 227136 / 227168 / 227092 / 226654 | Full cost up front 227162; W&L budget charged for any alliance 227157; budget gate 226965; prestige gate sign 226656. |
+| `Projects.UpdateOneTimeProjectsEffects` / `UpdateProjectEffects` | 212938 / 213040 | Projects 10/11: machine-gun stock (212945-212950) and research of 37/38 and 2/12 at pm 0. |
+| `MainMenu.CheckForCheckBoxUpdates` / `SetAutomanage` / `WeaponList.UpdateCheckBox` | 193614 (guard 193616) / 193666 / 227209 | #14 forces automanage at setup (career creation included); in-game weapon panel box is the player's choice. |
+
 ## W&L player-economy and battle-stat anchors (2026-10-15)
 
 Anchors behind `BUG-WL-005..010` and `BUG-TAC-018/019` (plan `superpowers/plans/2026-10-15-wl-economy-bugs.md`). The player-side model is in [`wl-player-model.md`](wl-player-model.md) § Player economy effects.
