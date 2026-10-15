@@ -48,7 +48,7 @@ internal static partial class FlankResponseTests
     {
         return new ManeuverInput
         {
-            Kind = PlayRectKind.FlankMarch, Envelops = true, AnchorX = 1000f, AnchorZ = 500f, StartOffsetSeconds = 900f,
+            Kind = PlayRectKind.FlankMarch, Envelops = true, AnchorX = 1000f, AnchorZ = 500f, StartOffsetSeconds = 900f, MarchRouteKnown = true,
             TemplateHasCenter = true, PlayActivatedHours = 10.0, CenterContactHours = -1.0,
             ChildX = 0f, ChildZ = 0f, ChildStrengthBucket = 2,
             HasEnemyExtent = true, EnemyEndX = 800f, EnemyEndZ = 1500f, EnemyAnchorX = 0f, EnemyAnchorZ = 1500f,
@@ -342,17 +342,28 @@ internal static partial class FlankResponseTests
         input.InwardLegHitsRiver = true;
         input.CanMirror = true;
         var state = default(ManeuverState);
-        input.MirrorAnchorX = -1000f;
-        input.MirrorAnchorZ = 500f;
         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, After(input, 10.75));
-        AssertEqual(ManeuverPhase.March, order.Phase, "a failing single flank marches to the mirrored side on the mirror tick");
+        AssertEqual(ManeuverPhase.Hold, order.Phase, "a failing single flank goes back to Hold on the mirror tick: the mirrored leg has no route result yet");
         AssertEqual("mirror-flank", order.Reason, "reason");
-        AssertEqual(-1000f, order.TargetX, "the March is ordered to the mirrored anchor x");
-        AssertEqual(500f, order.TargetZ, "the March is ordered to the mirrored anchor z");
         AssertTrue(state.Mirrored, "the mirrored side is tried once");
-        // The runtime now supplies the mirrored side: clear inputs keep marching.
+        // The runtime now supplies the mirrored anchor and, once planned, its route: clear inputs march to it.
         input.InwardLegHitsRiver = false;
-        AssertEqual(ManeuverPhase.March, EnvelopmentManeuver.Step(ref state, After(input, 10.76)).Phase, "the mirrored side is clear");
+        input.AnchorX = -1000f;
+        input.MarchRouteKnown = false;
+        AssertEqual(ManeuverPhase.Hold, EnvelopmentManeuver.Step(ref state, After(input, 10.755)).Phase, "no route result for the mirrored leg: still Hold");
+        input.MarchRouteKnown = true;
+        order = EnvelopmentManeuver.Step(ref state, After(input, 10.76));
+        AssertEqual(ManeuverPhase.March, order.Phase, "the mirrored side is clear and judged on its route");
+        AssertEqual(-1000f, order.TargetX, "the March is ordered to the mirrored anchor");
+        // The mirrored side fails while still in Hold (checked before any launch): final as well.
+        var holdState = default(ManeuverState);
+        ManeuverInput fails = Maneuver();
+        fails.CenterContactHours = 10.5;
+        fails.InwardLegHitsRiver = true;
+        fails.CanMirror = true;
+        EnvelopmentManeuver.Step(ref holdState, After(fails, 10.75));
+        AssertTrue(holdState.Mirrored, "mirrored once");
+        AssertEqual(ManeuverPhase.Abandoned, EnvelopmentManeuver.Step(ref holdState, After(fails, 10.76)).Phase, "the mirrored leg fails before launch: abandoned, not mirrored again");
         // A second failure is final.
         input.InwardLegHitsRiver = true;
         order = EnvelopmentManeuver.Step(ref state, After(input, 10.77));

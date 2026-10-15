@@ -613,7 +613,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (RotateInPlace(child, _rotationHeadings[k]))
                 {
                     rotated++;
-                    _refuseTurnBacks.NoteRotated(view.Own[_rotationTargets[k]].InstanceId, _rotationHeadings[k]);
+                    _refuseTurnBacks.NoteRotated(view.Own[_rotationTargets[k]].InstanceId, _rotationHeadings[k], TacticalDoctrineTime.NowBattleHours);
                 }
             }
             if (rotated > 0 || skipped > 0) PostureTelemetry.RefuseInPlace(view, groupIndex, w.Refuse, rotated, skipped);

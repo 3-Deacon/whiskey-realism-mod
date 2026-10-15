@@ -275,10 +275,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public double CenterContactHours = -1.0;
             public readonly Dictionary<string, ManeuverState> States = new Dictionary<string, ManeuverState>(StringComparer.Ordinal);
             public readonly List<ChildManeuver> Orders = new List<ChildManeuver>(8);
-            // The last march-leg river check per child, and the route plans this step may still spend (one per side and step).
+            // The last march-leg route check per child, and the one child that gets this step's route plan (the fair pick).
             public readonly Dictionary<string, EnvelopmentManeuver.MarchRouteCheck> MarchChecks =
                 new Dictionary<string, EnvelopmentManeuver.MarchRouteCheck>(StringComparer.Ordinal);
-            public int RoutePlansLeft;
+            public string PlanChildId;
 
             public void Clear()
             {
@@ -288,6 +288,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 States.Clear();
                 Orders.Clear();
                 MarchChecks.Clear();
+                PlanChildId = null;
             }
         }
 
@@ -297,6 +298,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // The march-leg route: the NavMesh corners of the planned path, copied to flat arrays for the grid sampling.
         private static float[] _routeX = new float[64];
         private static float[] _routeZ = new float[64];
+        // Scratch of the fair route-plan pick (grow-only; one entry per enveloping child of the step).
+        private static EnvelopmentManeuver.MarchRouteCheck[] _planChecks = new EnvelopmentManeuver.MarchRouteCheck[8];
+        private static bool[] _planNeeds = new bool[8];
+        private static string[] _planIds = new string[8];
         private static NavMeshQueryFilter _routeFilter;
         private static long _routeFilterTick = -1L;
         private static bool _firstFlankMarchLogged;
@@ -359,7 +364,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     PlayAnchor.EnemyAnchor(snapshot, axis, axis.OriginX, axis.OriginZ, out float enemyX, out float enemyZ);
                     BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
                     side.Orders.Clear();
-                    side.RoutePlansLeft = 1;
+                    // One route plan per side and step, served fairly (see PickRoutePlanChild).
+                    side.PlanChildId = PickRoutePlanChild(side, snapshot, grid, intents, axis, stance, now);
                     for (int i = 0; i < intents.Count; i++)
                     {
                         ManeuverSpec spec = intents[i].Maneuver;
@@ -419,9 +425,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             float enemyX, float enemyZ, BattleStance stance, double now)
         {
             ref UnitRecord child = ref snapshot.Own[index];
-            float anchorX = spec.AnchorX, anchorZ = spec.AnchorZ;
-            EnvelopmentManeuver.MirrorAcrossAxis(in axis, spec.AnchorX, spec.AnchorZ, out float mirrorX, out float mirrorZ);
-            if (mirrored) { anchorX = mirrorX; anchorZ = mirrorZ; }  // the one mirrored try is spent: MirrorAnchor is not read again
+            RectAnchor(in axis, spec, mirrored, out float anchorX, out float anchorZ);
             bool right = EnvelopmentManeuver.RectIsRight(in axis, anchorX, anchorZ);
 
             var input = new ManeuverInput
@@ -429,7 +433,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Kind = spec.Kind, Envelops = spec.Envelops, AnchorX = anchorX, AnchorZ = anchorZ, StartOffsetSeconds = spec.StartOffsetSeconds,
                 TemplateHasCenter = templateHasCenter, PlayActivatedHours = side.ActivatedHours, CenterContactHours = side.CenterContactHours,
                 ChildX = child.X, ChildZ = child.Z, ChildStrengthBucket = strengthBucket,
-                EnemyAnchorX = enemyX, EnemyAnchorZ = enemyZ, CanMirror = canMirror, MirrorAnchorX = mirrorX, MirrorAnchorZ = mirrorZ,
+                EnemyAnchorX = enemyX, EnemyAnchorZ = enemyZ, CanMirror = canMirror,
                 HeightDifferenceAnchored = GamePrefs.heightdifferencetoenemyunitanchored, Stance = stance, NowHours = now,
             };
             input.ChildInContact = snapshot.ClosestVisibleEnemy(index, out float contactDistance) >= 0 && contactDistance <= EnvelopmentManeuver.ContactMeters;
@@ -465,68 +469,116 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 int n = grid.SampleLine(anchorX, anchorZ, inwardX, inwardZ, EnvelopmentManeuver.InwardStepMeters, _riverSamples);
                 input.InwardLegHitsRiver = !EnvelopmentManeuver.InwardLegClear(_riverSamples, n);
-                if (!grid.Frozen) input.MarchLegHitsRiver = MarchLegHitsRiver(side, childId, grid, in child, anchorX, anchorZ, now, snapshot.TickId);
+                // A frozen river carries units: nothing to judge. Otherwise the route result (or its absence) decides, see MarchRouteStatus.
+                if (grid.Frozen) input.MarchRouteKnown = true;
+                else MarchRouteStatus(side, childId, grid, in child, anchorX, anchorZ, now, snapshot.TickId, ref input);
             }
+            else input.MarchRouteKnown = true;   // no terrain grid: no march-leg verdict to wait for
             return input;
         }
 
-        // The march leg judged on the route the child will walk (a NavMesh path from its position to the anchor, priced like
-        // the posture probe), each segment sampled on the BC10 grid: a straight line across a river that the route crosses by a
-        // bridge does not count. The check is re-run only at the leg's start, when the anchor moves (the mirrored side) and every
-        // RouteRecheckHours of doctrine time, and at most one route plan per side and step; with no budget the last result stands, with
-        // no path (or no result yet) the straight line is sampled instead (conservative).
-        private static bool MarchLegHitsRiver(SideManeuvers side, string childId, BattleTerrainGrid grid, in UnitRecord child,
-            float anchorX, float anchorZ, double now, long tickId)
+        private static void RectAnchor(in TacticalFrontAxis axis, ManeuverSpec spec, bool mirrored, out float x, out float z)
+        {
+            x = spec.AnchorX;
+            z = spec.AnchorZ;
+            if (mirrored) EnvelopmentManeuver.MirrorAcrossAxis(in axis, spec.AnchorX, spec.AnchorZ, out x, out z);
+        }
+
+        // Which enveloping child gets this step's single route plan, in the fair order EnvelopmentManeuver.PickRoutePlan defines: a
+        // child with no route result for its current anchor goes before any re-check. N enveloping children therefore each have
+        // their first route within N steps (DoubleEnvelopment's two wings: by the second step). Children that are done (Attack,
+        // Abandoned, Released), a Defender's, and a frozen map's need none.
+        private static string PickRoutePlanChild(SideManeuvers side, BattleSnapshot snapshot, BattleTerrainGrid grid, IReadOnlyList<DirectChildIntent> intents,
+            TacticalFrontAxis axis, BattleStance stance, double now)
+        {
+            if (grid == null || grid.Frozen || stance == BattleStance.Defender) return null;
+            int n = 0;
+            for (int i = 0; i < intents.Count; i++)
+            {
+                ManeuverSpec spec = intents[i].Maneuver;
+                if (!spec.HasValue || !spec.Envelops) continue;
+                if (snapshot.IndexOfOwn(ParseChildInstanceId(intents[i].ChildId)) < 0) continue;
+                side.States.TryGetValue(intents[i].ChildId, out ManeuverState state);
+                if (state.Phase == ManeuverPhase.Attack || state.Phase == ManeuverPhase.Abandoned || state.Phase == ManeuverPhase.Released) continue;
+                RectAnchor(in axis, spec, state.Mirrored, out float anchorX, out float anchorZ);
+                side.MarchChecks.TryGetValue(intents[i].ChildId, out EnvelopmentManeuver.MarchRouteCheck last);
+                last = EnvelopmentManeuver.CheckForAnchor(in last, anchorX, anchorZ);
+                if (n == _planChecks.Length)
+                {
+                    Array.Resize(ref _planChecks, n * 2);
+                    Array.Resize(ref _planNeeds, n * 2);
+                    Array.Resize(ref _planIds, n * 2);
+                }
+                _planChecks[n] = last;
+                _planNeeds[n] = EnvelopmentManeuver.NeedsRouteRecheck(in last, now, anchorX, anchorZ);
+                _planIds[n] = intents[i].ChildId;
+                n++;
+            }
+            int pick = EnvelopmentManeuver.PickRoutePlan(_planChecks, _planNeeds, n);
+            return pick < 0 ? null : _planIds[pick];
+        }
+
+        // The march leg's route result for this child: the stored one while it holds for this anchor, re-planned when the fair pick
+        // named this child. No result for the anchor means MarchRouteKnown stays false and the state machine keeps the child where it
+        // is (a Hold waits); a straight line is never sampled in its place.
+        private static void MarchRouteStatus(SideManeuvers side, string childId, BattleTerrainGrid grid, in UnitRecord child,
+            float anchorX, float anchorZ, double now, long tickId, ref ManeuverInput input)
         {
             side.MarchChecks.TryGetValue(childId, out EnvelopmentManeuver.MarchRouteCheck last);
-            if (!EnvelopmentManeuver.NeedsRouteRecheck(in last, now, anchorX, anchorZ)) return last.HitsRiver;
-            if (last.Valid && side.RoutePlansLeft <= 0) return last.HitsRiver;
+            last = EnvelopmentManeuver.CheckForAnchor(in last, anchorX, anchorZ);
+            if (EnvelopmentManeuver.NeedsRouteRecheck(in last, now, anchorX, anchorZ) && string.Equals(side.PlanChildId, childId, StringComparison.Ordinal))
+            {
+                last = PlanRoute(grid, in child, anchorX, anchorZ, now, tickId);
+                side.MarchChecks[childId] = last;
+                side.PlanChildId = null;
+            }
+            input.MarchRouteKnown = last.Valid;
+            input.MarchLegHitsRiver = last.HitsRiver;
+            input.MarchRouteMissing = last.NoPath;
+        }
 
-            var check = new EnvelopmentManeuver.MarchRouteCheck { Valid = true, CheckedHours = now, AnchorX = anchorX, AnchorZ = anchorZ };
-            bool planned = false;
-            if (side.RoutePlansLeft > 0)
+        // The march leg judged on the route the child will walk: a NavMesh path from its position to the anchor, priced like the
+        // posture probe, each segment sampled on the BC10 grid (a river crossed by a bridge or ford is not a river). No complete path
+        // (or a failed query) is a result too: NoPath.
+        private static EnvelopmentManeuver.MarchRouteCheck PlanRoute(BattleTerrainGrid grid, in UnitRecord child, float anchorX, float anchorZ,
+            double now, long tickId)
+        {
+            var check = new EnvelopmentManeuver.MarchRouteCheck { Valid = true, CheckedHours = now, AnchorX = anchorX, AnchorZ = anchorZ, NoPath = true };
+            try
             {
-                side.RoutePlansLeft--;
-                try
+                if (_routeFilterTick != tickId)
                 {
-                    if (_routeFilterTick != tickId)
+                    _routeFilter = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.CreateNavFilter();
+                    _routeFilterTick = tickId;
+                }
+                NavMeshPath path = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.SharedPath();
+                if (NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, 0f, anchorZ), _routeFilter, path)
+                    && path.status == NavMeshPathStatus.PathComplete)
+                {
+                    int count = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.ReadCorners(path, out Vector3[] corners);
+                    if (_routeX.Length < count)
                     {
-                        _routeFilter = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.CreateNavFilter();
-                        _routeFilterTick = tickId;
+                        _routeX = new float[count * 2];
+                        _routeZ = new float[count * 2];
                     }
-                    NavMeshPath path = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.SharedPath();
-                    if (NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, 0f, anchorZ), _routeFilter, path)
-                        && path.status == NavMeshPathStatus.PathComplete)
+                    for (int c = 0; c < count; c++)
                     {
-                        int count = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.ReadCorners(path, out Vector3[] corners);
-                        if (_routeX.Length < count)
-                        {
-                            _routeX = new float[count * 2];
-                            _routeZ = new float[count * 2];
-                        }
-                        for (int c = 0; c < count; c++)
-                        {
-                            _routeX[c] = corners[c].x;
-                            _routeZ[c] = corners[c].z;
-                        }
+                        _routeX[c] = corners[c].x;
+                        _routeZ[c] = corners[c].z;
+                    }
+                    if (count > 0)
+                    {
+                        check.NoPath = false;
                         check.HitsRiver = EnvelopmentManeuver.RouteHitsRiver(grid, _routeX, _routeZ, count, EnvelopmentManeuver.MarchStepMeters, _riverSamples);
-                        planned = count > 0;
                     }
                 }
-                catch (Exception e)
-                {
-                    OnceLog.Warning("play-executor-runtime:march-route-exception",
-                        "PlayExecutorRuntime march route plan failed, the straight line is sampled: " + e.GetType().Name + " " + e.Message);
-                }
             }
-            if (!planned)
+            catch (Exception e)
             {
-                int n = grid.SampleLine(child.X, child.Z, anchorX, anchorZ, EnvelopmentManeuver.MarchStepMeters, _riverSamples);
-                check.HitsRiver = !EnvelopmentManeuver.InwardLegClear(_riverSamples, n);
+                OnceLog.Warning("play-executor-runtime:march-route-exception",
+                    "PlayExecutorRuntime march route plan failed, the leg counts as unwalkable: " + e.GetType().Name + " " + e.Message);
             }
-            check.UsedRoute = planned;
-            side.MarchChecks[childId] = check;
-            return check.HitsRiver;
+            return check;
         }
 
         private static float HeightAt(float x, float z)

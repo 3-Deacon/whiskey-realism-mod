@@ -64,18 +64,45 @@ namespace WhiskeyRealism.Tactical.Battle
 
         public int Count => _count;
 
-        /// <summary>The executor rotated the regiment to <paramref name="rotation"/>; any earlier back-off ends.</summary>
-        public void NoteRotated(int instanceId, float rotation)
+        /// <summary>
+        /// The executor rotated the regiment to <paramref name="rotation"/>; any earlier back-off ends. A full table makes room
+        /// without forgetting an active back-off: an expired back-off goes first, then a remembered rotation that is not backed off
+        /// (the oldest), and only when all <see cref="Capacity"/> entries are active the one closest to expiry.
+        /// </summary>
+        public void NoteRotated(int instanceId, float rotation, double nowHours)
         {
             int slot = Find(instanceId);
             if (slot < 0)
             {
                 if (_count < Capacity) slot = _count++;
-                else { slot = _next; _next = (_next + 1) % Capacity; }
+                else slot = Evict(nowHours);
                 _id[slot] = instanceId;
             }
             _orderedTo[slot] = rotation;
             _backOffUntil[slot] = -1.0;
+        }
+
+        private int Evict(double nowHours)
+        {
+            int expired = -1, plain = -1, soonest = -1;
+            for (int k = 0; k < _count; k++)
+            {
+                int i = (_next + k) % _count;
+                double until = _backOffUntil[i];
+                if (until < 0.0)
+                {
+                    if (plain < 0) plain = i;
+                    continue;
+                }
+                if (nowHours >= until || nowHours < until - BackOffHours)
+                {
+                    if (expired < 0) expired = i;
+                }
+                else if (soonest < 0 || until < _backOffUntil[soonest]) soonest = i;
+            }
+            int slot = expired >= 0 ? expired : plain >= 0 ? plain : soonest;
+            _next = (slot + 1) % _count;
+            return slot;
         }
 
         /// <summary>

@@ -63,14 +63,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool ChildArrived, ChildInContact;
         public bool HasEnemyExtent;
         public float EnemyEndX, EnemyEndZ, EnemyAnchorX, EnemyAnchorZ, OutflankX, OutflankZ;   // the rect side's perceived line end; DeepRaid's outflank point
-        public bool InwardLegHitsRiver, MarchLegHitsRiver;               // BattleTerrainGrid samples (2 m inward, 10 m for the march)
+        public bool InwardLegHitsRiver;                                  // BattleTerrainGrid samples, 2 m steps along the inward leg
+        // The march leg is judged on the planned route, never on a straight line. MarchRouteKnown is false until the runtime has a
+        // route result for this leg: the child then stays in its phase (a Hold waits, "await-route"); it is neither launched nor
+        // abandoned. MarchRouteMissing: no complete NavMesh path (a result in its own right).
+        public bool MarchRouteKnown, MarchLegHitsRiver, MarchRouteMissing;
         public float AnchorHeight;
         public int CorridorEnemyCount;                                    // perceived enemies (Visible, or Remembered at >= 0.5) on the inward corridor
         public float MaxCorridorEnemyHeight;
         public float HeightDifferenceAnchored;                            // GamePrefs.heightdifferencetoenemyunitanchored (5 m)
         public bool CanMirror;                                            // a lone enveloping rect: one mirrored try
-        // The rect anchor mirrored across the army's centre line (the runtime fills it when CanMirror): the mirror tick marches there.
-        public float MirrorAnchorX, MirrorAnchorZ;
         // Additive: how far the child's headquarters may stand from a point it was sent to and still have arrived. SetGroupFormation
         // paths the HQ groupdepth + groupunitdistancetoback behind the waypoint (92044, 92058), so the runtime passes those.
         public float ArrivalSlackMeters;
@@ -197,15 +199,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     if (input.NowHours < goHours) return HoldOrder(in input, "hold-offset");
                 }
 
+                // A wing is never launched (or abandoned) before its march leg has a route result: it holds one step more.
+                if (!input.MarchRouteKnown) return HoldOrder(in input, "await-route");
+
                 string failure = FlankMoveCheck(in input);
                 if (failure != null)
                 {
-                    if (input.CanMirror && !state.Mirrored)
-                    {
-                        // One mirrored try: march to the mirrored anchor now; the runtime supplies the mirrored side's anchor and
-                        // checks from the next tick, and a second failure there is final.
-                        return MirrorMarch(ref state, in input, true);
-                    }
+                    // One mirrored try: back to Hold on the mirrored side; the runtime supplies the mirrored anchor, and the March to it
+                    // is ordered once that leg's route result exists. A second failure there is final.
+                    if (input.CanMirror && !state.Mirrored) return MirrorHold(ref state, in input);
                     return Abandon(ref state, failure);
                 }
                 state.Phase = ManeuverPhase.March;
@@ -222,8 +224,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 string failure = FlankMoveCheck(in input);
                 if (failure != null)
                 {
-                    if (input.CanMirror && !state.Mirrored)
-                        return MirrorMarch(ref state, in input, false);
+                    if (input.CanMirror && !state.Mirrored) return MirrorHold(ref state, in input);
                     return Abandon(ref state, failure);
                 }
             }
@@ -254,24 +255,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
         }
 
-        // The one mirrored try: the March phase toward the mirrored anchor (a DeepRaid re-finds its outflank point on the
-        // mirrored side next tick). A march already in progress keeps its clock (timeout counts from the first leg).
-        private static ManeuverOrder MirrorMarch(ref ManeuverState state, in ManeuverInput input, bool fromHold)
+        // The one mirrored try: back to Hold on the mirrored side (the runtime now supplies the mirrored anchor and plans its route).
+        // The March is ordered, to the mirrored anchor, at the first step the mirrored leg has a route result and passes its checks.
+        private static ManeuverOrder MirrorHold(ref ManeuverState state, in ManeuverInput input)
         {
             state.Mirrored = true;
             state.OutflankReached = false;
-            state.Phase = ManeuverPhase.March;
+            state.Phase = ManeuverPhase.Hold;
             state.PhaseSinceHours = input.NowHours;
-            if (fromHold)
-            {
-                state.ActiveSinceHours = input.NowHours;
-                state.ProceedReason = "mirror-flank";
-            }
-            return new ManeuverOrder
-            {
-                Phase = ManeuverPhase.March, Task = CommandTaskType.AdvanceToAssembly,
-                TargetX = input.MirrorAnchorX, TargetZ = input.MirrorAnchorZ, Heading = -1f, Reason = "mirror-flank",
-            };
+            return HoldOrder(in input, "mirror-flank");
         }
 
         // The march target: the rect anchor; a DeepRaid goes first to its outflank point.
@@ -340,7 +332,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // the inward corridor standing at least heightdifferencetoenemyunitanchored above the anchor.
         private static string FlankMoveCheck(in ManeuverInput input)
         {
-            if (input.MarchLegHitsRiver || input.InwardLegHitsRiver) return "river-on-leg";
+            // The march leg counts only once its route result exists (MarchRouteKnown); a launched child keeps marching until then.
+            if (input.MarchRouteKnown && input.MarchRouteMissing) return "no-route";
+            if ((input.MarchRouteKnown && input.MarchLegHitsRiver) || input.InwardLegHitsRiver) return "river-on-leg";
             Span<float> heights = stackalloc float[1];
             heights[0] = input.MaxCorridorEnemyHeight;
             if (AnchoredHighGround(input.AnchorHeight, heights, input.CorridorEnemyCount > 0 ? 1 : 0, input.HeightDifferenceAnchored))
@@ -424,8 +418,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public double CheckedHours;
             public float AnchorX, AnchorZ;
             public bool HitsRiver;
-            /// <summary>True when the result came from the planned route, false when it fell back to the straight line.</summary>
-            public bool UsedRoute;
+            /// <summary>No complete NavMesh path: a result in its own right (the leg cannot be walked).</summary>
+            public bool NoPath;
         }
 
         /// <summary>
@@ -438,6 +432,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             if (!last.Valid) return true;
             if (nowHours < last.CheckedHours || nowHours - last.CheckedHours >= RouteRecheckHours) return true;
             return Distance(last.AnchorX, last.AnchorZ, anchorX, anchorZ) > RouteAnchorMoveMeters;
+        }
+
+        /// <summary>The last result as it applies to this anchor: a result for a leg whose anchor moved on is no result.</summary>
+        public static MarchRouteCheck CheckForAnchor(in MarchRouteCheck last, float anchorX, float anchorZ)
+        {
+            if (last.Valid && Distance(last.AnchorX, last.AnchorZ, anchorX, anchorZ) > RouteAnchorMoveMeters) return default(MarchRouteCheck);
+            return last;
+        }
+
+        /// <summary>The fair order of route plans: a child with no result yet goes before any re-check, then the stalest result first.</summary>
+        public static bool PlansBefore(in MarchRouteCheck a, in MarchRouteCheck b)
+        {
+            if (a.Valid != b.Valid) return !a.Valid;
+            return a.CheckedHours < b.CheckedHours;
+        }
+
+        /// <summary>
+        /// The child that gets this step's single route plan (an index into <paramref name="checks"/>), or -1 when none needs one.
+        /// Among the children with <paramref name="needs"/> set the first in <see cref="PlansBefore"/> order wins, ties to the lower
+        /// index. The bound: a step serves exactly one child that has no result, and a served child stays served, so N enveloping
+        /// children each get their first route plan within N steps (DoubleEnvelopment's two wings: at the latest the second step),
+        /// whatever the re-checks queue behind them.
+        /// </summary>
+        public static int PickRoutePlan(MarchRouteCheck[] checks, bool[] needs, int count)
+        {
+            if (checks == null || needs == null) return -1;
+            count = Math.Min(count, Math.Min(checks.Length, needs.Length));
+            int best = -1;
+            for (int i = 0; i < count; i++)
+            {
+                if (!needs[i]) continue;
+                if (best < 0 || PlansBefore(in checks[i], in checks[best])) best = i;
+            }
+            return best;
         }
 
         /// <summary>
