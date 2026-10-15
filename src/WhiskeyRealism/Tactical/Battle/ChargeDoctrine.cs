@@ -58,6 +58,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // Producer flag: the doctrine reverted a regiment it armed while in mode 6 and has not yet
         // disarmed it (PendingDisarmAfter).
         public bool WhiskeyArmedPendingDisarm;
+        // Doctrine-clock seconds since the producer saw vanilla refuse a charge on odds (a new
+        // lastaichargetime value, 122292); +Infinity when it never has.
+        public double SecondsSinceLastAiChargeRefusal;
     }
 
     public enum ChargeAction
@@ -77,6 +80,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public const float OwnMoraleFloor = 0.5f;
         public const float OwnFatigueCeiling = 0.6f;
         public const int MaxLeadingRegimentsPerGroup = 2;
+        public const double RearmAfterRefusalBattleSeconds = 120.0;
 
         public const int NormalMovementMode = 0;
         public const int ArmedMovementMode = 3;   // set by the 122214 gate
@@ -84,7 +88,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // Phased on who armed the regiment and its movement mode:
         // - not armed by the doctrine: Charge only at movementmode 0 while moving (the 122214 gate)
-        //   with every condition met; a mode 3/6 the doctrine did not arm is vanilla's own.
+        //   with every condition met and the refusal backoff elapsed; a mode 3/6 the doctrine did
+        //   not arm is vanilla's own.
         // - armed, any mode: revert on a resolved cycle or a demoted stance (charge denial wins).
         // - armed, mode 6: hold; vanilla's odds check already passed and the assault resolves itself.
         // - armed, mode 0 (courier carrying the order) or 3 (armed, including the stationary volley
@@ -110,7 +115,10 @@ namespace WhiskeyRealism.Tactical.Battle
             if (!armed)
             {
                 bool atGate = input.MovementMode == NormalMovementMode && input.Moving;
-                return atGate && input.GroupAiStance == AssaultStance && ConditionsHold(in input)
+                // Vanilla's own renew check (timetorenewaichargecheck, 4917) is dead code, and a
+                // refusal (122290-122292) would re-arm at the 122214 gate on the next frame.
+                bool backoffElapsed = input.SecondsSinceLastAiChargeRefusal >= RearmAfterRefusalBattleSeconds;
+                return atGate && backoffElapsed && input.GroupAiStance == AssaultStance && ConditionsHold(in input)
                     ? ChargeAction.Charge
                     : ChargeAction.None;
             }

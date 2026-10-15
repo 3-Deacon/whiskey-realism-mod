@@ -20,6 +20,7 @@ internal static class ChargeDoctrineTests
             ("charge doctrine needs own morale and fatigue floors", NoChargeWhenFatiguedOrShaken),
             ("charge doctrine never charges through a friendly lane", NoChargeWhenLaneBlocked),
             ("charge doctrine never charges a stationary regiment", NoChargeWhenStationary),
+            ("charge doctrine waits out the refusal backoff before re-arming", NoRearmInsideRefusalBackoff),
             ("charge doctrine never touches player-owned units", NoChargeOnPlayerOwned),
             ("charge doctrine is infantry in assault stance only", NoChargeOutsideInfantryAssault),
             ("charge doctrine does not re-arm a vanilla charge mode already running", NoChargeWhenVanillaChargeModeActive),
@@ -67,6 +68,7 @@ internal static class ChargeDoctrineTests
             CurrentBehaviorOrdered = ChargeDoctrine.RevertBehavior,
             IsLeading = true,
             WhiskeyArmedPendingDisarm = false,
+            SecondsSinceLastAiChargeRefusal = double.PositiveInfinity,
         };
     }
 
@@ -180,6 +182,34 @@ internal static class ChargeDoctrineTests
         var input = Ready();
         input.Moving = false;
         AssertEqual(ChargeAction.None, Decide(input), "vanilla arms only with regimentpaths > 0 (122214)");
+    }
+
+    // After vanilla refuses on odds (122290 SetMovementMode(), 122292 lastaichargetime stamp)
+    // behavior 3 would re-arm at the 122214 gate on the next frame; vanilla's own renew check
+    // (timetorenewaichargecheck at 4917) sits in dead code. The doctrine waits on its own clock.
+    private static void NoRearmInsideRefusalBackoff()
+    {
+        AssertEqual(120.0, ChargeDoctrine.RearmAfterRefusalBattleSeconds, "backoff constant");
+
+        var justRefused = Ready();
+        justRefused.SecondsSinceLastAiChargeRefusal = 0.0;
+        AssertEqual(ChargeAction.None, Decide(justRefused), "just refused");
+
+        var inside = Ready();
+        inside.SecondsSinceLastAiChargeRefusal = ChargeDoctrine.RearmAfterRefusalBattleSeconds - 0.1;
+        AssertEqual(ChargeAction.None, Decide(inside), "inside the backoff");
+
+        var elapsed = Ready();
+        elapsed.SecondsSinceLastAiChargeRefusal = ChargeDoctrine.RearmAfterRefusalBattleSeconds;
+        AssertEqual(ChargeAction.Charge, Decide(elapsed), "backoff elapsed");
+
+        var never = Ready();
+        never.SecondsSinceLastAiChargeRefusal = double.PositiveInfinity;
+        AssertEqual(ChargeAction.Charge, Decide(never), "never refused");
+
+        var unknown = Ready();
+        unknown.SecondsSinceLastAiChargeRefusal = double.NaN;
+        AssertEqual(ChargeAction.None, Decide(unknown), "unknown refusal age fails closed");
     }
 
     private static void NoChargeOnPlayerOwned()
