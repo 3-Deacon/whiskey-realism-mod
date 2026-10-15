@@ -15,6 +15,7 @@ internal static class BattlePerceptionTests
             ("battle-perception mode own side uses within-fog", ModeOwnSideUsesWithinFog),
             ("battle-perception config off forces range-only", ConfigOffForcesRangeOnly),
             ("battle-perception mode log keys reset per battle", ModeLogKeysResetPerBattle),
+            ("battle-perception painted grid latch is per side", PaintedGridLatchIsPerSide),
             ("battle-perception visible becomes remembered after two hidden ticks", VisibleBecomesRememberedAfterTwoHiddenTicks),
             ("battle-perception hidden for one tick stays visible", HiddenForOneTickStaysVisible),
             ("battle-perception remembered keeps last visible position", RememberedKeepsLastVisiblePosition),
@@ -112,6 +113,29 @@ internal static class BattlePerceptionTests
         OnceLog.ResetTactical();
         AssertEqual(fired - 1, OnceLog.FiredCount, "battle end releases the mode key");
         OnceLog.Reset();
+    }
+
+    // W&L / ai_vs_ai: both sides perceive, each through its own grid (fows[0] / fows[1]).
+    private static void PaintedGridLatchIsPerSide()
+    {
+        var latch = new PaintedGridLatch(2);
+        object grid0 = new object(), grid1 = new object();
+        AssertFalse(latch.IsPainted(0, grid0), "nothing latched yet");
+        latch.MarkPainted(0, grid0);
+        latch.MarkPainted(1, grid1);
+        for (int tick = 0; tick < 3; tick++)
+        {
+            AssertTrue(latch.IsPainted(0, grid0), "side 0 stays latched while side 1 runs");
+            AssertTrue(latch.IsPainted(1, grid1), "side 1 stays latched while side 0 runs");
+        }
+        AssertFalse(latch.IsPainted(0, grid1), "another side's grid is not side 0's");
+        AssertFalse(latch.IsPainted(1, new object()), "a new grid object needs its own read");
+        AssertFalse(latch.IsPainted(0, null), "no grid");
+        AssertFalse(latch.IsPainted(2, grid0), "Europe has no slot");
+        latch.MarkPainted(2, grid0);
+        latch.Reset();
+        AssertFalse(latch.IsPainted(0, grid0), "battle end clears side 0");
+        AssertFalse(latch.IsPainted(1, grid1), "battle end clears side 1");
     }
 
     // ---------------------------------------------------------------- memory

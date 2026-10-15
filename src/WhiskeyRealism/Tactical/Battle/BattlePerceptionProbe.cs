@@ -24,7 +24,8 @@
 //   memory like one seen routing on the fog grid.
 // - FogOfWar.firstrunfinished is private (100648) and only ever turns true, after the
 //   first full grid pass (100690-100694), until the next InitFOW (100791); it is read by
-//   cached reflection until it is true, then the result is kept for the battle.
+//   cached reflection until it is true, then latched per side for the battle
+//   (PaintedGridLatch: W&L / ai_vs_ai sides use different grids).
 //   GameVars.hqinthesaddle blanks the AI grid in battle (101312). UseIntelligenceMap
 //   (100594) is logged once per battle (open question in
 //   docs/vanilla-vision-and-movement.md).
@@ -77,7 +78,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private static double _battleStartHours = double.NaN;
         private static bool _geometryRead;
         private static SliceGeometry _geometry;
-        private static FogOfWar _paintedGrid; // grid whose firstrunfinished was seen true
+        private static readonly PaintedGridLatch _paintedGrids = new PaintedGridLatch(2);
 
         private static FieldInfo _firstRunField;
         private static bool _firstRunResolved;
@@ -101,7 +102,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _ownReachCount = 0;
             _battleStartHours = double.NaN;
             _geometryRead = false;
-            _paintedGrid = null;
+            _paintedGrids.Reset();
         }
 
         /// <summary>
@@ -139,7 +140,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
             bool configOn = Plugin.EnableBattleFogHonestPerception == null || Plugin.EnableBattleFogHonestPerception.Value;
             PerceptionMode mode = BattlePerception.DecideMode(configOn, GameVars.usefow, GameVars.hqinthesaddle,
-                FirstRunFinished(grid), (nowHours - _battleStartHours) * 3600.0,
+                FirstRunFinished(grid, alliance), (nowHours - _battleStartHours) * 3600.0,
                 alliance == GameVars.playeralliance, out PerceptionFallbackReason reason);
 
             if (!FillProbe(side, s, battle, mode, grid))
@@ -346,12 +347,12 @@ namespace WhiskeyRealism.Tactical.Battle
             };
         }
 
-        // True once the grid has finished its first full pass. The reflected read boxes a
-        // bool, so it runs only until the answer is true; then the grid is remembered.
-        private static bool FirstRunFinished(FogOfWar grid)
+        // True once the side's grid has finished its first full pass. The reflected read
+        // boxes a bool, so it runs only until the answer is true; then the side latches it.
+        private static bool FirstRunFinished(FogOfWar grid, int alliance)
         {
             if ((UnityEngine.Object)grid == null) return false;
-            if (ReferenceEquals(grid, _paintedGrid)) return true;
+            if (_paintedGrids.IsPainted(alliance, grid)) return true;
             if (!_firstRunResolved)
             {
                 _firstRunResolved = true;
@@ -371,7 +372,7 @@ namespace WhiskeyRealism.Tactical.Battle
             try
             {
                 if (!(bool)_firstRunField.GetValue(grid)) return false;
-                _paintedGrid = grid;
+                _paintedGrids.MarkPainted(alliance, grid);
                 return true;
             }
             catch

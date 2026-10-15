@@ -66,6 +66,38 @@ namespace WhiskeyRealism.Tactical.Battle
         }
     }
 
+    /// <summary>
+    /// Per side, the fog grid already seen to have finished its first full pass
+    /// (FogOfWar.firstrunfinished, 100690-100694), so the probe stops its boxed reflected
+    /// read once the answer is true. One slot per side: under W&L or ai_vs_ai both sides
+    /// perceive through different grids (fows[0] / fows[1], 116505-116518), and a shared
+    /// slot would alternate between them and re-read every tick.
+    /// </summary>
+    public sealed class PaintedGridLatch
+    {
+        private readonly object[] _painted;
+
+        public PaintedGridLatch(int sides)
+        {
+            _painted = new object[Math.Max(0, sides)];
+        }
+
+        public bool IsPainted(int side, object grid)
+        {
+            return grid != null && side >= 0 && side < _painted.Length && ReferenceEquals(_painted[side], grid);
+        }
+
+        public void MarkPainted(int side, object grid)
+        {
+            if (side >= 0 && side < _painted.Length) _painted[side] = grid;
+        }
+
+        public void Reset()
+        {
+            Array.Clear(_painted, 0, _painted.Length);
+        }
+    }
+
     public static class BattlePerception
     {
         public const float FogStartupSeconds = 5f;
