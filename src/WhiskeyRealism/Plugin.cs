@@ -507,11 +507,13 @@ namespace WhiskeyRealism
             EnableArtilleryAllStanceAudit = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Artillery All-Stance Audit",
-                false,
-                "Default OFF: known defect, do not enable. Its ammo ratio divides the summed per-slot ammo (each slot 0-1) by guns x 200, so every " +
-                "battery reads as out of ammo and the audit cancels every AI bombardment. When on, BattleGroupStancePatch walks the alliance's " +
-                "artillery each stance pass and applies TacticalArtilleryMicroDoctrine (limber/unlimber/retreat/wheel/conserve-ammo) through " +
-                "TacticalArtilleryApplier; AI batteries only, Tactical Commander Mode = Active.");
+                true,
+                "Default ON. Each BattleGroupStancePatch pass (at most every Battle Group Stance Min Interval Seconds per side) walks the side's " +
+                "AI batteries in every group stance (vanilla CheckAIBombardment only covers stances 3/4) and applies the artillery micro-doctrine " +
+                "through vanilla calls: limber or retreat when the enemy is within 60 m, or within 100 m with no interposed infantry/cavalry and group " +
+                "morale below 0.6 (idle batteries only); unlimber and face an enemy in fire range; turn toward a visible enemy beyond range (only when off by vanilla's " +
+                "turn trigger); cancel bombardment below 10% ammo (mean of the three ammo slots). A battery is left alone for Artillery Audit Min " +
+                "Hold Seconds after a write. AI batteries only (W&L/player units protected); writes need Tactical Commander Mode = Active.");
             ArtilleryAuditMinHoldSeconds = Config.Bind(
                 "Tactical Orchestrator",
                 "Artillery Audit Min Hold Seconds",

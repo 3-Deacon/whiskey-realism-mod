@@ -313,6 +313,33 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
+        // Face writes (B7 + all-stance audit) follow vanilla's micro facing rule
+        // (AIBattle 4630 region): RotateRegiment only when
+        // Tools.GetAbsAngleDifference(transform yaw, target) >=
+        // GamePrefs.angletriggerforturningtowardsenemy. RotateRegiment
+        // (130159) stops the regiment and clears its target, so re-issuing it
+        // to an already-facing battery every hold window is not harmless.
+        public static bool ShouldRotateTowardTarget(float currentYaw, float targetYaw, float turnTriggerDegrees)
+        {
+            if (!IsFinite(currentYaw) || !IsFinite(targetYaw)) return false;
+            float trigger = IsFinite(turnTriggerDegrees) && turnTriggerDegrees > 0f ? turnTriggerDegrees : 0f;
+            return AbsAngleDifference(currentYaw, targetYaw) >= trigger;
+        }
+
+        // Port of Tools.GetAbsAngleDifference (151779) with its defaults.
+        public static float AbsAngleDifference(float angle1, float angle2)
+        {
+            float diff = angle1 - angle2;
+            while (diff < -180f) diff += 360f;
+            while (diff > 180f) diff -= 360f;
+            return System.Math.Abs(diff);
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
         // Counter-battery (combat behavior 8) has no reachable vanilla release:
         // CheckCounterBatteryFire skips units already at 8 (3834), so its own
         // 8 -> 7 branch is dead, and CheckAIBombardment skips 8 too (3890).

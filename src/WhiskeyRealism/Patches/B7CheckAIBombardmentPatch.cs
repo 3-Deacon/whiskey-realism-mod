@@ -131,16 +131,9 @@ namespace WhiskeyRealism.Patches
 
         private static TacticalArtilleryInputAdapter.Snapshot BuildSnapshot(Regiment unit, Regiment aigroup, int isPlayerAiOrFeud)
         {
-            float ammoTotal = 0f;
             float canister = 0f;
-            int slots = 0;
-            if (unit.ammo != null)
-            {
-                slots = unit.ammo.Length;
-                for (int i = 0; i < slots; i++) ammoTotal += unit.ammo[i];
-                if (slots > 2) canister = unit.ammo[2];
-            }
-            float ammoRatio = (slots > 0) ? ammoTotal / slots : 0f;
+            if (unit.ammo != null && unit.ammo.Length > 2) canister = unit.ammo[2];
+            float ammoRatio = TacticalArtilleryInputAdapter.ArtilleryAmmoRatio01(unit.ammo);
 
             float fallbackThreshold = 0.4f;
             try

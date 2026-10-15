@@ -1366,6 +1366,7 @@ static class Program
         TelemetryInfraFixTests.Run();
         TacticalDecisionSnapshotTests.Run();
         TacticalResolvedGroupDecisionTests.Run();
+        IntegrationFollowupTests.Run();
 
         return 0;
     }

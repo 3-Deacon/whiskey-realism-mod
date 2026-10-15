@@ -236,8 +236,7 @@ namespace WhiskeyRealism.Patches
 
                 float maxRange = 0f;
                 try { maxRange = unit.firerange; } catch { maxRange = 0f; }
-                float ammoRatio = 1f;
-                try { ammoRatio = SafeArtilleryAmmoRatio(unit); } catch { ammoRatio = 1f; }
+                float ammoRatio = TacticalArtilleryInputAdapter.ArtilleryAmmoRatio01(unit.ammo);
                 // Panic distance: Scourge's DistArtyPanic is per-unit-type runtime,
                 // GT vanilla has no analog. 100m default matches musket effective
                 // range — once enemy infantry is closer, unsupported artillery is
@@ -382,28 +381,6 @@ namespace WhiskeyRealism.Patches
             return count;
         }
 
-        private static float SafeArtilleryAmmoRatio(Regiment unit)
-        {
-            // Vanilla GT exposes `Regiment.ammo` as a float[] (one entry per
-            // ammo type). Sum all entries and treat the result as the
-            // remaining-rounds count. Without a known maximum, we approximate
-            // ratio against a per-gun nominal load (vanilla artillery typically
-            // ships with 120-200 rounds per gun); we use `guns * 200` as the
-            // denominator floor. Ratio is clamped to [0, 1].
-            try
-            {
-                if (unit.ammo == null || unit.ammo.Length == 0) return 1f;
-                float total = 0f;
-                for (int i = 0; i < unit.ammo.Length; i++) total += unit.ammo[i];
-                float nominalMax = unit.guns > 0 ? unit.guns * 200f : 800f;
-                float ratio = total / nominalMax;
-                if (ratio < 0f) ratio = 0f;
-                if (ratio > 1f) ratio = 1f;
-                return ratio;
-            }
-            catch { return 1f; }
-        }
-
         private static bool SafeMoraleBonus(Regiment unit)
         {
             try { return unit.groupmorale >= 0.6f; }
@@ -422,6 +399,11 @@ namespace WhiskeyRealism.Patches
             {
                 int instanceId;
                 try { instanceId = unit.GetInstanceID(); } catch { instanceId = 0; }
+                // One row per battery per distinct decision per 30 s: the audit
+                // re-evaluates every battery each stance pass.
+                string dedupe = side + "|" + instanceId + "|" + decision.Action + "|" + decision.AmmoMission + "|" + decision.Reason + "|" + limberState;
+                if (!TacticalTelemetry.ShouldEmit(_lastLoggedAt, "artillery-audit-decision", dedupe, Time.realtimeSinceStartup, 30f, false))
+                    return;
                 string unitName = SafeRegimentName(unit);
                 string sig = "TacticalArtilleryDecision|side=" + side
                     + "|unit=" + unitName
