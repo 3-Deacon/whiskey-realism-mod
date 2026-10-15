@@ -134,8 +134,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int axisSector,
             float supportPriority01,
             float aggressionBias01,
-            TacticalIntentModel enemyIntent)
+            TacticalIntentModel enemyIntent,
+            WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec maneuver = default(WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec),
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind zoneRectKind = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Unknown)
         {
+            Maneuver = maneuver;
+            ZoneRectKind = zoneRectKind;
             ChildId = childId ?? string.Empty;
             RawUnitTyp = rawUnitTyp;
             EffectiveCommandLevel = effectiveCommandLevel;
@@ -160,6 +164,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float SupportPriority01 { get; }
         public float AggressionBias01 { get; }
         public TacticalIntentModel EnemyIntent { get; }
+
+        /// <summary>
+        /// BC11 decision 4: the maneuver the child's zone assignment carries (an enveloping rect, or a wing rect with a
+        /// start delay); HasValue is false for every other child. The roles stay as the rect kind maps them.
+        /// </summary>
+        public WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec Maneuver { get; }
+
+        /// <summary>
+        /// BC11: the play rect this child's role came from (Unknown when the role came from evidence, or was kept off the zone by
+        /// BC10's deployed-reserve rule). The envelopment wings wait only on a Center child whose role really is its zone's.
+        /// </summary>
+        public WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind ZoneRectKind { get; }
 
         private static float Clamp01(float v)
         {

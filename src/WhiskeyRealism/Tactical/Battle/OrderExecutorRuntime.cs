@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using WhiskeyRealism.Tactical.Battle.Producers;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
@@ -82,6 +83,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // Scratch for the in-place rotation walk (grown to the roster).
         private static int[] _rotationQueue = new int[64];
         private static int[] _rotationTargets = new int[64];
+        private static float[] _rotationHeadings = new float[64];
+        // The rotations the in-combat refuse ordered, to leave a regiment vanilla turned back alone for a while.
+        private static readonly RefuseTurnBackMemory _refuseTurnBacks = new RefuseTurnBackMemory();
 
         // Set by the vanilla calls that re-lay a group's children (SetGroupFormation
         // directly or via SetWaypoint / SetFormation) for the target being issued;
@@ -108,6 +112,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // once per battle (its OnceLog key re-arms at battle end too).
         private static bool _firstFireLogged;
         private static bool _coveredLogged;
+        private static bool _refuseLogged;
 
         /// <summary>Per-tick seams and settings for an executor.</summary>
         internal static void BindForTick(OrderExecutor executor)
@@ -467,7 +472,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 case OrderChannel.Formation:
                     if ((w.Flags & (IntentFlags.Limber | IntentFlags.Unlimber)) != 0) return IssueMount(bunits, unit, (w.Flags & IntentFlags.Limber) != 0);
-                    return IssueFormation(bunits, unit, w, nowHours, enemiesInRange, lastShapeWriteHours);
+                    return IssueFormation(bunits, view, targetIndex, unit, w, feudReplay, nowHours, enemiesInRange, lastShapeWriteHours);
                 case OrderChannel.Facing:
                     return IssueFacing(bunits, view, targetIndex, unit, w, feudReplay, nowHours, enemiesInRange, lastShapeWriteHours);
                 case OrderChannel.Stop:
@@ -498,8 +503,8 @@ namespace WhiskeyRealism.Tactical.Battle
         // refused flank (BC5a) - the in-place wheel with the skew. The policy's
         // cooldown (0.05 h, 0.1 h under fire) runs from the group's last
         // formation or facing write, as #61's _lastFormationWriteAt did.
-        private static bool IssueFormation(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, double nowHours,
-            float enemiesInRange, float lastShapeWriteHours)
+        private static bool IssueFormation(BattleUnits bunits, BattleSnapshot view, int targetIndex, Regiment unit, in BattleOrderIntent w,
+            bool feudReplay, double nowHours, float enemiesInRange, float lastShapeWriteHours)
         {
             GameObject go = ((Component)unit).gameObject;
             int formation = w.Value;
@@ -510,19 +515,13 @@ namespace WhiskeyRealism.Tactical.Battle
                 return true;
             }
 
-            FormationWriteDecision decision = CommandFormationWritePolicy.Decide(new FormationWriteInput(
-                needsFormation: unit.groupformation != formation,
-                needsFacing: false,
-                needsRefuse: w.Refuse != RefuseFlank.None,
-                unit.combatstatussubordinates,
-                unit.groupsubordinatesmoving,
-                unit.regimentpaths,
-                unit.covervaluesubordinates,
-                (float)nowHours,
-                lastShapeWriteHours,
-                enemiesInRange));
+            FormationWriteDecision decision = OrderExecutor.DecideFormation(w, unit.groupformation,
+                unit.combatstatussubordinates, unit.groupsubordinatesmoving, unit.regimentpaths, unit.covervaluesubordinates,
+                (float)nowHours, lastShapeWriteHours, enemiesInRange);
             switch (decision.Kind)
             {
+                case FormationWriteKind.RefuseInPlace:
+                    return RefuseInPlace(view, targetIndex, w, feudReplay);
                 case FormationWriteKind.VanillaFormation:
                 {
                     int index = CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(formation);
@@ -553,19 +552,13 @@ namespace WhiskeyRealism.Tactical.Battle
             if (heading < 0f) return false;
             if (unit.unittyp <= TacticalUnitType.MaxCombat) return RotateInPlace(unit, heading);
 
-            FormationWriteDecision decision = CommandFormationWritePolicy.Decide(new FormationWriteInput(
-                needsFormation: false,
-                needsFacing: true,
-                needsRefuse: w.Refuse != RefuseFlank.None,
-                unit.combatstatussubordinates,
-                unit.groupsubordinatesmoving,
-                unit.regimentpaths,
-                unit.covervaluesubordinates,
-                (float)nowHours,
-                lastShapeWriteHours,
-                enemiesInRange));
+            FormationWriteDecision decision = OrderExecutor.DecideFacing(w,
+                unit.combatstatussubordinates, unit.groupsubordinatesmoving, unit.regimentpaths, unit.covervaluesubordinates,
+                (float)nowHours, lastShapeWriteHours, enemiesInRange);
             switch (decision.Kind)
             {
+                case FormationWriteKind.RefuseInPlace:
+                    return RefuseInPlace(view, targetIndex, w, feudReplay);
                 case FormationWriteKind.RotateInPlace:
                 {
                     if (_rotationQueue.Length < view.OwnCount)
@@ -588,6 +581,44 @@ namespace WhiskeyRealism.Tactical.Battle
                 default:
                     return false;
             }
+        }
+
+        // BC11 decision 2: a refused flank in combat. The wing regiments FlankFacing.RefuseRotations picks
+        // (setback at least RefuseWingShare of the refuse depth, not turned back by vanilla's micro turn
+        // 4560-4608, at most MaxRefuseRotationsPerTick) rotate in place to the skewed-line rotation
+        // (78155-78167) through RotateRegiment; each passes TacticalWriteGuard.CanWrite and RotateInPlace's
+        // own standing/charging checks. No SetGroupFormation, so nothing is re-laid and NoteLayout is not
+        // called (the leaf slot rule is unchanged).
+        private static bool RefuseInPlace(BattleSnapshot view, int groupIndex, in BattleOrderIntent w, bool feudReplay)
+        {
+            if (view == null || groupIndex < 0 || groupIndex >= view.OwnCount || w.Refuse == RefuseFlank.None) return false;
+            int n = view.OwnCount;
+            if (_rotationQueue.Length < n)
+            {
+                _rotationQueue = new int[n];
+                _rotationTargets = new int[n];
+            }
+            if (_rotationHeadings.Length < n) _rotationHeadings = new float[n];
+            ref UnitRecord group = ref view.Own[groupIndex];
+            MicroTurnRule rule = MicroTurnRule.From(GamePrefs.distancetoturntowardsenemy, GamePrefs.angletriggerforturningtowardsenemy,
+                GamePrefs.additionalanglewhenincovermicro, GamePrefs.maxcovervalueforgrouprotation);
+            int count = FlankFacing.RefuseRotations(view, groupIndex, w.Refuse, group.GroupWidth, GamePrefs.refuseflankdepth,
+                GamePrefs.refuseflankskew, in rule, _rotationQueue, _rotationTargets, _rotationHeadings, out int skipped,
+                _refuseTurnBacks, TacticalDoctrineTime.NowBattleHours);
+            int rotated = 0;
+            for (int k = 0; k < count; k++)
+            {
+                Regiment child = BattleSnapshotBuilder.UnitAt(view, _rotationTargets[k], enemy: false);
+                if ((UnityEngine.Object)child == null || !TacticalWriteGuard.CanWrite(child, feudReplay)) continue;
+                if (RotateInPlace(child, _rotationHeadings[k]))
+                {
+                    rotated++;
+                    _refuseTurnBacks.NoteRotated(view.Own[_rotationTargets[k]].InstanceId, _rotationHeadings[k], TacticalDoctrineTime.NowBattleHours);
+                }
+            }
+            if (rotated > 0 || skipped > 0) PostureTelemetry.RefuseInPlace(view, groupIndex, w.Refuse, rotated, skipped);
+            if (rotated > 0) NoteRefuseFirstFire("InPlace", w.Refuse, rotated, skipped);
+            return rotated > 0;
         }
 
         // SetGroupFormation(current formation, rotation, newpath:false,
@@ -614,7 +645,18 @@ namespace WhiskeyRealism.Tactical.Battle
                 placeentrenchments: false,
                 adjustbyterrainshape: true);
             NoteLayout(unit, refuse);
+            if (refuse != RefuseFlank.None)
+                NoteRefuseFirstFire("Wheel", refuse, unit.groupposition != null ? unit.groupposition.attachedunits : 0, 0);
             return true;
+        }
+
+        // Smoke item 2.26: the first refused flank of a battle, one line.
+        private static void NoteRefuseFirstFire(string mode, RefuseFlank side, int regiments, int skipped)
+        {
+            if (_refuseLogged) return;
+            _refuseLogged = true;
+            OnceLog.Info("tactical-battle-core:refuse-first-fire",
+                "[OrderExecutor] first refused flank: mode=" + mode + " flank=" + side + " regiments=" + regiments + " skipped=" + skipped);
         }
 
         private static void NoteLayout(Regiment unit, RefuseFlank refuse)
@@ -760,6 +802,8 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             _firstFireLogged = false;
             _coveredLogged = false;
+            _refuseLogged = false;
+            _refuseTurnBacks.Clear();
             for (int a = 0; a < _covered.Length; a++)
             {
                 _covered[a].Clear();

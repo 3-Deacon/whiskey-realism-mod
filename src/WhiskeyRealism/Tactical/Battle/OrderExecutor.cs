@@ -422,6 +422,36 @@ namespace WhiskeyRealism.Tactical.Battle
                 default: return -1;
             }
         }
+
+        /// <summary>
+        /// The formation policy's verdict for a group Formation intent (R8, CommandFormationWritePolicy)
+        /// over the group's live fields; OrderExecutorRuntime.IssueFormation issues what it decides.
+        /// </summary>
+        public static FormationWriteDecision DecideFormation(in BattleOrderIntent w, int groupFormation, float combatStatusSubordinates,
+            float groupSubordinatesMoving, int regimentPaths, float coverValueSubordinates, float nowHours, float lastShapeWriteHours,
+            float groupEnemiesInRange)
+        {
+            return CommandFormationWritePolicy.Decide(new FormationWriteInput(
+                needsFormation: groupFormation != w.Value,
+                needsFacing: false,
+                needsRefuse: w.Refuse != RefuseFlank.None,
+                combatStatusSubordinates, groupSubordinatesMoving, regimentPaths, coverValueSubordinates,
+                nowHours, lastShapeWriteHours, groupEnemiesInRange));
+        }
+
+        /// <summary>The same verdict for a group Facing intent (a rotation, with the intent's refused flank if it carries one).</summary>
+        public static FormationWriteDecision DecideFacing(in BattleOrderIntent w, float combatStatusSubordinates,
+            float groupSubordinatesMoving, int regimentPaths, float coverValueSubordinates, float nowHours, float lastShapeWriteHours,
+            float groupEnemiesInRange)
+        {
+            return CommandFormationWritePolicy.Decide(new FormationWriteInput(
+                needsFormation: false,
+                needsFacing: true,
+                needsRefuse: w.Refuse != RefuseFlank.None,
+                combatStatusSubordinates, groupSubordinatesMoving, regimentPaths, coverValueSubordinates,
+                nowHours, lastShapeWriteHours, groupEnemiesInRange));
+        }
+
         public const float CourierIntervalBattleHours = 0.25f;      // was #61 OutboundCourierIntervalSeconds 900
         public const float FailedWriteBackoffHours = 0.05f;
         public const float RetryBearingDegrees = 30f;

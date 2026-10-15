@@ -67,12 +67,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>
         /// Fills the own-centroid samples (every active own unit) and the
-        /// command-level candidates (unittyp at or above <paramref name="commandMin"/>)
-        /// with DirectChildDiscovery's "child-&lt;id&gt;" ids. Returns the candidate count.
+        /// command-level candidates with DirectChildDiscovery's "child-&lt;id&gt;" ids. A candidate is a unit at or above
+        /// <paramref name="commandMin"/> that is one of the side's direct children (<paramref name="directChildIds"/>,
+        /// BC11): the army HQ and grandchild groups used to be offered too, so a rect could go to a unit the
+        /// allocator never matches (zoneByChildId). Returns the candidate count.
         /// </summary>
-        public static int CollectOwn(IBattleUnitView s, int commandMin, List<float> xs, List<float> zs, List<CorpsPosition> corps)
+        public static int CollectOwn(IBattleUnitView s, int commandMin, List<float> xs, List<float> zs, List<CorpsPosition> corps,
+            ISet<string> directChildIds)
         {
-            if (s == null || xs == null || zs == null || corps == null) return 0;
+            if (s == null || xs == null || zs == null || corps == null || directChildIds == null) return 0;
             UnitRecord[] own = s.Own;
             for (int i = 0; i < s.OwnCount; i++)
             {
@@ -82,7 +85,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (float.IsNaN(px) || float.IsInfinity(px) || float.IsNaN(pz) || float.IsInfinity(pz)) continue;
                 xs.Add(px);
                 zs.Add(pz);
-                if (own[i].UnitTyp >= commandMin) corps.Add(new CorpsPosition("child-" + own[i].InstanceId, px, pz));
+                if (own[i].UnitTyp < commandMin) continue;
+                string childId = "child-" + own[i].InstanceId;
+                if (directChildIds.Contains(childId)) corps.Add(new CorpsPosition(childId, px, pz));
             }
             return corps.Count;
         }
