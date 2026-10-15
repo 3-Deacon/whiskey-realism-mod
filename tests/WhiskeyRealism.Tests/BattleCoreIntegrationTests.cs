@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Telemetry;
 using static TestHarness;
 using static TestFixtures;
@@ -25,6 +26,8 @@ internal static class BattleCoreIntegrationTests
             ("battle-core GroupReachIsWidestCombatSightOrCancelDistance", GroupReachIsWidestCombatSightOrCancelDistance),
             ("battle-core ArbiterStatsRowReachesTheMainLog", ArbiterStatsRowReachesTheMainLog),
             ("battle-core DiscardedLegacyRowsRouteToTheSidecar", DiscardedLegacyRowsRouteToTheSidecar),
+            ("battle-core ArbiterStandsDownWhenThePluginIsDisabled", ArbiterStandsDownWhenThePluginIsDisabled),
+            ("battle-core RetreatReleaseOnlyWhenWritesAllowed", RetreatReleaseOnlyWhenWritesAllowed),
         });
     }
 
@@ -177,6 +180,35 @@ internal static class BattleCoreIntegrationTests
             }
         }
         AssertTrue(checkedCalls > 10, "the scan found the battle code's LegacyInfo rows");
+    }
+
+    // The master Enabled switch can be turned off at runtime (Plugin.cs Enabled:
+    // "short-circuit every patch"); the arbiter tick then stands its side down
+    // (claims cleared) whatever the mode and the battle state say.
+    private static void ArbiterStandsDownWhenThePluginIsDisabled()
+    {
+        AssertEqual(ArbiterTickAction.Run,
+            PostureExecutorBattleGate.ArbiterAction(true, true, 5, 1, 0, 0, false), "enabled, Active, battle running");
+        AssertEqual(ArbiterTickAction.StandDown,
+            PostureExecutorBattleGate.ArbiterAction(false, true, 5, 1, 0, 0, false), "plugin disabled");
+        AssertEqual(ArbiterTickAction.StandDown,
+            PostureExecutorBattleGate.ArbiterAction(true, false, 5, 1, 0, 0, false), "MonitorOnly/Off");
+        AssertEqual(ArbiterTickAction.StandDown,
+            PostureExecutorBattleGate.ArbiterAction(true, true, 4, 1, 0, 0, false), "battle not started");
+        AssertEqual(ArbiterTickAction.StandDown,
+            PostureExecutorBattleGate.ArbiterAction(true, true, 5, 1, 0, 1, false), "player instance outside ai_vs_ai");
+    }
+
+    // Army retreat (macroai 3) hands Whiskey-held stances back to vanilla, which
+    // lowers lastaistancechangetime: a write, so only when writes are allowed.
+    private static void RetreatReleaseOnlyWhenWritesAllowed()
+    {
+        AssertEqual(ArbiterTickAction.StandDownAndReleaseRetreat,
+            PostureExecutorBattleGate.ArbiterAction(true, true, 5, 3, 0, 0, false), "Active retreat releases");
+        AssertEqual(ArbiterTickAction.StandDown,
+            PostureExecutorBattleGate.ArbiterAction(true, false, 5, 3, 0, 0, false), "MonitorOnly retreat writes nothing");
+        AssertEqual(ArbiterTickAction.StandDown,
+            PostureExecutorBattleGate.ArbiterAction(false, true, 5, 3, 0, 0, false), "disabled retreat writes nothing");
     }
 
     // One reach for a group's enemies-in-range (#44 sector strength and the

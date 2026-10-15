@@ -46,8 +46,11 @@ namespace WhiskeyRealism.Tactical
         {
             try
             {
+                // The master Enabled switch can be turned off at runtime; every
+                // battle write (executor plan guard, live CanWrite) fails closed then.
                 var plugin = Plugin.Instance;
-                return plugin != null && TacticalCommanderModePolicy.AllowsWrites(plugin.TacticalCommanderModeValue);
+                return plugin != null && plugin.Enabled != null && plugin.Enabled.Value
+                    && TacticalCommanderModePolicy.AllowsWrites(plugin.TacticalCommanderModeValue);
             }
             catch
             {

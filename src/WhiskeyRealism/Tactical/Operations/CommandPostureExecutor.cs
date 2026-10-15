@@ -109,6 +109,26 @@ namespace WhiskeyRealism.Tactical.Operations
             reason = "allow";
             return true;
         }
+
+        // The battle-core arbiter tick (#68). The master Enabled switch (it can be
+        // turned off at runtime) and Tactical Commander Mode come first: with either
+        // off the side stands down and writes nothing, not even the retreat
+        // release (which lowers lastaistancechangetime). Then the battle gate
+        // above; an army retreat (macroai 3) releases Whiskey-held stances.
+        public static ArbiterTickAction ArbiterAction(bool pluginEnabled, bool modeAllowsWrites,
+            int state, int macroAi, int eodCycle, int isPlayerAiOrFeud, bool aiVsAi)
+        {
+            if (!pluginEnabled || !modeAllowsWrites) return ArbiterTickAction.StandDown;
+            if (Allows(state, macroAi, eodCycle, isPlayerAiOrFeud, aiVsAi, out string reason)) return ArbiterTickAction.Run;
+            return reason == "vanilla-retreat" ? ArbiterTickAction.StandDownAndReleaseRetreat : ArbiterTickAction.StandDown;
+        }
+    }
+
+    public enum ArbiterTickAction
+    {
+        Run,
+        StandDown,
+        StandDownAndReleaseRetreat,
     }
 
     public enum FormationWriteKind

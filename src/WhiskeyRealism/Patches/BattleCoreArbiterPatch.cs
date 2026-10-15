@@ -26,10 +26,11 @@ namespace WhiskeyRealism.Patches
     // issues the winners through OrderExecutor. With no producer registered it
     // returns right after the first-fire mark.
     //
-    // Gate (D3): PostureExecutorBattleGate.Allows (state >= 5, macroai >= 0,
-    // macroai 3 → hand Whiskey-held stances back to vanilla, no end-of-day, no
-    // feud instance, no player instance unless ai_vs_ai), DrivesOrchestrator, and
-    // Tactical Commander Mode Active. A side gated off drops its published claims
+    // Gate (D3): DrivesOrchestrator, then PostureExecutorBattleGate.ArbiterAction:
+    // the master Enabled switch (runtime-toggleable) and Tactical Commander Mode
+    // Active first, then Allows (state >= 5, macroai >= 0, macroai 3 → hand
+    // Whiskey-held stances back to vanilla, no end-of-day, no feud instance, no
+    // player instance unless ai_vs_ai). A side gated off drops its published claims
     // (BattleCoreTick.StandDown) so InlineClaimCheck never reads a stale tick.
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupFormations")]
     internal static class BattleCoreArbiterPatch
@@ -66,20 +67,22 @@ namespace WhiskeyRealism.Patches
             int alliance = alliances[side];
 
             // Gated off: no claims stay published for inline intents to hit.
-            if (!PostureExecutorBattleGate.Allows(battle.state, battle.macroai, bunits.eodcycle, battle.isplayeraiorfeud,
-                    GameVars.ai_vs_ai, out string reason))
+            ArbiterTickAction action = PostureExecutorBattleGate.ArbiterAction(PluginEnabled(), TacticalWriteGuard.ModeAllowsWrites(),
+                battle.state, battle.macroai, bunits.eodcycle, battle.isplayeraiorfeud, GameVars.ai_vs_ai);
+            if (action != ArbiterTickAction.Run)
             {
-                if (reason == "vanilla-retreat") TacticalStanceWriter.ReleaseForRetreat(battle);
-                BattleCoreTick.StandDown(alliance);
-                return;
-            }
-            if (!TacticalWriteGuard.ModeAllowsWrites())
-            {
+                if (action == ArbiterTickAction.StandDownAndReleaseRetreat) TacticalStanceWriter.ReleaseForRetreat(battle);
                 BattleCoreTick.StandDown(alliance);
                 return;
             }
 
             BattleCoreTick.RunArbiter(battle, alliance);
+        }
+
+        private static bool PluginEnabled()
+        {
+            Plugin plugin = Plugin.Instance;
+            return plugin != null && plugin.Enabled != null && plugin.Enabled.Value;
         }
     }
 }
