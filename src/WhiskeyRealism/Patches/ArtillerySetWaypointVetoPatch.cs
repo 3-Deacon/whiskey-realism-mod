@@ -79,10 +79,11 @@ namespace WhiskeyRealism.Patches
                             PointBlankMeters))
                         return;
 
+                    if (!TryRetreatTarget(reg, out Vector3 retreatTarget, out float retreatAngle)) return;
+
                     int cancelled = CancelQueuedMoveOrders(reg);
                     if (reg.mounted != 1) __instance.MountUnits(reg, 1);
 
-                    Vector3 retreatTarget = RetreatTarget(reg, out float retreatAngle);
                     _inVetoWrite = true;
                     try
                     {
@@ -171,7 +172,7 @@ namespace WhiskeyRealism.Patches
             return cancelled;
         }
 
-        private static Vector3 RetreatTarget(Regiment reg, out float retreatAngle)
+        private static bool TryRetreatTarget(Regiment reg, out Vector3 target, out float retreatAngle)
         {
             Vector3 own = ((Component)reg).transform.position;
             retreatAngle = reg.unitrange != null
@@ -180,8 +181,7 @@ namespace WhiskeyRealism.Patches
             float distance = GamePrefs.artilleryfallbackenemyclosedist > 0f
                 ? GamePrefs.artilleryfallbackenemyclosedist
                 : DefaultRetreatMeters;
-            BattleWriterPolicy.AnglePointXZ(own.x, own.z, retreatAngle, distance, out float x, out float z);
-            return TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, own.y, z));
+            return TacticalTerrainProbe.TryVanillaAnglePoint(own, retreatAngle, distance, out target);
         }
 
         private static void EmitVetoTelemetry(Regiment reg, Vector3 vetoedTarget, float enemyDist, Vector3 retreatTarget, int cancelledOrders)

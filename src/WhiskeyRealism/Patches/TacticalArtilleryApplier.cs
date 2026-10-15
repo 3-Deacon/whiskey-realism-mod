@@ -105,8 +105,7 @@ namespace WhiskeyRealism.Patches
                 : 180f;
             float retreatAngle = unit.unitrange.retreatangle;
             Vector3 own = ((Component)unit).transform.position;
-            BattleWriterPolicy.AnglePointXZ(own.x, own.z, retreatAngle, distance, out float targetX, out float targetZ);
-            Vector3 target = TacticalTerrainProbe.WithTerrainHeight(new Vector3(targetX, own.y, targetZ));
+            if (!TacticalTerrainProbe.TryVanillaAnglePoint(own, retreatAngle, distance, out Vector3 target)) return false;
 
             if (unit.mounted != 1) bunits.MountUnits(unit, 1);
             unit.RegimentSetPath(target, newpath: true, skipcover: true, retreatAngle + 180f, modifylastwaypoint: false, 2, -1f, null, autoadvancefallback: true, uimovement: false);

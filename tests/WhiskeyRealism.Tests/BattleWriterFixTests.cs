@@ -20,6 +20,7 @@ internal static class BattleWriterFixTests
         MacroAiShadowHandsBackVanillaValueOnce();
         MacroAiShadowKeepsVanillaOffWhiskeyValue();
         VanillaAnglePointMatchesGetAngleTerrainPos();
+        VanillaAnglePointClampsToTerrainBounds();
         VanillaAnglePointXYMatchesGetAngleTerrainPosXY();
         B8MapsWithdrawalDecisionsToVanillaFallbackShapes();
         B8SkipsUnitsVanillaWouldNotFallBack();
@@ -411,13 +412,29 @@ internal static class BattleWriterFixTests
     // x += cos(a) * d; z -= sin(a) * d.
     private static void VanillaAnglePointMatchesGetAngleTerrainPos()
     {
-        BattleWriterPolicy.AnglePointXZ(100f, -200f, 90f, 50f, out float x, out float z);
+        BattleWriterPolicy.AnglePointXZ(100f, -200f, 90f, 50f, 4000f, 4000f, out float x, out float z);
         AssertNear(150f, x, "angle 90 x");
         AssertNear(-200f, z, "angle 90 z");
-        BattleWriterPolicy.AnglePointXZ(100f, -200f, 0f, 50f, out x, out z);
+        BattleWriterPolicy.AnglePointXZ(100f, -200f, 0f, 50f, 4000f, 4000f, out x, out z);
         AssertNear(100f, x, "angle 0 x");
         AssertNear(-150f, z, "angle 0 z");
         Pass("battle writers: angle point matches vanilla GetAngleTerrainPos");
+    }
+
+    // GetAngleTerrainPosStatic 26908-26923 clamps to the terrain: x in
+    // [0, size.x - 1], z in [-(size.z - 1), 0]. A retreat point from a unit
+    // near the map edge must stay on the map.
+    private static void VanillaAnglePointClampsToTerrainBounds()
+    {
+        BattleWriterPolicy.AnglePointXZ(30f, -200f, 270f, 180f, 2000f, 1500f, out float x, out float z);
+        AssertNear(0f, x, "west edge");
+        BattleWriterPolicy.AnglePointXZ(1950f, -200f, 90f, 180f, 2000f, 1500f, out x, out z);
+        AssertNear(1999f, x, "east edge = size.x - 1");
+        BattleWriterPolicy.AnglePointXZ(500f, -40f, 0f, 180f, 2000f, 1500f, out x, out z);
+        AssertNear(0f, z, "north edge z = 0");
+        BattleWriterPolicy.AnglePointXZ(500f, -1450f, 180f, 180f, 2000f, 1500f, out x, out z);
+        AssertNear(-1499f, z, "south edge = -(size.z - 1)");
+        Pass("battle writers: angle point clamps to the terrain like vanilla");
     }
 
     // BattlefieldSetup.GetAngleTerrainPosXYStatic 26937: the distancez term

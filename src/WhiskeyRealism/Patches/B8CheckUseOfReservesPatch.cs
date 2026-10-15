@@ -190,8 +190,7 @@ namespace WhiskeyRealism.Patches
 
                 float retreatAngle = unit.unitrange.retreatangle;
                 Vector3 position = ((Component)unit).transform.position;
-                BattleWriterPolicy.AnglePointXZ(position.x, position.z, retreatAngle, distance, out float targetX, out float targetZ);
-                Vector3 target = TacticalTerrainProbe.WithTerrainHeight(new Vector3(targetX, position.y, targetZ));
+                if (!TacticalTerrainProbe.TryVanillaAnglePoint(position, retreatAngle, distance, out Vector3 target)) return false;
 
                 if (fallback)
                 {

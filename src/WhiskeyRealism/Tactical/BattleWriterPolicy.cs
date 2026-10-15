@@ -222,15 +222,29 @@ namespace WhiskeyRealism.Tactical
             return shadowVanillaMacro;
         }
 
-        // XZ part of BattlefieldSetup.GetAngleTerrainPosStatic (26891). The mod
-        // assembly does not reference UnityEngine.TerrainModule, so patches use
-        // this and sample the height through BattlefieldSetup.GetTerrainHeight.
-        // (Vanilla also clamps to the terrain bounds; callers move < 1 km.)
-        public static void AnglePointXZ(float x, float z, float angleDegrees, float distance, out float outX, out float outZ)
+        // XZ part of BattlefieldSetup.GetAngleTerrainPosStatic (26891),
+        // including its terrain-bounds clamp (26908-26923): x in
+        // [0, size.x - 1], z in [-(size.z - 1), 0]. The mod assembly does not
+        // reference UnityEngine.TerrainModule, so patches pass the terrain size
+        // read by TacticalTerrainProbe.TryTerrainSize and sample the height
+        // through BattlefieldSetup.GetTerrainHeight.
+        public static void AnglePointXZ(
+            float x,
+            float z,
+            float angleDegrees,
+            float distance,
+            float terrainSizeX,
+            float terrainSizeZ,
+            out float outX,
+            out float outZ)
         {
             double a = (angleDegrees - 90.0) * System.Math.PI / 180.0;
             outX = (float)(x + System.Math.Cos(a) * distance);
             outZ = (float)(z - System.Math.Sin(a) * distance);
+            if (outX < 0f) outX = 0f;
+            if (outX > terrainSizeX - 1f) outX = terrainSizeX - 1f;
+            if (outZ > 0f) outZ = 0f;
+            if (outZ < 0f - terrainSizeZ + 1f) outZ = 0f - terrainSizeZ + 1f;
         }
 
         // XZ part of BattlefieldSetup.GetAngleTerrainPosXYStatic (26937).
