@@ -37,6 +37,7 @@ internal static class CampaignTerrainFixTests
             ("PontoonCreekSpeedMatchesTooltip", PontoonCreekSpeedMatchesTooltip),
             ("PontoonCreekSpeedOnlyForCampaignGroupsOnCreeks", PontoonCreekSpeedOnlyForCampaignGroupsOnCreeks),
             ("PontoonLevelFollowsAddPathPrecedence", PontoonLevelFollowsAddPathPrecedence),
+            ("GoodGroundCapAppliesOnlyWhereVanillaDoubled", GoodGroundCapAppliesOnlyWhereVanillaDoubled),
             ("PontoonPathCostIsInverseSpeed", PontoonPathCostIsInverseSpeed),
             ("PontoonRouteChoiceIsTimeOptimalWithFix", PontoonRouteChoiceIsTimeOptimalWithFix),
             ("EngineerBranchMasksSelectEngineersForVanillaTest", EngineerBranchMasksSelectEngineersForVanillaTest),
@@ -151,6 +152,22 @@ internal static class CampaignTerrainFixTests
         AssertEqual(2, TerrainBugFixes.PontoonLevel(true, 2, false, 0), "own");
         AssertEqual(1, TerrainBugFixes.PontoonLevel(false, 0, true, 1), "parent only");
         AssertEqual(-1, TerrainBugFixes.PontoonLevel(false, 2, false, 2), "none");
+    }
+
+    // CheckCoyCovers 138350 / 138373: vanilla doubles only a battle unit (<= 13) of the W&L
+    // player's command with no pending path or building assignment while incident 18 is on.
+    private static void GoodGroundCapAppliesOnlyWhereVanillaDoubled()
+    {
+        AssertTrue(TerrainBugFixes.GoodGroundCapApplies(true, true, 0, false, -1, true), "player's regiment in cover");
+        AssertTrue(TerrainBugFixes.GoodGroundCapApplies(true, true, 13, false, -1, true), "brigade HQ");
+        AssertFalse(TerrainBugFixes.GoodGroundCapApplies(false, true, 0, false, -1, true), "flag off");
+        AssertFalse(TerrainBugFixes.GoodGroundCapApplies(true, false, 0, false, -1, true), "AI or other own unit: vanilla never doubled it");
+        AssertFalse(TerrainBugFixes.GoodGroundCapApplies(true, true, 14, false, -1, true), "division HQ returns early");
+        AssertFalse(TerrainBugFixes.GoodGroundCapApplies(true, true, 0, true, -1, true), "building assignment returns early");
+        AssertFalse(TerrainBugFixes.GoodGroundCapApplies(true, true, 0, false, 0, true), "pending path returns early");
+        AssertFalse(TerrainBugFixes.GoodGroundCapApplies(true, true, 0, false, -1, false), "incident not active");
+        AssertTrue(TerrainBugFixes.ReadsParentPerk(true, 15), "corps asks its army");
+        AssertFalse(TerrainBugFixes.ReadsParentPerk(true, 16) || TerrainBugFixes.ReadsParentPerk(false, 15), "army / battle: no parent perk");
     }
 
     private static void PontoonPathCostIsInverseSpeed()
@@ -362,7 +379,13 @@ internal static class CampaignTerrainFixTests
     {
         string dir = TestFixtures.FindRepoPath("src/WhiskeyRealism/Patches");
         string pontoon = File.ReadAllText(Path.Combine(dir, "PontoonTrainCreekPatch.cs"));
-        AssertTrue(Body(pontoon, "internal static void Postfix(Regiment __instance, ref float __result)").Contains("PontoonApplies(Enabled(),"), "speed passes the flag");
+        string speed = Body(pontoon, "internal static void Postfix(Regiment __instance, ref float __result)");
+        AssertTrue(speed.Contains("PontoonApplies(Enabled(),"), "speed passes the flag");
+        AssertTrue(speed.Contains("__result *= factor;"), "speed applies the factor to vanilla's result");
+        AssertTrue(speed.Contains("int ownLevel = ownHas ? __instance.GetPerkLevel("), "own level read only for a holder");
+        AssertTrue(speed.Contains("int parentLevel = parentHas ? army.GetPerkLevel("), "parent level read only for a holder");
+        AssertFalse(speed.Contains("HasPerkParent(") || speed.Contains("GetPerkLevelParent("), "no per-frame parent-name read");
+        AssertTrue(Body(pontoon, "private static Regiment ParentArmy(Regiment unit)").Contains("TerrainBugFixes.ReadsParentPerk(unit.calledfromcampaign, unit.unittyp)"), "parent read only where vanilla's is");
         string pathPrefix = Body(pontoon, "internal static void Prefix(Regiment __instance)");
         AssertTrue(pathPrefix.Contains("PontoonApplies(Enabled(),"), "path cost passes the flag");
         AssertTrue(pathPrefix.IndexOf("Swap.Restore()", StringComparison.Ordinal) < pathPrefix.IndexOf("Swap.Apply(", StringComparison.Ordinal), "path Prefix restores before it applies");
@@ -378,9 +401,11 @@ internal static class CampaignTerrainFixTests
 
         string ground = File.ReadAllText(Path.Combine(dir, "GoodGroundCoverCapPatch.cs"));
         string postfix = Body(ground, "internal static void Postfix(Regiment __instance)");
-        AssertTrue(postfix.Contains("if (!Enabled()) return;"), "good ground passes the flag");
+        AssertTrue(postfix.Contains("if (!DLC_WL.dlc_scenarioactive || !__instance.dlcw_isundercommander) return;"), "good ground: only the W&L player's command passes the early return");
+        AssertTrue(postfix.Contains("TerrainBugFixes.GoodGroundCapApplies(Enabled(), __instance.dlcw_isundercommander, __instance.unittyp,"), "good ground passes the flag and the unit to the pure decision");
+        AssertTrue(postfix.Contains("__instance.GetLastTransmittedPath(),") && postfix.Contains("DLC_WL.IsIncidentActive(GoodGroundIncident))) return;"), "good ground passes vanilla's path and incident tests");
         AssertTrue(postfix.Contains("CapGoodGroundCover(doubled, GamePrefs.dlcwl_incidentgoodgroundcovermultiplier, TerrainBugFixes.GoodGroundCoverCap)"), "good ground uses the integrator cap");
-        AssertTrue(postfix.Contains("IsIncidentActive(GoodGroundIncident)") && postfix.Contains("dlcw_isundercommander"), "good ground mirrors vanilla's incident test");
+        AssertTrue(postfix.Contains("__instance.covervalue = capped;") && postfix.Contains("__instance.covervaluetemp = capped;"), "good ground writes the capped cover to both vanilla fields");
     }
 
     private static void PerkSelectionPatchUsesFullRangeWithFlag()

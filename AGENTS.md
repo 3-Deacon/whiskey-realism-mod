@@ -11,7 +11,7 @@
 > **Quick reference:**
 > - **Build:** `./build.sh` → `dist/WhiskeyRealism.dll`
 > - **Deploy:** `cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"` (game must be closed — Windows holds an exclusive lock on loaded DLLs)
-> - **Test:** `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` (console harness; covers all pure strategic AND tactical logic — scorers, ledgers, doctrines, cascade, allocators, gates, play templates, stance gating. 2280 PASS / 0 FAIL as of 2026-10-15 (main `742d7e4` plus the campaign terrain fixes); `docs/handoff.md` carries the current count.)
+> - **Test:** `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` (console harness; covers all pure strategic AND tactical logic — scorers, ledgers, doctrines, cascade, allocators, gates, play templates, stance gating. 2281 PASS / 0 FAIL as of 2026-10-15 (main `742d7e4` plus the campaign terrain fixes); `docs/handoff.md` carries the current count.)
 > - **Required for every DLL-affecting change:** build, deploy, then verify the deployed DLL matches `dist/WhiskeyRealism.dll` by timestamp/size and `sha256sum`. Do not report an implementation as ready from build output alone.
 > - **Agent instructions file:** `AGENTS.md` is the source. `CLAUDE.md` at the repo root is a symlink to it so Claude Code and Codex pick up the same content. Edit `AGENTS.md`; never write into `CLAUDE.md` directly.
 > - **Source-of-truth order:** shipped code > [`docs/patch-catalog.md`](docs/patch-catalog.md) > per-patch design doc > umbrella spec > archived plan

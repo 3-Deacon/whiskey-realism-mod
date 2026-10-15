@@ -113,11 +113,6 @@ namespace WhiskeyRealism.Tactical.Battle
         // Marks an entry for removal inside Update; vanilla instance ids are never 0.
         private const int DroppedId = 0;
 
-        /// <summary>
-        /// Order: config off, fog off, player-alliance side (vanilla's own iswithinfog, which
-        /// already applies the HQ-in-the-saddle rule and is cleared at init), HQ in the
-        /// saddle, grid not painted yet, else the AI fog grid.
-        /// </summary>
         // W&L player-intelligence incidents that make FogOfWar.UnitIsHidden answer "visible" for
         // every position (101183-101186): 60 Lost Orders (battle), 61 and 64 Scouting Ahead
         // (campaign). Incident.launchedtime >= 0 is what IsIncidentActive tests (46251-46263).
@@ -137,6 +132,11 @@ namespace WhiskeyRealism.Tactical.Battle
             return dlcScenarioActive && mode == PerceptionMode.FogGrid;
         }
 
+        /// <summary>
+        /// Order: config off, fog off, player-alliance side (vanilla's own iswithinfog, which
+        /// already applies the HQ-in-the-saddle rule and is cleared at init), HQ in the
+        /// saddle, grid not painted yet, else the AI fog grid.
+        /// </summary>
         public static PerceptionMode DecideMode(bool configOn, bool useFow, bool hqInTheSaddleBattle, bool gridFirstRunFinished,
             double secondsSinceBattleStart, bool sideIsPlayerAlliance, out PerceptionFallbackReason reason)
         {

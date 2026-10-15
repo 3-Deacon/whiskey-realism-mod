@@ -52,9 +52,9 @@ Branch `fix/campaign-terrain-bugs` (worktree `.worktrees/campaign-terrain-bugs`,
 
 Ordinals #100-#104 (main holds #80 BC9, #81-#91 logistics, #92-#99 W&L economy).
 
-Tests: `CampaignTerrainFixTests` (24) and the updated C-Perk window test. Red first: the scorer tests fail on the old weights; every fix was mutation-checked in a scratch copy (24 mutations in the first round, 14 after the B7/B8 and helper changes, incl. the runtime restore and flag paths, all killed).
+Tests: `CampaignTerrainFixTests` (25) and the updated C-Perk window test. Red first: the scorer tests fail on the old weights. Mutation checks in scratch copies: my 24 first-round and 14 second-round plants were all killed; the verify round's 22 plants (`loop/terrain/r1/tools/mutate.py`) found three survivors in the runtime wiring (M10 Good Ground cover writes dropped, M15 pontoon `__result *= factor` dropped, M18 Good Ground early return inverted). The pins now cover those lines and the who-gets-the-cap decision is the pure, tested `GoodGroundCapApplies`; M10, M15 and M18 were re-run and are killed.
 
-Gates (after the main merge): `./build.sh` 0 warnings; test build 0 warnings; harness exit 0, 2280 PASS; config-audit 0 (134 entries); orphan-sweep 0, `--include-test-only` 29 (unchanged); `tools/test_smoke_check.py` OK.
+Gates (after the main merge): `./build.sh` 0 warnings; test build 0 warnings; harness exit 0, 2281 PASS; config-audit 0 (134 entries); orphan-sweep 0, `--include-test-only` 29 (unchanged); `tools/test_smoke_check.py` OK.
 
 ## PROVE-MODE
 

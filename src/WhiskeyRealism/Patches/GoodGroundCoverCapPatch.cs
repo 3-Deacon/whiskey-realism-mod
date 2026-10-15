@@ -50,9 +50,9 @@ namespace WhiskeyRealism.Patches
                 PatchFirstFire.Mark("tactical.patch.good-ground-cover-cap");
                 try
                 {
-                    if (!Enabled()) return;
-                    if (__instance.unittyp > 13 || (UnityEngine.Object)__instance.buildingassignment != null || __instance.GetLastTransmittedPath() >= 0) return;
-                    if (!DLC_WL.IsIncidentActive(GoodGroundIncident)) return;
+                    if (!TerrainBugFixes.GoodGroundCapApplies(Enabled(), __instance.dlcw_isundercommander, __instance.unittyp,
+                        (UnityEngine.Object)__instance.buildingassignment != null, __instance.GetLastTransmittedPath(),
+                        DLC_WL.IsIncidentActive(GoodGroundIncident))) return;
                     float doubled = __instance.covervalue;
                     float capped = TerrainBugFixes.CapGoodGroundCover(doubled, GamePrefs.dlcwl_incidentgoodgroundcovermultiplier, TerrainBugFixes.GoodGroundCoverCap);
                     if (capped == doubled) return;

@@ -33,6 +33,13 @@ namespace WhiskeyRealism.Strategic
             return -1;
         }
 
+        // Vanilla's HasPerkParent / GetPerkLevelParent answer only for a campaign corps asking
+        // its army (132698, 132750).
+        internal static bool ReadsParentPerk(bool calledFromCampaign, int unitTyp)
+        {
+            return calledFromCampaign && unitTyp == 15;
+        }
+
         // Whether the pontoon fix speaks for this unit: a campaign land group on the campaign
         // table (division, corps, army, army group). Fleets use the fleet table (9 = Battery
         // Runner) and battle-table units' 9 is Cold Steel.
@@ -75,6 +82,16 @@ namespace WhiskeyRealism.Strategic
         // (126510: x clamp01(1 - covervalue)) stay at 10% or more; below that the incident keeps
         // its full doubling. The cap never takes a unit below its cover without the incident.
         internal const float GoodGroundCoverCap = 0.9f;
+
+        // Who gets the cap: exactly the units vanilla doubled (CheckCoyCovers 138350 early
+        // return: a pending path, a building assignment or unittyp > 13; 138373: incident 18
+        // active and the unit under the W&L player's command), with the fix on.
+        internal static bool GoodGroundCapApplies(bool fixOn, bool underPlayerCommand, int unitTyp,
+            bool hasBuildingAssignment, int lastTransmittedPath, bool incidentActive)
+        {
+            return fixOn && underPlayerCommand && incidentActive && unitTyp <= 13
+                && !hasBuildingAssignment && lastTransmittedPath < 0;
+        }
 
         internal static float CapGoodGroundCover(float doubled, float multiplier, float cap)
         {

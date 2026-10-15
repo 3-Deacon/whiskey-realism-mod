@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Telemetry;
@@ -25,7 +26,7 @@ namespace WhiskeyRealism.Patches
     // Route: vanilla moves at 1/cost and prices at cost (55843, 132900); a Prefix points
     //   movementcostpontoontrain at 1/factor for a campaign-table group's AddPath call so routes
     //   are priced at their real travel time, and a Finalizer restores it (LogisticsSwaps'
-//   ValueSwap: restored only while the static still holds our array).
+    //   ValueSwap: restored only while the static still holds our array).
     // Every side, the W&L player's command included (the tooltip rule). Rollback: Campaign /
     // Fix Pontoon Train Creek Speed.
     internal static class PontoonTrainCreekPatch
@@ -42,9 +43,28 @@ namespace WhiskeyRealism.Patches
             // The proof line is formatted once per campaign, not per call (per frame).
             private static bool _logged;
 
+            // Parent transform -> its Regiment, or null for the "Units" root (vanilla's
+            // HasPerkParent / GetPerkLevelParent, 132696-132763, for a campaign corps only).
+            // Filled once per parent, so the parent's name is read once, not per frame.
+            private static readonly Dictionary<UnityEngine.Transform, Regiment> _armyOf = new Dictionary<UnityEngine.Transform, Regiment>();
+
             static CreekSpeed()
             {
                 CampaignScope.Register("pontoon-creek-speed-log", () => _logged = false);
+                CampaignScope.Register("pontoon-creek-parent-army", () => _armyOf.Clear());
+            }
+
+            private static Regiment ParentArmy(Regiment unit)
+            {
+                if (!TerrainBugFixes.ReadsParentPerk(unit.calledfromcampaign, unit.unittyp)) return null;
+                UnityEngine.Transform parent = unit.transform.parent;
+                if ((UnityEngine.Object)parent == null) return null;
+                if (!_armyOf.TryGetValue(parent, out Regiment army))
+                {
+                    army = parent.gameObject.name != "Units" ? parent.GetComponent<Regiment>() : null;
+                    _armyOf[parent] = army;
+                }
+                return army;
             }
 
             [HarmonyPostfix]
@@ -58,9 +78,14 @@ namespace WhiskeyRealism.Patches
                     try
                     {
                         if (!TerrainBugFixes.PontoonApplies(Enabled(), true, __instance.unittyp)) return;
-                        int level = TerrainBugFixes.PontoonLevel(
-                            __instance.HasPerk(TerrainBugFixes.CampaignPontoonTrain), __instance.GetPerkLevel(TerrainBugFixes.CampaignPontoonTrain),
-                            __instance.HasPerkParent(TerrainBugFixes.CampaignPontoonTrain), __instance.GetPerkLevelParent(TerrainBugFixes.CampaignPontoonTrain));
+                        // Level getters run only for a holder; the parent army is read directly
+                        // (vanilla's HasPerkParent reads the parent's name on every call).
+                        bool ownHas = __instance.HasPerk(TerrainBugFixes.CampaignPontoonTrain);
+                        int ownLevel = ownHas ? __instance.GetPerkLevel(TerrainBugFixes.CampaignPontoonTrain) : 0;
+                        Regiment army = ParentArmy(__instance);
+                        bool parentHas = (UnityEngine.Object)army != null && army.HasPerk(TerrainBugFixes.CampaignPontoonTrain);
+                        int parentLevel = parentHas ? army.GetPerkLevel(TerrainBugFixes.CampaignPontoonTrain) : 0;
+                        int level = TerrainBugFixes.PontoonLevel(ownHas, ownLevel, parentHas, parentLevel);
                         float factor = TerrainBugFixes.PontoonCreekSpeedMultiplier(true, true, __instance.unittyp, __instance.currentterrain, level);
                         if (factor == 1f) return;
                         __result *= factor;

@@ -206,9 +206,10 @@ namespace WhiskeyRealism.Tactical.Battle
 
         // FogOfWar.UnitIsHidden returns false for every position while the W&L player's
         // intelligence incident 60 (Lost Orders), 61 or 64 (Scouting Ahead) is active
-        // (101183-101186): the incident reveals the enemy to the player. Vanilla's AI never asks
-        // that grid about the player's units (iswithinfog is computed for non-player units
-        // only, 127212-127230), so the shortcut was never meant for an AI side. For the FogGrid
+        // (101183-101186): the incident reveals the enemy to the player. Vanilla asks the AI
+        // side's grid (oppositefow) only about non-player units; a player-alliance unit is
+        // tested only on the player's own grid, and only under W&L HQ-in-the-saddle
+        // (Regiment fog update 127211-127224). So the shortcut was never meant for an AI side. For the FogGrid
         // probe (an AI side's own grid) the incidents are marked not launched for the probe's
         // UnitIsHidden calls and restored in FillProbe's finally (BUG-TAC-020).
         private static readonly WhiskeyRealism.Patches.FieldMask<DLC_WL.Incident, float> _incidentMask =
