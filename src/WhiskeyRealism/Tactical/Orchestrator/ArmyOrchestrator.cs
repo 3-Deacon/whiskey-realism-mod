@@ -794,12 +794,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (enemyVisible.InstanceFlankThreat != null) _flankThreat = enemyVisible.InstanceFlankThreat;
         }
 
-        public TacticalLeafBrigadeMap.LeafAssignment? GetLeafBrigadeAssignment(int instanceId)
-        {
-            if (_leafBrigadeMap == null) return null;
-            return _leafBrigadeMap.TryGetValue(instanceId, out var assignment) ? assignment : (TacticalLeafBrigadeMap.LeafAssignment?)null;
-        }
-
         /// <summary>
         /// Refresh the leaf brigade map. Caller passes the full nested tree built
         /// from extended probes; we use the current DirectChildIntent role

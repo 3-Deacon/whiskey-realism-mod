@@ -399,8 +399,7 @@ namespace WhiskeyRealism.Tactical.Operations
         MoveBehindTarget = 2,
         RequestScoutLocation = 3,
         GetAway = 4,
-        ChargeRaidTarget = 5,
-        MoveToFollowTarget = 6
+        ChargeRaidTarget = 5
     }
 
     public readonly struct TacticalCavalryFollowInput
@@ -622,8 +621,7 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         Unknown = 0,
         Limbered = 1,
-        Unlimbered = 2,
-        Unlimbering = 3
+        Unlimbered = 2
     }
 
     public enum TacticalArtilleryMicroAction

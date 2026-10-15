@@ -85,7 +85,6 @@ namespace WhiskeyRealism.Strategic
         private readonly List<CampaignMapAsset> _assets = new List<CampaignMapAsset>();
 
         public IReadOnlyList<CampaignMapTown> Towns => _towns;
-        public IReadOnlyList<CampaignMapState> States => _states;
         public IReadOnlyList<CampaignMapAsset> Assets => _assets;
         public string Signature { get; private set; } = "empty";
 

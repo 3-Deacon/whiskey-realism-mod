@@ -323,8 +323,7 @@ namespace WhiskeyRealism.Tactical.Operations
         RefuseReserve = 5,
         WithdrawReserve = 6,
         FinalReserve = 7,
-        ExploitReserve = 8,
-        FlankShift = 9
+        ExploitReserve = 8
     }
 
     public readonly struct OperationalReserveInput

@@ -21,7 +21,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static class TacticalDirectChildGate
     {
-        public const float OnAxisToleranceRadians = (float)(Math.PI / 3.0); // ±60°
         public const float FixDistanceRatio = 0.7f;
         public const float FallbackAwayToleranceRadians = (float)(Math.PI / 2.0); // ±90°
 

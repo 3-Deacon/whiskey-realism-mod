@@ -248,23 +248,6 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
-        internal static bool CrossesWater(Vector3 from, Vector3 to)
-        {
-            try
-            {
-                BattlefieldSetup setup = GetBattlefieldSetup();
-                if ((object)setup == null) return true;
-                return setup.CheckTerrainLine(from, to, new[] { WaterTerrainId }, 2f);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-terrain-probe:water-line",
-                    "TacticalTerrainProbe water line sample failed: " + ex.GetType().Name);
-                return true;
-            }
-        }
-
         private static IReadOnlyList<TacticalTerrainRuntimeSample> SampleFootprint(
             Regiment regiment,
             Frontline2 deploymentZone,

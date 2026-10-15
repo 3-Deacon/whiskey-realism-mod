@@ -23,7 +23,6 @@ namespace WhiskeyRealism.Tactical.Operations
         CurrentSetObjective = 2,
         VisibleEnemyLine = 3,
         FriendlyLineShape = 4,
-        TerrainSample = 5,
         VerifiedSceneObject = 6
     }
 

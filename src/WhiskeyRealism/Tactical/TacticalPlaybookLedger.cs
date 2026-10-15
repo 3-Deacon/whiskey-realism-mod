@@ -11,7 +11,6 @@ namespace WhiskeyRealism.Tactical
         RefuseLeft = 3,
         ProbeAndFix = 4,
         WeakPointPressure = 5,
-        ReserveHeldCenter = 6,
         LineRelief = 7
     }
 

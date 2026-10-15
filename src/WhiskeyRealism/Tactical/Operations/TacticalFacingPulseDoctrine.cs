@@ -15,7 +15,6 @@ namespace WhiskeyRealism.Tactical.Operations
         None,
         Visible,
         RecentFire,
-        LastKnown,
         Objective,
         Entry
     }

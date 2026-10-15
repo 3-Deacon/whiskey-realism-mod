@@ -7,9 +7,7 @@ namespace WhiskeyRealism.Tactical.Operations
         None = 0,
         HeldReserve = 1,
         FormingUp = 2,
-        WaitingForCommitWindow = 3,
         DefendingObjective = 4,
-        RecoveringAfterFallback = 5,
         PlayerProtected = 6
     }
 

@@ -30,8 +30,7 @@ namespace WhiskeyRealism.Tactical.Operations
         WeaklyHeld,
         StronglyHeld,
         Contested,
-        Secured,
-        Lost
+        Secured
     }
 
     public enum TacticalReassessmentTier

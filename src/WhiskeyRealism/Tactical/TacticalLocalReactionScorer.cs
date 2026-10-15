@@ -11,8 +11,7 @@ namespace WhiskeyRealism.Tactical
         LimitedCounterstroke = 4,
         DenyCharge = 5,
         PermitCharge = 6,
-        LineReliefRequest = 7,
-        LocalFallbackPressure = 8
+        LineReliefRequest = 7
     }
 
     public readonly struct TacticalLocalReactionInput

@@ -40,13 +40,8 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         Planning,
         MovingToAssembly,
-        Forming,
         WaitingForCommit,
-        Committed,
-        Engaged,
-        Reorganizing,
-        Complete,
-        Failed
+        Committed
     }
 
     public enum CommandEchelonKind

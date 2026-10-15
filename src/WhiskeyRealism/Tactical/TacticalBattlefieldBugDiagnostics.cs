@@ -120,7 +120,6 @@ namespace WhiskeyRealism.Tactical
 
         public TacticalBattlefieldBugObservationKind Kind { get; }
         public bool IsRisk { get; }
-        public bool IsDuplicateRisk => IsRisk;
         public string Reason { get; }
         public string Signature { get; }
         public string Summary { get; }
@@ -170,7 +169,6 @@ namespace WhiskeyRealism.Tactical
         public bool ShouldRemoveAddedPath { get; }
         public string Reason { get; }
         public string Signature { get; }
-        public bool IsBehaviorChange => ShouldOverrideResult || ShouldRemoveAddedPath;
     }
 
     public static class TacticalBattlefieldBugDiagnostics
