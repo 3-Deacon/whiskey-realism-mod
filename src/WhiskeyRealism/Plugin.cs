@@ -80,6 +80,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableSinglePassObjectiveRecords;
         public static ConfigEntry<bool> EnableVanillaMacroAiSync;
         public static ConfigEntry<bool> EnableGeometricPlayTemplates;
+        public static ConfigEntry<bool> EnableBattleFogHonestPerception;
+        public static ConfigEntry<bool> EnableInfantryChargeDoctrine;
         public static ConfigEntry<float> BattleGroupStanceMinIntervalSeconds;
         public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
         public static ConfigEntry<float> BrigadeTaskHoldSeconds;
@@ -583,6 +585,20 @@ namespace WhiskeyRealism
                 "(army-relative rectangles, each tagged LeftWing / Center / Reserve / ...), projects it to world coordinates from the army centroid " +
                 "and enemy direction, and assigns corps to rectangles by closest distance. The role allocator then uses the rectangle kind as the " +
                 "role basis. Falls back to evidence-based allocation when no template exists or positions cannot be computed.");
+            EnableBattleFogHonestPerception = Config.Bind(
+                "Tactical",
+                "Enable Battle Fog-Honest Perception",
+                true,
+                "Default ON. AI battle perception uses vanilla's own AI-side fog grid (FogOfWar.UnitIsHidden, the arguments vanilla uses at " +
+                "127225); hidden enemies are remembered and decay. OFF = vanilla range-only perception. " +
+                "(battle-core slice; active once the perception workstream lands)");
+            EnableInfantryChargeDoctrine = Config.Bind(
+                "Tactical",
+                "Enable Infantry Charge Doctrine",
+                true,
+                "Default ON. AI infantry in assault may charge (combat behavior 3) a visible, weaker or disordered target inside vanilla's charge " +
+                "radius. Never on W&L player-owned units. OFF = vanilla (AI infantry reaches melee only by contact). " +
+                "(battle-core slice; active once the charge workstream lands)");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
