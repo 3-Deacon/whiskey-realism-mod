@@ -580,7 +580,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _pending[p] = new PendingMove
             {
                 Intent = i, PathsBefore = pathsBefore, MovedAtCall = pathsAfter > pathsBefore, Retries = retries,
-                TargetCount = count, AlreadyThereCount = thereCount,
+                TargetCount = count, AlreadyThereCount = thereCount, IssuedAtHours = nowHours,
             };
         }
 
@@ -611,6 +611,14 @@ namespace WhiskeyRealism.Tactical.Battle
                     RemovePending(p);
                     continue;
                 }
+
+                // A move through BlockedMovingOrder (the recorded intent keeps
+                // AvoidCoveredCrossings only then) gets its SetWaypoint two frames
+                // after the call (UpdateOrders 3382). The next side-stat cycle is
+                // far later, but vanilla's override calls re-run it on the same
+                // battle clock (84021, 218963+): too early to judge.
+                if ((pm.Intent.Flags & IntentFlags.AvoidCoveredCrossings) != 0 && !pm.MovedAtCall && nowHours <= pm.IssuedAtHours)
+                    continue;
 
                 IssuedTarget[] targets = _pendingTargets[p];
                 if (pm.MovedAtCall ||
@@ -994,6 +1002,7 @@ namespace WhiskeyRealism.Tactical.Battle
             // The targets' moving-unit count rose during the vanilla call.
             public bool MovedAtCall;
             public int Retries;
+            public double IssuedAtHours;
         }
 
         private struct RetryTicket

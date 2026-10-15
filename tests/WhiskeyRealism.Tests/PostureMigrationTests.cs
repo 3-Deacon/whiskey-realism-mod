@@ -47,6 +47,7 @@ internal static class PostureMigrationTests
             ("bc5a PostureFlankRiskIsThePerceivedRule", PostureFlankRiskIsThePerceivedRule),
             ("bc5a LeafSlotTurnsWithTheParentsWheel", LeafSlotTurnsWithTheParentsWheel),
             ("bc5a FireControlWalksTheGroupsSubtree", FireControlWalksTheGroupsSubtree),
+            ("bc5a CoveredCrossingMoveIsNotJudgedOnTheIssuingClock", CoveredCrossingMoveIsNotJudgedOnTheIssuingClock),
         });
     }
 
@@ -984,5 +985,44 @@ internal static class PostureMigrationTests
         AssertEqual(1, PostureSense.CollectDescendants(s, 2, ref result, ref children), "brigade 3 has one regiment");
         AssertEqual(3, result[0], "its own index");
         AssertEqual(0, PostureSense.CollectDescendants(s, 3, ref result, ref children), "a regiment has no subtree");
+    }
+
+    private static void CoveredCrossingMoveIsNotJudgedOnTheIssuingClock()
+    {
+        // BlockedMovingOrder sets the waypoint two frames after the call
+        // (UpdateOrders 3382). The arbiter's next tick is a side-stat cycle later
+        // (CalculateSideStatsAndUpdateAITasks 84572), but vanilla's override calls
+        // (84021, the overview lines 218963+) re-run the cycle at once, on the
+        // same battle clock. Such an observation is too early to judge the move.
+        var own = new[] { Group(7, 0f, -100f) };
+        var s = Snapshot(own, new[] { -1 });
+        var outcomes = new OrderOutcome[8];
+        var targets = new[] { new IssuedTarget { InstanceId = 7, X = 0f, Z = -600f } };
+        BattleOrderIntent move = PostureIntentPlan.LeafMove(7, CommandTaskType.AttackObjective, 0f, -600f, -1f, false);
+        move.Flags |= IntentFlags.AvoidCoveredCrossings;
+
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        executor.RecordIssued(move, 10.0, targets, 1, new UnitWaypoint[0], 0, 0, 0);
+        executor.ObserveOutcomes(s, 10.0, outcomes, out int n);
+        AssertEqual(0, n, "same clock: still pending");
+        AssertEqual(SkipReason.Duplicate, executor.Plan(s, move, 10.0).Skip, "the pending move dedupes its repeat");
+        s.Own[0].LastWaypointX = 0f;
+        s.Own[0].LastWaypointZ = -600f;
+        executor.ObserveOutcomes(s, 10.015, outcomes, out n);
+        AssertEqual(1, n, "judged a cycle later");
+        AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "vanilla took the target (waypoint stamp, 92067)");
+
+        // A plain move is judged at once (its path is added in the call).
+        var plain = new OrderExecutor();
+        plain.Bind(new AllowGuard(), null);
+        BattleOrderIntent direct = move;
+        direct.Flags &= ~IntentFlags.AvoidCoveredCrossings;
+        s.Own[0].LastWaypointX = 0f;
+        s.Own[0].LastWaypointZ = 0f;
+        plain.RecordIssued(direct, 10.0, targets, 1, new UnitWaypoint[0], 0, 0, 0);
+        plain.ObserveOutcomes(s, 10.0, outcomes, out n);
+        AssertTrue(n >= 1, "judged");
+        AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "no path, no stamp: a silent exit");
     }
 }

@@ -28,9 +28,11 @@ namespace WhiskeyRealism.Tactical.Battle
     //     NavMeshObstacles over the covered crossings away from the destination;
     //     UpdateOrders (3382, every AIBattle.Update frame, before the pause
     //     return) calls SetWaypoint(useorderdelay:false, manualfinalrotation -1)
-    //     two frames later and removes them. The next arbiter tick (a macro cycle,
-    //     0.015 game-hours) is many frames on, so D6 sees the move through the
-    //     waypoint stamp (SetGroupFormation 92067) or the moving-unit count.
+    //     two frames later and removes them. The next arbiter tick (one
+    //     sidestatupdatecycle, 0.015 game-hours, 84572) is many frames on, so D6
+    //     sees the move through the waypoint stamp (SetGroupFormation 92067) or
+    //     the moving-unit count; a same-clock re-run (vanilla's override calls)
+    //     leaves it pending (OrderExecutor.ObserveOutcomes).
     //     Without crossing data (null on a map without river crossings,
     //     7919-7920) the move is a plain SetWaypoint.
     //   Stance: Util/TacticalStanceWriter (the one ChangeStance caller, 90772).
@@ -170,8 +172,11 @@ namespace WhiskeyRealism.Tactical.Battle
                 BattleOrderIntent recorded = winner;
                 recorded.TargetX = plan.X;
                 recorded.TargetZ = plan.Z;
-                // UpdateOrders' SetWaypoint skips the courier: no courier cadence stamp.
+                // UpdateOrders' SetWaypoint skips the courier: no courier cadence
+                // stamp. The recorded flag marks a move that went through
+                // BlockedMovingOrder (its outcome waits for UpdateOrders).
                 if (viaBlockedOrder) recorded.Flags &= ~IntentFlags.UseOrderDelay;
+                else recorded.Flags &= ~IntentFlags.AvoidCoveredCrossings;
                 executor.RecordIssued(recorded, nowHours, _issued, issued, _waypointsBefore, waypoints, pathsBefore, pathsAfter);
             }
 
