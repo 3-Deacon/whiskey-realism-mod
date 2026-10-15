@@ -383,7 +383,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static TacticalEnemyContactLedger ContactLedger(int allianceId)
             => allianceId >= 0 && allianceId <= 1 ? _contactLedgers[allianceId] : null;
 
-        /// <summary>Doctrine time in battle hours (night cycle excluded).</summary>
+        /// <summary>Doctrine time in battle hours (TacticalDoctrineClock).</summary>
         private static float DoctrineHours() => (float)TacticalDoctrineClock.NowBattleHours;
 
         /// <summary>
@@ -872,9 +872,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // currenttimefromstart is `uniStormSystem.Hour + battlepasseddays * 24`
         // (SetTimeVariables 93545) — so a battle that begins at 14:00 would
         // report 14h elapsed without subtracting the start, firing the
-        // doctrine's prolonged-delay gate (>= 6h) on tick 1. Doctrine time
-        // also excludes the night cycle, so the overnight jump no longer
-        // counts as hours of delay.
+        // doctrine's prolonged-delay gate (>= 6h) on tick 1. Read through
+        // TacticalDoctrineClock so the night freeze applies here too.
         private static float _battleStartDoctrineHours = -1f;
         private static System.WeakReference<BattleUnits> _battleStartOwner;
 
