@@ -41,6 +41,7 @@ internal static class PostureStanceFixTests
 
         // BR-H1
         Pass("defensive hold is no opinion for leaf and brigade tasks", DefensiveHoldIsNoOpinionForTasks);
+        Pass("defensive hold never turns attack probe or support into hold for any role", DefensiveHoldNeverHoldsAnyRole);
         Pass("opportunity overrides keep withdrawal consolidate and attack-now rules", OpportunityOverridesKeepOtherRules);
 
         // B-divplay
@@ -306,6 +307,22 @@ internal static class PostureStanceFixTests
             var result = TacticalOpportunityTaskOverride.Override(task, DirectChildRole.Main, ReinforcementOpportunity.DefensiveHold, out string reason);
             AssertEqual(task, result, "DefensiveHold keeps " + task);
             AssertTrue(reason == null, "no override reason for " + task);
+        }
+    }
+
+    private static void DefensiveHoldNeverHoldsAnyRole()
+    {
+        // Both #61 call sites (brigade posture: role Main; leaf cascade: the
+        // leaf's role) go through TacticalOpportunityTaskOverride.Override.
+        foreach (DirectChildRole role in Enum.GetValues(typeof(DirectChildRole)))
+        {
+            foreach (var task in new[] { CommandTaskType.AttackObjective, CommandTaskType.Probe, CommandTaskType.SupportAttack })
+            {
+                var result = TacticalOpportunityTaskOverride.Override(task, role, ReinforcementOpportunity.DefensiveHold, out string reason);
+                AssertEqual(task, result, "DefensiveHold keeps " + task + " for " + role);
+                AssertTrue(result != CommandTaskType.HoldObjective, "never Hold for " + role);
+                AssertTrue(reason == null, "no override reason for " + role);
+            }
         }
     }
 
