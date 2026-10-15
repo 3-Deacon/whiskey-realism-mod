@@ -52,7 +52,7 @@ namespace WhiskeyRealism.Patches
                     GameObject newLink = __instance.unitlinkedto;
                     bool newlyLinked = (UnityEngine.Object)__state.PreviousLink == null && (UnityEngine.Object)newLink != null;
                     if (!newlyLinked) return;
-                    if (!BattleWriterPolicy.GateMayIntervene(TacticalWriteGuard.ModeAllowsWrites(), Enabled())) return;
+                    if (!TacticalWriteGuard.ModeAllowsWrites() || !Enabled()) return;
 
                     Regiment target = newLink.GetComponent<Regiment>();
                     bool clear = TacticalHqLinkGuard.ShouldClearAutoGroupLink(

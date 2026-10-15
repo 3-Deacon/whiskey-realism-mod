@@ -116,8 +116,7 @@ namespace WhiskeyRealism.Patches
                     50f);
 
                 var afterIssue = Runtime.Snapshot(__instance, forceVanillaProvenance: false).ActiveOrder;
-                bool matched = Runtime.ActiveMatchesIssued(candidate, evaluation.ActiveOrder, afterIssue);
-                if (matched)
+                if (Runtime.ActiveMatchesIssued(candidate, evaluation.ActiveOrder, afterIssue))
                 {
                     DedupeState.RecordAccepted(
                         Runtime.WithSession(candidate, afterIssue.GivenOrderSession),
@@ -127,8 +126,9 @@ namespace WhiskeyRealism.Patches
                 }
                 else
                 {
-                    if (BattleWriterPolicy.RecordsPlayerOrderAttempt(matched))
-                        DedupeState.RecordAttempt(candidate, evaluation.Tick);
+                    // Recorded whatever the diagnostics setting, or the
+                    // 120-tick throttle never applies to a rejected order.
+                    DedupeState.RecordAttempt(candidate, evaluation.Tick);
                     if (diagnosticsEnabled) Log("suppress", "vanilla-bridge-no-match", candidate, afterIssue);
                 }
             }

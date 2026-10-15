@@ -372,13 +372,6 @@ namespace WhiskeyRealism.Tactical
             return hasVisibleEnemy && distance <= neededDistance;
         }
 
-        // R14: gates/writers only intervene when Tactical Commander Mode is
-        // Active and their own flag is on; otherwise vanilla runs untouched.
-        public static bool GateMayIntervene(bool modeAllowsWrites, bool gateEnabled)
-        {
-            return modeAllowsWrites && gateEnabled;
-        }
-
         // #46: AIBattle.UpdateMovingTargets returns at 6872 when
         // state < 4 || macroai == 3 || macroai == -1.
         public static bool ObjectiveChainCycleActive(int state, int macroAi)
@@ -478,13 +471,6 @@ namespace WhiskeyRealism.Tactical
         {
             if (!isArtillery || !calledFromCampaign || sollGuns < 0) return currentGuns;
             return sollGuns;
-        }
-
-        // #62: dedupe bookkeeping must not depend on diagnostics logging; the
-        // patch records an unmatched bridge attempt whatever the log setting.
-        public static bool RecordsPlayerOrderAttempt(bool bridgeMatched)
-        {
-            return !bridgeMatched;
         }
 
         // #59 pre-check — AIBattle.CheckUseOfReserves 6093-6113: vanilla only

@@ -38,7 +38,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.feud-action-gate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (!BattleWriterPolicy.GateMayIntervene(TacticalWriteGuard.ModeAllowsWrites(), Enabled())) return true;
+                if (!TacticalWriteGuard.ModeAllowsWrites() || !Enabled()) return true;
 
                 bool tookOwnership = false;
                 try

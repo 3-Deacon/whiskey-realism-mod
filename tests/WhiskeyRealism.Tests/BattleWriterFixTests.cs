@@ -36,7 +36,6 @@ internal static class BattleWriterFixTests
         ArtilleryMicroMapsActionsToVanillaWrites();
         CounterBatteryReleasedWhenTargetGone();
         FeudGateRestoresVanillaDistanceCap();
-        GatesFailOpenOutsideActiveMode();
         ObjectiveChainCycleGateMatchesVanilla();
         ObjectiveChainMovementGateMatchesVanilla();
         ObjectiveChainGuardLetsPlayerAncestorsAdvance();
@@ -44,7 +43,6 @@ internal static class BattleWriterFixTests
         DeploymentSkipsFleetsAndMissingZones();
         HqLinkSameCommandUsesVanillaHierarchy();
         CombinedArtilleryGunsFollowVanillaInitializeRule();
-        PlayerOrderAttemptRecordedWithoutDiagnostics();
     }
 
     private static void Pass(string name)
@@ -404,16 +402,6 @@ internal static class BattleWriterFixTests
         Pass("battle writers: #34 combined artillery guns follow vanilla initialize rule");
     }
 
-    // #62: an unmatched CheckCurrentOrderUpdate bridge call must still enter
-    // the dedupe shadow, or the 120-tick throttle never applies when
-    // diagnostics are off and the order is re-issued every micro cycle 28.
-    private static void PlayerOrderAttemptRecordedWithoutDiagnostics()
-    {
-        TestHarness.AssertTrue(BattleWriterPolicy.RecordsPlayerOrderAttempt(bridgeMatched: false), "unmatched attempt");
-        TestHarness.AssertFalse(BattleWriterPolicy.RecordsPlayerOrderAttempt(bridgeMatched: true), "accepted orders are recorded as accepted");
-        Pass("battle writers: #62 records dedupe attempts regardless of diagnostics");
-    }
-
     private static void AssertNear(float expected, float actual, string label)
     {
         TestHarness.AssertTrue(Math.Abs(expected - actual) < 0.001f, label + ": expected " + expected + " got " + actual);
@@ -574,16 +562,6 @@ internal static class BattleWriterFixTests
         TestHarness.AssertFalse(BattleWriterPolicy.FeudMoveTargetAllowed(true, 900f, 400f), "beyond cap");
         TestHarness.AssertFalse(BattleWriterPolicy.FeudMoveTargetAllowed(false, 0f, 400f), "no enemy");
         Pass("battle writers: #42 restores vanilla feud distance cap");
-    }
-
-    // R14: Commander Mode Off/MonitorOnly means no Whiskey writes and no
-    // Whiskey denials - gates hand the call back to vanilla.
-    private static void GatesFailOpenOutsideActiveMode()
-    {
-        TestHarness.AssertTrue(BattleWriterPolicy.GateMayIntervene(true, true), "active + enabled");
-        TestHarness.AssertFalse(BattleWriterPolicy.GateMayIntervene(false, true), "monitor/off");
-        TestHarness.AssertFalse(BattleWriterPolicy.GateMayIntervene(true, false), "flag off");
-        Pass("battle writers: gates fail open to vanilla outside Active mode");
     }
 
     // DoPlacementAIUnitsWithinDeploymentzoneNew 85684-85751: num3 == 1

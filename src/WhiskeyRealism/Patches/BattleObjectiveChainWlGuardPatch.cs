@@ -63,7 +63,7 @@ namespace WhiskeyRealism.Patches
             {
                 __state = null;
                 if (!DLC_WL.dlc_scenarioactive) return;
-                if (!BattleWriterPolicy.GateMayIntervene(TacticalWriteGuard.ModeAllowsWrites(), Enabled())) return;
+                if (!TacticalWriteGuard.ModeAllowsWrites() || !Enabled()) return;
 
                 var state = new ObjectiveChainFilterState();
                 try
