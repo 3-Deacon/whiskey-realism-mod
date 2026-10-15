@@ -20,7 +20,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     ///   0 = assault with flanking (envelopment)
     ///   1 = frontal assault (no flanking)
     ///   2 = defend (FORMS LINE OF BATTLE via vanilla's group-stance cascade)
-    ///   3 = retreat / fallback
+    ///   3 = retreat / fallback (vanilla-owned; never written by Whiskey)
     ///  -1 = unset (vanilla computes via its own hysteresis-driven path)
     /// </summary>
     public static class TacticalVanillaMacroAiMapping
@@ -28,8 +28,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public const int MacroAiFlankAttack = 0;
         public const int MacroAiFrontalAttack = 1;
         public const int MacroAiDefend = 2;
-        public const int MacroAiRetreat = 3;
-        public const int MacroAiUnset = -1;
 
         /// <summary>
         /// Returns the vanilla macroai value Whiskey wants for the given doctrine
@@ -52,20 +50,43 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     float threshold = ArmyOrchestrator.EffectiveEnvelopmentMinRatio(commanderAggression01);
                     return currentRatio >= threshold ? MacroAiFlankAttack : MacroAiFrontalAttack;
 
-                case ReinforcementOpportunity.DefensiveHold:
                 case ReinforcementOpportunity.WaitAndConsolidate:
                 case ReinforcementOpportunity.DelayingDefense:
-                    // All three produce defensive posture for vanilla: form
-                    // the line, hold ground, no offensive maneuver. Vanilla's
-                    // macroai = 2 cascade is exactly this. The distinction
-                    // between them lives at the playbook-selection layer
-                    // (DelayingDefense biases toward DelayingDefense
-                    // playbook archetype with forward-screen + delay lines).
+                case ReinforcementOpportunity.WithdrawalToFightLater:
+                    // Defensive posture for vanilla: form the line, hold
+                    // ground, no offensive maneuver (macroai = 2). Withdrawal
+                    // maps here too and is a hold, not a retreat: #44 writes
+                    // the value only into the AIBattle instance macroai, in a
+                    // Postfix on CheckGlobalAIStrategy (6314), and never 3. A
+                    // Whiskey-written 3 would carry no startoffallback stamp
+                    // (vanilla stamps it only on its own transition, 6355),
+                    // so 6362 would end the battle on the next cycle.
+                    //
+                    // Vanilla's own retreat paths still run before the
+                    // Postfix each cycle, unaffected by the 2:
+                    //   6336-6349  victory bar below trigger -> SetEndOfBattle
+                    //              8/12 + retreat timer (does not read macroai);
+                    //   6351-6359  losing on points with >1% losses -> stamps
+                    //              startoffallback, macroai = 3; from then on
+                    //              6374 returns early, #44 takes no opinion
+                    //              while macroai == 3, and 6362 ends the battle
+                    //              after timetostartairetreattimer;
+                    //   6412-6418  attacker screening retreat (no arrivals in
+                    //              24 h, casualties > 5%, force balance below
+                    //              GetScreeningTrigger) -> macroai = 3 without a
+                    //              startoffallback stamp. Its num4 comes from
+                    //              newmacroaitoset and force balance, which #44
+                    //              does not write, so the 2 neither triggers
+                    //              nor blocks it.
+                    // When those paths do not fire, the instance 2 drives this
+                    // cycle's AdjustGroupAIStance (UpdateAITasks 5866/5869).
                     return MacroAiDefend;
 
-                case ReinforcementOpportunity.WithdrawalToFightLater:
-                    return MacroAiRetreat;
-
+                case ReinforcementOpportunity.DefensiveHold:
+                    // "Hold and refuse decisive engagement" is the doctrine's
+                    // fall-through, not a conviction. Returning no opinion lets
+                    // vanilla's pipeline decide; forcing 2 here made near-even
+                    // meeting engagements passive mutual-defend battles (BR-H1).
                 case ReinforcementOpportunity.NoOpportunity:
                 default:
                     // Pre-doctrine state or fall-through — don't override
@@ -77,12 +98,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// True when the macroai value is a legal one (0-3) that we should
-        /// actually write to the field. Defensive guard for the patch.
+        /// True when the macroai value is one Whiskey may write (0-2). Retreat
+        /// (3) is excluded: see <see cref="MapOpportunityToMacroAi"/>.
         /// </summary>
         public static bool IsLegalMacroAi(int value)
         {
-            return value >= MacroAiFlankAttack && value <= MacroAiRetreat;
+            return value >= MacroAiFlankAttack && value <= MacroAiDefend;
         }
     }
 }

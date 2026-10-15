@@ -18,7 +18,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     {
         private static FieldInfo _commandHierarchyShiftField;
         private static FieldInfo _fatigueField;
-        private static FieldInfo _ammoField;
         private static FieldInfo _groupEnemiesInRangeField;
         private static FieldInfo _flanksThreatedField;
         private static FieldInfo _outflankedField;
@@ -231,7 +230,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 catch { }
 
                 fatigue01 = ClampUnit(SafeFloat(reg, ref _fatigueField, "fatigue"), 0.2f);
-                ammo01 = ClampUnit(SafeFloat(reg, ref _ammoField, "ammo"), 0.9f);
+                // Regiment.ammo is float[] (decompile 111498): the old scalar
+                // read returned 0 for every unit. Same vanilla rule as
+                // ArmyEvidenceBuilder (ammo[0], or SumUp/3 for artillery).
+                ammo01 = ArmyEvidenceBuilder.NormalizeAmmo01(SafeAmmo(reg), unittyp, 0.9f);
 
                 // Gap-fill chunk 1: per-group sector fields (own-side only).
                 // BuildGroupSector reads: groupenemiesinrange, unitrange.enemystrengthwithinangle[],
@@ -339,6 +341,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try { return reg.permanentlydetached; }
             catch { return false; }
         }
+        private static float[] SafeAmmo(Regiment reg) { try { return reg.ammo; } catch { return null; } }
         private static float SafeOwnInRange(Regiment reg) { try { return reg.groupowninrange; } catch { return 0f; } }
         private static float SafeAiGroup(Regiment reg) { try { return reg.groupstrengthaigroup; } catch { return 0f; } }
 

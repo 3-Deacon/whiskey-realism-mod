@@ -26,9 +26,52 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
+    /// What the army looked like at its last replan (or plan creation). Replan
+    /// triggers compare against it so they fire on a change, not on a level
+    /// (T7). Main-effort band values are seeded lazily from the first reading
+    /// of the current main-effort band.
+    /// </summary>
+    public readonly struct ReplanBaseline
+    {
+        public ReplanBaseline(
+            float morale,
+            float reservesCommitted,
+            float reinforcementShare,
+            InferredIntent enemyIntent,
+            int mainEffortSector,
+            float mainEffortOwnStrength,
+            float mainEffortOdds)
+        {
+            Morale = morale;
+            ReservesCommitted = reservesCommitted;
+            ReinforcementShare = reinforcementShare;
+            EnemyIntent = enemyIntent;
+            MainEffortSector = mainEffortSector;
+            MainEffortOwnStrength = mainEffortOwnStrength;
+            MainEffortOdds = mainEffortOdds;
+        }
+
+        public static ReplanBaseline Initial =>
+            new ReplanBaseline(1f, 0f, 0f, InferredIntent.Unknown, -1, 0f, 0f);
+
+        public float Morale { get; }
+        public float ReservesCommitted { get; }
+        public float ReinforcementShare { get; }
+        public InferredIntent EnemyIntent { get; }
+        public int MainEffortSector { get; }
+        public float MainEffortOwnStrength { get; }
+        public float MainEffortOdds { get; }
+
+        public bool HasMainEffortSnapshot(int sector) => MainEffortSector == sector && MainEffortOwnStrength > 0f;
+
+        public ReplanBaseline WithMainEffort(int sector, float ownStrength, float odds) =>
+            new ReplanBaseline(Morale, ReservesCommitted, ReinforcementShare, EnemyIntent, sector, ownStrength, odds);
+    }
+
+    /// <summary>
     /// Army echelon orchestrator. Owns the army CO's TacticalBattlePlan, exposes
-    /// CurrentMacroAi for the rewired BattleMacroStrategyPatch to read, emits
-    /// ArmyIntent down to corps each tick.
+    /// CurrentMacroAi for the rewired BattleMacroStrategyPatch to read, and
+    /// allocates direct-child (corps) roles each tick.
     ///
     /// AIBattle.macroai values: -1 dynamic / 0 assault / 1 attack / 2 defend / 3 retreat.
     /// </summary>
@@ -59,6 +102,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float PlanAgeSeconds => _planAgeSeconds;
         public float HistoryGlobalOdds => _historyGlobalOdds;
         public TacticalIntentModel CurrentIntentModel => _currentIntentModel;
+
+        private ReplanBaseline _replanBaseline = ReplanBaseline.Initial;
+        public ReplanBaseline LastReplanBaseline => _replanBaseline;
+
+        /// <summary>Recorded by the tick cycle right after a replan.</summary>
+        public void RecordReplanBaseline(ReplanBaseline baseline) => _replanBaseline = baseline;
 
         /// <summary>
         /// AIBattle.macroai derived from current plan + phase + commander aggression.
@@ -96,52 +145,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
             _phaseAgeSeconds = 0f;
+            _replanBaseline = ReplanBaseline.Initial;
         }
 
+        /// <summary>
+        /// Advances plan age (time since the last replan) and phase age (time
+        /// since the last phase transition) by the same doctrine-clock delta.
+        /// The tick cycle passes doctrine seconds (TacticalDoctrineTime).
+        /// </summary>
         public void AdvancePlanAge(float deltaSeconds)
         {
             if (deltaSeconds <= 0f || float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds)) return;
             _planAgeSeconds += deltaSeconds;
-            // Legacy compat: callers that don't supply a separate battle-time
-            // delta get phase age advanced at real-time too. The preferred
-            // pattern for compression-aware code is to call AdvancePhaseAge
-            // explicitly with a battle-time delta and AdvancePlanAge with a
-            // real-time delta — see ArmyTickCycle.MaybeReplan.
             _phaseAgeSeconds += deltaSeconds;
-        }
-
-        /// <summary>
-        /// Adds <paramref name="battleDeltaSeconds"/> to phase age in battle-
-        /// time. Use this when the runtime tracks GameVars.currenttimefromstart
-        /// for compression-aware phase budgets (2x/5x/20x time compression
-        /// makes real-time and battle-time diverge — phase budgets should run
-        /// on battle-time, replan rate limits on real-time).
-        ///
-        /// Callers should NOT also pass the same delta to AdvancePlanAge for
-        /// the phase-age component — that would double-count. The new pattern
-        /// is: AdvancePhaseAge(battleDelta) FIRST to set phase age, then a
-        /// real-time-only plan age update (or AdvancePlanAge for legacy).
-        /// </summary>
-        public void AdvancePhaseAge(float battleDeltaSeconds)
-        {
-            if (battleDeltaSeconds <= 0f ||
-                float.IsNaN(battleDeltaSeconds) || float.IsInfinity(battleDeltaSeconds))
-                return;
-            _phaseAgeSeconds += battleDeltaSeconds;
-        }
-
-        /// <summary>
-        /// Real-time-only plan age advance. Use this with AdvancePhaseAge
-        /// to keep the two timers semantically separate: replan rate limits
-        /// run on real-time (wallclock decision cadence), phase budgets run
-        /// on battle-time (commander decision pace).
-        /// </summary>
-        public void AdvancePlanAgeRealtimeOnly(float realDeltaSeconds)
-        {
-            if (realDeltaSeconds <= 0f ||
-                float.IsNaN(realDeltaSeconds) || float.IsInfinity(realDeltaSeconds))
-                return;
-            _planAgeSeconds += realDeltaSeconds;
         }
 
         private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, out TacticalBattlePlan nextPlan)
@@ -354,14 +370,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Legacy overload without hysteresis. Used by call sites that
-        /// haven't been updated to pass odds yet. Should be removed once
-        /// the runtime fully migrates to the hysteresis-aware path.
-        /// </summary>
-        public bool ConsiderMainEffortShift(int decisiveSectorId)
-            => ConsiderMainEffortShift(decisiveSectorId, decisiveSectorOdds: float.MaxValue, currentMainEffortOdds: 0f);
-
-        /// <summary>
         /// Per-tick phase progression evaluator. Runtime calls this after
         /// updating evidence; the doctrine decides whether to advance
         /// (Probe -> MainEffort -> Exploit -> Consolidate -> Withdraw)
@@ -376,7 +384,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float armyMoraleCurrent,
             float armyMoraleFloor,
             float reservesCommittedFraction,
-            TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady)
+            TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady,
+            float intelConfidence01 = 1f)
         {
             if (!HasPlan)
                 return new TacticalPhaseProgressionDoctrine.Decision(BattlePhase.Probe, "no-plan");
@@ -396,7 +405,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 armyMoraleFloor: armyMoraleFloor,
                 reservesCommittedFraction: reservesCommittedFraction,
                 commanderAggression01: aggression01,
-                mainEffortReadiness: mainEffortReadiness);
+                mainEffortReadiness: mainEffortReadiness,
+                intelConfidence01: intelConfidence01);
 
             var decision = TacticalPhaseProgressionDoctrine.Decide(input);
             if (decision.NextPhase != _plan.Phase)
@@ -404,19 +414,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 AdvancePhase(decision.NextPhase);
             }
             return decision;
-        }
-
-        public ArmyIntent EmitArmyIntent()
-        {
-            return new ArmyIntent(
-                _plan.PlanId,
-                _plan.Phase,
-                _plan.MainEffortSector,
-                _plan.FixingSectors,
-                _plan.ScreeningSectors,
-                _plan.ReserveCommitTriggerOdds,
-                aggressionBias01: (_commanderPersonality.Aggression + 1f) * 0.5f,
-                directChildIntents: _directChildIntents);
         }
 
         public ReplanTrigger CheckReplanTriggers(ReplanTriggerInput input) => ArmyReplanTriggers.Evaluate(input);
@@ -438,18 +435,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return;
             }
 
+            // A replan re-picks the playbook; it does not throw away where the
+            // battle is. Every playbook instantiates in Probe at the default
+            // sector, so without this a defensive replan reset Withdraw/
+            // Consolidate to Probe and the main effort to the default band
+            // (Withdraw -> Probe -> Withdraw loop, review T7).
+            bool hadPlan = HasPlan;
+            if (hadPlan)
+            {
+                nextPlan = nextPlan.WithPhase(_plan.Phase).WithMainEffortSector(_plan.MainEffortSector);
+            }
             _plan = nextPlan;
             HasPlan = true;
             _currentIntentModel = enemyIntent;
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
-            _phaseAgeSeconds = 0f;
-            // Plan changed → MainEffortSector/FixingSectors/ScreeningSectors may have shifted,
-            // which would change DirectChildAllocator outputs. Invalidate the direct-child
-            // evidence cache so the next signature-equal observe reallocates against the new
-            // plan instead of returning stale pre-replan intents. (AdvancePhase does not need
-            // this — the allocator does not read BattlePhase.)
-            _hasObservedEvidence = false;
+            if (!hadPlan) _phaseAgeSeconds = 0f;
             // Opportunity-change trigger (2026-05-21). Snapshot the opportunity at
             // each replan so ArmyReplanTriggers.Evaluate can detect transitions
             // without firing the trigger every cycle. Next cycle's input compares
@@ -509,7 +510,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             "objective-unknown",
             0f);
         private StrategicBattleIntentSnapshot _currentStrategicBattleIntent = StrategicBattleIntentSnapshot.Empty;
-        private bool _hasObservedEvidence;
 
         public IReadOnlyList<DirectChildIntent> CurrentDirectChildIntents => _directChildIntents;
         public TacticalCommanderMode CommanderMode => _commanderMode;
@@ -527,7 +527,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _directChildSnapshots = Array.Empty<DirectChildSnapshot>();
                 _directChildEvidenceCache = Array.Empty<DirectChildEvidence>();
                 _directChildIntents = Array.Empty<DirectChildIntent>();
-                _hasObservedEvidence = false;
                 _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
                 return;
             }
@@ -550,7 +549,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     enemyIntent: unknownEnemy);
             }
             _directChildIntents = initial;
-            _hasObservedEvidence = false;
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
         }
 
@@ -604,30 +602,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _directChildIntents);
         }
 
-        public void ObserveDirectChildEvidence(IReadOnlyList<DirectChildEvidence> evidence)
-        {
-            if (!HasPlan) return;
-            if (evidence == null || evidence.Count != _directChildSnapshots.Length) return;
-
-            if (_hasObservedEvidence && SignatureEqual(evidence, _directChildEvidenceCache))
-            {
-                return;
-            }
-
-            for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
-            _hasObservedEvidence = true;
-
-            _directChildIntents = DirectChildAllocator.Allocate(
-                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache);
-            _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
-            EmitDirectChildIntentTelemetry();
-        }
-
-        public void ObserveDirectChildEvidenceWithIntent(IReadOnlyList<DirectChildEvidence> evidence, IReadOnlyList<TacticalIntentModel> perChildEnemyIntent)
-        {
-            ObserveDirectChildEvidenceWithZones(evidence, perChildEnemyIntent, null);
-        }
-
         /// <summary>
         /// Zone-aware observation (Stage 2 / G geometric play layer). When
         /// <paramref name="zoneAssignments"/> is non-empty, the allocator
@@ -640,13 +614,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             if (!HasPlan) return;
             if (evidence == null || evidence.Count != _directChildSnapshots.Length) return;
-            // Force allocation regardless of signature when explicit per-child intent is supplied,
-            // since enemy intent (which is not part of DirectChildEvidence.SignatureEquals) can change.
+            // Allocates every call: main-role hysteresis counts consecutive
+            // cycles, and the reserve-release context (global odds) and
+            // per-child enemy intent are not part of the evidence signature.
             for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
-            _hasObservedEvidence = true;
-            _directChildIntents = DirectChildAllocator.AllocateWithZones(
-                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
-                perChildEnemyIntent, zoneAssignments);
+            _directChildIntents = DirectChildAllocator.StabilizeMain(
+                DirectChildAllocator.AllocateWithZones(
+                    _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
+                    perChildEnemyIntent, zoneAssignments, new ReserveReleaseContext(_lastGlobalOdds)),
+                _mainHysteresis);
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
             EmitDirectChildIntentTelemetry();
         }
@@ -789,6 +765,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> CurrentLeafBrigadeMap
             => _leafBrigadeMap;
 
+        // Front geometry from the latest evidence (EnemyVisibleState). The leaf
+        // cascade orders siblings across this axis and reads flank exposure
+        // from it; UpdateLeafBrigadeMap is called by the #61 patch without an
+        // axis, so the orchestrator keeps the one the tick cycle observed.
+        private TacticalFrontAxis _frontAxis = TacticalFrontAxis.None;
+
+        // Reserve release / main-role hysteresis inputs (T15/T16), refreshed
+        // by the tick cycle.
+        private float _lastGlobalOdds = 1f;
+        private readonly MainRoleHysteresisState _mainHysteresis = new MainRoleHysteresisState();
+
+        /// <summary>Army-wide odds from the latest evidence; read by reserve release.</summary>
+        public void ObserveGlobalOdds(float globalOdds)
+        {
+            if (!float.IsNaN(globalOdds) && !float.IsInfinity(globalOdds) && globalOdds >= 0f) _lastGlobalOdds = globalOdds;
+        }
+        private IReadOnlyDictionary<int, float> _flankThreat = new Dictionary<int, float>();
+
+        /// <summary>
+        /// Records the front axis and per-group flank threat (mean outflanked weight) the
+        /// evidence was banded on. Called from the orchestrator tick cycle
+        /// (<see cref="ArmyTickCycle.MaybeReplan(ArmyOrchestrator, float, ArmyEvidence, EnemyVisibleState, float, float, float, float, int, float, float, float, float, float, double)"/>).
+        /// </summary>
+        public void ObserveFrontGeometry(EnemyVisibleState enemyVisible)
+        {
+            if (enemyVisible.FrontAxis.IsValid) _frontAxis = enemyVisible.FrontAxis;
+            if (enemyVisible.InstanceFlankThreat != null) _flankThreat = enemyVisible.InstanceFlankThreat;
+        }
+
         public TacticalLeafBrigadeMap.LeafAssignment? GetLeafBrigadeAssignment(int instanceId)
         {
             if (_leafBrigadeMap == null) return null;
@@ -852,7 +857,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     : CascadeEnvelopmentMode.DoubleWingEchelon;
             }
 
-            _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(tree, topAssignments, aggression01, envelopmentMode);
+            _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(
+                tree, topAssignments, aggression01, envelopmentMode, _frontAxis, _flankThreat);
             _leafBrigadeMapSignature = sig;
         }
 
@@ -968,28 +974,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence)
         {
-            UpdateReinforcementOpportunity(evidence, UnityEngine.Time.realtimeSinceStartup);
+            UpdateReinforcementOpportunity(evidence, (float)TacticalDoctrineTime.NowBattleSeconds);
         }
 
-        // Test-injectable overload for harness use.
-        internal void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence, float nowRealtimeSeconds)
+        /// <summary>
+        /// Clock-injected overload. The hysteresis hold is measured on doctrine
+        /// time (TacticalDoctrineTime), so the same span of battle
+        /// passes at every time compression. The "Opportunity Hysteresis Min
+        /// Hold Seconds" config value is read as battle MINUTES.
+        /// </summary>
+        internal void UpdateReinforcementOpportunity(TacticalForceBalanceEvidence evidence, float nowBattleSeconds)
         {
             var raw = TacticalReinforcementOpportunityDoctrine.Decide(evidence);
-            float secondsSinceLastChange = nowRealtimeSeconds - _opportunityLastChangedRealtimeSeconds;
-            // Negative on first call (uninitialized timestamp = 0; nowRealtimeSeconds
-            // > 0); treat as "very long ago" so first decision is always accepted.
-            if (secondsSinceLastChange < 0f) secondsSinceLastChange = float.MaxValue;
+            float sinceLastChange = _hasOpportunityChange
+                ? nowBattleSeconds - _opportunityLastChangedBattleSeconds
+                : float.MaxValue;
+            // Battle clock ran backwards (reload): treat as long ago.
+            if (sinceLastChange < 0f) sinceLastChange = float.MaxValue;
 
-            float minHoldSeconds = TacticalOpportunityHysteresis.DefaultMinHoldSeconds;
-            if (Plugin.OpportunityHysteresisMinHoldSeconds != null)
-            {
-                minHoldSeconds = Plugin.OpportunityHysteresisMinHoldSeconds.Value;
-            }
+            // Config value is battle MINUTES (default bound to
+            // TacticalOpportunityHysteresis.DefaultMinHoldBattleMinutes).
+            float minHold = Plugin.OpportunityHysteresisMinHoldSeconds != null
+                ? Plugin.OpportunityHysteresisMinHoldSeconds.Value * 60f
+                : TacticalOpportunityHysteresis.DefaultMinHoldBattleSeconds;
             var smoothed = TacticalOpportunityHysteresis.Smooth(
-                raw, _currentReinforcementOpportunity, secondsSinceLastChange, minHoldSeconds);
-            if (smoothed.Changed)
+                raw, _currentReinforcementOpportunity, sinceLastChange, minHold);
+            if (smoothed.Changed || !_hasOpportunityChange)
             {
-                _opportunityLastChangedRealtimeSeconds = nowRealtimeSeconds;
+                _opportunityLastChangedBattleSeconds = nowBattleSeconds;
+                _hasOpportunityChange = true;
             }
             _currentReinforcementOpportunity = smoothed.Decision;
             _currentForceBalanceStance = evidence.Stance;
@@ -1001,10 +1014,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // GetBattleType signal.
         private BattleStance _currentForceBalanceStance = BattleStance.Meeting;
 
-        // Timestamp (Unity Time.realtimeSinceStartup) of the most recent
-        // accepted opportunity-category change. Read by
-        // TacticalOpportunityHysteresis.Smooth to enforce minimum hold time.
-        private float _opportunityLastChangedRealtimeSeconds = 0f;
+        // Battle time (seconds) of the most recent accepted opportunity-category
+        // change. Read by TacticalOpportunityHysteresis.Smooth to enforce the
+        // minimum hold.
+        private float _opportunityLastChangedBattleSeconds;
+        private bool _hasOpportunityChange;
 
         private string ComputeLeafMapSignature(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree)
         {
@@ -1044,6 +1058,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 envCode = sigAggression01 >= EnvelopmentSimultaneousAggressionThreshold ? 1 : 2;
             }
             sb.Append("|env=").Append(envCode);
+            // Front geometry: rebuild when the front rotates (15-degree buckets,
+            // already stabilized against jitter by ArmyEvidenceBuilder) or the
+            // vanilla flank-threat picture changes.
+            sb.Append("|hd=").Append(_frontAxis.HeadingBucket(15));
+            int threatHash = 0;
+            if (_flankThreat != null)
+            {
+                foreach (var kv in _flankThreat) threatHash ^= kv.Key * 31 + (int)(kv.Value * 100f);
+            }
+            sb.Append("|ft=").Append(threatHash);
             return sb.ToString();
         }
 
@@ -1096,6 +1120,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _planAgeSeconds = 0f;
             _phaseAgeSeconds = 0f;
             _historyGlobalOdds = 1f;
+            _replanBaseline = ReplanBaseline.Initial;
         }
 
         private static CommandNodeOperationalState[] CopyCommandOperations(
@@ -1106,16 +1131,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var copy = new CommandNodeOperationalState[commandOperations.Count];
             for (int i = 0; i < commandOperations.Count; i++) copy[i] = commandOperations[i];
             return copy;
-        }
-
-        private static bool SignatureEqual(IReadOnlyList<DirectChildEvidence> a, DirectChildEvidence[] b)
-        {
-            if (a.Count != b.Length) return false;
-            for (int i = 0; i < a.Count; i++)
-            {
-                if (!a[i].SignatureEquals(b[i])) return false;
-            }
-            return true;
         }
     }
 }

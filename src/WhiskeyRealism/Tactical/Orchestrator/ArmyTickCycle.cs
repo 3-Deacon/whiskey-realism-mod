@@ -11,16 +11,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     {
         private static readonly Dictionary<int, float> _lastReplanByAlliance = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _clockByAlliance = new Dictionary<int, float>();
+        private static readonly Dictionary<int, double> _lastDoctrineNowByAlliance = new Dictionary<int, double>();
 
         public static void Reset()
         {
             _lastReplanByAlliance.Clear();
             _clockByAlliance.Clear();
+            _lastDoctrineNowByAlliance.Clear();
         }
 
         public static void ResetForTest()
         {
             Reset();
+        }
+
+        /// <summary>
+        /// Stamps a replan made outside <see cref="MaybeReplan(ArmyOrchestrator, float, ArmyEvidence, EnemyVisibleState, float, float, float, float, int, float, float, float, float, float, double)"/>
+        /// (the coordinator's new-battle-day replan) so it counts against
+        /// "Min Replan Seconds" like any other. Uses the doctrine time.
+        /// </summary>
+        public static void RecordReplan(int allianceId) => RecordReplan(allianceId, TacticalDoctrineTime.NowBattleSeconds);
+
+        internal static void RecordReplan(int allianceId, double doctrineNowSeconds)
+        {
+            if (double.IsNaN(doctrineNowSeconds) || double.IsInfinity(doctrineNowSeconds)) return;
+            _clockByAlliance[allianceId] = (float)doctrineNowSeconds;
+            _lastReplanByAlliance[allianceId] = (float)doctrineNowSeconds;
+            _lastDoctrineNowByAlliance[allianceId] = doctrineNowSeconds;
         }
 
         /// <summary>
@@ -36,12 +53,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownMainEffortStrength,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
-            float reinforcementsArrivingDelta,
+            float ownReinforcementsArriving,
             int minReplanSeconds) =>
             MaybeReplan(
                 orchestrator, deltaSeconds, ownEvidence, enemyVisible,
                 ownMainEffortStrength, ownArmyMorale, ownReservesCommittedFraction,
-                reinforcementsArrivingDelta, minReplanSeconds,
+                ownReinforcementsArriving, minReplanSeconds,
                 ownAvgFatigue01: 0.2f,
                 ownAvgAmmo01: 0.9f,
                 nearestReinforcementHours: 0f,
@@ -55,39 +72,56 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownMainEffortStrength,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
-            float reinforcementsArrivingDelta,
+            float ownReinforcementsArriving,
             int minReplanSeconds,
             float ownAvgFatigue01,
             float ownAvgAmmo01,
             float nearestReinforcementHours,
             float nearestReinforcementStrength,
-            float battleDeltaSeconds = -1f)
+            float battleDeltaSeconds = -1f,
+            double doctrineNowSeconds = double.NaN)
         {
             if (orchestrator == null) return ReplanTrigger.None;
 
             var allianceId = orchestrator.AllianceId;
-            if (deltaSeconds > 0f && !float.IsNaN(deltaSeconds) && !float.IsInfinity(deltaSeconds))
+            // Doctrine clock (T8): plan age, phase age and the replan cooldown
+            // all run on BATTLE time when the caller supplies it. Wall-clock
+            // deltas drove the 180 s plan deadline before, so at 20x
+            // compression a plan "expired" after ~10 battle-minutes and at 1x
+            // every 3 wall-clock minutes. Callers pass
+            // TacticalDoctrineTime.NowBattleSeconds. A frozen value yields a
+            // zero delta; the night freeze itself comes from the
+            // coordinator's doctrine clock once NowBattleSeconds is pointed
+            // at it (integration). On this branch the seam reads the raw
+            // clock, which does not freeze. Legacy callers without a battle
+            // clock keep the single-clock behaviour.
+            bool doctrineClock = !double.IsNaN(doctrineNowSeconds) && !double.IsInfinity(doctrineNowSeconds);
+            if (doctrineClock)
+            {
+                double delta = 0.0;
+                if (_lastDoctrineNowByAlliance.TryGetValue(allianceId, out var lastDoctrineNow) && doctrineNowSeconds > lastDoctrineNow)
+                    delta = doctrineNowSeconds - lastDoctrineNow;
+                _lastDoctrineNowByAlliance[allianceId] = doctrineNowSeconds;
+                battleDeltaSeconds = (float)delta;
+            }
+            bool battleClock = battleDeltaSeconds >= 0f;
+            float clockDelta = battleClock ? battleDeltaSeconds : deltaSeconds;
+            // The replan cooldown runs on doctrine time itself when supplied,
+            // the same clock RecordReplan stamps; otherwise on summed deltas.
+            if (doctrineClock)
+            {
+                _clockByAlliance[allianceId] = (float)doctrineNowSeconds;
+            }
+            else if (clockDelta > 0f && !float.IsNaN(clockDelta) && !float.IsInfinity(clockDelta))
             {
                 float currentClock;
                 _clockByAlliance.TryGetValue(allianceId, out currentClock);
-                _clockByAlliance[allianceId] = currentClock + deltaSeconds;
+                _clockByAlliance[allianceId] = currentClock + clockDelta;
             }
-            // Time compression: if caller supplied a battle-time delta,
-            // advance plan age on real-time and phase age on battle-time
-            // separately. Phase budgets are commander-pace (battle clock)
-            // decisions; replan rate limits are wallclock (real time).
-            // Legacy callers that don't pass battleDeltaSeconds keep the
-            // single-source behavior via AdvancePlanAge.
-            if (battleDeltaSeconds >= 0f)
-            {
-                orchestrator.AdvancePlanAgeRealtimeOnly(deltaSeconds);
-                orchestrator.AdvancePhaseAge(battleDeltaSeconds);
-            }
-            else
-            {
-                orchestrator.AdvancePlanAge(deltaSeconds);
-            }
+            orchestrator.AdvancePlanAge(clockDelta);
 
+            orchestrator.ObserveFrontGeometry(enemyVisible);
+            orchestrator.ObserveGlobalOdds(ownEvidence.CurrentOdds);
             if (!orchestrator.HasPlan) return ReplanTrigger.None;
 
             var intent = ArmyIntentInference.Build(ownEvidence, enemyVisible);
@@ -143,12 +177,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < enemyVisible.Sectors.Length; i++)
                 {
                     var s = enemyVisible.Sectors[i];
-                    if (s.EnemyStrength <= 0f) continue;
+                    // Bands with no enemy carry no odds signal. Band odds are
+                    // capped and blended toward unknown by intel confidence
+                    // (EnemyVisibleState.SectorOdds), so a fully observed weak
+                    // point is a decisive-sector candidate and a picket seen
+                    // under low coverage is not.
+                    if (!s.HasEnemy) continue;
+                    float odds = enemyVisible.SectorOdds(s);
                     if (s.SectorId == preShiftMainEffortSector)
-                        preShiftMainEffortOdds = s.Odds;
-                    if (s.Odds > decisiveSectorOdds)
+                        preShiftMainEffortOdds = odds;
+                    if (odds > decisiveSectorOdds)
                     {
-                        decisiveSectorOdds = s.Odds;
+                        decisiveSectorOdds = odds;
                         decisiveSectorId = s.SectorId;
                     }
                 }
@@ -180,43 +220,88 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < enemyVisible.Sectors.Length; i++)
                 {
                     var s = enemyVisible.Sectors[i];
-                    if (s.SectorId == currentMainEffortSector && s.EnemyStrength > 0f)
-                        currentMainEffortOdds = s.Odds;
-                    if (s.SectorId != currentMainEffortSector && s.Odds > bestNonMainEffortOdds)
-                        bestNonMainEffortOdds = s.Odds;
+                    if (!s.HasEnemy) continue;
+                    float odds = enemyVisible.SectorOdds(s);
+                    if (s.SectorId == currentMainEffortSector)
+                        currentMainEffortOdds = odds;
+                    else if (odds > bestNonMainEffortOdds)
+                        bestNonMainEffortOdds = odds;
                 }
             }
+
+            // ---- Main-effort band history (T7) ----
+            //
+            // The main band's own strength and odds at the last replan (or at
+            // first sighting of this band) are the history the sector-loss and
+            // breakthrough checks compare against. Previously both "histories"
+            // were the army-wide total / global odds, so MainEffortSectorLoss
+            // could never fire and the 1.35x breakthrough ratio divided sector
+            // odds by global odds.
+            float mainBandOwn = 0f;
+            float mainBandOdds = 0f;
+            bool mainBandSeen = false;
+            if (enemyVisible.Sectors != null)
+            {
+                for (int i = 0; i < enemyVisible.Sectors.Length; i++)
+                {
+                    var s = enemyVisible.Sectors[i];
+                    if (s.SectorId != currentMainEffortSector) continue;
+                    mainBandSeen = true;
+                    mainBandOwn = s.OwnStrength;
+                    if (s.HasEnemy) mainBandOdds = enemyVisible.SectorOdds(s);
+                }
+            }
+            var baseline = orchestrator.LastReplanBaseline;
+            if (mainBandSeen && mainBandOwn > 0f && !baseline.HasMainEffortSnapshot(currentMainEffortSector))
+            {
+                baseline = baseline.WithMainEffort(currentMainEffortSector, mainBandOwn, mainBandOdds);
+                orchestrator.RecordReplanBaseline(baseline);
+            }
+            else if (baseline.MainEffortSector == currentMainEffortSector && baseline.MainEffortOdds <= 0f && mainBandOdds > 0f)
+            {
+                baseline = baseline.WithMainEffort(currentMainEffortSector, baseline.MainEffortOwnStrength, mainBandOdds);
+                orchestrator.RecordReplanBaseline(baseline);
+            }
+            float mainOwnCurrent = mainBandSeen && mainBandOwn > 0f ? mainBandOwn : ownMainEffortStrength;
+            float mainOwnHistory = baseline.HasMainEffortSnapshot(currentMainEffortSector)
+                ? baseline.MainEffortOwnStrength
+                : mainOwnCurrent;
+            float mainOddsHistory = baseline.MainEffortSector == currentMainEffortSector && baseline.MainEffortOdds > 0f
+                ? baseline.MainEffortOdds
+                : currentMainEffortOdds;
+            float reinforcementShare = ownReinforcementsArriving / Math.Max(1f, ownMainEffortStrength);
 
             // ---- Phase progression evaluator ----
             //
             // Drives Probe -> MainEffort -> Exploit -> Consolidate -> Withdraw
             // each tick. AdvancePhase resets phase age (NOT plan age) on
             // actual transitions so each phase has its own budget while the
-            // overarching plan deadline (180s) still backstops via PhaseDeadline
-            // replan trigger.
+            // overarching plan deadline (ArmyReplanTriggers.PlanDeadlineBattleSeconds)
+            // still backstops via the PhaseDeadline replan trigger.
             orchestrator.EvaluateAndAdvancePhase(
                 globalOddsCurrent: ownEvidence.CurrentOdds,
                 mainEffortOddsCurrent: currentMainEffortOdds,
-                mainEffortOddsHistory: orchestrator.HistoryGlobalOdds,
+                mainEffortOddsHistory: mainOddsHistory,
                 armyMoraleCurrent: ownArmyMorale,
                 armyMoraleFloor: 0.4f,
                 reservesCommittedFraction: ownReservesCommittedFraction,
-                mainEffortReadiness: readiness.Result);
+                mainEffortReadiness: readiness.Result,
+                intelConfidence01: enemyVisible.IntelConfidence01);
 
             var input = new ReplanTriggerInput(
                 planAgeSeconds: orchestrator.PlanAgeSeconds,
                 currentPhase: orchestrator.CurrentPlan.Phase,
-                mainEffortOwnStrength: ownMainEffortStrength,
-                mainEffortHistoryOwnStrength: ownMainEffortStrength,
+                mainEffortOwnStrength: mainOwnCurrent,
+                mainEffortHistoryOwnStrength: mainOwnHistory,
                 globalOddsCurrent: ownEvidence.CurrentOdds,
                 globalOddsHistory: orchestrator.HistoryGlobalOdds,
                 armyMoraleCurrent: ownArmyMorale,
                 armyMoraleFloor: 0.4f,
                 reservesCommittedFraction: ownReservesCommittedFraction,
-                reinforcementsArrivingDelta: reinforcementsArrivingDelta,
+                ownReinforcementsArriving: ownReinforcementsArriving,
                 enemyMainEffortShiftConfidenceWeighted: ConfidenceWeightedShift(intent),
                 mainEffortLocalOdds: currentMainEffortOdds,
-                mainEffortLocalOddsHistory: orchestrator.HistoryGlobalOdds,
+                mainEffortLocalOddsHistory: mainOddsHistory,
                 bestNonMainEffortSectorOdds: bestNonMainEffortOdds,
                 currentMainEffortOdds: currentMainEffortOdds,
                 // Opportunity-change trigger inputs (2026-05-21). The orchestrator
@@ -224,20 +309,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // UpdateReinforcementOpportunity; _lastReplanOpportunity is
                 // snapshotted in Replan(). Differing values fire OpportunityChange.
                 currentOpportunity: orchestrator.CurrentReinforcementOpportunity.Opportunity,
-                lastReplanOpportunity: orchestrator.LastReplanOpportunity);
+                lastReplanOpportunity: orchestrator.LastReplanOpportunity,
+                armyMoraleAtLastReplan: baseline.Morale,
+                reservesCommittedAtLastReplan: baseline.ReservesCommitted,
+                ownStrength: ownMainEffortStrength,
+                reinforcementShareAtLastReplan: baseline.ReinforcementShare,
+                currentEnemyIntent: intent.PrimaryIntent,
+                enemyIntentAtLastReplan: baseline.EnemyIntent);
 
             var trigger = orchestrator.CheckReplanTriggers(input);
             if (trigger == ReplanTrigger.None) return ReplanTrigger.None;
 
             float now;
             _clockByAlliance.TryGetValue(allianceId, out now);
+            // "Min Replan Seconds" is measured on the same clock as plan age:
+            // battle seconds when the caller supplies the battle clock.
+            float cooldown = minReplanSeconds;
+            // A stamp later than now means the clock ran backwards (reload
+            // to an earlier save): treat the last replan as long ago.
             if (_lastReplanByAlliance.TryGetValue(allianceId, out var lastReplan) &&
-                now - lastReplan < minReplanSeconds)
+                lastReplan <= now && now - lastReplan < cooldown)
             {
                 return ReplanTrigger.None;
             }
 
             orchestrator.Replan(ownEvidence, intent);
+            orchestrator.RecordReplanBaseline(new ReplanBaseline(
+                ownArmyMorale,
+                ownReservesCommittedFraction,
+                reinforcementShare,
+                intent.PrimaryIntent,
+                orchestrator.CurrentPlan.MainEffortSector,
+                mainOwnCurrent,
+                mainBandOdds));
             _lastReplanByAlliance[allianceId] = now;
             return trigger;
         }

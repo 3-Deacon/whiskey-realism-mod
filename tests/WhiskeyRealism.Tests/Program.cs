@@ -1008,12 +1008,7 @@ static class Program
             ("tactical battle plan records id phase main effort and age", TacticalBattlePlanRecordsIdPhaseMainEffortAndAge),
             ("tactical battle plan with phase advances and resets age", TacticalBattlePlanWithPhaseAdvancesAndResetsAge),
             ("tactical battle plan with age changes age only", TacticalBattlePlanWithAgeChangesAgeOnly),
-            ("army intent carries plan id phase and aggression bias", ArmyIntentCarriesPlanIdPhaseAndAggressionBias),
             ("tactical battle plan sanitizes NaN and Infinity floats", TacticalBattlePlanSanitizesNanAndInfinityFloats),
-            ("army intent sanitizes NaN and Infinity floats", ArmyIntentSanitizesNanAndInfinityFloats),
-            ("army intent clamps aggression bias out of range", ArmyIntentClampsAggressionBiasOutOfRange),
-            ("army intent carries direct child intents list", ArmyIntentCarriesDirectChildIntentsList),
-            ("army intent direct child intents defaults empty", ArmyIntentDirectChildIntentsDefaultsEmpty),
             ("tactical playbook personality fit scores peak at match and decay off", TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff),
             ("tactical playbook terrain preference returns dominant weight", TacticalPlaybookTerrainPreferenceReturnsDominantWeight),
             ("tactical playbook odds range one inside band decays outside", TacticalPlaybookOddsRangeOneInsideBandDecaysOutside),
@@ -1119,7 +1114,6 @@ static class Program
             ("army orchestrator pick initial plan with lee personality assigns lee envelopment", ArmyOrchestratorPickInitialPlanWithLeePersonalityAssignsLeeEnvelopment),
             ("army orchestrator current macroai attack on main effort with aggressive personality", ArmyOrchestratorCurrentMacroAiAttackOnMainEffortWithAggressivePersonality),
             ("army orchestrator current macroai defend on consolidate with cautious personality", ArmyOrchestratorCurrentMacroAiDefendOnConsolidateWithCautiousPersonality),
-            ("army orchestrator emit army intent matches current plan", ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan),
             ("army orchestrator records history on initial plan", ArmyOrchestratorRecordsHistoryOnInitialPlan),
             ("army orchestrator tick advances age without replanning", ArmyOrchestratorTickAdvancesAgeWithoutReplanning),
             ("army orchestrator replan with intent resets age and updates history", ArmyOrchestratorReplanWithIntentResetsAgeAndUpdatesHistory),
@@ -1127,8 +1121,6 @@ static class Program
             ("army orchestrator failed replan preserves active state", ArmyOrchestratorFailedReplanPreservesActiveState),
             ("army orchestrator register direct children stores snapshots", ArmyOrchestratorRegisterDirectChildrenStoresSnapshots),
             ("army orchestrator observe evidence allocates roles", ArmyOrchestratorObserveEvidenceAllocatesRoles),
-            ("army orchestrator observe evidence is idempotent on equal signature", ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature),
-            ("army orchestrator emit army intent includes direct children", ArmyOrchestratorEmitArmyIntentIncludesDirectChildren),
             ("army orchestrator get direct child role unknown when unregistered", ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered),
             ("army orchestrator refreshes expanded direct child snapshots", ArmyOrchestratorRefreshesExpandedDirectChildSnapshots),
             ("army orchestrator returns role for synth army child id", ArmyOrchestratorReturnsRoleForSynthArmyChildId),
@@ -1136,7 +1128,6 @@ static class Program
             ("army orchestrator preserves O3 direct child role after command tree allocation", TestArmyOrchestratorPreservesDirectChildRoleWithCommandTree),
             ("army orchestrator resolves command node intent after direct child evidence", TestArmyOrchestratorResolvesCommandNodeIntent),
             ("army orchestrator command resolver falls back to O3 direct child intent", TestArmyOrchestratorCommandResolverFallsBackToDirectChildIntent),
-            ("army orchestrator replan invalidates direct child evidence cache", ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache),
             ("army replan triggers phase deadline fires when age exceeds phase budget", ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget),
             ("army replan triggers main effort sector loss fires below threshold", ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold),
             ("army replan triggers force imbalance shift fires when odds cross hysteresis", ArmyReplanTriggersForceImbalanceShiftFiresWhenOddsCrossHysteresis),
@@ -1248,15 +1239,13 @@ static class Program
             // Time compression handling
             ("consider main effort shift respects hysteresis margin", ConsiderMainEffortShiftRespectsHysteresisMargin),
             ("consider main effort shift legacy overload always shifts", ConsiderMainEffortShiftLegacyOverloadAlwaysShifts),
-            ("advance plan age realtime only does not advance phase age", AdvancePlanAgeRealtimeOnlyDoesNotAdvancePhaseAge),
-            ("advance phase age battle time separate from plan age", AdvancePhaseAgeBattleTimeSeparateFromPlanAge),
             ("army tick cycle 20x compression burns probe budget in battle time", ArmyTickCycle20xCompressionBurnsProbeInBattleTime),
             ("leaf brigade map stops at brigade tier not regiments", LeafBrigadeMapStopsAtBrigadeTierNotRegiments),
             ("leaf brigade map handles four tier army corps division brigade", LeafBrigadeMapHandlesFourTierArmyCorpsDivisionBrigade),
-            ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h mid commander withdraws", ReinforcementOpportunity15kVs13kPlus7kIn12hMidWithdraws),
-            ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h aggressive attacks now", ReinforcementOpportunity15kVs13kPlus7kIn12hAggressiveAttacks),
-            ("reinforcement opportunity 15k own vs 13k enemy +7k in 12h cautious withdraws", ReinforcementOpportunity15kVs13kPlus7kIn12hCautiousWithdraws),
-            ("reinforcement opportunity 10k vs 15k enemy growing cautious delays defensively", ReinforcementOpportunity10kVs15kEnemyGrowingCautiousDelaysDefensively),
+            ("reinforcement opportunity 15k own vs 13k enemy mid commander holds as defender", ReinforcementOpportunity15kVs13kMidHoldsAsDefender),
+            ("reinforcement opportunity 15k own vs 13k enemy aggressive attacks now", ReinforcementOpportunity15kVs13kAggressiveAttacks),
+            ("reinforcement opportunity 15k own vs 13k enemy cautious holds as defender", ReinforcementOpportunity15kVs13kCautiousHoldsAsDefender),
+            ("reinforcement opportunity 10k vs 15k cautious delays defensively", ReinforcementOpportunity10kVs15kCautiousDelaysDefensively),
             ("reinforcement opportunity severely outnumbered withdraws", ReinforcementOpportunitySeverelyOutnumberedWithdraws),
             ("reinforcement opportunity aggressive commander refuses withdraw at moderate disadvantage", ReinforcementOpportunityAggressiveCommanderRefusesToWithdrawAtModerateDisadvantage),
             ("compute withdrawal ratio threshold personality scale", ComputeWithdrawalRatioThresholdPersonalityScale),
@@ -1274,9 +1263,9 @@ static class Program
             ("playbook catalog stance hard filter defender rejects offensive", PlaybookCatalogStanceHardFilterDefenderRejectsOffensive),
             ("playbook catalog stance hard filter attacker rejects defensive", PlaybookCatalogStanceHardFilterAttackerRejectsDefensive),
             ("playbook catalog stance of classifies archetypes correctly", PlaybookCatalogStanceOfClassifiesArchetypesCorrectly),
-            ("reinforcement opportunity 15k own vs 10k enemy +5k in 8h attack window open", ReinforcementOpportunity15kVs10kPlus5kIn8hAttackWindowOpen),
+            ("reinforcement opportunity 15k own vs 10k enemy attacks on the advantage", ReinforcementOpportunity15kVs10kAttacksOnAdvantage),
             ("reinforcement opportunity 12k own +5k in 6h vs 13k enemy waits to consolidate", ReinforcementOpportunity12kPlus5kIn6hWaitsToConsolidate),
-            ("reinforcement opportunity 13k vs 13k both reinforcing defensive hold", ReinforcementOpportunity13kVs13kBothReinforcingDefensiveHold),
+            ("reinforcement opportunity 13k vs 13k own relief too far defensive hold", ReinforcementOpportunity13kVs13kOwnReliefTooFarDefensiveHold),
             ("reinforcement opportunity intel confidence floor falls through to no opportunity", ReinforcementOpportunityIntelConfidenceFloorFallsThrough),
             ("reinforcement opportunity small cavalry brigade can attack at favorable ratio", ReinforcementOpportunitySmallCavalryCanAttack),
             ("reinforcement opportunity picket clash below 500 men does not attack", ReinforcementOpportunityPicketClashDoesNotAttack),
@@ -1359,6 +1348,7 @@ static class Program
         TacticalLifecycleFixTests.Run();
         PostureStanceFixTests.Run();
         BattleWriterFixTests.Run();
+        TacticalEvidenceFixTests.Run();
         CommanderModeParseTests.Run();
         CampaignEconomyFixTests.Run();
         CampaignLifecycleFixTests.Run();
@@ -21116,7 +21106,31 @@ static class Program
         AssertEqual(BattleLifecycleEvent.BattleStart, detector.Observe(5), "second BattleStart after reset");
     }
 
-    // ---- TacticalBattlePlan / ArmyIntent tests (O1.1) ----
+    // ---- TacticalPlaybook tests (O1.2) ----
+
+    private sealed class StubPlaybook : TacticalPlaybook
+    {
+        public StubPlaybook() : base(
+            BattlePlanId.GenericMethodical,
+            "stub",
+            new PersonalityFit(0f, 0f, 0f),
+            new TerrainPreference(0.5f, 0.5f, 0.5f, 0.5f),
+            new OddsRange(0.8f, 1.4f),
+            reserveCommitTriggerOdds: 1.0f) { }
+
+        public override TacticalBattlePlan Instantiate(PlaybookContext ctx) =>
+            new TacticalBattlePlan(
+                BattlePlanId.GenericMethodical,
+                BattlePhase.Probe,
+                ctx.DefaultMainEffortSector,
+                null,
+                null,
+                ReserveCommitTriggerOdds,
+                0f,
+                ctx.JitterSeed);
+    }
+
+    // ---- TacticalBattlePlan tests (O1.1) ----
 
     private static void TacticalBattlePlanRecordsIdPhaseMainEffortAndAge()
     {
@@ -21173,22 +21187,6 @@ static class Program
         AssertEqual(2, plan.MainEffortSector, "main effort preserved");
     }
 
-    private static void ArmyIntentCarriesPlanIdPhaseAndAggressionBias()
-    {
-        var intent = new ArmyIntent(
-            BattlePlanId.ManeuverAndFix,
-            BattlePhase.MainEffort,
-            mainEffortSector: 1,
-            fixingSectors: new[] { 2, 3 },
-            screeningSectors: System.Array.Empty<int>(),
-            reserveCommitTriggerOdds: 1.3f,
-            aggressionBias01: 0.65f);
-        AssertEqual(BattlePlanId.ManeuverAndFix, intent.PlanId, "plan id");
-        AssertEqual(BattlePhase.MainEffort, intent.Phase, "phase");
-        AssertEqual(1, intent.MainEffortSector, "main effort sector");
-        AssertNear(0.65f, intent.AggressionBias01, 1e-5f, "aggression bias");
-    }
-
     private static void TacticalBattlePlanSanitizesNanAndInfinityFloats()
     {
         var plan = new TacticalBattlePlan(
@@ -21204,82 +21202,6 @@ static class Program
         AssertNear(0f, plan.AgeSeconds, 1e-5f, "Infinity ageSeconds sanitized then clamped to 0");
         AssertEqual(0, plan.FixingSectors.Length, "null fixingSectors coalesced to empty");
         AssertEqual(0, plan.ScreeningSectors.Length, "null screeningSectors coalesced to empty");
-    }
-
-    private static void ArmyIntentSanitizesNanAndInfinityFloats()
-    {
-        var intent = new ArmyIntent(
-            BattlePlanId.GenericMethodical,
-            BattlePhase.Probe,
-            mainEffortSector: 0,
-            fixingSectors: null,
-            screeningSectors: null,
-            reserveCommitTriggerOdds: float.PositiveInfinity,
-            aggressionBias01: float.NaN);
-        AssertNear(0f, intent.ReserveCommitTriggerOdds, 1e-5f, "Infinity reserveOdds sanitized to 0");
-        AssertNear(0.5f, intent.AggressionBias01, 1e-5f, "NaN aggressionBias coerced to 0.5");
-        AssertEqual(0, intent.FixingSectors.Length, "null fixingSectors coalesced to empty");
-        AssertEqual(0, intent.ScreeningSectors.Length, "null screeningSectors coalesced to empty");
-    }
-
-    private static void ArmyIntentClampsAggressionBiasOutOfRange()
-    {
-        var below = new ArmyIntent(BattlePlanId.GenericMethodical, BattlePhase.Probe, 0, null, null, 1.0f, -2.0f);
-        var above = new ArmyIntent(BattlePlanId.GenericMethodical, BattlePhase.Probe, 0, null, null, 1.0f, 5.0f);
-        AssertNear(0f, below.AggressionBias01, 1e-5f, "below 0 clamped to 0");
-        AssertNear(1f, above.AggressionBias01, 1e-5f, "above 1 clamped to 1");
-    }
-
-    private static void ArmyIntentCarriesDirectChildIntentsList()
-    {
-        var children = new[]
-        {
-            new DirectChildIntent(
-                "c0", 15, 16, "First", 2, DirectChildRole.Main,
-                DirectChildAxis.SectorAxis, 2, 1.0f, 0.6f,
-                new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>())),
-        };
-        var intent = new ArmyIntent(
-            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
-            mainEffortSector: 2, fixingSectors: new[] { 0 }, screeningSectors: new[] { 4 },
-            reserveCommitTriggerOdds: 1.2f, aggressionBias01: 0.7f,
-            directChildIntents: children);
-        AssertEqual(1, intent.DirectChildIntents.Count);
-        AssertEqual("c0", intent.DirectChildIntents[0].ChildId);
-        AssertEqual(DirectChildRole.Main, intent.DirectChildIntents[0].Role);
-    }
-
-    private static void ArmyIntentDirectChildIntentsDefaultsEmpty()
-    {
-        // existing 7-arg ctor must continue to work and yield empty children list
-        var intent = new ArmyIntent(
-            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
-            2, Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0.5f);
-        AssertEqual(0, intent.DirectChildIntents.Count);
-    }
-
-    // ---- TacticalPlaybook tests (O1.2) ----
-
-    private sealed class StubPlaybook : TacticalPlaybook
-    {
-        public StubPlaybook() : base(
-            BattlePlanId.GenericMethodical,
-            "stub",
-            new PersonalityFit(0f, 0f, 0f),
-            new TerrainPreference(0.5f, 0.5f, 0.5f, 0.5f),
-            new OddsRange(0.8f, 1.4f),
-            reserveCommitTriggerOdds: 1.0f) { }
-
-        public override TacticalBattlePlan Instantiate(PlaybookContext ctx) =>
-            new TacticalBattlePlan(
-                BattlePlanId.GenericMethodical,
-                BattlePhase.Probe,
-                ctx.DefaultMainEffortSector,
-                null,
-                null,
-                ReserveCommitTriggerOdds,
-                0f,
-                ctx.JitterSeed);
     }
 
     private static void TacticalPlaybookPersonalityFitScoresPeakAtMatchAndDecayOff()
@@ -21771,7 +21693,7 @@ static class Program
             new DirectChildEvidence(1, 1, false, 4, 0, 0.5f),
         };
         var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(3, intents.Count);
         AssertEqual(DirectChildRole.Main, intents[1].Role, "main on sector 2");
         AssertEqual(2, intents[1].PrimarySector);
@@ -21806,7 +21728,7 @@ static class Program
             new DirectChildEvidence(2, 2, false, 3, 0, 0.5f),
         };
         var personality = new PersonalityVector(-0.6f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertTrue(intents[1].Role != DirectChildRole.Main,
             "locally outnumbered brigade in MainEffortSector must NOT be Main under cautious commander; got " + intents[1].Role);
         // Some other sector should have picked up Main via fallback.
@@ -21839,7 +21761,7 @@ static class Program
             new DirectChildEvidence(1, 1, false, 3, 0, 0.5f),
         };
         var personality = new PersonalityVector(0.6f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[1].Role,
             "aggressive commander bypasses local-odds gate and assigns Main to planned brigade");
     }
@@ -21862,7 +21784,7 @@ static class Program
             new DirectChildEvidence(2, 2, true, 2, 0, 0.7f),
         };
         var personality = new PersonalityVector(-0.6f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[0].Role,
             "parity (own == enemy) is acceptable for Main even under cautious commander");
     }
@@ -21899,7 +21821,7 @@ static class Program
             new DirectChildEvidence(0, 0, false, 10, 0, 0.4f),
         };
         var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[0].Role, "c0 is Main");
         for (int i = 1; i < intents.Count; i++)
         {
@@ -21926,7 +21848,7 @@ static class Program
             new DirectChildEvidence(2, 1, false, 3, 0, 0.5f),
         };
         var personality = new PersonalityVector(0.2f, 0.0f, 0.0f, 0.0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.SupportMain, intents[0].Role);
         AssertEqual(DirectChildRole.Main, intents[1].Role);
         AssertEqual(DirectChildRole.SupportMain, intents[2].Role);
@@ -21940,7 +21862,7 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pinning", true) };
         var evidence = new[] { new DirectChildEvidence(2, 2, true, 0, 0, 0.6f) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Fix, intents[0].Role);
     }
 
@@ -21954,7 +21876,7 @@ static class Program
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 7, 0.9f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
 
-        var intents = DirectChildAllocator.AllocateWithChildIntent(plan, personality, snapshots, evidence, new[] { enemyAttack });
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, new[] { enemyAttack }, null);
 
         AssertEqual(DirectChildRole.Fallback, intents[0].Role);
         AssertEqual(DirectChildAxis.Withdraw, intents[0].Axis);
@@ -21970,7 +21892,7 @@ static class Program
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 7, 0.9f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
 
-        var intents = DirectChildAllocator.AllocateWithChildIntent(plan, personality, snapshots, evidence, new[] { enemyAttack });
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, new[] { enemyAttack }, null);
 
         AssertEqual(DirectChildRole.Fallback, intents[0].Role);
         AssertEqual(DirectChildAxis.Withdraw, intents[0].Axis);
@@ -21992,7 +21914,7 @@ static class Program
             new DirectChildEvidence(3, 0, false, 5, 0, 0.5f),
         };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[0].Role);
         AssertEqual(DirectChildRole.Reserve, intents[1].Role);
     }
@@ -22011,10 +21933,10 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Distant Brigade", true) };
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 5, 0.9f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.AllocateWithChildIntent(
+        var intents = DirectChildAllocator.AllocateWithZones(
             plan, personality, snapshots,
             new[] { new DirectChildEvidence(1, 4, contactFlag: false, primarySector: 5, flankExposureBucket: 0, confidence01: 0.95f) },
-            new[] { enemyAttack });
+            new[] { enemyAttack }, null);
         AssertTrue(intents[0].Role != DirectChildRole.Fallback,
             "outnumbered but not in contact must NOT be Fallback; got " + intents[0].Role);
     }
@@ -22033,10 +21955,10 @@ static class Program
         // is NOT Attack (e.g., Defend). Should NOT trigger Fallback.
         var enemyHold = new TacticalIntentModel(InferredIntent.Defend, 5, 0.9f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.AllocateWithChildIntent(
+        var intents = DirectChildAllocator.AllocateWithZones(
             plan, personality, snapshots,
             new[] { new DirectChildEvidence(2, 4, contactFlag: true, primarySector: 5, flankExposureBucket: 0, confidence01: 0.95f) },
-            new[] { enemyHold });
+            new[] { enemyHold }, null);
         AssertTrue(intents[0].Role != DirectChildRole.Fallback,
             "outnumbered but enemy-not-attacking must hold the line; got " + intents[0].Role);
     }
@@ -22049,10 +21971,10 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
         var enemyAttack = new TacticalIntentModel(InferredIntent.Attack, 0, 0.8f, 0f, Array.Empty<EvidenceTag>());
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.AllocateWithChildIntent(
+        var intents = DirectChildAllocator.AllocateWithZones(
             plan, personality, snapshots,
             new[] { new DirectChildEvidence(1, 3, true, 0, 0, 0.7f) },
-            new[] { enemyAttack });
+            new[] { enemyAttack }, null);
         AssertEqual(DirectChildRole.Fallback, intents[0].Role);
     }
 
@@ -22072,7 +21994,7 @@ static class Program
             new DirectChildEvidence(2, 2, false, 4, 3, 0.5f),
         };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.RefuseLeft, intents[0].Role);
         AssertEqual(DirectChildRole.RefuseRight, intents[1].Role);
     }
@@ -22093,7 +22015,7 @@ static class Program
             new DirectChildEvidence(2, 1, true, 2, 0, 0.5f),
         };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Main, intents[0].Role, "first registered wins ties");
         AssertTrue(intents[1].Role != DirectChildRole.Main, "second registered did not also become Main");
     }
@@ -22117,7 +22039,7 @@ static class Program
         };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
 
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
 
         AssertEqual(DirectChildRole.Main, intents[1].Role, "strongest contact becomes fallback main effort");
         AssertEqual(4, intents[1].AxisSector, "fallback main effort sector");
@@ -22141,7 +22063,7 @@ static class Program
         };
         var personality = new PersonalityVector(0.8f, -0.6f, 0.5f, 0f, 0f);
 
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
 
         AssertEqual(DirectChildRole.Main, intents[0].Role, "first aggressive wing becomes provisional main");
         AssertEqual(1, intents[0].AxisSector, "provisional main axis follows observed child sector");
@@ -22167,7 +22089,7 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Lonely", true) };
         var evidence = new[] { new DirectChildEvidence(1, 1, false, 0, 0, 0.3f) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Reserve, intents[0].Role);
     }
 
@@ -22179,7 +22101,7 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Screening", true) };
         var evidence = new[] { new DirectChildEvidence(1, 1, false, 4, 0, 0.3f) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
-        var intents = DirectChildAllocator.Allocate(plan, personality, snapshots, evidence);
+        var intents = DirectChildAllocator.AllocateWithZones(plan, personality, snapshots, evidence, null, null);
         AssertEqual(DirectChildRole.Screen, intents[0].Role);
         AssertEqual(DirectChildAxis.Hold, intents[0].Axis);
     }
@@ -22192,10 +22114,10 @@ static class Program
         var snapshots = new[] { new DirectChildSnapshot("c0", "a", 15, 0, "Pressed", true) };
         var personality = new PersonalityVector(0f, 0f, 0f, 0f, 0f);
         // perChildEnemyIntent length 0 != snapshots length 1; allocator must rebuild internally.
-        var intents = DirectChildAllocator.AllocateWithChildIntent(
+        var intents = DirectChildAllocator.AllocateWithZones(
             plan, personality, snapshots,
             new[] { new DirectChildEvidence(1, 3, true, 0, 0, 0.7f) },
-            Array.Empty<TacticalIntentModel>());
+            Array.Empty<TacticalIntentModel>(), null);
         // With Unknown enemy intent, Fallback rule (which needs Attack intent) cannot fire.
         // Adverse-odds child with no other rule match used to land Unknown; with
         // the 2026-05-23 G3 fall-through default → Reserve (so vanilla's macroai
@@ -22613,8 +22535,7 @@ static class Program
             sectors,
             enemyReserveCommitFraction: 0.4f,
             anyContactSpotted: true,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 2000f);
+            anyContactBroken: false);
 
         AssertEqual(2, state.Sectors.Length, "sector count");
         AssertEqual(0, state.Sectors[0].SectorId, "sector 0 id");
@@ -22623,7 +22544,6 @@ static class Program
         AssertNear(0.4f, state.EnemyReserveCommitFraction, 1e-5f, "enemy reserve commit fraction");
         AssertTrue(state.AnyContactSpotted, "any contact spotted");
         AssertFalse(state.AnyContactBroken, "any contact broken");
-        AssertNear(2000f, state.EnemyReinforcementStrength24h, 1e-5f, "enemy reinforcement strength 24h");
     }
 
     private static void EnemyVisibleStateClampsAndCoercesNullSectors()
@@ -22632,18 +22552,16 @@ static class Program
             sectors: null,
             enemyReserveCommitFraction: 1.5f,
             anyContactSpotted: false,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: float.NaN);
+            anyContactBroken: false);
 
         AssertEqual(0, state.Sectors.Length, "null sectors become empty");
         AssertNear(1.0f, state.EnemyReserveCommitFraction, 1e-5f, "reserve fraction clamps to 1");
-        AssertNear(0f, state.EnemyReinforcementStrength24h, 1e-5f, "NaN reinforcement strength becomes 0");
     }
 
     private static void ArmyIntentInferenceUnknownWhenNoVisibleSectors()
     {
         var ownEvidence = new ArmyEvidence(currentOdds: 1.0f, terrain: TerrainKind.Open, defaultMainEffortSector: 0);
-        var enemy = new EnemyVisibleState(System.Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f);
+        var enemy = new EnemyVisibleState(System.Array.Empty<EnemyVisibleSector>(), 0f, false, false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22664,8 +22582,7 @@ static class Program
             },
             0.7f,
             true,
-            false,
-            0f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22684,8 +22601,7 @@ static class Program
             new[] { new EnemyVisibleSector(0, 5000f, 7000f, false) },
             0.7f,
             true,
-            false,
-            1500f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22694,7 +22610,6 @@ static class Program
         AssertTrue(model.Confidence01 >= ArmyIntentInference.ConfidenceFloor, "single sector confidence reaches floor");
         AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReserveCommitted) >= 0, "single sector evidence includes reserve committed");
         AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ContactSpotted) >= 0, "single sector evidence includes contact spotted");
-        AssertTrue(System.Array.IndexOf(model.SupportingEvidence, EvidenceTag.ReinforcementsArriving) >= 0, "single sector evidence includes reinforcements");
     }
 
     private static void ArmyIntentInferenceUnconcentratedReservesUncommittedImpliesProbe()
@@ -22709,8 +22624,7 @@ static class Program
             },
             0.1f,
             true,
-            false,
-            0f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22725,8 +22639,7 @@ static class Program
             new[] { new EnemyVisibleSector(0, 5000f, 1000f, false) },
             0f,
             false,
-            true,
-            0f);
+            true);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22746,8 +22659,7 @@ static class Program
             },
             0.6f,
             true,
-            false,
-            0f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22762,8 +22674,7 @@ static class Program
             new[] { new EnemyVisibleSector(0, 5000f, 100f, false) },
             0f,
             false,
-            false,
-            0f);
+            false);
 
         var model = ArmyIntentInference.Build(ownEvidence, enemy);
 
@@ -22782,8 +22693,7 @@ static class Program
             },
             enemyReserveCommitFraction: 0.5f,
             anyContactSpotted: true,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
 
         var intent = ArmyIntentInference.BuildForFrontage(primarySector: 2, enemy, ownStrengthBucket: 1);
         AssertTrue(intent.PrimaryIntent != InferredIntent.Unknown,
@@ -22797,8 +22707,7 @@ static class Program
             sectors: new[] { new EnemyVisibleSector(0, 100f, 100f, false) },
             enemyReserveCommitFraction: 0f,
             anyContactSpotted: false,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
         var intent = ArmyIntentInference.BuildForFrontage(primarySector: 99, enemy, ownStrengthBucket: 0);
         AssertEqual(InferredIntent.Unknown, intent.PrimaryIntent);
     }
@@ -22836,18 +22745,6 @@ static class Program
         orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
         orch.AdvancePhase(BattlePhase.Consolidate);
         AssertEqual(2, orch.CurrentMacroAi, "Consolidate phase -> macroai 2 (defend)");
-    }
-
-    private static void ArmyOrchestratorEmitArmyIntentMatchesCurrentPlan()
-    {
-        var lee = new PersonalityVector(0.8f, -0.4f, 0.7f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
-        orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 2));
-        var intent = orch.EmitArmyIntent();
-        AssertEqual(BattlePlanId.DoubleEnvelopment, intent.PlanId, "intent plan id matches");
-        AssertEqual(BattlePhase.Probe, intent.Phase, "intent phase matches");
-        AssertEqual(2, intent.MainEffortSector, "intent main effort matches plan");
-        AssertTrue(intent.AggressionBias01 > 0.5f, "intent aggression bias positive for aggressive CO");
     }
 
     private static void ArmyOrchestratorRecordsHistoryOnInitialPlan()
@@ -22944,36 +22841,12 @@ static class Program
             new DirectChildSnapshot("c0", "a", 15, 0, "First", true),
             new DirectChildSnapshot("c1", "a", 15, 0, "Second", true),
         });
-        orch.ObserveDirectChildEvidence(new[]
+        orch.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(1, 1, false, 0, 0, 0.3f),
             new DirectChildEvidence(3, 1, true,  2, 0, 0.7f),
-        });
+        }, null, null);
         AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("c1"));
-    }
-
-    private static void ArmyOrchestratorObserveEvidenceIdempotentOnEqualSignature()
-    {
-        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
-        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        var firstRole = orch.GetDirectChildRole("c0");
-        var firstIntents = orch.CurrentDirectChildIntents;
-        // re-observe identical evidence — orchestrator should NOT recompute
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        AssertEqual(firstRole, orch.GetDirectChildRole("c0"));
-        AssertTrue(object.ReferenceEquals(firstIntents, orch.CurrentDirectChildIntents),
-            "signature-equal evidence must reuse the cached intent list (no allocation)");
-    }
-
-    private static void ArmyOrchestratorEmitArmyIntentIncludesDirectChildren()
-    {
-        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
-        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        var intent = orch.EmitArmyIntent();
-        AssertEqual(1, intent.DirectChildIntents.Count);
-        AssertEqual(DirectChildRole.Main, intent.DirectChildIntents[0].Role);
     }
 
     private static void ArmyOrchestratorGetDirectChildRoleUnknownWhenUnregistered()
@@ -23017,10 +22890,10 @@ static class Program
         {
             new DirectChildSnapshot("synth-army-12345", "army-12345", 16, 0, "ArmyA", true),
         });
-        orch.ObserveDirectChildEvidence(new[]
+        orch.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
-        });
+        }, null, null);
         AssertEqual(DirectChildRole.Main, orch.GetDirectChildRole("synth-army-12345"));
         AssertEqual(DirectChildRole.Unknown, orch.GetDirectChildRole("child-12345"),
             "orchestrator must distinguish synth-army-{id} from child-{id} by exact match");
@@ -23056,13 +22929,13 @@ static class Program
             new DirectChildSnapshot("child-200", "army-100", 15, 0, "Corps", true),
         });
         army.RegisterCommandTree(tree);
-        army.ObserveDirectChildEvidenceWithIntent(new[]
+        army.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
         }, new[]
         {
             new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()),
-        });
+        }, null);
 
         AssertEqual(DirectChildRole.Main, army.GetDirectChildRole("child-200"), "O3 direct child role should remain authoritative");
         var resolution = army.ResolveCommandIntentForGroup(200);
@@ -23085,10 +22958,10 @@ static class Program
             new DirectChildSnapshot("child-200", "army-100", 15, 0, "Corps", true),
         });
         army.RegisterCommandTree(tree);
-        army.ObserveDirectChildEvidence(new[]
+        army.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(3, 1, true, 2, 0, 0.7f),
-        });
+        }, null, null);
 
         var parent = army.ResolveCommandIntentForGroup(200);
         var child = army.ResolveCommandIntentForGroup(300);
@@ -23106,13 +22979,13 @@ static class Program
         {
             new DirectChildSnapshot("synth-army-200", "army-200", 15, 0, "Detached Corps", true),
         });
-        army.ObserveDirectChildEvidenceWithIntent(new[]
+        army.ObserveDirectChildEvidenceWithZones(new[]
         {
             new DirectChildEvidence(1, 3, true, 4, 0, 0.8f),
         }, new[]
         {
             new TacticalIntentModel(InferredIntent.Attack, 4, 0.8f, 0.5f, Array.Empty<EvidenceTag>()),
-        });
+        }, null);
 
         var resolution = army.ResolveCommandIntentForGroup(200);
 
@@ -23208,50 +23081,6 @@ static class Program
         AssertTrue(TacticalReserveCommitGate.PermitReserveListBias(main), "main role can be list-bias eligible");
     }
 
-    private static void ArmyOrchestratorReplanInvalidatesDirectChildEvidenceCache()
-    {
-        var orch = NewArmyOrchestratorWithPlan(mainSector: 2);
-        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        var firstIntents = orch.CurrentDirectChildIntents;
-
-        // Force a replan (returns void; succeeds when TryPickPlan returns true).
-        // The empty-catalog helper used by NewArmyOrchestratorWithPlan would otherwise
-        // make TryPickPlan fail, so we register a single placeholder playbook by re-using
-        // SetPlanForTesting before calling Replan with the new sector.
-        orch.SetPlanForTesting(new TacticalBattlePlan(
-            BattlePlanId.DoubleEnvelopment, BattlePhase.MainEffort,
-            mainEffortSector: 5,  // different sector than before
-            Array.Empty<int>(), Array.Empty<int>(), 1.2f, 0f, 0));
-
-        // Simulate post-replan: signature-equal evidence should now allocate against the new plan,
-        // because _hasObservedEvidence was reset (replan path) — but here we use SetPlanForTesting,
-        // which does not reset _hasObservedEvidence. So instead, drive the same invariant via the
-        // RegisterDirectChildren path which DOES clear _hasObservedEvidence. Then verify that
-        // re-observing with the same signature now picks up the new sector layout.
-        orch.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        AssertTrue(!object.ReferenceEquals(firstIntents, orch.CurrentDirectChildIntents),
-            "after re-registration, the cached intent list must be replaced");
-
-        // Now exercise Replan invalidation directly. We need a non-empty catalog so TryPickPlan succeeds.
-        // The simplest path: spin up a fresh orchestrator with a real seeded catalog.
-        var orch2 = new ArmyOrchestrator(allianceId: 0, BuiltInPlaybooks.SeedCatalog(),
-            new PersonalityVector(0.2f, 0f, 0f, 0f, 0f));
-        orch2.PickInitialPlan(new ArmyEvidence(currentOdds: 1.2f, terrain: TerrainKind.Open, defaultMainEffortSector: 2));
-        orch2.RegisterDirectChildren(new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) });
-        orch2.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        var preReplanIntents = orch2.CurrentDirectChildIntents;
-
-        orch2.Replan(new ArmyEvidence(currentOdds: 0.8f, terrain: TerrainKind.Open, defaultMainEffortSector: 5));
-        // Re-observing with identical evidence should now reallocate (cache invalidated by Replan).
-        orch2.ObserveDirectChildEvidence(new[] { new DirectChildEvidence(2, 1, true, 2, 0, 0.5f) });
-        AssertTrue(!object.ReferenceEquals(preReplanIntents, orch2.CurrentDirectChildIntents),
-            "Replan must invalidate the cache so the next signature-equal observe reallocates");
-    }
-
-    // Helper used by the five tests above. Note the 8-arg TacticalBattlePlan ctor (the
-    // last arg is jitterSeed) and 5-arg PersonalityVector ctor (the last arg is pol).
     private static ArmyOrchestrator NewArmyOrchestratorWithPlan(int mainSector = 2)
     {
         var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
@@ -23288,13 +23117,13 @@ static class Program
     private static void ArmyReplanTriggersPhaseDeadlineFiresWhenAgeExceedsPhaseBudget()
     {
         var input = new ReplanTriggerInput(
-            planAgeSeconds: 200f, currentPhase: BattlePhase.Probe,
+            planAgeSeconds: ArmyReplanTriggers.PlanDeadlineBattleSeconds + 20f, currentPhase: BattlePhase.Probe,
             mainEffortOwnStrength: 5000f, mainEffortHistoryOwnStrength: 5000f,
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 1.0f, armyMoraleFloor: 0.4f,
-            reservesCommittedFraction: 0.5f, reinforcementsArrivingDelta: 0f,
+            reservesCommittedFraction: 0.5f, ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0f);
-        AssertEqual(ReplanTrigger.PhaseDeadline, ArmyReplanTriggers.Evaluate(input), "age >= 180 fires PhaseDeadline");
+        AssertEqual(ReplanTrigger.PhaseDeadline, ArmyReplanTriggers.Evaluate(input), "age past the battle-time plan deadline fires PhaseDeadline");
     }
 
     private static void ArmyReplanTriggersMainEffortSectorLossFiresBelowThreshold()
@@ -23304,7 +23133,7 @@ static class Program
             mainEffortOwnStrength: 1500f, mainEffortHistoryOwnStrength: 5000f,  // 30% of historic
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 1.0f, armyMoraleFloor: 0.4f,
-            reservesCommittedFraction: 0.5f, reinforcementsArrivingDelta: 0f,
+            reservesCommittedFraction: 0.5f, ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0f);
         AssertEqual(ReplanTrigger.MainEffortSectorLoss, ArmyReplanTriggers.Evaluate(input), "main-effort below 50% fires MainEffortSectorLoss");
     }
@@ -23331,7 +23160,7 @@ static class Program
 
     private static void ArmyReplanTriggersReinforcementArrivalFiresOnNonzeroDelta()
     {
-        var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, reinforcementsArrivingDelta: 2500f, 0f);
+        var input = new ReplanTriggerInput(30f, BattlePhase.MainEffort, 5000f, 5000f, 1.0f, 1.0f, 1f, 0.4f, 0.5f, ownReinforcementsArriving: 2500f, 0f);
         AssertEqual(ReplanTrigger.ReinforcementArrival, ArmyReplanTriggers.Evaluate(input), "reinforcements arrival fires ReinforcementArrival");
     }
 
@@ -23359,7 +23188,7 @@ static class Program
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 0.9f, armyMoraleFloor: 0.4f,
             reservesCommittedFraction: 0.35f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0.0f);
         AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(input),
             "0.35 unknown sentinel must not trip ReserveExhaustion");
@@ -23374,7 +23203,7 @@ static class Program
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 0.9f, armyMoraleFloor: 0.4f,
             reservesCommittedFraction: 0.90f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0.0f);
         AssertEqual(ReplanTrigger.ReserveExhaustion, ArmyReplanTriggers.Evaluate(input),
             "known fraction >= 0.85 still fires ReserveExhaustion");
@@ -24103,7 +23932,7 @@ static class Program
         // Budget elapsed, global odds below 0.9 → consolidate (don't commit
         // to a bad attack just because the clock ran out)
         var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
-            BattlePhase.Probe, planAgeSeconds: 200f,
+            BattlePhase.Probe, planAgeSeconds: TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(0.5f) + 60f,
             globalOddsCurrent: 0.7f, mainEffortOddsCurrent: 0.7f,
             commanderAggression01: 0.5f));
         AssertEqual(BattlePhase.Consolidate, d.NextPhase,
@@ -24158,30 +23987,30 @@ static class Program
 
     private static void PhaseProgressionAggressiveShortensProbeBudget()
     {
-        // Aggressive commander (aggression01=1.0) -> 30s probe budget.
-        // At 45s (past budget) with neutral odds, commit anyway.
+        // Aggressive commander (aggression01=1.0) -> 20 battle-minute probe
+        // budget. At 30 battle-minutes (past budget) with neutral odds, commit.
         var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
-            BattlePhase.Probe, planAgeSeconds: 45f,
+            BattlePhase.Probe, planAgeSeconds: 30f * 60f,
             globalOddsCurrent: 0.95f, mainEffortOddsCurrent: 0.95f,
             commanderAggression01: 1.0f));
         AssertEqual(BattlePhase.MainEffort, d.NextPhase,
-            "aggressive 30s probe budget commits at 45s; got " + d.Reason);
-        AssertNear(30f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(1.0f), 0.01f,
-            "aggression=1.0 -> 30s probe budget");
+            "aggressive 20-minute probe budget commits at 30 minutes; got " + d.Reason);
+        AssertNear(20f * 60f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(1.0f), 0.01f,
+            "aggression=1.0 -> 20 battle-minute probe budget");
     }
 
     private static void PhaseProgressionCautiousLengthensProbeBudget()
     {
-        // Cautious commander (aggression01=0.0) -> 120s budget.
-        // At 60s with neutral odds, still probing.
+        // Cautious commander (aggression01=0.0) -> 60 battle-minute budget.
+        // At 30 battle-minutes with neutral odds, still probing.
         var d = TacticalPhaseProgressionDoctrine.Decide(MakePhaseInput(
-            BattlePhase.Probe, planAgeSeconds: 60f,
+            BattlePhase.Probe, planAgeSeconds: 30f * 60f,
             globalOddsCurrent: 0.95f, mainEffortOddsCurrent: 0.95f,
             commanderAggression01: 0.0f));
         AssertEqual(BattlePhase.Probe, d.NextPhase,
-            "cautious 120s probe budget still probing at 60s; got " + d.Reason);
-        AssertNear(120f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(0.0f), 0.01f,
-            "aggression=0.0 -> 120s probe budget");
+            "cautious 60-minute probe budget still probing at 30 minutes; got " + d.Reason);
+        AssertNear(60f * 60f, TacticalPhaseProgressionDoctrine.ProbeBudgetForAggression(0.0f), 0.01f,
+            "aggression=0.0 -> 60 battle-minute probe budget");
     }
 
     private static void PhaseProgressionExploitEndsOnReservesExhausted()
@@ -24225,7 +24054,7 @@ static class Program
         orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 0));
         AssertEqual(0, orch.CurrentPlan.MainEffortSector, "plan starts on sector 0");
 
-        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 2);
+        bool shifted = orch.ConsiderMainEffortShift(2, float.MaxValue, 0f);
         AssertTrue(shifted, "shift returns true when sector changes");
         AssertEqual(2, orch.CurrentPlan.MainEffortSector,
             "main effort shifted to sector 2");
@@ -24238,7 +24067,7 @@ static class Program
         orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 0));
         orch.AdvancePhase(BattlePhase.Withdraw);
 
-        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 2);
+        bool shifted = orch.ConsiderMainEffortShift(2, float.MaxValue, 0f);
         AssertTrue(!shifted, "withdraw phase blocks main-effort shifts");
         AssertEqual(0, orch.CurrentPlan.MainEffortSector,
             "main effort unchanged during withdraw");
@@ -24250,7 +24079,7 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.1f, TerrainKind.Wooded, defaultMainEffortSector: 1));
 
-        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 1);
+        bool shifted = orch.ConsiderMainEffortShift(1, float.MaxValue, 0f);
         AssertTrue(!shifted, "no-op when decisive sector equals current");
     }
 
@@ -24586,11 +24415,11 @@ static class Program
         // and we observe pure phase progression.
         var visible = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(0, 6000f, 4000f, false) },  // 1.5x local, no recent fire
-            0.5f, anyContactSpotted: false, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+            0.5f, anyContactSpotted: false, anyContactBroken: false);
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 10f, evidence, visible,
             ownMainEffortStrength: 8000f, ownArmyMorale: 1.0f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.1f, ownAvgAmmo01: 0.95f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -24609,7 +24438,7 @@ static class Program
     {
         return new EnemyVisibleState(
             new[] { new EnemyVisibleSector(sectorId, ownStrength, enemyStrength, false) },
-            0.5f, anyContactSpotted: false, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+            0.5f, anyContactSpotted: false, anyContactBroken: false);
     }
 
     private static void ArmyTickCycleExhaustedWithReliefHoldsInProbe()
@@ -24630,7 +24459,7 @@ static class Program
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 8000f, 5000f),
             ownMainEffortStrength: 20000f, ownArmyMorale: 0.7f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.7f, ownAvgAmmo01: 0.5f,
             nearestReinforcementHours: 2f, nearestReinforcementStrength: 15000f);
@@ -24656,7 +24485,7 @@ static class Program
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local
             ownMainEffortStrength: 18000f, ownArmyMorale: 0.8f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.4f, ownAvgAmmo01: 0.7f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -24682,7 +24511,7 @@ static class Program
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local
             ownMainEffortStrength: 18000f, ownArmyMorale: 0.8f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.4f, ownAvgAmmo01: 0.7f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -24708,7 +24537,7 @@ static class Program
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local, no intent shift
             ownMainEffortStrength: 8000f, ownArmyMorale: 1.0f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase,
@@ -24737,12 +24566,12 @@ static class Program
             new EnemyVisibleSector(sectorId: 1, ownStrength: 3000f, enemyStrength: 5000f, recentFire: false),
             new EnemyVisibleSector(sectorId: 2, ownStrength: 5000f, enemyStrength: 2000f, recentFire: false), // decisive
         };
-        var visible = new EnemyVisibleState(sectors, 0.4f, anyContactSpotted: false, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+        var visible = new EnemyVisibleState(sectors, 0.4f, anyContactSpotted: false, anyContactBroken: false);
 
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 5f, evidence, visible,
             ownMainEffortStrength: 12000f, ownArmyMorale: 1.0f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -24782,40 +24611,9 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, defaultMainEffortSector: 0));
 
-        bool shifted = orch.ConsiderMainEffortShift(decisiveSectorId: 3);
+        bool shifted = orch.ConsiderMainEffortShift(3, float.MaxValue, 0f);
         AssertTrue(shifted, "legacy overload shifts on any positive decisive sector");
         AssertEqual(3, orch.CurrentPlan.MainEffortSector, "shifted to sector 3");
-    }
-
-    private static void AdvancePlanAgeRealtimeOnlyDoesNotAdvancePhaseAge()
-    {
-        // Compression-aware API: AdvancePlanAgeRealtimeOnly bumps plan age
-        // (used for replan rate limit) without touching phase age (used for
-        // commander-pace budgets). Mirrors the split needed under 2x/5x/20x
-        // time compression.
-        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
-        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
-        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "starts at 0");
-        AssertNear(0f, orch.PhaseAgeSeconds, 1e-5f, "starts at 0");
-
-        orch.AdvancePlanAgeRealtimeOnly(5f);
-        AssertNear(5f, orch.PlanAgeSeconds, 1e-5f, "plan age advanced");
-        AssertNear(0f, orch.PhaseAgeSeconds, 1e-5f, "phase age NOT advanced");
-    }
-
-    private static void AdvancePhaseAgeBattleTimeSeparateFromPlanAge()
-    {
-        // AdvancePhaseAge bumps phase age only — used with battle-time delta
-        // at high time compression (20x compression makes battle time advance
-        // 20s of phase budget per 1s of wallclock).
-        var lee = new PersonalityVector(0.7f, -0.3f, 0.6f, 0.5f, 0.4f);
-        var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
-        orch.PickInitialPlan(new ArmyEvidence(1.0f, TerrainKind.Open, 0));
-
-        orch.AdvancePhaseAge(20f);
-        AssertNear(0f, orch.PlanAgeSeconds, 1e-5f, "plan age NOT advanced by phase-only");
-        AssertNear(20f, orch.PhaseAgeSeconds, 1e-5f, "phase age advanced (battle time)");
     }
 
     private static void ArmyTickCycle20xCompressionBurnsProbeInBattleTime()
@@ -24841,13 +24639,14 @@ static class Program
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 1.5f, new ArmyEvidence(1.0f, TerrainKind.Open, 0), visible,
             ownMainEffortStrength: 10000f, ownArmyMorale: 1.0f,
-            ownReservesCommittedFraction: 0.2f, reinforcementsArrivingDelta: 0f,
+            ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 600,
             ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f,
             battleDeltaSeconds: 30f);  // 20x compression: 1.5 real = 30 battle
 
-        AssertNear(1.5f, orch.PlanAgeSeconds, 1e-5f, "plan age accrues real-time (1.5s)");
+        // T8 (2026-10-14): plan age (the plan deadline) is battle time too.
+        AssertNear(30f, orch.PlanAgeSeconds, 1e-5f, "plan age accrues battle-time (30s)");
         AssertNear(30f, orch.PhaseAgeSeconds, 1e-5f, "phase age accrues battle-time (30s)");
     }
 
@@ -24876,7 +24675,7 @@ static class Program
             orch, deltaSeconds: 5f, evidence, visible,
             ownMainEffortStrength: 12000f, ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,  // above exploit-gate min 0.4
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 0,
             ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
             nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f);
@@ -25235,7 +25034,6 @@ static class Program
     private static TacticalForceBalanceEvidence MakeForceBalance(
         float own, float enemy,
         ReinforcementArrival[] ownArrivals = null,
-        ReinforcementArrival[] enemyArrivals = null,
         float aggression = 0.5f, float initiative = 0.5f, float intel = 0.8f,
         float ownCasualtyRatio = 0f, float ownRoutedFraction = 0f,
         float battleHoursElapsed = 0f,
@@ -25244,7 +25042,6 @@ static class Program
         return new TacticalForceBalanceEvidence(
             own, enemy,
             ownArrivals ?? System.Array.Empty<ReinforcementArrival>(),
-            enemyArrivals ?? System.Array.Empty<ReinforcementArrival>(),
             initiative, aggression, intel,
             ownCasualtyRatio01: ownCasualtyRatio,
             ownRoutedFraction01: ownRoutedFraction,
@@ -25252,40 +25049,44 @@ static class Program
             stance: stance);
     }
 
-    private static void ReinforcementOpportunity15kVs13kPlus7kIn12hMidWithdraws()
+    private static void ReinforcementOpportunity15kVs13kMidHoldsAsDefender()
     {
-        // User's example #1 (per their explicit quote: "may be better to continue
-        // holding if reinforcements bring them to 20,000 in 12 hours"):
-        //   15K own vs 13K enemy now, enemy +7K in 12h, mid commander
+        // 15K own vs 13K known enemy, mid commander. The enemy's schedule is
+        // not an input (enemy reinforcements count once in range).
         // CurrentRatio = 1.15 (below mid-band threshold ~1.32)
         // OwnParity = 0 (already ahead) → fails WaitAndConsolidate's > 0 check
         // CurrentRatio above WithdrawalRatioThreshold (0.85) → not Withdraw
-        // → DefensiveHold (own ahead now, future worse, no own relief, hold ground)
+        // → DefensiveHold as Defender.
+        // BR-H1 (2026-10-14): only a Defender holds here. In a meeting
+        // engagement vanilla attacks regardless of force balance
+        // (CheckGlobalAIStrategy 6400-6408), so Meeting/Attacker cap the attack
+        // threshold at parity and attack on the advantage.
         var ev = MakeForceBalance(15000f, 13000f,
-            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
-            aggression: 0.5f);
+            aggression: 0.5f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DefensiveHold, d.Opportunity,
-            "mid commander holds when current advantage thin and future worse without own relief, got reason=" + d.Reason);
+            "mid defender holds a thin advantage, got reason=" + d.Reason);
+        var meeting = TacticalReinforcementOpportunityDoctrine.Decide(MakeForceBalance(15000f, 13000f, aggression: 0.5f));
+        AssertEqual(ReinforcementOpportunity.AttackNow, meeting.Opportunity, "meeting engagement attacks on the advantage");
     }
 
-    private static void ReinforcementOpportunity15kVs13kPlus7kIn12hAggressiveAttacks()
+    private static void ReinforcementOpportunity15kVs13kAggressiveAttacks()
     {
         // Same numbers, aggression=0.85 (Hood-style)
         // AttackThreshold drops to ~1.20 * (1.30 - 0.85*0.40) = ~1.15
-        // CurrentRatio 1.15 now meets threshold
-        // ParityForEnemy = 12h, AttackWindow ~0.5h → window exists
-        // Decision: AttackNow
+        // CurrentRatio 1.15 now meets threshold, known enemy below us
+        // Decision: AttackNow (advantage-and-enemy-static)
         var ev = MakeForceBalance(15000f, 13000f,
-            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
             aggression: 0.85f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
-            "aggressive commander strikes the defeat-in-detail window, got reason=" + d.Reason);
+            "aggressive commander attacks a thin advantage, got reason=" + d.Reason);
     }
 
-    private static void ReinforcementOpportunity15kVs13kPlus7kIn12hCautiousWithdraws()
+    private static void ReinforcementOpportunity15kVs13kCautiousHoldsAsDefender()
     {
+        // BR-H1: holding at these odds is Defender behaviour; Meeting/Attacker
+        // attack at parity like vanilla (CheckGlobalAIStrategy 6400-6408).
         // Same numbers, aggression=0.10 (McClellan-style)
         // AttackThreshold rises to ~1.20 * (1.30 - 0.10*0.40) = ~1.51
         // CurrentRatio 1.15 way below — won't attack
@@ -25293,14 +25094,13 @@ static class Program
         // → DefensiveHold (cautious commander never attacks the unequal odds AND
         //   doesn't withdraw from a position where own > enemy currently)
         var ev = MakeForceBalance(15000f, 13000f,
-            enemyArrivals: new[] { new ReinforcementArrival(12f, 7000f) },
-            aggression: 0.10f);
+            aggression: 0.10f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DefensiveHold, d.Opportunity,
             "cautious commander holds defensively (not attack, not withdraw with own ahead now), got reason=" + d.Reason);
     }
 
-    private static void ReinforcementOpportunity10kVs15kEnemyGrowingCautiousDelaysDefensively()
+    private static void ReinforcementOpportunity10kVs15kCautiousDelaysDefensively()
     {
         // 10K vs 15K = ratio 0.67. With 2026-05-23 personality-modulated
         // withdrawal threshold, cautious commander (aggression 0.10) threshold
@@ -25308,7 +25108,6 @@ static class Program
         // DelayingDefense (outnumbered but defensible, no near parity).
         // Historical CW pattern: Johnston Atlanta-campaign-style Fabian delay.
         var ev = MakeForceBalance(10000f, 15000f,
-            enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
             aggression: 0.10f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DelayingDefense, d.Opportunity,
@@ -25320,7 +25119,6 @@ static class Program
         // 5K vs 15K = ratio 0.33. Cautious commander threshold 0.52,
         // ratio 0.33 < 0.52 → WithdrawalToFightLater fires (severe overmatch).
         var ev = MakeForceBalance(5000f, 15000f,
-            enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
             aggression: 0.10f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.WithdrawalToFightLater, d.Opportunity,
@@ -25333,7 +25131,6 @@ static class Program
         // 0.55 - 0.95*0.30 = 0.27. Ratio 0.40 > 0.27 → does NOT withdraw.
         // Jackson at Chancellorsville pattern: hold ground even at 2.5:1 odds.
         var ev = MakeForceBalance(6000f, 15000f,
-            enemyArrivals: new[] { new ReinforcementArrival(4f, 5000f) },
             aggression: 0.95f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.DelayingDefense, d.Opportunity,
@@ -25554,24 +25351,21 @@ static class Program
             1e-6f, "cautious threshold");
     }
 
-    private static void ReinforcementOpportunity15kVs10kPlus5kIn8hAttackWindowOpen()
+    private static void ReinforcementOpportunity15kVs10kAttacksOnAdvantage()
     {
-        // 15K vs 10K now, enemy +5K in 8h, mid commander
+        // 15K vs 10K known enemy, mid commander
         // CurrentRatio = 1.5 (above threshold 1.20)
-        // EnemyAt 8h = 15K, OwnAt 8h = 15K → parity at 8h
-        // Window 1h required, parity 8h away → window comfortably open
-        // Decision: AttackNow
+        // Decision: AttackNow (advantage-and-enemy-static)
         var ev = MakeForceBalance(15000f, 10000f,
-            enemyArrivals: new[] { new ReinforcementArrival(8f, 5000f) },
             aggression: 0.5f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.AttackNow, d.Opportunity,
-            "clear-advantage + parity in 8h → AttackNow, got reason=" + d.Reason);
+            "clear advantage → AttackNow, got reason=" + d.Reason);
     }
 
     private static void ReinforcementOpportunity12kPlus5kIn6hWaitsToConsolidate()
     {
-        // 12K own +5K in 6h vs 13K enemy now (no enemy arrivals)
+        // 12K own +5K in 6h vs 13K known enemy
         // CurrentRatio = 0.92 (below threshold)
         // OwnParity = 6h (own 17K vs enemy 13K = 1.31)
         // EnemyParity = never (own > enemy after own arrival)
@@ -25585,18 +25379,16 @@ static class Program
             "own reinforcement arriving in time → WaitAndConsolidate, got reason=" + d.Reason);
     }
 
-    private static void ReinforcementOpportunity13kVs13kBothReinforcingDefensiveHold()
+    private static void ReinforcementOpportunity13kVs13kOwnReliefTooFarDefensiveHold()
     {
-        // 13K vs 13K now, both reinforcing — enemy +8K in 14h, own +3K in 12h
-        // CurrentRatio = 1.0 (below threshold)
-        // OwnAt 12h = 16K, EnemyAt 12h = 13K → own briefly ahead 12-14h
-        // OwnAt 14h = 16K, EnemyAt 14h = 21K → enemy decisive
-        // Mid-band MaxWaitHours = 7.5h, OwnParity 12h is BEYOND that
-        // Decision: DefensiveHold (not WaitAndConsolidate because relief is too far)
+        // BR-H1: holding at these odds is Defender behaviour; Meeting/Attacker
+        // attack at parity like vanilla (CheckGlobalAIStrategy 6400-6408).
+        // 13K vs 13K known enemy, own +3K in 12h
+        // CurrentRatio = 1.0 (below threshold), OwnParity 0 (already level)
+        // Decision: DefensiveHold as Defender
         var ev = MakeForceBalance(13000f, 13000f,
             ownArrivals: new[] { new ReinforcementArrival(12f, 3000f) },
-            enemyArrivals: new[] { new ReinforcementArrival(14f, 8000f) },
-            aggression: 0.5f);
+            aggression: 0.5f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         // CurrentRatio 1.0 is below WithdrawalRatioThreshold(0.85)? No, 1.0 >= 0.85.
         // So withdrawal is NOT triggered. Hold is the right call.
@@ -25607,9 +25399,8 @@ static class Program
     private static void ReinforcementOpportunityIntelConfidenceFloorFallsThrough()
     {
         // Same scenario as attack-window-open but with intel confidence 0.3
-        // (below the 0.5 floor for action) → falls through to NoOpportunity
+        // (below the 0.35 floor for action) → falls through to NoOpportunity
         var ev = MakeForceBalance(15000f, 10000f,
-            enemyArrivals: new[] { new ReinforcementArrival(8f, 5000f) },
             aggression: 0.5f, intel: 0.3f);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertEqual(ReinforcementOpportunity.NoOpportunity, d.Opportunity,
@@ -25704,11 +25495,13 @@ static class Program
 
     private static void ReinforcementOpportunityCautiousStandingAdvantageDoesNotAttack()
     {
+        // BR-H1: holding at these odds is Defender behaviour; Meeting/Attacker
+        // attack at parity like vanilla (CheckGlobalAIStrategy 6400-6408).
         // 15K vs 13K, no enemy growth, cautious commander (0.10).
         // AttackThreshold @ 0.10 = 1.20 * (1.30 - 0.10*0.40) = 1.512
         // CurrentRatio 1.154 < 1.512 → ratio check fails even though enemy static.
         // Decision: NOT AttackNow (cautious commander needs bigger margin).
-        var ev = MakeForceBalance(15000f, 13000f, aggression: 0.10f);
+        var ev = MakeForceBalance(15000f, 13000f, aggression: 0.10f, stance: BattleStance.Defender);
         var d = TacticalReinforcementOpportunityDoctrine.Decide(ev);
         AssertTrue(d.Opportunity != ReinforcementOpportunity.AttackNow,
             "cautious commander honors elevated attack threshold despite static enemy, got " + d.Opportunity + " reason=" + d.Reason);
@@ -25760,13 +25553,10 @@ static class Program
     private static void ReinforcementOpportunityStrengthAtHourAccumulatesArrivals()
     {
         var ev = MakeForceBalance(10000f, 5000f,
-            ownArrivals: new[] { new ReinforcementArrival(2f, 1500f), new ReinforcementArrival(6f, 1000f) },
-            enemyArrivals: new[] { new ReinforcementArrival(4f, 2000f) });
+            ownArrivals: new[] { new ReinforcementArrival(2f, 1500f), new ReinforcementArrival(6f, 1000f) });
         AssertEqual(10000f, ev.OwnStrengthAtHour(1f), "no arrivals yet at hour 1");
         AssertEqual(11500f, ev.OwnStrengthAtHour(3f), "first arrival counted at hour 3");
         AssertEqual(12500f, ev.OwnStrengthAtHour(8f), "both arrivals counted at hour 8");
-        AssertEqual(5000f, ev.EnemyStrengthAtHour(2f), "enemy arrival not yet at hour 2");
-        AssertEqual(7000f, ev.EnemyStrengthAtHour(5f), "enemy arrival counted at hour 5");
     }
 
     private static void ReinforcementOpportunityParityHoursForOwnShortCircuitsWhenAlreadyAhead()
@@ -25836,55 +25626,56 @@ static class Program
     {
         // Telemetry showed TacticalCommanderUnknown for Hunter and Beauregard.
         // Hunter was unregistered. Beauregard was registered but failed name match
-        // because the GTCW combinedname was 'P.G.T. Beauregard'. Both must now resolve.
-        AssertTrue(LookupEntry("Union", "Hunter").HasValue, "Hunter (Union) must be registered");
+        // because the GTCW combinedname was 'P.G.T. Beauregard'. Both must now resolve
+        // by their full vanilla names (T12: surnames alone never match).
         AssertTrue(LookupEntry("Union", "David Hunter").HasValue, "Hunter (full name) must match");
-        AssertTrue(LookupEntry("CSA", "Beauregard").HasValue, "Beauregard (CSA last name) must match");
         AssertTrue(LookupEntry("CSA", "P.G.T. Beauregard").HasValue, "Beauregard (full name with initials) must match");
+        AssertTrue(!LookupEntry("CSA", "Beauregard").HasValue, "bare surname never matches");
     }
 
     private static void HistoricalRegistryNormalizesInitialsAndPunctuation()
     {
-        // NormalizeLastName must strip initials and punctuation when picking the
-        // last meaningful token. Short surnames (3 chars) like "Lee" and "Ord"
-        // must still be preserved.
-        AssertEqual("beauregard", HistoricalFigureRegistry.NormalizeLastNameForTest("P.G.T. Beauregard"), "PGT initials stripped");
-        AssertEqual("hill", HistoricalFigureRegistry.NormalizeLastNameForTest("A.P. Hill"), "AP initials stripped");
-        AssertEqual("lee", HistoricalFigureRegistry.NormalizeLastNameForTest("R.E. Lee"), "RE initials stripped, Lee kept");
-        AssertEqual("ord", HistoricalFigureRegistry.NormalizeLastNameForTest("E.O.C. Ord"), "EOC initials stripped, Ord kept");
-        AssertEqual("hunter", HistoricalFigureRegistry.NormalizeLastNameForTest("David Hunter"), "single first-name + lastname");
-        AssertEqual("forrest", HistoricalFigureRegistry.NormalizeLastNameForTest("Nathan Bedford Forrest"), "three-token name takes last");
+        AssertEqual("pgt beauregard", HistoricalFigureRegistry.NormalizeFullNameForTest("P.G.T. Beauregard"), "PGT initials compacted");
+        AssertEqual("ambrose p hill", HistoricalFigureRegistry.NormalizeFullNameForTest("Ambrose P. Hill"), "middle initial kept");
+        AssertEqual("edward oc ord", HistoricalFigureRegistry.NormalizeFullNameForTest("Edward O.C.  Ord"), "whitespace collapsed");
+        AssertEqual("nathan b forrest", HistoricalFigureRegistry.NormalizeFullNameForTest(" Nathan B. Forrest "), "trimmed");
     }
 
     private static void HistoricalRegistryCoversMajorCivilWarCommanders()
     {
         string[] mustCover = new[]
         {
-            "Lee", "Jackson", "Longstreet", "Stuart", "Hood", "Bragg", "Johnston",
-            "Beauregard", "Forrest", "Polk", "Ewell", "Hill", "Early", "Hardee",
-            "Cleburne", "Pickett", "Wheeler", "Morgan", "Hampton",
-            "Grant", "Sherman", "Sheridan", "Meade", "Thomas", "Hooker", "Burnside",
-            "McClellan", "Pope", "Halleck", "Hunter", "Sigel", "Banks", "Buell",
-            "Rosecrans", "Schofield", "McPherson", "Reynolds", "Hancock", "Sedgwick",
-            "Buford", "Custer",
+            "Robert E. Lee", "Thomas J. Jackson", "James Longstreet", "J.E.B. Stuart", "John B. Hood",
+            "Braxton Bragg", "Joseph E. Johnston", "P.G.T. Beauregard", "Nathan B. Forrest", "Leonidas Polk",
+            "Richard S. Ewell", "Ambrose P. Hill", "Jubal A. Early", "William J. Hardee", "Patrick R. Cleburne",
+            "George E. Pickett", "Joseph Wheeler", "John H. Morgan", "Wade Hampton",
+            "Ulysses S. Grant", "William T. Sherman", "Philip H. Sheridan", "George G. Meade", "George H. Thomas",
+            "Joseph Hooker", "Ambrose E. Burnside", "George B. McClellan", "John Pope", "Henry W. Halleck",
+            "David Hunter", "Franz Sigel", "Nathaniel P. Banks", "Don Carlos Buell", "William Rosecrans",
+            "John M. Schofield", "James B. McPherson", "John F. Reynolds", "Winfield S. Hancock", "John Sedgwick",
+            "John Buford", "George A. Custer",
         };
         var missing = new System.Collections.Generic.List<string>();
-        foreach (var last in mustCover)
+        foreach (var full in mustCover)
         {
-            var union = LookupEntry("Union", last);
-            var csa = LookupEntry("CSA", last);
-            if (!union.HasValue && !csa.HasValue) missing.Add(last);
+            var union = LookupEntry("Union", full);
+            var csa = LookupEntry("CSA", full);
+            if (!union.HasValue && !csa.HasValue) missing.Add(full);
         }
         AssertTrue(missing.Count == 0, "registry missing: " + string.Join(",", missing));
     }
 
-    private static PersonalityVector? LookupEntry(string allianceTag, string nameOrFull)
+    private static PersonalityVector? LookupEntry(string allianceTag, string fullName)
     {
-        string normalized = HistoricalFigureRegistry.NormalizeLastNameForTest(nameOrFull);
+        string normalized = HistoricalFigureRegistry.NormalizeFullNameForTest(fullName);
         foreach (var entry in HistoricalFigureRegistry.EntriesForTest)
         {
-            if (entry.AllianceTag == allianceTag && entry.CanonicalName == normalized)
-                return entry.V;
+            if (entry.AllianceTag != allianceTag || entry.FullNames == null) continue;
+            foreach (var n in entry.FullNames)
+            {
+                if (HistoricalFigureRegistry.NormalizeFullNameForTest(n) == normalized)
+                    return entry.V;
+            }
         }
         return null;
     }
@@ -25900,7 +25691,7 @@ static class Program
             globalOddsCurrent: 1.0f, globalOddsHistory: 1.0f,
             armyMoraleCurrent: 0.9f, armyMoraleFloor: 0.4f,
             reservesCommittedFraction: 0.35f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             enemyMainEffortShiftConfidenceWeighted: 0.0f);
         AssertEqual(ReplanTrigger.None, ArmyReplanTriggers.Evaluate(atSentinel),
             "at sentinel boundary: no trigger");
@@ -25922,7 +25713,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.None, trigger, "normal conditions do not replan");
@@ -25936,7 +25727,7 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
-        orch.AdvancePlanAge(190f);
+        orch.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
 
         var trigger = ArmyTickCycle.MaybeReplan(
             orch,
@@ -25946,7 +25737,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.PhaseDeadline, trigger, "age beyond budget replans on phase deadline");
@@ -25960,7 +25751,7 @@ static class Program
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
-        orch.AdvancePlanAge(200f);
+        orch.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
 
         var first = ArmyTickCycle.MaybeReplan(
             orch,
@@ -25970,9 +25761,9 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
-        orch.AdvancePlanAge(200f);
+        orch.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
         var second = ArmyTickCycle.MaybeReplan(
             orch,
             deltaSeconds: 5f,
@@ -25981,7 +25772,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.PhaseDeadline, first, "first over-budget tick replans");
@@ -26002,12 +25793,12 @@ static class Program
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         union.PickInitialPlan(ownEvidence);
         csa.PickInitialPlan(ownEvidence);
-        union.AdvancePlanAge(200f);
-        csa.AdvancePlanAge(200f);
+        union.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
+        csa.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
 
         var unionFirst = ArmyTickCycle.MaybeReplan(union, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
         var csaFirst = ArmyTickCycle.MaybeReplan(csa, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
-        union.AdvancePlanAge(200f);
+        union.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
         var unionSecond = ArmyTickCycle.MaybeReplan(union, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
 
         AssertEqual(ReplanTrigger.PhaseDeadline, unionFirst, "union first over-budget tick replans");
@@ -26022,14 +25813,14 @@ static class Program
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var firstBattle = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         firstBattle.PickInitialPlan(ownEvidence);
-        firstBattle.AdvancePlanAge(200f);
+        firstBattle.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
         var first = ArmyTickCycle.MaybeReplan(firstBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
 
         ArmyTickCycle.Reset();
 
         var secondBattle = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         secondBattle.PickInitialPlan(ownEvidence);
-        secondBattle.AdvancePlanAge(200f);
+        secondBattle.AdvancePlanAge(ArmyReplanTriggers.PlanDeadlineBattleSeconds + 10f);
         var second = ArmyTickCycle.MaybeReplan(secondBattle, 5f, ownEvidence, NormalEnemyVisibleState(), 5000f, 1.0f, 0.5f, 0f, 60);
 
         AssertEqual(ReplanTrigger.PhaseDeadline, first, "first battle over-budget tick replans");
@@ -26052,7 +25843,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.None, trigger, "normal tick does not replan");
@@ -26076,8 +25867,7 @@ static class Program
             },
             enemyReserveCommitFraction: 0.8f,
             anyContactSpotted: true,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
 
         var trigger = ArmyTickCycle.MaybeReplan(
             orch,
@@ -26087,7 +25877,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.EnemyIntentShift, trigger, "confident enemy attack signal replans");
@@ -26107,7 +25897,7 @@ static class Program
             ownMainEffortStrength: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
-            reinforcementsArrivingDelta: 0f,
+            ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
         AssertEqual(ReplanTrigger.None, trigger, "no active plan cannot replan");
@@ -26119,8 +25909,7 @@ static class Program
             new[] { new EnemyVisibleSector(0, 5000f, 5000f, false) },
             enemyReserveCommitFraction: 0.5f,
             anyContactSpotted: true,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
     }
 
     private static void DirectChildDiscoveryProbeHandlesEmptyUnitsused()
@@ -26213,8 +26002,7 @@ static class Program
             },
             enemyReserveCommitFraction: 0.4f,
             anyContactSpotted: false,
-            anyContactBroken: false,
-            enemyReinforcementStrength24h: 0f);
+            anyContactBroken: false);
 
         var evidence = DirectChildEvidenceBuilder.BuildAll(
             snapshots: new[]
@@ -26235,7 +26023,7 @@ static class Program
     {
         var enemy = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(2, 500f, 500f, recentFire: true) },
-            0.3f, true, false, 0f);
+            0.3f, true, false);
         var evidence = DirectChildEvidenceBuilder.BuildAll(
             new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) },
             new[] { 2 },
@@ -26248,7 +26036,7 @@ static class Program
     {
         var enemy = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(0, 1000f, 0f, false) },
-            0f, false, false, 0f);
+            0f, false, false);
         var evidence = DirectChildEvidenceBuilder.BuildAll(
             new[] { new DirectChildSnapshot("c0", "a", 15, 0, "First", true) },
             new[] { 99 /* sector not present in EnemyVisibleState */ },
@@ -26622,7 +26410,7 @@ static class Program
     {
         var sig = new TacticalBattleStateSignature(50, 8000, 7500, 1, 2, true, 12345, 0, 5);
         var ev = new ArmyEvidence(1.2f, TerrainKind.Open, 3);
-        var vis = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.4f, true, false, 1200f);
+        var vis = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.4f, true, false);
         var objs = new ObjectiveRecord[0];
         var tree = CommandTreeSnapshot.Empty;
         var children = Array.Empty<DirectChildSnapshot>();
@@ -26633,7 +26421,7 @@ static class Program
         AssertEqual(0f, snap.OwnMainEffortStrength, "negative main effort sanitized");
         AssertEqual(1f, snap.OwnArmyMorale, " >1 morale clamped");
         AssertEqual(0f, snap.OwnReservesCommittedFraction, "negative reserves sanitized");
-        AssertEqual(500f, snap.ReinforcementsArrivingDelta, "positive delta stored");
+        AssertEqual(500f, snap.OwnReinforcementsArriving, "positive delta stored");
     }
 
     private static void TacticalBattleRuntimeSnapshotCopiesObjectivesDefensively()
@@ -26641,7 +26429,7 @@ static class Program
         var list = new List<ObjectiveRecord>();
         // Note: ObjectiveRecord ctor requires valid Observation; use default for test (sanitized inside)
         var snap = new TacticalBattleRuntimeSnapshot(default(TacticalBattleStateSignature), 10f, default(ArmyEvidence),
-            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
+            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false),
             100f, 0.9f, 0.1f, 0f, list, CommandTreeSnapshot.Empty, Array.Empty<DirectChildSnapshot>());
         // mutate original
         // (list is empty, but test demonstrates copy contract even if non-empty in real use)
@@ -26653,7 +26441,7 @@ static class Program
     {
         var children = new DirectChildSnapshot[0];
         var snap = new TacticalBattleRuntimeSnapshot(default(TacticalBattleStateSignature), 2f, default(ArmyEvidence),
-            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
+            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false),
             50f, 0.8f, 0.2f, 0f, Array.Empty<ObjectiveRecord>(), CommandTreeSnapshot.Empty, children);
         AssertEqual(0, snap.DirectChildSnapshots.Count, "stores copy of direct child list");
     }
@@ -26665,7 +26453,7 @@ static class Program
 
         // minimal with objectives count >0 would set HasData true (ctor accepts)
         var snapWithObj = new TacticalBattleRuntimeSnapshot(default(TacticalBattleStateSignature), 1f, default(ArmyEvidence),
-            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
+            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false),
             10f, 0.5f, 0.1f, 0f, new[] { default(ObjectiveRecord) }, CommandTreeSnapshot.Empty, Array.Empty<DirectChildSnapshot>());
         AssertTrue(snapWithObj.HasData, "snapshot with objectives has data");
     }
@@ -26994,11 +26782,11 @@ static class Program
 
     private static void MacroAiDefensiveHoldMapsToDefend()
     {
+        // BR-H1 (2026-10-14): DefensiveHold is the doctrine's fall-through —
+        // no opinion, vanilla's CheckGlobalAIStrategy decides.
         int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
             ReinforcementOpportunity.DefensiveHold, currentRatio: 0.95f, commanderAggression01: 0.5f);
-        AssertTrue(result.HasValue, "DefensiveHold must return a macroai value");
-        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiDefend, result.Value,
-            "DefensiveHold → vanilla macroai = 2 (forms line of battle via AdjustGroupAIStance)");
+        AssertTrue(!result.HasValue, "DefensiveHold returns null (vanilla decides)");
     }
 
     private static void MacroAiWaitAndConsolidateMapsToDefend()
@@ -27017,8 +26805,8 @@ static class Program
         int? result = TacticalVanillaMacroAiMapping.MapOpportunityToMacroAi(
             ReinforcementOpportunity.WithdrawalToFightLater, currentRatio: 0.60f, commanderAggression01: 0.5f);
         AssertTrue(result.HasValue, "WithdrawalToFightLater must return a macroai value");
-        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiRetreat, result.Value,
-            "WithdrawalToFightLater → vanilla macroai = 3 (retreat)");
+        AssertEqual(TacticalVanillaMacroAiMapping.MacroAiDefend, result.Value,
+            "WithdrawalToFightLater → defend (2); macroai 3 stays vanilla's (startoffallback 6355/6362)");
     }
 
     private static void MacroAiNoOpportunityReturnsNull()
@@ -27058,7 +26846,7 @@ static class Program
         AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(0), "0 is legal");
         AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(1), "1 is legal");
         AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(2), "2 is legal");
-        AssertTrue(TacticalVanillaMacroAiMapping.IsLegalMacroAi(3), "3 is legal");
+        AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(3), "3 (retreat) is never a Whiskey write");
         AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(-1), "-1 (unset) is NOT a legal write");
         AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(4), "4 is out of range");
         AssertTrue(!TacticalVanillaMacroAiMapping.IsLegalMacroAi(99), "99 is out of range");
@@ -27449,10 +27237,10 @@ static class Program
             TacticalStanceReconciler.ResolveEffectiveStance(
                 BattleStance.Attacker, ReinforcementOpportunity.DelayingDefense),
             "Attacker + DelayingDefense → demote to Defender");
-        AssertEqual(BattleStance.Defender,
+        AssertEqual(BattleStance.Attacker,
             TacticalStanceReconciler.ResolveEffectiveStance(
                 BattleStance.Attacker, ReinforcementOpportunity.DefensiveHold),
-            "Attacker + DefensiveHold → demote to Defender");
+            "Attacker + DefensiveHold (no opinion, BR-H1) → stays Attacker");
         AssertEqual(BattleStance.Defender,
             TacticalStanceReconciler.ResolveEffectiveStance(
                 BattleStance.Attacker, ReinforcementOpportunity.WaitAndConsolidate),

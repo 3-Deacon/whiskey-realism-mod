@@ -38,8 +38,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Returns the stance the playbook catalog should be handed. Demotes an
         /// objective-attacker (or Meeting) to <see cref="BattleStance.Defender"/>
         /// when the doctrine outcome is non-offensive (DelayingDefense,
-        /// DefensiveHold, WaitAndConsolidate, WithdrawalToFightLater). Otherwise
-        /// passes the objective-based stance through unchanged.
+        /// WaitAndConsolidate, WithdrawalToFightLater). DefensiveHold is the
+        /// doctrine's no-opinion fall-through (BR-H1) and does not demote.
+        /// Otherwise passes the objective-based stance through unchanged.
         ///
         /// Note: only demotes in the defensive direction. A doctrine of
         /// AttackNow does NOT promote a Defender to Attacker — that direction is
@@ -58,15 +59,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// True when the doctrine outcome wants the force NOT to press an
-        /// attack. NoOpportunity and AttackNow are excluded (NoOpportunity is
-        /// neutral; AttackNow is the only offensive outcome).
+        /// attack. NoOpportunity, DefensiveHold (both neutral) and AttackNow
+        /// are excluded.
         /// </summary>
         public static bool IsNonOffensive(ReinforcementOpportunity doctrine)
         {
             switch (doctrine)
             {
                 case ReinforcementOpportunity.DelayingDefense:
-                case ReinforcementOpportunity.DefensiveHold:
                 case ReinforcementOpportunity.WaitAndConsolidate:
                 case ReinforcementOpportunity.WithdrawalToFightLater:
                     return true;

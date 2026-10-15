@@ -162,7 +162,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     bundle.OwnMainEffortStrength,
                     bundle.OwnArmyMorale,
                     bundle.OwnReservesCommittedFraction,
-                    bundle.ReinforcementsArrivingDelta,
+                    bundle.OwnReinforcementsArriving,
                     objectives,
                     commandTree,
                     directChildren,

@@ -19,25 +19,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // Scourge's pattern: state transitions are time-rate-limited (courier
     // cooldown 15min, help cooldown 30min, target re-acquisition timer).
     // Same idea here at battle scale: once we COMMIT to an opportunity
-    // category, hold it for MinHoldSeconds wallclock before allowing a
+    // category, hold it for a minimum span of BATTLE time before allowing a
     // transition. Brigades get stable orders, vanilla AI executes them.
     //
     // Pure scorer: no Unity API touches. Caller passes the raw doctrine
-    // output + the prior decision + wallclock-seconds-since-last-change.
+    // output + the prior decision + battle-seconds-since-last-change.
     // Returns the smoothed decision.
     public static class TacticalOpportunityHysteresis
     {
-        // Wallclock seconds a decision must be held before a transition is
-        // allowed. Scourge uses 15-30 minutes at strategic scale; we use
-        // 6 seconds at battle scale because GT's tactical cycle is much
-        // tighter (compression up to 50× means 6 wallclock-seconds ≈ 5
-        // game-minutes of battle-time at 50× — enough to absorb noise
-        // without freezing decisions for the entire engagement).
+        // BATTLE seconds a decision must be held before a transition is
+        // allowed (10 battle-minutes). The caller measures elapsed time on
+        // TacticalDoctrineTime, so the hold means the same amount of
+        // battle at 1x and 50x compression (the old 6 wall-clock seconds were
+        // 36 battle-seconds at 1x and 5 battle-minutes at 50x).
         //
-        // Tunable via configuration; conservative default chosen so brigade
-        // orders persist long enough to actually execute the order before
-        // the next decision lands.
-        public const float DefaultMinHoldSeconds = 6.0f;
+        // Single source of the default: the "Opportunity Hysteresis Min Hold"
+        // config entry is in battle MINUTES and should bind its default to
+        // DefaultMinHoldBattleMinutes; the doctrine works in seconds.
+        public const float DefaultMinHoldBattleMinutes = 10f;
+        public const float DefaultMinHoldBattleSeconds = DefaultMinHoldBattleMinutes * 60f;
 
         // Decisive-transition shortcut: even within MinHoldSeconds, allow a
         // transition if the new decision is a strong upgrade in danger
@@ -78,15 +78,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         //        differ from `raw` if doctrine just flipped)
         // secondsSinceLastChange = how long `prev.Opportunity` has been
         //        held (resets on every accepted transition)
-        // minHoldSeconds = override for DefaultMinHoldSeconds (caller's
-        //        config-bound tunable)
+        // minHoldSeconds = override for DefaultMinHoldBattleSeconds (caller's
+        //        config-bound tunable); both elapsed and hold in battle seconds
         public static SmoothResult Smooth(
             ReinforcementOpportunityDecision raw,
             ReinforcementOpportunityDecision prev,
             float secondsSinceLastChange,
             float minHoldSeconds)
         {
-            if (minHoldSeconds < 0f) minHoldSeconds = DefaultMinHoldSeconds;
+            if (minHoldSeconds < 0f) minHoldSeconds = DefaultMinHoldBattleSeconds;
 
             // Same category — no smoothing needed.
             if (raw.Opportunity == prev.Opportunity)

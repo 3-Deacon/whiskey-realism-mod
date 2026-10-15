@@ -15,7 +15,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// runtime — battles sat in Probe forever. This doctrine fixes that.
     ///
     /// The recommendation is driven by:
-    /// - plan age (probe and main-effort each have an aggression-scaled budget),
+    /// - phase age on battle time (probe and main-effort each have an
+    ///   aggression-scaled budget in battle minutes; past the budget the
+    ///   effort consolidates only if its progress has stalled),
     /// - global force odds (favorable -> commit; reverted -> consolidate/withdraw),
     /// - main-effort sector odds spike vs history (-> exploit when probe breaks),
     /// - reserves committed fraction (commit-deep + favorable -> exploit;
@@ -24,12 +26,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static class TacticalPhaseProgressionDoctrine
     {
-        // Phase budgets in seconds. Mid commander (aggression01=0.5) baselines.
-        // Aggressive commanders shorten Probe (commit faster) and lengthen
-        // MainEffort (sustain push). Cautious commanders do the inverse.
-        public const float ProbeBudgetMidSeconds = 60f;
-        public const float MainEffortBudgetMidSeconds = 120f;
-        public const float ExploitBudgetMidSeconds = 90f;
+        // Phase budgets in BATTLE seconds (phase age advances by
+        // TacticalDoctrineTime deltas). Civil War
+        // scale: a probe takes tens of minutes, a main effort hours. The old
+        // 30-180 s budgets elapsed in seconds of battle time, so every plan hit
+        // MainEffort -> Consolidate almost immediately.
+        public const float ExploitBudgetMidSeconds = 90f * 60f;
 
         // Odds thresholds. ProbeCommitOdds: global odds above which probe phase
         // is judged "found a working axis, commit." Strictly above 1.0 so that
@@ -39,6 +41,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // exploit. ConsolidateOddsFloor: global odds below which the attacking
         // force should pause and consolidate.
         public const float ProbeCommitOddsFloor = 1.05f;
+
+        /// <summary>
+        /// Intel confidence the probe needs before odds alone commit the main
+        /// effort: the same gate the reinforcement-opportunity doctrine acts on
+        /// (<see cref="TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction"/>),
+        /// so both doctrines agree on "enough intel to act". Blended odds clear
+        /// 1.05 at almost any confidence against a small force; this keeps a
+        /// picket seen under low coverage from committing the army. The probe
+        /// budget still commits on time.
+        /// </summary>
+        public const float ProbeCommitMinIntelConfidence = TacticalReinforcementOpportunityDoctrine.MinIntelConfidenceForAction;
 
         // Consolidate exit threshold for "odds recovered, resume attack."
         // Matches the legacy 1.4 hysteresis used elsewhere.
@@ -72,9 +85,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float armyMoraleFloor,
                 float reservesCommittedFraction,
                 float commanderAggression01,
-                TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady)
+                TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady,
+                float intelConfidence01 = 1f)
             {
                 CurrentPhase = currentPhase;
+                IntelConfidence01 = float.IsNaN(intelConfidence01) ? 0f : Clamp01(intelConfidence01);
                 PlanAgeSeconds = planAgeSeconds < 0f ? 0f : planAgeSeconds;
                 GlobalOddsCurrent = SanitizePositive(globalOddsCurrent, 1f);
                 GlobalOddsHistory = SanitizePositive(globalOddsHistory, 1f);
@@ -105,6 +120,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             /// transition is blocked even with favorable odds.
             /// </summary>
             public TacticalSectorReadinessDoctrine.Result MainEffortReadiness { get; }
+
+            /// <summary>Contact-ledger confidence behind the odds (1 for callers without a ledger).</summary>
+            public float IntelConfidence01 { get; }
 
             public bool IsReservesCommitKnown
             {
@@ -184,6 +202,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             if (input.GlobalOddsCurrent >= ProbeCommitOddsFloor &&
                 input.MainEffortOddsCurrent >= ProbeCommitOddsFloor &&
+                input.IntelConfidence01 >= ProbeCommitMinIntelConfidence &&
                 readinessAllowsPush)
                 return new Decision(BattlePhase.MainEffort, "probe-found-purchase");
 
@@ -245,10 +264,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         : "breakthrough-detected-but-force-fatigued");
             }
 
-            // Consolidate gate: budget elapsed OR odds reverted with deep
-            // commit (we're in too far to keep pushing; lock down gains).
-            if (input.PlanAgeSeconds >= mainEffortBudget)
-                return new Decision(BattlePhase.Consolidate, "main-effort-budget-elapsed");
+            // Consolidate gate: the budget only opens the question — the push
+            // stops when it has STALLED (main-effort odds no better than when
+            // the effort began) or when odds reverted with a deep commit. An
+            // effort still gaining ground past its budget keeps going.
+            if (input.PlanAgeSeconds >= mainEffortBudget && IsStalled(input))
+                return new Decision(BattlePhase.Consolidate, "main-effort-stalled-after-budget");
 
             if (input.GlobalOddsCurrent < ConsolidateOddsFloor &&
                 input.IsReservesCommitKnown && input.ReservesCommittedFraction >= DeepCommitFraction)
@@ -268,8 +289,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (input.GlobalOddsCurrent < ConsolidateOddsFloor)
                 return new Decision(BattlePhase.Consolidate, "odds-reverted-during-exploit");
 
-            if (input.PlanAgeSeconds >= ExploitBudgetMidSeconds)
-                return new Decision(BattlePhase.Consolidate, "exploit-budget-elapsed");
+            if (input.PlanAgeSeconds >= ExploitBudgetMidSeconds && IsStalled(input))
+                return new Decision(BattlePhase.Consolidate, "exploit-stalled-after-budget");
 
             return new Decision(BattlePhase.Exploit, "exploit-continuing");
         }
@@ -280,35 +301,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // either resumed attack (if odds swing back high enough) or
             // withdraw on morale loss. Exit back to MainEffort needs a
             // strong odds reversal AND enough reserves to mean it.
-            if (input.GlobalOddsCurrent >= 1.4f &&
-                input.IsReservesCommitKnown && input.ReservesCommittedFraction < 0.6f)
+            // Unknown reserve state is not a reason to stay consolidated
+            // forever (Consolidate was effectively absorbing whenever the
+            // reserve fraction was the unknown sentinel).
+            if (input.GlobalOddsCurrent >= ResumeFromConsolidateOddsFloor &&
+                (!input.IsReservesCommitKnown || input.ReservesCommittedFraction < 0.6f))
                 return new Decision(BattlePhase.MainEffort, "odds-recovered-resume-attack");
 
             return new Decision(BattlePhase.Consolidate, "consolidate-continuing");
         }
 
         /// <summary>
-        /// Probe budget scaled by commander aggression. Aggressive commanders
-        /// (>0.75) commit at 30s; cautious commanders (&lt;0.25) probe for 120s.
+        /// Probe budget in battle seconds, scaled by commander aggression:
+        /// cautious 60 battle-minutes, mid 40, aggressive 20.
         /// </summary>
         public static float ProbeBudgetForAggression(float aggression01)
         {
             float a = Clamp01(aggression01);
-            // Linear: 0.0 -> 120, 0.5 -> 60, 1.0 -> 30
-            return 120f - a * 90f;
+            return (60f - a * 40f) * 60f;
         }
 
         /// <summary>
-        /// Main effort budget scaled by commander aggression. Aggressive
-        /// commanders sustain attack longer (180s); cautious commanders pull
-        /// back into consolidate sooner (60s).
+        /// Main effort budget in battle seconds: cautious commanders review the
+        /// push after 1 battle-hour, mid 2 h, aggressive 3 h.
         /// </summary>
         public static float MainEffortBudgetForAggression(float aggression01)
         {
             float a = Clamp01(aggression01);
-            // Linear: 0.0 -> 60, 0.5 -> 120, 1.0 -> 180
-            return 60f + a * 120f;
+            return (60f + a * 120f) * 60f;
         }
+
+        // Progress test for the budget gates: main-effort odds no better than
+        // at the start of the effort.
+        private static bool IsStalled(Input input)
+            => input.MainEffortOddsCurrent <= input.MainEffortOddsHistory;
 
         private static float SanitizePositive(float v, float fallback)
         {

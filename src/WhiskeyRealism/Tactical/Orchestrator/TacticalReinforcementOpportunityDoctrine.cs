@@ -62,8 +62,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
-    /// Pure logic that decides whether the army should attack now (defeat-
-    /// in-detail before enemy reinforcements arrive), wait for own
+    /// Pure logic that decides whether the army should attack now (clear
+    /// advantage over the enemy it has had in range), wait for own
     /// reinforcements, dig in defensively, or withdraw to fight later.
     ///
     /// Personality-modulated: aggressive commanders (Hood, Jackson, Grant
@@ -73,17 +73,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// before committing.
     ///
     /// Better than SoW's AttackEnemy (campai.cpp:1030) because:
-    /// - Considers reinforcement timing (SoW only looks at currently-present)
+    /// - Considers own reinforcement timing (SoW only looks at currently-present)
     /// - Uses actual strength (SoW counts divisions)
     /// - Personality scales decision thresholds (SoW is one-size-fits-all)
     /// - Five posture outcomes (SoW is binary attack/retreat)
     /// </summary>
     public static class TacticalReinforcementOpportunityDoctrine
     {
-        // Personality-tuned attack threshold:
-        //   aggression 0.0 (cautious)  → threshold ~1.56  ("need 56% advantage")
-        //   aggression 0.5 (mid-band)  → threshold ~1.20  ("need 20% advantage")
-        //   aggression 1.0 (aggressive)→ threshold ~1.08  ("need 8% advantage")
+        // Personality-tuned attack threshold
+        //   BaseAttackThreshold * (AggressionThresholdOffset - aggression * AggressionThresholdScale):
+        //   aggression 0.0 (cautious)  → 1.56  ("need 56% advantage")
+        //   aggression 0.5 (mid-band)  → 1.32  ("need 32% advantage")
+        //   aggression 1.0 (aggressive)→ 1.08  ("need 8% advantage")
+        // Capped at parity for Meeting/Attacker stances — see
+        // EffectiveAttackThreshold.
         public const float BaseAttackThreshold = 1.20f;
         public const float AggressionThresholdScale = 0.40f;
         public const float AggressionThresholdOffset = 1.30f;
@@ -138,22 +141,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // the delay window expires regardless of casualties.
         public const float ProlongedDelayHoursThreshold = 6.0f;
 
-        // Confidence floor — if intel quality is below this, fall back to
-        // existing behavior (don't act on bad data). This is the ONLY gate
-        // that can block AttackNow regardless of ratio; everything else is
-        // dimensionless (ratios, fractions, hours) and scale-invariant.
+        // Intel gate: below this confidence the doctrine has no opinion
+        // (NoOpportunity) and vanilla's own pipeline decides. This is the only
+        // gate that can block AttackNow regardless of ratio; everything else
+        // is dimensionless (ratios, fractions, hours) and scale-invariant.
         //
-        // Per 2026-05-19 user direction: GTCW campaigns produce dynamic battle
-        // sizes from 1,500 to 60,000+ per side, so the doctrine must NOT carry
-        // any absolute headcount threshold. A 200-man cavalry detachment
-        // screening a major army's flank is a real tactical decision; telling
-        // it "you're too small to matter" is wrong. Small forces with poor
-        // intel naturally drop to NoOpportunity via this confidence gate.
-        public const float MinIntelConfidenceForAction = 0.5f;
+        // Confidence comes from TacticalEnemyContactLedger: observation
+        // coverage (recency of the ground in front of the line, softened by
+        // the share of enemy-side entry points watched) times contact
+        // recency. It says how well the side has looked, never how big the
+        // enemy is, so a small enemy force that is fully observed is a real
+        // opportunity at any battle size (1,500 to 60,000+ a side, per
+        // 2026-05-19 user direction: no absolute headcount thresholds).
+        //
+        // 0.35: a fully observed front with no enemy-side entry point watched
+        // reads 0.5, and with one of five coverage bands unobserved as well
+        // 0.4; both act. A picket seen under low coverage (~0.1) does not.
+        // The probe's commit gate (TacticalPhaseProgressionDoctrine) uses the
+        // same constant.
+        public const float MinIntelConfidenceForAction = 0.35f;
 
         public static ReinforcementOpportunityDecision Decide(TacticalForceBalanceEvidence ev)
         {
-            float attackThreshold = ComputeAttackThreshold(ev.CommanderAggression01);
+            float attackThreshold = EffectiveAttackThreshold(ev.CommanderAggression01, ev.Stance);
             float attackWindowHours = ComputeAttackWindowHours(ev.CommanderAggression01);
             float maxWaitHours = ComputeMaxWaitHours(ev.CommanderAggression01);
 
@@ -173,15 +183,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     attackThreshold, attackWindowHours);
             }
 
-            // ATTACK NOW: two valid sub-cases, both require ratio clears
-            // threshold AND absolute force is sufficient:
-            //   (a) defeat-in-detail window: enemy IS growing within 24h but
-            //       not so soon we cannot finish before parity arrives.
-            //   (b) standing advantage with static enemy: enemy will not
-            //       reach parity at all (parityForEnemy >= 999 sentinel).
-            //       SoW's AttackEnemy attacks on ratio alone here; we mirror
-            //       that — there's no urgency but there's also no reason to
-            //       sit on a 1.5×+ advantage and wait for it to erode.
+            // ATTACK NOW: the ratio clears the threshold AND either
+            //   (a) the known enemy is below us and will not catch up
+            //       (parityForEnemy >= 999 sentinel) — SoW's AttackEnemy
+            //       attacks on ratio alone here; no reason to sit on an
+            //       advantage and wait for it to erode — or
+            //   (b) Meeting/Attacker at parity: vanilla attacks (6400-6408)
+            //       as long as the known enemy does not outnumber what we
+            //       will have when the attack lands.
+            // There is no defeat-in-detail window: the side cannot see the
+            // enemy's arrival schedule; enemy reinforcements count once they
+            // are in range (contact ledger).
             // Scale-invariant: only the ratio matters. Whether you have a 500-
             // man cavalry detachment or a 60,000-man field army, the question
             // is "do I have a clear advantage right now."
@@ -195,14 +207,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             bool ratioAndForceOk = currentRatio >= attackThreshold;
             bool enemyNotGrowing = parityForEnemy >= 999f;
-            bool defeatInDetailWindowOpen =
-                parityForEnemy <= 24f &&
-                parityForEnemy >= attackWindowHours;
-            if (stanceAllowsAttack && ratioAndForceOk && (defeatInDetailWindowOpen || enemyNotGrowing))
+            bool parityHoldsThroughWindow = ev.Stance != BattleStance.Defender &&
+                ev.EnemyDeployedStrength <= ev.OwnStrengthAtHour(attackWindowHours);
+            if (stanceAllowsAttack && ratioAndForceOk && (enemyNotGrowing || parityHoldsThroughWindow))
             {
-                string reason = enemyNotGrowing
-                    ? "advantage-and-enemy-static"
-                    : "defeat-in-detail-window-open";
+                string reason = enemyNotGrowing ? "advantage-and-enemy-static" : "parity-holds-through-attack-window";
                 return new ReinforcementOpportunityDecision(
                     ReinforcementOpportunity.AttackNow,
                     reason,
@@ -366,6 +375,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return BaseAttackThreshold * (AggressionThresholdOffset - agg * AggressionThresholdScale);
         }
 
+        /// <summary>
+        /// Attack threshold after the battle-type rule. Vanilla
+        /// CheckGlobalAIStrategy (6400-6408) attacks in a meeting engagement
+        /// (GetBattleType == 0) regardless of force balance, and attacks
+        /// whenever forcebalance ≥ forcebalancetriggerattack / (1 + initiative
+        /// × 0.7) = 0.80 / 1.35 ≈ 0.59 at mid initiative (battleprefs) — below
+        /// parity. Requiring 1.08-1.56x for every stance left both sides of a
+        /// near-even meeting in DefensiveHold (BR-H1). Meeting/Attacker cap at
+        /// parity; a Defender keeps the personality threshold (vanilla's
+        /// defender only assaults at overwhelming balance, 6408).
+        /// </summary>
+        public static float EffectiveAttackThreshold(float commanderAggression01, BattleStance stance)
+        {
+            float t = ComputeAttackThreshold(commanderAggression01);
+            if (stance != BattleStance.Defender && t > 1f) t = 1f;
+            return t;
+        }
+
         public static float ComputeAttackWindowHours(float commanderAggression01)
         {
             float agg = Clamp01(commanderAggression01);
@@ -377,10 +404,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public static float ComputeMaxWaitHours(float commanderAggression01)
         {
             float agg = Clamp01(commanderAggression01);
-            // cautious 0.0 → BaseMaxWaitHoursForOwn + AggressionWaitScale = 9h
-            // aggressive 1.0 → BaseMaxWaitHoursForOwn - AggressionWaitScale*0 = 6h
-            // Actually we want aggressive shorter and cautious longer:
-            // base + (1-agg) * scale → 0.0→9, 0.5→7.5, 1.0→6
+            // base + (1 - agg) * scale: cautious 0.0 → 28 h, mid 0.5 → 23 h,
+            // aggressive 1.0 → 18 h.
             return BaseMaxWaitHoursForOwn + (1f - agg) * AggressionWaitScale;
         }
 

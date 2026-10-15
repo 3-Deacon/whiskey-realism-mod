@@ -23,7 +23,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         ReceivingFire,
         ForceImbalanceDownward,
         ForceImbalanceUpward,
-        ReinforcementsArriving,
         FlankExposure
     }
 

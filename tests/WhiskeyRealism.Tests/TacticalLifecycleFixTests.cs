@@ -581,7 +581,7 @@ internal static class TacticalLifecycleFixTests
         var evidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         var visible = new EnemyVisibleState(
             new[] { new EnemyVisibleSector(0, 5000f, 9000f, true) },
-            0.5f, anyContactSpotted: true, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+            0.5f, anyContactSpotted: true, anyContactBroken: false);
         var army = new ArmyOrchestrator(1, BuiltInPlaybooks.SeedCatalog(), default);
         army.PickInitialPlan(evidence);
         army.AdvancePlanAge(100f);
