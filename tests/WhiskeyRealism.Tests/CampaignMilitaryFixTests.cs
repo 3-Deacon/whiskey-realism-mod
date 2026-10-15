@@ -39,6 +39,7 @@ internal static class CampaignMilitaryFixTests
         CoordinatedSingleLeadNeedsReinforceRatio();
         CoordinatedOffensiveMirrorsVanillaEarlyOuts();
         CoordinatedOffensiveTempoGateMatchesVanilla();
+        CoordinatedTempoErrorLeavesVanillaUntouched();
         CoordinatedPackageLockExpiresWithPath();
     }
 
@@ -615,5 +616,16 @@ internal static class CampaignMilitaryFixTests
         var read = typeof(Heatmap).GetMethod("GetValueOnPos", new[] { typeof(UnityEngine.Vector3), typeof(bool) });
         TestHarness.AssertTrue(read != null && read.IsPublic && !read.IsStatic, "public instance Heatmap.GetValueOnPos(Vector3, bool)");
         LogPass("c2a transfer strength reads vanilla heatmap grids");
+    }
+
+    // Re-review: only a real failed roll ends the call (ownunits emptied so
+    // vanilla does not roll twice); a tempo-gate exception must let vanilla run
+    // unchanged, and a pass proceeds to commit.
+    private static void CoordinatedTempoErrorLeavesVanillaUntouched()
+    {
+        TestHarness.AssertTrue(CoordinatedOffensiveVanillaGates.SuppressVanillaThisCall(TempoVerdict.Wait), "failed roll ends the call");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.SuppressVanillaThisCall(TempoVerdict.Error), "gate error: vanilla runs unchanged");
+        TestHarness.AssertFalse(CoordinatedOffensiveVanillaGates.SuppressVanillaThisCall(TempoVerdict.Go), "pass proceeds to commit");
+        LogPass("c2a coordinated tempo error leaves vanilla untouched");
     }
 }

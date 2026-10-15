@@ -347,8 +347,17 @@ namespace WhiskeyRealism.Strategic
 
     // Vanilla AICampaign.CheckOffensiveMovements gates the coordinated package
     // must respect before it commits anything in vanilla's place.
+    public enum TempoVerdict { Go, Wait, Error }
+
     public static class CoordinatedOffensiveVanillaGates
     {
+        // Only a real failed roll ends the call (vanilla must not roll again for
+        // the same target); a gate error leaves vanilla's call untouched.
+        public static bool SuppressVanillaThisCall(TempoVerdict verdict)
+        {
+            return verdict == TempoVerdict.Wait;
+        }
+
         // Early return at decompile 14200: no own units, timediff <= 0, null or
         // inactive lead, !recruitingzonesupdated (vanilla commits at most one
         // offensive per faction job cycle and clears the flag at 14458), or the

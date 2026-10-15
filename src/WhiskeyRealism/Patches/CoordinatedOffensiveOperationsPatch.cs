@@ -122,7 +122,9 @@ namespace WhiskeyRealism.Patches
                 // empty ownunits so vanilla early-returns (14200) instead of rolling
                 // again for the same target; the Finalizer restores the list. Silent -
                 // this fails most calls by design and runs per unit per job cycle.
-                if (!PassesVanillaTempoGate(allianceId, decision, ownUnits, timediff))
+                var tempo = VanillaTempoVerdict(allianceId, decision, ownUnits, timediff);
+                if (tempo == TempoVerdict.Error) return; // vanilla runs unchanged
+                if (CoordinatedOffensiveVanillaGates.SuppressVanillaThisCall(tempo))
                 {
                     _snapshots[_aifaction] = snapshot;
                     snapshotRegistered = true;
@@ -581,14 +583,14 @@ namespace WhiskeyRealism.Patches
 
         // Vanilla tempo roll (14316-14350): applied when the objective position lies
         // in a state of another alliance and the target area's num2 (14230) > 0.
-        private static bool PassesVanillaTempoGate(int allianceId, PackageFilterDecision decision, IList ownUnits, float timediff)
+        private static TempoVerdict VanillaTempoVerdict(int allianceId, PackageFilterDecision decision, IList ownUnits, float timediff)
         {
             try
             {
-                if (decision.TargetEnemyWeight <= 0f) return true;
+                if (decision.TargetEnemyWeight <= 0f) return TempoVerdict.Go;
                 int state = BattlefieldSetup.GetStateOfField(decision.Target, usecloseststate: true);
-                if (state < 0 || GameVars.nation == null || state >= GameVars.nation.Length) return true;
-                if (GameVars.nation[state].alliance == allianceId) return true;
+                if (state < 0 || GameVars.nation == null || state >= GameVars.nation.Length) return TempoVerdict.Go;
+                if (GameVars.nation[state].alliance == allianceId) return TempoVerdict.Go;
 
                 float date = GameVars.GetCampaignFloatingDate();
                 bool forced = GameVars.debug_permanentaimovement ||
@@ -612,13 +614,15 @@ namespace WhiskeyRealism.Patches
                     DLC_WL.dlc_scenarioactive,
                     GamePrefs.dlcwl_careerincreasedaggressiveness,
                     PackageContainsPlayerGroup(decision.Output, ownUnits));
-                return CoordinatedOffensiveVanillaGates.TempoPasses(UnityEngine.Random.Range(0f, 1f), tval, forced);
+                return CoordinatedOffensiveVanillaGates.TempoPasses(UnityEngine.Random.Range(0f, 1f), tval, forced)
+                    ? TempoVerdict.Go
+                    : TempoVerdict.Wait;
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("coordinated-ops:offensive:tempo",
-                    "Patch CoordinatedOps tempo gate failed (package held back): " + ex.Message);
-                return false;
+                    "Patch CoordinatedOps tempo gate failed (vanilla runs unchanged): " + ex.Message);
+                return TempoVerdict.Error;
             }
         }
 
