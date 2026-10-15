@@ -223,7 +223,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public TacticalFrontAxis FrontAxis { get; }
         public IReadOnlyDictionary<int, int> InstanceSectors { get; }
 
-        /// <summary>Own command group instance id → vanilla <c>flanksthreated</c>.</summary>
+        /// <summary>Own command group instance id → mean outflanked weight of its regiments (0-4).</summary>
         public IReadOnlyDictionary<int, float> InstanceFlankThreat { get; }
 
         public float FlankThreatForInstance(int instanceId)

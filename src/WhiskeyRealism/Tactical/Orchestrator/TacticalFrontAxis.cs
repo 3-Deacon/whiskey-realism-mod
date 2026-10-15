@@ -195,22 +195,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 next.HasEnemyExtent, next.EnemyLateralMin, next.EnemyLateralMax, next.TargetDistance);
         }
 
+        /// <summary>Mean outflanked weight that counts as a flank threat.</summary>
+        public const float FlankThreatNoticeable = 0.25f;
+
+        /// <summary>Mean outflanked weight that counts as a severe flank threat.</summary>
+        public const float FlankThreatSevere = 1.5f;
+
         /// <summary>
         /// Flank-exposure bucket (0-3) consumed by
         /// <see cref="DirectChildAllocator"/> (refuse at 3) and the leaf
         /// cascade (cautious branch at 2). Inputs: the child holds an army
-        /// wing; the visible enemy line extends past that wing; vanilla's own
-        /// group <c>flanksthreated</c> (Regiment 110958 — the group sum of
-        /// subordinate <c>outflanked</c> states, 120568-120580: +1 one flank,
-        /// +2 both, +3 rear, +4 surrounded).
+        /// wing; the visible enemy line extends past that wing; the group's
+        /// mean outflanked weight over its regiments
+        /// (ArmyEvidenceBuilder.MeanOutflankedWeight, vanilla's 0-4 scale:
+        /// 1 one flank, 2 both, 3 rear, 4 surrounded). A mean of
+        /// <see cref="FlankThreatNoticeable"/> (a quarter of the line on one
+        /// flank) adds one step; <see cref="FlankThreatSevere"/> (the whole line
+        /// on both flanks, or half of it taken in the rear) adds two.
         /// </summary>
-        public static int FlankExposureBucket(bool isWing, bool enemyOverlapsFlank, float vanillaFlanksThreated)
+        public static int FlankExposureBucket(bool isWing, bool enemyOverlapsFlank, float meanOutflankedWeight)
         {
             int bucket = 0;
             if (isWing) bucket++;
             if (isWing && enemyOverlapsFlank) bucket++;
-            if (Finite(vanillaFlanksThreated) && vanillaFlanksThreated > 0f)
-                bucket += vanillaFlanksThreated >= 2f ? 2 : 1;
+            if (Finite(meanOutflankedWeight) && meanOutflankedWeight >= FlankThreatNoticeable)
+                bucket += meanOutflankedWeight >= FlankThreatSevere ? 2 : 1;
             if (!isWing && bucket > 2) bucket = 2;
             return bucket > 3 ? 3 : bucket;
         }

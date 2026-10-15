@@ -79,6 +79,7 @@ internal static class TacticalEvidenceFixTests
         Run("every registry name is a vanilla commanders.txt name", RegistryNamesExistInVanilla);
         Run("the orchestrator's one observe path releases reserves and holds Main", OrchestratorObservePathAppliesReleaseAndHysteresis);
         Run("evidence is built once per side per frame and shared", EvidenceMemoSharesWithinFrame);
+        Run("flank threat is the mean outflanked weight of a group's regiments", FlankThreatIsMeanOverSubordinates);
     }
 
     private static void Run(string name, Action test)
@@ -313,7 +314,7 @@ internal static class TacticalEvidenceFixTests
         var threat = new Dictionary<int, float> { { 20, 3f } };
         var state = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, 0f,
             frontAxis: axis, instanceSectors: map, instanceFlankThreat: threat);
-        TestHarness.AssertEqual(3f, state.FlankThreatForInstance(20), "vanilla flanksthreated carried");
+        TestHarness.AssertEqual(3f, state.FlankThreatForInstance(20), "group flank threat carried");
         TestHarness.AssertEqual(0f, state.FlankThreatForInstance(10), "missing threat reads 0");
         map[10] = 3; // caller mutation must not leak in
         TestHarness.AssertTrue(state.FrontAxis.IsValid, "axis carried");
@@ -427,7 +428,7 @@ internal static class TacticalEvidenceFixTests
         var threatened = TacticalLeafBrigadeMap.BuildMap(tree,
             new[] { new TacticalLeafBrigadeMap.TopAssignment(2, DirectChildRole.Main) },
             0.2f, CascadeEnvelopmentMode.None, axis, threat);
-        TestHarness.AssertEqual(DirectChildRole.RefuseRight, threatened[14].LeafRole, "vanilla flanksthreated on the right wing refuses");
+        TestHarness.AssertEqual(DirectChildRole.RefuseRight, threatened[14].LeafRole, "outflanked regiments on the right wing refuse");
     }
 
     private static void EnvelopmentSplitsArmyCorps()
@@ -1102,5 +1103,33 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertFalse(memo.TryGet(battleA, 0, -1, out _), "unknown frame never hits");
         memo.Reset();
         TestHarness.AssertFalse(memo.TryGet(battleA, 1, 10, out _), "reset clears");
+    }
+
+    private static void FlankThreatIsMeanOverSubordinates()
+    {
+        // Vanilla outflanked weights (UpdateGroupStrength 120568-120580).
+        TestHarness.AssertEqual(0f, ArmyEvidenceBuilder.VanillaOutflankedWeight(0), "none");
+        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.VanillaOutflankedWeight(2), "one flank");
+        TestHarness.AssertEqual(2f, ArmyEvidenceBuilder.VanillaOutflankedWeight(3), "both flanks");
+        TestHarness.AssertEqual(3f, ArmyEvidenceBuilder.VanillaOutflankedWeight(5), "rear");
+        TestHarness.AssertEqual(4f, ArmyEvidenceBuilder.VanillaOutflankedWeight(7), "surrounded");
+
+        var wingCorps = new int[12];
+        wingCorps[0] = 1; wingCorps[7] = 2;
+        float twoOutflanked = ArmyEvidenceBuilder.MeanOutflankedWeight(wingCorps, wingCorps.Length);
+        TestHarness.AssertTrue(Near(twoOutflanked, 2f / 12f), "two of twelve regiments: " + twoOutflanked);
+        TestHarness.AssertEqual(2, TacticalFrontAxis.FlankExposureBucket(true, true, twoOutflanked),
+            "two outflanked regiments in an overlapped wing corps do not trigger refuse");
+
+        var turned = new int[12];
+        for (int i = 0; i < turned.Length; i++) turned[i] = 1;
+        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, true, ArmyEvidenceBuilder.MeanOutflankedWeight(turned, turned.Length)),
+            "a whole wing outflanked refuses");
+
+        var rear = new int[12];
+        for (int i = 0; i < 6; i++) rear[i] = 4;
+        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, false, ArmyEvidenceBuilder.MeanOutflankedWeight(rear, rear.Length)),
+            "half the wing taken in the rear refuses");
+        TestHarness.AssertEqual(0f, ArmyEvidenceBuilder.MeanOutflankedWeight(new int[0], 0), "no regiments, no threat");
     }
 }

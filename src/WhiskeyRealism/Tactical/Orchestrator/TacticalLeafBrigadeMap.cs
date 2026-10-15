@@ -88,8 +88,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         ///
         /// <paramref name="frontAxis"/> orders siblings across the front (left =
         /// negative lateral) and locates the army's wings; without it the legacy
-        /// world-X order is used. <paramref name="flankThreat"/> is vanilla's
-        /// per-group <c>flanksthreated</c> (instance id → value), see
+        /// world-X order is used. <paramref name="flankThreat"/> is each group's
+        /// mean outflanked weight over its regiments (instance id → 0-4), see
         /// <see cref="TacticalFrontAxis.FlankExposureBucket"/>.
         ///
         /// Envelopment is an army-level decision: with three or more eligible

@@ -1666,8 +1666,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // Flank exposure (TacticalFrontAxis.FlankExposureBucket): the
                 // leftmost/rightmost children hold the army's wings; a wing is
                 // more exposed when the visible enemy line extends past it and
-                // when vanilla's own group flanksthreated (110958, summed from
-                // subordinate outflanked states 120568-120580) reports a threat.
+                // when its regiments are outflanked (mean vanilla outflanked
+                // weight, ArmyEvidenceBuilder.MeanOutflankedWeight).
                 // Bucket 3 refuses in DirectChildAllocator.
                 var flankBuckets = new int[childCount];
                 var perChildIntent = new TacticalIntentModel[childCount];

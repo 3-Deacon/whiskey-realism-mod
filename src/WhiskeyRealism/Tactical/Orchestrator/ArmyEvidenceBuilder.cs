@@ -325,6 +325,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public int GetHashCode(Regiment r) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(r);
         }
 
+        private static int[] _outflankedBuffer = new int[64];
+
+        /// <summary>
+        /// Mean vanilla outflanked weight over the group's combat regiments
+        /// (<see cref="MeanOutflankedWeight"/>). Walks <c>allattachedunits</c>,
+        /// the list vanilla's own group pass uses (120148), with the same
+        /// unittyp &lt;= 13 filter; alive/unrouted stands in for
+        /// activeInHierarchy so the walk stays on managed fields.
+        /// </summary>
+        private static float SubordinateFlankThreat(Regiment group)
+        {
+            try
+            {
+                var subs = group.allattachedunits;
+                if (subs == null || subs.Length == 0) return 0f;
+                if (_outflankedBuffer.Length < subs.Length) _outflankedBuffer = new int[subs.Length * 2];
+                int n = 0;
+                for (int i = 0; i < subs.Length; i++)
+                {
+                    var r = subs[i];
+                    if ((object)r == null || r.unittyp > TacticalUnitType.MaxCombat) continue;
+                    if (r.strength <= 0 || r.isrouted) continue;
+                    _outflankedBuffer[n++] = r.outflanked;
+                }
+                return MeanOutflankedWeight(_outflankedBuffer, n);
+            }
+            catch { return 0f; }
+        }
+
         private static int SafeFrameCount()
         {
             try { return UnityEngine.Time.frameCount; }
@@ -600,8 +629,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         if (routed || IsPlayerCommanded(reg)) continue;
                         if (!TryPosition(reg, out int gid, out float gx, out float gz)) continue;
                         ownGroups.Add(new FrontUnitSample(gid, gx, gz, Math.Max(0, reg.groupstrengthaigroup), false));
-                        float threat = reg.flanksthreated;
-                        if (threat > 0f && !float.IsNaN(threat))
+                        float threat = SubordinateFlankThreat(reg);
+                        if (threat > 0f)
                         {
                             if (flankThreat == null) flankThreat = new Dictionary<int, float>();
                             flankThreat[gid] = threat;

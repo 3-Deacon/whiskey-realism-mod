@@ -782,7 +782,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private IReadOnlyDictionary<int, float> _flankThreat = new Dictionary<int, float>();
 
         /// <summary>
-        /// Records the front axis and vanilla per-group flank threat the
+        /// Records the front axis and per-group flank threat (mean outflanked weight) the
         /// evidence was banded on. Called from the orchestrator tick cycle
         /// (<see cref="ArmyTickCycle.MaybeReplan(ArmyOrchestrator, float, ArmyEvidence, EnemyVisibleState, float, float, float, float, int, float, float, float, float, float)"/>).
         /// </summary>
@@ -1063,7 +1063,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int threatHash = 0;
             if (_flankThreat != null)
             {
-                foreach (var kv in _flankThreat) threatHash ^= kv.Key * 31 + (int)kv.Value;
+                foreach (var kv in _flankThreat) threatHash ^= kv.Key * 31 + (int)(kv.Value * 100f);
             }
             sb.Append("|ft=").Append(threatHash);
             return sb.ToString();

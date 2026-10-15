@@ -227,5 +227,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
         }
+    
+        /// <summary>
+        /// Vanilla's weight for a <c>Regiment.outflanked</c> state (set 123151-123175:
+        /// 1/2 one flank, 3 both flanks, 4-6 rear, 7 surrounded), as
+        /// UpdateGroupStrength adds it to <c>flanksthreated</c> (120568-120580).
+        /// </summary>
+        internal static float VanillaOutflankedWeight(int outflanked)
+        {
+            switch (outflanked)
+            {
+                case 1: case 2: return 1f;
+                case 3: return 2f;
+                case 4: case 5: case 6: return 3f;
+                case 7: return 4f;
+                default: return 0f;
+            }
+        }
+
+        /// <summary>
+        /// A group's flank threat on vanilla's 0-4 scale: the mean outflanked
+        /// weight over its combat regiments. Vanilla's own
+        /// <c>flanksthreated</c> cannot be used: UpdateGroupStrength adds the
+        /// group's OWN outflanked weight once per active subordinate
+        /// (120273 loop over allattachedunits, 120568-120582), so it scales with
+        /// the size of the formation, and a corps of forty read as surrounded
+        /// whenever its HQ had one enemy on a flank.
+        /// </summary>
+        internal static float MeanOutflankedWeight(int[] outflankedStates, int count)
+        {
+            if (outflankedStates == null || count <= 0) return 0f;
+            if (count > outflankedStates.Length) count = outflankedStates.Length;
+            float sum = 0f;
+            for (int i = 0; i < count; i++) sum += VanillaOutflankedWeight(outflankedStates[i]);
+            return sum / count;
+        }
     }
 }
