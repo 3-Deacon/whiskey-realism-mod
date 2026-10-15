@@ -56,6 +56,21 @@ internal static partial class BattleMovementHonestyTests
             ("bc10 FrozenRiverIsNotRisk", FrozenRiverIsNotRisk),
             ("bc10 DeadGroundNeedsAThreat", DeadGroundNeedsAThreat),
             ("bc10 PathProbeUsesAQueryFilterNotTheGlobalAreaCosts", PathProbeUsesAQueryFilterNotTheGlobalAreaCosts),
+            // road march routing
+            ("bc10 RouteNotPlannedBelow400m", RouteNotPlannedBelow400m),
+            ("bc10 RouteNotPlannedBelowWoodedShare", RouteNotPlannedBelowWoodedShare),
+            ("bc10 RouteTakesRoadAroundForest", RouteTakesRoadAroundForest),
+            ("bc10 RouteRejectedWhenGainBelow20Percent", RouteRejectedWhenGainBelow20Percent),
+            ("bc10 RouteNeverViaWithinLast250m", RouteNeverViaWithinLast250m),
+            ("bc10 RouteRiverImpassableUsesBridge", RouteRiverImpassableUsesBridge),
+            ("bc10 RouteCorridorShrinksToFit6000CellsElseNotPlanned", RouteCorridorShrinksToFit6000CellsElseNotPlanned),
+            ("bc10 RoutePlanAllocatesNothingAfterWarmup", RoutePlanAllocatesNothingAfterWarmup),
+            ("bc10 RoutedMoveCarriesColumnFormationAndLegHeadings", RoutedMoveCarriesColumnFormationAndLegHeadings),
+            ("bc10 RouteWaitsForColumnThenGoesUnrouted", RouteWaitsForColumnThenGoesUnrouted),
+            ("bc10 ExecutorValidatesViaPoints", ExecutorValidatesViaPoints),
+            ("bc10 DedupeComparesFinalTargetOnly", DedupeComparesFinalTargetOnly),
+            ("bc10 CoveredCrossingMoveTakesNoVia", CoveredCrossingMoveTakesNoVia),
+            ("bc10 RoutingIsWiredIntoThePostureAndExecutorRuntime", RoutingIsWiredIntoThePostureAndExecutorRuntime),
         });
     }
 

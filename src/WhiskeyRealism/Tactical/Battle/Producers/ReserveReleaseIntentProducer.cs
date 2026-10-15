@@ -1,5 +1,6 @@
 using System;
 using WhiskeyRealism.Patches;
+using WhiskeyRealism.Tactical.Battle.Producers;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
@@ -48,7 +49,10 @@ namespace WhiskeyRealism.Tactical.Battle
                     // No per-tick strings: the direct child's intent is matched by id in place.
                     if (!TacticalReserveCommitGate.TryReleasedDirectChild(army.CurrentDirectChildIntents, id, out int sector)) continue;
                     if (TacticalReserveCommitGate.TryPlanRelease(snapshot, index, sector, out BattleOrderIntent move))
+                    {
+                        PostureRoutes.AttachIfInColumn(snapshot, index, ref move);
                         sink.Submit(move);
+                    }
                 }
             }
         }

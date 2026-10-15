@@ -85,6 +85,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // snapshot from the live area costs plus AddPath's battle costs.
             public NavMeshQueryFilter NavFilter;
             public bool NavFilterReady;
+            // BC10 decision 6: one road-route plan (a NavMesh path and an A*) per side and snapshot.
+            public readonly NavPlanBudget RouteBudget = new NavPlanBudget(1);
+            public readonly RoadRouteScratch RouteScratch = new RoadRouteScratch();
             public int LastOwnCount;
             public bool NavDeferred;
             public readonly List<float> SupportMainX = new List<float>(8);
@@ -141,6 +144,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             t.Nav.NextApply(t.LastOwnCount);
             t.NavFilterReady = false;
+            t.RouteBudget.NextApply(0);
             t.LastOwnCount = n;
             t.SupportMainBuilt = false;
             t.TickId = s.TickId;
@@ -541,6 +545,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
+                PostureRoutes.Forget(rec.InstanceId);
                 PostureTelemetry.Group(s, i, reason, state, decision, 0, decision.Reason);
                 return false;
             }
@@ -557,6 +562,24 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 // No move back over the probe's ground: the move intents need a target.
                 hasTarget = false;
                 targetReason = BattleRecon.HoldReason;
+            }
+
+            // BC10 road march: a long move through woods or swamp goes over a road when that is
+            // clearly faster, after the group takes march column; the route and the group's
+            // formation target are this pipeline's, so the arbiter sees one Formation intent.
+            RoadRoute roadRoute = default(RoadRoute);
+            bool columnWait = false;
+            if (hasTarget && rec.UnitTyp > TacticalUnitType.MaxCombat && !closeEngaged && PostureRoutes.Applies(state.Task, decision.Action))
+            {
+                bool avoidCovered = PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z);
+                if (PostureRoutes.Resolve(s, t, i, x, z, avoidCovered, out roadRoute, out columnWait) == PostureRoutes.Outcome.Deferred)
+                {
+                    PostureTelemetry.Group(s, i, reason, state, decision, 0, "road-route-deferred");
+                    return false;
+                }
+                if (roadRoute.Use || columnWait) targetFormation = RoadRoutePlanner.ColumnGroupFormation;
+                if (columnWait) targetReason = "road-column-wait";
+                else if (roadRoute.Use) targetReason = "road-route";
             }
 
             // #61 SetFormation: threat facing for holding tasks and the refused
@@ -592,6 +615,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 Priority = priority,
                 Source = source,
                 Reason = reason,
+                ViaCount = roadRoute.Use ? roadRoute.ViaCount : 0,
+                ViaX0 = roadRoute.ViaX0,
+                ViaZ0 = roadRoute.ViaZ0,
+                ViaX1 = roadRoute.ViaX1,
+                ViaZ1 = roadRoute.ViaZ1,
+                ColumnWait = columnWait,
             };
             int submitted = PostureIntentPlan.Submit(sink, request);
             bool shapes = decision.Action == PostureExecutionAction.SetFormation ||
@@ -710,6 +739,215 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         internal static CommandNodeOperationalState WithRoleAndTask(CommandNodeOperationalState state, CommandNodeRole role, CommandTaskType task)
         {
             return new CommandNodeOperationalState(state.NodeId, state.Echelon, role, task, state.TaskState, state.X, state.Z, state.FacingDegrees);
+        }
+    }
+
+    // Road march routing glue (BC10 decision 6): plans a route for a posture Move, caches it,
+    // and decides between the routed move, the column wait and the unrouted move
+    // (RoadRoutePlanner.DecideColumn). The planner is pure; this holds the NavMesh path of
+    // vanilla's own route, the per-side budget and the per-group latches.
+    internal static class PostureRoutes
+    {
+        static PostureRoutes()
+        {
+            BattleScope.Register("posture-routes", Reset);
+        }
+
+        internal enum Outcome { NoRoute, Routed, ColumnWait, Deferred }
+
+        private const float CacheHours = 0.25f;
+        private const float TargetBucketMeters = 50f;
+
+        private struct CachedRoute
+        {
+            public RoadRoute Route;
+            public double AtHours;
+        }
+
+        private static readonly Dictionary<long, CachedRoute> _cache = new Dictionary<long, CachedRoute>(64);
+        // The doctrine hour each group first waited for march column.
+        private static readonly Dictionary<int, double> _columnSince = new Dictionary<int, double>(64);
+        private static float[] _pathX = new float[64];
+        private static float[] _pathZ = new float[64];
+        private static bool _firstLogged;
+
+        // Movement tasks that march a long way to an objective (plan decision 6); fallbacks,
+        // probes and scouts keep vanilla's pathing.
+        internal static bool Applies(CommandTaskType task, PostureExecutionAction action)
+        {
+            if (Plugin.EnableDeploymentAndMarchDoctrine == null || !Plugin.EnableDeploymentAndMarchDoctrine.Value) return false;
+            switch (action)
+            {
+                case PostureExecutionAction.SetWaypoint:
+                case PostureExecutionAction.SetFormationAndWaypoint:
+                case PostureExecutionAction.ReleaseReserve:
+                    break;
+                default:
+                    return false;
+            }
+            switch (task)
+            {
+                case CommandTaskType.AdvanceToAssembly:
+                case CommandTaskType.FormUp:
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.ReserveWait:
+                case CommandTaskType.ReleaseReserve:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // The move (x, z) of group i: its route (Use only when the group is in march column) and
+        // whether it waits for the column. Deferred when a plan is wanted but this side's budget
+        // for the snapshot is spent: the move is held one tick rather than sent unrouted.
+        internal static Outcome Resolve(BattleSnapshot s, PostureTick.State t, int i, float x, float z, bool avoidCovered,
+            out RoadRoute route, out bool columnWait)
+        {
+            route = default(RoadRoute);
+            columnWait = false;
+            ref UnitRecord rec = ref s.Own[i];
+            // Safety before speed: a move around covered crossings takes BlockedMovingOrder, which has no via points.
+            if (avoidCovered && OrderExecutorRuntime.CoveredPointCount(s) > 0)
+            {
+                Forget(rec.InstanceId);
+                return Outcome.NoRoute;
+            }
+
+            BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
+            if (!RoadRoutePlanner.Wanted(grid, rec.X, rec.Z, x, z))
+            {
+                Forget(rec.InstanceId);
+                return Outcome.NoRoute;
+            }
+            if (!TryPlan(s, t, grid, i, x, z, out RoadRoute planned)) return Outcome.Deferred;
+            if (!planned.Use)
+            {
+                Forget(rec.InstanceId);
+                return Outcome.NoRoute;
+            }
+
+            double waited = 0.0;
+            if (rec.Formation != RoadRoutePlanner.ColumnGroupFormation)
+            {
+                if (!_columnSince.TryGetValue(rec.InstanceId, out double since)) _columnSince[rec.InstanceId] = since = s.DoctrineHours;
+                waited = Math.Max(0.0, s.DoctrineHours - since);
+            }
+            else
+            {
+                _columnSince.Remove(rec.InstanceId);
+            }
+
+            switch (RoadRoutePlanner.DecideColumn(true, rec.Formation, waited))
+            {
+                case ColumnDecision.Routed:
+                    route = planned;
+                    LogFirst(planned);
+                    return Outcome.Routed;
+                case ColumnDecision.Wait:
+                    columnWait = true;
+                    return Outcome.ColumnWait;
+                default:
+                    return Outcome.NoRoute; // TimedOutUnrouted: the latch stays so the wait is not restarted
+            }
+        }
+
+        // A reserve release is a short courier move: it takes via points only when the group is
+        // already in march column (the posture pipeline owns the group's formation).
+        internal static void AttachIfInColumn(BattleSnapshot s, int i, ref BattleOrderIntent move)
+        {
+            if (Plugin.EnableDeploymentAndMarchDoctrine == null || !Plugin.EnableDeploymentAndMarchDoctrine.Value) return;
+            if (s.Own[i].Formation != RoadRoutePlanner.ColumnGroupFormation) return;
+            PostureTick.State t = PostureTick.For(s);
+            BattleTerrainGrid grid = BattleTerrainGridRuntime.Get();
+            if (t == null || !RoadRoutePlanner.Wanted(grid, s.Own[i].X, s.Own[i].Z, move.TargetX, move.TargetZ)) return;
+            if (!TryPlan(s, t, grid, i, move.TargetX, move.TargetZ, out RoadRoute planned) || !planned.Use) return;
+            move.ViaCount = planned.ViaCount;
+            move.ViaX0 = planned.ViaX0;
+            move.ViaZ0 = planned.ViaZ0;
+            move.ViaX1 = planned.ViaX1;
+            move.ViaZ1 = planned.ViaZ1;
+            LogFirst(planned);
+        }
+
+        internal static void Forget(int groupId)
+        {
+            _columnSince.Remove(groupId);
+        }
+
+        // The cached plan for (group, 50 m target bucket) while it is under 0.25 doctrine-h old, else a
+        // new one if this side's budget allows. False = deferred.
+        private static bool TryPlan(BattleSnapshot s, PostureTick.State t, BattleTerrainGrid grid, int i, float x, float z, out RoadRoute route)
+        {
+            ref UnitRecord rec = ref s.Own[i];
+            int bx = (int)Math.Floor(x / TargetBucketMeters);
+            int bz = (int)Math.Floor(z / TargetBucketMeters);
+            long key = ((long)rec.InstanceId << 32) ^ (uint)(((bx & 0xFFFF) << 16) | (bz & 0xFFFF));
+            double now = s.DoctrineHours;
+            if (_cache.TryGetValue(key, out CachedRoute cached) && now - cached.AtHours >= 0.0 && now - cached.AtHours < CacheHours)
+            {
+                route = cached.Route;
+                return true;
+            }
+            if (!t.RouteBudget.TryConsume())
+            {
+                route = default(RoadRoute);
+                return false;
+            }
+
+            route = default(RoadRoute);
+            using (TelemetryPerf.Scope("tactical.producer.posture.road-route", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            {
+                try
+                {
+                    PostureTargets.EnsureNavFilter(t);
+                    var path = new NavMeshPath();
+                    var from = new Vector3(rec.X, rec.Y, rec.Z);
+                    var to = new Vector3(x, 0f, z);
+                    if (NavMesh.CalculatePath(from, to, t.NavFilter, path) && path.status == NavMeshPathStatus.PathComplete)
+                    {
+                        Vector3[] corners = path.corners;
+                        int count = corners != null ? corners.Length : 0;
+                        if (_pathX.Length < count)
+                        {
+                            _pathX = new float[count * 2];
+                            _pathZ = new float[count * 2];
+                        }
+                        for (int c = 0; c < count; c++)
+                        {
+                            _pathX[c] = corners[c].x;
+                            _pathZ[c] = corners[c].z;
+                        }
+                        route = RoadRoutePlanner.Plan(grid, rec.X, rec.Z, x, z, _pathX, _pathZ, count, t.RouteScratch);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    route = default(RoadRoute);
+                    OnceLog.Warning("tactical-producer-posture:road-route-failed",
+                        "[PostureProducer] road route plan failed, the move goes unrouted: " + ex.GetType().Name + " " + ex.Message);
+                }
+            }
+            _cache[key] = new CachedRoute { Route = route, AtHours = now };
+            return true;
+        }
+
+        private static void LogFirst(in RoadRoute route)
+        {
+            if (_firstLogged) return;
+            _firstLogged = true;
+            float ratio = route.VanillaCost > 0f ? route.RouteCost / route.VanillaCost : 0f;
+            OnceLog.Info("tactical-battle-core:road-route-first-fire",
+                "[OrderExecutor] first road march: via=" + route.ViaCount + " costRatio=" + ratio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " column=true");
+        }
+
+        private static void Reset()
+        {
+            _cache.Clear();
+            _columnSince.Clear();
+            _firstLogged = false;
         }
     }
 
@@ -953,7 +1191,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         // probe's pathfinding, on a query filter instead of the global NavMesh area costs. A
         // fresh filter prices every area at 1, so every area's live cost is copied first
         // (areaMask all areas, agent type 0: the overload vanilla's CalculatePath uses).
-        private static void EnsureNavFilter(PostureTick.State t)
+        internal static void EnsureNavFilter(PostureTick.State t)
         {
             if (t.NavFilterReady) return;
             t.NavFilterReady = true;

@@ -159,7 +159,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     int waypointsAt = waypoints;
                     RecordWaypointsBefore(unit, issued, ref waypoints);
                     int before = MovingUnits(unit);
-                    wrote = IssueMove(bunits, view, unit, winner, plan.UseOrderDelay, x, z, out bool blocked);
+                    wrote = IssueMove(bunits, view, unit, winner, in plan, x, z, out bool blocked);
                     if (wrote)
                     {
                         _issued[issued++] = new IssuedTarget { InstanceId = own[targetIndex].InstanceId, X = x, Z = z };
@@ -299,9 +299,10 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        private static bool IssueMove(BattleUnits bunits, BattleSnapshot view, Regiment unit, in BattleOrderIntent w, bool useOrderDelay, float x, float z,
+        private static bool IssueMove(BattleUnits bunits, BattleSnapshot view, Regiment unit, in BattleOrderIntent w, in ExecutionPlan plan, float x, float z,
             out bool viaBlockedOrder)
         {
+            bool useOrderDelay = plan.UseOrderDelay;
             viaBlockedOrder = false;
             Vector3 target = TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z));
             if ((w.Flags & IntentFlags.AvoidCoveredCrossings) != 0)
@@ -323,22 +324,29 @@ namespace WhiskeyRealism.Tactical.Battle
             // CheckArtyFallback does before its path (3519).
             if ((w.Flags & IntentFlags.Limber) != 0 && unit.unittyp == TacticalUnitType.Artillery && unit.mounted != 1)
                 bunits.MountUnits(unit, 1);
-            bunits.SetWaypoint(
-                unit,
-                target,
-                newpath: true,
-                doublequick: (w.Flags & IntentFlags.DoubleQuick) != 0,
-                manualfinalrotation: w.Heading >= 0f ? w.Heading : -1f,
-                modifylastwaypoint: false,
-                useorderdelay: useOrderDelay,
-                timetomove: -1f,
-                direction: -1,
-                showmovementoptions: false,
-                ignorebattlemonuments: false,
-                groupmoveonly: false,
-                ignoredisabledships: false,
-                checkforreadiness: true,
-                clearinterruptionpaths: true);
+            // Road march (BC10 decision 6): each via point is a leg of its own, and the legs
+            // after the first append (newpath: false), the way vanilla's FlankMove does
+            // (117089-117090). Under the courier delay the first leg queues the one order
+            // (AddToOrderQueue 124917 marks the group's ordertypeactive, so the later legs'
+            // queueing test, 91483-91510, is skipped) and every path added in the call is
+            // activated when it is delivered (SetOrderStatus 125488-125506). A child of a fanned-out
+            // order keeps its offset on the via points too.
+            int legs = OrderExecutor.ViaLegs(w, 0, plan.ViaCount);
+            if (legs > 0)
+            {
+                float offsetX = x - plan.X;
+                float offsetZ = z - plan.Z;
+                float v0x = plan.ViaX0 + offsetX, v0z = plan.ViaZ0 + offsetZ;
+                float v1x = plan.ViaX1 + offsetX, v1z = plan.ViaZ1 + offsetZ;
+                IssueLeg(bunits, unit, w, useOrderDelay, v0x, v0z, newPath: true,
+                    OrderExecutor.LegHeading(v0x, v0z, legs > 1 ? v1x : x, legs > 1 ? v1z : z));
+                if (legs > 1) IssueLeg(bunits, unit, w, useOrderDelay, v1x, v1z, newPath: false, OrderExecutor.LegHeading(v1x, v1z, x, z));
+                IssueLeg(bunits, unit, w, useOrderDelay, x, z, newPath: false, w.Heading >= 0f ? w.Heading : -1f);
+            }
+            else
+            {
+                IssueLeg(bunits, unit, w, useOrderDelay, x, z, newPath: true, w.Heading >= 0f ? w.Heading : -1f);
+            }
             NoteLayout(unit, RefuseFlank.None);
             // An in-contact withdrawal of an infantry/cavalry regiment is vanilla's
             // tactical fallback, which ends in SetMovementMode(2) (CheckLineFallbacks
@@ -349,6 +357,28 @@ namespace WhiskeyRealism.Tactical.Battle
             if ((w.Flags & IntentFlags.InContactWithdrawal) != 0 && unit.unittyp <= TacticalUnitType.Cavalry)
                 unit.SetMovementMode(2);
             return true;
+        }
+
+        // One SetWaypoint call of a move: the target (or a via point) at terrain height.
+        private static void IssueLeg(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, bool useOrderDelay, float x, float z,
+            bool newPath, float heading)
+        {
+            bunits.SetWaypoint(
+                unit,
+                TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z)),
+                newpath: newPath,
+                doublequick: (w.Flags & IntentFlags.DoubleQuick) != 0,
+                manualfinalrotation: heading,
+                modifylastwaypoint: false,
+                useorderdelay: useOrderDelay,
+                timetomove: -1f,
+                direction: -1,
+                showmovementoptions: false,
+                ignorebattlemonuments: false,
+                groupmoveonly: false,
+                ignoredisabledships: false,
+                checkforreadiness: true,
+                clearinterruptionpaths: true);
         }
 
         private static bool IssueOther(BattleUnits bunits, BattleSnapshot view, int targetIndex, Regiment unit, in BattleOrderIntent w,
@@ -621,6 +651,13 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int i = 0; i < units.Length; i++)
                 if (units[i] != null && units[i].regimentpaths > 0) moving++;
             return moving;
+        }
+
+        /// <summary>How many covered points the side perceives this snapshot (the posture pipeline skips a route when a move around them is due).</summary>
+        internal static int CoveredPointCount(BattleSnapshot view)
+        {
+            List<Vector3> list = PerceivedCoveredPoints(view);
+            return list != null ? list.Count : 0;
         }
 
         // The crossings and fire points the side's perceived enemy covers, as the world

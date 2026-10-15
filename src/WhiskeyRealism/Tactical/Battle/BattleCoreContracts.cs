@@ -249,6 +249,10 @@ namespace WhiskeyRealism.Tactical.Battle
         public WhiskeyRealism.Tactical.Operations.CommandTaskType Task;
         public string Reason;     // static literal only
         public RefuseFlank Refuse; // Formation / Facing on a group (BC5a)
+        // BC10 road march, Move only (additive): up to two via points the executor sends the
+        // group through before the target (RoadRoutePlanner). ViaCount 0 = a plain move.
+        public int ViaCount;
+        public float ViaX0, ViaZ0, ViaX1, ViaZ1;
     }
 
     public interface IIntentSink

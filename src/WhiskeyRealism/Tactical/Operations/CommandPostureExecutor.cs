@@ -1090,6 +1090,12 @@ namespace WhiskeyRealism.Tactical.Operations
         public IntentPriority Priority;
         public IntentSource Source;
         public string Reason; // static literal
+        // BC10 road march: the planned via points ride on the Move (the executor sends the group
+        // through them); ColumnWait holds the Move back while group formation 4 (march column,
+        // TargetFormation) is ordered: the formation intent goes out alone.
+        public int ViaCount;
+        public float ViaX0, ViaZ0, ViaX1, ViaZ1;
+        public bool ColumnWait;
     }
 
     // #61 ApplyDecision as intents (plan BC5a). Stance goes with every move
@@ -1144,12 +1150,14 @@ namespace WhiskeyRealism.Tactical.Operations
                     return SubmitFormation(sink, r);
                 case PostureExecutionAction.SetFormationAndWaypoint:
                     if (!r.HasTarget) return 0;
+                    if (r.ColumnWait) return SubmitStance(sink, r) + SubmitFormation(sink, r);
                     return SubmitStance(sink, r) + SubmitMove(sink, r) + SubmitFormation(sink, r);
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
                 case PostureExecutionAction.FallbackToLine:
                 case PostureExecutionAction.RecoverInterruptedOrder:
                     if (!r.HasTarget) return 0;
+                    if (r.ColumnWait) return SubmitStance(sink, r) + SubmitFormation(sink, r);
                     return SubmitStance(sink, r) + SubmitMove(sink, r);
                 default:
                     return 0;
@@ -1293,8 +1301,17 @@ namespace WhiskeyRealism.Tactical.Operations
 
         private static int SubmitMove(IIntentSink sink, in PostureIntentRequest r)
         {
-            sink.Submit(MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings,
-                r.Priority, r.Source, r.Reason));
+            BattleOrderIntent move = MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings,
+                r.Priority, r.Source, r.Reason);
+            if (r.ViaCount > 0)
+            {
+                move.ViaCount = Math.Min(r.ViaCount, 2);
+                move.ViaX0 = r.ViaX0;
+                move.ViaZ0 = r.ViaZ0;
+                move.ViaX1 = r.ViaX1;
+                move.ViaZ1 = r.ViaZ1;
+            }
+            sink.Submit(move);
             return 1;
         }
 

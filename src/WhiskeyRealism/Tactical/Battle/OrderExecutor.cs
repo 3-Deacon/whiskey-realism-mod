@@ -296,6 +296,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public float X, Z;
         public bool UseOrderDelay;
         public int DispatchType;
+        // BC10: the intent's via points after validation (a point that cannot be made safe is dropped).
+        public int ViaCount;
+        public float ViaX0, ViaZ0, ViaX1, ViaZ1;
     }
 
     // The single write-path pipeline (plan BC4 steps 1-6, 8; step 7 is
@@ -385,6 +388,28 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             return (w.Flags & IntentFlags.AvoidCoveredCrossings) != 0 && w.Heading < 0f &&
                 (w.Flags & IntentFlags.DoubleQuick) == 0 && crossingCount > 0;
+        }
+
+        /// <summary>
+        /// How many via legs a Move issues: none when it goes through BlockedMovingOrder (it has no
+        /// via points: safety before speed) or has no validated via point, else the planned count.
+        /// </summary>
+        public static int ViaLegs(in BattleOrderIntent w, int coveredPoints, int planned)
+        {
+            if (planned <= 0 || TakesBlockedMovingOrder(w, coveredPoints)) return 0;
+            return Math.Min(planned, 2);
+        }
+
+        /// <summary>
+        /// manualfinalrotation of a via leg: the bearing from the leg's end to the next point
+        /// (0 = +z, 90 = +x, [0, 360)), so the leg's SetGroupFormation (91559) lays the column's
+        /// frontage across the road it follows. The final leg carries the intent's own heading.
+        /// </summary>
+        public static float LegHeading(float fromX, float fromZ, float toX, float toZ)
+        {
+            double degrees = Math.Atan2(toX - fromX, toZ - fromZ) * (180.0 / Math.PI);
+            if (degrees < 0.0) degrees += 360.0;
+            return (float)(degrees >= 360.0 ? 0.0 : degrees);
         }
 
         /// <summary>SetGroupFormation's refuseflank: -1 none, 0 left, 1 right.</summary>
@@ -608,6 +633,7 @@ namespace WhiskeyRealism.Tactical.Battle
             plan.Skip = SkipReason.None;
             plan.X = x;
             plan.Z = z;
+            if (w.Channel == OrderChannel.Move && w.ViaCount > 0) ValidateVia(s, idx, w, ref plan);
             plan.UseOrderDelay = UsesOrderDelay(w);
             // 9. The player's share of an ancestor's move goes out as one W&L
             //    dispatch per executed plan. Move only: the dispatch carries the
@@ -836,6 +862,24 @@ namespace WhiskeyRealism.Tactical.Battle
         public static void OffsetTarget(in UnitRecord group, in UnitRecord child, float x, float z, float sizeX, float sizeZ, out float childX, out float childZ)
         {
             VanillaMapBounds.ClampXZ(x + child.X - group.X, z + child.Z - group.Z, sizeX, sizeZ, out childX, out childZ);
+        }
+
+        // Each via point is validated like the target (map clamp, river pull-back, water and
+        // fence step-back) as a pass-through point, so the friendly-footprint rule does not apply;
+        // one that cannot be made safe is dropped and the others stay in order.
+        private void ValidateVia(IBattleUnitView s, int idx, in BattleOrderIntent w, ref ExecutionPlan plan)
+        {
+            for (int k = 0; k < w.ViaCount && k < 2; k++)
+            {
+                BattleOrderIntent via = w;
+                via.TargetX = k == 0 ? w.ViaX0 : w.ViaX1;
+                via.TargetZ = k == 0 ? w.ViaZ0 : w.ViaZ1;
+                via.Flags = (w.Flags | IntentFlags.ReliefOrSupport) & ~IntentFlags.ArtilleryFirePosition;
+                if (WaypointValidator.Validate(s, idx, via, _sizeX, _sizeZ, _terrain, out float vx, out float vz) != SkipReason.None) continue;
+                if (plan.ViaCount == 0) { plan.ViaX0 = vx; plan.ViaZ0 = vz; }
+                else { plan.ViaX1 = vx; plan.ViaZ1 = vz; }
+                plan.ViaCount++;
+            }
         }
 
         private bool IsDuplicate(IBattleUnitView s, int idx, in UnitRecord rec, in BattleOrderIntent w, float x, float z)
