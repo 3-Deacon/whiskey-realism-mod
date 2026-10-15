@@ -64,10 +64,13 @@ namespace WhiskeyRealism.Tactical
     // re-checks the carve-out at most every HoldHours * 0.5, so a group that
     // turns weak may wait that long before Whiskey yields.
     //
-    // Inside the hold a lower-priority Whiskey source (#45 scorer) cannot flip
-    // a stance the posture executor (#61) set, and the same source needs a
-    // minimum dwell before changing its own opinion. Once Whiskey stops
-    // claiming, the hold lapses and vanilla resumes.
+    // Inside the hold a lower-priority Whiskey source (#45 scorer) can neither
+    // flip a stance the posture executor (#61) set nor yield it to vanilla;
+    // only the owner or a higher source may. A weak group held by #61 goes
+    // back to vanilla on #61's next pass or when the record ages past
+    // HoldHours. The same source needs a minimum dwell before changing its
+    // own opinion. Once Whiskey stops claiming, the hold lapses and vanilla
+    // resumes.
     public enum StanceWriteSource
     {
         None = 0,
@@ -250,9 +253,15 @@ namespace WhiskeyRealism.Tactical
             if (input.CurrentOrderedStance == 4 && input.Source == StanceWriteSource.ChargeDemotion)
                 return new StanceWriteDecision(StanceWriteAction.Write, "charge-demotion");
             if (YieldsToVanilla(input.VanillaGroupStance, input.TargetStance))
+            {
+                // A source may only give away a hold it owns or outranks.
+                if (input.Record.HasValue && IsInsideHold(input.Record, input.NowHours) &&
+                    input.Record.Source > input.Source)
+                    return Refuse("whiskey-hold");
                 return new StanceWriteDecision(
                     StanceWriteAction.Yield,
                     input.VanillaGroupStance == 4 ? "vanilla-assault-escalation" : "vanilla-weak-group");
+            }
             if (input.CurrentOrderedStance == 4) return Refuse("vanilla-assault");
 
             StanceHoldRecord record = input.Record;

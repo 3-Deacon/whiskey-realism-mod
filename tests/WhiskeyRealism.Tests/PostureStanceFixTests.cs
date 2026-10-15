@@ -28,6 +28,7 @@ internal static class PostureStanceFixTests
         Pass("vanilla per-group stance ports AdjustGroupAIStance 4239-4252", VanillaPerGroupStancePortsAdjustGroupAIStance);
         Pass("stance owner yields to vanilla weak-group defend and screen", StanceOwnerYieldsToVanillaWeakGroup);
         Pass("stance owner yields to vanilla assault only when Whiskey wants attack", StanceOwnerYieldsToAssaultOnlyForAttack);
+        Pass("a lower-priority source cannot yield a higher-priority hold", LowerPrioritySourceCannotYieldHigherHold);
         Pass("stance owner claim without vanilla stance does not stamp", StanceOwnerClaimWithoutVanillaStanceDoesNotStamp);
         Pass("retreat release lets vanilla re-evaluate immediately", RetreatReleaseLetsVanillaReevaluate);
         Pass("group stance scorer uses the shared task mapping", GroupStanceScorerUsesSharedTaskMapping);
@@ -827,6 +828,34 @@ internal static class PostureStanceFixTests
             AssertEqual(StanceWriteAction.Claim, h.Action, "Whiskey " + target + " + vanilla assault → keep holding");
             AssertTrue(TacticalStanceOwnership.StampsVanillaHold(h, hold), "hold re-stamped for " + target);
         }
+    }
+
+    private static void LowerPrioritySourceCannotYieldHigherHold()
+    {
+        // #61 (Executor) wrote screen on a strong group (vanilla per-group = 4).
+        // #45 (Scorer) wants attack: escalation would yield, but the hold is not
+        // the scorer's to give away.
+        var executorHold = new StanceHoldRecord(1, 1.0f, StanceWriteSource.Executor);
+        var scorer = Input(target: 3, current: 1, now: 1.01f, record: executorHold, source: StanceWriteSource.Scorer, vanilla: 4);
+        var d = TacticalStanceOwnership.Decide(scorer);
+        AssertEqual(StanceWriteAction.Refuse, d.Action, "scorer refused");
+        AssertEqual("whiskey-hold", d.Reason, "reason");
+        AssertFalse(TacticalStanceOwnership.ReleasesVanillaHold(d), "stamp not released");
+        AssertFalse(TacticalStanceOwnership.StampsVanillaHold(d, scorer), "stamp not changed");
+        var next = TacticalStanceOwnership.Next(d, scorer);
+        AssertEqual(StanceWriteSource.Executor, next.Source, "executor record kept");
+        AssertEqual(1, next.Stance, "executor stance kept");
+
+        // Same for the weak-group yield.
+        var weak = Input(target: 3, current: 1, now: 1.01f, record: executorHold, source: StanceWriteSource.Scorer, vanilla: 2);
+        AssertEqual(StanceWriteAction.Refuse, TacticalStanceOwnership.Decide(weak).Action, "weak-group yield refused for lower source");
+
+        // The owner itself (or a higher source) may still yield.
+        var owner = Input(target: 3, current: 1, now: 1.01f, record: executorHold, source: StanceWriteSource.Executor, vanilla: 4);
+        AssertEqual(StanceWriteAction.Yield, TacticalStanceOwnership.Decide(owner).Action, "owner yields");
+        // Outside the hold any source may yield.
+        var expired = Input(target: 3, current: 1, now: 1.0f + TacticalStanceOwnership.HoldHours + 0.01f, record: executorHold, source: StanceWriteSource.Scorer, vanilla: 4);
+        AssertEqual(StanceWriteAction.Yield, TacticalStanceOwnership.Decide(expired).Action, "expired hold yields");
     }
 
     private static void StanceOwnerClaimWithoutVanillaStanceDoesNotStamp()
