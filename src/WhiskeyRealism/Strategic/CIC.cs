@@ -7,6 +7,16 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
 {
+    // Config values the CIC reads. StrategicCoordinator refreshes these from Plugin config
+    // before every review so CIC.cs stays free of BepInEx types and compiles in the harness.
+    internal static class CicSettings
+    {
+        internal static bool OverrideVanillaSettings = true;  // Plugin default
+        internal static int LockedDifficulty = DifficultyPersonalityModifier.HistoricalHardDifficultyIndex;
+        internal static bool HistoricalOperationDoctrine = true;
+        internal static bool PlanTrace;
+    }
+
     public class CIC
     {
         public int AllianceId;
@@ -16,6 +26,12 @@ namespace WhiskeyRealism.Strategic
         public OperationalPlan ActivePlan;
         private static readonly HashSet<string> ObjectivesDiagnosticLogged = new HashSet<string>();
 
+        // Seams for the vanilla reads Replan needs. Defaults are the reflection paths;
+        // the harness swaps them for fixtures.
+        internal static Func<int, IList> AvailableObjectivesProvider = GetAvailableObjectivesViaReflection;
+        internal static Func<object, int> ObjectiveIdReader = ReadObjectiveIdViaReflection;
+        internal static Func<int> CurrentChapterProvider = ResolveCurrentChapter;
+
         public PersonalityVector Effective(EraStageManager era)
         {
             var composed = PersonalityVector.Compose(
@@ -23,120 +39,31 @@ namespace WhiskeyRealism.Strategic
                 era.StageVector,
                 FactionProfiles.For(AllianceId));
 
-            bool overrideSettings = Plugin.Instance?.OverrideVanillaSettings?.Value ?? false;
-            int lockedDifficulty = Plugin.Instance?.LockedDifficulty?.Value
-                ?? DifficultyPersonalityModifier.HistoricalHardDifficultyIndex;
-
             return PersonalityVector.Add(
                 composed,
                 DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
-                    overrideSettings,
-                    lockedDifficulty));
+                    CicSettings.OverrideVanillaSettings,
+                    CicSettings.LockedDifficulty));
         }
 
-        // Consults PhaseTruthOutput to decide how to handle the current plan.
-        // When truth is null, falls back to ReviewPlan (deadline-only logic).
-        // The routing switch is pure logic delegated to CicReviewRouter so it can be tested
-        // without BepInEx/HarmonyLib dependencies in the test harness.
-        public bool ReviewPlanWithTruth(int currentMonth, int currentYear, PhaseTruthOutput truth)
+        // Applies a PhaseTruthOutput to the active plan. The routing itself lives in
+        // CicReviewRouter (single implementation, harness-covered); this wrapper only drops
+        // an aborted plan and logs phase advances.
+        public bool ReviewPlanWithTruth(int day, int currentMonth, int currentYear, PhaseTruthOutput truth)
         {
             if (ActivePlan == null) return false;
-            if (truth == null) return ReviewPlan(currentMonth, currentYear);
-
-            switch (truth.RecommendedAction)
-            {
-                case PhaseTruthAction.Advance:
-                    return AdvancePhase();
-                case PhaseTruthAction.Complete:
-                    ActivePlan.IsDirty = true;
-                    return false;
-                case PhaseTruthAction.Pause:
-                    MarkOperationDecision(truth, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.Abort:
-                    ActivePlan = null;
-                    return false;
-                case PhaseTruthAction.Exploit:
-                    MarkOperationDecision(truth, OperationPosture.ExploitBreakthrough, allowAttack: true, allowReinforce: true, probeOnly: false, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.Counterstroke:
-                    MarkOperationDecision(truth, OperationPosture.Counterstroke, allowAttack: true, allowReinforce: true, probeOnly: false, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.ScreenAndDelay:
-                    MarkOperationDecision(truth, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.Recover:
-                    MarkOperationDecision(truth, OperationPosture.Recover, allowAttack: false, allowReinforce: true, probeOnly: true, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.Pivot:
-                    ActivePlan.PendingRetarget = true;
-                    ActivePlan.PendingRetargetReason = truth.AlternateOperationId;
-                    ActivePlan.IsDirty = true;
-                    return false;
-                case PhaseTruthAction.Replan:
-                    ActivePlan.PendingRetarget = false;
-                    ActivePlan.PendingRetargetReason = null;
-                    ActivePlan.IsDirty = true;
-                    return false;
-                case PhaseTruthAction.Continue:
-                default:
-                    return ReviewPlan(currentMonth, currentYear);
-            }
-        }
-
-        public bool ReviewPlan(int currentMonth, int currentYear)
-        {
-            if (ActivePlan == null) return false;
-            if (ActivePlan.IsDirty) return false;
-
-            if (currentYear > ActivePlan.PlanDeadlineYear ||
-               (currentYear == ActivePlan.PlanDeadlineYear && currentMonth > ActivePlan.PlanDeadlineMonth))
-                return false;
-
-            var p = ActivePlan.CurrentPhase;
-            if (p != null && (currentYear > p.DeadlineYear ||
-                             (currentYear == p.DeadlineYear && currentMonth > p.DeadlineMonth)))
-            {
-                return AdvancePhase();
-            }
-
-            return true;
-        }
-
-        private void MarkOperationDecision(
-            PhaseTruthOutput truth,
-            OperationPosture posture,
-            bool allowAttack,
-            bool allowReinforce,
-            bool probeOnly,
-            int currentMonth,
-            int currentYear)
-        {
-            if (ActivePlan == null) return;
-            ActivePlan.OperationPosture = posture;
-            ActivePlan.OperationLastDecisionDaySerial = currentYear * 372 + currentMonth * 31;
-            ActivePlan.PendingRetarget = false;
-            ActivePlan.PendingRetargetReason = truth?.Reason;
-
-            var phase = ActivePlan.CurrentPhase;
-            if (phase == null) return;
-            phase.OperationPosture = posture;
-            phase.AllowCoordinatedAttack = allowAttack;
-            phase.AllowReinforcementPackage = allowReinforce;
-            phase.AllowProbeOnly = probeOnly;
-        }
-
-        public bool AdvancePhase()
-        {
-            if (ActivePlan == null) return false;
-            if (ActivePlan.CurrentPhaseIndex + 1 < ActivePlan.Phases.Count)
-            {
-                ActivePlan.CurrentPhaseIndex++;
+            int daySerial = currentYear * 372 + currentMonth * 31 + day;
+            int phaseBefore = ActivePlan.CurrentPhaseIndex;
+            var outcome = CicReviewRouter.Route(ActivePlan, truth, daySerial, currentMonth, currentYear);
+            if (ActivePlan.CurrentPhaseIndex != phaseBefore)
                 EmitCampaignInfo($"[Plan:{OfficerName}] action=phase-advanced phase={ActivePlan.CurrentPhaseIndex}");
-                return true;
+
+            if (outcome == CicRouteOutcome.AbandonPlan)
+            {
+                ActivePlan = null;
+                return false;
             }
-            ActivePlan.IsDirty = true;
-            return false;
+            return outcome == CicRouteOutcome.KeepPlan;
         }
 
         public void Replan(EraStageManager era, int currentMonth, int currentYear)
@@ -147,7 +74,7 @@ namespace WhiskeyRealism.Strategic
                 currentMonth,
                 currentYear,
                 daySerial,
-                ResolveCurrentChapter(),
+                CurrentChapterProvider(),
                 null,
                 null);
         }
@@ -161,7 +88,7 @@ namespace WhiskeyRealism.Strategic
             DirectorPosture posture,
             HistoricalOperationContext context)
         {
-            var availableObjectives = GetAvailableObjectivesViaReflection(AllianceId);
+            var availableObjectives = AvailableObjectivesProvider(AllianceId);
             int objCount = availableObjectives?.Count ?? -1;
             if (availableObjectives == null || availableObjectives.Count == 0)
             {
@@ -184,9 +111,7 @@ namespace WhiskeyRealism.Strategic
             }
 
             scored.Sort((a, b) => b.score.CompareTo(a.score));
-            bool doctrineEnabled = Plugin.Instance == null ||
-                Plugin.Instance.EnableHistoricalOperationDoctrine == null ||
-                Plugin.Instance.EnableHistoricalOperationDoctrine.Value;
+            bool doctrineEnabled = CicSettings.HistoricalOperationDoctrine;
 
             if (doctrineEnabled)
             {
@@ -229,7 +154,7 @@ namespace WhiskeyRealism.Strategic
 
             ActivePlan = BuildLegacyGenericPlan(picked.obj, picked.meta, p, strategy, currentMonth, currentYear);
 
-            if (ActivePlan != null && Plugin.Instance.PlanTrace.Value)
+            if (ActivePlan != null && CicSettings.PlanTrace)
             {
                 EmitPlanDecision("select", ActivePlan.Rationale, "alliance=" + AllianceId + "|officer=" + OfficerName + "|phases=" + ActivePlan.Phases.Count + "|deadline=" + ActivePlan.PlanDeadlineYear + "-" + ActivePlan.PlanDeadlineMonth.ToString("D2"), ev => ev
                     .WithField("phases", ActivePlan.Phases.Count)
@@ -539,6 +464,11 @@ namespace WhiskeyRealism.Strategic
         }
 
         private static int GetObjectiveId(object campaignObjective)
+        {
+            return ObjectiveIdReader(campaignObjective);
+        }
+
+        private static int ReadObjectiveIdViaReflection(object campaignObjective)
         {
             if (campaignObjective == null) return -1;
             var f = AccessTools.Field(campaignObjective.GetType(), "UniqueObjectiveID");

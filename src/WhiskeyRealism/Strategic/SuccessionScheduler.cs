@@ -38,6 +38,9 @@ namespace WhiskeyRealism.Strategic
             public bool WarClearlyLost;
         }
 
+        // Refreshed from Plugin config by StrategicCoordinator (keeps this file BepInEx-free).
+        internal static bool TraceEnabled;
+
         private readonly List<Event> _events = new List<Event>();
 
         // Events that have FIRED (passed both gates) but haven't necessarily had
@@ -99,7 +102,7 @@ namespace WhiskeyRealism.Strategic
                               (w.CurrentYear == e.EarliestYear && w.CurrentMonth >= e.EarliestMonth);
                 bool warStateOk = e.WarStateGate(w);
 
-                if (Plugin.Instance.SuccessionTrace.Value)
+                if (TraceEnabled)
                 {
                     TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Decision, "Succession", TelemetrySeverity.Info, ev => ev
                         .WithAlliance(e.AllianceId)

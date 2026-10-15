@@ -1,75 +1,92 @@
 namespace WhiskeyRealism.Strategic
 {
-    // Pure routing logic: given a PhaseTruthOutput, decide what ReviewPlanWithTruth should do
-    // to the plan. No BepInEx / Unity / reflection dependencies — safe to compile in tests.
-    //
-    // CIC.ReviewPlanWithTruth delegates here; callers that don't need CIC can call RouteAction
-    // directly (e.g. the test harness).
+    internal enum CicRouteOutcome
+    {
+        // Plan stays active for this review.
+        KeepPlan,
+        // Plan is dirty; caller rebuilds it via CIC.Replan.
+        Replan,
+        // Operation aborted; caller drops the plan before replanning.
+        AbandonPlan
+    }
+
+    // Single implementation of "what does a PhaseTruthOutput do to the active plan".
+    // CIC.ReviewPlanWithTruth delegates here (it only adds the abandon → null and the
+    // phase-advanced log line), so the console harness exercises the exact runtime path.
+    // No BepInEx / Unity / reflection dependencies.
     internal static class CicReviewRouter
     {
-        // Returns true when the plan is still valid (Continue → ReviewPlan baseline, or Advance
-        // succeeds). Returns false when the plan needs replanning (dirty or no next phase).
+        internal static CicRouteOutcome Route(
+            OperationalPlan plan,
+            PhaseTruthOutput truth,
+            int daySerial,
+            int currentMonth,
+            int currentYear)
+        {
+            if (plan == null) return CicRouteOutcome.Replan;
+            if (truth == null) return ToOutcome(ReviewPlanBaseline(plan, daySerial, currentMonth, currentYear));
+
+            switch (truth.RecommendedAction)
+            {
+                case PhaseTruthAction.Advance:
+                    return ToOutcome(AdvancePhase(plan, daySerial));
+
+                case PhaseTruthAction.Complete:
+                    plan.IsDirty = true;
+                    return CicRouteOutcome.Replan;
+
+                case PhaseTruthAction.Abort:
+                    plan.IsDirty = true;
+                    return CicRouteOutcome.AbandonPlan;
+
+                case PhaseTruthAction.Pivot:
+                    plan.PendingRetarget = true;
+                    plan.PendingRetargetReason = truth.AlternateOperationId;
+                    plan.IsDirty = true;
+                    return CicRouteOutcome.Replan;
+
+                case PhaseTruthAction.Replan:
+                    plan.PendingRetarget = false;
+                    plan.PendingRetargetReason = null;
+                    plan.IsDirty = true;
+                    return CicRouteOutcome.Replan;
+
+                case PhaseTruthAction.Pause:
+                case PhaseTruthAction.ScreenAndDelay:
+                    MarkOperationDecision(plan, truth, daySerial, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true);
+                    return CicRouteOutcome.KeepPlan;
+                case PhaseTruthAction.Exploit:
+                    MarkOperationDecision(plan, truth, daySerial, OperationPosture.ExploitBreakthrough, allowAttack: true, allowReinforce: true, probeOnly: false);
+                    return CicRouteOutcome.KeepPlan;
+                case PhaseTruthAction.Counterstroke:
+                    MarkOperationDecision(plan, truth, daySerial, OperationPosture.Counterstroke, allowAttack: true, allowReinforce: true, probeOnly: false);
+                    return CicRouteOutcome.KeepPlan;
+                case PhaseTruthAction.Recover:
+                    MarkOperationDecision(plan, truth, daySerial, OperationPosture.Recover, allowAttack: false, allowReinforce: true, probeOnly: true);
+                    return CicRouteOutcome.KeepPlan;
+
+                case PhaseTruthAction.Continue:
+                default:
+                    return ToOutcome(ReviewPlanBaseline(plan, daySerial, currentMonth, currentYear));
+            }
+        }
+
+        // Legacy bool shape kept for existing harness callers: true = keep plan.
         internal static bool RouteAction(
             OperationalPlan plan,
             PhaseTruthOutput truth,
             int currentMonth,
             int currentYear)
         {
-            if (plan == null) return false;
-            if (truth == null) return ReviewPlanBaseline(plan, currentMonth, currentYear);
-
-            switch (truth.RecommendedAction)
-            {
-                case PhaseTruthAction.Advance:
-                    return AdvancePhase(plan);
-
-                case PhaseTruthAction.Complete:
-                    plan.IsDirty = true;
-                    return false;
-
-                case PhaseTruthAction.Pause:
-                    ApplyOperationPosture(plan, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true);
-                    return true;
-                case PhaseTruthAction.Exploit:
-                    ApplyOperationPosture(plan, OperationPosture.ExploitBreakthrough, allowAttack: true, allowReinforce: true, probeOnly: false);
-                    return true;
-                case PhaseTruthAction.Counterstroke:
-                    ApplyOperationPosture(plan, OperationPosture.Counterstroke, allowAttack: true, allowReinforce: true, probeOnly: false);
-                    return true;
-                case PhaseTruthAction.ScreenAndDelay:
-                    ApplyOperationPosture(plan, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true);
-                    return true;
-                case PhaseTruthAction.Recover:
-                    ApplyOperationPosture(plan, OperationPosture.Recover, allowAttack: false, allowReinforce: true, probeOnly: true);
-                    return true;
-
-                case PhaseTruthAction.Abort:
-                    plan.IsDirty = true;
-                    return false;
-
-                case PhaseTruthAction.Pivot:
-                    plan.PendingRetarget = true;
-                    plan.PendingRetargetReason = truth.AlternateOperationId;
-                    plan.IsDirty = true;
-                    return false;
-                case PhaseTruthAction.Replan:
-                    plan.IsDirty = true;
-                    return false;
-
-                case PhaseTruthAction.Continue:
-                default:
-                    return ReviewPlanBaseline(plan, currentMonth, currentYear);
-            }
+            int daySerial = currentYear * 372 + currentMonth * 31 + 1;
+            return Route(plan, truth, daySerial, currentMonth, currentYear) == CicRouteOutcome.KeepPlan;
         }
 
-        // Mirrors the deadline/phase logic of CIC.ReviewPlan, operating on the plan directly.
-        // Only called for the Continue/default branch so CIC.ReviewPlanWithTruth can fall through
-        // to the same deadline checks without duplicating them here.
-        // NOTE: Callers that go through CIC.ReviewPlanWithTruth will use ReviewPlan() on the CIC
-        // instance rather than this helper, so this is here only for the test harness path.
-        internal static bool ReviewPlanBaseline(OperationalPlan plan, int currentMonth, int currentYear)
+        // Plan/phase deadline checks. Every keep-plan path runs through here so a posture
+        // override (Recover, ScreenAndDelay, ...) can never freeze the deadlines.
+        internal static bool ReviewPlanBaseline(OperationalPlan plan, int daySerial, int currentMonth, int currentYear)
         {
-            if (plan.IsDirty) return false;
+            if (plan == null || plan.IsDirty) return false;
 
             if (currentYear > plan.PlanDeadlineYear ||
                (currentYear == plan.PlanDeadlineYear && currentMonth > plan.PlanDeadlineMonth))
@@ -79,42 +96,62 @@ namespace WhiskeyRealism.Strategic
             if (p != null && (currentYear > p.DeadlineYear ||
                              (currentYear == p.DeadlineYear && currentMonth > p.DeadlineMonth)))
             {
-                return AdvancePhase(plan);
+                return AdvancePhase(plan, daySerial);
             }
 
             return true;
         }
 
-        // Advances the plan's current phase index. If no next phase exists, marks the plan
-        // dirty and returns false (signals replan). Does NOT log — no Plugin dependency.
-        internal static bool AdvancePhase(OperationalPlan plan)
+        internal static bool ReviewPlanBaseline(OperationalPlan plan, int currentMonth, int currentYear)
+        {
+            return ReviewPlanBaseline(plan, currentYear * 372 + currentMonth * 31 + 1, currentMonth, currentYear);
+        }
+
+        // Advances the plan's current phase index and stamps the new phase's start day.
+        // If no next phase exists, marks the plan dirty and returns false (signals replan).
+        internal static bool AdvancePhase(OperationalPlan plan, int daySerial)
         {
             if (plan == null) return false;
             if (plan.CurrentPhaseIndex + 1 < plan.Phases.Count)
             {
                 plan.CurrentPhaseIndex++;
+                var phase = plan.CurrentPhase;
+                if (phase != null) phase.PhaseStartedDaySerial = daySerial;
                 return true;
             }
             plan.IsDirty = true;
             return false;
         }
 
-        private static void ApplyOperationPosture(
+        internal static bool AdvancePhase(OperationalPlan plan)
+        {
+            return AdvancePhase(plan, plan?.CurrentPhase?.PhaseStartedDaySerial ?? 0);
+        }
+
+        private static void MarkOperationDecision(
             OperationalPlan plan,
+            PhaseTruthOutput truth,
+            int daySerial,
             OperationPosture posture,
             bool allowAttack,
             bool allowReinforce,
             bool probeOnly)
         {
-            if (plan == null) return;
             plan.OperationPosture = posture;
+            plan.OperationLastDecisionDaySerial = daySerial;
             plan.PendingRetarget = false;
+            plan.PendingRetargetReason = truth?.Reason;
             var phase = plan.CurrentPhase;
             if (phase == null) return;
             phase.OperationPosture = posture;
             phase.AllowCoordinatedAttack = allowAttack;
             phase.AllowReinforcementPackage = allowReinforce;
             phase.AllowProbeOnly = probeOnly;
+        }
+
+        private static CicRouteOutcome ToOutcome(bool keep)
+        {
+            return keep ? CicRouteOutcome.KeepPlan : CicRouteOutcome.Replan;
         }
     }
 }

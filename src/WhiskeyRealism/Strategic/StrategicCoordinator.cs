@@ -89,6 +89,7 @@ namespace WhiskeyRealism.Strategic
         {
             try
             {
+                RefreshStrategicSettings();
                 Eras[0] = Eras[0] ?? new EraStageManager { Stage = EraStage.Amateur1861 };
                 Eras[1] = Eras[1] ?? new EraStageManager { Stage = EraStage.Amateur1861 };
 
@@ -254,6 +255,7 @@ namespace WhiskeyRealism.Strategic
             }
             _wlCareerStartDeferredLogged = false;
 
+            RefreshStrategicSettings();
             int playerAlliance = ResolvePlayerAlliance();
             bool operationalRuntimeReady = OperationalRuntimeReady();
             if (!operationalRuntimeReady && !_operationalRuntimeDeferredLogged)
@@ -299,7 +301,7 @@ namespace WhiskeyRealism.Strategic
                     PublishDirectorPosture(alliance, cic, era, day, month, year, daySerial);
 
                 var phaseTruth = BuildPhaseTruth(cic, alliance, day, month, year);
-                if (!cic.ReviewPlanWithTruth(month, year, phaseTruth))
+                if (!cic.ReviewPlanWithTruth(day, month, year, phaseTruth))
                 {
                     string beforeOperation = cic.ActivePlan?.OperationId;
                     cic.Replan(
@@ -423,6 +425,28 @@ namespace WhiskeyRealism.Strategic
                 newPosture.Stale = true;
                 DirectorMemories[alliance].LastPosture =
                     DirectorMemories[alliance].LastPosture ?? newPosture;
+            }
+        }
+
+        // Copies the Plugin config values pure strategic types read (CIC, SuccessionScheduler)
+        // into their BepInEx-free settings holders.
+        private static void RefreshStrategicSettings()
+        {
+            var plugin = Plugin.Instance;
+            if (plugin == null) return;
+            try
+            {
+                CicSettings.OverrideVanillaSettings = ConfigValue(plugin.OverrideVanillaSettings);
+                CicSettings.LockedDifficulty = plugin.LockedDifficulty != null
+                    ? plugin.LockedDifficulty.Value
+                    : DifficultyPersonalityModifier.HistoricalHardDifficultyIndex;
+                CicSettings.HistoricalOperationDoctrine = ConfigValue(plugin.EnableHistoricalOperationDoctrine, defaultValue: true);
+                CicSettings.PlanTrace = ConfigValue(plugin.PlanTrace);
+                SuccessionScheduler.TraceEnabled = ConfigValue(plugin.SuccessionTrace);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("coordinator:settings-refresh", "[Coordinator] settings refresh failed: " + ex.Message);
             }
         }
 

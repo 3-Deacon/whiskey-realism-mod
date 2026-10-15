@@ -78,6 +78,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationCatalog.cs" Link="HistoricalOperationCatalog.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationDynamicRuleEvaluator.cs" Link="OperationDynamicRuleEvaluator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\OperationDecisionMemory.cs" Link="OperationDecisionMemory.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CIC.cs" Link="CIC.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\EraStageManager.cs" Link="EraStageManager.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\SuccessionScheduler.cs" Link="SuccessionScheduler.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalOperationContextBuilder.cs" Link="HistoricalOperationContextBuilder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\RecruitmentIntentLedger.cs" Link="RecruitmentIntentLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ProjectSelectionScorer.cs" Link="ProjectSelectionScorer.cs" />
