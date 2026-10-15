@@ -76,7 +76,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyPrefix]
         internal static void Prefix(int _aifaction, Regiment unit, float timediff)
         {
-            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-ops-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope("campaign.patch.coord-offensive-ops.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
             if (!_wiredLogged)
             {
@@ -203,7 +203,7 @@ namespace WhiskeyRealism.Patches
                         "candidate-list-unchanged",
                         "aifaction=" + _aifaction);
                     OnceLog.Warning(
-                        "coord-offensive:no-snapshot:" + _aifaction,
+                        "coord-offensive:no-snapshot",
                         "Patch CoordinatedOps prefix failed before snapshot; vanilla candidate list left unchanged");
                 }
             }
@@ -213,7 +213,7 @@ namespace WhiskeyRealism.Patches
         [HarmonyFinalizer]
         internal static Exception Finalizer(Exception __exception, int _aifaction)
         {
-            using (TelemetryPerf.Scope("tactical.patch.coord-offensive-ops-finalizer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope("campaign.patch.coord-offensive-ops.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 RestoreSnapshot(_aifaction);
                 return __exception;
