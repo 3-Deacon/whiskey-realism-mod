@@ -46,6 +46,13 @@ namespace WhiskeyRealism.Telemetry
 
     internal sealed class TelemetrySummary
     {
+        internal const int SlowestScopeLimit = 8;
+
+        // Upper bound on JSONL bytes parsed when building a summary (it runs on the main
+        // thread at quit; sessions can reach the 250 MB cap). failures/health are read first.
+        internal static long MaxInputBytes = 32L * 1024L * 1024L;
+
+        private long _inputBytesRead;
         private readonly SortedDictionary<string, long> _countByLayer = new SortedDictionary<string, long>(StringComparer.Ordinal);
         private readonly SortedDictionary<string, long> _countByCategory = new SortedDictionary<string, long>(StringComparer.Ordinal);
         private readonly SortedDictionary<string, long> _countByEvent = new SortedDictionary<string, long>(StringComparer.Ordinal);
@@ -80,6 +87,8 @@ namespace WhiskeyRealism.Telemetry
         internal DateTime? EndUtc { get; private set; }
         internal string PluginVersion { get; private set; }
         internal string RuntimeAssemblySha256 { get; private set; }
+        internal bool InputTruncated { get; private set; }
+        internal int RetainedSlowScopeCount { get { return _slowestScopes.Count; } }
         internal List<TelemetrySummaryItem> CountByLayer { get { return ItemsFrom(_countByLayer, int.MaxValue); } }
         internal List<TelemetrySummaryItem> CountByCategory { get { return ItemsFrom(_countByCategory, int.MaxValue); } }
         internal List<TelemetrySummaryItem> CountByEvent { get { return ItemsFrom(_countByEvent, int.MaxValue); } }
@@ -91,11 +100,7 @@ namespace WhiskeyRealism.Telemetry
         {
             get
             {
-                var copy = new List<TelemetrySlowScope>(_slowestScopes);
-                copy.Sort(CompareSlowScope);
-                if (copy.Count > 8)
-                    copy.RemoveRange(8, copy.Count - 8);
-                return copy;
+                return new List<TelemetrySlowScope>(_slowestScopes);
             }
         }
         internal List<TelemetrySummaryItem> QueueDrops { get { return ItemsFrom(_queueDrops, int.MaxValue); } }
@@ -146,6 +151,8 @@ namespace WhiskeyRealism.Telemetry
             builder.AppendLine("- runtimeAssemblySha256: " + RuntimeAssemblySha256);
             builder.AppendLine("- campaignDates: " + JoinSet(_campaignDates));
             builder.AppendLine("- battles: " + JoinSet(_battleIds));
+            if (InputTruncated)
+                builder.AppendLine("- inputTruncated: true (read " + _inputBytesRead.ToString(CultureInfo.InvariantCulture) + " bytes; bound " + MaxInputBytes.ToString(CultureInfo.InvariantCulture) + ")");
             AppendItems(builder, "countsByLayer", CountByLayer);
             AppendItems(builder, "countsByCategory", CountByCategory);
             AppendItems(builder, "countsByEvent", CountByEvent);
@@ -237,31 +244,38 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
+        // Streams the file line by line (no ReadAllLines) and stops once the summary-wide
+        // MaxInputBytes bound is reached.
         private void ReadJsonl(string path)
         {
-            string[] lines;
+            if (InputTruncated)
+                return;
+
             try
             {
-                lines = File.ReadAllLines(path);
+                foreach (string line in File.ReadLines(path))
+                {
+                    _inputBytesRead += line.Length + 1;
+                    if (_inputBytesRead > MaxInputBytes)
+                    {
+                        InputTruncated = true;
+                        return;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(line))
+                        continue;
+
+                    try
+                    {
+                        AccumulateRow(JObject.Parse(line));
+                    }
+                    catch (JsonException)
+                    {
+                    }
+                }
             }
             catch
             {
-                return;
-            }
-
-            for (int i = 0; i < lines.Length; i++)
-            {
-                if (string.IsNullOrWhiteSpace(lines[i]))
-                    continue;
-
-                try
-                {
-                    var row = JObject.Parse(lines[i]);
-                    AccumulateRow(row);
-                }
-                catch (JsonException)
-                {
-                }
             }
         }
 
@@ -302,7 +316,7 @@ namespace WhiskeyRealism.Telemetry
                 AddCount(_writeResults, eventName + " " + FirstNonBlank(FieldString(fields, "result"), FieldString(fields, "writeResult"), reason, decision));
 
             if (string.Equals(category, "Performance", StringComparison.OrdinalIgnoreCase) && durationMs > 0.0)
-                _slowestScopes.Add(new TelemetrySlowScope(FirstNonBlank(FieldString(fields, "scope"), eventName), eventName, durationMs));
+                AddSlowScope(new TelemetrySlowScope(FirstNonBlank(FieldString(fields, "scope"), eventName), eventName, durationMs));
 
             if (string.Equals(category, "Failure", StringComparison.OrdinalIgnoreCase))
             {
@@ -312,6 +326,21 @@ namespace WhiskeyRealism.Telemetry
                     _observedSinkFailures++;
                 CaptureMissingAnchor(eventName, reason, fields);
             }
+        }
+
+        // Keeps only the top SlowestScopeLimit rows, sorted, as rows stream in.
+        private void AddSlowScope(TelemetrySlowScope scope)
+        {
+            if (_slowestScopes.Count >= SlowestScopeLimit
+                && CompareSlowScope(scope, _slowestScopes[_slowestScopes.Count - 1]) >= 0)
+                return;
+
+            int index = _slowestScopes.Count;
+            while (index > 0 && CompareSlowScope(scope, _slowestScopes[index - 1]) < 0)
+                index--;
+            _slowestScopes.Insert(index, scope);
+            if (_slowestScopes.Count > SlowestScopeLimit)
+                _slowestScopes.RemoveAt(_slowestScopes.Count - 1);
         }
 
         private void ReconcileManifestCounters()
@@ -357,6 +386,8 @@ namespace WhiskeyRealism.Telemetry
                 _recommendedInspectionQueries.Add("event=MissingAnchor");
         }
 
+        // failures* and health* first so they survive the MaxInputBytes bound; then the rest
+        // in name order.
         private static List<string> OrderedJsonlFiles(string path)
         {
             var files = new List<string>();
@@ -369,8 +400,22 @@ namespace WhiskeyRealism.Telemetry
             {
             }
 
-            files.Sort(StringComparer.OrdinalIgnoreCase);
+            files.Sort(CompareJsonlFiles);
             return files;
+        }
+
+        private static int CompareJsonlFiles(string left, string right)
+        {
+            int rank = FileRank(left).CompareTo(FileRank(right));
+            return rank != 0 ? rank : StringComparer.OrdinalIgnoreCase.Compare(left, right);
+        }
+
+        private static int FileRank(string path)
+        {
+            string name = Path.GetFileName(path) ?? string.Empty;
+            if (name.StartsWith("failures", StringComparison.OrdinalIgnoreCase)) return 0;
+            if (name.StartsWith("health", StringComparison.OrdinalIgnoreCase)) return 1;
+            return 2;
         }
 
         private static void AddCount(SortedDictionary<string, long> counts, string key)

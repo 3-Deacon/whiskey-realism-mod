@@ -39,6 +39,10 @@ internal static class TelemetryInfraFixTests
         WriterRetriesTransientFailureWithoutDisablingSink();
         WriterDisablesSinkAfterConsecutiveFailures();
         WriterShutdownDrainIsBounded();
+        ShutdownWritesFinalManifestAndSummaryOnce();
+        ShutdownRewritesManifestOnlyAfterLateFailure();
+        SummaryKeepsBoundedSlowestScopes();
+        SummaryBoundsInputBytesAndReadsFailuresFirst();
     }
 
     private static void LogPass(string message)
@@ -754,5 +758,119 @@ internal static class TelemetryInfraFixTests
             DeleteQuietly(dir);
         }
         LogPass("writer shutdown drain is bounded");
+    }
+
+    // ---------------------------------------------------------------- P-shutdown
+
+    private static void ShutdownWritesFinalManifestAndSummaryOnce()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            TelemetryRuntime runtime = StartRuntime(gameRoot);
+            TestHarness.AssertTrue(runtime.TryEmit(Decision(runtime.SessionId, 1)), "row accepted");
+            TelemetryRouter.Shutdown("p-test");
+            TestHarness.AssertEqual(1, runtime.FinalManifestWriteCount, "final manifest written once");
+            TestHarness.AssertEqual(1, runtime.SummaryWriteCount, "summary written once");
+            TestHarness.AssertTrue(File.Exists(Path.Combine(SessionDir(gameRoot, runtime), "summary.md")), "summary exists");
+        }
+        finally
+        {
+            TelemetryRouter.Shutdown("cleanup");
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("shutdown writes final manifest and summary once");
+    }
+
+    private static void ShutdownRewritesManifestOnlyAfterLateFailure()
+    {
+        string gameRoot = TempDir();
+        try
+        {
+            var config = TelemetryRuntimeConfig.Create(
+                gameRoot, "0.2.2-test", "abcdef1234567890", TelemetryProfile.FullTuning,
+                maxTuningLogMb: 8, fileRotateMb: 4, retainedSessions: 2,
+                emitHumanSummary: true, performanceWarnings: true,
+                createIssueBundleOnShutdown: true, warningCallback: null);
+            TelemetryRuntime runtime = TelemetryRuntime.Start(config);
+            string dir = SessionDir(gameRoot, runtime);
+            Directory.CreateDirectory(Path.Combine(dir, "issue-bundle.json"));
+            runtime.Shutdown("p-test");
+            TestHarness.AssertEqual(2, runtime.FinalManifestWriteCount, "manifest rewritten once to record the late failure");
+            TestHarness.AssertEqual(1, runtime.SummaryWriteCount, "summary still written once");
+            var manifest = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(Path.Combine(dir, "manifest.json")));
+            TestHarness.AssertTrue((long)manifest["droppedCounters"]["sinkFailures"] >= 1L, "late failure recorded in final manifest");
+            TestHarness.AssertTrue(File.ReadAllText(Path.Combine(dir, "summary.md")).Contains("TelemetrySinkFailure"), "summary includes the late failure");
+        }
+        finally
+        {
+            DeleteQuietly(gameRoot);
+        }
+        LogPass("shutdown rewrites manifest only after late failure");
+    }
+
+    private static string PerfRow(string scope, double durationMs)
+    {
+        var ev = TelemetryEvent.Create("sum", TelemetryProfile.FullTuning, TelemetryLayer.Tactical, TelemetryCategory.Performance, "Performance", TelemetrySeverity.Info)
+            .WithDurationMs(durationMs)
+            .WithField("scope", scope);
+        return TelemetryJson.ToJsonLine(ev);
+    }
+
+    private static void SummaryKeepsBoundedSlowestScopes()
+    {
+        string dir = TempDir();
+        try
+        {
+            var lines = new System.Text.StringBuilder();
+            for (int i = 1; i <= 2000; i++)
+                lines.Append(PerfRow("scope-" + (i % 50).ToString(CultureInfo.InvariantCulture), i * 0.5));
+            File.WriteAllText(Path.Combine(dir, "performance.jsonl"), lines.ToString());
+            TelemetrySummary summary = TelemetrySummary.FromDirectory(dir);
+            var slowest = summary.SlowestScopes;
+            TestHarness.AssertEqual(8, slowest.Count, "top 8 slowest");
+            TestHarness.AssertEqual(1000.0, slowest[0].DurationMs, "slowest first");
+            TestHarness.AssertEqual(996.5, slowest[7].DurationMs, "eighth slowest");
+            TestHarness.AssertTrue(summary.RetainedSlowScopeCount <= 8, "slow scopes retained incrementally, not all rows");
+        }
+        finally
+        {
+            DeleteQuietly(dir);
+        }
+        LogPass("summary keeps bounded slowest scopes");
+    }
+
+    private static void SummaryBoundsInputBytesAndReadsFailuresFirst()
+    {
+        string dir = TempDir();
+        long saved = TelemetrySummary.MaxInputBytes;
+        try
+        {
+            var perf = new System.Text.StringBuilder();
+            for (int i = 0; i < 2000; i++)
+                perf.Append(PerfRow("bulk", 1.0));
+            File.WriteAllText(Path.Combine(dir, "performance.jsonl"), perf.ToString());
+            File.WriteAllText(Path.Combine(dir, "campaign.jsonl"), perf.ToString());
+            var failure = TelemetryEvent.Create("sum", TelemetryProfile.FullTuning, TelemetryLayer.System, TelemetryCategory.Failure, "PTestFailure", TelemetrySeverity.Warning)
+                .WithField("reason", "boom");
+            File.WriteAllText(Path.Combine(dir, "failures.jsonl"), TelemetryJson.ToJsonLine(failure));
+
+            TelemetrySummary.MaxInputBytes = 64 * 1024;
+            TelemetrySummary summary = TelemetrySummary.FromDirectory(dir);
+            string markdown = summary.ToMarkdown();
+            TestHarness.AssertTrue(markdown.Contains("PTestFailure=1"), "failures read first even when bulk files exceed the bound");
+            TestHarness.AssertTrue(summary.InputTruncated, "summary marks truncated input");
+            TestHarness.AssertTrue(markdown.Contains("inputTruncated: true"), "markdown reports truncation");
+            long rowsRead = 0;
+            foreach (var item in summary.CountByLayer)
+                rowsRead += item.Count;
+            TestHarness.AssertTrue(rowsRead < 4001, "row reading stopped at the byte bound");
+        }
+        finally
+        {
+            TelemetrySummary.MaxInputBytes = saved;
+            DeleteQuietly(dir);
+        }
+        LogPass("summary bounds input bytes and reads failures first");
     }
 }
