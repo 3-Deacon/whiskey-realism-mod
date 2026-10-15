@@ -70,6 +70,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersonalityVector.cs" Link="PersonalityVector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalFigureRegistry.cs" Link="HistoricalFigureRegistry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\Reflection.cs" Link="Util\Reflection.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Util\VanillaTerrain.cs" Link="Util\VanillaTerrain.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DifficultyPersonalityModifier.cs" Link="DifficultyPersonalityModifier.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PerkSelectionScorer.cs" Link="PerkSelectionScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\VanillaPerkTables.cs" Link="VanillaPerkTables.cs" />
@@ -303,6 +304,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlOrderCaptureGate.cs" Link="PlayerOrders\WlOrderCaptureGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlCourierDelay.cs" Link="PlayerOrders\WlCourierDelay.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlCourierQueue.cs" Link="PlayerOrders\WlCourierQueue.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlOrderFlow.cs" Link="PlayerOrders\WlOrderFlow.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPosture.cs" Link="DirectorPosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />

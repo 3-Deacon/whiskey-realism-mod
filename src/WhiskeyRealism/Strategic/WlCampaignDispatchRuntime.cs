@@ -56,9 +56,6 @@ namespace WhiskeyRealism.Strategic
         private static readonly WlCorrectionMemory<Regiment> _corrections = new WlCorrectionMemory<Regiment>();
         private static readonly Func<Regiment, bool> QueuedOrderRunning = QueuedOrderRunningOf;
         private static CareerInformationPanel _panel;
-        private static bool _terrainResolved;
-        private static PropertyInfo _activeTerrain;
-        private static MethodInfo _sampleHeight;
 
         static WlCampaignDispatchRuntime()
         {
@@ -303,7 +300,7 @@ namespace WhiskeyRealism.Strategic
             Regiment textUnit = (UnityEngine.Object)issuerUnit != null ? issuerUnit : group;
             string headline = Tooltip.GetTooltipText(tooltip, 0);
             string content = Tooltip.GetTooltipText(tooltip, 1, new Tooltip.VariableContainer(0f, destinationName, textUnit, 0));
-            position = new Vector3(position.x, TerrainHeight(position, position.y), position.z);
+            position = new Vector3(position.x, VanillaTerrain.SampleHeight(position, position.y), position.z);
 
             var panel = Panel();
             if ((UnityEngine.Object)panel == null)
@@ -331,31 +328,6 @@ namespace WhiskeyRealism.Strategic
                 case 10: return 1090;
                 case 16: return 1203;
                 default: return -1;
-            }
-        }
-
-        // Terrain.activeTerrain.SampleHeight (8638), by reflection: the mod does not
-        // reference UnityEngine.TerrainModule (as WaypointValidatorRuntime).
-        private static float TerrainHeight(Vector3 position, float fallback)
-        {
-            try
-            {
-                if (!_terrainResolved)
-                {
-                    _terrainResolved = true;
-                    Type terrainType = AccessTools.TypeByName("UnityEngine.Terrain");
-                    _activeTerrain = terrainType != null ? AccessTools.Property(terrainType, "activeTerrain") : null;
-                    _sampleHeight = terrainType != null ? AccessTools.Method(terrainType, "SampleHeight", new[] { typeof(Vector3) }) : null;
-                    if (_activeTerrain == null || _sampleHeight == null)
-                        OnceLog.Warning("wl-campaign-dispatch:terrain", "[W&LCampaignDispatch] Terrain.SampleHeight not readable; order height unchanged");
-                }
-                object terrain = _activeTerrain?.GetValue(null, null);
-                if (terrain == null || _sampleHeight == null) return fallback;
-                return (float)_sampleHeight.Invoke(terrain, new object[] { position });
-            }
-            catch
-            {
-                return fallback;
             }
         }
 

@@ -71,6 +71,8 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrineDiagnostics { get; private set; }
         internal static ConfigEntry<bool> EnableCampaignChainDispatches { get; private set; }
         internal static ConfigEntry<bool> EnablePlayerComplianceLedger { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderReadmit { get; private set; }
+        internal static ConfigEntry<bool> EnableWlOrderCouriers { get; private set; }
         internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
@@ -505,6 +507,24 @@ namespace WhiskeyRealism
                 "reliability (saved in the sidecar). The battle AI counts the player's regiments at that reliability when it weighs its " +
                 "sectors, so it does not build its main effort on a player who ignores orders. Starts at full trust; no penalty for the player. Off: the " +
                 "player's regiments count fully and nothing is recorded.");
+            EnableWlOrderReadmit = Config.Bind(
+                "W&L",
+                "Enable W&L Order Readmit",
+                true,
+                "Default ON. W&L subordinate career: a new order from your superiors reaches you when the situation changes " +
+                "(the same kind of order at a new place after 15 game minutes, a retreat over 'Engage at will', a defend once the " +
+                "objective is held or the army turns defensive), instead of being dropped by vanilla's one-order-per-type rule; " +
+                "'Engage at will' is released to 'hold current position' when contact ends. Writes the W&L order slot " +
+                "(DLC_WL.givenorder) and restores it if vanilla refuses the new order. Needs Tactical Commander Mode = Active. " +
+                "Off: vanilla's order dedupe.");
+            EnableWlOrderCouriers = Config.Bind(
+                "W&L",
+                "Enable W&L Order Couriers",
+                true,
+                "Default ON. W&L subordinate career: orders from your superiors (vanilla's and Whiskey's) arrive after the courier " +
+                "delay from the issuing headquarters, using vanilla's own order-delay settings (bugle within range, a mounted courier " +
+                "beyond it, relays down the chain), instead of appearing the instant they are given. Needs Tactical Commander Mode = " +
+                "Active. Off: orders are delivered at the next order pass.");
             EnableCicFactionAiBugGuard = Config.Bind(
                 "W&L",
                 "Enable CIC Faction AI Bug Guard",

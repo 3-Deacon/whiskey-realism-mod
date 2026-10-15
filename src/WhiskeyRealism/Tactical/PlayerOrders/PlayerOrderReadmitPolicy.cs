@@ -9,6 +9,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     internal enum OrderOrigin
     {
         Vanilla,
+        P62,
         Executor,
         Release,
         FollowUp,

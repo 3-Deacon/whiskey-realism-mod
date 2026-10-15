@@ -68,6 +68,7 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalOrder", TelemetryCategory.Write);
             AddTactical("TacticalCommand", TelemetryCategory.Write);
             AddTactical("TacticalPlayerOrder", TelemetryCategory.Decision);
+            AddTactical("TacticalPlayerOrderFlow", TelemetryCategory.Decision);
             AddTactical("TacticalCurrentOrder", TelemetryCategory.Decision);
             AddTactical("TacticalCourierQueue", TelemetryCategory.State);
             AddTactical("TacticalReserve", TelemetryCategory.Gate);

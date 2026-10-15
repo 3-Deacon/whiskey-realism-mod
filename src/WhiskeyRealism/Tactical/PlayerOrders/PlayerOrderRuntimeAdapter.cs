@@ -159,59 +159,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             }
         }
 
-        public bool ActiveMatchesIssued(
-            PlayerOrderCandidate candidate,
-            PlayerOrderActiveSnapshot before,
-            PlayerOrderActiveSnapshot active)
-        {
-            if (!candidate.HasCandidate || !active.HasActiveOrder) return false;
-            if (active.GivenOrderSession <= before.GivenOrderSession) return false;
-            if (active.VanillaType != candidate.VanillaType) return false;
-            if (string.IsNullOrEmpty(active.UnitKey)) return false;
-            if (Bucket(active.TargetPoint.X) != Bucket(candidate.TargetPoint.X)) return false;
-            if (Bucket(active.TargetPoint.Z) != Bucket(candidate.TargetPoint.Z)) return false;
-            if (Bucket(active.Rotation) != Bucket(candidate.Rotation + 180f)) return false;
-            return string.Equals(active.ObjectiveKey, ExpectedDestination(candidate), StringComparison.Ordinal);
-        }
-
-        public PlayerOrderCandidate WithSession(PlayerOrderCandidate candidate, int givenOrderSession)
-        {
-            return new PlayerOrderCandidate(
-                candidate.Scope,
-                candidate.Intent,
-                candidate.VanillaType,
-                candidate.Priority,
-                candidate.UnitKey,
-                candidate.BattleIdentity,
-                givenOrderSession,
-                candidate.TargetPoint,
-                candidate.Rotation,
-                candidate.ObjectiveKey,
-                candidate.Reason,
-                candidate.ActiveCampaignActionable,
-                candidate.CampaignGroupFlag,
-                candidate.ValidExitPoint);
-        }
-
-        public PlayerOrderCandidate WithAcceptedOrder(PlayerOrderCandidate candidate, PlayerOrderActiveSnapshot active)
-        {
-            return new PlayerOrderCandidate(
-                candidate.Scope,
-                candidate.Intent,
-                candidate.VanillaType,
-                candidate.Priority,
-                active.UnitKey,
-                candidate.BattleIdentity,
-                active.GivenOrderSession,
-                active.TargetPoint,
-                active.Rotation,
-                active.ObjectiveKey,
-                candidate.Reason,
-                candidate.ActiveCampaignActionable,
-                candidate.CampaignGroupFlag,
-                candidate.ValidExitPoint || active.TargetPoint.ValidExitPoint);
-        }
-
         private RuntimeEvaluation Skip(RuntimeSnapshot snapshot, string reason)
         {
             return new RuntimeEvaluation(
@@ -687,18 +634,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private static bool HasPoint(PlayerOrderPoint point)
         {
             return IsFinite(point.X) && IsFinite(point.Z) && (Math.Abs(point.X) > 0.001f || Math.Abs(point.Z) > 0.001f || point.ValidExitPoint);
-        }
-
-        private static int Bucket(float value)
-        {
-            if (!IsFinite(value)) return 0;
-            return (int)Math.Round(value / 10f);
-        }
-
-        private static string ExpectedDestination(PlayerOrderCandidate candidate)
-        {
-            if (candidate.Intent == PlayerOrderIntent.RetreatToExit) return string.Empty;
-            return string.IsNullOrWhiteSpace(candidate.ObjectiveKey) ? "Objective" : candidate.ObjectiveKey;
         }
 
         private static bool IsFinite(float value)

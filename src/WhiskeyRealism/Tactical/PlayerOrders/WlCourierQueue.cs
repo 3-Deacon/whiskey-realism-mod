@@ -18,6 +18,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public int IssuerKey;
         public double IssuedAt, DueAt;
         public long EnqueueSeq;
+        // Diagnostics for the flow row: the courier path the delay was computed over.
+        public int Legs;
+        public float Meters;
     }
 
     // Told about every entry the queue discards by itself: superseded, overflow, cleared. A capture
@@ -96,6 +99,21 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             _pending[_count++] = stored;
             RecordSent(in stored);
             return true;
+        }
+
+        // An entry the delivery pass drops after it has left the queue (its own checks), reported
+        // through the sink like every other discard.
+        public void Discard(in CourierEntry e, string reason)
+        {
+            _sink?.Discarded(in e, reason);
+        }
+
+        // True when an entry of this type is waiting.
+        public bool HasPending(int type)
+        {
+            for (int i = 0; i < _count; i++)
+                if (_pending[i].Type == type) return true;
+            return false;
         }
 
         // The earliest-due entry that is due (ties by enqueue order), removed from the queue.

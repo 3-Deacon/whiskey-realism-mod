@@ -109,30 +109,19 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
-                TacticalPlayerDispatchRuntime.Emit(
+                bool queued = TacticalPlayerDispatchRuntime.Emit(
                     evaluation.CurrentCommand,
                     candidate.VanillaType,
                     candidate.TargetPoint.X,
                     candidate.TargetPoint.Z,
                     candidate.Rotation,
-                    DestinationName(candidate));
+                    DestinationName(candidate),
+                    OrderOrigin.P62);
 
-                var afterIssue = Runtime.Snapshot(__instance, forceVanillaProvenance: false).ActiveOrder;
-                if (Runtime.ActiveMatchesIssued(candidate, evaluation.ActiveOrder, afterIssue))
-                {
-                    TacticalPlayerDispatchRuntime.Dedupe.RecordAccepted(
-                        Runtime.WithSession(candidate, afterIssue.GivenOrderSession),
-                        Runtime.WithAcceptedOrder(candidate, afterIssue),
-                        evaluation.Tick);
-                    if (diagnosticsEnabled) Log("issue", decision.Reason, candidate, afterIssue);
-                }
-                else
-                {
-                    // Recorded whatever the diagnostics setting, or the
-                    // 120-tick throttle never applies to a rejected order.
-                    TacticalPlayerDispatchRuntime.Dedupe.RecordAttempt(candidate, evaluation.Tick);
-                    if (diagnosticsEnabled) Log("suppress", "vanilla-bridge-no-match", candidate, afterIssue);
-                }
+                // The throttle and the signature suppress a repeat while the order is on its way.
+                TacticalPlayerDispatchRuntime.Dedupe.RecordAttempt(candidate, evaluation.Tick);
+                if (diagnosticsEnabled)
+                    Log(queued ? "issue" : "suppress", queued ? decision.Reason : "queue-refused", candidate, evaluation.ActiveOrder);
             }
             catch (Exception ex)
             {
