@@ -127,6 +127,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableOffensiveWeaponTrimFix;
         public static ConfigEntry<bool> EnableAiRandomCandidatePickFix;
         public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
+        public static ConfigEntry<bool> ReuseCampaignAiUnitList;
+        public static ConfigEntry<bool> SkipDeadWlUnitNameRead;
         internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
@@ -946,6 +948,14 @@ namespace WhiskeyRealism
                 3f,
                 "Wall-clock milliseconds per AICampaign.Update frame above which the governor stops running passes beyond the guaranteed ones, " +
                 "unless the owed backlog forces catch-up. Default 3.");
+            ReuseCampaignAiUnitList = Config.Bind(
+                "Performance", "Reuse Campaign AI Unit List", true,
+                "Default ON. Every vanilla AICampaign.UpdateUnitAI pass copies the whole campaign unit list into a new list it only reads (8 bytes per unit per pass; the governor and fast-forward catch-up add passes). " +
+                "A narrow IL rewrite (left as vanilla if the code pattern is not found) refills one reused list with the same units in the same order instead; this flag switches it live. Off: vanilla.");
+            SkipDeadWlUnitNameRead = Config.Bind(
+                "Performance", "Skip Dead W&L Unit Name Read", true,
+                "Default ON. In a W&L career vanilla BattleUnits.IsUnitUnderCommander reads the unit's name and discards the comparison on every call (about 90-100 calls per frame), allocating a string each time. " +
+                "A narrow IL rewrite (left as vanilla if the code pattern is not found) skips the read; no result changes. This flag switches it live. Off: vanilla.");
             EnableWlCampAccountingFix = Config.Bind(
                 "W&L Camp", "Enable W&L Camp Accounting Fix", true,
                 "Default ON. Corrects vanilla short-camp minimum allocation so credited station time sums to actual camp time.");
