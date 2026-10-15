@@ -118,7 +118,10 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
         public static ConfigEntry<bool> EnableRaidSupplyThresholdFix;
         public static ConfigEntry<bool> EnableFoggedAiCampFix;
+        public static ConfigEntry<bool> EnableFoggedAiCampPlacementBudget;
+        public static ConfigEntry<int> FoggedAiCampPlacementsPerFrame;
         public static ConfigEntry<bool> EnableFoggedAiEmbarkationFix;
+        public static ConfigEntry<bool> EnableHiddenTransportFlagDeferral;
         public static ConfigEntry<bool> EnableOrphanCampCleanup;
         public static ConfigEntry<bool> EnableAiAreaMembershipRefresh;
         public static ConfigEntry<bool> EnableWinterOffensiveModifierFix;
@@ -127,6 +130,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableOffensiveWeaponTrimFix;
         public static ConfigEntry<bool> EnableAiRandomCandidatePickFix;
         public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
+        public static ConfigEntry<bool> ReuseCampaignAiUnitList;
+        public static ConfigEntry<bool> SkipDeadWlUnitNameRead;
         public static ConfigEntry<bool> EnableAutoresolveStandardGunFix;
         public static ConfigEntry<bool> EnableCombineWeaponStockFix;
         public static ConfigEntry<bool> EnableAiWeaponPurchaseOrderableFix;
@@ -147,6 +152,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<int> FastForwardAi50xExtraPasses;
         internal ConfigEntry<float> FastForwardAiSlowFrameThresholdMs;
         internal ConfigEntry<int> FastForwardAiSlowFrameCooldownFrames;
+        internal ConfigEntry<bool> TimeSliceDailyReview;
+        internal ConfigEntry<float> DailyReviewFrameBudgetMs;
         internal ConfigEntry<bool> CampaignAiGovernorEnabled;
         internal ConfigEntry<int> CampaignAiGovernorMaxPasses20x;
         internal ConfigEntry<int> CampaignAiGovernorMaxPasses50x;
@@ -890,9 +897,18 @@ namespace WhiskeyRealism
             EnableFoggedAiCampFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Fogged AI Camp Fix", true,
                 "Default ON. Vanilla never lets an AI army the player cannot see encamp, take winter quarters or entrench (UpdateCampsAndEntrenchments requires the unit to be out of the player's fog), so hidden AI armies lose the winter supply/movement relief, readiness, drill, morale and entrenchment effects. AI land units in the player's fog now camp as visible ones do; the camp and entrenchment models (and the encamp bugle) stay hidden until the player can see the unit. Player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableFoggedAiCampPlacementBudget = Config.Bind(
+                "Campaign Bug Fixes", "Enable Fogged AI Camp Placement Budget", true,
+                "Default ON. With the Fogged AI Camp Fix, hidden AI armies that halted for the night all reach vanilla's camp time in the same few seconds, and each camp placement fits its model to the ground. A hidden AI unit without a camp places one only while this frame's placement budget ('Fogged AI Camp Placements Per Frame') has room; the others place theirs on a later regular cycle (vanilla re-checks each unit every 25 frames). Each unit still gets its camp as in vanilla; only the moment is spread. Units that already have a camp are never deferred. Off: every hidden AI camp is placed on the first cycle it qualifies.");
+            FoggedAiCampPlacementsPerFrame = Config.Bind(
+                "Campaign Bug Fixes", "Fogged AI Camp Placements Per Frame", 2,
+                "Default 2. Most new camps placed per frame for AI units the player cannot see, when 'Enable Fogged AI Camp Placement Budget' is on. A value below 1 counts as 1.");
             EnableFoggedAiEmbarkationFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Fogged AI Embarkation Fix", true,
                 "Default ON. Vanilla creates a unit's train, river boat or ship model (which is its embarked state) only while the player can see it, so an AI land unit in the player's fog is never embarked: no rail speed, it halts at night, uses no transport capacity, locomotives or ships, skips the sea embarkation delay and keeps full rations and reinforcements. AI land units in fog now embark as visible ones do, with the transport model hidden until the player can see the unit; those models share one never-used ship-firing sound array instead of adding 20 sound objects each. Fleets and player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableHiddenTransportFlagDeferral = Config.Bind(
+                "Campaign Bug Fixes", "Enable Hidden Transport Flag Deferral", true,
+                "Default ON. With the Fogged AI Embarkation Fix, a transport model created for an AI unit the player cannot see is hidden at once, yet vanilla still sets up its flag (texture loads and a material copy the model's removal does not free). That setup is skipped for such a model and run when the model is shown, which is when vanilla itself would have created it; a model removed while hidden never sets its flag up. Off: the flag is set up when the model is created (models already deferred still set theirs up when shown).");
             EnableOrphanCampCleanup = Config.Bind(
                 "Campaign Bug Fixes", "Enable Orphan Camp Cleanup", true,
                 "Default ON. Vanilla never removes a unit's camp or entrenchment when the unit is destroyed (merged, disbanded or wiped out), so its tents and earthworks stay on the map. They are removed with the unit, the way vanilla removes them when a unit breaks camp. Off: vanilla.");
@@ -993,6 +1009,17 @@ namespace WhiskeyRealism
             FastForwardAiSlowFrameCooldownFrames = Config.Bind(
                 "Performance", "Fast Forward AI Slow Frame Cooldown Frames", 180,
                 "Unity frames to skip extra fast-forward AI catch-up after a slow 20x/50x AI frame.");
+            TimeSliceDailyReview = Config.Bind(
+                "Performance", "Time-Slice Daily Review", true,
+                "Default ON. Spreads the daily strategic review (campaign map, then per alliance the CIC review and every ledger) over a few " +
+                "frames as an ordered job list, using at most Daily Review Frame Budget Ms plus one job per frame, instead of running it all " +
+                "on the frame the date changes. Jobs keep their order and inputs; vanilla state they read (unit positions, strengths, " +
+                "treasury) is read when each job runs, a few frames after the date change. Patches keep seeing the previous day's complete " +
+                "results until the whole review finishes, then the new day is published at once. Set false for rollback to the single-frame review.");
+            DailyReviewFrameBudgetMs = Config.Bind(
+                "Performance", "Daily Review Frame Budget Ms", 4f,
+                "Wall-clock milliseconds per frame the time-sliced daily strategic review may use before it continues on the next frame; " +
+                "every frame runs at least one review job. Default 4.");
             CampaignAiGovernorEnabled = Config.Bind(
                 "Performance", "Campaign AI Governor Enabled", true,
                 "Default ON. Replaces vanilla AICampaign.Update high-speed pass scheduling with a bounded wrapper that preserves vanilla side effects.");
@@ -1016,6 +1043,14 @@ namespace WhiskeyRealism
                 3f,
                 "Wall-clock milliseconds per AICampaign.Update frame above which the governor stops running passes beyond the guaranteed ones, " +
                 "unless the owed backlog forces catch-up. Default 3.");
+            ReuseCampaignAiUnitList = Config.Bind(
+                "Performance", "Reuse Campaign AI Unit List", true,
+                "Default ON. Every vanilla AICampaign.UpdateUnitAI pass copies the whole campaign unit list into a new list it only reads (8 bytes per unit per pass; the governor and fast-forward catch-up add passes). " +
+                "A narrow IL rewrite (left as vanilla if the code pattern is not found) refills one reused list with the same units in the same order instead; this flag switches it live. Off: vanilla.");
+            SkipDeadWlUnitNameRead = Config.Bind(
+                "Performance", "Skip Dead W&L Unit Name Read", true,
+                "Default ON. In a W&L career vanilla BattleUnits.IsUnitUnderCommander reads the unit's name and discards the comparison on every call (about 90-100 calls per frame), allocating a string each time. " +
+                "A narrow IL rewrite (left as vanilla if the code pattern is not found) skips the read; no result changes. This flag switches it live. Off: vanilla.");
             EnableWlCampAccountingFix = Config.Bind(
                 "W&L Camp", "Enable W&L Camp Accounting Fix", true,
                 "Default ON. Corrects vanilla short-camp minimum allocation so credited station time sums to actual camp time.");

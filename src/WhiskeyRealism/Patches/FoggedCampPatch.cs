@@ -35,6 +35,17 @@ namespace WhiskeyRealism.Patches
     // 72305). Player-alliance units are never touched (they are never fogged on the campaign
     // map, 127211-127215). Rollback: Campaign Bug Fixes / Enable Fogged AI Camp Fix (models
     // are still re-shown for visible units when the flag is off).
+    //
+    // Placement budget (perf review L1): night halt (133958) stops every hidden AI unit that
+    // marched that day at once, so ~2.2 game hours later (timetoopensummercamp, 115408) they
+    // all place a camp within one 25-frame regular cycle, and CBuilding.Place fits each
+    // camp to the ground per vertex (95840-95891). A fogged unit without a camp is flipped
+    // only while this frame's budget has room (FoggedModelRule.ShouldFlipUnderPlacementBudget);
+    // for such a unit iswithinfog is read only by the placement test (115408), so a deferred
+    // unit is exactly vanilla's "not placed this cycle" and encamps on a later cycle. A unit
+    // with a camp is always flipped, or the fog branch (115426) would destroy it. The
+    // Finalizer spends one placement when a flipped call took the unit from no camp to a
+    // camp. Rollback: Campaign Bug Fixes / Enable Fogged AI Camp Placement Budget.
     [HarmonyPatch(typeof(Regiment), "UpdateCampsAndEntrenchments")]
     internal static class FoggedCampPatch
     {
@@ -42,6 +53,25 @@ namespace WhiskeyRealism.Patches
         // NavMesh area ids; -1 until the campaign navmesh resolves them.
         private static int _riverArea = -1;
         private static int _seaArea = -1;
+        private static readonly PerFrameBudget Placements = new PerFrameBudget();
+
+        // First-log flags: OnceLog.Info takes a lock and a set lookup, so each line is
+        // formatted once per campaign instead of on every call.
+        private static bool _keptLogged;
+        private static bool _hiddenLogged;
+        private static bool _shownLogged;
+        private static bool _deferredLogged;
+
+        static FoggedCampPatch()
+        {
+            CampaignScope.Register("fogged-camp-log", () =>
+            {
+                _keptLogged = false;
+                _hiddenLogged = false;
+                _shownLogged = false;
+                _deferredLogged = false;
+            });
+        }
 
         private static readonly UnitFogFlip<Regiment, int[]> Flip = new UnitFogFlip<Regiment, int[]>(
             unit => unit.iswithinfog,
@@ -51,11 +81,12 @@ namespace WhiskeyRealism.Patches
             NoSounds);
 
         [HarmonyPrefix]
-        internal static void Prefix(Regiment __instance)
+        internal static void Prefix(Regiment __instance, out bool __state)
         {
             using (TelemetryPerf.Scope("campaign.patch.fogged-camp.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 PatchFirstFire.Mark("campaign.patch.fogged-camp.prefix");
+                __state = false;
                 try
                 {
                     if (__instance == null || !__instance.iswithinfog) return;
@@ -69,6 +100,21 @@ namespace WhiskeyRealism.Patches
                     {
                         return;
                     }
+                    bool hasCamp = (UnityEngine.Object)__instance.campbuilding != null;
+                    int frame = Time.frameCount;
+                    if (!FoggedModelRule.ShouldFlipUnderPlacementBudget(
+                            hasCamp,
+                            BudgetEnabled(),
+                            Placements.HasRoom(frame, FoggedModelRule.EffectivePlacementsPerFrame(BudgetPerFrame()))))
+                    {
+                        if (!_deferredLogged)
+                        {
+                            _deferredLogged = true;
+                            OnceLog.Info("fogged-camp:deferred", "[Patch:FoggedCamp] deferred a hidden AI unit's camp to a later cycle (per-frame placement budget)");
+                        }
+                        return;
+                    }
+                    __state = hasCamp;
                     Flip.Apply(__instance);
                 }
                 catch (Exception ex)
@@ -79,7 +125,7 @@ namespace WhiskeyRealism.Patches
         }
 
         [HarmonyFinalizer]
-        internal static void Finalizer(Regiment __instance)
+        internal static void Finalizer(Regiment __instance, bool __state)
         {
             using (TelemetryPerf.Scope("campaign.patch.fogged-camp.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
@@ -91,8 +137,14 @@ namespace WhiskeyRealism.Patches
                     if (failure != null)
                         OnceLog.Warning("fogged-camp:restore", "[Patch:FoggedCamp] restoring the fog flag failed: " + failure);
                     if (__instance == null) return;
-                    if (flipped && (UnityEngine.Object)__instance.campbuilding != null)
+                    bool hasCamp = (UnityEngine.Object)__instance.campbuilding != null;
+                    if (FoggedModelRule.PlacedNewCamp(flipped, __state, hasCamp))
+                        Placements.Spend(Time.frameCount);
+                    if (flipped && hasCamp && !_keptLogged)
+                    {
+                        _keptLogged = true;
                         OnceLog.Info("fogged-camp:kept", "[Patch:FoggedCamp] a fogged AI unit kept its camp (model hidden from the player)");
+                    }
 
                     bool isPlayerAlliance = __instance.alliance == GameVars.playeralliance;
                     if (isPlayerAlliance) return;
@@ -118,10 +170,16 @@ namespace WhiskeyRealism.Patches
 
         private static void Report(int change)
         {
-            if (change < 0)
+            if (change < 0 && !_hiddenLogged)
+            {
+                _hiddenLogged = true;
                 OnceLog.Info("fogged-camp:hidden", "[Patch:FoggedCamp] hid a camp or entrenchment model of an AI unit the player cannot see");
-            else if (change > 0)
+            }
+            else if (change > 0 && !_shownLogged)
+            {
+                _shownLogged = true;
                 OnceLog.Info("fogged-camp:shown", "[Patch:FoggedCamp] re-showed a camp or entrenchment model of an AI unit the player now sees");
+            }
         }
 
         // CheckModelReplacement (116383, 116399) shows a boat on these areas when the unit
@@ -131,6 +189,18 @@ namespace WhiskeyRealism.Patches
             if (_riverArea < 0) _riverArea = UnityEngine.AI.NavMesh.GetAreaFromName("Rivers");
             if (_seaArea < 0) _seaArea = UnityEngine.AI.NavMesh.GetAreaFromName("FencesWalls, Sea (C)");
             return (_riverArea >= 0 && terrain == _riverArea) || (_seaArea >= 0 && terrain == _seaArea);
+        }
+
+        private static bool BudgetEnabled()
+        {
+            try { return Plugin.EnableFoggedAiCampPlacementBudget != null && Plugin.EnableFoggedAiCampPlacementBudget.Value; }
+            catch { return false; }
+        }
+
+        private static int BudgetPerFrame()
+        {
+            try { return Plugin.FoggedAiCampPlacementsPerFrame != null ? Plugin.FoggedAiCampPlacementsPerFrame.Value : 2; }
+            catch { return 2; }
         }
 
         private static bool Enabled()

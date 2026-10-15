@@ -11,8 +11,10 @@ namespace WhiskeyRealism.Strategic
     //   AICampaign.IsUnitAvailableForOffensiveOperations(int, Regiment, Vector3, bool, bool)
     //   (decompile line 14080)
     //
-    // The primary path resolves and calls the vanilla method via reflection. If that
-    // lookup fails, MirrorVanillaGates() reproduces all 13 known gates without weather
+    // The primary path resolves the vanilla method by name once and calls it through a
+    // typed delegate (no object[] or boxing per call; #38 calls it per formation
+    // assignment on idle-lead passes). If that lookup or bind fails, or the vanilla call
+    // throws, MirrorVanillaGates() reproduces all 13 known gates without weather
     // (weather is intentionally omitted; the vanilla path covers it when available).
     //
     // Nested-type note: RaidForce, FortConstructionOrder, SeaInvasionForce, and
@@ -21,7 +23,7 @@ namespace WhiskeyRealism.Strategic
     internal static class OffensiveAvailabilityWrapper
     {
         // Vanilla IsUnitAvailableForOffensiveOperations
-        private static MethodInfo _vanillaMethod;
+        private static Func<int, Regiment, Vector3, bool, bool, bool> _vanillaGate;
         private static bool _vanillaLookupAttempted;
 
         // Private IsUnitTakingTown
@@ -41,15 +43,13 @@ namespace WhiskeyRealism.Strategic
 
             try
             {
-                var method = ResolveVanillaMethod();
-                if (method != null)
+                var gate = ResolveVanillaGate();
+                if (gate != null)
                 {
-                    return (bool)method.Invoke(null, new object[]
-                    {
+                    return gate(
                         aifactionIndex, unit, operationPosition,
                         /*checkexistingoperations*/ true,
-                        /*checkforbadweather*/ true
-                    });
+                        /*checkforbadweather*/ true);
                 }
             }
             catch (Exception ex)
@@ -61,19 +61,21 @@ namespace WhiskeyRealism.Strategic
             return MirrorVanillaGates(aifactionIndex, unit, operationPosition);
         }
 
-        private static MethodInfo ResolveVanillaMethod()
+        private static Func<int, Regiment, Vector3, bool, bool, bool> ResolveVanillaGate()
         {
-            if (_vanillaMethod != null) return _vanillaMethod;
-            if (_vanillaLookupAttempted) return null;
+            if (_vanillaLookupAttempted) return _vanillaGate;
             _vanillaLookupAttempted = true;
-            _vanillaMethod = AccessTools.Method(
+            var method = AccessTools.Method(
                 typeof(AICampaign),
                 "IsUnitAvailableForOffensiveOperations",
                 new[] { typeof(int), typeof(Regiment), typeof(Vector3), typeof(bool), typeof(bool) });
-            if (_vanillaMethod == null)
+            if (method != null)
+                _vanillaGate = (Func<int, Regiment, Vector3, bool, bool, bool>)Delegate.CreateDelegate(
+                    typeof(Func<int, Regiment, Vector3, bool, bool, bool>), method, throwOnBindFailure: false);
+            if (_vanillaGate == null)
                 OnceLog.Warning("offensive-availability:lookup",
-                    "[OffensiveAvailability] AICampaign.IsUnitAvailableForOffensiveOperations not found — using mirror");
-            return _vanillaMethod;
+                    "[OffensiveAvailability] AICampaign.IsUnitAvailableForOffensiveOperations not found or not bindable — using mirror");
+            return _vanillaGate;
         }
 
         private static bool MirrorVanillaGates(int aifactionIndex, Regiment unit, Vector3 operationPosition)

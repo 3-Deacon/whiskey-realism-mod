@@ -14,22 +14,33 @@ namespace WhiskeyRealism.Util
     // literals, so the fired set is bounded by the number of patch entries.
     // The set is never reset: battle and campaign teardown must not re-fire.
     //
-    // Hot path: one lookup in an immutable set, no lock. The set is replaced
-    // (copy-on-write) under the lock the first time an id fires. If the main log
-    // is unavailable or throws, the id stays unrecorded and the next call retries.
+    // Hot path: one identity lookup in an immutable alias set (ids are literals,
+    // so a reference hash), no lock. A miss falls back to the canonical ordinal
+    // set; an id that already fired under another string instance is then added
+    // as an alias, up to MaxAliases, so an id built per call can neither re-fire
+    // nor grow the alias set without bound. Both sets are replaced (copy-on-write)
+    // under the lock. If the main log is unavailable or throws, the id stays
+    // unrecorded and the next call retries.
     internal static class PatchFirstFire
     {
         internal const string LinePrefix = "[first-fire] ";
+        internal const int MaxAliases = 2048;
 
         private static readonly object Gate = new object();
         private static volatile HashSet<string> _fired = new HashSet<string>(StringComparer.Ordinal);
+        private static volatile HashSet<string> _firedRefs = new HashSet<string>(ReferenceStringComparer.Instance);
 
         internal static void Mark(string patchId)
         {
             try
             {
-                if (patchId == null || _fired.Contains(patchId))
+                if (patchId == null || _firedRefs.Contains(patchId))
                     return;
+                if (_fired.Contains(patchId))
+                {
+                    AddAlias(patchId);
+                    return;
+                }
 
                 lock (Gate)
                 {
@@ -46,11 +57,23 @@ namespace WhiskeyRealism.Util
                     }
 
                     _fired = new HashSet<string>(_fired, StringComparer.Ordinal) { patchId };
+                    AddAlias(patchId);
                 }
             }
             catch
             {
                 // A patch entry must never throw; the next call retries.
+            }
+        }
+
+        private static void AddAlias(string patchId)
+        {
+            lock (Gate)
+            {
+                HashSet<string> refs = _firedRefs;
+                if (refs.Count >= MaxAliases || refs.Contains(patchId))
+                    return;
+                _firedRefs = new HashSet<string>(refs, ReferenceStringComparer.Instance) { patchId };
             }
         }
 

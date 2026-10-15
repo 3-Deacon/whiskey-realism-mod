@@ -95,7 +95,7 @@ namespace WhiskeyRealism.Telemetry
                     return TelemetryQueueResult.Enqueued;
                 }
 
-                int incomingRank = Rank(ev.Category);
+                int incomingRank = Rank(ev.Category, ev.Severity);
                 int victimRank = LowestPriorityDetailRank();
                 if (victimRank > incomingRank)
                 {
@@ -166,7 +166,7 @@ namespace WhiskeyRealism.Telemetry
 
         private void Push(TelemetryEvent ev)
         {
-            _ranks[Rank(ev.Category)].Push(ev, _nextSequence++);
+            _ranks[Rank(ev.Category, ev.Severity)].Push(ev, _nextSequence++);
         }
 
         private int LowestPriorityDetailRank()
@@ -210,9 +210,12 @@ namespace WhiskeyRealism.Telemetry
             return slot >= 0 && slot < CategorySlots ? slot : (int)TelemetryCategory.Trace;
         }
 
-        // Eviction rank: higher rank is evicted first. Performance sits below Decision/State
-        // (TacticalTuning exists to capture doctrine rows) but above Trace.
-        internal static int Rank(TelemetryCategory category)
+        // Eviction rank: higher rank is evicted first. Shedding order under load: Trace rows
+        // first, then Info rows (State, then Decision, then Gate/Write); Performance rows
+        // and Warning/Error rows of any category are never evicted by another detail row
+        // (an incoming row evicts only a strictly lower-priority rank). Health/Failure use
+        // their own reserve. Debug severity sheds like Info.
+        internal static int Rank(TelemetryCategory category, TelemetrySeverity severity = TelemetrySeverity.Info)
         {
             switch (category)
             {
@@ -220,14 +223,21 @@ namespace WhiskeyRealism.Telemetry
                     return 0;
                 case TelemetryCategory.Failure:
                     return 1;
+                case TelemetryCategory.Performance:
+                    return 2;
+            }
+
+            if (severity >= TelemetrySeverity.Warning)
+                return 2;
+
+            switch (category)
+            {
                 case TelemetryCategory.Gate:
                 case TelemetryCategory.Write:
-                    return 2;
-                case TelemetryCategory.Decision:
                     return 3;
-                case TelemetryCategory.State:
+                case TelemetryCategory.Decision:
                     return 4;
-                case TelemetryCategory.Performance:
+                case TelemetryCategory.State:
                     return 5;
                 default:
                     return 6;

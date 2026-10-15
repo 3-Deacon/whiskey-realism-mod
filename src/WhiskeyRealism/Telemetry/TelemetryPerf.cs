@@ -16,12 +16,18 @@ namespace WhiskeyRealism.Telemetry
     //   - a call at/above its threshold also emits one full "Performance" row, at most
     //     MaxSlowRowsPerScopeWindow per scope per window, and only while the
     //     "Telemetry Performance Warnings" config is on.
+    //   - the per-name aggregate is found through an identity alias table (scope names are
+    //     literals: one reference hash) in front of the canonical ordinal map, so a name
+    //     built per call still lands on one aggregate and grows nothing past the caps.
     // Top-level scopes on the frame-probe thread are reported to TelemetryFrameProbe, even
     // when the profile suppresses that layer's rows (record-only: timed, no rows).
+    // Each scope also opens a Unity Profiler marker of the same name while a development
+    // player's Profiler records (TelemetryProfilerMarkers); otherwise that costs one bool.
     internal static class TelemetryPerf
     {
         internal const int MaxSlowRowsPerScopeWindow = 8;
         internal const int MaxScopesPerThread = 1024;
+        internal const int MaxAliasesPerThread = 2048;
         private const int MaxDepth = 32;
 
         // Real-time aggregation window: one PerformanceAggregate row per scope per 5 s (1 s
@@ -52,22 +58,30 @@ namespace WhiskeyRealism.Telemetry
                 TelemetryProfile profile = TelemetryRouter.CurrentProfile;
                 int depth = t_depth;
                 bool recordOnly = false;
+                bool timed = true;
                 if (!TelemetryRouter.ShouldEmit(profile, layer, category))
                 {
                     // The profile suppresses this layer's rows, but a top-level scope on the
                     // frame-probe (main) thread is still timed so hitch rows can name it
                     // (e.g. campaign.* scopes under the default TacticalTuning profile).
                     if (profile == TelemetryProfile.Off || depth != 0 || !TelemetryFrameProbe.IsProbeThread)
-                        return NoopScope.Instance;
-                    recordOnly = true;
+                        timed = false;
+                    else
+                        recordOnly = true;
                 }
+
+                // A Unity Profiler marker is opened whatever the profile, but only while a
+                // development player's Profiler records (never in the shipped player).
+                bool marker = TelemetryProfilerMarkers.Active;
+                if (!timed && !marker)
+                    return NoopScope.Instance;
 
                 if (depth < 0 || depth >= MaxDepth)
                     return NoopScope.Instance;
 
                 PerfScope[] pool = t_pool ?? (t_pool = new PerfScope[MaxDepth]);
                 PerfScope perfScope = pool[depth] ?? (pool[depth] = new PerfScope(depth));
-                perfScope.Begin(scope, layer, category, thresholdMs, recordOnly);
+                perfScope.Begin(scope, layer, category, thresholdMs, recordOnly, timed, marker);
                 t_depth = depth + 1;
                 return perfScope;
             }
@@ -306,15 +320,20 @@ namespace WhiskeyRealism.Telemetry
             internal double ThresholdMs { get; private set; }
             internal long StartTimestamp { get; private set; }
             internal bool RecordOnly { get; private set; }
+            internal bool Timed { get; private set; }
+            private IntPtr _marker;
             private bool _active;
 
-            internal void Begin(string scope, TelemetryLayer layer, TelemetryCategory category, double thresholdMs, bool recordOnly)
+            internal void Begin(string scope, TelemetryLayer layer, TelemetryCategory category, double thresholdMs,
+                bool recordOnly, bool timed, bool marker)
             {
                 RecordOnly = recordOnly;
+                Timed = timed;
                 Name = TelemetryEvent.Safe(scope);
                 Layer = layer;
                 Category = category;
                 ThresholdMs = TelemetryFields.SanitizedNumber(thresholdMs);
+                _marker = marker ? TelemetryProfilerMarkers.Begin(Name) : IntPtr.Zero;
                 _active = true;
                 StartTimestamp = Stopwatch.GetTimestamp();
             }
@@ -332,11 +351,16 @@ namespace WhiskeyRealism.Telemetry
                 TelemetryCategory category = Category;
                 double thresholdMs = ThresholdMs;
                 bool recordOnly = RecordOnly;
+                bool timed = Timed;
                 long start = StartTimestamp;
+                IntPtr marker = _marker;
+                _marker = IntPtr.Zero;
 
                 // Pop to this scope's depth (also heals a non-LIFO dispose).
                 t_depth = Depth;
 
+                TelemetryProfilerMarkers.End(marker);
+                if (!timed) return;
                 try
                 {
                     Complete(name, layer, category, thresholdMs, Depth, recordOnly, start, end);
@@ -384,8 +408,15 @@ namespace WhiskeyRealism.Telemetry
             internal readonly object Sync = new object();
             private readonly System.Threading.Thread _owner = System.Threading.Thread.CurrentThread;
 
+            // Canonical per-name map (ordinal), capped at MaxScopesPerThread names.
             private readonly Dictionary<string, ScopeAggregate> _byName =
                 new Dictionary<string, ScopeAggregate>(StringComparer.Ordinal);
+            // Identity alias table in front of _byName (ReferenceStringComparer): a literal
+            // scope name resolves with one reference hash. A miss goes through _byName, so
+            // an equal name with another identity still lands on the same aggregate; aliases
+            // stop at MaxAliasesPerThread, after which such a name just takes the ordinal path.
+            private readonly Dictionary<string, ScopeAggregate> _byRef =
+                new Dictionary<string, ScopeAggregate>(ReferenceStringComparer.Instance);
             private readonly List<ScopeAggregate> _ordered = new List<ScopeAggregate>();
             private bool _flushing;
 
@@ -404,14 +435,21 @@ namespace WhiskeyRealism.Telemetry
             internal ScopeAggregate Get(string name, TelemetryLayer layer, TelemetryCategory category, double thresholdMs)
             {
                 ScopeAggregate aggregate;
-                if (_byName.TryGetValue(name, out aggregate))
+                if (_byRef.TryGetValue(name, out aggregate))
                     return aggregate;
-                if (_byName.Count >= MaxScopesPerThread)
-                    return null;
 
-                aggregate = new ScopeAggregate(name, layer, category, thresholdMs);
-                _byName[name] = aggregate;
-                _ordered.Add(aggregate);
+                if (!_byName.TryGetValue(name, out aggregate))
+                {
+                    if (_byName.Count >= MaxScopesPerThread)
+                        return null;
+
+                    aggregate = new ScopeAggregate(name, layer, category, thresholdMs);
+                    _byName[name] = aggregate;
+                    _ordered.Add(aggregate);
+                }
+
+                if (_byRef.Count < MaxAliasesPerThread)
+                    _byRef[name] = aggregate;
                 return aggregate;
             }
 
