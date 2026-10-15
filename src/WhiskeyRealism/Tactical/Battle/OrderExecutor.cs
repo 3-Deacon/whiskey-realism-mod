@@ -379,15 +379,17 @@ namespace WhiskeyRealism.Tactical.Battle
     // hold, courier cadence, failed backoff, pending moves, retries, last outcome)
     // is write-path state owned here, not doctrine state (D4).
     //
-    // Outcomes (D6): under useorderdelay SetWaypoint queues the move through
-    // AddToOrderQueue (91483-91510) and regimentpaths stays 0 until the courier
-    // arrives, so a move whose queue rose is Pending; it becomes Moved once the
-    // group or a descendant has paths, and Failed after PendingCourierTimeoutHours.
-    // A group that was already moving keeps its count when redirected, and
-    // AddToOrderQueue is skipped while an order of that type is in flight
-    // (91490/91502), so a move is also Moved once vanilla took the target: a
-    // target unit's (or a descendant's) last waypoint moved onto it within
-    // DedupeMeters. SetGroupFormation stamps lastsetwaypointposition = target on
+    // Outcomes (D6): there is no courier wait to observe. Under useorderdelay
+    // SetWaypoint still queues the courier (AddToOrderQueue 91483-91510) but goes
+    // on to SetGroupFormation / RegimentSetPath in the same call (91540/91559 with
+    // newpath:false), and AddPath adds the path at once (regimentpaths++ 130519)
+    // with pathstatus = 0, waiting for the courier (131243-131246). So a move is
+    // Moved when the moving-unit count of its targets rose at the call or by the
+    // next observation. A group that was already moving keeps its count when
+    // redirected, and AddToOrderQueue is skipped while an order of that type is
+    // in flight (91490/91502), so a move is also Moved once vanilla took the
+    // target: a target unit's (or a descendant's) last waypoint moved onto it
+    // within DedupeMeters. SetGroupFormation stamps lastsetwaypointposition = target on
     // every group move (92067; 91559 runs with newpath:false under the courier
     // delay too), RegimentSetPath on a regiment (131254/131258). That is "taken",
     // not "delivered". A unit whose waypoint was already on the target before the
@@ -405,7 +407,6 @@ namespace WhiskeyRealism.Tactical.Battle
         public const float RecentOrderBattleSeconds = 180f;
         public const float CourierIntervalBattleHours = 0.25f;      // was #61 OutboundCourierIntervalSeconds 900
         public const float FailedWriteBackoffHours = 0.05f;
-        public const float PendingCourierTimeoutHours = 0.25f;
         public const float RetryBearingDegrees = 30f;
         public const int MaxRetries = 1;
         // = #61 FacingRefreshToleranceDegrees.
@@ -547,12 +548,11 @@ namespace WhiskeyRealism.Tactical.Battle
         /// Bookkeeping after the vanilla call. For Move, <paramref name="targets"/>
         /// holds the units the call reached, <paramref name="waypointsBefore"/> the
         /// pre-call waypoints of those units and their descendants, and the counts
-        /// are their queued orders and moving units (unit or descendants with
-        /// regimentpaths &gt; 0) summed live just before and after the calls.
+        /// are their moving units (unit or descendants with regimentpaths &gt; 0)
+        /// summed live just before and after the calls.
         /// </summary>
         public void RecordIssued(in BattleOrderIntent i, double nowHours, IssuedTarget[] targets, int targetCount,
-            UnitWaypoint[] waypointsBefore, int waypointCount,
-            int queuedBefore, int pathsBefore, int queuedAfter, int pathsAfter)
+            UnitWaypoint[] waypointsBefore, int waypointCount, int pathsBefore, int pathsAfter)
         {
             long key = Key(i.GroupId, i.Channel);
             _lastOrderAt[key] = nowHours;
@@ -566,9 +566,6 @@ namespace WhiskeyRealism.Tactical.Battle
             if (UsesOrderDelay(i)) _courierAt[i.GroupId] = nowHours;
 
             int retries = ConsumeTicket(i.GroupId, i.TargetX, i.TargetZ);
-            MoveState state = pathsAfter > pathsBefore ? MoveState.Moving
-                : queuedAfter > queuedBefore ? MoveState.Queued
-                : MoveState.NotIssued;
             int p = FindPending(i.GroupId);
             if (p < 0)
             {
@@ -602,14 +599,14 @@ namespace WhiskeyRealism.Tactical.Battle
 
             _pending[p] = new PendingMove
             {
-                Intent = i, IssuedAtHours = nowHours, PathsBefore = pathsBefore, State = state, Retries = retries,
+                Intent = i, PathsBefore = pathsBefore, MovedAtCall = pathsAfter > pathsBefore, Retries = retries,
                 TargetCount = count, AlreadyThereCount = thereCount,
             };
         }
 
         /// <summary>
-        /// Resolves pending moves against this tick's snapshot (D6) and writes the
-        /// outcomes (Pending, Moved, Failed, Retried, GaveUp, Skipped) up to the
+        /// Resolves last tick's moves against this tick's snapshot (D6) and writes the
+        /// outcomes (Moved, Failed, Retried, GaveUp, Skipped) up to the
         /// buffer length. Every outcome also becomes the group's LastOutcome.
         /// </summary>
         public void ObserveOutcomes(IBattleUnitView s, double nowHours, OrderOutcome[] outcomes, out int count)
@@ -636,19 +633,12 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
 
                 IssuedTarget[] targets = _pendingTargets[p];
-                if (pm.State == MoveState.Moving ||
+                if (pm.MovedAtCall ||
                     MovingUnits(s, targets, pm.TargetCount) > pm.PathsBefore ||
                     TargetTaken(s, targets, pm.TargetCount, _pendingAlreadyThere[p], pm.AlreadyThereCount))
                 {
                     Emit(outcomes, ref count, pm, OrderOutcomeKind.Moved, SkipReason.None, nowHours, pm.Retries);
                     RemovePending(p);
-                    continue;
-                }
-
-                double age = nowHours - pm.IssuedAtHours;
-                if (pm.State == MoveState.Queued && age >= 0.0 && age < PendingCourierTimeoutHours)
-                {
-                    Emit(outcomes, ref count, pm, OrderOutcomeKind.Pending, SkipReason.None, nowHours, pm.Retries);
                     continue;
                 }
 
@@ -1005,21 +995,14 @@ namespace WhiskeyRealism.Tactical.Battle
             return ((long)groupId << 3) | (long)(int)channel;
         }
 
-        private enum MoveState
-        {
-            NotIssued,
-            Queued,
-            Moving,
-        }
-
         private struct PendingMove
         {
             public BattleOrderIntent Intent;
-            public double IssuedAtHours;
             public int PathsBefore;
             public int TargetCount;
             public int AlreadyThereCount;
-            public MoveState State;
+            // The targets' moving-unit count rose during the vanilla call.
+            public bool MovedAtCall;
             public int Retries;
         }
 

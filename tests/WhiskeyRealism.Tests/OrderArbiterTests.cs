@@ -31,8 +31,8 @@ internal static class OrderArbiterTests
             ("battle-core FriendlyFireLineRejectsArtilleryPosition", FriendlyFireLineRejectsArtilleryPosition),
             ("battle-core PointBlankRejectsArtilleryTarget", PointBlankRejectsArtilleryTarget),
             ("battle-core PrecheckSkipsRoutedOnRetreatGarrison", PrecheckSkipsRoutedOnRetreatGarrison),
-            ("battle-core QueuedOrderIsPendingNotFailed", QueuedOrderIsPendingNotFailed),
-            ("battle-core PendingTimesOutToFailed", PendingTimesOutToFailed),
+            ("battle-core CourierMoveCountsAtTheCall", CourierMoveCountsAtTheCall),
+            ("battle-core SilentExitFailsAtNextObservation", SilentExitFailsAtNextObservation),
             ("battle-core FailedRetriesOnceRotatedThenGivesUp", FailedRetriesOnceRotatedThenGivesUp),
             ("battle-core RedirectOfMovingGroupIsMoved", RedirectOfMovingGroupIsMoved),
             ("battle-core StaleWaypointNearTargetIsNotATake", StaleWaypointNearTargetIsNotATake),
@@ -231,7 +231,7 @@ internal static class OrderArbiterTests
 
         var first = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor);
         AssertTrue(executor.Plan(view, first, t).Execute, "first order");
-        Record(executor, first, t, queuedBefore: 0, pathsBefore: 0, queuedAfter: 0, pathsAfter: 1);
+        Record(executor, first, t, pathsBefore: 0, pathsAfter: 1);
         view.Own[g].LastWaypointX = 500f;
         view.Own[g].LastWaypointZ = -500f;
         view.Own[g].RegimentPaths = 1;
@@ -264,7 +264,7 @@ internal static class OrderArbiterTests
         double t = 3.0;
 
         var attack = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.AttackObjective);
-        Record(executor, attack, t, 0, 0, 0, 1);
+        Record(executor, attack, t, 0, 1);
         view.Own[g].RegimentPaths = 1;
         view.Own[g].LastWaypointX = 500f;
         view.Own[g].LastWaypointZ = -500f;
@@ -431,7 +431,11 @@ internal static class OrderArbiterTests
 
     // ----------------------------------------------------------------- outcomes
 
-    private static void QueuedOrderIsPendingNotFailed()
+    // Under useorderdelay SetWaypoint still reaches RegimentSetPath in the same
+    // call, and AddPath adds the path at once (130519) with pathstatus 0 until
+    // the courier arrives (131243-131246): a courier move from a standstill is
+    // Moved at the call, with no wait for the courier.
+    private static void CourierMoveCountsAtTheCall()
     {
         var view = new FixtureBattleView();
         int g = view.AddGroup(1, 100f, -100f);
@@ -439,39 +443,30 @@ internal static class OrderArbiterTests
         var outcomes = new OrderOutcome[8];
         var order = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor);
         order.Flags = IntentFlags.UseOrderDelay;
-        Record(executor, order, 1.0, queuedBefore: 0, pathsBefore: 0, queuedAfter: 1, pathsAfter: 0);
-
-        executor.ObserveOutcomes(view, 1.1, outcomes, out int n);
-        AssertEqual(1, n, "one outcome");
-        AssertEqual(OrderOutcomeKind.Pending, outcomes[0].Kind, "courier still travelling (D6)");
-
+        Record(executor, order, 1.0, pathsBefore: 0, pathsAfter: 1);
         view.Own[g].RegimentPaths = 1;
-        executor.ObserveOutcomes(view, 1.15, outcomes, out n);
-        AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "paths rose once the courier arrived");
+
+        executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
+        AssertEqual(1, n, "one outcome");
+        AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "paths rose at the call");
         AssertTrue(executor.TryGetLastOutcome(1, OrderChannel.Move, out OrderOutcome last), "last outcome kept");
         AssertEqual(OrderOutcomeKind.Moved, last.Kind, "last outcome is Moved");
-        executor.ObserveOutcomes(view, 1.2, outcomes, out n);
+        executor.ObserveOutcomes(view, 1.02, outcomes, out n);
         AssertEqual(0, n, "resolved orders are not reported again");
     }
 
-    private static void PendingTimesOutToFailed()
+    private static void SilentExitFailsAtNextObservation()
     {
         var view = new FixtureBattleView();
         view.AddGroup(1, 100f, -100f);
         var executor = NewExecutor();
         var outcomes = new OrderOutcome[8];
         var order = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor);
-        Record(executor, order, 1.0, 0, 0, 1, 0);
-
-        executor.ObserveOutcomes(view, 1.0 + OrderExecutor.PendingCourierTimeoutHours + 0.01, outcomes, out int n);
+        order.Flags = IntentFlags.UseOrderDelay;
+        Record(executor, order, 1.0, pathsBefore: 0, pathsAfter: 0);
+        executor.ObserveOutcomes(view, 1.001, outcomes, out int n);
         AssertTrue(n >= 1, "an outcome");
-        AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "the courier never delivered");
-
-        var direct = new OrderExecutor();
-        direct.Bind(new FixtureGuard(), new SelfOnlyChainResolver(), new FixtureDispatchMapper(), new FixtureTerrain());
-        Record(direct, Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0, 0, 0, 0, 0);
-        direct.ObserveOutcomes(view, 1.001, outcomes, out n);
-        AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "neither queue nor paths rose: Failed at once (silent vanilla exit)");
+        AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "no paths and no waypoint stamp: a silent vanilla exit, Failed at once");
     }
 
     private static void FailedRetriesOnceRotatedThenGivesUp()
@@ -486,7 +481,7 @@ internal static class OrderArbiterTests
         view.Own[g].X = 500f;
         order.TargetX = 500f;
 
-        Record(executor, order, 1.0, 0, 0, 0, 0);
+        Record(executor, order, 1.0, 0, 0);
         executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
         AssertEqual(2, n, "Failed then Retried");
         AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "first failure");
@@ -505,7 +500,7 @@ internal static class OrderArbiterTests
         AssertTrue(retryPlan.Execute, "a retry bypasses the failed-write backoff");
         AssertEqual(SkipReason.Cooldown, executor.Plan(view, order, 1.012).Skip, "the producer's own re-issue is backed off");
 
-        Record(executor, retries[0], 1.012, 0, 0, 0, 0);
+        Record(executor, retries[0], 1.012, 0, 0);
         executor.ObserveOutcomes(view, 1.02, outcomes, out n);
         AssertEqual(2, n, "Failed then GaveUp");
         AssertEqual(OrderOutcomeKind.GaveUp, outcomes[1].Kind, "MaxRetries = 1");
@@ -536,7 +531,7 @@ internal static class OrderArbiterTests
             var order = Move(1, 800f, -800f, IntentPriority.Executor, IntentSource.PostureExecutor);
             if (courier) order.Flags = IntentFlags.UseOrderDelay;
 
-            Record(executor, order, 1.0, queuedBefore: 0, pathsBefore: 2, queuedAfter: courier ? 1 : 0, pathsAfter: 2,
+            Record(executor, order, 1.0, pathsBefore: 2, pathsAfter: 2,
                 waypointBeforeX: 300f, waypointBeforeZ: -300f);
             view.Own[g].LastWaypointX = 800f;
             view.Own[g].LastWaypointZ = -800f;
@@ -545,14 +540,14 @@ internal static class OrderArbiterTests
             AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "redirected moving group took the order, courier=" + courier);
 
             Record(executor, Move(1, 200f, -900f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.02,
-                0, 2, courier ? 1 : 0, 2, waypointBeforeX: 800f, waypointBeforeZ: -800f);
+                2, 2, waypointBeforeX: 800f, waypointBeforeZ: -800f);
             view.Own[child].LastWaypointX = 210f;
             view.Own[child].LastWaypointZ = -880f;
             executor.ObserveOutcomes(view, 1.03, outcomes, out n);
             AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "a descendant's waypoint on the target counts, courier=" + courier);
 
             Record(executor, Move(1, 900f, -200f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.04,
-                0, 2, 0, 2, waypointBeforeX: 800f, waypointBeforeZ: -800f);
+                2, 2, waypointBeforeX: 800f, waypointBeforeZ: -800f);
             view.Own[child].LastWaypointX = 0f;
             view.Own[child].LastWaypointZ = 0f;
             executor.ObserveOutcomes(view, 1.05, outcomes, out n);
@@ -571,7 +566,7 @@ internal static class OrderArbiterTests
         var executor = NewExecutor();
         var outcomes = new OrderOutcome[8];
         Record(executor, Move(1, 800f, -800f, IntentPriority.Executor, IntentSource.PostureExecutor), 1.0,
-            0, 0, 0, 0, waypointBeforeX: 790f, waypointBeforeZ: -790f);
+            0, 0, waypointBeforeX: 790f, waypointBeforeZ: -790f);
         executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
         AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "a waypoint already on the target before the call is no evidence");
     }
@@ -593,13 +588,13 @@ internal static class OrderArbiterTests
         var executor = NewExecutor();
         var order = Move(1, 200f, -900f, IntentPriority.Executor, IntentSource.PostureExecutor);
 
-        Record(executor, order, 1.0, 0, 1, 0, 1, waypointBeforeX: 800f, waypointBeforeZ: -800f,
+        Record(executor, order, 1.0, 1, 1, waypointBeforeX: 800f, waypointBeforeZ: -800f,
             childId: 2, childBeforeX: 210f, childBeforeZ: -880f);
         executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
         AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "the brigade was already there before the call: not a take");
 
         var fresh = NewExecutor();
-        Record(fresh, order, 1.0, 0, 1, 0, 1, waypointBeforeX: 800f, waypointBeforeZ: -800f,
+        Record(fresh, order, 1.0, 1, 1, waypointBeforeX: 800f, waypointBeforeZ: -800f,
             childId: 2, childBeforeX: 500f, childBeforeZ: -500f);
         fresh.ObserveOutcomes(view, 1.01, outcomes, out n);
         AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "the brigade's waypoint moved onto the target: a take");
@@ -710,15 +705,17 @@ internal static class OrderArbiterTests
             new IssuedTarget { InstanceId = 11, X = 380f, Z = -420f },
             new IssuedTarget { InstanceId = 12, X = 420f, Z = -420f },
         };
-        executor.RecordIssued(order, 1.0, targets, 2, null, 0, queuedBefore: 0, pathsBefore: 0, queuedAfter: 2, pathsAfter: 0);
+        executor.RecordIssued(order, 1.0, targets, 2, null, 0, pathsBefore: 0, pathsAfter: 0);
 
         view.Own[player].RegimentPaths = 1;
         executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
-        AssertEqual(1, n, "one outcome");
-        AssertEqual(OrderOutcomeKind.Pending, outcomes[0].Kind, "the player's brigade moving is not the ordered brigades moving");
+        AssertTrue(n >= 1, "an outcome");
+        AssertEqual(OrderOutcomeKind.Failed, outcomes[0].Kind, "the player's brigade moving is not the ordered brigades moving");
 
+        var again = NewExecutor();
+        again.RecordIssued(order, 1.02, targets, 2, null, 0, pathsBefore: 0, pathsAfter: 0);
         view.Own[left].RegimentPaths = 1;
-        executor.ObserveOutcomes(view, 1.02, outcomes, out n);
+        again.ObserveOutcomes(view, 1.03, outcomes, out n);
         AssertEqual(OrderOutcomeKind.Moved, outcomes[0].Kind, "an ordered brigade gained paths");
     }
 
@@ -839,15 +836,14 @@ internal static class OrderArbiterTests
     // A Move issued to the group itself (self-only chain) at the intent's target,
     // with the pre-call waypoints of the group and optionally one descendant.
     private static void Record(OrderExecutor executor, in BattleOrderIntent intent, double now,
-        int queuedBefore, int pathsBefore, int queuedAfter, int pathsAfter,
+        int pathsBefore, int pathsAfter,
         float waypointBeforeX = 0f, float waypointBeforeZ = 0f,
         int childId = 0, float childBeforeX = 0f, float childBeforeZ = 0f)
     {
         _issued[0] = new IssuedTarget { InstanceId = intent.GroupId, X = intent.TargetX, Z = intent.TargetZ };
         _before[0] = new UnitWaypoint { InstanceId = intent.GroupId, Target = 0, X = waypointBeforeX, Z = waypointBeforeZ };
         _before[1] = new UnitWaypoint { InstanceId = childId, Target = 0, X = childBeforeX, Z = childBeforeZ };
-        executor.RecordIssued(intent, now, _issued, 1, _before, childId != 0 ? 2 : 1,
-            queuedBefore, pathsBefore, queuedAfter, pathsAfter);
+        executor.RecordIssued(intent, now, _issued, 1, _before, childId != 0 ? 2 : 1, pathsBefore, pathsAfter);
     }
 
     private static BattleOrderIntent Move(int group, float x, float z, IntentPriority priority, IntentSource source,

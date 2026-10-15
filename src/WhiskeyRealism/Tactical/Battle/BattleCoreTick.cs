@@ -285,7 +285,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // (telemetry throttle, not doctrine timing).
         private sealed class ArbiterStats
         {
-            public int Intents, Winners, Issued, Pending, Moved, Failed, Retried, GaveUp, Skipped, Deduped, Superseded;
+            public int Intents, Winners, Issued, Moved, Failed, Retried, GaveUp, Skipped, Deduped, Superseded;
             private readonly int[] _skips = new int[SkipReasonCount];
             private float _windowStart = -1f;
 
@@ -301,7 +301,6 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 switch (outcome.Kind)
                 {
-                    case OrderOutcomeKind.Pending: Pending++; break;
                     case OrderOutcomeKind.Moved: Moved++; break;
                     case OrderOutcomeKind.Failed: Failed++; break;
                     case OrderOutcomeKind.Retried: Retried++; break;
@@ -317,7 +316,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (now - _windowStart < TelemetryIntervalRealSeconds) return;
                 TelemetryRouter.LegacyInfo("[OrderArbiter] alliance=" + alliance
                     + " intents=" + Intents + " winners=" + Winners + " issued=" + Issued
-                    + " pending=" + Pending + " moved=" + Moved + " failed=" + Failed + " retried=" + Retried
+                    + " moved=" + Moved + " failed=" + Failed + " retried=" + Retried
                     + " gaveUp=" + GaveUp + " skipped=" + Skipped + " deduped=" + Deduped + " superseded=" + Superseded
                     + " topSkip=" + TopSkip(), TelemetryLayer.Tactical);
                 Clear();
@@ -326,7 +325,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
             public void Clear()
             {
-                Intents = Winners = Issued = Pending = Moved = Failed = Retried = GaveUp = Skipped = Deduped = Superseded = 0;
+                Intents = Winners = Issued = Moved = Failed = Retried = GaveUp = Skipped = Deduped = Superseded = 0;
                 Array.Clear(_skips, 0, _skips.Length);
                 _windowStart = -1f;
             }

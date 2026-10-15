@@ -16,10 +16,9 @@ namespace WhiskeyRealism.Tactical.Battle
     //     (skips the W&L control exit 91300 and the order-arrow UI) and
     //     useorderdelay from the plan; groups go on to SetGroupFormation (91559),
     //     regiments to RegimentSetPath (91540). Under useorderdelay the move is
-    //     queued with AddToOrderQueue on the courier's unit (91483-91510), which
-    //     sets ordertypeactive[0|1] on every receiving unit (124994-124999) until
-    //     delivery clears it (124878); that flag plus the unit's own orderqueue is
-    //     the "queued" signal, so no transform.parent walk is needed.
+    //     also queued with AddToOrderQueue (91483-91510), but the path is added in
+    //     the same call (AddPath 130519, pathstatus 0 until the courier arrives,
+    //     131243-131246), so the moving-unit count is the "issued" signal.
     //   Stance: Util/TacticalStanceWriter (the one ChangeStance caller, 90772).
     //   Formation: BattleUnits.SetFormation (90971, courier) only when
     //     CommandFormationWritePolicy allows it — vanilla re-forms only a settled,
@@ -113,7 +112,7 @@ namespace WhiskeyRealism.Tactical.Battle
             int executed = 0;
             int issued = 0;
             int waypoints = 0;
-            int queuedBefore = 0, pathsBefore = 0, queuedAfter = 0, pathsAfter = 0;
+            int pathsBefore = 0, pathsAfter = 0;
             if (_issued.Length < plan.Targets.Count) _issued = new IssuedTarget[Math.Max(plan.Targets.Count, _issued.Length * 2)];
             float sizeX = 0f, sizeZ = 0f;
             if (plan.Targets.FannedOut) WaypointValidatorRuntime.TryMapSize(out sizeX, out sizeZ);
@@ -136,10 +135,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     RecordWaypointsBefore(unit, issued, ref waypoints);
                     _issued[issued++] = new IssuedTarget { InstanceId = own[targetIndex].InstanceId, X = x, Z = z };
-                    queuedBefore += QueuedSignal(unit);
                     pathsBefore += MovingUnits(unit);
                     wrote = IssueMove(bunits, unit, winner, plan.UseOrderDelay, x, z);
-                    queuedAfter += QueuedSignal(unit);
                     pathsAfter += MovingUnits(unit);
                 }
                 else
@@ -157,8 +154,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 BattleOrderIntent recorded = winner;
                 recorded.TargetX = plan.X;
                 recorded.TargetZ = plan.Z;
-                executor.RecordIssued(recorded, nowHours, _issued, issued, _waypointsBefore, waypoints,
-                    queuedBefore, pathsBefore, queuedAfter, pathsAfter);
+                executor.RecordIssued(recorded, nowHours, _issued, issued, _waypointsBefore, waypoints, pathsBefore, pathsAfter);
             }
 
             if (executed > 0 && !_firstFireLogged)
@@ -381,26 +377,6 @@ namespace WhiskeyRealism.Tactical.Battle
             if (d <= FacingToleranceDegrees) return false;
             unit.RotateRegiment(heading);
             return true;
-        }
-
-        // Courier orders in flight for the unit: its own queue (a root unit queues
-        // on itself, 91500) plus every unit under it that a queued move or behavior
-        // order is addressed to (ordertypeactive[0|1], 124994-124999).
-        private static int QueuedSignal(Regiment unit)
-        {
-            int queued = unit.orderqueue != null ? unit.orderqueue.Count : 0;
-            if (HasActiveMoveOrder(unit)) queued++;
-            Regiment[] units = unit.allattachedunits;
-            if (units == null) return queued;
-            for (int i = 0; i < units.Length; i++)
-                if (units[i] != null && HasActiveMoveOrder(units[i])) queued++;
-            return queued;
-        }
-
-        private static bool HasActiveMoveOrder(Regiment unit)
-        {
-            bool[] active = unit.ordertypeactive;
-            return active != null && active.Length > 1 && (active[0] || active[1]);
         }
 
         // The unit's and every descendant's lastsetwaypointposition before the call
