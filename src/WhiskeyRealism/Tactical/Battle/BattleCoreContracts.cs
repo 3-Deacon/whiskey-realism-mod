@@ -44,9 +44,8 @@ namespace WhiskeyRealism.Tactical.Battle
         public int Commander;
         public float X, Y, Z, RotationY;
         public int Strength;
-        public float GroupStrengthDirect;
         public int GroupOwnInRange, GroupStrengthAiGroup; // vanilla groupowninrange / groupstrengthaigroup
-        public float Morale, BattleStartMorale, Ammo01, Fatigue, Experience;
+        public float Morale, BattleStartMorale, Ammo01, Fatigue;
         public int RegimentPaths, QueuedOrders, MovementMode, AiStance, AiStanceOrdered, Formation, CombatBehaviorOrdered;
         public float LastWaypointX, LastWaypointZ;
         // BC5a, additive (the leaf slot, shipped #61 TryFormationSlot): a group's
@@ -144,7 +143,6 @@ namespace WhiskeyRealism.Tactical.Battle
         PostureExecutor,
         FacingPulse,
         FireControl,
-        Play,
         DivisionPlay,
         Withdrawal,
         ArtilleryDoctrine,

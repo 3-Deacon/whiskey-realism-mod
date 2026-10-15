@@ -244,14 +244,12 @@ namespace WhiskeyRealism.Tactical.Battle
             record.Z = p.z;
             record.RotationY = go.transform.eulerAngles.y;
             record.Strength = reg.strength;
-            record.GroupStrengthDirect = reg.groupstrengthdirect;
             record.GroupOwnInRange = reg.groupowninrange;
             record.GroupStrengthAiGroup = reg.groupstrengthaigroup;
             record.Morale = reg.morale;
             record.BattleStartMorale = reg.battlestartmorale;
             record.Ammo01 = ArmyEvidenceBuilder.NormalizeAmmo01(reg.ammo, reg.unittyp, 0.9f);
             record.Fatigue = reg.fatigue;
-            record.Experience = reg.experience;
             record.RegimentPaths = reg.regimentpaths;
             record.QueuedOrders = QueuedOrders(reg);
             record.MovementMode = reg.movementmode;

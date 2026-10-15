@@ -727,6 +727,23 @@ namespace WhiskeyRealism.Tactical.Battle
                 claim.Priority == retry.Priority;
         }
 
+        /// <summary>
+        /// A handed-out retry that RetryStillClaimed refused: it is not run (its
+        /// ticket lapses at the next ObserveOutcomes) and its source's LastOutcome
+        /// becomes Superseded instead of the stale Retried.
+        /// </summary>
+        public OrderOutcome RecordSuperseded(in BattleOrderIntent retry, double nowHours)
+        {
+            int t = FindTicket(retry.GroupId, retry.TargetX, retry.TargetZ);
+            var outcome = new OrderOutcome
+            {
+                GroupId = retry.GroupId, Channel = OrderChannel.Move, Kind = OrderOutcomeKind.Superseded,
+                Source = retry.Source, AtHours = nowHours, Retries = t >= 0 ? _tickets[t].Retries : 0,
+            };
+            SetLastOutcome(outcome);
+            return outcome;
+        }
+
         /// <summary>Step 9: one W&amp;L dispatch per executed plan, not per fanned-out target.</summary>
         public static bool ShouldDispatch(in ExecutionPlan plan, int executedTargets)
         {

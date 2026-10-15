@@ -105,10 +105,10 @@ internal static class TacticalPlaybookTests
         AssertTrue(decision.HasAnchor, "play should anchor on engaged child");
         AssertEqual("line-center", decision.AnchorNodeId, "nearest engaged child anchors play");
         AssertFalse(decision.HelpRequested, "no trouble means no help request");
-        AssertEqual(CommandTaskType.AttackObjective, decision.OrderFor("line-center").Task, "anchor attacks");
-        AssertEqual(CommandTaskType.SupportAttack, decision.OrderFor("line-right").Task, "idle sibling supports");
-        AssertEqual(CommandTaskType.ReserveWait, decision.OrderFor("reserve").Task, "reserve remains held");
-        AssertEqual(TacticalOrderDelivery.Courier, decision.OrderFor("line-right").Delivery, "idle sibling gets courier delivery");
+        AssertEqual(CommandTaskType.AttackObjective, PlayOrderFor(decision, "line-center").Task, "anchor attacks");
+        AssertEqual(CommandTaskType.SupportAttack, PlayOrderFor(decision, "line-right").Task, "idle sibling supports");
+        AssertEqual(CommandTaskType.ReserveWait, PlayOrderFor(decision, "reserve").Task, "reserve remains held");
+        AssertEqual(TacticalOrderDelivery.Courier, PlayOrderFor(decision, "line-right").Delivery, "idle sibling gets courier delivery");
     }
 
     private static void ScourgeDivisionPlaySkipsOrderedNonAnchorSubordinates()
@@ -134,9 +134,9 @@ internal static class TacticalPlaybookTests
 
         AssertTrue(decision.HasAnchor, "engaged child anchors play");
         AssertEqual("anchor", decision.AnchorNodeId, "anchor id");
-        AssertTrue(decision.OrderFor("anchor").HasOrder, "anchor gets play order");
-        AssertFalse(decision.OrderFor("ordered-support").HasOrder, "ordered non-anchor should not receive another play order");
-        AssertEqual(CommandTaskType.SupportAttack, decision.OrderFor("idle-support").Task, "idle support receives play slot");
+        AssertTrue(PlayOrderFor(decision, "anchor").HasOrder, "anchor gets play order");
+        AssertFalse(PlayOrderFor(decision, "ordered-support").HasOrder, "ordered non-anchor should not receive another play order");
+        AssertEqual(CommandTaskType.SupportAttack, PlayOrderFor(decision, "idle-support").Task, "idle support receives play slot");
     }
 
     private static void HistoricalHardDifficultyAddsCasualtyToleranceOnly()

@@ -132,19 +132,6 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool HelpRequested { get; }
         public IReadOnlyList<TacticalDivisionPlayOrder> Orders { get; }
         public bool HasAnchor { get { return !string.IsNullOrWhiteSpace(AnchorNodeId); } }
-
-        public TacticalDivisionPlayOrder OrderFor(string nodeId)
-        {
-            if (string.IsNullOrWhiteSpace(nodeId)) return default;
-            string key = nodeId.Trim();
-            for (int i = 0; i < Orders.Count; i++)
-            {
-                if (string.Equals(Orders[i].NodeId, key, StringComparison.Ordinal))
-                    return Orders[i];
-            }
-
-            return default;
-        }
     }
 
     public static class TacticalDivisionPlayExecutor

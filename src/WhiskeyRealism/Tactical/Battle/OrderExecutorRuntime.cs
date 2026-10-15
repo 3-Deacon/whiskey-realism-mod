@@ -558,19 +558,14 @@ namespace WhiskeyRealism.Tactical.Battle
             if (channel != OrderChannel.Formation && channel != OrderChannel.Facing) return 0f;
             // Only the group path reads it (a regiment rotates or re-forms directly).
             if (index < 0 || index >= view.OwnCount || (view.Own[index].Flags & UnitFlags.IsGroup) == 0) return 0f;
-            return BattleWriterPolicy.SnapshotEnemyStrengthInRange(view, index, LineOfSightRange());
+            return BattleWriterPolicy.SnapshotEnemyStrengthInRange(view, index, GroupRangeReach());
         }
 
-        private static float LineOfSightRange()
+        // vanilla's enemiesinrange reach over a group's combat unit types
+        // (BattlePerception.GroupRangeReach; #44 reads the same).
+        internal static float GroupRangeReach()
         {
-            float range = GamePrefs.distancetoenemytocancelinterruption;
-            float[] sight = GamePrefs.maximumlineofsight;
-            if (sight != null)
-            {
-                for (int t = 0; t <= TacticalUnitType.Skirmisher && t < sight.Length; t++)
-                    if (sight[t] > range) range = sight[t];
-            }
-            return range;
+            return BattlePerception.GroupRangeReach(GamePrefs.maximumlineofsight, GamePrefs.distancetoenemytocancelinterruption);
         }
 
         // Vanilla turns a settled unit toward an enemy with RotateRegiment

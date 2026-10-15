@@ -188,7 +188,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     if (!OrderExecutor.RetryStillClaimed(arbiter, _retries[r]))
                     {
-                        stats.Superseded++;
+                        stats.Tally(executor.RecordSuperseded(_retries[r], now));
                         continue;
                     }
                     ExecutionPlan retryPlan = executor.PlanRetry(snapshot, _retries[r], now);
@@ -268,6 +268,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     case OrderOutcomeKind.Failed: Failed++; break;
                     case OrderOutcomeKind.Retried: Retried++; break;
                     case OrderOutcomeKind.GaveUp: GaveUp++; break;
+                    case OrderOutcomeKind.Superseded: Superseded++; break;
                     case OrderOutcomeKind.Skipped: Skip(outcome.Reason); break;
                 }
             }

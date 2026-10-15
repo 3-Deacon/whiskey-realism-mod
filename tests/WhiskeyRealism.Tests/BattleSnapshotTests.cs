@@ -130,7 +130,7 @@ internal static class BattleSnapshotTests
             Records.Add(new UnitRecord
             {
                 InstanceId = id, UnitTyp = unittyp, Alliance = 0, X = x, Z = z,
-                Strength = strength, GroupStrengthDirect = strength, ParentIndex = -1, Flags = flags,
+                Strength = strength, ParentIndex = -1, Flags = flags,
             });
             var self = new int[descendants.Length + 1];
             self[0] = id; // GetComponentsInChildren(true) includes the component's own object
@@ -538,10 +538,10 @@ internal static class BattleSnapshotTests
     private static void StrengthBucketReadsAiGroupAndInRangeStrength()
     {
         var f = SmallArmy();
-        SetStrengths(f, Div1, direct: 25000f, strength: 25000, ownInRange: 0, aiGroup: 0);
-        SetStrengths(f, Div2, direct: 900f, strength: 0, ownInRange: 3200, aiGroup: 0);
-        SetStrengths(f, Brig1, direct: 1200f, strength: 0, ownInRange: 0, aiGroup: 1500);
-        SetStrengths(f, Brig2, direct: 600f, strength: 0, ownInRange: 400, aiGroup: 999);
+        SetStrengths(f, Div1, strength: 25000, ownInRange: 0, aiGroup: 0);
+        SetStrengths(f, Div2, strength: 0, ownInRange: 3200, aiGroup: 0);
+        SetStrengths(f, Brig1, strength: 0, ownInRange: 0, aiGroup: 1500);
+        SetStrengths(f, Brig2, strength: 0, ownInRange: 400, aiGroup: 999);
         f.Load(2); f.Assemble();
 
         var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>();
@@ -552,11 +552,10 @@ internal static class BattleSnapshotTests
         AssertEqual(0, probes.Find(p => p.InstanceId == Brig2).StrengthBucket, "both below 1000 -> weak");
     }
 
-    private static void SetStrengths(Fixture f, int id, float direct, int strength, int ownInRange, int aiGroup)
+    private static void SetStrengths(Fixture f, int id, int strength, int ownInRange, int aiGroup)
     {
         int i = f.Records.FindIndex(r => r.InstanceId == id);
         var r = f.Records[i];
-        r.GroupStrengthDirect = direct;
         r.Strength = strength;
         r.GroupOwnInRange = ownInRange;
         r.GroupStrengthAiGroup = aiGroup;
@@ -586,8 +585,8 @@ internal static class BattleSnapshotTests
         var f = new Fixture();
         f.Add(Div1, TacticalUnitType.BattleGroupDivision, 0f, 0f, 0);
         f.Add(Div2, TacticalUnitType.BattleGroupDivision, 100f, 0f, 0);
-        SetStrengths(f, Div1, direct: 10000f, strength: 0, ownInRange: 0, aiGroup: 0);
-        SetStrengths(f, Div2, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 9000);
+        SetStrengths(f, Div1, strength: 0, ownInRange: 0, aiGroup: 0);
+        SetStrengths(f, Div2, strength: 0, ownInRange: 0, aiGroup: 9000);
         f.Load(); f.Assemble();
         f.Snapshot.SetEnemySummary(5000f, 0f, 50f, 1000f);
         var axis = BattleSnapshotAssembler.FitFrontAxis(f.Snapshot, TacticalFrontAxis.None, commandHierarchyShift: 0);
@@ -606,10 +605,10 @@ internal static class BattleSnapshotTests
         f.Add(Div2, TacticalUnitType.BattleGroupDivision, 100f, 0f, 0);
         f.Add(Brig1, TacticalUnitType.BattleGroupBrigade, -500f, 0f, 0);
         f.Add(Brig2, TacticalUnitType.BattleGroupBrigade, 300f, 0f, 0, UnitFlags.Routed);
-        SetStrengths(f, Div1, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 9000);
-        SetStrengths(f, Div2, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 10);
-        SetStrengths(f, Brig1, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 5000);
-        SetStrengths(f, Brig2, direct: 0f, strength: 0, ownInRange: 0, aiGroup: 5000);
+        SetStrengths(f, Div1, strength: 0, ownInRange: 0, aiGroup: 9000);
+        SetStrengths(f, Div2, strength: 0, ownInRange: 0, aiGroup: 10);
+        SetStrengths(f, Brig1, strength: 0, ownInRange: 0, aiGroup: 5000);
+        SetStrengths(f, Brig2, strength: 0, ownInRange: 0, aiGroup: 5000);
         f.Load(); f.Assemble();
         f.Snapshot.SetEnemySummary(5000f, 0f, 50f, 1000f);
 

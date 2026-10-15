@@ -376,7 +376,7 @@ namespace WhiskeyRealism.Patches
 
             var sectors = new List<TacticalSectorAssessment>();
             int sectorId = 0;
-            float sightRange = LineOfSightRange();
+            float sightRange = OrderExecutorRuntime.GroupRangeReach();
             if (snapshot != null)
             {
                 if (_flankThreatMean.Length < snapshot.OwnCount)
@@ -429,21 +429,6 @@ namespace WhiskeyRealism.Patches
         // snapshot's flank pressure (grow-only scratch, main thread).
         private static float[] _flankThreatMean = new float[64];
         private static int[] _flankThreatCount = new int[64];
-
-        // vanilla's enemiesinrange reach: max(maximumlineofsight[unittyp],
-        // distancetoenemytocancelinterruption) (InitMaxUnitRanges 122510,
-        // UpdateUnitRangeFast 122608), over the combat unit types a group holds.
-        private static float LineOfSightRange()
-        {
-            float range = GamePrefs.distancetoenemytocancelinterruption;
-            float[] sight = GamePrefs.maximumlineofsight;
-            if (sight != null)
-            {
-                for (int t = 0; t <= TacticalUnitType.Skirmisher && t < sight.Length; t++)
-                    if (sight[t] > range) range = sight[t];
-            }
-            return range;
-        }
 
         // The unit's record in the side's snapshot (keyed by GameObject id), or -1.
         private static int OwnIndex(BattleSnapshot snapshot, Regiment unit)

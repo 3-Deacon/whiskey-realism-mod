@@ -21,6 +21,7 @@ internal static class BattleCoreIntegrationTests
             ("battle-core ProducerRegistryDropsMissingAndMisnamedProducers", ProducerRegistryDropsMissingAndMisnamedProducers),
             ("battle-core ProducerRegistrySurvivesAThrowingFactory", ProducerRegistrySurvivesAThrowingFactory),
             ("battle-core RuntimeRegistryBuildsEveryProducerExplicitly", RuntimeRegistryBuildsEveryProducerExplicitly),
+            ("battle-core GroupReachIsWidestCombatSightOrCancelDistance", GroupReachIsWidestCombatSightOrCancelDistance),
         });
     }
 
@@ -131,6 +132,20 @@ internal static class BattleCoreIntegrationTests
             AssertFalse(text.Contains("RegisterProducer("), Path.GetFileName(path) + " still self-registers a producer");
             AssertFalse(text.Contains("EnsureRegistered("), Path.GetFileName(path) + " still touches producer static constructors");
         }
+    }
+
+    // One reach for a group's enemies-in-range (#44 sector strength and the
+    // executor's formation policy): vanilla's enemiesinrange list reach
+    // max(maximumlineofsight[unittyp], distancetoenemytocancelinterruption)
+    // (InitMaxUnitRanges 122510, UpdateUnitRangeFast 122608), widest over the
+    // combat types a group holds (infantry, cavalry, artillery, skirmishers).
+    private static void GroupReachIsWidestCombatSightOrCancelDistance()
+    {
+        float[] sight = { 100f, 300f, 200f, 250f, 5000f };
+        AssertNear(300f, BattlePerception.GroupRangeReach(sight, 150f), 0.001f, "widest combat line of sight");
+        AssertNear(400f, BattlePerception.GroupRangeReach(sight, 400f), 0.001f, "cancel-interruption distance wins");
+        AssertNear(150f, BattlePerception.GroupRangeReach(null, 150f), 0.001f, "no sight table");
+        AssertNear(150f, BattlePerception.GroupRangeReach(new[] { 120f }, 150f), 0.001f, "short table");
     }
 
     // Some declaration of the class (it may be partial) carries `Name => "X"`, or

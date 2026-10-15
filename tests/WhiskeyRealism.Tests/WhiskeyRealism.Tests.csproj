@@ -5,6 +5,11 @@
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <RefsDir>$(MSBuildThisFileDirectory)..\..\refs</RefsDir>
+    <!-- CS0649 (field never assigned): the harness compiles only the pure src
+         files, so fields their runtime halves assign (e.g. BattleArtilleryState,
+         SuccessionScheduler.WarStateView, AreaOrderBusyFlags) look unassigned here.
+         ./build.sh compiles every file and still reports CS0649. -->
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="HarmonyX" Version="2.10.2" />

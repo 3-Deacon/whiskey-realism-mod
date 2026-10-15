@@ -48,6 +48,7 @@ internal static class OrderArbiterTests
             ("battle-core StanceSourceMapsIntentLadder", StanceSourceMapsIntentLadder),
             ("battle-core StanceCheapPathNeedsLiveVanillaStamp", StanceCheapPathNeedsLiveVanillaStamp),
             ("battle-core RetryRunsOnlyWhileItsSourceStillClaims", RetryRunsOnlyWhileItsSourceStillClaims),
+            ("battle-core SupersededRetryIsReportedToTheSource", SupersededRetryIsReportedToTheSource),
         });
     }
 
@@ -57,7 +58,7 @@ internal static class OrderArbiterTests
     {
         var arbiter = new OrderArbiter();
         arbiter.BeginTick();
-        arbiter.Submit(Move(1, 100f, -100f, IntentPriority.Play, IntentSource.Play));
+        arbiter.Submit(Move(1, 100f, -100f, IntentPriority.Play, IntentSource.DivisionPlay));
         arbiter.Submit(Move(1, 200f, -200f, IntentPriority.Executor, IntentSource.PostureExecutor));
         arbiter.Submit(Move(1, 300f, -300f, IntentPriority.Scorer, IntentSource.GroupStanceScorer));
         var winners = new BattleOrderIntent[8];
@@ -76,14 +77,14 @@ internal static class OrderArbiterTests
         arbiter.BeginTick();
         arbiter.Submit(Move(1, 100f, -100f, IntentPriority.Executor, IntentSource.PostureExecutor));
         arbiter.Submit(Stance(1, 2, IntentPriority.Scorer, IntentSource.GroupStanceScorer));
-        arbiter.Submit(Move(2, 400f, -400f, IntentPriority.Play, IntentSource.Play));
+        arbiter.Submit(Move(2, 400f, -400f, IntentPriority.Play, IntentSource.DivisionPlay));
         var winners = new BattleOrderIntent[8];
         int n = arbiter.Resolve(winners);
         AssertEqual(3, n, "group 1 move + group 1 stance + group 2 move");
         AssertTrue(arbiter.TryGetClaim(1, OrderChannel.Stance, out BattleOrderIntent stance), "stance claim");
         AssertEqual(IntentPriority.Scorer, stance.Priority, "a Scorer stance survives an Executor move");
         AssertTrue(arbiter.TryGetClaim(2, OrderChannel.Move, out BattleOrderIntent move2), "group 2 move claim");
-        AssertEqual(IntentSource.Play, move2.Source, "group 2 move source");
+        AssertEqual(IntentSource.DivisionPlay, move2.Source, "group 2 move source");
     }
 
     private static void TieKeepsPreviousWinner()
@@ -164,7 +165,7 @@ internal static class OrderArbiterTests
         for (int g = 1; g <= 200; g++)
         {
             arbiter.Submit(Move(g, g, -g, IntentPriority.Executor, IntentSource.PostureExecutor));
-            arbiter.Submit(Move(g, g + 50f, -g, IntentPriority.Play, IntentSource.Play));
+            arbiter.Submit(Move(g, g + 50f, -g, IntentPriority.Play, IntentSource.DivisionPlay));
             arbiter.Submit(Stance(g, 2, IntentPriority.Scorer, IntentSource.GroupStanceScorer));
             arbiter.Submit(Behavior(g, 2, IntentPriority.Executor, IntentSource.FireControl));
         }
@@ -832,6 +833,37 @@ internal static class OrderArbiterTests
         arbiter.BeginTick();
         arbiter.Resolve(new BattleOrderIntent[4]);
         AssertFalse(OrderExecutor.RetryStillClaimed(arbiter, retry), "the source dropped the move");
+    }
+
+    // BC7: a retry whose source lost the (group, Move) claim is not run; the
+    // source learns it was superseded (the "superseded" count of the
+    // [OrderArbiter] row), not a stale Retried.
+    private static void SupersededRetryIsReportedToTheSource()
+    {
+        var view = new FixtureBattleView();
+        int g = view.AddGroup(1, 500f, -500f);
+        var executor = NewExecutor();
+        var outcomes = new OrderOutcome[8];
+        var retries = new BattleOrderIntent[4];
+        var order = Move(1, 500f, -700f, IntentPriority.Executor, IntentSource.PostureExecutor);
+
+        Record(executor, order, 1.0, 0, 0);
+        executor.ObserveOutcomes(view, 1.01, outcomes, out int n);
+        AssertEqual(OrderOutcomeKind.Retried, outcomes[n - 1].Kind, "a retry is pending");
+        AssertEqual(1, executor.TakeRetries(retries), "one retry handed out");
+
+        OrderOutcome superseded = executor.RecordSuperseded(retries[0], 1.012);
+        AssertEqual(OrderOutcomeKind.Superseded, superseded.Kind, "superseded");
+        AssertEqual(1, superseded.Retries, "the retry's count");
+        AssertEqual(OrderChannel.Move, superseded.Channel, "move channel");
+        AssertTrue(executor.TryGetLastOutcome(1, OrderChannel.Move, out OrderOutcome last), "reported");
+        AssertEqual(OrderOutcomeKind.Superseded, last.Kind, "LastOutcome is Superseded, not Retried");
+        AssertEqual(IntentSource.PostureExecutor, last.Source, "names the retry's source");
+        AssertNear(1.012f, (float)last.AtHours, 0.0001f, "at the tick it lapsed");
+
+        executor.ObserveOutcomes(view, 1.02, outcomes, out n);
+        AssertEqual(0, n, "nothing pending: the retry lapsed");
+        AssertEqual(0, executor.TakeRetries(retries), "and is not handed out again");
     }
 
     // ------------------------------------------------------------------ helpers

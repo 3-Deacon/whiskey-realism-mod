@@ -2,6 +2,7 @@ using System;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using static TestFixtures;
 using static TestHarness;
 using VanillaMapBounds = WhiskeyRealism.Tactical.Battle.VanillaMapBounds;
 using VanillaPathAreaCosts = WhiskeyRealism.Tactical.Battle.VanillaPathAreaCosts;
@@ -369,9 +370,9 @@ internal static class PostureStanceFixTests
             Sub("idle", CommandNodeRole.SupportingAttack, false, 0f, CommandTaskType.SupportAttack),
         }));
         AssertEqual("attacker", decision.AnchorNodeId, "a holding child cannot anchor an attack play");
-        AssertFalse(decision.OrderFor("holder").HasOrder, "hold task kept");
-        AssertFalse(decision.OrderFor("guard").HasOrder, "guard flank kept");
-        AssertEqual(CommandTaskType.SupportAttack, decision.OrderFor("idle").Task, "idle sibling supports");
+        AssertFalse(PlayOrderFor(decision, "holder").HasOrder, "hold task kept");
+        AssertFalse(PlayOrderFor(decision, "guard").HasOrder, "guard flank kept");
+        AssertEqual(CommandTaskType.SupportAttack, PlayOrderFor(decision, "idle").Task, "idle sibling supports");
     }
 
     private static void DivisionPlayStandsDownForDefender()

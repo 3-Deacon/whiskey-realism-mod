@@ -167,6 +167,24 @@ namespace WhiskeyRealism.Tactical.Battle
             return Math.Max(lineOfSight, cancelInterruptionDistance);
         }
 
+        /// <summary>
+        /// A group's enemies-in-range reach (#44 sector strength, the executor's
+        /// formation policy): RangeOnlyReach over the widest combat line of sight
+        /// a group holds (unit types infantry..skirmisher; GamePrefs.maximumlineofsight
+        /// is per unittyp). Vanilla's groupenemiesinrange reads the group's own
+        /// enemiesinrange list (UpdateGroupStrength 120558/120563).
+        /// </summary>
+        public static float GroupRangeReach(float[] lineOfSightByType, float cancelInterruptionDistance)
+        {
+            float sight = 0f;
+            if (lineOfSightByType != null)
+            {
+                for (int t = 0; t <= WhiskeyRealism.Tactical.TacticalUnitType.Skirmisher && t < lineOfSightByType.Length; t++)
+                    if (lineOfSightByType[t] > sight) sight = lineOfSightByType[t];
+            }
+            return RangeOnlyReach(sight, cancelInterruptionDistance);
+        }
+
         /// <summary>True when (x, z) lies within any own unit's reach, own units [0, count).</summary>
         public static bool WithinAnyReach(float[] ownX, float[] ownZ, float[] reach, int count, float x, float z)
         {

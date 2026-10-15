@@ -8,6 +8,7 @@ using UnityEngine.AI;
 using WhiskeyRealism.Tactical;
 using BattleCore = WhiskeyRealism.Tactical.Battle.BattleCore;
 using BattleSnapshot = WhiskeyRealism.Tactical.Battle.BattleSnapshot;
+using CommandWaypointWritePolicy = WhiskeyRealism.Tactical.Battle.CommandWaypointWritePolicy;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;

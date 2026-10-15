@@ -379,17 +379,6 @@ namespace WhiskeyRealism.Tactical.Operations
         }
     }
 
-    // Moved to Tactical/Battle/OrderExecutor.cs (BC4). The forwarder keeps the
-    // one member TacticalObserverPatch (outside BC5a's region) still names in
-    // this namespace; BC7 deletes it.
-    public static class CommandWaypointWritePolicy
-    {
-        public static bool IsExecutorMovementActive(bool pathInterrupted, int regimentPaths, int movementMode, float groupSubordinatesMoving,
-            float groupSubordinatesMovingNonAi, bool hasLastWaypoint, float distanceToLastWaypoint, float minWaypointDistance)
-            => Battle.CommandWaypointWritePolicy.IsExecutorMovementActive(pathInterrupted, regimentPaths, movementMode, groupSubordinatesMoving,
-                groupSubordinatesMovingNonAi, hasLastWaypoint, distanceToLastWaypoint, minWaypointDistance);
-    }
-
     public static class CommandPostureExecutor
     {
         public static bool IdleCanSatisfyTask(CommandTaskType task)

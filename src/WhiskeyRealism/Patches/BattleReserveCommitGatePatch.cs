@@ -18,8 +18,9 @@ namespace WhiskeyRealism.Patches
     // support units before vanilla, then rolls back only newly-added paths when
     // TacticalReserveCommitGate denies: the calling command group resolves to a
     // Reserve role (ledger state first), unless the direct-child allocator already
-    // released it or the unit is already engaged. The deleted B8 patch's doctrine
-    // deny is the same rule (see TacticalReserveCommitGate). Vanilla picks the unit
+    // released it (vanilla commits only unengaged units, 6129, so there is no
+    // engaged exemption). The deleted B8 patch's doctrine deny is the same rule
+    // (see TacticalReserveCommitGate). Vanilla picks the unit
     // itself (6121-6129); its PerformAIActionDLCWL (5101-5115) passes a W&L
     // under-commander unit whenever the group holds an AI stance, so it does not
     // keep player units out. The rollback skips the whole commit when any changed
