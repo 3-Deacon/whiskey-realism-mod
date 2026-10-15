@@ -37,6 +37,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (double.IsNaN(doctrineNowSeconds) || double.IsInfinity(doctrineNowSeconds)) return;
             _clockByAlliance[allianceId] = (float)doctrineNowSeconds;
             _lastReplanByAlliance[allianceId] = (float)doctrineNowSeconds;
+            _lastDoctrineNowByAlliance[allianceId] = doctrineNowSeconds;
         }
 
         /// <summary>
@@ -316,8 +317,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // "Min Replan Seconds" is measured on the same clock as plan age:
             // battle seconds when the caller supplies the battle clock.
             float cooldown = minReplanSeconds;
+            // A stamp later than now means the clock ran backwards (reload
+            // to an earlier save): treat the last replan as long ago.
             if (_lastReplanByAlliance.TryGetValue(allianceId, out var lastReplan) &&
-                now - lastReplan < cooldown)
+                lastReplan <= now && now - lastReplan < cooldown)
             {
                 return ReplanTrigger.None;
             }

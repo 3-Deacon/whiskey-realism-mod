@@ -81,6 +81,7 @@ internal static class TacticalEvidenceFixTests
         Run("evidence is built once per side per frame and shared", EvidenceMemoSharesWithinFrame);
         Run("flank threat is the mean outflanked weight of a group's regiments", FlankThreatIsMeanOverSubordinates);
         Run("an externally recorded replan counts against the replan cooldown", RecordedReplanRateLimits);
+        Run("a backward doctrine clock does not lock out replans", BackwardClockDoesNotLockReplan);
     }
 
     private static void Run(string name, Action test)
@@ -964,6 +965,9 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 40f, 40f), 1f), "40-man vedette: odds unknown");
         TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, new TacticalEnemyContactLedger(), 1f), "no contact: unknown");
         TestHarness.AssertTrue(Near(ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 4000f, 1000f), 1f), 1.5f), "real contact: own/seen");
+        // Confidence >= 0.5 needs a sighting of a quarter of own strength, so
+        // knowable odds top out at 4:1; 5:1 reads as unknown (by design).
+        TestHarness.AssertEqual(1f, ArmyEvidenceBuilder.KnownEnemyOdds(6000f, Seen(1f, 1200f, 1200f), 1f), "5:1 is past the knowable ceiling");
     }
 
     private static void PicketOnlyContactKeepsProbe()
@@ -1148,5 +1152,17 @@ internal static class TacticalEvidenceFixTests
         var later = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f,
             doctrineNowSeconds: dawn + 90.0);
         TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, later, "after the 60 s cooldown the trigger replans");
+    }
+
+    private static void BackwardClockDoesNotLockReplan()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
+        var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
+        ArmyTickCycle.RecordReplan(orch.AllianceId, 30 * 3600.0);
+        // Reload to an earlier save: doctrine time is now before the stamp.
+        var trigger = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f,
+            doctrineNowSeconds: 29 * 3600.0);
+        TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, trigger, "a stamp in the future is treated as long ago");
     }
 }
