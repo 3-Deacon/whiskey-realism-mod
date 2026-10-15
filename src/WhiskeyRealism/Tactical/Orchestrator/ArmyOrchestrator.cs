@@ -789,6 +789,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> CurrentLeafBrigadeMap
             => _leafBrigadeMap;
 
+        // Front geometry from the latest evidence (EnemyVisibleState). The leaf
+        // cascade orders siblings across this axis and reads flank exposure
+        // from it; UpdateLeafBrigadeMap is called by the #61 patch without an
+        // axis, so the orchestrator keeps the one the tick cycle observed.
+        private TacticalFrontAxis _frontAxis = TacticalFrontAxis.None;
+        private IReadOnlyDictionary<int, float> _flankThreat = new Dictionary<int, float>();
+
+        public TacticalFrontAxis CurrentFrontAxis => _frontAxis;
+
+        /// <summary>
+        /// Records the front axis and vanilla per-group flank threat the
+        /// evidence was banded on. Called from the orchestrator tick cycle
+        /// (<see cref="ArmyTickCycle.MaybeReplan(ArmyOrchestrator, float, ArmyEvidence, EnemyVisibleState, float, float, float, float, int, float, float, float, float, float)"/>).
+        /// </summary>
+        public void ObserveFrontGeometry(EnemyVisibleState enemyVisible)
+        {
+            if (enemyVisible.FrontAxis.IsValid) _frontAxis = enemyVisible.FrontAxis;
+            if (enemyVisible.InstanceFlankThreat != null) _flankThreat = enemyVisible.InstanceFlankThreat;
+        }
+
         public TacticalLeafBrigadeMap.LeafAssignment? GetLeafBrigadeAssignment(int instanceId)
         {
             if (_leafBrigadeMap == null) return null;
@@ -852,7 +872,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     : CascadeEnvelopmentMode.DoubleWingEchelon;
             }
 
-            _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(tree, topAssignments, aggression01, envelopmentMode);
+            _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(
+                tree, topAssignments, aggression01, envelopmentMode, _frontAxis, _flankThreat);
             _leafBrigadeMapSignature = sig;
         }
 
@@ -1044,6 +1065,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 envCode = sigAggression01 >= EnvelopmentSimultaneousAggressionThreshold ? 1 : 2;
             }
             sb.Append("|env=").Append(envCode);
+            // Front geometry: rebuild when the front rotates (15-degree buckets,
+            // already stabilized against jitter by ArmyEvidenceBuilder) or the
+            // vanilla flank-threat picture changes.
+            sb.Append("|hd=").Append(_frontAxis.HeadingBucket(15));
+            int threatHash = 0;
+            if (_flankThreat != null)
+            {
+                foreach (var kv in _flankThreat) threatHash ^= kv.Key * 31 + (int)kv.Value;
+            }
+            sb.Append("|ft=").Append(threatHash);
             return sb.ToString();
         }
 

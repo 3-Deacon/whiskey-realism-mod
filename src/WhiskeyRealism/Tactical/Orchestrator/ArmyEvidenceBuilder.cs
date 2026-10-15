@@ -115,9 +115,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 float enemyActive = SumEnemyActiveForce(bunits, side);
                 float odds = enemyActive <= 0f ? 1f : ownActive / Math.Max(1f, enemyActive);
-                var ownEvidence = new ArmyEvidence(odds, TerrainKind.Open, defaultMainEffortSector: 0);
 
                 var enemyVisible = BuildEnemyVisibleState(battle, bunits, side, allianceId);
+                // Default main effort = the center band of the front, not
+                // "whatever group is first in completeunitlist".
+                var ownEvidence = new ArmyEvidence(odds, TerrainKind.Open,
+                    defaultMainEffortSector: DefaultMainEffortSector(enemyVisible.FrontAxis));
                 float ownMorale = Clamp01OrDefault(SafeSideInfoFloat(bunits, side, "averagemorale"), 1f);
                 float ownReservesCommitted = EstimateReserveCommitFraction(battle, bunits, side, ownActive);
                 float ownReinforcements = SanitizeNonNegative(
@@ -251,7 +254,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private static Bundle NoEvidence()
         {
             return new Bundle(
-                new ArmyEvidence(1f, TerrainKind.Open, defaultMainEffortSector: 0),
+                new ArmyEvidence(1f, TerrainKind.Open, defaultMainEffortSector: DefaultMainEffortSector(TacticalFrontAxis.None)),
                 new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
                 ownMainEffortStrength: 1f,
                 ownArmyMorale: 1f,
@@ -259,6 +262,30 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 reinforcementsArrivingDelta: 0f);
         }
 
+        // Last bare (un-banded) front axis per alliance, kept so centroid jitter
+        // does not re-band units every tick (TacticalFrontAxis.Stabilize) and
+        // so a side with no enemy in sight keeps facing where it last faced.
+        // Reset when the BattleUnits instance changes (new battle / reload).
+        private static readonly TacticalFrontAxis[] _lastBareAxis = new TacticalFrontAxis[2];
+        private static readonly TacticalFrontAxis[] _lastFittedAxis = new TacticalFrontAxis[2];
+        private static System.WeakReference<BattleUnits> _lastBareAxisOwner;
+
+        /// <summary>
+        /// Builds the per-band own/enemy picture for one side.
+        ///
+        /// Enemy strength is the union of vanilla's fog-filtered sight lists
+        /// across the side's alive combat regiments (<c>unitrange.enemyinrangereg</c>
+        /// within raycastrange[0], 122649, and <c>enemyinfirerangereg</c>, 122692),
+        /// each enemy counted once. The old per-group sum of
+        /// <c>unitrange.enemystrengthwithinangle</c> (122720-122732) is not fog
+        /// filtered and holds every enemy within aidefensivemaxrange for EVERY
+        /// regiment, so a brigade of four counted the same enemy four times and
+        /// a corps about forty times.
+        ///
+        /// Sectors are lateral bands of a <see cref="TacticalFrontAxis"/> from
+        /// the own centroid toward the visible-enemy centroid (or the nearest
+        /// objective we do not hold), keyed by GameObject instance id.
+        /// </summary>
         private static EnemyVisibleState BuildEnemyVisibleState(AIBattle battle, BattleUnits bunits, int ownSide, int ownAllianceId)
         {
             try
@@ -268,29 +295,43 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 int enemySide = OppositeSide(ownSide);
                 int effectiveCommandMin = ClampShiftedMin(ReadCommandHierarchyShift());
-                var sectors = new List<EnemyVisibleSector>();
-                bool anyContactSpotted = false;
-                bool anyContactBroken = false;
+                var ownCombat = new List<FrontUnitSample>();
+                var ownGroups = new List<FrontUnitSample>();
+                var enemyVisible = new List<FrontUnitSample>();
+                var seenEnemy = new HashSet<int>();
+                var flankThreat = new Dictionary<int, float>();
+                bool anyRecentFire = false;
 
                 for (int i = 0; i < units.Count; i++)
                 {
-                    var group = units[i] as Regiment;
-                    if (!IsUsableOwnGroup(group, ownAllianceId, effectiveCommandMin)) continue;
+                    var reg = units[i] as Regiment;
+                    if (reg == null || reg.alliance != ownAllianceId) continue;
+                    if (!TryPosition(reg, out int id, out float x, out float z)) continue;
+                    bool routed = reg.isrouted || reg.markedforrout;
 
-                    float ownStrength = Math.Max(1f, SafeRegimentFloat(group, "groupstrengthaigroup"));
-                    float enemyStrength = VisibleEnemyStrength(group);
-                    bool recentFire = HasRecentFire(group);
-                    if (enemyStrength > 0f || recentFire)
+                    if (reg.unittyp >= effectiveCommandMin)
                     {
-                        anyContactSpotted = true;
+                        if (routed) continue;
+                        ownGroups.Add(new FrontUnitSample(id, x, z, Math.Max(0, reg.groupstrengthaigroup), false));
+                        float threat = reg.flanksthreated;
+                        if (threat > 0f && !float.IsNaN(threat)) flankThreat[id] = threat;
+                        continue;
                     }
 
-                    sectors.Add(new EnemyVisibleSector(
-                        sectors.Count,
-                        ownStrength,
-                        enemyStrength,
-                        recentFire));
+                    if (reg.unittyp > TacticalUnitType.MaxCombat || reg.unittyp == TacticalUnitType.Excluded) continue;
+                    if (!IsAliveCombatUnit(reg.strength, SafeActive(reg), routed)) continue;
+
+                    bool fire = HasReceivedFire(reg);
+                    if (fire) anyRecentFire = true;
+                    ownCombat.Add(new FrontUnitSample(id, x, z, reg.strength, fire));
+                    CollectVisibleEnemies(reg, ownAllianceId, seenEnemy, enemyVisible);
                 }
+
+                var bare = BareAxis(bunits, ownAllianceId, ownCombat.Count > 0 ? ownCombat : ownGroups, enemyVisible);
+                var axis = EnemyVisibleSectorBuilder.FitAxis(bare, ownCombat.Count > 0 ? ownCombat : ownGroups, enemyVisible);
+                if (ownAllianceId >= 0 && ownAllianceId <= 1) _lastFittedAxis[ownAllianceId] = axis;
+                var sectors = EnemyVisibleSectorBuilder.BuildSectors(axis, ownCombat, enemyVisible);
+                var instanceSectors = EnemyVisibleSectorBuilder.MapInstances(axis, ownGroups);
 
                 float enemyActiveForce = Math.Max(1f, SafeSideInfoFloat(bunits, enemySide, "totalactiveforce"));
                 float enemyReserveCommitFraction = EstimateReserveCommitFraction(battle, bunits, enemySide, enemyActiveForce);
@@ -298,15 +339,185 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     SafeSideInfoFloat(bunits, enemySide, "reinforcementarrivalswithin24hrs"));
 
                 return new EnemyVisibleState(
-                    sectors.ToArray(),
+                    sectors,
                     enemyReserveCommitFraction,
-                    anyContactSpotted,
-                    anyContactBroken,
-                    enemyReinforcements);
+                    anyContactSpotted: enemyVisible.Count > 0 || anyRecentFire,
+                    anyContactBroken: false,
+                    enemyReinforcements,
+                    frontAxis: axis,
+                    instanceSectors: instanceSectors,
+                    instanceFlankThreat: flankThreat);
             }
             catch
             {
                 return EmptyEnemyVisible();
+            }
+        }
+
+        /// <summary>
+        /// Own-centroid → target axis, stabilized against the last axis for this
+        /// alliance. Target = strength-weighted centroid of visible enemies; with
+        /// nothing in sight, the nearest objective not held by this alliance
+        /// (BattleUnits.objectives 78910, owner 84809 — public map knowledge);
+        /// otherwise keep facing the last known way.
+        /// </summary>
+        private static TacticalFrontAxis BareAxis(
+            BattleUnits bunits,
+            int allianceId,
+            IReadOnlyList<FrontUnitSample> own,
+            IReadOnlyList<FrontUnitSample> enemy)
+        {
+            if (!Centroid(own, out float ox, out float oz)) return TacticalFrontAxis.None;
+
+            bool sameOwner = _lastBareAxisOwner != null
+                && _lastBareAxisOwner.TryGetTarget(out var owner)
+                && ReferenceEquals(owner, bunits);
+            if (!sameOwner)
+            {
+                _lastBareAxis[0] = TacticalFrontAxis.None;
+                _lastBareAxis[1] = TacticalFrontAxis.None;
+                _lastFittedAxis[0] = TacticalFrontAxis.None;
+                _lastFittedAxis[1] = TacticalFrontAxis.None;
+                _lastBareAxisOwner = new System.WeakReference<BattleUnits>(bunits);
+            }
+            int slot = allianceId == 1 ? 1 : 0;
+            var previous = allianceId >= 0 && allianceId <= 1 ? _lastBareAxis[slot] : TacticalFrontAxis.None;
+
+            TacticalFrontAxis next;
+            if (Centroid(enemy, out float ex, out float ez))
+                next = TacticalFrontAxis.FromCentroids(ox, oz, ex, ez);
+            else if (TryNearestOpenObjective(allianceId, ox, oz, out float tx, out float tz))
+                next = TacticalFrontAxis.FromCentroids(ox, oz, tx, tz);
+            else if (previous.IsValid)
+                next = TacticalFrontAxis.FromCentroids(ox, oz, ox + previous.ForwardX * previous.TargetDistance,
+                    oz + previous.ForwardZ * previous.TargetDistance);
+            else
+                next = TacticalFrontAxis.FromCentroids(ox, oz, ox, oz);
+
+            var stable = TacticalFrontAxis.Stabilize(previous, next, TacticalFrontAxis.DefaultMinHeadingChangeDegrees);
+            if (allianceId >= 0 && allianceId <= 1) _lastBareAxis[slot] = stable;
+            return stable;
+        }
+
+        /// <summary>
+        /// Own command group (GameObject instance id) → lateral band, using the
+        /// last front axis fitted for this alliance by <see cref="Build"/>.
+        /// Empty until a Build has run. Lets callers that only have the battle
+        /// (the worker capture path) band groups the same way the evidence did.
+        /// </summary>
+        internal static Dictionary<int, int> MapOwnGroupsToSectors(int allianceId)
+        {
+            var map = new Dictionary<int, int>();
+            try
+            {
+                if (allianceId < 0 || allianceId > 1) return map;
+                var axis = _lastFittedAxis[allianceId];
+                if (!axis.IsValid) return map;
+                var units = SafeGetCompleteUnitList();
+                if (units == null) return map;
+                int effectiveCommandMin = ClampShiftedMin(ReadCommandHierarchyShift());
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var reg = units[i] as Regiment;
+                    if (reg == null || reg.alliance != allianceId) continue;
+                    if (reg.unittyp < effectiveCommandMin) continue;
+                    if (reg.isrouted || reg.markedforrout) continue;
+                    if (!TryPosition(reg, out int id, out float x, out float z)) continue;
+                    map[id] = axis.SectorOf(x, z);
+                }
+            }
+            catch { }
+            return map;
+        }
+
+        private static bool Centroid(IReadOnlyList<FrontUnitSample> units, out float x, out float z)
+        {
+            x = 0f; z = 0f;
+            if (units == null || units.Count == 0) return false;
+            double sx = 0, sz = 0, w = 0;
+            for (int i = 0; i < units.Count; i++)
+            {
+                double weight = Math.Max(1f, units[i].Strength);
+                sx += units[i].X * weight;
+                sz += units[i].Z * weight;
+                w += weight;
+            }
+            if (w <= 0) return false;
+            x = (float)(sx / w);
+            z = (float)(sz / w);
+            return true;
+        }
+
+        private static bool TryNearestOpenObjective(int allianceId, float ox, float oz, out float tx, out float tz)
+        {
+            tx = 0f; tz = 0f;
+            try
+            {
+                var objectives = BattleUnits.objectives;
+                if (objectives == null) return false;
+                float best = float.MaxValue;
+                for (int i = 0; i < objectives.Length; i++)
+                {
+                    var obj = objectives[i];
+                    if (obj == null || obj.owner == allianceId) continue;
+                    var p = obj.transform.position;
+                    float dx = p.x - ox, dz = p.z - oz;
+                    float d = dx * dx + dz * dz;
+                    if (d < best) { best = d; tx = p.x; tz = p.z; }
+                }
+                return best < float.MaxValue;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void CollectVisibleEnemies(Regiment own, int ownAllianceId, HashSet<int> seen, List<FrontUnitSample> output)
+        {
+            try
+            {
+                var range = own.unitrange;
+                if (range == null) return;
+                AddVisible(range.enemyinrangereg, ownAllianceId, seen, output);
+                AddVisible(range.enemyinfirerangereg, ownAllianceId, seen, output);
+            }
+            catch { }
+        }
+
+        private static void AddVisible(List<Regiment> list, int ownAllianceId, HashSet<int> seen, List<FrontUnitSample> output)
+        {
+            if (list == null) return;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var enemy = list[i];
+                if (enemy == null || enemy.alliance == ownAllianceId) continue;
+                // Same eligibility vanilla applies when filling the lists (122644).
+                if (enemy.unittyp == TacticalUnitType.Excluded || enemy.unittyp > TacticalUnitType.MaxCombat) continue;
+                if (enemy.isrouted || !SafeActive(enemy)) continue;
+                if (!TryPosition(enemy, out int id, out float x, out float z)) continue;
+                if (!seen.Add(id)) continue;
+                output.Add(new FrontUnitSample(id, x, z, enemy.strength, false));
+            }
+        }
+
+        private static bool TryPosition(Regiment reg, out int instanceId, out float x, out float z)
+        {
+            instanceId = 0; x = 0f; z = 0f;
+            try
+            {
+                var go = reg.gameObject;
+                if (go == null) return false;
+                instanceId = go.GetInstanceID();
+                var p = go.transform.position;
+                if (float.IsNaN(p.x) || float.IsNaN(p.z) || float.IsInfinity(p.x) || float.IsInfinity(p.z)) return false;
+                x = p.x;
+                z = p.z;
+                return instanceId != 0;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -374,99 +585,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 return false;
             }
-        }
-
-        private static float VisibleEnemyStrength(Regiment group)
-        {
-            try
-            {
-                float strength = SumVisibleEnemyStrengthForGroup(group);
-                if (strength > 0f) return strength;
-
-                int enemiesInRange = Math.Max(0, SafeRegimentInt(group, "groupenemiesinrange"));
-                if (enemiesInRange <= 0) return 0f;
-
-                // Fallback only: groupenemiesinrange is a visible contact count, not exact strength.
-                return enemiesInRange * 1000f;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static float SumVisibleEnemyStrengthForGroup(Regiment group)
-        {
-            try
-            {
-                float total = 0f;
-                if (group == null)
-                    return 0f;
-                if (group.allattachedunits == null) return 0f;
-
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    var unit = group.allattachedunits[i];
-                    if (!IsUsableAttachedCombatUnit(unit)) continue;
-                    total += SumVisibleEnemyStrengthByAngle(unit);
-                }
-
-                return total;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static float SumVisibleEnemyStrengthByAngle(Regiment unit)
-        {
-            try
-            {
-                if (unit == null || unit.unitrange == null || unit.unitrange.enemystrengthwithinangle == null)
-                    return 0f;
-
-                float total = 0f;
-                for (int i = 0; i < unit.unitrange.enemystrengthwithinangle.Length; i++)
-                    total += Math.Max(0f, unit.unitrange.enemystrengthwithinangle[i]);
-                return total;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static bool IsUsableAttachedCombatUnit(Regiment unit)
-        {
-            try
-            {
-                if (unit == null) return false;
-                if (unit.unittyp > 13) return false;
-                if (unit.isrouted || unit.permanentlydetached) return false;
-                if (!unit.gameObject.activeInHierarchy) return false;
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static bool HasRecentFire(Regiment group)
-        {
-            try
-            {
-                if (group == null) return false;
-                if (HasReceivedFire(group)) return true;
-                if (group.allattachedunits == null) return false;
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    if (HasReceivedFire(group.allattachedunits[i])) return true;
-                }
-            }
-            catch { }
-            return false;
         }
 
         private static bool HasReceivedFire(Regiment unit)

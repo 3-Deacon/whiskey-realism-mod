@@ -79,5 +79,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (groupStrengthAiGroup > 0) return groupStrengthAiGroup;
             return 0f;
         }
+
+        /// <summary>
+        /// Default main-effort sector: the center band of the front (sectors
+        /// are lateral bands, <see cref="TacticalFrontAxis"/>).
+        /// </summary>
+        internal static int DefaultMainEffortSector(TacticalFrontAxis axis)
+            => axis.IsValid && axis.BandCount > 0 ? axis.CenterSector : TacticalFrontAxis.DefaultBandCount / 2;
     }
 }

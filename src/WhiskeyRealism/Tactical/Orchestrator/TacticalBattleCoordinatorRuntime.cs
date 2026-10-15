@@ -1634,40 +1634,52 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     enemyVisForChildren = snap.EnemyVisible;
                 }
 
-                // Build instanceId → sector-index map matching ArmyEvidenceBuilder's iteration
-                // (BattleUnits.completeunitlist filtered by IsUsableOwnGroup). The post-filter
-                // index IS the SectorId in enemyVisForChildren.Sectors, so a real per-child
-                // primary sector lets BuildForFrontage actually find a matching sector and
-                // lets the allocator's adjacency / flank rules engage.
-                var instanceToSector = BuildInstanceToSectorIndexMap(battle, side.AllianceId);
+                // Sectors are lateral bands of the side's front axis
+                // (TacticalFrontAxis), carried with the evidence as an
+                // instance-id → band map so a rout elsewhere never renumbers a
+                // child's sector. Fallback map: same axis, projected live.
+                var axis = enemyVisForChildren.FrontAxis;
+                IReadOnlyDictionary<int, int> instanceToSector = enemyVisForChildren.InstanceSectors;
+                if (instanceToSector == null || instanceToSector.Count == 0)
+                    instanceToSector = BuildInstanceToSectorIndexMap(battle, side.AllianceId);
+                int fallbackSector = ArmyEvidenceBuilder.DefaultMainEffortSector(axis);
 
                 var primarySectors = new int[childCount];
+                var childInstanceIds = new int[childCount];
                 int minSector = int.MaxValue;
                 int maxSector = int.MinValue;
                 for (int i = 0; i < childCount; i++)
                 {
                     var existing = side.Army.CurrentDirectChildIntents[i];
                     int instanceId = ParseInstanceIdFromChildId(existing.ChildId);
+                    childInstanceIds[i] = instanceId;
                     int sector;
                     if (instanceId != 0 && instanceToSector.TryGetValue(instanceId, out int mapped))
                         sector = mapped;
                     else
-                        sector = existing.PrimarySector >= 0 ? existing.PrimarySector : 0;
+                        sector = fallbackSector;
                     primarySectors[i] = sector;
                     if (sector < minSector) minSector = sector;
                     if (sector > maxSector) maxSector = sector;
                 }
 
-                // Flank exposure: leftmost (lowest sector index) and rightmost (highest) children
-                // are wing positions. Bucket >= FlankExposureRefuseThreshold (=2) triggers
-                // RefuseLeft/RefuseRight in the allocator. Single-child armies have min==max so
-                // both checks land on the same child and it stays bucket=2 either way.
+                // Flank exposure (TacticalFrontAxis.FlankExposureBucket): the
+                // leftmost/rightmost children hold the army's wings; a wing is
+                // more exposed when the visible enemy line extends past it and
+                // when vanilla's own group flanksthreated (110958, summed from
+                // subordinate outflanked states 120568-120580) reports a threat.
+                // Bucket 3 refuses in DirectChildAllocator.
                 var flankBuckets = new int[childCount];
                 var perChildIntent = new TacticalIntentModel[childCount];
+                bool hasWings = childCount > 1 && minSector != maxSector;
                 for (int i = 0; i < childCount; i++)
                 {
-                    bool isWing = childCount > 1 && (primarySectors[i] == minSector || primarySectors[i] == maxSector);
-                    flankBuckets[i] = isWing ? 2 : 0;
+                    bool leftWing = hasWings && primarySectors[i] == minSector;
+                    bool rightWing = hasWings && primarySectors[i] == maxSector;
+                    bool overlapped = (leftWing && axis.EnemyOverlapsLeft) || (rightWing && axis.EnemyOverlapsRight);
+                    flankBuckets[i] = TacticalFrontAxis.FlankExposureBucket(
+                        leftWing || rightWing, overlapped,
+                        enemyVisForChildren.FlankThreatForInstance(childInstanceIds[i]));
                     perChildIntent[i] = ArmyIntentInference.BuildForFrontage(primarySectors[i], enemyVisForChildren, ownStrengthBucket: 1);
                 }
 
@@ -1703,7 +1715,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         shift = ex.RawUnitTyp - ex.EffectiveCommandLevel;
                     }
                     zoneAssignments = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime
-                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount);
+                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis);
                 }
                 side.Army.ObserveDirectChildEvidenceWithZones(evidence, perChildIntent, zoneAssignments);
 
@@ -1734,37 +1746,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // TacticalBattleCoordinator.cs so the harness can lock the negative-id parse
         // contract. Both partials see it via the shared `partial class` declaration.
 
-        // Walk BattleUnits.completeunitlist with the same shifted command-level
-        // filter ArmyEvidenceBuilder uses and record each command-level group's
-        // GameObject InstanceID → post-filter index. The post-filter index equals the SectorId
-        // assigned by ArmyEvidenceBuilder, so per-child primary-sector lookups stay aligned.
+        // Own command group GameObject InstanceID → lateral band of the side's
+        // front axis (the axis ArmyEvidenceBuilder last fitted for this
+        // alliance). Same banding as EnemyVisibleState.InstanceSectors, so
+        // per-child primary sectors line up with the evidence sectors.
         private static System.Collections.Generic.Dictionary<int, int> BuildInstanceToSectorIndexMap(AIBattle battle, int allianceId)
         {
-            var map = new System.Collections.Generic.Dictionary<int, int>();
-            try
-            {
-                var units = BattleUnits.completeunitlist as System.Collections.IList;
-                if (units == null) return map;
-                int effectiveCommandMin = ArmyEvidenceBuilder.ClampShiftedMin(ArmyEvidenceBuilder.ReadCommandHierarchyShift());
-                int sectorIndex = 0;
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var group = units[i] as Regiment;
-                    if (group == null) continue;
-                    if (group.alliance != allianceId) continue;
-                    if (group.unittyp < effectiveCommandMin) continue;
-                    if (group.isrouted || group.markedforrout) continue;
-                    var go = ((Component)group).gameObject;
-                    if (go == null) continue;
-                    map[go.GetInstanceID()] = sectorIndex;
-                    sectorIndex++;
-                }
-            }
-            catch
-            {
-                // Empty map → primary sectors fall back to existing.PrimarySector per child.
-            }
-            return map;
+            return ArmyEvidenceBuilder.MapOwnGroupsToSectors(allianceId);
         }
 
         // ---- Slice 2: worker input capture (runs on main thread) ----

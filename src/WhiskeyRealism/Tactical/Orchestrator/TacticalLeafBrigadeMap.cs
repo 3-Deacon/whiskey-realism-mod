@@ -18,7 +18,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// This is the depth-agnostic improvement over SoW's rigid per-tier Think
     /// dispatch: the same algorithm walks 1-tier (army → brigades direct),
     /// 2-tier (army → divisions → brigades), or N-tier hierarchies. Sibling
-    /// distribution is geometry-aware (left-to-right by world X) and
+    /// distribution is geometry-aware (left-to-right across the front axis) and
     /// personality-modulated (high-aggression commanders widen the attack band).
     /// </summary>
     public static class TacticalLeafBrigadeMap
@@ -85,16 +85,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Builds the leaf assignment map. Walks each top-tier child via the tree,
         /// cascades the top role down to its descendant leaves, and returns a
         /// dictionary keyed by leaf brigade instanceId.
+        ///
+        /// <paramref name="frontAxis"/> orders siblings across the front (left =
+        /// negative lateral) and locates the army's wings; without it the legacy
+        /// world-X order is used. <paramref name="flankThreat"/> is vanilla's
+        /// per-group <c>flanksthreated</c> (instance id → value), see
+        /// <see cref="TacticalFrontAxis.FlankExposureBucket"/>.
+        ///
+        /// Envelopment is an army-level decision: with three or more eligible
+        /// top-level children (not Fallback / Refuse) the wings are the army's
+        /// outer corps, ordered across the front. Smaller armies keep the old
+        /// behaviour of splitting the Main child's own subordinates.
         /// </summary>
         public static IReadOnlyDictionary<int, LeafAssignment> BuildMap(
             IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree,
             IReadOnlyList<TopAssignment> topLevelAssignments,
             float commanderAggression01,
-            CascadeEnvelopmentMode envelopmentMode = CascadeEnvelopmentMode.None)
+            CascadeEnvelopmentMode envelopmentMode = CascadeEnvelopmentMode.None,
+            TacticalFrontAxis frontAxis = default(TacticalFrontAxis),
+            IReadOnlyDictionary<int, float> flankThreat = null)
         {
             var result = new Dictionary<int, LeafAssignment>();
             if (tree == null || topLevelAssignments == null) return result;
 
+            var topRoles = new DirectChildRole[topLevelAssignments.Count];
+            for (int i = 0; i < topRoles.Length; i++) topRoles[i] = topLevelAssignments[i].Role;
+
+            CascadeEnvelopmentMode deeperMode = envelopmentMode;
+            if (envelopmentMode != CascadeEnvelopmentMode.None &&
+                ApplyArmyLevelEnvelopment(tree, topLevelAssignments, topRoles, commanderAggression01, envelopmentMode, frontAxis))
+            {
+                deeperMode = CascadeEnvelopmentMode.None;
+            }
+
+            var geometry = new CascadeGeometry(frontAxis, flankThreat);
             for (int i = 0; i < topLevelAssignments.Count; i++)
             {
                 var top = topLevelAssignments[i];
@@ -105,19 +129,99 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var visited = new HashSet<int>();
                 CascadeInto(
                     topNode,
-                    top.Role,
-                    new List<DirectChildRole> { top.Role },
+                    topRoles[i],
+                    new List<DirectChildRole> { topRoles[i] },
                     new List<string> { topNode.Name },
                     i,
                     tree,
                     commanderAggression01,
-                    envelopmentMode,
+                    deeperMode,
+                    geometry,
                     visited,
                     depth: 0,
                     result);
             }
 
             return result;
+        }
+
+        private readonly struct CascadeGeometry
+        {
+            public CascadeGeometry(TacticalFrontAxis axis, IReadOnlyDictionary<int, float> threat)
+            {
+                Axis = axis;
+                Threat = threat;
+            }
+
+            public TacticalFrontAxis Axis { get; }
+            public IReadOnlyDictionary<int, float> Threat { get; }
+
+            /// <summary>
+            /// The outermost sibling holds an army flank when it also sits in
+            /// the army's edge band on that side.
+            /// </summary>
+            public int FlankBucket(TacticalCommandTreeProbe.ProbeNode child, int index, int count)
+            {
+                float threat = 0f;
+                if (Threat != null) Threat.TryGetValue(child.InstanceId, out threat);
+                if (!Axis.IsValid || count < 2)
+                    return TacticalFrontAxis.FlankExposureBucket(false, false, threat);
+                int band = Axis.SectorOf(child.WorldX, child.WorldZ);
+                bool leftWing = index == 0 && band == 0;
+                bool rightWing = index == count - 1 && band == Axis.BandCount - 1;
+                bool overlapped = (leftWing && Axis.EnemyOverlapsLeft) || (rightWing && Axis.EnemyOverlapsRight);
+                return TacticalFrontAxis.FlankExposureBucket(leftWing || rightWing, overlapped, threat);
+            }
+        }
+
+        private static bool ApplyArmyLevelEnvelopment(
+            IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree,
+            IReadOnlyList<TopAssignment> tops,
+            DirectChildRole[] topRoles,
+            float commanderAggression01,
+            CascadeEnvelopmentMode mode,
+            TacticalFrontAxis axis)
+        {
+            var eligible = new List<int>();
+            for (int i = 0; i < tops.Count; i++)
+            {
+                var role = topRoles[i];
+                if (role == DirectChildRole.Fallback || role == DirectChildRole.RefuseLeft || role == DirectChildRole.RefuseRight)
+                    continue;
+                if (!tree.TryGetValue(tops[i].ChildInstanceId, out var node) || !node.Active) continue;
+                eligible.Add(i);
+            }
+            if (eligible.Count < 3) return false;
+
+            eligible.Sort((a, b) =>
+            {
+                var na = tree[tops[a].ChildInstanceId];
+                var nb = tree[tops[b].ChildInstanceId];
+                float la = axis.IsValid ? axis.LateralOf(na.WorldX, na.WorldZ) : na.WorldX;
+                float lb = axis.IsValid ? axis.LateralOf(nb.WorldX, nb.WorldZ) : nb.WorldX;
+                int c = la.CompareTo(lb);
+                return c != 0 ? c : na.InstanceId.CompareTo(nb.InstanceId);
+            });
+
+            var strengths = new int[eligible.Count];
+            for (int k = 0; k < eligible.Count; k++) strengths[k] = tree[tops[eligible[k]].ChildInstanceId].StrengthBucket;
+            var (leftAnchor, rightAnchor) = TacticalRoleCascade.ChooseEnvelopmentAnchorIndices(strengths);
+
+            for (int k = 0; k < eligible.Count; k++)
+            {
+                var ctx = new TacticalRoleCascade.CascadeContext(
+                    parentRole: DirectChildRole.Main,
+                    childIndex: k,
+                    childCount: eligible.Count,
+                    childStrengthBucket: strengths[k],
+                    childFlankExposureBucket: 0,
+                    commanderAggression01: commanderAggression01,
+                    anchorIndex: leftAnchor,
+                    envelopmentMode: mode,
+                    secondaryAnchorIndex: rightAnchor);
+                topRoles[eligible[k]] = TacticalRoleCascade.DistributeChildRole(ctx);
+            }
+            return true;
         }
 
         private static void CascadeInto(
@@ -129,6 +233,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree,
             float commanderAggression01,
             CascadeEnvelopmentMode envelopmentMode,
+            CascadeGeometry geometry,
             HashSet<int> visited,
             int depth,
             Dictionary<int, LeafAssignment> output)
@@ -166,7 +271,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // command-tier cascade.
             if (node.UnitTyp < TacticalUnitType.BattleGroupBrigade) return;
 
-            var children = TacticalCommandTreeProbe.EnumerateChildrenLeftToRight(node.InstanceId, tree);
+            var children = TacticalCommandTreeProbe.EnumerateChildrenLeftToRight(node.InstanceId, tree, geometry.Axis);
             if (children.Count == 0)
             {
                 // Above-brigade node with no brigade descendants. Record as a
@@ -226,7 +331,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     childIndex: idx,
                     childCount: children.Count,
                     childStrengthBucket: child.StrengthBucket,
-                    childFlankExposureBucket: 0,
+                    childFlankExposureBucket: geometry.FlankBucket(child, idx, children.Count),
                     commanderAggression01: commanderAggression01,
                     anchorIndex: anchorIndex,
                     envelopmentMode: activeMode,
@@ -250,6 +355,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     tree,
                     commanderAggression01,
                     envelopmentMode,
+                    geometry,
                     visited,
                     depth + 1,
                     output);

@@ -317,7 +317,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // Mirrors SoW offai.cpp:1115-1320 multi-rect army-tier play, where
             // each rect maps to a different corps' assigned zone. Whiskey's
             // version uses index position as the proxy for spatial distribution
-            // (children are pre-sorted left-to-right by world X in
+            // (children are pre-sorted left-to-right across the front axis in
             // TacticalCommandTreeProbe.EnumerateChildrenLeftToRight).
             int primaryAnchor = ctx.AnchorIndex;
             int secondaryAnchor = ctx.SecondaryAnchorIndex;

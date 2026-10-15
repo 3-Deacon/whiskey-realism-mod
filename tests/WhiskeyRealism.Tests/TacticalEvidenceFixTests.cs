@@ -18,6 +18,27 @@ internal static class TacticalEvidenceFixTests
         Run("alive combat unit needs strength active and not routed", AliveCombatUnitPredicate);
         Run("scheduled arrival durationleft is already hours", ScheduledArrivalDurationIsHours);
         Run("scheduled arrival strength uses vanilla groupstrength", ScheduledArrivalStrengthUsesGroupStrength);
+        Run("front axis right vector matches play projection handedness", FrontAxisHandednessMatchesPlayProjection);
+        Run("front axis facing north orders left to right by world x", FrontAxisFacingNorthUsesWorldX);
+        Run("front axis facing east orders across the front not by world x", FrontAxisFacingEastIgnoresWorldX);
+        Run("front axis facing south swaps world x order", FrontAxisFacingSouthSwapsWorldX);
+        Run("front axis bands clamp and center", FrontAxisBandsClampAndCenter);
+        Run("front axis degenerate target defaults forward to +z", FrontAxisDegenerateTargetDefaults);
+        Run("front axis stabilize keeps heading under threshold", FrontAxisStabilizeKeepsHeading);
+        Run("front axis enemy overlap per flank", FrontAxisEnemyOverlap);
+        Run("flank exposure bucket combines wing overlap and vanilla threat", FlankExposureBucketCombines);
+        Run("band sectors dedupe enemies seen by several own units", BandSectorsDedupeEnemies);
+        Run("band sectors aggregate own strength by lateral band", BandSectorsAggregateOwnByBand);
+        Run("instance sector map is keyed by instance id and stable when a group routs", InstanceSectorMapStableAcrossRout);
+        Run("sector odds ignore pickets below the meaningful-enemy floor", SectorOddsIgnorePickets);
+        Run("enemy visible state carries axis and instance sectors", EnemyVisibleStateCarriesGeometry);
+        Run("command tree children sort along the front axis", CommandTreeChildrenSortAlongFront);
+        Run("default main effort is the center band", DefaultMainEffortIsCenterBand);
+        Run("picket in the main-effort band does not zero main-effort odds", PicketDoesNotZeroMainEffortOdds);
+        Run("leaf cascade refuses the flanks across the front when facing east", LeafCascadeRefusesAcrossFrontFacingEast);
+        Run("leaf cascade feeds real flank exposure to cautious commanders", LeafCascadeUsesRealFlankExposure);
+        Run("envelopment splits the army's corps into wings, not one corps's divisions", EnvelopmentSplitsArmyCorps);
+        Run("orchestrator keeps the observed front axis for the leaf cascade", OrchestratorKeepsFrontAxis);
     }
 
     private static void Run(string name, Action test)
@@ -82,5 +103,332 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(4200f, ArmyEvidenceBuilder.ArrivalStrength(groupStrength: 4200, groupStrengthAiGroup: 0), "groupstrength wins");
         TestHarness.AssertEqual(900f, ArmyEvidenceBuilder.ArrivalStrength(0, 900), "aigroup fallback when groupstrength unset");
         TestHarness.AssertEqual(0f, ArmyEvidenceBuilder.ArrivalStrength(-5, -5), "negatives clamp to 0");
+    }
+
+    // ---- T3/T4 geometry ----
+
+    private static bool Near(float a, float b) => Math.Abs(a - b) < 1e-4f;
+
+    private static void FrontAxisHandednessMatchesPlayProjection()
+    {
+        // PlayProjection.Project: right = (forwardZ, -forwardX). Allocator treats
+        // PrimarySector < mainSector as LEFT; cascade puts RefuseLeft at index 0.
+        // All three must agree: lower band index = more negative lateral = left.
+        var axis = TacticalFrontAxis.FromCentroids(0f, 0f, 30f, 40f);
+        TestHarness.AssertTrue(Near(axis.ForwardX, 0.6f) && Near(axis.ForwardZ, 0.8f), "forward normalized");
+        TestHarness.AssertTrue(Near(axis.RightX, axis.ForwardZ) && Near(axis.RightZ, -axis.ForwardX), "right = (fz, -fx)");
+        TestHarness.AssertTrue(Near(axis.TargetDistance, 50f), "target distance kept for play projection depth");
+    }
+
+    private static TacticalFrontAxis Banded(float ownX, float ownZ, float tX, float tZ)
+    {
+        return TacticalFrontAxis.FromCentroids(ownX, ownZ, tX, tZ).WithOwnExtent(-100f, 100f, 5);
+    }
+
+    private static void FrontAxisFacingNorthUsesWorldX()
+    {
+        var axis = Banded(0f, 0f, 0f, 500f);
+        TestHarness.AssertTrue(axis.SectorOf(-80f, 0f) < axis.SectorOf(80f, 0f), "facing +Z: west is left");
+        TestHarness.AssertEqual(axis.SectorOf(0f, -50f), axis.SectorOf(0f, 50f), "depth does not change band");
+    }
+
+    private static void FrontAxisFacingEastIgnoresWorldX()
+    {
+        var axis = Banded(0f, 0f, 500f, 0f);
+        // Facing +X the left hand points to +Z.
+        TestHarness.AssertTrue(axis.SectorOf(0f, 80f) < axis.SectorOf(0f, -80f), "facing east: north is left");
+        TestHarness.AssertEqual(axis.SectorOf(-80f, 0f), axis.SectorOf(80f, 0f), "world-X difference is depth, same band");
+    }
+
+    private static void FrontAxisFacingSouthSwapsWorldX()
+    {
+        var axis = Banded(0f, 0f, 0f, -500f);
+        TestHarness.AssertTrue(axis.SectorOf(80f, 0f) < axis.SectorOf(-80f, 0f), "facing south: east is left");
+    }
+
+    private static void FrontAxisBandsClampAndCenter()
+    {
+        var axis = Banded(0f, 0f, 0f, 500f);
+        TestHarness.AssertEqual(5, axis.BandCount, "band count");
+        TestHarness.AssertEqual(2, axis.CenterSector, "center band");
+        TestHarness.AssertEqual(0, axis.SectorOf(-100f, 0f), "left edge");
+        TestHarness.AssertEqual(2, axis.SectorOf(0f, 0f), "center");
+        TestHarness.AssertEqual(4, axis.SectorOf(100f, 0f), "right edge");
+        TestHarness.AssertEqual(4, axis.SectorOf(900f, 0f), "beyond right clamps");
+        TestHarness.AssertEqual(0, axis.SectorOf(-900f, 0f), "beyond left clamps");
+    }
+
+    private static void FrontAxisDegenerateTargetDefaults()
+    {
+        var axis = TacticalFrontAxis.FromCentroids(10f, 10f, 10f, 10.2f);
+        TestHarness.AssertTrue(axis.IsValid, "degenerate still valid");
+        TestHarness.AssertTrue(Near(axis.ForwardX, 0f) && Near(axis.ForwardZ, 1f), "forward defaults to +Z like PlayProjection");
+        TestHarness.AssertFalse(TacticalFrontAxis.None.IsValid, "None is invalid");
+        TestHarness.AssertEqual(0, TacticalFrontAxis.None.SectorOf(5f, 5f), "None maps to sector 0");
+    }
+
+    private static void FrontAxisStabilizeKeepsHeading()
+    {
+        var prev = TacticalFrontAxis.FromCentroids(0f, 0f, 0f, 100f);
+        double small = 5.0 * Math.PI / 180.0;
+        var nudged = TacticalFrontAxis.FromCentroids(20f, 0f, 20f + (float)(100.0 * Math.Sin(small)), (float)(100.0 * Math.Cos(small)));
+        var kept = TacticalFrontAxis.Stabilize(prev, nudged, 10f);
+        TestHarness.AssertTrue(Near(kept.ForwardX, prev.ForwardX) && Near(kept.ForwardZ, prev.ForwardZ), "5 deg wobble keeps heading");
+        TestHarness.AssertTrue(Near(kept.OriginX, 20f), "origin still follows the army");
+        var turned = TacticalFrontAxis.FromCentroids(0f, 0f, 100f, 100f);
+        var accepted = TacticalFrontAxis.Stabilize(prev, turned, 10f);
+        TestHarness.AssertTrue(Near(accepted.ForwardX, turned.ForwardX), "45 deg turn accepted");
+        var first = TacticalFrontAxis.Stabilize(TacticalFrontAxis.None, turned, 10f);
+        TestHarness.AssertTrue(Near(first.ForwardX, turned.ForwardX), "no previous -> accept");
+    }
+
+    private static void FrontAxisEnemyOverlap()
+    {
+        var axis = Banded(0f, 0f, 0f, 500f).WithEnemyExtent(-300f, 50f);
+        TestHarness.AssertTrue(axis.EnemyOverlapsLeft, "enemy line extends past our left");
+        TestHarness.AssertFalse(axis.EnemyOverlapsRight, "enemy line short of our right");
+        TestHarness.AssertFalse(Banded(0f, 0f, 0f, 500f).EnemyOverlapsLeft, "no enemy extent -> no overlap");
+    }
+
+    private static void FlankExposureBucketCombines()
+    {
+        TestHarness.AssertEqual(0, TacticalFrontAxis.FlankExposureBucket(false, false, 0f), "interior, quiet");
+        TestHarness.AssertEqual(1, TacticalFrontAxis.FlankExposureBucket(true, false, 0f), "wing alone");
+        TestHarness.AssertEqual(2, TacticalFrontAxis.FlankExposureBucket(true, true, 0f), "wing + overlapped");
+        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, true, 1f), "wing + overlapped + vanilla threat -> refuse");
+        TestHarness.AssertEqual(3, TacticalFrontAxis.FlankExposureBucket(true, false, 3f), "wing + severe vanilla outflank -> refuse");
+        TestHarness.AssertEqual(2, TacticalFrontAxis.FlankExposureBucket(false, false, 4f), "interior surrounded caps at 2");
+    }
+
+    private static FrontUnitSample U(int id, float x, float z, float strength, bool fire = false)
+        => new FrontUnitSample(id, x, z, strength, fire);
+
+    private static void BandSectorsDedupeEnemies()
+    {
+        var axis = Banded(0f, 0f, 0f, 500f);
+        var own = new List<FrontUnitSample> { U(1, 0f, 0f, 1000f), U(2, 10f, 0f, 1000f) };
+        // Enemy 77 reported by three own regiments (union of enemyinrangereg lists).
+        var enemy = new List<FrontUnitSample> { U(77, 0f, 300f, 500f), U(77, 0f, 300f, 500f), U(77, 0f, 300f, 500f) };
+        var sectors = EnemyVisibleSectorBuilder.BuildSectors(axis, own, enemy);
+        float enemyTotal = 0f;
+        for (int i = 0; i < sectors.Length; i++) enemyTotal += sectors[i].EnemyStrength;
+        TestHarness.AssertEqual(500f, enemyTotal, "enemy counted once");
+    }
+
+    private static void BandSectorsAggregateOwnByBand()
+    {
+        var axis = Banded(0f, 0f, 0f, 500f);
+        var own = new List<FrontUnitSample>
+        {
+            U(1, -90f, 0f, 600f, fire: true), U(2, -85f, 10f, 400f),
+            U(3, 90f, 0f, 2000f),
+        };
+        var sectors = EnemyVisibleSectorBuilder.BuildSectors(axis, own, new List<FrontUnitSample>());
+        TestHarness.AssertEqual(2, sectors.Length, "only populated bands emitted");
+        var left = Find(sectors, 0);
+        var right = Find(sectors, 4);
+        TestHarness.AssertEqual(1000f, left.OwnStrength, "left band sums both regiments");
+        TestHarness.AssertTrue(left.RecentFire, "left band under fire");
+        TestHarness.AssertEqual(2000f, right.OwnStrength, "right band");
+        TestHarness.AssertFalse(right.RecentFire, "right band quiet");
+    }
+
+    private static EnemyVisibleSector Find(EnemyVisibleSector[] sectors, int id)
+    {
+        for (int i = 0; i < sectors.Length; i++) if (sectors[i].SectorId == id) return sectors[i];
+        throw new Exception("sector " + id + " missing");
+    }
+
+    private static void InstanceSectorMapStableAcrossRout()
+    {
+        var axis = Banded(0f, 0f, 0f, 500f);
+        var groups = new List<FrontUnitSample> { U(10, -90f, 0f, 1f), U(20, 0f, 0f, 1f), U(30, 90f, 0f, 1f) };
+        var map = EnemyVisibleSectorBuilder.MapInstances(axis, groups);
+        TestHarness.AssertEqual(0, map[10], "left group");
+        TestHarness.AssertEqual(2, map[20], "center group");
+        TestHarness.AssertEqual(4, map[30], "right group");
+        groups.RemoveAt(0); // group 10 routs and drops out of the walk
+        var after = EnemyVisibleSectorBuilder.MapInstances(axis, groups);
+        TestHarness.AssertEqual(2, after[20], "center group keeps its sector");
+        TestHarness.AssertEqual(4, after[30], "right group keeps its sector");
+    }
+
+    private static void SectorOddsIgnorePickets()
+    {
+        var picket = new EnemyVisibleSector(0, 5000f, 50f, false);
+        TestHarness.AssertFalse(picket.HasMeaningfulEnemy, "50 vs 5000 is a picket");
+        TestHarness.AssertEqual(0f, picket.Odds, "picket odds not meaningful");
+        var real = new EnemyVisibleSector(1, 5000f, 1000f, true);
+        TestHarness.AssertTrue(real.HasMeaningfulEnemy, "1000 vs 5000 is a real force");
+        TestHarness.AssertEqual(5f, real.Odds, "real odds");
+        var outnumbered = new EnemyVisibleSector(2, 0f, 800f, true);
+        TestHarness.AssertTrue(outnumbered.HasMeaningfulEnemy, "enemy facing an empty band is meaningful");
+        TestHarness.AssertEqual(0f, outnumbered.Odds, "no own force -> odds 0");
+    }
+
+    private static void EnemyVisibleStateCarriesGeometry()
+    {
+        var axis = Banded(0f, 0f, 0f, 500f);
+        var map = new Dictionary<int, int> { { 10, 0 }, { 20, 4 } };
+        var threat = new Dictionary<int, float> { { 20, 3f } };
+        var state = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, 0f,
+            frontAxis: axis, instanceSectors: map, instanceFlankThreat: threat);
+        TestHarness.AssertEqual(3f, state.FlankThreatForInstance(20), "vanilla flanksthreated carried");
+        TestHarness.AssertEqual(0f, state.FlankThreatForInstance(10), "missing threat reads 0");
+        map[10] = 3; // caller mutation must not leak in
+        TestHarness.AssertTrue(state.FrontAxis.IsValid, "axis carried");
+        TestHarness.AssertEqual(0, state.SectorForInstance(10, -1), "copied map");
+        TestHarness.AssertEqual(4, state.SectorForInstance(20, -1), "copied map right");
+        TestHarness.AssertEqual(-1, state.SectorForInstance(99, -1), "unknown id -> fallback");
+        var legacy = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, 0f);
+        TestHarness.AssertFalse(legacy.FrontAxis.IsValid, "legacy ctor has no axis");
+        TestHarness.AssertEqual(7, legacy.SectorForInstance(10, 7), "legacy ctor falls back");
+    }
+
+    private static void CommandTreeChildrenSortAlongFront()
+    {
+        // Facing east: children differ in Z (lateral) and X (depth). World-X
+        // order would put the rear child first; lateral order must not.
+        var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>
+        {
+            new TacticalCommandTreeProbe.ExtendedProbe(1, 16, "army", true, 0, false, 0f, 0f, 3),
+            new TacticalCommandTreeProbe.ExtendedProbe(2, 15, "north", true, 1, true, 50f, 200f, 2),
+            new TacticalCommandTreeProbe.ExtendedProbe(3, 15, "center", true, 1, true, -300f, 0f, 2),
+            new TacticalCommandTreeProbe.ExtendedProbe(4, 15, "south", true, 1, true, 10f, -200f, 2),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 0);
+        var axis = TacticalFrontAxis.FromCentroids(0f, 0f, 1000f, 0f);
+        var ordered = TacticalCommandTreeProbe.EnumerateChildrenLeftToRight(1, tree, axis);
+        TestHarness.AssertEqual("north", ordered[0].Name, "left (north) first when facing east");
+        TestHarness.AssertEqual("center", ordered[1].Name, "center second");
+        TestHarness.AssertEqual("south", ordered[2].Name, "right (south) last");
+        var legacy = TacticalCommandTreeProbe.EnumerateChildrenLeftToRight(1, tree);
+        TestHarness.AssertEqual("center", legacy[0].Name, "no axis keeps legacy world-X order");
+    }
+
+    private static void DefaultMainEffortIsCenterBand()
+    {
+        TestHarness.AssertEqual(2, ArmyEvidenceBuilder.DefaultMainEffortSector(TacticalFrontAxis.None), "no axis -> center of default bands");
+        TestHarness.AssertEqual(2, ArmyEvidenceBuilder.DefaultMainEffortSector(Banded(0f, 0f, 0f, 100f)), "banded axis center");
+    }
+
+    internal static ArmyOrchestrator OrchestratorWithPlan(BattlePhase phase, int mainSector, float aggression = 0f)
+    {
+        var personality = new WhiskeyRealism.Strategic.PersonalityVector(aggression, 0f, 0f, 0f, 0f);
+        var orch = new ArmyOrchestrator(0, BuiltInPlaybooks.SeedCatalog(), personality);
+        orch.SetPlanForTesting(new TacticalBattlePlan(BattlePlanId.GenericMethodical, phase, mainSector,
+            null, null, 1.2f, 0f, 7));
+        return orch;
+    }
+
+    private static void PicketDoesNotZeroMainEffortOdds()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2);
+        // Main band (2) faces only a 40-man picket; the army as a whole has 1.3x.
+        var sectors = new[] { new EnemyVisibleSector(2, 6000f, 40f, false) };
+        var enemy = new EnemyVisibleState(sectors, 0.35f, true, false, 0f);
+        ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1.3f, TerrainKind.Open, 2), enemy,
+            6000f, 1f, 0.35f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: 1f);
+        TestHarness.AssertEqual(BattlePhase.MainEffort, orch.CurrentPlan.Phase,
+            "picket band falls back to global odds (1.3) and probe commits");
+    }
+
+    private static TacticalCommandTreeProbe.ExtendedProbe P(int id, int typ, string name, int parent, float x, float z, int bucket = 2)
+        => new TacticalCommandTreeProbe.ExtendedProbe(id, typ, name, true, parent, parent == 1, x, z, bucket);
+
+    private static void LeafCascadeRefusesAcrossFrontFacingEast()
+    {
+        // Army 1 -> Main corps 2 -> five brigades spread north..south, with
+        // world X scrambled (depth). Facing east: north is LEFT.
+        var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>
+        {
+            P(1, 16, "army", 0, 0f, 0f),
+            P(2, 15, "corps", 1, 0f, 0f),
+            P(10, 14, "b-north", 2, 90f, 400f),
+            P(11, 14, "b-nmid", 2, -60f, 200f),
+            P(12, 14, "b-center", 2, 30f, 0f),
+            P(13, 14, "b-smid", 2, -90f, -200f),
+            P(14, 14, "b-south", 2, 60f, -400f),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 0);
+        var axis = TacticalFrontAxis.FromCentroids(0f, 0f, 2000f, 0f).WithOwnExtent(-400f, 400f, 5);
+        var map = TacticalLeafBrigadeMap.BuildMap(tree,
+            new[] { new TacticalLeafBrigadeMap.TopAssignment(2, DirectChildRole.Main) },
+            0.5f, CascadeEnvelopmentMode.None, axis);
+        TestHarness.AssertEqual(DirectChildRole.RefuseLeft, map[10].LeafRole, "north brigade refuses the left");
+        TestHarness.AssertEqual(DirectChildRole.Main, map[12].LeafRole, "center brigade is the anchor");
+        TestHarness.AssertEqual(DirectChildRole.RefuseRight, map[14].LeafRole, "south brigade refuses the right");
+    }
+
+    private static void LeafCascadeUsesRealFlankExposure()
+    {
+        // Cautious commander: outer children refuse only when the flank is
+        // actually exposed, otherwise they are held in reserve.
+        var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>
+        {
+            P(1, 16, "army", 0, 0f, 0f),
+            P(2, 15, "corps", 1, 0f, 0f),
+            P(10, 14, "b-left", 2, -400f, 0f),
+            P(11, 14, "b-lmid", 2, -200f, 0f),
+            P(12, 14, "b-center", 2, 0f, 0f),
+            P(13, 14, "b-rmid", 2, 200f, 0f),
+            P(14, 14, "b-right", 2, 400f, 0f),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 0);
+        // Facing north; visible enemy line overlaps our LEFT only.
+        var axis = TacticalFrontAxis.FromCentroids(0f, 0f, 0f, 2000f).WithOwnExtent(-400f, 400f, 5).WithEnemyExtent(-900f, 300f);
+        var map = TacticalLeafBrigadeMap.BuildMap(tree,
+            new[] { new TacticalLeafBrigadeMap.TopAssignment(2, DirectChildRole.Main) },
+            0.2f, CascadeEnvelopmentMode.None, axis);
+        TestHarness.AssertEqual(DirectChildRole.RefuseLeft, map[10].LeafRole, "overlapped left wing refuses");
+        TestHarness.AssertEqual(DirectChildRole.Reserve, map[14].LeafRole, "quiet right wing held in reserve");
+        var threat = new Dictionary<int, float> { { 14, 2f } };
+        var threatened = TacticalLeafBrigadeMap.BuildMap(tree,
+            new[] { new TacticalLeafBrigadeMap.TopAssignment(2, DirectChildRole.Main) },
+            0.2f, CascadeEnvelopmentMode.None, axis, threat);
+        TestHarness.AssertEqual(DirectChildRole.RefuseRight, threatened[14].LeafRole, "vanilla flanksthreated on the right wing refuses");
+    }
+
+    private static void EnvelopmentSplitsArmyCorps()
+    {
+        // Army with three corps left/center/right, two brigades each.
+        var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>
+        {
+            P(1, 16, "army", 0, 0f, 0f),
+            P(2, 15, "corps-left", 1, -600f, 0f),
+            P(3, 15, "corps-center", 1, 0f, 0f),
+            P(4, 15, "corps-right", 1, 600f, 0f),
+            P(20, 14, "l1", 2, -700f, 0f), P(21, 14, "l2", 2, -500f, 0f),
+            P(30, 14, "c1", 3, -100f, 0f), P(31, 14, "c2", 3, 100f, 0f),
+            P(40, 14, "r1", 4, 500f, 0f), P(41, 14, "r2", 4, 700f, 0f),
+        };
+        var tree = TacticalCommandTreeProbe.BuildTree(probes, 0);
+        var axis = TacticalFrontAxis.FromCentroids(0f, 0f, 0f, 2000f).WithOwnExtent(-700f, 700f, 5);
+        var tops = new[]
+        {
+            new TacticalLeafBrigadeMap.TopAssignment(3, DirectChildRole.Main),
+            new TacticalLeafBrigadeMap.TopAssignment(2, DirectChildRole.SupportMain),
+            new TacticalLeafBrigadeMap.TopAssignment(4, DirectChildRole.Reserve),
+        };
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, tops, 0.8f, CascadeEnvelopmentMode.DoubleWing, axis);
+        TestHarness.AssertEqual(DirectChildRole.Main, map[20].CascadeChain[0], "left corps is a wing (Main)");
+        TestHarness.AssertEqual(DirectChildRole.Main, map[40].CascadeChain[0], "right corps is a wing (Main)");
+        TestHarness.AssertTrue(map[30].CascadeChain[0] != DirectChildRole.Main, "center corps pins/supports, not a wing");
+        var echelon = TacticalLeafBrigadeMap.BuildMap(tree, tops, 0.4f, CascadeEnvelopmentMode.DoubleWingEchelon, axis);
+        TestHarness.AssertEqual(DirectChildRole.Main, echelon[20].CascadeChain[0], "echelon: primary wing Main");
+        TestHarness.AssertEqual(DirectChildRole.SupportMain, echelon[40].CascadeChain[0], "echelon: secondary wing follows as SupportMain");
+    }
+
+    private static void OrchestratorKeepsFrontAxis()
+    {
+        ArmyTickCycle.ResetForTest();
+        var orch = OrchestratorWithPlan(BattlePhase.Probe, mainSector: 2);
+        var axis = Banded(0f, 0f, 1000f, 0f);
+        var enemy = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.35f, false, false, 0f, frontAxis: axis);
+        ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2), enemy,
+            6000f, 1f, 0.35f, 0f, 60, 0f, 1f, 0f, 0f, battleDeltaSeconds: 1f);
+        TestHarness.AssertTrue(orch.CurrentFrontAxis.IsValid, "axis stored");
+        TestHarness.AssertTrue(Near(orch.CurrentFrontAxis.ForwardX, 1f), "axis faces east");
     }
 }

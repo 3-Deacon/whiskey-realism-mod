@@ -88,6 +88,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 orchestrator.AdvancePlanAge(deltaSeconds);
             }
 
+            orchestrator.ObserveFrontGeometry(enemyVisible);
             if (!orchestrator.HasPlan) return ReplanTrigger.None;
 
             var intent = ArmyIntentInference.Build(ownEvidence, enemyVisible);
@@ -143,7 +144,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < enemyVisible.Sectors.Length; i++)
                 {
                     var s = enemyVisible.Sectors[i];
-                    if (s.EnemyStrength <= 0f) continue;
+                    // Pickets (EnemyVisibleSector.HasMeaningfulEnemy) carry no
+                    // odds signal; they must not look like decisive sectors.
+                    if (!s.HasMeaningfulEnemy) continue;
                     if (s.SectorId == preShiftMainEffortSector)
                         preShiftMainEffortOdds = s.Odds;
                     if (s.Odds > decisiveSectorOdds)
@@ -180,7 +183,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < enemyVisible.Sectors.Length; i++)
                 {
                     var s = enemyVisible.Sectors[i];
-                    if (s.SectorId == currentMainEffortSector && s.EnemyStrength > 0f)
+                    if (s.SectorId == currentMainEffortSector && s.HasMeaningfulEnemy)
                         currentMainEffortOdds = s.Odds;
                     if (s.SectorId != currentMainEffortSector && s.Odds > bestNonMainEffortOdds)
                         bestNonMainEffortOdds = s.Odds;

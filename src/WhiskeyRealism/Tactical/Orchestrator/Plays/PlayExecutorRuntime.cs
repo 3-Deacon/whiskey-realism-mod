@@ -37,8 +37,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private static readonly List<float>[] _ownXsScratch = { new List<float>(64), new List<float>(64) };
         private static readonly List<float>[] _ownZsScratch = { new List<float>(64), new List<float>(64) };
         private static readonly List<CorpsPosition>[] _corpsPosScratch = { new List<CorpsPosition>(16), new List<CorpsPosition>(16) };
-        private static readonly List<float>[] _enemyXsScratch = { new List<float>(32), new List<float>(32) };
-        private static readonly List<float>[] _enemyZsScratch = { new List<float>(32), new List<float>(32) };
 
         /// <summary>Position-bucket size (meters) for signature comparison.</summary>
         private const float PositionBucketMeters = 50f;
@@ -53,16 +51,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// Skips full recompute when the per-side input signature is
         /// unchanged (cache hit). Wrapped in TelemetryPerf.Scope.
         /// </summary>
+        /// <param name="frontAxis">The side's front axis from
+        /// <see cref="EnemyVisibleState.FrontAxis"/>. The play faces the same
+        /// way the sector bands do, toward what the side can SEE — never the
+        /// omniscient centroid of every enemy command group on the map.</param>
         public static IReadOnlyList<CorpsAssignment> ComputeZoneAssignments(
             int allianceId,
             BattlePlanId planId,
             int commandHierarchyShift,
-            int childCount)
+            int childCount,
+            TacticalFrontAxis frontAxis)
         {
             using (TelemetryPerf.Scope("tactical.play-executor.zone-assignments",
                 TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount);
+                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis);
             }
         }
 
@@ -70,7 +73,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int allianceId,
             BattlePlanId planId,
             int commandHierarchyShift,
-            int childCount)
+            int childCount,
+            TacticalFrontAxis frontAxis)
         {
             try
             {
@@ -104,8 +108,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 var ownXs = _ownXsScratch[allianceId]; ownXs.Clear();
                 var ownZs = _ownZsScratch[allianceId]; ownZs.Clear();
                 var corpsPositions = _corpsPosScratch[allianceId]; corpsPositions.Clear();
-                var enemyXs = _enemyXsScratch[allianceId]; enemyXs.Clear();
-                var enemyZs = _enemyZsScratch[allianceId]; enemyZs.Clear();
 
                 for (int i = 0; i < units.Count; i++)
                 {
@@ -138,17 +140,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                                 "child-" + regGo.GetInstanceID(), x, z));
                         }
                     }
-                    else
-                    {
-                        // Other-alliance unit. Use top-level command brigades
-                        // (filtered to a reasonable level) for enemy centroid
-                        // rather than every regiment — biases toward main mass.
-                        if (reg.unittyp >= effectiveCommandMin)
-                        {
-                            enemyXs.Add(x);
-                            enemyZs.Add(z);
-                        }
-                    }
                 }
 
                 if (corpsPositions.Count == 0)
@@ -157,18 +148,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
 
                 PlayProjection.ComputeCentroid(ownXs, ownZs, out float armyX, out float armyZ, out int ownN);
-                PlayProjection.ComputeCentroid(enemyXs, enemyZs, out float enemyX, out float enemyZ, out int enemyN);
                 if (ownN == 0) return null;
 
-                // If no enemy data, anchor enemy centroid forward of the army
-                // along arbitrary +Z so the projection still produces a
-                // coherent layout (degenerate at battle start when no enemy
-                // is visible yet).
-                if (enemyN == 0)
-                {
-                    enemyX = armyX;
-                    enemyZ = armyZ + PlayProjection.DefaultEngagementDistanceMeters;
-                }
+                // Face the side's front axis (visible enemy, else nearest open
+                // objective, else last heading). Without an axis, anchor the
+                // target forward along +Z so the projection stays coherent.
+                float engagement = frontAxis.IsValid && frontAxis.TargetDistance >= 1f
+                    ? frontAxis.TargetDistance
+                    : PlayProjection.DefaultEngagementDistanceMeters;
+                float enemyX = armyX + (frontAxis.IsValid ? frontAxis.ForwardX : 0f) * engagement;
+                float enemyZ = armyZ + (frontAxis.IsValid ? frontAxis.ForwardZ : 1f) * engagement;
 
                 // ---- Signature-skip ----
                 // Build a per-side signature from plan + bucketed centroids +
