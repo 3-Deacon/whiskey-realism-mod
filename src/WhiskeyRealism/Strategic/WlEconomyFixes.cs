@@ -21,8 +21,22 @@ namespace WhiskeyRealism.Strategic
     {
         // Effect ids (DLC_WL constants, DC:43023-43093; effectdescriptions.dat).
         internal const int EffectSupplyEfficiency = 9;
+        internal const int EffectFoodSupplies = 10;
+        internal const int EffectAmmunition = 11;
+        internal const int EffectReinforcementSpeed = 14;
+        internal const int EffectMorale = 16;
+        internal const int EffectFightingSpirit = 17;
+        internal const int EffectContractRenewal = 19;
         internal const int EffectAttrition = 22;
         internal const int EffectEngineering = 23;
+        internal const int EffectStaffEfficiency = 27;
+
+        // Player effects the campaign army panel lists without an ownership test
+        // (CampaignArmyPanel.UpdateStats, DC:173699-173702, 173742-173747).
+        internal static readonly int[] PanelStaffEffects =
+        {
+            EffectSupplyEfficiency, EffectFoodSupplies, EffectAmmunition, EffectReinforcementSpeed, EffectMorale, EffectFightingSpirit,
+        };
 
         // Camp station "Inspect Logistics" (camp.dat; applied at DC:114349-114351).
         internal const int CampStationInspectLogistics = 5;
@@ -93,6 +107,20 @@ namespace WhiskeyRealism.Strategic
             return careerActive && !groupOwned && isPlayersMapGroup;
         }
 
+        // BUG-WL-011. Per-regiment stats key the player's effects on the campaign
+        // group: medical/training/readiness and camp station 11 on groupunit
+        // (DC:115107, 115243, 115276-115279), morale effect 16 on
+        // parentcampaignunit (DC:127874). For a player below the map group these
+        // are inert, as in BUG-WL-007. These stats are per regiment, so the group
+        // counts as the player's only while vanilla works on one of the player's
+        // own regiments inside the map group carrying the player's command (the
+        // readiness and attrition tooltips are per unit too, DC:173552, 173637);
+        // AI peers in that group keep vanilla values.
+        internal static bool RaiseGroupForPlayerUnit(bool careerActive, bool groupOwned, bool unitOwned, bool groupIsPlayersMapGroup)
+        {
+            return careerActive && !groupOwned && unitOwned && groupIsPlayersMapGroup;
+        }
+
         // BUG-WL-008. num15 in UpdateIIPSupplyLink is a resupply duration
         // (campaignprefs supplyspeeddistance0/2000: "within this time the whole
         // unit is resupplied"; per-tick supply = need x elapsed / num15,
@@ -108,15 +136,24 @@ namespace WhiskeyRealism.Strategic
             return IsPositiveFinite(value) ? value : float.NaN;
         }
 
-        // BUG-WL-009. Actions 28 "Logistics Corps", 50 "Not Yet Ready" (effect 9)
-        // and 27 "Engineer Corps" (effect 23) carry type-1 qualities, which
-        // UpdateCumulativeEffects adds to cumulativeeffectsonce (DC:44757-44763);
-        // effects 9 and 23 are only ever read from the running multiplier
-        // (DC:114348, 87433, 173699), so the promised bonus never applies. The
-        // once value is folded into the running multiplier as x(1 + once).
+        // BUG-WL-009. These actions carry type-1 qualities, which
+        // UpdateCumulativeEffects adds to cumulativeeffectsonce (DC:44757-44763),
+        // on effects that are only ever read from the running multiplier, so the
+        // bonus their text promises never applies (actions.dat):
+        //   9  supply efficiency  28 Logistics Corps, 50 Not Yet Ready (DC:114348)
+        //   17 fighting spirit    31 High Spirits "improve morale in your unit" (DC:116687, 116738)
+        //   19 contract renewal   36/37 Recruitment Campaign, 46 Camp Pleasures, 64 Uncle Sam,
+        //                         65 Irish Legion "re-sign their contracts" (DC:113593)
+        //   23 engineering        27 Engineer Corps (DC:87433)
+        //   27 staff efficiency   30 Staff Standards, 66 Examine Details (DC:44559-44583)
+        // The once value is folded into the running multiplier as x(1 + once).
+        // Not folded: 22 (actions 40/41/49: texts never mention attrition and "+"
+        // would raise it), 0 (item qualities whose texts promise other things) and
+        // 3 (companion type-0 data, rank progression never promised).
         internal static bool FoldsOnceEffect(int effectId)
         {
-            return effectId == EffectSupplyEfficiency || effectId == EffectEngineering;
+            return effectId == EffectSupplyEfficiency || effectId == EffectFightingSpirit || effectId == EffectContractRenewal
+                || effectId == EffectEngineering || effectId == EffectStaffEfficiency;
         }
 
         internal static float FoldOnceIntoRunning(float running, float once)
@@ -136,6 +173,36 @@ namespace WhiskeyRealism.Strategic
         {
             if (transitStarted) return WlTransferOutcome.Queued;
             return careerActive ? WlTransferOutcome.BlockedByCareerGuard : WlTransferOutcome.NoTransit;
+        }
+
+        // The running[9] value to write for one UpdateIIPSupplyLink call (NaN: leave
+        // vanilla). With the sign fix on, every owned group gets the corrected
+        // direction. With it off, a natively owned group keeps vanilla (the
+        // rollback), and a group owned only through the staff scope fix gets
+        // 1 / camp, which cancels effect 9 and camp station 5 to neutral, so the
+        // scope fix never carries vanilla's inverted direction to a new player
+        // (it still carries effects 10/11/14, which point the right way).
+        internal static float SupplyEfficiencyForCall(bool nativelyOwned, bool raisedByScope, bool signFixOn, float effect, float campModifier)
+        {
+            if (!nativelyOwned && !raisedByScope) return float.NaN;
+            if (signFixOn) return SignCorrectedSupplyEfficiency(effect, campModifier);
+            if (nativelyOwned || !IsPositiveFinite(campModifier)) return float.NaN;
+            return 1f / campModifier;
+        }
+
+        // BUG-WL-012. The campaign army panel lists the player's staff supply,
+        // morale and fighting-spirit effects for whatever group is selected
+        // (DC:173699-173702, 173742-173747). Show them only on a group the player
+        // owns or the map group carrying the player's command.
+        internal static bool HidePlayerStaffEffectsOnPanel(bool careerActive, bool panelUnitOwned, bool isPlayersMapGroup)
+        {
+            return careerActive && !panelUnitOwned && !isPlayersMapGroup;
+        }
+
+        // BUG-WL-009: effect 9 is folded only with the sign fix on (BUG-WL-008).
+        internal static bool OnceFoldNeedsSignFix(int effectId)
+        {
+            return effectId == EffectSupplyEfficiency;
         }
 
         private static bool IsPositiveFinite(float value)

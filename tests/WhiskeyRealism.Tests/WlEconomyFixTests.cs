@@ -25,6 +25,10 @@ internal static class WlEconomyFixTests
             ("wl once effect fold covers supply and engineering only", OnceEffectFoldIds),
             ("wl transfer telemetry counts additions after vanilla's purge", TransferAddedCountAfterPurge),
             ("wl transfer telemetry classifies what actually happened", TransferOutcomeClassification),
+            ("wl staff scope reaches the player's own units in the carrying map group only", StaffScopeReachesPlayerUnitsOnly),
+            ("wl supply scope never carries vanilla's inverted efficiency", SupplyScopeNeverCarriesInvertedEfficiency),
+            ("wl army panel shows player staff effects only on the player's groups", PanelShowsStaffEffectsOnlyOnPlayerGroups),
+            ("wl once effect fold covers the promised morale, renewal and staff effects", OnceEffectFoldPromisedEffects),
         });
     }
 
@@ -117,6 +121,8 @@ internal static class WlEconomyFixTests
     {
         AssertTrue(WlEconomyFixes.FoldsOnceEffect(9), "supply efficiency (actions 28, 50)");
         AssertTrue(WlEconomyFixes.FoldsOnceEffect(23), "engineering points (action 27)");
+        AssertFalse(WlEconomyFixes.FoldsOnceEffect(0), "prestige generation: item ids do not match their texts");
+        AssertFalse(WlEconomyFixes.FoldsOnceEffect(3), "rank progression: only companion type-0 data, not promised");
         AssertFalse(WlEconomyFixes.FoldsOnceEffect(22), "attrition: intent ambiguous, left vanilla");
         AssertFalse(WlEconomyFixes.FoldsOnceEffect(4), "incident chance has a once reader (DC:46139)");
         AssertFalse(WlEconomyFixes.FoldsOnceEffect(24), "infantry experience has a once reader (DC:140121)");
@@ -137,5 +143,47 @@ internal static class WlEconomyFixTests
         AssertEqual(WlTransferOutcome.Queued, WlEconomyFixes.ClassifyTransfer(transitStarted: true, careerActive: false), "normal campaign transit");
         AssertEqual(WlTransferOutcome.BlockedByCareerGuard, WlEconomyFixes.ClassifyTransfer(transitStarted: false, careerActive: true), "MoveUnit's career guard (DC:93099)");
         AssertEqual(WlTransferOutcome.NoTransit, WlEconomyFixes.ClassifyTransfer(transitStarted: false, careerActive: false), "re-parented inside its corps, or refused");
+    }
+
+    private static void StaffScopeReachesPlayerUnitsOnly()
+    {
+        AssertTrue(WlEconomyFixes.RaiseGroupForPlayerUnit(careerActive: true, groupOwned: false, unitOwned: true, groupIsPlayersMapGroup: true), "player's regiment in the AI parent group");
+        AssertFalse(WlEconomyFixes.RaiseGroupForPlayerUnit(careerActive: true, groupOwned: false, unitOwned: false, groupIsPlayersMapGroup: true), "AI peer in the same map group");
+        AssertFalse(WlEconomyFixes.RaiseGroupForPlayerUnit(careerActive: true, groupOwned: false, unitOwned: true, groupIsPlayersMapGroup: false), "not the carrying map group");
+        AssertFalse(WlEconomyFixes.RaiseGroupForPlayerUnit(careerActive: true, groupOwned: true, unitOwned: true, groupIsPlayersMapGroup: true), "already owned: vanilla applies it");
+        AssertFalse(WlEconomyFixes.RaiseGroupForPlayerUnit(careerActive: false, groupOwned: false, unitOwned: true, groupIsPlayersMapGroup: true), "no career");
+    }
+
+    private static void SupplyScopeNeverCarriesInvertedEfficiency()
+    {
+        // Vanilla's later multiplications are num15 *= running[9]; num15 *= camp.
+        float camp = 1.4f, effect = 1.25f;
+        float r = WlEconomyFixes.SupplyEfficiencyForCall(nativelyOwned: false, raisedByScope: true, signFixOn: false, effect: effect, campModifier: camp);
+        AssertNear(1f, r * camp, 1e-6f, "scope without the sign fix: effect 9 and camp 5 cancel to neutral");
+        r = WlEconomyFixes.SupplyEfficiencyForCall(nativelyOwned: false, raisedByScope: true, signFixOn: true, effect: effect, campModifier: camp);
+        AssertNear(1f / (effect * camp), r * camp, 1e-6f, "scope with the sign fix: corrected direction");
+        r = WlEconomyFixes.SupplyEfficiencyForCall(nativelyOwned: true, raisedByScope: false, signFixOn: true, effect: effect, campModifier: camp);
+        AssertNear(1f / (effect * camp), r * camp, 1e-6f, "owned group with the sign fix");
+        AssertTrue(float.IsNaN(WlEconomyFixes.SupplyEfficiencyForCall(nativelyOwned: true, raisedByScope: false, signFixOn: false, effect: effect, campModifier: camp)), "owned group, sign fix off: vanilla (rollback)");
+        AssertTrue(float.IsNaN(WlEconomyFixes.SupplyEfficiencyForCall(nativelyOwned: false, raisedByScope: false, signFixOn: true, effect: effect, campModifier: camp)), "AI group: vanilla already reads 1");
+        AssertTrue(float.IsNaN(WlEconomyFixes.SupplyEfficiencyForCall(nativelyOwned: false, raisedByScope: true, signFixOn: false, effect: effect, campModifier: 0f)), "camp clamped to 0: leave vanilla");
+    }
+
+    private static void PanelShowsStaffEffectsOnlyOnPlayerGroups()
+    {
+        AssertFalse(WlEconomyFixes.HidePlayerStaffEffectsOnPanel(careerActive: true, panelUnitOwned: true, isPlayersMapGroup: false), "player's own group");
+        AssertFalse(WlEconomyFixes.HidePlayerStaffEffectsOnPanel(careerActive: true, panelUnitOwned: false, isPlayersMapGroup: true), "map group carrying the player's command");
+        AssertTrue(WlEconomyFixes.HidePlayerStaffEffectsOnPanel(careerActive: true, panelUnitOwned: false, isPlayersMapGroup: false), "AI or enemy group");
+        AssertFalse(WlEconomyFixes.HidePlayerStaffEffectsOnPanel(careerActive: false, panelUnitOwned: false, isPlayersMapGroup: false), "no career: nothing to hide");
+        AssertEqual(6, WlEconomyFixes.PanelStaffEffects.Length, "supply 9/10/11/14, morale 16, fighting spirit 17");
+    }
+
+    private static void OnceEffectFoldPromisedEffects()
+    {
+        AssertTrue(WlEconomyFixes.FoldsOnceEffect(17), "fighting spirit (action 31 High Spirits)");
+        AssertTrue(WlEconomyFixes.FoldsOnceEffect(19), "contract renewal (actions 36/37/46/64/65)");
+        AssertTrue(WlEconomyFixes.FoldsOnceEffect(27), "staff efficiency (actions 30/66)");
+        AssertTrue(WlEconomyFixes.OnceFoldNeedsSignFix(9), "supply efficiency needs the sign fix");
+        AssertFalse(WlEconomyFixes.OnceFoldNeedsSignFix(17), "fighting spirit points the right way in vanilla");
     }
 }

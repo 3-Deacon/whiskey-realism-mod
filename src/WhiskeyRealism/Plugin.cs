@@ -55,7 +55,8 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableWlOperationNullGuard;
         internal static ConfigEntry<bool> EnableWlAttritionScopeFix;
         internal static ConfigEntry<bool> EnableWlBuySuppliesFix;
-        internal static ConfigEntry<bool> EnableWlSupplyStaffScopeFix;
+        internal static ConfigEntry<bool> EnableWlStaffScopeFix;
+        internal static ConfigEntry<bool> EnableWlStaffPanelScopeFix;
         internal static ConfigEntry<bool> EnableWlSupplyEfficiencySignFix;
         internal static ConfigEntry<bool> EnableWlActionOnceEffectsFix;
         internal static ConfigEntry<bool> EnableBattleEntrenchmentAverageFix;
@@ -377,14 +378,24 @@ namespace WhiskeyRealism
                 "Default ON. W&L career only. Vanilla \"Buy Supplies\" (and the average-supply value it and its conditions read) tests the " +
                 "player's command type instead of each subordinate's, so a division, corps or army commander pays 1000 money and no unit gets " +
                 "supplies. With this on, an HQ commander's owned basic units are filled the way vanilla fills a brigade commander's. Off: vanilla.");
-            EnableWlSupplyStaffScopeFix = Config.Bind(
+            EnableWlStaffScopeFix = Config.Bind(
                 "W&L",
-                "Enable W&L Supply Staff Scope Fix",
+                "Enable W&L Staff Scope Fix",
                 true,
-                "Default ON. W&L career only. Vanilla applies the player's Quartermaster, Subsistence and Ordnance staff, the reinforcement-speed " +
-                "effect and the camp station Inspect Logistics only when the player's command is itself a campaign-map group. With this on they " +
-                "also apply to the map group that carries the player's command (the group vanilla's own camp treats as the player's), so a " +
-                "brigade or regiment commander, or a division inside an AI corps, gets them. No other AI group is affected. Off: vanilla.");
+                "Default ON. W&L career only. Vanilla applies several of the player's staff, camp and action effects only when the player's " +
+                "command is itself a campaign-map group, so a brigade or regiment commander, or a division inside an AI corps, gets nothing " +
+                "from them. With this on: supply (Quartermaster, Subsistence, Ordnance, reinforcement speed, camp station Inspect Logistics) " +
+                "applies to the map group carrying the player's command (supply is one pool per map group); medical care, training, " +
+                "readiness (camp station Readiness) and morale apply to the player's own regiments inside that group. No other AI group is " +
+                "affected. With Enable W&L Supply Efficiency Sign Fix off, supply efficiency and Inspect Logistics stay neutral for that " +
+                "group rather than slowing its resupply. Off: vanilla.");
+            EnableWlStaffPanelScopeFix = Config.Bind(
+                "W&L",
+                "Enable W&L Staff Panel Scope Fix",
+                true,
+                "Default ON. W&L career only. Vanilla's campaign army panel lists the player's staff effects on supply, morale and fighting " +
+                "spirit for whichever group is selected, enemies included. With this on they are listed only for the player's own groups " +
+                "and the map group carrying the player's command. Display only. Off: vanilla.");
             EnableWlSupplyEfficiencySignFix = Config.Bind(
                 "W&L",
                 "Enable W&L Supply Efficiency Sign Fix",
@@ -396,10 +407,12 @@ namespace WhiskeyRealism
                 "W&L",
                 "Enable W&L Action Once-Effects Fix",
                 true,
-                "Default ON. W&L career only. The actions Logistics Corps and Not Yet Ready (supply efficiency) and Engineer Corps (engineering " +
-                "points) store their bonus where vanilla never reads it. With this on that bonus multiplies the running effect, x(1 + value). " +
-                "The supply-efficiency part needs Enable W&L Supply Efficiency Sign Fix as well (otherwise it would slow resupply). The " +
-                "attrition values of Harsh Punishments, Ample Rewards and Purge stay vanilla (intent unclear). Off: vanilla.");
+                "Default ON. W&L career only. Several actions store their bonus where vanilla never reads it: Logistics Corps and Not Yet " +
+                "Ready (supply efficiency), High Spirits (fighting spirit), Recruitment Campaign, Organize Recruitment, Camp Pleasures, Uncle " +
+                "Sam and Irish Legion (contract renewals), Engineer Corps (engineering points), Staff Standards and Examine Details (staff " +
+                "efficiency, the rate at which staff skills grow toward yours). With this on that bonus multiplies the running effect, " +
+                "x(1 + value). The supply-efficiency part needs Enable W&L Supply Efficiency Sign Fix as well (otherwise it would slow " +
+                "resupply). The attrition values of Harsh Punishments, Ample Rewards and Purge stay vanilla (intent unclear). Off: vanilla.");
             EnableBattleEntrenchmentAverageFix = Config.Bind(
                 "Tactical",
                 "Enable Battle Entrenchment Average Fix",
