@@ -411,6 +411,31 @@ namespace WhiskeyRealism.Tactical
             return chain.AbleToFight;
         }
 
+        // #60: BattleUnits.DoPlacementAIUnitsWithinDeploymentzoneNew sets
+        // num3 = 1 for a defender (GetBattleType == 2) or an attacker (== 1)
+        // whose groupmorale <= minimummoraleforaistances[1]; fewer than 3
+        // eligible sub-units force num3 = 2. num3 == 1 places the group on
+        // fortification lines with ignoredeplyomentzone: true and
+        // PlaceSingleBrigades - outside-zone placement there is deliberate.
+        public static bool WouldTakeFortifiedDeploymentPath(
+            int battleType,
+            float groupMorale,
+            float minimumMoraleForStance1,
+            int eligibleSubUnits)
+        {
+            if (eligibleSubUnits < 3) return false;
+            if (battleType == 2) return true;
+            return battleType == 1 && groupMorale <= minimumMoraleForStance1;
+        }
+
+        // #60 eligibility: never fleets (unittyp 17); no correction when the
+        // deployment zone has fewer than 2 frontline vectors (every point would
+        // read as out of zone); never undo vanilla's fortified placement.
+        public static bool DeploymentCorrectionAllowed(int unitTyp, int frontlineVectorCount, bool fortifiedPath)
+        {
+            return unitTyp != 17 && frontlineVectorCount >= 2 && !fortifiedPath;
+        }
+
         // #59 pre-check — AIBattle.CheckUseOfReserves 6093-6113: vanilla only
         // commits a reserve when an attached unit (unittyp <= 2, no paths, not
         // routed) is outflanked (1|5 left, 2|6 right) on a side its own flank

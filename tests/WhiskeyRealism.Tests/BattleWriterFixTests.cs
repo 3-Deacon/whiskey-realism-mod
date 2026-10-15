@@ -37,6 +37,8 @@ internal static class BattleWriterFixTests
         GatesFailOpenOutsideActiveMode();
         ObjectiveChainCycleGateMatchesVanilla();
         ObjectiveChainMovementGateMatchesVanilla();
+        DeploymentSkipsVanillaFortifiedPlacement();
+        DeploymentSkipsFleetsAndMissingZones();
     }
 
     private static void Pass(string name)
@@ -491,5 +493,28 @@ internal static class BattleWriterFixTests
         TestHarness.AssertFalse(BattleWriterPolicy.GateMayIntervene(false, true), "monitor/off");
         TestHarness.AssertFalse(BattleWriterPolicy.GateMayIntervene(true, false), "flag off");
         Pass("battle writers: gates fail open to vanilla outside Active mode");
+    }
+
+    // DoPlacementAIUnitsWithinDeploymentzoneNew 85684-85751: num3 == 1
+    // (defender battle type 2, or attacker type 1 with groupmorale <=
+    // minimummoraleforaistances[1]) with >= 3 eligible sub-units places the
+    // group on fortification lines with ignoredeplyomentzone: true.
+    private static void DeploymentSkipsVanillaFortifiedPlacement()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(2, 0.9f, 0.4f, 3), "defender");
+        TestHarness.AssertTrue(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(1, 0.3f, 0.4f, 5), "shaken attacker");
+        TestHarness.AssertFalse(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(1, 0.9f, 0.4f, 5), "attacker");
+        TestHarness.AssertFalse(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(2, 0.9f, 0.4f, 2), "too few units -> num3 = 2");
+        TestHarness.AssertFalse(BattleWriterPolicy.WouldTakeFortifiedDeploymentPath(0, 0.9f, 0.4f, 5), "meeting");
+        Pass("battle writers: #60 leaves vanilla fortified-line placement alone");
+    }
+
+    private static void DeploymentSkipsFleetsAndMissingZones()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.DeploymentCorrectionAllowed(14, 4, false), "brigade with zone");
+        TestHarness.AssertFalse(BattleWriterPolicy.DeploymentCorrectionAllowed(17, 4, false), "fleet");
+        TestHarness.AssertFalse(BattleWriterPolicy.DeploymentCorrectionAllowed(14, 1, false), "frontlinevector.Count < 2");
+        TestHarness.AssertFalse(BattleWriterPolicy.DeploymentCorrectionAllowed(14, 4, true), "fortified path");
+        Pass("battle writers: #60 skips fleets, missing zones and fortified groups");
     }
 }
