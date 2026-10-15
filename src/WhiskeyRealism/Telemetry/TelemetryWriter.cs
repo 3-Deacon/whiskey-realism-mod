@@ -68,7 +68,6 @@ namespace WhiskeyRealism.Telemetry
         private readonly Dictionary<string, long> _prospectiveBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private byte[] _chunk = new byte[64 * 1024];
         private int[] _rowEnds = new int[256];
-        private readonly int[] _singleRowEnd = new int[1];
         // Files whose last write left an untruncatable fragment: the next write starts with a
         // newline so the fragment stays on its own (invalid, skipped) line.
         private readonly HashSet<string> _tornFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -863,10 +862,10 @@ namespace WhiskeyRealism.Telemetry
                     if (prefix == 1)
                         payload[0] = (byte)'\n';
                     Utf8NoBom.GetBytes(json, 0, json.Length, payload, prefix);
-                    _singleRowEnd[0] = payload.Length;
+                    int[] rowEnd = { payload.Length }; // call-local: failure rows can come from any thread
 
                     Exception failure;
-                    ok = AppendRows(fileName, payload, payload.Length, prefix, _singleRowEnd, 1, out landed, out failure);
+                    ok = AppendRows(fileName, payload, payload.Length, prefix, rowEnd, 1, out landed, out failure);
                 }
 
                 if (!onWriterThread)
