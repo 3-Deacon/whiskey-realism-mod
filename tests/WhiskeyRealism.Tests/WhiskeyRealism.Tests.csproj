@@ -299,6 +299,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderTargetPolicy.cs" Link="PlayerOrders\PlayerOrderTargetPolicy.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderVanillaScene.cs" Link="PlayerOrders\PlayerOrderVanillaScene.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderDiagnostics.cs" Link="PlayerOrders\PlayerOrderDiagnostics.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\PlayerOrderReadmitPolicy.cs" Link="PlayerOrders\PlayerOrderReadmitPolicy.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlOrderCaptureGate.cs" Link="PlayerOrders\WlOrderCaptureGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlCourierDelay.cs" Link="PlayerOrders\WlCourierDelay.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\PlayerOrders\WlCourierQueue.cs" Link="PlayerOrders\WlCourierQueue.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersistenceDto.cs" Link="PersistenceDto.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorPosture.cs" Link="DirectorPosture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DirectorMemory.cs" Link="DirectorMemory.cs" />

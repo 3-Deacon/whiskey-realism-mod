@@ -36,7 +36,6 @@ namespace WhiskeyRealism.Strategic
         private const int AifactionScanLimit = 8;
         private const int MaxLoggedSignatures = 64;
         private const float VanillaZone = 20f;
-        private const double HoursPerYear = 8760.0;
         private const string VanillaMoveTrigger = "vanilla-move";
 
         private struct PendingMove
@@ -463,7 +462,7 @@ namespace WhiskeyRealism.Strategic
 
         private static double NowDays()
         {
-            return GameVars.GetCampaignFloatingDate() * HoursPerYear / 24.0;
+            return GameVars.GetCampaignFloatingDate() * WlCampaignDispatchPolicy.HoursPerYear / 24.0;
         }
 
         private static float XZDistance(Vector3 a, Vector3 b)
