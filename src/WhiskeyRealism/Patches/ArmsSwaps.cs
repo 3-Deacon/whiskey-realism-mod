@@ -25,7 +25,6 @@ namespace WhiskeyRealism.Patches
             _set = set;
         }
 
-        internal bool Active => _active;
         internal int Count => _masked.Count;
 
         // Starts a masking pass; false when one is already active.

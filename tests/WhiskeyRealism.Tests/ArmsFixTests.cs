@@ -288,6 +288,7 @@ internal static class ArmsFixTests
         AssertTrue(settle.Contains("int sourceAfter = sourceAlive ? Pieces(source, before.IsArtillery) : 0;"), "deleted source holds nothing");
         AssertTrue(settle.Contains("CombineWeaponLedger.Settle(before, sourceAfter, Pieces(target, before.IsArtillery))"), "pure ledger decides");
         AssertTrue(settle.Contains("alliance.weaponstock[cell.Key] = cell.Value;") && settle.Contains("target.weapon = settled.TargetWeapon;"), "writes stock and weapon");
+        AssertTrue(settle.Contains("if (settled.Downgraded)"), "a re-arm logs its own line");
         string snapshot = MethodBody(src, "Snapshot");
         AssertTrue(snapshot.Contains("if (source.alliance != target.alliance)"), "cross-alliance merge keeps vanilla");
         AssertTrue(snapshot.Contains("if (id >= alliance.weaponstock.Length) return null;"), "ids bound-checked");
@@ -375,7 +376,8 @@ internal static class ArmsFixTests
         AssertEqual(1, mask.Count, "one masked");
         AssertEqual(null, mask.Restore(), "clean restore");
         AssertTrue(ReferenceEquals(originalGatling, gatling.Tech), "original list back");
-        AssertFalse(mask.Active, "pass over");
+        AssertTrue(mask.Begin(), "pass over: a new one can start");
+        AssertEqual(null, mask.Restore(), "empty pass restores cleanly");
         AssertEqual(null, mask.Restore(), "second restore is a no-op");
 
         mask.Begin();
@@ -390,7 +392,7 @@ internal static class ArmsFixTests
         broken.Begin();
         AssertTrue(broken.Hide(both, 1), "copy of one written");
         AssertEqual("boom", broken.Restore(), "restore failure reported");
-        AssertFalse(broken.Active, "pass over after a failure");
+        AssertTrue(broken.Begin(), "pass over after a failure");
     }
 
     private static void PurchaseOrderableWiring()

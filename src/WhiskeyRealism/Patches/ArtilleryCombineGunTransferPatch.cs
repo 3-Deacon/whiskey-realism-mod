@@ -140,7 +140,10 @@ namespace WhiskeyRealism.Patches
                 target.weapon = settled.TargetWeapon;
                 changed = true;
             }
-            if (changed)
+            if (!changed) return;
+            if (settled.Downgraded)
+                OnceLog.Info("combine-weapon-stock:rearmed", "[Patch:CombineWeaponStock] merge target short of its model's stock: re-armed with the standard weapon, its own pieces returned to stock");
+            else
                 OnceLog.Info("combine-weapon-stock", "[Patch:CombineWeaponStock] corrected weapon stock after CombineUnits (guns counted as guns, model kept where stock covers the merge)");
         }
 
