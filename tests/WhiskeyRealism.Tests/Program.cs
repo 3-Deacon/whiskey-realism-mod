@@ -1394,6 +1394,7 @@ static class Program
         CampaignEconomyFixTests.Run();
         CampaignLifecycleFixTests.Run();
         CampaignMilitaryFixTests.Run();
+        TelemetryInfraFixTests.Run();
         TacticalDecisionSnapshotTests.Run();
         TacticalResolvedGroupDecisionTests.Run();
 
@@ -1416,9 +1417,10 @@ static class Program
         queue.TryEnqueue(EventForQueue(TelemetryCategory.State, "state-a"));
         queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-a"));
         var drained = queue.Drain(10);
-        AssertEqual(2, drained.Count, "queue count");
+        // WS P TEL-queue: protected rows use their own reserve and never evict detail rows.
+        AssertEqual(3, drained.Count, "queue count");
         AssertTrue(drained.Exists(e => e.Category == TelemetryCategory.Failure), "failure preserved");
-        AssertTrue(queue.DroppedCount > 0, "dropped counted");
+        AssertEqual(0L, queue.DroppedCount, "protected row does not evict detail");
     }
 
     private static TelemetryEvent EventForQueue(TelemetryCategory category, string name)
@@ -1555,7 +1557,9 @@ static class Program
             writer.Start();
             AssertTrue(writer.StopAndFlush(1000), "writer stops after configured row batches");
             AssertEqual(5, CountJsonLines(File.ReadAllText(Path.Combine(sessionDirectory, "tactical.jsonl"))), "configured flush writer row count");
-            AssertTrue(manifestCalls >= 4, "flushRows=2 should split five rows across multiple flush manifest writes");
+            // WS P P-queue: the manifest is rewritten on new output file / rotation / timer /
+            // shutdown only, not once per flush batch.
+            AssertTrue(manifestCalls >= 1 && manifestCalls <= 3, "flushRows=2 batches do not each rewrite the manifest");
         }
         finally
         {
@@ -2813,9 +2817,9 @@ static class Program
         AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-a")), "health accepted under pressure");
 
         var drained = queue.Drain(10);
-        AssertEqual(2, drained.Count, "queue count");
+        AssertEqual(3, drained.Count, "queue count");
         AssertTrue(drained.Exists(e => e.Category == TelemetryCategory.Health), "health preserved");
-        AssertFalse(drained.Exists(e => e.EventName == "trace-a"), "trace evicted before health");
+        AssertTrue(drained.Exists(e => e.EventName == "trace-a"), "health uses protected reserve; trace not evicted");
     }
 
     private static void TelemetryRetentionKeepsNewestTwoByManifestDirAndMtime()
@@ -2945,8 +2949,10 @@ static class Program
         queue.TryEnqueue(EventForQueue(TelemetryCategory.Write, "write-a"));
         AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Failure, "failure-a")), "failure accepted under pressure");
 
+        AssertTrue(queue.TryEnqueue(EventForQueue(TelemetryCategory.Gate, "gate-b")), "gate evicts decision under detail pressure");
+
         var drained = queue.Drain(10);
-        AssertEqual(3, drained.Count, "queue count");
+        AssertEqual(4, drained.Count, "queue count");
         AssertFalse(drained.Exists(e => e.EventName == "decision-a"), "decision evicted first");
         AssertTrue(drained.Exists(e => e.EventName == "gate-a"), "gate retained");
         AssertTrue(drained.Exists(e => e.EventName == "write-a"), "write retained");
@@ -3061,12 +3067,12 @@ static class Program
         AssertTrue(full.TryEnqueue(EventForQueue(TelemetryCategory.Health, "health-b")), "health accepted with full detail capacity");
 
         var fullDrained = full.Drain(10);
-        AssertEqual(2, fullDrained.Count, "full queue count after protected eviction");
-        AssertFalse(fullDrained.Exists(e => e.EventName == "trace-b"), "lowest priority detail evicted when detail capacity full");
+        AssertEqual(3, fullDrained.Count, "full queue keeps detail rows when protected row arrives");
+        AssertTrue(fullDrained.Exists(e => e.EventName == "trace-b"), "detail not evicted by protected row");
         AssertTrue(fullDrained.Exists(e => e.EventName == "state-b"), "higher priority detail retained when health arrives");
         AssertTrue(fullDrained.Exists(e => e.EventName == "health-b"), "health retained when detail capacity full");
-        AssertEqual(1L, full.DroppedCount, "full queue evicts one detail row");
-        AssertEqual(1L, full.DroppedCountFor(TelemetryCategory.Trace), "trace drop counted");
+        AssertEqual(0L, full.DroppedCount, "full queue evicts no detail row for protected");
+        AssertEqual(0L, full.DroppedCountFor(TelemetryCategory.Trace), "trace not dropped");
         AssertEqual(0L, full.ProtectedOverflowCount, "full queue has no protected overflow");
     }
 
@@ -18578,19 +18584,14 @@ static class Program
 
     private static void TelemetryDecisionRequiresInputSignature()
     {
-        bool threw = false;
-        try
-        {
-            TelemetryEvent.Create(
-                "s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical,
-                TelemetryCategory.Decision, "DecisionWithoutSignature", TelemetrySeverity.Info)
-                .WithDecision("Attack", "test", "");
-        }
-        catch (ArgumentException)
-        {
-            threw = true;
-        }
-        AssertTrue(threw, "decision rows must reject blank input signatures");
+        // WS P Router: a blank signature is flagged on the row instead of throwing (the throw
+        // ran inside TelemetryRouter.Emit's configure callback and silently dropped the row).
+        var ev = TelemetryEvent.Create(
+            "s", TelemetryProfile.FullTuning, TelemetryLayer.Tactical,
+            TelemetryCategory.Decision, "DecisionWithoutSignature", TelemetrySeverity.Info)
+            .WithDecision("Attack", "test", "");
+        AssertEqual(TelemetryEvent.MissingInputSignature, ev.InputSignature, "decision rows mark blank input signatures");
+        AssertTrue(ev.Fields.GetBool("inputSignatureMissing"), "decision rows flag blank input signatures");
     }
 
     private static void AssertEnumContract(Type enumType, params (string name, int value)[] expected)

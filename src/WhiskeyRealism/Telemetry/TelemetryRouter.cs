@@ -5,19 +5,25 @@ namespace WhiskeyRealism.Telemetry
     internal static class TelemetryRouter
     {
         private static readonly object Gate = new object();
-        private static TelemetryRuntime _runtime;
-        private static TelemetryRuntime _shutdownRuntime;
-        private static TelemetryProfile _profile = TelemetryProfile.Off;
+        // Writes happen under Gate; hot-path reads (Emit, DiagnosticsSnapshot) are lock-free.
+        private static volatile TelemetryRuntime _runtime;
+        private static volatile TelemetryRuntime _shutdownRuntime;
+        // Read on every TelemetryPerf.Scope call; volatile so the hot path never takes Gate.
+        private static volatile TelemetryProfile _profile = TelemetryProfile.Off;
+        private static volatile bool _performanceWarnings = true;
         private static bool _legacySuppressionWarned;
         private static long _legacySuppressedCount;
 
         internal static TelemetryProfile CurrentProfile
         {
-            get
-            {
-                lock (Gate)
-                    return _profile;
-            }
+            get { return _profile; }
+        }
+
+        // "Telemetry Performance Warnings" config: when false, slow TelemetryPerf scopes are
+        // folded into the per-scope aggregate rows instead of emitting individual rows.
+        internal static bool PerformanceWarningsEnabled
+        {
+            get { return _performanceWarnings; }
         }
 
         internal static TelemetryProfile ParseProfile(string value)
@@ -77,6 +83,7 @@ namespace WhiskeyRealism.Telemetry
                 _runtime = runtime;
                 _shutdownRuntime = null;
                 _profile = runtime != null ? runtime.Profile : TelemetryProfile.Off;
+                _performanceWarnings = runtime == null || runtime.PerformanceWarnings;
                 _legacySuppressionWarned = false;
                 _legacySuppressedCount = 0L;
             }
@@ -93,11 +100,6 @@ namespace WhiskeyRealism.Telemetry
         }
 
         internal static bool LegacyWarning(string line)
-        {
-            return Legacy(line, TelemetrySeverity.Warning);
-        }
-
-        internal static bool LegacyWarning(string line, TelemetryLayer fallbackLayer)
         {
             return Legacy(line, TelemetrySeverity.Warning);
         }
@@ -126,13 +128,8 @@ namespace WhiskeyRealism.Telemetry
         {
             try
             {
-                TelemetryRuntime runtime;
-                TelemetryProfile profile;
-                lock (Gate)
-                {
-                    runtime = _runtime ?? _shutdownRuntime;
-                    profile = _profile;
-                }
+                TelemetryRuntime runtime = _runtime ?? _shutdownRuntime;
+                TelemetryProfile profile = _profile;
 
                 if (!ShouldEmit(profile, layer, category))
                 {
@@ -173,10 +170,7 @@ namespace WhiskeyRealism.Telemetry
                     return false;
                 }
 
-                TelemetryRuntime runtime;
-                lock (Gate)
-                    runtime = _runtime ?? _shutdownRuntime;
-
+                TelemetryRuntime runtime = _runtime ?? _shutdownRuntime;
                 return runtime != null && runtime.IsRunning && runtime.TryEmit(ev);
             }
             catch
@@ -189,10 +183,7 @@ namespace WhiskeyRealism.Telemetry
         {
             try
             {
-                TelemetryRuntime runtime;
-                lock (Gate)
-                    runtime = _runtime ?? _shutdownRuntime;
-
+                TelemetryRuntime runtime = _runtime ?? _shutdownRuntime;
                 return runtime != null
                     ? runtime.DiagnosticsSnapshot()
                     : TelemetryRuntimeDiagnostics.Empty;
@@ -207,14 +198,20 @@ namespace WhiskeyRealism.Telemetry
         {
             try
             {
+                // Write every thread's final partial aggregate window before stopping. The writer
+                // flushes again after its final drain (its own scopes run during that drain).
+                TelemetryPerf.FlushAggregates();
+
                 TelemetryRuntime runtime;
                 lock (Gate)
                 {
                     runtime = _runtime;
                     if (runtime == null)
                         return;
-                    _runtime = null;
+                    // Publish the shutdown runtime before clearing the live one: readers are
+                    // lock-free (`_runtime ?? _shutdownRuntime`) and must never see both null.
                     _shutdownRuntime = runtime;
+                    _runtime = null;
                     _profile = runtime.Profile;
                 }
 
@@ -253,13 +250,8 @@ namespace WhiskeyRealism.Telemetry
                 if (!route.RouteToSidecar)
                     return route.AllowMainLog;
 
-                TelemetryRuntime runtime;
-                TelemetryProfile profile;
-                lock (Gate)
-                {
-                    runtime = _runtime ?? _shutdownRuntime;
-                    profile = _profile;
-                }
+                TelemetryRuntime runtime = _runtime ?? _shutdownRuntime;
+                TelemetryProfile profile = _profile;
 
                 TelemetryEvent ev;
                 bool emitted = false;

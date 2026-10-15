@@ -140,7 +140,7 @@ namespace WhiskeyRealism.Patches
                 using (TelemetryPerf.Scope("campaign.patch.wl-camp-realism.diary-threshold-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
                 if (__state && _vanillaThresholdDepth > 0) _vanillaThresholdDepth--;
-                if (__exception is NullReferenceException && DLC_WL.dlc_scenarioactive)
+                if (__exception is NullReferenceException && DLC_WL.dlc_scenarioactive && !VanillaFaultSite.IsModFault(__exception))
                 {
                     OnceLog.Warning(
                         "wl-diary-startup:vanilla-nre",
@@ -478,7 +478,9 @@ namespace WhiskeyRealism.Patches
         private static bool DiarySupplyCycleReady(Regiment campaignGroup)
         {
             if (!UnityAlive(campaignGroup)) return MarkDiaryCycleReady(4);
-            if (campaignGroup.unittyp > 13 && (campaignGroup.groupsupplystate == null || campaignGroup.groupsupplystate.Length <= 2))
+            // Vanilla handles a null groupsupplystate itself (Diary.UpdateEvents ~183037); only
+            // a non-null array shorter than 3 would throw.
+            if (!VanillaFaultSite.DiarySupplyCycleSafe(campaignGroup.unittyp, campaignGroup.groupsupplystate))
             {
                 return MarkDiaryCycleUnsafe(4, "group-supplystate-unready");
             }

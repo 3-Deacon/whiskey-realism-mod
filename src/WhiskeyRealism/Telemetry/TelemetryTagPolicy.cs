@@ -243,18 +243,51 @@ namespace WhiskeyRealism.Telemetry
                 || string.Equals(tag, "HistoricalOperation", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsSeriousLine(string line)
+        // Serious = a whole word token (failed/failure/exception/error/fatal, plural ok), a
+        // CamelCase exception type name (…Exception), or the missing-anchor / missing
+        // required phrases. Substrings inside other words ("errorBudget", "failureRisk",
+        // "exceptional") are not serious; they used to promote doctrine rows to Failure.
+        internal static bool IsSeriousLine(string line)
         {
             if (string.IsNullOrWhiteSpace(line))
                 return false;
 
-            return line.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("failure", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("exception", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("missing-anchor", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("missing required", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("fatal", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (line.IndexOf("missing-anchor", StringComparison.OrdinalIgnoreCase) >= 0
+                || line.IndexOf("missing required", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            int i = 0;
+            while (i < line.Length)
+            {
+                while (i < line.Length && !char.IsLetter(line[i]))
+                    i++;
+                int start = i;
+                while (i < line.Length && char.IsLetterOrDigit(line[i]))
+                    i++;
+                if (i > start && IsSeriousToken(line, start, i - start))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static readonly string[] SeriousWords =
+        {
+            "failed", "failure", "failures", "exception", "exceptions", "error", "errors", "fatal"
+        };
+
+        private static bool IsSeriousToken(string line, int start, int length)
+        {
+            for (int w = 0; w < SeriousWords.Length; w++)
+            {
+                string word = SeriousWords[w];
+                if (word.Length == length && string.Compare(line, start, word, 0, length, StringComparison.OrdinalIgnoreCase) == 0)
+                    return true;
+            }
+
+            const string typeSuffix = "Exception";
+            return length > typeSuffix.Length
+                && string.CompareOrdinal(line, start + length - typeSuffix.Length, typeSuffix, 0, typeSuffix.Length) == 0;
         }
 
         private static TelemetryTagRoute Serious(TelemetryTagRoute route)
