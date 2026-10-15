@@ -27,6 +27,10 @@ internal static class PostureStanceFixTests
         // T-settle
         Pass("settlement gate does not treat a marching unit as settled", SettlementGateMarchingUnitIsNotSettled);
         Pass("settlement gate does not treat an active move as settled", SettlementGateActiveMoveIsNotSettled);
+
+        // B-macro3
+        Pass("posture executor stands down in vanilla retreat and end of day", PostureExecutorStandsDownInRetreatAndEndOfDay);
+        Pass("posture executor skips the feud instance", PostureExecutorSkipsFeudInstance);
     }
 
     private static void Pass(string name, Action test)
@@ -218,5 +222,25 @@ internal static class PostureStanceFixTests
         });
         AssertFalse(d.AllowChange, "active move order is not settled");
         AssertEqual("active-move", d.Reason, "reason");
+    }
+
+    private static void PostureExecutorStandsDownInRetreatAndEndOfDay()
+    {
+        AssertTrue(PostureExecutorBattleGate.Allows(5, 1, 0, 0, false, out _), "normal AI battle runs");
+        AssertFalse(PostureExecutorBattleGate.Allows(5, 3, 0, 0, false, out string retreat), "macroai 3");
+        AssertEqual("vanilla-retreat", retreat, "retreat reason");
+        AssertFalse(PostureExecutorBattleGate.Allows(5, 1, 1, 0, false, out string eod), "eodcycle 1");
+        AssertEqual("end-of-day", eod, "eod reason");
+        AssertFalse(PostureExecutorBattleGate.Allows(5, 1, 2, 0, false, out _), "eodcycle 2");
+        AssertFalse(PostureExecutorBattleGate.Allows(4, 1, 0, 0, false, out _), "state < 5");
+        AssertFalse(PostureExecutorBattleGate.Allows(5, -1, 0, 0, false, out _), "macroai inactive");
+    }
+
+    private static void PostureExecutorSkipsFeudInstance()
+    {
+        AssertFalse(PostureExecutorBattleGate.Allows(5, 1, 0, 2, true, out string feud), "feud instance under W&L");
+        AssertEqual("feud-instance", feud, "feud reason");
+        AssertFalse(PostureExecutorBattleGate.Allows(5, 1, 0, 1, false, out _), "player instance outside ai_vs_ai");
+        AssertTrue(PostureExecutorBattleGate.Allows(5, 1, 0, 1, true, out _), "player instance under ai_vs_ai (W&L) runs; per-unit guard protects");
     }
 }

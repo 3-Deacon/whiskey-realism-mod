@@ -91,8 +91,10 @@ namespace WhiskeyRealism.Patches
             var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
             var units = SafeList(battle, ref _unitsUsedField, "unitsused");
 
-            if (state < 5 || macro < 0 || side < 0 || bunits == null || units == null) return;
-            if (isPlayerAiOrFeud != 0 && !GameVars.ai_vs_ai) return;
+            if (side < 0 || bunits == null || units == null) return;
+            // B-macro3: stand down for vanilla army retreat (macroai 3), the
+            // end-of-day phase, and the W&L feud instance.
+            if (!PostureExecutorBattleGate.Allows(state, macro, SafeEodCycle(bunits), isPlayerAiOrFeud, GameVars.ai_vs_ai, out _)) return;
 
             Dictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders = BuildRuntimeDivisionPlayOrders(units);
             var iteratedInstanceIds = new HashSet<int>();
@@ -3771,6 +3773,12 @@ namespace WhiskeyRealism.Patches
         private static void EnsureStanceMatchesTask(BattleUnits bunits, Regiment group, CommandTaskType task)
         {
             TacticalStanceWriter.EnsureStanceForTask(bunits, group, task, null, StanceWriteSource.Executor);
+        }
+
+        private static int SafeEodCycle(BattleUnits bunits)
+        {
+            try { return bunits != null ? bunits.eodcycle : 1; }
+            catch { return 1; }
         }
 
         private static bool SafeRouted(Regiment group)

@@ -82,6 +82,30 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool CloseEngaged { get; }
     }
 
+    // Battle-level gate for the #61 posture executor (Postfix on
+    // AIBattle.AdjustGroupFormations).
+    // Vanilla anchors: AdjustGroupFormations itself returns for state < 5 or
+    // macroai < 0 (5879); CheckGlobalAIStrategy returns once macroai == 3
+    // (6374) and vanilla sets every group to screen for the army retreat (4258);
+    // BattleUnits.eodcycle > 0 is the end-of-day phase where vanilla stops
+    // issuing AI orders (8259, 83526) and autosaves (66904); UpdateAITasks (5857)
+    // runs every instance under ai_vs_ai, and isplayeraiorfeud == 2 is the W&L
+    // feud instance (SetSide 3408) that duplicates side 0's cycle.
+    public static class PostureExecutorBattleGate
+    {
+        public static bool Allows(int state, int macroAi, int eodCycle, int isPlayerAiOrFeud, bool aiVsAi, out string reason)
+        {
+            if (state < 5) { reason = "battle-not-started"; return false; }
+            if (macroAi < 0) { reason = "macro-inactive"; return false; }
+            if (macroAi == 3) { reason = "vanilla-retreat"; return false; }
+            if (eodCycle > 0) { reason = "end-of-day"; return false; }
+            if (isPlayerAiOrFeud == 2) { reason = "feud-instance"; return false; }
+            if (isPlayerAiOrFeud != 0 && !aiVsAi) { reason = "player-instance"; return false; }
+            reason = "allow";
+            return true;
+        }
+    }
+
     public static class CommandWaypointWritePolicy
     {
         private const float MovementFlagThreshold = 0.05f;
