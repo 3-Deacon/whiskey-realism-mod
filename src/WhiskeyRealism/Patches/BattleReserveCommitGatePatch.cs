@@ -426,6 +426,8 @@ namespace WhiskeyRealism.Patches
                 {
                     Regiment unit = attached[i];
                     if ((UnityEngine.Object)unit == null) continue;
+                    // Vanilla's own early exit (6093-6113, own outflanked state):
+                    // mirrors what vanilla will do, not a Whiskey perception.
                     if (BattleWriterPolicy.IsEndangeredForReserveSupport(
                             unit.unittyp, unit.regimentpaths, unit.isrouted, unit.outflanked, unit.ownonflank))
                         return true;
@@ -452,6 +454,7 @@ namespace WhiskeyRealism.Patches
                 try
                 {
                     if ((UnityEngine.Object)unit == null) continue;
+                    // Vanilla's own candidate filter (6121, own outflanked state).
                     if (!BattleWriterPolicy.IsReserveSupportCandidate(
                             unit.unittyp, unit.regimentpaths, unit.isrouted, unit.outflanked, unit.inengagement))
                         continue;

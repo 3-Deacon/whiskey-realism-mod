@@ -189,6 +189,8 @@ namespace WhiskeyRealism.Patches
             {
                 Regiment unit = attached[i];
                 if ((UnityEngine.Object)unit == null) continue;
+                // Vanilla's own candidate filter (6121, own outflanked state): which
+                // unit vanilla may move, not a Whiskey perception of the enemy.
                 if (!BattleWriterPolicy.IsReserveSupportCandidate(
                         unit.unittyp, unit.regimentpaths, unit.isrouted, unit.outflanked, unit.inengagement))
                     continue;

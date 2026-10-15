@@ -311,6 +311,8 @@ namespace WhiskeyRealism.Patches
                 catch { }
                 try
                 {
+                    // Scene-graph parent name for the log label only (a Unity
+                    // scene question; nothing derives a command relation from it).
                     var parent = ((Component)r).transform.parent;
                     if ((object)parent != null) snap.parentName = parent.name;
                 }

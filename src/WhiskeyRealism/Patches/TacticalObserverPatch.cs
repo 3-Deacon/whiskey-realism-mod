@@ -2007,6 +2007,8 @@ namespace WhiskeyRealism.Patches
                     .WithField("receivedFire", MatrixReceivedFire(group))
                     .WithField("visibleEnemy", MatrixClosestEnemy(group))
                     .WithField("angleEnemy", MatrixEnemyAngleStrength(group))
+                    // Vanilla's own (unfiltered) group state, logged beside the
+                    // perceived inputs above for comparison; no decision reads it.
                     .WithField("flankThreat", group.flanksthreated)
                     .WithField("outflanked", group.outflanked)
                     .WithField("cover", group.covervalue)
