@@ -54,6 +54,9 @@ internal static class TelemetryInfraFixTests
         PerfShutdownFlushesEveryThreadsAggregates();
         PerfProbeTickFlushesDueAggregateWindows();
         PerfAggregateWindowDefaultsToFiveSeconds();
+        WriterRetryAfterTornWriteDoesNotDuplicateRows();
+        WriterCountsRowsOnlyAfterTheirWriteSucceeds();
+        WriterShutdownTimeoutFailureRowNeverOpensSecondHandle();
         RegimentDiagnosticsWatchTokensParse();
         RegimentDiagnosticsRescanOnlyWhenRosterOrWatchListChanges();
         FaultSiteDetectsModFramesInStack();
@@ -1275,5 +1278,182 @@ internal static class TelemetryInfraFixTests
         // cut that 5x while slow rows stay immediate (capped per scope per window).
         TestHarness.AssertEqual(5000L, TelemetryPerf.AggregateWindowMs, "default aggregate window");
         LogPass("perf aggregate window defaults to five seconds");
+    }
+
+    // ---------------------------------------------------------------- L2 / L3
+
+    // Stream wrapper for writer fault injection: optionally writes only part of the first
+    // Write call before throwing (a torn write), or fails every Write while Fail is set.
+    private sealed class FaultStream : Stream
+    {
+        private readonly FileStream _inner;
+        internal int TornWritesRemaining;
+        internal Func<bool> Fail = () => false;
+
+        internal FaultStream(string path)
+        {
+            _inner = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 1);
+        }
+
+        public override bool CanRead { get { return false; } }
+        public override bool CanSeek { get { return _inner.CanSeek; } }
+        public override bool CanWrite { get { return true; } }
+        public override long Length { get { return _inner.Length; } }
+        public override long Position { get { return _inner.Position; } set { _inner.Position = value; } }
+        public override void Flush() { _inner.Flush(); }
+        public override int Read(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+        public override long Seek(long offset, SeekOrigin origin) { return _inner.Seek(offset, origin); }
+        public override void SetLength(long value) { _inner.SetLength(value); }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            if (Fail())
+                throw new IOException("injected sharing violation");
+            if (TornWritesRemaining > 0 && count > 1)
+            {
+                TornWritesRemaining--;
+                _inner.Write(buffer, offset, count / 2 + 7);
+                _inner.Flush();
+                throw new IOException("injected torn write");
+            }
+            _inner.Write(buffer, offset, count);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    private static void WriterRetryAfterTornWriteDoesNotDuplicateRows()
+    {
+        string dir = TempDir();
+        var saved = TelemetryWriter.OpenAppendStream;
+        int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
+        try
+        {
+            int torn = 1;
+            TelemetryWriter.RetryBaseMilliseconds = 5;
+            TelemetryWriter.OpenAppendStream = path =>
+            {
+                var stream = new FaultStream(path);
+                if (path.EndsWith("tactical.jsonl", StringComparison.Ordinal) && torn-- > 0)
+                    stream.TornWritesRemaining = 1;
+                return stream;
+            };
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            for (int i = 0; i < 6; i++)
+                queue.Enqueue(Decision("w", i));
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { }, "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 16);
+            writer.Start();
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
+
+            string[] lines = File.ReadAllLines(Path.Combine(dir, "tactical.jsonl"));
+            TestHarness.AssertEqual(6, lines.Length, "each row exactly once after a torn write + retry");
+            var seen = new HashSet<string>();
+            foreach (string line in lines)
+            {
+                var row = Newtonsoft.Json.Linq.JObject.Parse(line);
+                TestHarness.AssertTrue(seen.Add((string)row["inputSignature"]), "no duplicate row");
+            }
+            TestHarness.AssertTrue(writer.SinkFailureCount >= 1, "torn write counted as a failure");
+            TestHarness.AssertFalse(writer.FileSinkDisabled, "single failure does not disable the sink");
+        }
+        finally
+        {
+            TelemetryWriter.OpenAppendStream = saved;
+            TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
+            DeleteQuietly(dir);
+        }
+        LogPass("writer retry after torn write does not duplicate rows");
+    }
+
+    private static void WriterCountsRowsOnlyAfterTheirWriteSucceeds()
+    {
+        string dir = TempDir();
+        var saved = TelemetryWriter.OpenAppendStream;
+        int savedBackoff = TelemetryWriter.RetryBaseMilliseconds;
+        bool failing = true;
+        try
+        {
+            TelemetryWriter.RetryBaseMilliseconds = 20;
+            TelemetryWriter.OpenAppendStream = path =>
+            {
+                var stream = new FaultStream(path);
+                if (path.EndsWith("tactical.jsonl", StringComparison.Ordinal))
+                    stream.Fail = () => System.Threading.Volatile.Read(ref failing);
+                return stream;
+            };
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            var writer = new TelemetryWriter(queue, budget, dir, delegate { }, "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 16);
+            writer.Start();
+            for (int i = 0; i < 3; i++)
+                queue.Enqueue(Decision("w", i));
+            writer.Signal();
+            TestHarness.AssertTrue(WaitUntil(() => writer.SinkFailureCount >= 1, 2000), "failure observed");
+            TestHarness.AssertFalse(writer.OutputFilesSnapshot().Contains("tactical.jsonl"), "failed rows are not accounted as written output");
+            System.Threading.Volatile.Write(ref failing, false);
+            TestHarness.AssertTrue(WaitUntil(() => writer.OutputFilesSnapshot().Contains("tactical.jsonl"), 3000), "accounted once the write succeeds");
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer stops");
+            TestHarness.AssertEqual(3, CountLines(Path.Combine(dir, "tactical.jsonl")), "rows written once");
+        }
+        finally
+        {
+            System.Threading.Volatile.Write(ref failing, false);
+            TelemetryWriter.OpenAppendStream = saved;
+            TelemetryWriter.RetryBaseMilliseconds = savedBackoff;
+            DeleteQuietly(dir);
+        }
+        LogPass("writer counts rows only after their write succeeds");
+    }
+
+    private static void WriterShutdownTimeoutFailureRowNeverOpensSecondHandle()
+    {
+        string dir = TempDir();
+        var saved = TelemetryWriter.OpenAppendStream;
+        var entered = new System.Threading.ManualResetEvent(false);
+        var release = new System.Threading.ManualResetEvent(false);
+        int offThreadFailureOpens = 0;
+        try
+        {
+            TelemetryWriter.OpenAppendStream = path =>
+            {
+                if (path.EndsWith("failures.jsonl", StringComparison.Ordinal)
+                    && System.Threading.Thread.CurrentThread.Name != "WhiskeyRealismTelemetryWriter")
+                    System.Threading.Interlocked.Increment(ref offThreadFailureOpens);
+                return new FaultStream(path);
+            };
+            var queue = new TelemetryQueue(capacity: 64);
+            var budget = new TelemetryBudget(totalBytes: 1 << 20, rotateBytes: 1 << 20);
+            int manifestCalls = 0;
+            var writer = new TelemetryWriter(queue, budget, dir, delegate
+            {
+                if (System.Threading.Interlocked.Increment(ref manifestCalls) == 1)
+                {
+                    entered.Set();
+                    release.WaitOne(5000);
+                }
+            }, "w", TelemetryProfile.FullTuning, null, flushMilliseconds: 50, flushRows: 16);
+            writer.Start();
+            queue.Enqueue(Decision("w", 1));
+            writer.Signal();
+            TestHarness.AssertTrue(entered.WaitOne(2000), "writer blocked in manifest");
+            TestHarness.AssertFalse(writer.StopAndFlush(1), "shutdown times out while writer is blocked");
+            TestHarness.AssertEqual(0, offThreadFailureOpens, "timeout failure row does not open failures.jsonl off the writer thread");
+            release.Set();
+            TestHarness.AssertTrue(writer.StopAndFlush(3000), "writer finishes after release");
+            TestHarness.AssertTrue(ReadIfExists(Path.Combine(dir, "failures.jsonl")).Contains("writer-shutdown-timeout"), "timeout failure row written by the writer thread");
+            TestHarness.AssertEqual(0, offThreadFailureOpens, "still no second handle");
+        }
+        finally
+        {
+            release.Set();
+            TelemetryWriter.OpenAppendStream = saved;
+            DeleteQuietly(dir);
+        }
+        LogPass("writer shutdown timeout failure row never opens second handle");
     }
 }

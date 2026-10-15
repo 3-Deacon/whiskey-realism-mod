@@ -8,14 +8,19 @@ namespace WhiskeyRealism.Telemetry
 {
     // Background JSONL writer for one telemetry session.
     //
-    // - One open StreamWriter per output file, flushed once per batch and closed on
-    //   rotation, failure, and shutdown (previously File.AppendAllText per row).
+    // - One open handle per output file; each batch writes one encoded chunk per file and
+    //   handles are closed on rotation, failure, and shutdown (previously File.AppendAllText
+    //   per row). Rows count as written (budget output bytes, manifest file list) only once
+    //   their bytes are on disk.
     // - manifest.json is rewritten only when the output-file set changes (new file or
     //   rotation), every ManifestIntervalMs, and at shutdown (previously once per batch).
-    // - A failed write closes that stream, keeps the unwritten rows pending, and retries
-    //   after an exponential backoff; the file sink is disabled only after
-    //   MaxConsecutiveWriteFailures consecutive failures (previously the first exception
-    //   disabled the sink for the whole session).
+    // - A failed chunk write commits the rows that fully reached the file (measured by file
+    //   length), truncates a torn partial row, closes the handle, keeps the rest pending, and
+    //   retries after an exponential backoff, so a retry never duplicates rows. The file sink
+    //   is disabled only after MaxConsecutiveWriteFailures consecutive failures (previously
+    //   the first exception disabled the sink for the whole session).
+    // - Sink-failure rows raised off the writer thread while it is alive are queued, never
+    //   written through a second handle.
     // - Run() has an outer guard that logs once and keeps the thread alive.
     // - The shutdown drain is bounded so a producer racing shutdown cannot pin the thread.
     internal sealed class TelemetryWriter
@@ -29,6 +34,11 @@ namespace WhiskeyRealism.Telemetry
         // Internal (not const) so tests can shorten them.
         internal static int ManifestIntervalMs = 5000;
         internal static int RetryBaseMilliseconds = 50;
+
+        // Opens an append handle for one output file. Rows are written as one encoded chunk
+        // per file per batch, so the handle is unbuffered. Internal so tests can inject faults.
+        internal static Func<string, Stream> OpenAppendStream = path =>
+            new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 1);
 
         private static readonly System.Text.UTF8Encoding Utf8NoBom = new System.Text.UTF8Encoding(false);
 
@@ -48,8 +58,12 @@ namespace WhiskeyRealism.Telemetry
         private readonly HashSet<string> _warnedSinkFailureModes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _failureRowsAttempted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> _fileBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, StreamWriter> _streams = new Dictionary<string, StreamWriter>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, OpenFile> _streams = new Dictionary<string, OpenFile>(StringComparer.OrdinalIgnoreCase);
         private readonly List<PendingRow> _pending = new List<PendingRow>();
+        private readonly List<string> _batchFiles = new List<string>();
+        private readonly List<PendingRow> _chunkRows = new List<PendingRow>();
+        private readonly Dictionary<string, long> _prospectiveBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        private byte[] _chunk = new byte[64 * 1024];
         private readonly FileWritePerfAccumulator _fileWritePerf = new FileWritePerfAccumulator();
         private readonly Thread _thread;
         private volatile bool _stopRequested;
@@ -300,31 +314,230 @@ namespace WhiskeyRealism.Telemetry
                 return;
 
             bool hasNonPerformanceRow = HasNonPerformanceRow(_pending);
-            int written = 0;
             using (hasNonPerformanceRow
                 ? TelemetryPerf.Scope("telemetry.flush", TelemetryLayer.System, TelemetryCategory.Performance, 10.0)
                 : NoopDisposable.Instance)
             {
-                for (; written < _pending.Count; written++)
-                {
-                    PendingRow row = _pending[written];
-                    RowWriteResult result = WritePendingRow(ref row);
-                    _pending[written] = row;
-                    if (result == RowWriteResult.Retry)
-                        break;
-                    if (IsFileWritePerfRow(row.Event) && result != RowWriteResult.Written)
-                        _fileWritePerf.RecordDropped();
-                }
-
-                if (!FlushOpenStreams())
-                    written = 0;
+                PrepareRows();
+                WriteChunks();
+                CloseStreamsFromOldRotations();
             }
 
-            if (written > 0)
-                _pending.RemoveRange(0, written);
+            RemoveDoneRows();
 
             if (hasNonPerformanceRow)
                 EmitPendingFileWritePerf(force: false);
+        }
+
+        // Encodes each not-yet-prepared row once, assigns its output file (rotation-aware,
+        // counting rows already assigned in this batch) and reserves its budget once. Rows the
+        // budget refuses, or that arrive while the sink is disabled, are finished here.
+        private void PrepareRows()
+        {
+            _prospectiveBytes.Clear();
+            for (int i = 0; i < _pending.Count; i++)
+            {
+                PendingRow row = _pending[i];
+                if (!row.Done && row.FileName != null)
+                    AddProspective(row.FileName, row.Bytes);
+            }
+
+            for (int i = 0; i < _pending.Count; i++)
+            {
+                PendingRow row = _pending[i];
+                if (row.Done)
+                    continue;
+
+                if (IsFileSinkDisabled())
+                {
+                    row.Done = true;
+                    RecordSinkFailure("write-row-disabled", null);
+                    if (IsFileWritePerfRow(row.Event))
+                        _fileWritePerf.RecordDropped();
+                    continue;
+                }
+
+                if (row.FileName != null)
+                    continue;
+
+                try
+                {
+                    row.Json = TelemetryJson.ToJsonLine(row.Event);
+                    row.Bytes = Utf8NoBom.GetByteCount(row.Json);
+                    string fileName = FileNameForNextWrite(row.Event, row.Bytes);
+                    if (!_budget.TryReserve(row.Event.Category, row.Bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(row.Event)))
+                    {
+                        row.Done = true;
+                        if (IsFileWritePerfRow(row.Event))
+                            _fileWritePerf.RecordDropped();
+                        continue;
+                    }
+
+                    row.FileName = fileName;
+                    AddProspective(fileName, row.Bytes);
+                }
+                catch (Exception ex)
+                {
+                    row.Done = true;
+                    RecordSinkFailure("encode-row", ex);
+                }
+            }
+        }
+
+        private void AddProspective(string fileName, long bytes)
+        {
+            long existing;
+            _prospectiveBytes.TryGetValue(fileName, out existing);
+            _prospectiveBytes[fileName] = existing + bytes;
+        }
+
+        // Writes one chunk per output file, in first-appearance order. Stops at the first
+        // failing file; its unwritten rows and every later file stay pending for the retry.
+        private void WriteChunks()
+        {
+            _batchFiles.Clear();
+            for (int i = 0; i < _pending.Count; i++)
+            {
+                PendingRow row = _pending[i];
+                if (!row.Done && row.FileName != null && !_batchFiles.Contains(row.FileName))
+                    _batchFiles.Add(row.FileName);
+            }
+
+            for (int f = 0; f < _batchFiles.Count; f++)
+            {
+                if (IsFileSinkDisabled() || !WriteChunk(_batchFiles[f]))
+                    return;
+            }
+
+            Interlocked.Exchange(ref _consecutiveWriteFailures, 0);
+        }
+
+        private bool WriteChunk(string fileName)
+        {
+            _chunkRows.Clear();
+            int total = 0;
+            for (int i = 0; i < _pending.Count; i++)
+            {
+                PendingRow row = _pending[i];
+                if (row.Done || !string.Equals(row.FileName, fileName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                int bytes = (int)row.Bytes;
+                EnsureChunkCapacity(total + bytes);
+                total += Utf8NoBom.GetBytes(row.Json, 0, row.Json.Length, _chunk, total);
+                row.ChunkEnd = total;
+                _chunkRows.Add(row);
+            }
+
+            if (_chunkRows.Count == 0)
+                return true;
+
+            OpenFile file = null;
+            long startLength = -1L;
+            long started = Stopwatch.GetTimestamp();
+            try
+            {
+                file = GetOrOpen(fileName);
+                startLength = TryLength(file.Stream);
+                file.Stream.Write(_chunk, 0, total);
+                file.Stream.Flush();
+                CommitRows(fileName, _chunkRows.Count, (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                int committed = 0;
+                if (file != null && startLength >= 0L)
+                {
+                    long endLength = TryLength(file.Stream);
+                    long writtenBytes = endLength >= startLength ? endLength - startLength : 0L;
+                    int boundary = 0;
+                    while (committed < _chunkRows.Count && _chunkRows[committed].ChunkEnd <= writtenBytes)
+                    {
+                        boundary = _chunkRows[committed].ChunkEnd;
+                        committed++;
+                    }
+
+                    // Drop a torn partial row so the retry does not leave half a line behind.
+                    if (writtenBytes > boundary)
+                        TryTruncate(file.Stream, startLength + boundary);
+                }
+
+                if (committed > 0)
+                    CommitRows(fileName, committed, 0.0);
+
+                CloseStream(fileName);
+                OnWriteFailure("write-row", ex);
+                return false;
+            }
+        }
+
+        private void CommitRows(string fileName, int count, double durationMs)
+        {
+            long bytes = 0L;
+            long perfRows = 0L;
+            long perfBytes = 0L;
+            for (int i = 0; i < count; i++)
+            {
+                PendingRow row = _chunkRows[i];
+                row.Done = true;
+                bytes += row.Bytes;
+                if (IsFileWritePerfRow(row.Event))
+                {
+                    perfRows++;
+                    perfBytes += row.Bytes;
+                }
+            }
+
+            if (perfRows > 0L)
+                _fileWritePerf.RecordWritten(durationMs, perfBytes, perfRows);
+            RecordOutput(fileName, bytes);
+        }
+
+        private void EnsureChunkCapacity(int needed)
+        {
+            if (needed <= _chunk.Length)
+                return;
+            int size = _chunk.Length;
+            while (size < needed)
+                size *= 2;
+            Array.Resize(ref _chunk, size);
+        }
+
+        private void RemoveDoneRows()
+        {
+            int keep = 0;
+            for (int i = 0; i < _pending.Count; i++)
+            {
+                if (!_pending[i].Done)
+                    _pending[keep++] = _pending[i];
+            }
+
+            if (keep < _pending.Count)
+                _pending.RemoveRange(keep, _pending.Count - keep);
+        }
+
+        private static long TryLength(Stream stream)
+        {
+            try
+            {
+                return stream.Length;
+            }
+            catch
+            {
+                return -1L;
+            }
+        }
+
+        private static void TryTruncate(Stream stream, long length)
+        {
+            try
+            {
+                stream.SetLength(length);
+            }
+            catch
+            {
+            }
         }
 
         private bool InRetryBackoff()
@@ -365,73 +578,8 @@ namespace WhiskeyRealism.Telemetry
             _fileWritePerf.Reset();
         }
 
-        private RowWriteResult WritePendingRow(ref PendingRow row)
-        {
-            TelemetryEvent ev = row.Event;
-            if (IsFileSinkDisabled())
-            {
-                RecordSinkFailure("write-row-disabled", null);
-                return RowWriteResult.SinkDisabled;
-            }
-
-            try
-            {
-                if (row.Json == null)
-                {
-                    row.Json = TelemetryJson.ToJsonLine(ev);
-                    row.Bytes = Utf8NoBom.GetByteCount(row.Json);
-                }
-
-                string fileName = FileNameForNextWrite(ev, row.Bytes);
-                if (!row.Reserved)
-                {
-                    if (!_budget.TryReserve(ev.Category, row.Bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(ev)))
-                        return RowWriteResult.Dropped;
-                    row.Reserved = true;
-                }
-
-                long start = IsFileWritePerfRow(ev) ? Stopwatch.GetTimestamp() : 0L;
-                StreamWriter stream = OpenStream(fileName);
-                stream.Write(row.Json);
-                if (start != 0L)
-                    _fileWritePerf.RecordWritten((Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency, row.Bytes);
-
-                RecordOutput(fileName, row.Bytes);
-                return RowWriteResult.Written;
-            }
-            catch (Exception ex)
-            {
-                OnWriteFailure("write-row", ex);
-                return IsFileSinkDisabled() ? RowWriteResult.SinkFailed : RowWriteResult.Retry;
-            }
-        }
-
-        private bool FlushOpenStreams()
-        {
-            lock (_streamGate)
-            {
-                if (_streams.Count == 0)
-                    return true;
-
-                try
-                {
-                    foreach (KeyValuePair<string, StreamWriter> entry in _streams)
-                        entry.Value.Flush();
-                    Interlocked.Exchange(ref _consecutiveWriteFailures, 0);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    CloseAllStreamsLocked();
-                    OnWriteFailure("flush", ex);
-                    return false;
-                }
-            }
-        }
-
         private void OnWriteFailure(string reason, Exception ex)
         {
-            CloseAllStreams();
             int failures = Interlocked.Increment(ref _consecutiveWriteFailures);
             RecordSinkFailure(reason, ex);
             if (failures >= MaxConsecutiveWriteFailures)
@@ -448,42 +596,75 @@ namespace WhiskeyRealism.Telemetry
             Interlocked.Exchange(ref _retryNotBeforeTimestamp, Stopwatch.GetTimestamp() + backoffMs * Stopwatch.Frequency / 1000L);
         }
 
-        private StreamWriter OpenStream(string fileName)
+        private OpenFile GetOrOpen(string fileName)
         {
             lock (_streamGate)
             {
-                StreamWriter stream;
-                if (_streams.TryGetValue(fileName, out stream))
-                    return stream;
+                OpenFile file;
+                if (_streams.TryGetValue(fileName, out file))
+                    return file;
 
-                string path = Path.Combine(_sessionDirectory, fileName);
-                var file = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, StreamBufferBytes);
-                stream = new StreamWriter(file, Utf8NoBom, StreamBufferBytes);
-                _streams[fileName] = stream;
-                return stream;
+                file = new OpenFile(OpenAppendStream(Path.Combine(_sessionDirectory, fileName)), _streamRotationIndex);
+                _streams[fileName] = file;
+                return file;
+            }
+        }
+
+        private void CloseStream(string fileName)
+        {
+            lock (_streamGate)
+            {
+                OpenFile file;
+                if (!_streams.TryGetValue(fileName, out file))
+                    return;
+                _streams.Remove(fileName);
+                DisposeQuietly(file);
+            }
+        }
+
+        private void CloseStreamsFromOldRotations()
+        {
+            lock (_streamGate)
+            {
+                if (_streams.Count == 0)
+                    return;
+
+                List<string> stale = null;
+                foreach (KeyValuePair<string, OpenFile> entry in _streams)
+                {
+                    if (entry.Value.RotationIndex != _streamRotationIndex)
+                        (stale ?? (stale = new List<string>())).Add(entry.Key);
+                }
+
+                if (stale == null)
+                    return;
+                for (int i = 0; i < stale.Count; i++)
+                {
+                    DisposeQuietly(_streams[stale[i]]);
+                    _streams.Remove(stale[i]);
+                }
             }
         }
 
         private void CloseAllStreams()
         {
             lock (_streamGate)
-                CloseAllStreamsLocked();
+            {
+                foreach (KeyValuePair<string, OpenFile> entry in _streams)
+                    DisposeQuietly(entry.Value);
+                _streams.Clear();
+            }
         }
 
-        private void CloseAllStreamsLocked()
+        private static void DisposeQuietly(OpenFile file)
         {
-            foreach (KeyValuePair<string, StreamWriter> entry in _streams)
+            try
             {
-                try
-                {
-                    entry.Value.Dispose();
-                }
-                catch
-                {
-                }
+                file.Stream.Dispose();
             }
-
-            _streams.Clear();
+            catch
+            {
+            }
         }
 
         private void RecordOutput(string fileName, long bytes)
@@ -498,44 +679,37 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
-        // One-shot append used for self-reported sink-failure rows: these can be written from
-        // the runtime's shutdown path after the writer thread has closed its streams.
+        // Self-reported sink-failure rows. On the writer thread they go straight through the
+        // writer's own handle. From another thread while the writer is alive (shutdown
+        // timeout) they are queued for the writer, never written through a second handle;
+        // once the writer has exited (its handles are closed) a one-shot append is safe.
         private RowWriteResult WriteFailureRow(TelemetryEvent ev)
         {
             try
             {
+                bool onWriterThread = Thread.CurrentThread == _thread;
+                if (!onWriterThread && _thread.IsAlive)
+                {
+                    TelemetryQueueResult queued = _queue != null ? _queue.Enqueue(ev) : TelemetryQueueResult.Dropped;
+                    Signal();
+                    return queued == TelemetryQueueResult.Dropped ? RowWriteResult.Dropped : RowWriteResult.Written;
+                }
+
                 string json = TelemetryJson.ToJsonLine(ev);
                 long bytes = Utf8NoBom.GetByteCount(json);
                 string fileName = FileNameForNextWrite(ev, bytes);
                 if (!_budget.TryReserve(ev.Category, bytes, lowPriority: true, protectedSummary: IsCapSurvivingRuntimeRow(ev)))
                     return RowWriteResult.Dropped;
 
-                StreamWriter open = null;
-                bool onWriterThread = Thread.CurrentThread == _thread;
+                byte[] payload = Utf8NoBom.GetBytes(json);
                 if (onWriterThread)
                 {
-                    lock (_streamGate)
-                        _streams.TryGetValue(fileName, out open);
-                }
-
-                if (open != null)
-                {
-                    open.Write(json);
-                    open.Flush();
+                    GetOrOpen(fileName).Stream.Write(payload, 0, payload.Length);
                 }
                 else
                 {
-                    // Other threads (shutdown timeout, runtime shutdown) never touch the
-                    // writer's StreamWriters; append through a separate shared handle.
-                    using (var file = new FileStream(
-                        Path.Combine(_sessionDirectory, fileName),
-                        FileMode.Append,
-                        FileAccess.Write,
-                        FileShare.ReadWrite | FileShare.Delete))
-                    {
-                        byte[] payload = Utf8NoBom.GetBytes(json);
-                        file.Write(payload, 0, payload.Length);
-                    }
+                    using (Stream once = OpenAppendStream(Path.Combine(_sessionDirectory, fileName)))
+                        once.Write(payload, 0, payload.Length);
                 }
 
                 RecordOutput(fileName, bytes);
@@ -554,6 +728,9 @@ namespace WhiskeyRealism.Telemetry
             long currentBytes;
             lock (_gate)
                 _fileBytes.TryGetValue(candidate, out currentBytes);
+            long batchBytes;
+            if (_prospectiveBytes.TryGetValue(candidate, out batchBytes))
+                currentBytes += batchBytes;
 
             if (currentBytes > 0L && currentBytes + bytes > _budget.RotateBytes)
             {
@@ -561,12 +738,12 @@ namespace WhiskeyRealism.Telemetry
                 rotationIndex = _budget.RotationIndex;
             }
 
+            // Handles of the previous rotation are closed after this batch's chunks are
+            // written (CloseStreamsFromOldRotations); nothing is buffered, so no flush here.
             if (rotationIndex != _streamRotationIndex)
             {
                 if (_streamRotationIndex >= 0)
                 {
-                    FlushOpenStreams();
-                    CloseAllStreams();
                     lock (_gate)
                         _manifestDue = true;
                 }
@@ -757,25 +934,34 @@ namespace WhiskeyRealism.Telemetry
         {
             Written,
             Dropped,
-            SinkFailed,
-            SinkDisabled,
-            Retry
+            SinkFailed
         }
 
-        private struct PendingRow
+        private sealed class PendingRow
         {
             internal PendingRow(TelemetryEvent ev)
             {
                 Event = ev;
-                Json = null;
-                Bytes = 0L;
-                Reserved = false;
             }
 
-            internal TelemetryEvent Event;
+            internal readonly TelemetryEvent Event;
             internal string Json;
             internal long Bytes;
-            internal bool Reserved;
+            internal string FileName;   // set once encoded + budget-reserved
+            internal int ChunkEnd;      // end offset inside the current chunk
+            internal bool Done;         // written, dropped, or failed permanently
+        }
+
+        private sealed class OpenFile
+        {
+            internal OpenFile(Stream stream, int rotationIndex)
+            {
+                Stream = stream;
+                RotationIndex = rotationIndex;
+            }
+
+            internal readonly Stream Stream;
+            internal readonly int RotationIndex;
         }
 
         private sealed class NoopDisposable : IDisposable
@@ -795,10 +981,10 @@ namespace WhiskeyRealism.Telemetry
             private double _durationMs;
             private DateTime _firstRecordedUtc;
 
-            internal void RecordWritten(double durationMs, long bytesWritten)
+            internal void RecordWritten(double durationMs, long bytesWritten, long rows)
             {
                 MarkStarted();
-                _eventsEmitted++;
+                _eventsEmitted += Math.Max(0L, rows);
                 _bytesWritten += Math.Max(0L, bytesWritten);
                 _durationMs += TelemetryFields.SanitizedNumber(durationMs);
             }
