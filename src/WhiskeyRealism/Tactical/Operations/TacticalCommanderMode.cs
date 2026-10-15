@@ -28,6 +28,22 @@ namespace WhiskeyRealism.Tactical.Operations
             }
         }
 
+        public static bool IsRecognized(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return true;
+            switch (raw.Trim().ToLowerInvariant())
+            {
+                case "off":
+                case "monitoronly":
+                case "monitor-only":
+                case "monitor only":
+                case "active":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         public static bool RunsLedger(TacticalCommanderMode mode) =>
             mode == TacticalCommanderMode.MonitorOnly || mode == TacticalCommanderMode.Active;
 

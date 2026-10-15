@@ -46,49 +46,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Cached reflection for AIBattle.bunits (same pattern as ArmyEvidenceBuilder / CommandTreeRuntime)
         private static FieldInfo _bunitsFieldCache;
 
-        // Parity window state (Tasks 10/11 — single-pass refactor).
-        // Keyed by (battleSequence, allianceId) so each side gets its own 20-clean
-        // budget; mismatch on one side does not shut down the other.
-        private static readonly Dictionary<ParityKey, int> _parityComparesRemaining
-            = new Dictionary<ParityKey, int>();
-        private static readonly HashSet<ParityKey> _parityMismatchObserved
-            = new HashSet<ParityKey>();
-        private const int ParityCompareBudget = 20;
-
-        private readonly struct ParityKey : IEquatable<ParityKey>
-        {
-            public readonly int BattleSequence;
-            public readonly int AllianceId;
-            public ParityKey(int battleSequence, int allianceId)
-            {
-                BattleSequence = battleSequence;
-                AllianceId = allianceId;
-            }
-            public bool Equals(ParityKey other)
-            {
-                return BattleSequence == other.BattleSequence && AllianceId == other.AllianceId;
-            }
-            public override bool Equals(object obj)
-            {
-                return obj is ParityKey other && Equals(other);
-            }
-            public override int GetHashCode()
-            {
-                unchecked { return (BattleSequence * 397) ^ AllianceId; }
-            }
-        }
-
-        /// <summary>
-        /// Called from TacticalBattleCoordinator.ResetRuntimeTickState on battle
-        /// end so the next battle's parity window starts fresh. Public so the
-        /// coordinator can reach it across files.
-        /// </summary>
-        public static void ClearParityState()
-        {
-            _parityComparesRemaining.Clear();
-            _parityMismatchObserved.Clear();
-        }
-
         /// <summary>
         /// Cheap signature extractor. Reads only coarse totals, macroai, eodcycle, limited
         /// objective names for hash, a bounded scan for pathinterrupted flags, and time bucket.
@@ -112,7 +69,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         side1MacroAI: -1,
                         anySideInRetreatOrEOD: false,
                         majorObjectiveAnchorHash: 0,
-                        anyInterruptedPathsOrNewContact: false,
+                        interruptedContactBucket: 0,
                         battleHourBucket: ComputeHourBucket(currentBattleHours));
                 }
 
@@ -130,7 +87,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 int objHash = ComputeCheapObjectiveHash(battle);
 
-                bool anyInterrupted = ComputeAnyPathInterruptedOrNewContact(bunits);
+                int contactBucket = ComputeInterruptedContactBucket(bunits);
 
                 int bucket = ComputeHourBucket(currentBattleHours);
 
@@ -142,7 +99,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     side1MacroAI: macro1,
                     anySideInRetreatOrEOD: anyRetreatOrEod,
                     majorObjectiveAnchorHash: objHash,
-                    anyInterruptedPathsOrNewContact: anyInterrupted,
+                    interruptedContactBucket: contactBucket,
                     battleHourBucket: bucket);
             }
             catch (Exception e)
@@ -151,7 +108,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     "[TacticalOrchestrator] TacticalBattleSnapshotBuilder.ExtractCurrentSignature degraded: "
                     + e.GetType().Name + " " + e.Message);
                 return new TacticalBattleStateSignature(
-                    0, 0, 0, -1, -1, false, 0, false, ComputeHourBucket(currentBattleHours));
+                    0, 0, 0, -1, -1, false, 0, 0, ComputeHourBucket(currentBattleHours));
             }
         }
 
@@ -182,13 +139,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ObjectiveRecord[] objectives;
                 using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                 {
-                    objectives = BuildObjectiveRecordsWithParityWindow(battle, allianceId);
+                    objectives = BuildObjectiveRecords(battle, allianceId);
                 }
 
                 var commandTree = CommandTreeRuntime.Snapshot(allianceId);
 
-                // Direct children discovery (uses completeunitlist + GetAttachedUnitsReg)
-                IReadOnlyList<DirectChildSnapshot> directChildren = DirectChildDiscovery.Snapshot(battle);
+                // Direct children discovery for THIS side (completeunitlist filtered by
+                // alliance + GetAttachedUnitsReg). Snapshot(battle) resolved the alliance
+                // from the AIBattle that fired the Tick, which drives both sides, so the
+                // other side's snapshot carried the wrong army's children.
+                IReadOnlyList<DirectChildSnapshot> directChildren = DirectChildDiscovery.Snapshot(allianceId);
 
                 // The snapshot performs its own defensive copies. Readiness
                 // fields (fatigue/ammo/reinforcement timing) flow from bundle
@@ -202,7 +162,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     bundle.OwnMainEffortStrength,
                     bundle.OwnArmyMorale,
                     bundle.OwnReservesCommittedFraction,
-                    bundle.ReinforcementsArrivingDelta,
+                    bundle.OwnReinforcementsArriving,
                     objectives,
                     commandTree,
                     directChildren,
@@ -221,41 +181,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        // ---- Objective-records parity window (Tasks 10/11 — single-pass refactor) ----
-
         /// <summary>
-        /// Branches on EnableSinglePassObjectiveRecords:
-        ///   flag OFF  — legacy path only, .legacy scope reports the cost.
-        ///   flag ON, key in window (budget > 0 or mismatch already seen):
-        ///              run both, compare, emit TacticalObjectiveRecordsParityMismatch on
-        ///              diff, return legacy (safety: never publish drifted output).
-        ///   flag ON, key past window (20 clean compares, no mismatch):
-        ///              aggregate-only; .aggregate scope is the success-metric scope.
+        /// EnableSinglePassObjectiveRecords ON: single pass over the shared observation
+        /// aggregate. OFF (rollback): legacy per-unit walk. The legacy-vs-aggregate parity
+        /// comparator (budget 0 since 2026-05-21, never in window) was removed.
         /// </summary>
-        private static ObjectiveRecord[] BuildObjectiveRecordsWithParityWindow(AIBattle battle, int allianceId)
+        private static ObjectiveRecord[] BuildObjectiveRecords(AIBattle battle, int allianceId)
         {
-            bool flagOn = Plugin.Instance != null
+            bool singlePass = Plugin.Instance != null
                 && Plugin.EnableSinglePassObjectiveRecords != null
                 && Plugin.EnableSinglePassObjectiveRecords.Value;
 
-            if (!flagOn)
+            if (!singlePass)
             {
-                // Rollback path — legacy only, isolated measurement.
-                ObjectiveRecord[] legacyOnly;
                 using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records.legacy", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                 {
-                    legacyOnly = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, allianceId);
+                    return TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, allianceId);
                 }
-                return legacyOnly;
             }
-
-            int battleSeq = TacticalBattleCoordinator.BattleSequenceForParity;
-            var key = new ParityKey(battleSeq, allianceId);
-
-            bool inWindow = false;
-            if (!_parityComparesRemaining.TryGetValue(key, out int remaining)) remaining = ParityCompareBudget;
-            if (remaining > 0) inWindow = true;
-            if (_parityMismatchObserved.Contains(key)) inWindow = true;
 
             IObservationSource source;
             using (TelemetryPerf.Scope("tactical.snapshot-build.aggregate-capture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
@@ -263,209 +206,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 source = TacticalUnitObservationAggregate.Shared.Capture(allianceId);
             }
 
-            if (!inWindow)
-            {
-                // Post-window steady-state — aggregate only. This is the success-metric scope.
-                ObjectiveRecord[] aggregateOnly;
-                using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records.aggregate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
-                {
-                    aggregateOnly = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromAggregate(source, battle, allianceId);
-                }
-                return aggregateOnly;
-            }
-
-            // Parity window: run both, compare, emit mismatch on diff. Never poison the
-            // outer p99 metric by leaving inner scopes off — both inner paths get their
-            // own scopes so the .aggregate scope reflects only aggregate cost.
-            ObjectiveRecord[] legacyResult;
-            using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records.legacy", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
-            {
-                legacyResult = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromBattle(battle, allianceId);
-            }
-            ObjectiveRecord[] aggregateResult;
             using (TelemetryPerf.Scope("tactical.snapshot-build.objective-records.aggregate", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                aggregateResult = TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromAggregate(source, battle, allianceId);
+                return TacticalVisionRuntimeAdapter.BuildObjectiveRecordsFromAggregate(source, battle, allianceId);
             }
-
-            var diff = ObjectiveRecordsEqual(legacyResult, aggregateResult);
-            if (!diff.IsEqual)
-            {
-                _parityMismatchObserved.Add(key);
-                EmitParityMismatch(battleSeq, allianceId, legacyResult, aggregateResult, diff);
-                return legacyResult;  // safety: never publish drifted output
-            }
-
-            _parityComparesRemaining[key] = remaining - 1;
-            return aggregateResult;
-        }
-
-        /// <summary>
-        /// Carries the first-diverging-field detail for a parity comparison.
-        /// IsEqual == true means arrays are identical; all other fields are empty/default.
-        /// </summary>
-        private readonly struct ParityDiff
-        {
-            public readonly bool IsEqual;
-            public readonly int FirstDifferingIndex;     // -1 when equal or count differs
-            public readonly string FirstDifferingField;  // "" when equal or count differs
-            public readonly string LegacyValue;          // safe-truncated string repr
-            public readonly string AggregateValue;       // safe-truncated string repr
-
-            public ParityDiff(bool isEqual, int idx, string field, string legacyVal, string aggregateVal)
-            {
-                IsEqual = isEqual;
-                FirstDifferingIndex = idx;
-                FirstDifferingField = field ?? string.Empty;
-                LegacyValue = legacyVal ?? string.Empty;
-                AggregateValue = aggregateVal ?? string.Empty;
-            }
-
-            public static ParityDiff Equal => new ParityDiff(true, -1, string.Empty, string.Empty, string.Empty);
-            public static ParityDiff CountDifference => new ParityDiff(false, -1, "Length", string.Empty, string.Empty);
-        }
-
-        // Truncates a string to 64 chars for safe telemetry payload.
-        private static string Trunc(string s)
-        {
-            if (s == null) return "(null)";
-            return s.Length > 64 ? s.Substring(0, 64) : s;
-        }
-
-        private static ParityDiff ObjectiveRecordsEqual(ObjectiveRecord[] a, ObjectiveRecord[] b)
-        {
-            if (ReferenceEquals(a, b)) return ParityDiff.Equal;
-            if (a == null || b == null) return ParityDiff.CountDifference;
-            if (a.Length != b.Length) return ParityDiff.CountDifference;
-            for (int i = 0; i < a.Length; i++)
-            {
-                var itemDiff = ObjectiveRecordEqualsItem(a[i], b[i], i);
-                if (!itemDiff.IsEqual) return itemDiff;
-            }
-            return ParityDiff.Equal;
-        }
-
-        /// <summary>
-        /// Compares every field of two ObjectiveRecord values that could diverge
-        /// between the legacy (BuildObjectiveRecordsFromBattle) and aggregate
-        /// (BuildObjectiveRecordsFromAggregate) paths. Returns a ParityDiff naming
-        /// the first field that differs so smoke sessions can identify the root cause.
-        ///
-        /// Fields compared (exhaustive per ObjectiveRecord struct definition):
-        ///   Observation.ObjectiveId       — string, ordinal
-        ///   Observation.Type              — enum
-        ///   Observation.Source            — enum
-        ///   Observation.Location.X/Z      — float, exact
-        ///   Observation.SourceConfidence  — float, exact (both paths read same regiment fields)
-        ///   Observation.Value             — float, exact
-        ///   Observation.TypeAnchorVerified — bool
-        ///   Observation.ApproachAvenue.HasAvenue  — bool (distinguishes None from populated)
-        ///   Observation.ApproachAvenue.AxisX/Z    — float, exact (approach bearing)
-        ///   Observation.ApproachAvenue.Origin.X/Z — float, exact
-        ///   Observation.ApproachAvenue.Objective.X/Z — float, exact
-        ///   Observation.ApproachAvenue.Source      — enum
-        ///   Observation.ApproachAvenue.Confidence01 — float, exact
-        ///   Observation.ApproachAvenue.RoadAnchored   — bool
-        ///   Observation.ApproachAvenue.CrossingAnchored — bool
-        ///   Observation.ApproachAvenue.Reason — string, ordinal
-        ///   Status                        — enum
-        ///   EnemyStrength                 — float, exact (sanitized via SanitizeFloorZero; same inputs)
-        ///   FriendlyAssignedStrength      — float, exact
-        ///   HasUsableStrengthEvidence     — bool (derived from the two floats above)
-        /// </summary>
-        private static ParityDiff ObjectiveRecordEqualsItem(ObjectiveRecord x, ObjectiveRecord y, int recordIndex)
-        {
-            // Observation identity
-            var xo = x.Observation;
-            var yo = y.Observation;
-            if (!string.Equals(xo.ObjectiveId, yo.ObjectiveId, StringComparison.Ordinal))
-                return new ParityDiff(false, recordIndex, "ObjectiveId", Trunc(xo.ObjectiveId), Trunc(yo.ObjectiveId));
-            if (xo.Type != yo.Type)
-                return new ParityDiff(false, recordIndex, "Type", xo.Type.ToString(), yo.Type.ToString());
-            if (xo.Source != yo.Source)
-                return new ParityDiff(false, recordIndex, "Source", xo.Source.ToString(), yo.Source.ToString());
-            if (xo.Location.X != yo.Location.X)
-                return new ParityDiff(false, recordIndex, "Location.X", xo.Location.X.ToString("R"), yo.Location.X.ToString("R"));
-            if (xo.Location.Z != yo.Location.Z)
-                return new ParityDiff(false, recordIndex, "Location.Z", xo.Location.Z.ToString("R"), yo.Location.Z.ToString("R"));
-            if (xo.SourceConfidence != yo.SourceConfidence)
-                return new ParityDiff(false, recordIndex, "SourceConfidence", xo.SourceConfidence.ToString("R"), yo.SourceConfidence.ToString("R"));
-            if (xo.Value != yo.Value)
-                return new ParityDiff(false, recordIndex, "Value", xo.Value.ToString("R"), yo.Value.ToString("R"));
-            if (xo.TypeAnchorVerified != yo.TypeAnchorVerified)
-                return new ParityDiff(false, recordIndex, "TypeAnchorVerified", xo.TypeAnchorVerified.ToString(), yo.TypeAnchorVerified.ToString());
-
-            // Approach avenue (nested struct)
-            var xa = xo.ApproachAvenue;
-            var ya = yo.ApproachAvenue;
-            if (xa.HasAvenue != ya.HasAvenue)
-                return new ParityDiff(false, recordIndex, "ApproachAvenue.HasAvenue", xa.HasAvenue.ToString(), ya.HasAvenue.ToString());
-            if (xa.HasAvenue) // only compare populated fields when both have an avenue
-            {
-                if (xa.Origin.X != ya.Origin.X)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Origin.X", xa.Origin.X.ToString("R"), ya.Origin.X.ToString("R"));
-                if (xa.Origin.Z != ya.Origin.Z)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Origin.Z", xa.Origin.Z.ToString("R"), ya.Origin.Z.ToString("R"));
-                if (xa.Objective.X != ya.Objective.X)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Objective.X", xa.Objective.X.ToString("R"), ya.Objective.X.ToString("R"));
-                if (xa.Objective.Z != ya.Objective.Z)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Objective.Z", xa.Objective.Z.ToString("R"), ya.Objective.Z.ToString("R"));
-                if (xa.AxisX != ya.AxisX)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.AxisX", xa.AxisX.ToString("R"), ya.AxisX.ToString("R"));
-                if (xa.AxisZ != ya.AxisZ)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.AxisZ", xa.AxisZ.ToString("R"), ya.AxisZ.ToString("R"));
-                if (xa.Source != ya.Source)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Source", xa.Source.ToString(), ya.Source.ToString());
-                if (xa.Confidence01 != ya.Confidence01)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Confidence01", xa.Confidence01.ToString("R"), ya.Confidence01.ToString("R"));
-                if (xa.RoadAnchored != ya.RoadAnchored)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.RoadAnchored", xa.RoadAnchored.ToString(), ya.RoadAnchored.ToString());
-                if (xa.CrossingAnchored != ya.CrossingAnchored)
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.CrossingAnchored", xa.CrossingAnchored.ToString(), ya.CrossingAnchored.ToString());
-                if (!string.Equals(xa.Reason, ya.Reason, StringComparison.Ordinal))
-                    return new ParityDiff(false, recordIndex, "ApproachAvenue.Reason", Trunc(xa.Reason), Trunc(ya.Reason));
-            }
-
-            // Derived fields — most likely to diverge if aggregate misses a unit
-            if (x.Status != y.Status)
-                return new ParityDiff(false, recordIndex, "Status", x.Status.ToString(), y.Status.ToString());
-            if (x.EnemyStrength != y.EnemyStrength)
-                return new ParityDiff(false, recordIndex, "EnemyStrength", x.EnemyStrength.ToString("R"), y.EnemyStrength.ToString("R"));
-            if (x.FriendlyAssignedStrength != y.FriendlyAssignedStrength)
-                return new ParityDiff(false, recordIndex, "FriendlyAssignedStrength", x.FriendlyAssignedStrength.ToString("R"), y.FriendlyAssignedStrength.ToString("R"));
-            if (x.HasUsableStrengthEvidence != y.HasUsableStrengthEvidence)
-                return new ParityDiff(false, recordIndex, "HasUsableStrengthEvidence", x.HasUsableStrengthEvidence.ToString(), y.HasUsableStrengthEvidence.ToString());
-
-            return ParityDiff.Equal;
-        }
-
-        private static void EmitParityMismatch(
-            int battleSeq,
-            int allianceId,
-            ObjectiveRecord[] legacy,
-            ObjectiveRecord[] aggregate,
-            ParityDiff diff)
-        {
-            try
-            {
-                TelemetryRouter.Emit(
-                    TelemetryLayer.Tactical,
-                    TelemetryCategory.Gate,
-                    "TacticalObjectiveRecordsParityMismatch",
-                    TelemetrySeverity.Warning,
-                    ev => ev
-                        .WithSide(allianceId)
-                        .WithDecision("mismatch", "objective-records", "battleSeq=" + battleSeq + "|alliance=" + allianceId)
-                        .WithField("legacyCount", legacy?.Length ?? -1)
-                        .WithField("aggregateCount", aggregate?.Length ?? -1)
-                        .WithField("battleSequence", battleSeq)
-                        .WithField("allianceId", allianceId)
-                        .WithField("diffIndex", diff.FirstDifferingIndex)
-                        .WithField("diffField", diff.FirstDifferingField)
-                        .WithField("legacyValue", diff.LegacyValue)
-                        .WithField("aggregateValue", diff.AggregateValue));
-            }
-            catch { }
         }
 
         // ---- Internal cheap helpers (no heavy vision / sector iteration) ----
@@ -523,29 +267,46 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
-        private static bool ComputeAnyPathInterruptedOrNewContact(BattleUnits bunits)
+        private static int ComputeInterruptedContactBucket(BattleUnits bunits)
         {
+            // Replaces ComputeAnyPathInterruptedOrNewContact (2026-05-22). The
+            // prior bool flipped on every cycle once contact was made because
+            // groupenemiesinrange oscillates as units enter/exit fire range —
+            // causing heavy-gate signature mismatches and re-fires every cycle.
+            //
+            // New form: count units matching the condition, bucket into discrete
+            // ranges so signature only changes on meaningful shifts:
+            //   0  → 0 contacts
+            //   1  → 1-3 contacts
+            //   2  → 4-10 contacts
+            //   3  → 11+ contacts
+            //
+            // Same bounded scan (first 40 units) to keep the signature computation
+            // cheap on every vanilla side-stat tick.
             try
             {
-                if (bunits == null) return false;
+                if (bunits == null) return 0;
                 var units = BattleUnits.completeunitlist as IList;
-                if (units == null || units.Count == 0) return false;
+                if (units == null || units.Count == 0) return 0;
 
-                // Bounded scan (cheap path) — first 40 units sufficient for change detection
                 int limit = Math.Min(units.Count, 40);
+                int count = 0;
                 for (int i = 0; i < limit; i++)
                 {
                     var reg = units[i] as Regiment;
                     if (reg != null && (reg.pathinterrupted || reg.groupenemiesinrange > 0))
                     {
-                        return true;
+                        count++;
                     }
                 }
-                return false;
+                if (count <= 0) return 0;
+                if (count <= 3) return 1;
+                if (count <= 10) return 2;
+                return 3;
             }
             catch
             {
-                return false;
+                return 0;
             }
         }
     }

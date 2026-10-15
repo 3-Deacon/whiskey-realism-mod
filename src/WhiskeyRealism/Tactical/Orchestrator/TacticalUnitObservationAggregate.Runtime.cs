@@ -16,18 +16,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public sealed partial class TacticalUnitObservationAggregate
     {
-        private static FieldInfo _commandHierarchyShiftField;
-        private static FieldInfo _fatigueField;
-        private static FieldInfo _ammoField;
         private static int _captureFailureLogged;  // OnceLog gate
 
         /// <summary>
         /// Single-walk capture. Walks <c>BattleUnits.completeunitlist</c>
         /// once, populating allied-specific fields (visibility, objective,
-        /// waypoint, fatigue/ammo) only when the candidate's
+        /// waypoint) only when the candidate's
         /// <c>reg.alliance == allianceId</c>. Enemy units get cheap
-        /// fields (position, strength, unittyp, routed flag,
-        /// permanently-detached flag) only — matching the pre-refactor
+        /// fields (strength, routed flag, permanently-detached flag) only — matching the pre-refactor
         /// cost profile where visibility logic was gated by
         /// <c>IsUsableOwnUnit</c>.
         /// </summary>
@@ -39,7 +35,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _capturedForAlliance = allianceId;
             try
             {
-                int shift = ReadCommandHierarchyShift();
                 var raw = BattleUnits.completeunitlist as IList;
                 if (raw == null) return this;
                 for (int i = 0; i < raw.Count; i++)
@@ -47,7 +42,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var reg = raw[i] as Regiment;
                     if (reg == null) continue;
                     bool isOwn = reg.alliance == allianceId;
-                    var obs = CaptureUnit(reg, isOwn, shift);
+                    var obs = CaptureUnit(reg, isOwn);
                     _units.Add(obs);
                     int idx = _units.Count - 1;
                     if (isOwn) _alliedIndices.Add(idx);
@@ -66,7 +61,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return this;
         }
 
-        private TacticalUnitObservation CaptureUnit(Regiment reg, bool isOwn, int commandHierarchyShift)
+        private TacticalUnitObservation CaptureUnit(Regiment reg, bool isOwn)
         {
             int instanceId = 0;
             float worldX = 0f, worldZ = 0f;
@@ -86,7 +81,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             catch { }
 
-            int unittyp = SafeUnittyp(reg);
             int alliance = SafeAlliance(reg);
             bool isRouted = SafeIsRouted(reg);
             bool permanentlyDetached = SafePermanentlyDetached(reg);
@@ -96,13 +90,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float strength = 0f;
             try { strength = TacticalVisionRuntimeAdapter.SafeStrength(reg); }
             catch { strength = 0f; }
-            float groupOwnInRange = SafeOwnInRange(reg);
-            float groupAiGroup = SafeAiGroup(reg);
 
             bool hasObj = false;
             string objectiveName = string.Empty;
             float objX = 0f, objZ = 0f;
-            var objType = TacticalObjectiveType.UnknownVanillaObjective;
             bool hasLastWaypoint = false;
             float lastWaypointX = 0f, lastWaypointZ = 0f;
             // VisibleEnemyStrength = legacy EstimateVisibleEnemyStrength(own) — strength of single
@@ -112,8 +103,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool hasVisibleEnemy = false;
             bool hasVisibleEnemyPosition = false;
             float visibleEnemyX = 0f, visibleEnemyZ = 0f;
-            float fatigue01 = 0.2f;
-            float ammo01 = 0.9f;
 
             if (isOwn)
             {
@@ -130,7 +119,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                             objectiveName = TacticalVisionRuntimeAdapter.SafeObjectiveName(obj);
                             objX = pt.X;
                             objZ = pt.Z;
-                            objType = TacticalObjectiveType.UnknownVanillaObjective;
                         }
                     }
                 }
@@ -192,28 +180,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     }
                 }
                 catch { }
-
-                fatigue01 = ClampUnit(SafeFloat(reg, ref _fatigueField, "fatigue"), 0.2f);
-                ammo01 = ClampUnit(SafeFloat(reg, ref _ammoField, "ammo"), 0.9f);
             }
 
-            int effective = unittyp - commandHierarchyShift;
             return new TacticalUnitObservation(
                 instanceId: instanceId,
-                unittyp: unittyp,
                 alliance: alliance,
                 isRouted: isRouted,
                 permanentlyDetached: permanentlyDetached,
-                worldX: worldX,
-                worldZ: worldZ,
                 strength: strength,
-                groupOwnInRange: groupOwnInRange,
-                groupAiGroup: groupAiGroup,
                 hasCurrentSetObjective: hasObj,
                 objectiveName: objectiveName,
                 objectiveX: objX,
                 objectiveZ: objZ,
-                objectiveType: objType,
                 hasLastWaypoint: hasLastWaypoint,
                 lastWaypointX: lastWaypointX,
                 lastWaypointZ: lastWaypointZ,
@@ -221,13 +199,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 hasVisibleEnemy: hasVisibleEnemy,
                 hasVisibleEnemyPosition: hasVisibleEnemyPosition,
                 visibleEnemyX: visibleEnemyX,
-                visibleEnemyZ: visibleEnemyZ,
-                fatigue01: fatigue01,
-                ammo01: ammo01,
-                effectiveCommandLevel: effective);
+                visibleEnemyZ: visibleEnemyZ);
         }
 
-        private static int SafeUnittyp(Regiment reg) { try { return reg.unittyp; } catch { return 0; } }
         private static int SafeAlliance(Regiment reg) { try { return reg.alliance; } catch { return -1; } }
         private static bool SafeIsRouted(Regiment reg)
         {
@@ -239,48 +213,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // permanentlydetached is a public bool field on Regiment — use direct access.
             try { return reg.permanentlydetached; }
             catch { return false; }
-        }
-        private static float SafeOwnInRange(Regiment reg) { try { return reg.groupowninrange; } catch { return 0f; } }
-        private static float SafeAiGroup(Regiment reg) { try { return reg.groupstrengthaigroup; } catch { return 0f; } }
-
-        private static float SafeFloat(Regiment reg, ref FieldInfo cache, string fieldName)
-        {
-            try
-            {
-                if (cache == null) cache = AccessTools.Field(typeof(Regiment), fieldName);
-                if (cache == null) return 0f;
-                var v = cache.GetValue(reg);
-                return v is float f ? f : 0f;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static float ClampUnit(float v, float fallback)
-        {
-            if (float.IsNaN(v) || float.IsInfinity(v)) return fallback;
-            if (v < 0f) return 0f;
-            if (v > 1f) return 1f;
-            return v;
-        }
-
-        private static int ReadCommandHierarchyShift()
-        {
-            try
-            {
-                if (_commandHierarchyShiftField == null)
-                    _commandHierarchyShiftField = AccessTools.Field(typeof(GamePrefs), "commandhierarchyshift");
-                if (_commandHierarchyShiftField == null) return 0;
-                var v = _commandHierarchyShiftField.GetValue(null);
-                if (v is int shift) return shift;
-                return 0;
-            }
-            catch
-            {
-                return 0;
-            }
         }
     }
 }

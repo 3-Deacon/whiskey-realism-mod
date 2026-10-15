@@ -8,19 +8,32 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla Regiment.AddPath calculates one NavMesh path segment, but exact
-    // endpoint equality and retained failed fragments can poison tactical retries.
+    // #53 — Regiment.AddPath (decompile 130259) calculates one NavMesh path
+    // segment for RegimentSetPath's retry loop (131167-131178, up to 20
+    // iterations). AddPath returns 1 only on exact float equality between the
+    // last corner and the target (130517), which a navmesh-snapped target never
+    // satisfies, so vanilla keeps adding sliver segments until the iteration
+    // cap. This Postfix ends that loop (result 0 -> 1) when the added segment
+    // already ends within tolerance of the target.
+    //
+    // It never removes a segment: vanilla deliberately accepts partial/invalid
+    // paths once iterations >= 15 (130511) and chains from a mismatched
+    // endpoint, and removing them left units with zero paths (R10). AI-controlled
+    // units only, behind TacticalWriteGuard (Commander Mode + W&L/player), so
+    // player right-click orders are untouched.
     [HarmonyPatch(typeof(Regiment), "AddPath")]
     internal static class TacticalPathfinderDisciplinePatch
     {
         private const float EndpointToleranceMeters = 5f;
+        private static readonly Vector3[] CornerBuffer = new Vector3[128];
 
         [HarmonyPrefix]
         internal static void Prefix(Regiment __instance, out int __state)
         {
             using (TelemetryPerf.Scope("tactical.patch.pathfinder-discipline-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                __state = SafePathCount(__instance);
+                PatchFirstFire.Mark("tactical.patch.pathfinder-discipline-prefix");
+                __state = (UnityEngine.Object)__instance != null ? Math.Max(0, __instance.regimentpaths) : -1;
             }
         }
 
@@ -34,48 +47,37 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.pathfinder-discipline", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (!Enabled()) return;
+                PatchFirstFire.Mark("tactical.patch.pathfinder-discipline");
+                if (__state < 0 || __result != 0) return;
 
                 try
                 {
-                    if (__instance == null || __instance.calledfromcampaign || __instance.unittyp == 17) return;
-                    if (__instance.regimentpath == null || __state < 0) return;
+                    int after = __instance.regimentpaths;
+                    if (after <= __state) return;
+                    if (!Enabled()) return;
+                    if (__instance.calledfromcampaign || __instance.unittyp == 17) return;
 
-                    int after = SafePathCount(__instance);
+                    NavMeshPath[] paths = __instance.regimentpath;
                     int pathIndex = after - 1;
-                    NavMeshPath path = pathIndex >= 0 && pathIndex < __instance.regimentpath.Length
-                        ? __instance.regimentpath[pathIndex]
-                        : null;
-                    Vector3[] corners = path != null ? path.corners : null;
-                    int cornerCount = corners != null ? corners.Length : 0;
-                    float finalDistance = cornerCount > 0
-                        ? XzDistance(corners[cornerCount - 1], target)
-                        : 0f;
+                    if (paths == null || pathIndex < 0 || pathIndex >= paths.Length || paths[pathIndex] == null) return;
 
-                    TacticalPathfinderAddPathDecision decision =
-                        TacticalBattlefieldBugDiagnostics.ClassifyAddPathOutcome(
-                            vanillaResult: __result,
-                            pathCountBefore: __state,
-                            pathCountAfter: after,
-                            cornerCount: cornerCount,
-                            navStatus: path != null ? path.status.ToString() : "-",
-                            finalDistanceToTarget: finalDistance,
-                            endpointTolerance: EndpointToleranceMeters);
+                    if (!TryLastCorner(paths[pathIndex], out Vector3 lastCorner, out int cornerCount)) return;
 
-                    if (!decision.IsBehaviorChange) return;
+                    AddPathDecision decision = BattleWriterPolicy.DecideAddPath(
+                        pathAdded: true,
+                        cornerCount: cornerCount,
+                        vanillaResult: __result,
+                        finalDistance: XzDistance(lastCorner, target),
+                        tolerance: EndpointToleranceMeters);
+                    if (!decision.OverrideResult) return;
+                    if (!TacticalWriteGuard.CanWrite(__instance)) return;
 
-                    if (decision.ShouldRemoveAddedPath)
-                        RemoveAddedPaths(__instance, __state, after);
-                    if (decision.ShouldOverrideResult)
-                        __result = decision.OverrideResult;
-
+                    __result = decision.Result;
                     OnceLog.Info(
-                        "tactical-pathfinder-discipline:" + decision.Reason,
+                        "tactical-pathfinder-discipline:endpoint-within-tolerance",
                         "[TacticalPathfinderDiscipline] reason=" + decision.Reason +
-                        " result=" + __result +
                         " iterations=" + iterations +
-                        " unit=" + SafeUnitName(__instance) +
-                        " " + decision.Signature);
+                        " corners=" + cornerCount);
                 }
                 catch (Exception ex)
                 {
@@ -95,31 +97,24 @@ namespace WhiskeyRealism.Patches
                 Plugin.Instance.EnableTacticalPathfinderDiscipline.Value;
         }
 
-        private static int SafePathCount(Regiment regiment)
+        // GetCornersNonAlloc truncates to the buffer; fall back to the
+        // allocating corners array only for very long paths.
+        private static bool TryLastCorner(NavMeshPath path, out Vector3 lastCorner, out int cornerCount)
         {
-            if (regiment == null) return 0;
-            return regiment.regimentpaths < 0 ? 0 : regiment.regimentpaths;
-        }
-
-        private static void RemoveAddedPaths(Regiment regiment, int before, int after)
-        {
-            int safeBefore = Math.Max(0, before);
-            int safeAfter = Math.Max(safeBefore, after);
-            if (regiment.regimentpath != null)
+            lastCorner = default(Vector3);
+            cornerCount = path.GetCornersNonAlloc(CornerBuffer);
+            if (cornerCount <= 0) return false;
+            if (cornerCount < CornerBuffer.Length)
             {
-                int max = Math.Min(safeAfter, regiment.regimentpath.Length);
-                for (int i = safeBefore; i < max; i++)
-                    regiment.regimentpath[i] = new NavMeshPath();
+                lastCorner = CornerBuffer[cornerCount - 1];
+                return true;
             }
 
-            if (regiment.pathstatus != null)
-            {
-                int max = Math.Min(safeAfter, regiment.pathstatus.Length);
-                for (int i = safeBefore; i < max; i++)
-                    regiment.pathstatus[i] = 0;
-            }
-
-            regiment.regimentpaths = safeBefore;
+            Vector3[] corners = path.corners;
+            cornerCount = corners != null ? corners.Length : 0;
+            if (cornerCount <= 0) return false;
+            lastCorner = corners[cornerCount - 1];
+            return true;
         }
 
         private static float XzDistance(Vector3 a, Vector3 b)
@@ -127,13 +122,6 @@ namespace WhiskeyRealism.Patches
             float dx = a.x - b.x;
             float dz = a.z - b.z;
             return Mathf.Sqrt(dx * dx + dz * dz);
-        }
-
-        private static string SafeUnitName(Regiment regiment)
-        {
-            if (regiment == null) return "-";
-            string value = regiment.name;
-            return TacticalCurrentOrderSignature.Safe(value);
         }
     }
 }

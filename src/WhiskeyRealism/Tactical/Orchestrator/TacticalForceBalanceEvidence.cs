@@ -4,6 +4,26 @@ using System.Collections.Generic;
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
+    /// Side-level battle stance — corresponds to vanilla
+    /// <c>BattleUnits.GetBattleType(alliance)</c> at decompile line 86095.
+    /// Set at battle start (and rarely updated) from objective-points-held
+    /// ratio. The doctrine + playbook layer hard-filter on this so we never
+    /// produce attack output on a defender side, or pure-delay output on
+    /// an attacker side. Mirrors Scourge of War's <c>OpenType()</c> +
+    /// <c>Rank(eRankSide)</c> pattern (offai.cpp:1151-1159).
+    /// </summary>
+    public enum BattleStance
+    {
+        /// <summary>Neither side holds enough objectives — collide-while-moving.</summary>
+        Meeting = 0,
+        /// <summary>We're attacking (enemy holds the defensive objectives).</summary>
+        Attacker = 1,
+        /// <summary>We're defending (we hold the defensive objectives).</summary>
+        Defender = 2,
+    }
+
+
+    /// <summary>
     /// A single scheduled arrival: time-until-arrival in hours, expected
     /// strength of the arriving force.
     /// </summary>
@@ -27,14 +47,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
     /// <summary>
     /// Pure DTO holding everything the reinforcement-opportunity doctrine
-    /// needs: own and enemy deployed strength right now, both sides'
-    /// scheduled reinforcements (sorted by arrival time), and the commander's
-    /// initiative/aggression along with an intel-confidence factor (lower
-    /// when scout coverage is poor).
+    /// needs: own deployed strength and own scheduled reinforcements (the
+    /// side's own knowledge), the enemy strength the side has had in range
+    /// (contact ledger), and the commander's initiative/aggression along with
+    /// the ledger's intel confidence.
     ///
-    /// Test-friendly: no Unity types, no vanilla types. Built by the runtime
-    /// from BattleUnits.sideinformation + BattleUnits.scheduledarrival; pure
-    /// callers in tests can construct directly.
+    /// There is no enemy-arrivals list: the side cannot see the enemy's
+    /// schedule. Enemy reinforcements count once they are on the map and in
+    /// range, through the ledger estimate.
+    ///
+    /// Test-friendly: no Unity types, no vanilla types.
     /// </summary>
     public readonly struct TacticalForceBalanceEvidence
     {
@@ -42,27 +64,63 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownDeployedStrength,
             float enemyDeployedStrength,
             IReadOnlyList<ReinforcementArrival> ownArrivals,
-            IReadOnlyList<ReinforcementArrival> enemyArrivals,
             float commanderInitiative01,
             float commanderAggression01,
-            float intelConfidence01)
+            float intelConfidence01,
+            float ownCasualtyRatio01 = 0f,
+            float ownRoutedFraction01 = 0f,
+            float battleHoursElapsed = 0f,
+            BattleStance stance = BattleStance.Meeting)
         {
             OwnDeployedStrength = SanitizeNonNeg(ownDeployedStrength);
             EnemyDeployedStrength = SanitizeNonNeg(enemyDeployedStrength);
             OwnArrivals = ownArrivals ?? Array.Empty<ReinforcementArrival>();
-            EnemyArrivals = enemyArrivals ?? Array.Empty<ReinforcementArrival>();
             CommanderInitiative01 = Clamp01(commanderInitiative01);
             CommanderAggression01 = Clamp01(commanderAggression01);
             IntelConfidence01 = Clamp01(intelConfidence01);
+            OwnCasualtyRatio01 = Clamp01(ownCasualtyRatio01);
+            OwnRoutedFraction01 = Clamp01(ownRoutedFraction01);
+            BattleHoursElapsed = SanitizeNonNeg(battleHoursElapsed);
+            Stance = stance;
         }
 
         public float OwnDeployedStrength { get; }
         public float EnemyDeployedStrength { get; }
         public IReadOnlyList<ReinforcementArrival> OwnArrivals { get; }
-        public IReadOnlyList<ReinforcementArrival> EnemyArrivals { get; }
         public float CommanderInitiative01 { get; }
         public float CommanderAggression01 { get; }
         public float IntelConfidence01 { get; }
+
+        /// <summary>
+        /// Own casualty ratio: cumulative losses / total active force.
+        /// Mirrors vanilla <c>BattleUnits.sideinformation[side].casualtyratio</c>
+        /// at decompile line 84662. Used by doctrine to escalate from
+        /// DelayingDefense → WithdrawalToFightLater when losses mount.
+        /// </summary>
+        public float OwnCasualtyRatio01 { get; }
+
+        /// <summary>
+        /// Fraction of own brigades that have routed or been destroyed.
+        /// Mirrors vanilla <c>routedratio + numberofrouts</c>. Used by doctrine
+        /// as a secondary escalation trigger (sudden routs imply morale
+        /// collapse even when raw casualty count is low).
+        /// </summary>
+        public float OwnRoutedFraction01 { get; }
+
+        /// <summary>
+        /// Real-time hours since battle start. Used by doctrine: very long
+        /// battles in DelayingDefense without parity relief should escalate
+        /// to WithdrawalToFightLater (the delay window has elapsed without
+        /// the situation improving).
+        /// </summary>
+        public float BattleHoursElapsed { get; }
+
+        /// <summary>
+        /// Battle stance from vanilla <c>GetBattleType(alliance)</c>. Hard-filters
+        /// the doctrine + playbook layer so they can't produce attack outcomes
+        /// on a defender side or pure-delay outcomes on an attacker side.
+        /// </summary>
+        public BattleStance Stance { get; }
 
         /// <summary>
         /// Current ratio of own vs enemy deployed strength. Returns 1.0 when
@@ -78,23 +136,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Total enemy strength expected within the given window (in hours),
-        /// including currently-deployed force plus arrivals that land within
-        /// the window.
-        /// </summary>
-        public float EnemyStrengthAtHour(float hoursFromNow)
-        {
-            float total = EnemyDeployedStrength;
-            for (int i = 0; i < EnemyArrivals.Count; i++)
-            {
-                if (EnemyArrivals[i].HoursUntilArrival <= hoursFromNow)
-                    total += EnemyArrivals[i].EstimatedStrength;
-            }
-            return total;
-        }
-
-        /// <summary>
-        /// Same as EnemyStrengthAtHour but for own force.
+        /// Own force expected within the given window (hours): deployed plus
+        /// own scheduled arrivals that land within it.
         /// </summary>
         public float OwnStrengthAtHour(float hoursFromNow)
         {
@@ -108,50 +151,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Hours until enemy force ≥ own force (parity for enemy). Returns
-        /// HoursUntilNever (= 999f) when the parity is never reached within
-        /// the next 48 hours of arrivals (enemy never catches up).
+        /// Hours until enemy force ≥ own force (parity for enemy): 0 when the
+        /// known enemy already matches us, otherwise HoursUntilNever (999).
+        /// The enemy's known strength does not grow on a schedule (no
+        /// enemy-arrivals input), and own arrivals only widen the gap.
         /// </summary>
         public float ParityHoursForEnemy()
         {
             const float HoursUntilNever = 999f;
-            // Step through arrival events sorted by time. At each event,
-            // recompute own/enemy strengths and check for parity.
-            var events = MergedArrivalEvents();
-            for (int i = 0; i < events.Count; i++)
-            {
-                float h = events[i];
-                if (EnemyStrengthAtHour(h) >= OwnStrengthAtHour(h)) return h;
-            }
-            return HoursUntilNever;
+            return EnemyDeployedStrength >= OwnDeployedStrength ? 0f : HoursUntilNever;
         }
 
         /// <summary>
-        /// Hours until own force ≥ enemy force. Returns HoursUntilNever (= 999f)
-        /// when own never catches enemy.
+        /// Hours until own force ≥ the known enemy force. Returns
+        /// HoursUntilNever (= 999f) when own arrivals never catch up.
         /// </summary>
         public float ParityHoursForOwn()
         {
             const float HoursUntilNever = 999f;
             if (OwnDeployedStrength >= EnemyDeployedStrength) return 0f;
-            var events = MergedArrivalEvents();
+            var events = OwnArrivalEvents();
             for (int i = 0; i < events.Count; i++)
             {
                 float h = events[i];
-                if (OwnStrengthAtHour(h) >= EnemyStrengthAtHour(h)) return h;
+                if (OwnStrengthAtHour(h) >= EnemyDeployedStrength) return h;
             }
             return HoursUntilNever;
         }
 
-        private List<float> MergedArrivalEvents()
+        private List<float> OwnArrivalEvents()
         {
-            // Returns a sorted+deduped list of all distinct arrival times
-            // from both sides. The doctrine evaluates parity at each
-            // transition point.
+            // Sorted, deduped own arrival times, plus hour 0.
             var set = new SortedSet<float>();
             for (int i = 0; i < OwnArrivals.Count; i++) set.Add(OwnArrivals[i].HoursUntilArrival);
-            for (int i = 0; i < EnemyArrivals.Count; i++) set.Add(EnemyArrivals[i].HoursUntilArrival);
-            // Always evaluate at hour 0 (current state) for completeness.
             set.Add(0f);
             return new List<float>(set);
         }

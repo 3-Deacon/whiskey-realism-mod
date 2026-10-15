@@ -1,84 +1,41 @@
 using System;
 using HarmonyLib;
-using UnityEngine;
-using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla BattleUnits.CombineUnits moves artillery crew strength from the
-    // source to the target, but never adds the source unit's organic guns to the
-    // receiving unit. This Postfix preserves the proportional source guns that
-    // correspond to the men actually transferred.
+    // #34 — Vanilla BattleUnits.CombineUnits (decompile 93153) moves artillery
+    // crew strength between batteries and only refreshes statsguns
+    // (UpdateStatsGuns 135252), leaving `guns` at the pre-combine value until
+    // the next Regiment.Initialize recomputes it as
+    // GetSollGuns(forinitialization: true) (112681). This Postfix applies that
+    // same derivation right after the combine on the campaign map (pure
+    // BattleWriterPolicy.GunsAfterCombine), so the UI and the next load agree.
+    // The previous proportional "guns += delta" edit was not durable: Initialize
+    // overwrote it on load. Rollback: Campaign / Enable Artillery Combine Gun Sync.
     [HarmonyPatch(typeof(BattleUnits), "CombineUnits")]
     internal static class ArtilleryCombineGunTransferPatch
     {
-        [HarmonyPrefix]
-        internal static void Prefix(Regiment unitsource, Regiment unitto, ref State __state)
-        {
-            using (TelemetryPerf.Scope("campaign.patch.arty-combine-gun-transfer.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
-            {
-                __state = default;
-                try
-                {
-                    if (!Enabled()) return;
-                    if ((UnityEngine.Object)(object)unitsource == (UnityEngine.Object)null ||
-                        (UnityEngine.Object)(object)unitto == (UnityEngine.Object)null)
-                    {
-                        return;
-                    }
-                    if (unitsource.unittyp != 2 || unitto.unittyp != 2) return;
-
-                    __state = new State(
-                        unitsource,
-                        unitto,
-                        TotalMen(unitsource),
-                        TotalMen(unitto),
-                        Math.Max(0, unitsource.guns),
-                        Math.Max(0, unitto.guns));
-                }
-                catch (Exception ex)
-                {
-                    OnceLog.Warning("artillery-combine-guns:prefix", "[Patch:ArtilleryCombine] prefix failed: " + ex.Message);
-                }
-            }
-        }
-
         [HarmonyPostfix]
-        internal static void Postfix(State __state)
+        internal static void Postfix(Regiment unitsource, Regiment unitto, bool __result)
         {
             using (TelemetryPerf.Scope("campaign.patch.arty-combine-gun-transfer.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.arty-combine-gun-transfer.postfix");
                 try
                 {
-                    if (!__state.Valid) return;
-                    var target = __state.Target;
-                    if ((UnityEngine.Object)(object)target == (UnityEngine.Object)null) return;
+                    if (!Enabled()) return;
+                    if ((UnityEngine.Object)unitto == null || unitto.unittyp != 2) return;
 
-                    int transferredMen = TotalMen(target) - __state.TargetMenBefore;
-                    int gunsToTransfer = ArtilleryCombineGunTransfer.CalculateGunsToTransfer(
-                        isArtillery: true,
-                        sourceGuns: __state.SourceGunsBefore,
-                        sourceTotalMen: __state.SourceMenBefore,
-                        transferredMen: transferredMen);
-                    if (gunsToTransfer <= 0) return;
+                    bool changed = SyncGuns(unitto);
+                    // CombineUnits returns true when it deleted an emptied source.
+                    if (!__result && (UnityEngine.Object)unitsource != null && unitsource.unittyp == 2)
+                        changed |= SyncGuns(unitsource);
 
-                    int desiredTargetGuns = __state.TargetGunsBefore + gunsToTransfer;
-                    if (target.guns >= desiredTargetGuns) return;
-
-                    int delta = desiredTargetGuns - target.guns;
-                    target.guns += delta;
-                    target.UpdateStatsGuns(adjuststatdata: false);
-
-                    var source = __state.Source;
-                    if ((UnityEngine.Object)(object)source != (UnityEngine.Object)null && TotalMen(source) > 0)
-                    {
-                        source.guns = Math.Max(0, source.guns - delta);
-                        source.UpdateStatsGuns(adjuststatdata: false);
-                    }
-
-                    OnceLog.Info("artillery-combine-guns", "[Patch:ArtilleryCombine] preserved source artillery guns during CombineUnits");
+                    if (changed)
+                        OnceLog.Info("artillery-combine-guns", "[Patch:ArtilleryCombine] synced battery guns to GetSollGuns after CombineUnits");
                 }
                 catch (Exception ex)
                 {
@@ -87,43 +44,30 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static int TotalMen(Regiment unit)
+        private static bool SyncGuns(Regiment unit)
         {
-            return Math.Max(0, unit.strength) + Math.Max(0, unit.losses[0]) + Math.Max(0, unit.sick);
+            if (!unit.calledfromcampaign) return false;
+            int guns = BattleWriterPolicy.GunsAfterCombine(
+                isArtillery: true,
+                calledFromCampaign: true,
+                sollGuns: unit.GetSollGuns(forinitialization: true),
+                currentGuns: unit.guns);
+            if (guns == unit.guns) return false;
+
+            unit.guns = guns;
+            unit.UpdateStatsGuns(adjuststatdata: false);
+            return true;
         }
 
         private static bool Enabled()
         {
-            try { return Plugin.Instance != null && Plugin.Instance.Enabled.Value; }
-            catch { return false; }
-        }
-
-        internal readonly struct State
-        {
-            internal readonly Regiment Source;
-            internal readonly Regiment Target;
-            internal readonly int SourceMenBefore;
-            internal readonly int TargetMenBefore;
-            internal readonly int SourceGunsBefore;
-            internal readonly int TargetGunsBefore;
-
-            internal State(
-                Regiment source,
-                Regiment target,
-                int sourceMenBefore,
-                int targetMenBefore,
-                int sourceGunsBefore,
-                int targetGunsBefore)
+            try
             {
-                Source = source;
-                Target = target;
-                SourceMenBefore = sourceMenBefore;
-                TargetMenBefore = targetMenBefore;
-                SourceGunsBefore = sourceGunsBefore;
-                TargetGunsBefore = targetGunsBefore;
+                return Plugin.Instance != null && Plugin.Instance.Enabled.Value
+                    && Plugin.EnableArtilleryCombineGunSync != null
+                    && Plugin.EnableArtilleryCombineGunSync.Value;
             }
-
-            internal bool Valid => SourceMenBefore > 0 && SourceGunsBefore > 0;
+            catch { return false; }
         }
     }
 }

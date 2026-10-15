@@ -20,6 +20,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.economy-filter-assign-bootstrap", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.economy-filter-assign-bootstrap");
             try
             {
                 if (!Enabled()) return;

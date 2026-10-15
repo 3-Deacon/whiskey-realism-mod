@@ -19,25 +19,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public static partial class DirectChildDiscovery
     {
-        private static FieldInfo _commandHierarchyShiftField;
-
-        public static IReadOnlyList<DirectChildSnapshot> Snapshot(AIBattle battle)
+        static DirectChildDiscovery()
         {
-            // Backwards-compatible overload — when caller doesn't supply an alliance,
-            // fall back to the AIBattle's own sideofai mapping.
-            if (battle == null) return Array.Empty<DirectChildSnapshot>();
-            try
-            {
-                int allianceId = ResolveAllianceFromBattle(battle);
-                return Snapshot(allianceId);
-            }
-            catch (Exception e)
-            {
-                OnceLog.Warning("o3-direct-child-discovery:exception",
-                    "DirectChildDiscovery.Snapshot(battle) failed: " + e.GetType().Name + " " + e.Message);
-                return Array.Empty<DirectChildSnapshot>();
-            }
+            BattleScope.Register("direct-child-discovery", ResetForBattleEnd);
         }
+
+        private static FieldInfo _commandHierarchyShiftField;
 
         public static IReadOnlyList<DirectChildSnapshot> Snapshot(int allianceId)
         {
@@ -61,10 +48,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (units == null || units.Count == 0) return Array.Empty<RegimentProbe>();
             int effectiveCommandMin = ClampShiftedMin(commandHierarchyShift);
 
-            // First pass: walk every command-level group on this alliance and collect
-            // instanceIds of regiments flagged as direct children via vanilla's
-            // GetAttachedUnitsReg(directonly: true).
+            // Walk vanilla command hierarchy via GetAttachedUnitsReg to build
+            // TWO maps in one pass:
+            //   directChildren — set of instance ids that are a direct child of
+            //     some command-level parent.
+            //   directChildToParent — reverse map (child id -> parent id) so
+            //     we can populate parentInstanceId from the vanilla command
+            //     hierarchy. The prior code used go.transform.parent which is
+            //     the Unity scene-graph parent, NOT the command parent. Corps
+            //     / divisions in vanilla GTCW are typically siblings under a
+            //     common units root with the command hierarchy expressed only
+            //     through allattachedunits lists. That made parentInstanceId 0
+            //     for most units, which caused DirectChildDiscovery.Snapshot
+            //     to fall through to synth-army placeholders for any army
+            //     with no transform-parent-matched direct children.
+            //
+            // 2026-05-23 backport: the extended-probes path
+            // (BuildExtendedProbesForAlliance) was fixed in the 2026-05-19
+            // patch but the non-extended path still used transform.parent.
+            // Smoke confirmed synth-army-* IDs reappearing for CSA's corps
+            // root with no matched direct children. This brings both paths
+            // into sync.
             var directChildren = new HashSet<int>();
+            var directChildToParent = new Dictionary<int, int>();
             for (int i = 0; i < units.Count; i++)
             {
                 var reg = units[i] as Regiment;
@@ -73,6 +79,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 var regGo = ((Component)reg).gameObject;
                 if (regGo == null) continue;
                 if (reg.unittyp < effectiveCommandMin) continue;
+                int regInstanceId = regGo.GetInstanceID();
                 Regiment[] kids;
                 try { kids = reg.GetAttachedUnitsReg(true, true, -1, true, false, false, false, false); }
                 catch { kids = null; }
@@ -83,25 +90,43 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     if (kid == null) continue;
                     var kidGo = ((Component)kid).gameObject;
                     if (kidGo == null) continue;
-                    directChildren.Add(kidGo.GetInstanceID());
+                    int kidId = kidGo.GetInstanceID();
+                    directChildren.Add(kidId);
+                    // Record FIRST command parent. Walks in unit-list order
+                    // so an Army containing a Corps records Corps→Army before
+                    // nested walks try to claim it.
+                    if (!directChildToParent.ContainsKey(kidId))
+                        directChildToParent[kidId] = regInstanceId;
                 }
             }
 
+            // The W&L player's command subtree (dlcw_isundercommander) is never an
+            // AI direct child, as in ArmyPostureInputsRuntime's probe tree
+            // (PlayerCommandProbeFilter): no role is allocated to it.
+            bool wl = DLC_WL.dlc_scenarioactive;
             var result = new List<RegimentProbe>(units.Count);
             for (int i = 0; i < units.Count; i++)
             {
                 var reg = units[i] as Regiment;
                 if (reg == null) continue;
                 if (reg.alliance != allianceId) continue;
+                if (wl && reg.dlcw_isundercommander) continue;
                 var go = ((Component)reg).gameObject;
                 if (go == null) continue;
                 int instanceId = go.GetInstanceID();
-                var parentTransform = go.transform != null ? go.transform.parent : null;
+                // Vanilla command hierarchy parent FIRST; fall back to Unity
+                // transform parent only when no command parent claimed this
+                // unit (true top-level army node).
                 int parentInstanceId = 0;
-                if (parentTransform != null)
+                if (!directChildToParent.TryGetValue(instanceId, out parentInstanceId))
                 {
-                    var parentReg = parentTransform.GetComponent<Regiment>();
-                    if (parentReg != null) parentInstanceId = ((Component)parentReg).gameObject.GetInstanceID();
+                    parentInstanceId = 0;
+                    var parentTransform = go.transform != null ? go.transform.parent : null;
+                    if (parentTransform != null)
+                    {
+                        var parentReg = parentTransform.GetComponent<Regiment>();
+                        if (parentReg != null) parentInstanceId = ((Component)parentReg).gameObject.GetInstanceID();
+                    }
                 }
                 result.Add(new RegimentProbe(
                     instanceId: instanceId,
@@ -297,6 +322,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         private static readonly Dictionary<string, float> _lastProbeHealthTelemetryAt = new Dictionary<string, float>();
+
+        // Keys embed per-battle distributions; cleared at battle end so the dedupe
+        // dictionary does not grow across battles.
+        internal static void ResetForBattleEnd()
+        {
+            _lastProbeHealthTelemetryAt.Clear();
+        }
         private const float ProbeHealthTelemetrySeconds = 30f;
 
         private static int SafeStrengthBucket(Regiment reg)
@@ -335,28 +367,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             return true;
-        }
-
-        private static FieldInfo _sideOfAiField;
-        private static FieldInfo _bunitsField;
-
-        private static int ResolveAllianceFromBattle(AIBattle battle)
-        {
-            try
-            {
-                if (_sideOfAiField == null) _sideOfAiField = AccessTools.Field(typeof(AIBattle), "sideofai");
-                if (_bunitsField == null) _bunitsField = AccessTools.Field(typeof(AIBattle), "bunits");
-                if (_sideOfAiField == null || _bunitsField == null) return -1;
-                int side = (_sideOfAiField.GetValue(battle) is int s) ? s : -1;
-                if (side != 0 && side != 1) return -1;
-                var bunits = _bunitsField.GetValue(battle) as BattleUnits;
-                if (bunits == null || bunits.alliance == null || side >= bunits.alliance.Length) return -1;
-                return bunits.alliance[side];
-            }
-            catch
-            {
-                return -1;
-            }
         }
 
         private static int ReadCommandHierarchyShift()

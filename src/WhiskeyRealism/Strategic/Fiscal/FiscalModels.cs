@@ -24,8 +24,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
         DiscretionaryIndustry = 1,
         NewForceGrowth = 2,
         VanityNaval = 3,
-        TariffConflict = 4,
-        LowValueSubsidy = 5
+        TariffConflict = 4
     }
 
     public sealed class FiscalOptions
@@ -35,6 +34,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
         public int CreditDefenseExitBuffer = 2;
         public int EmergencyExitStableTicks = 14;
         public float MinimumSupplyProtection = 0.35f;
+        public float LowSupplySectorShare = 0.33f;
     }
 
     public sealed class FiscalStateMemory
@@ -42,6 +42,9 @@ namespace WhiskeyRealism.Strategic.Fiscal
         public FiscalPosture PreviousPosture = FiscalPosture.BalancedWar;
         public int StableTicksAboveEmergency;
         public bool EmergencyResidue;
+        // Tax snapshot taken when the alliance entered CreditDefense/Emergency; the
+        // stress tax floor is anchored to it. Null => use current taxes.
+        public float[] TaxFloorAnchor;
     }
 
     public sealed class FiscalInput
@@ -78,6 +81,7 @@ namespace WhiskeyRealism.Strategic.Fiscal
         public float AmmoPressure;
         public float TransportPressure;
         public int LowSupplyFormationCount;
+        public int SectorCount;
         public int LowAmmoFormationCount;
         public string TopSupplyTheater;
     }

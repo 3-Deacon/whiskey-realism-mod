@@ -83,7 +83,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             default(TacticalBattleStateSignature),
             0f,
             default(ArmyEvidence),
-            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, 0f),
+            new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false, intelConfidence01: 0f),
             0f,
             0f,
             0f,
@@ -107,13 +107,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownMainEffortStrength,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
-            float reinforcementsArrivingDelta,
+            float ownReinforcementsArriving,
             IReadOnlyList<ObjectiveRecord> objectives,
             CommandTreeSnapshot commandTree,
             IReadOnlyList<DirectChildSnapshot> directChildSnapshots)
             : this(signatureAtBuild, buildBattleHours, ownEvidence, enemyVisible,
                    ownMainEffortStrength, ownArmyMorale, ownReservesCommittedFraction,
-                   reinforcementsArrivingDelta, objectives, commandTree, directChildSnapshots,
+                   ownReinforcementsArriving, objectives, commandTree, directChildSnapshots,
                    ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
                    nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f)
         { }
@@ -126,7 +126,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float ownMainEffortStrength,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
-            float reinforcementsArrivingDelta,
+            float ownReinforcementsArriving,
             IReadOnlyList<ObjectiveRecord> objectives,
             CommandTreeSnapshot commandTree,
             IReadOnlyList<DirectChildSnapshot> directChildSnapshots,
@@ -142,7 +142,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             OwnMainEffortStrength = SanitizeNonNegative(ownMainEffortStrength);
             OwnArmyMorale = Clamp01(ownArmyMorale);
             OwnReservesCommittedFraction = Clamp01(ownReservesCommittedFraction);
-            ReinforcementsArrivingDelta = SanitizeNonNegative(reinforcementsArrivingDelta);
+            OwnReinforcementsArriving = SanitizeNonNegative(ownReinforcementsArriving);
             Objectives = CopyObjectives(objectives);
             CommandTree = commandTree ?? CommandTreeSnapshot.Empty;
             DirectChildSnapshots = CopyDirectChildSnapshots(directChildSnapshots);
@@ -159,7 +159,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float OwnMainEffortStrength { get; }
         public float OwnArmyMorale { get; }
         public float OwnReservesCommittedFraction { get; }
-        public float ReinforcementsArrivingDelta { get; }
+        /// <summary>
+        /// Own reinforcement strength due within 24 h
+        /// (sideinformation.reinforcementarrivalswithin24hrs). Own side only:
+        /// the enemy's schedule is not known; enemy arrivals count once in
+        /// range, through the contact ledger.
+        /// </summary>
+        public float OwnReinforcementsArriving { get; }
         public IReadOnlyList<ObjectiveRecord> Objectives { get; }
         public CommandTreeSnapshot CommandTree { get; }
         public IReadOnlyList<DirectChildSnapshot> DirectChildSnapshots { get; }

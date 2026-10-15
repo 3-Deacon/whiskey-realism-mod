@@ -188,6 +188,11 @@ namespace WhiskeyRealism.Telemetry
         internal TelemetryProfile Profile { get; private set; }
         internal string SessionId { get; private set; }
 
+        internal bool PerformanceWarnings
+        {
+            get { return _config == null || _config.PerformanceWarnings; }
+        }
+
         internal bool IsRunning
         {
             get { return _writer != null && !_shutdown; }
@@ -313,25 +318,12 @@ namespace WhiskeyRealism.Telemetry
                 Warn(_config, "Telemetry shutdown failed closed: " + ex.GetType().Name);
             }
 
-            try
-            {
-                WriteManifest(DateTime.UtcNow);
-            }
-            catch (Exception ex)
-            {
-                Warn(_config, "Telemetry shutdown manifest failed closed: " + ex.GetType().Name);
-            }
-
-            try
-            {
-                WriteSummaryOnShutdown();
-            }
-            catch (Exception ex)
-            {
-                if (_writer != null)
-                    _writer.RecordRuntimeSinkFailure("summary-write", ex);
-                Warn(_config, "Telemetry summary failed closed: " + ex.GetType().Name);
-            }
+            // Shutdown order: final manifest -> issue bundle (reads the manifest) -> summary
+            // (reads every sidecar, including a bundle failure row) -> manifest again only if
+            // a late sink failure changed the counters. Previously the manifest was written
+            // three times and the summary (a full sidecar parse) twice.
+            WriteFinalManifest();
+            long sinkFailuresAtFinalManifest = _writer != null ? _writer.SinkFailureCount : 0L;
 
             try
             {
@@ -346,15 +338,6 @@ namespace WhiskeyRealism.Telemetry
 
             try
             {
-                WriteManifest(DateTime.UtcNow);
-            }
-            catch (Exception ex)
-            {
-                Warn(_config, "Telemetry shutdown manifest failed closed: " + ex.GetType().Name);
-            }
-
-            try
-            {
                 WriteSummaryOnShutdown();
             }
             catch (Exception ex)
@@ -364,9 +347,19 @@ namespace WhiskeyRealism.Telemetry
                 Warn(_config, "Telemetry summary failed closed: " + ex.GetType().Name);
             }
 
+            if (_writer != null && _writer.SinkFailureCount != sinkFailuresAtFinalManifest)
+                WriteFinalManifest();
+        }
+
+        internal int FinalManifestWriteCount { get; private set; }
+        internal int SummaryWriteCount { get; private set; }
+
+        private void WriteFinalManifest()
+        {
             try
             {
                 WriteManifest(DateTime.UtcNow);
+                FinalManifestWriteCount++;
             }
             catch (Exception ex)
             {
@@ -422,10 +415,14 @@ namespace WhiskeyRealism.Telemetry
                     foreach (string file in _writer.OutputFilesSnapshot())
                         manifest.OutputFiles.Add(file);
                     manifest.DroppedCounters["sinkFailures"] = _writer.SinkFailureCount;
+                    if (_writer.TornRowCount > 0L)
+                        manifest.DroppedCounters["tornRows"] = _writer.TornRowCount;
                 }
 
                 if (_writerShutdownTimedOut)
                     manifest.DroppedCounters["writerShutdownTimedOut"] = 1L;
+
+                TelemetryFrameProbe.AddManifestStats(manifest.FrameProbe);
 
                 string path = Path.Combine(_sessionDirectory, "manifest.json");
                 File.WriteAllText(path, manifest.ToJson());
@@ -451,6 +448,8 @@ namespace WhiskeyRealism.Telemetry
             }
 
             AddStandardShutdownOutputs(files);
+            if (_config.EmitHumanSummary)
+                AddIfAbsent(files, Path.Combine(_sessionDirectory, "summary.md"));
 
             string note = "Telemetry issue bundle manifest generated on shutdown for session " + SessionId + ".";
             string json = TelemetryIssueBundle.CreateManifest(SessionId, _sessionDirectory, files, note).ToJson();
@@ -466,6 +465,7 @@ namespace WhiskeyRealism.Telemetry
 
             TelemetrySummary summary = TelemetrySummary.FromDirectory(_sessionDirectory);
             File.WriteAllText(Path.Combine(_sessionDirectory, "summary.md"), summary.ToMarkdown());
+            SummaryWriteCount++;
         }
 
         private void AddManifestOutputFiles(List<string> files)
@@ -502,6 +502,17 @@ namespace WhiskeyRealism.Telemetry
             AddIfExists(files, Path.Combine(_sessionDirectory, "performance.jsonl"));
             AddIfExists(files, Path.Combine(_sessionDirectory, "tactical.jsonl"));
             AddIfExists(files, Path.Combine(_sessionDirectory, "campaign.jsonl"));
+        }
+
+        private static void AddIfAbsent(List<string> files, string path)
+        {
+            for (int i = 0; i < files.Count; i++)
+            {
+                if (string.Equals(files[i], path, StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+
+            files.Add(path);
         }
 
         private static void AddIfExists(List<string> files, string path)

@@ -15,8 +15,6 @@ namespace WhiskeyRealism.Strategic
         Recover,
         Concede,
         CoordinateHold,
-        CoordinateMass,
-        CoordinateReserve,
-        CoordinateConcede
+        CoordinateMass
     }
 }

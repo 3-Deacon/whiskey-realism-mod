@@ -9,7 +9,9 @@ namespace WhiskeyRealism.Patches
     // Vanilla UpdateEconomyAllianceData aggregates IIP, corporate-building,
     // and town economy data for the current filter-map iterators. A null entry
     // can throw before UpdateFilterMaps advances those iterators, causing the
-    // same Player.log NRE every frame. This Finalizer suppresses only that NRE.
+    // same Player.log NRE every frame. This Finalizer suppresses only that NRE
+    // (UpdateEconomyAllianceData decompile 32344), and only when no Whiskey Realism frame
+    // is on the throwing stack.
     [HarmonyPatch(typeof(Economy), "UpdateEconomyAllianceData")]
     internal static class EconomyAllianceDataGuardPatch
     {
@@ -18,10 +20,18 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.economy-alliance-data-guard", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.economy-alliance-data-guard");
                 try
                 {
                     if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return __exception;
                     if (!EconomyAllianceDataGuard.ShouldSuppress(__exception)) return __exception;
+                    if (VanillaFaultSite.IsModFault(__exception))
+                    {
+                        OnceLog.Warning(
+                            "economy-alliance-data:mod-fault",
+                            "[Patch:EconomyAllianceData] not suppressing NullReferenceException; the throwing stack includes Whiskey Realism code.");
+                        return __exception;
+                    }
 
                     OnceLog.Warning(
                         "economy-alliance-data:nre",

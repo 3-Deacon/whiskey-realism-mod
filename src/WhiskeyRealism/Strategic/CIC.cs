@@ -7,14 +7,59 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Strategic
 {
+    // Config values the CIC reads. StrategicCoordinator refreshes these from Plugin config
+    // before every review so CIC.cs stays free of BepInEx types and compiles in the harness.
+    internal static class CicSettings
+    {
+        internal static bool OverrideVanillaSettings = true;  // Plugin default
+        internal static int LockedDifficulty = DifficultyPersonalityModifier.HistoricalHardDifficultyIndex;
+        internal static bool HistoricalOperationDoctrine = true;
+        internal static bool PlanTrace;
+    }
+
+    // R16: which alliances get an AI CIC. Vanilla only runs campaign AI for alliances that
+    // own an AIFaction, created in AICampaign.UpdateUnitAI (decompile 11356-11361) when
+    // `(k != GameVars.playeralliance) | GameVars.ai_vs_ai`; ai_vs_ai is true exactly when a
+    // W&L scenario is active (CampaignController 29787-29794). Once the aifaction list
+    // exists it is the ground truth; before that, mirror vanilla's creation predicate.
+    // A W&L player who is commander-in-chief never gets an AI CIC.
+    internal static class CicEligibility
+    {
+        internal static bool ShouldRunCic(
+            int allianceId,
+            bool factionListReady,
+            bool hasAiFaction,
+            int playerAlliance,
+            bool aiVsAi,
+            bool playerIsWlCic)
+        {
+            if (allianceId < 0 || allianceId > 1) return false;
+            if (playerIsWlCic && allianceId == playerAlliance) return false;
+            if (factionListReady) return hasAiFaction;
+            return allianceId != playerAlliance || aiVsAi;
+        }
+    }
+
     public class CIC
     {
         public int AllianceId;
-        public int OfficerCommanderId;
         public string OfficerName;
         public PersonalityVector OfficerPersonality;
         public OperationalPlan ActivePlan;
         private static readonly HashSet<string> ObjectivesDiagnosticLogged = new HashSet<string>();
+
+        // Seams for the vanilla reads Replan needs. Defaults are the reflection paths;
+        // the harness swaps them for fixtures.
+        // Candidates for scoring/historical matching: mintownobjectives = 0, because the Union
+        // operations target abstract objective 3 (Richmond, no towns in campaignobjectives.dat)
+        // through its catalog position.
+        internal static Func<int, IList> AvailableObjectivesProvider = alliance => GetAvailableObjectivesViaReflection(alliance, 0);
+        // Exactly vanilla's own PickCampaignObjective call (decompile 17782): default
+        // mintownobjectives = 1, i.e. at least one enemy-held town/IIP (178827).
+        internal static Func<int, IList> VanillaPickableObjectivesProvider = alliance => GetAvailableObjectivesViaReflection(alliance, 1);
+        internal static Func<object, int> ObjectiveIdReader = ReadObjectiveIdViaReflection;
+        internal static Func<int, bool> TargetPositionResolves = id => ObjectiveAdapter.ResolveObjectivePosition(id).HasValue;
+        internal static Func<object, bool> ObjectiveHasGround = ReadObjectiveHasGroundViaReflection;
 
         public PersonalityVector Effective(EraStageManager era)
         {
@@ -23,133 +68,31 @@ namespace WhiskeyRealism.Strategic
                 era.StageVector,
                 FactionProfiles.For(AllianceId));
 
-            bool overrideSettings = Plugin.Instance?.OverrideVanillaSettings?.Value ?? false;
-            int lockedDifficulty = Plugin.Instance?.LockedDifficulty?.Value
-                ?? DifficultyPersonalityModifier.HistoricalHardDifficultyIndex;
-
             return PersonalityVector.Add(
                 composed,
                 DifficultyPersonalityModifier.ForLockedHistoricalDifficulty(
-                    overrideSettings,
-                    lockedDifficulty));
+                    CicSettings.OverrideVanillaSettings,
+                    CicSettings.LockedDifficulty));
         }
 
-        // Consults PhaseTruthOutput to decide how to handle the current plan.
-        // When truth is null, falls back to ReviewPlan (deadline-only logic).
-        // The routing switch is pure logic delegated to CicReviewRouter so it can be tested
-        // without BepInEx/HarmonyLib dependencies in the test harness.
-        public bool ReviewPlanWithTruth(int currentMonth, int currentYear, PhaseTruthOutput truth)
+        // Applies a PhaseTruthOutput to the active plan. The routing itself lives in
+        // CicReviewRouter (single implementation, harness-covered); this wrapper only drops
+        // an aborted plan and logs phase advances.
+        public bool ReviewPlanWithTruth(int day, int currentMonth, int currentYear, PhaseTruthOutput truth)
         {
             if (ActivePlan == null) return false;
-            if (truth == null) return ReviewPlan(currentMonth, currentYear);
-
-            switch (truth.RecommendedAction)
-            {
-                case PhaseTruthAction.Advance:
-                    return AdvancePhase();
-                case PhaseTruthAction.Complete:
-                    ActivePlan.IsDirty = true;
-                    return false;
-                case PhaseTruthAction.Pause:
-                    MarkOperationDecision(truth, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.Abort:
-                    ActivePlan = null;
-                    return false;
-                case PhaseTruthAction.Exploit:
-                    MarkOperationDecision(truth, OperationPosture.ExploitBreakthrough, allowAttack: true, allowReinforce: true, probeOnly: false, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.Counterstroke:
-                    MarkOperationDecision(truth, OperationPosture.Counterstroke, allowAttack: true, allowReinforce: true, probeOnly: false, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.ScreenAndDelay:
-                    MarkOperationDecision(truth, OperationPosture.ScreenAndDelay, allowAttack: false, allowReinforce: true, probeOnly: true, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.Recover:
-                    MarkOperationDecision(truth, OperationPosture.Recover, allowAttack: false, allowReinforce: true, probeOnly: true, currentMonth: currentMonth, currentYear: currentYear);
-                    return true;
-                case PhaseTruthAction.Pivot:
-                    ActivePlan.PendingRetarget = true;
-                    ActivePlan.PendingRetargetReason = truth.AlternateOperationId;
-                    ActivePlan.IsDirty = true;
-                    return false;
-                case PhaseTruthAction.Replan:
-                    ActivePlan.PendingRetarget = false;
-                    ActivePlan.PendingRetargetReason = null;
-                    ActivePlan.IsDirty = true;
-                    return false;
-                case PhaseTruthAction.Continue:
-                default:
-                    return ReviewPlan(currentMonth, currentYear);
-            }
-        }
-
-        public bool ReviewPlan(int currentMonth, int currentYear)
-        {
-            if (ActivePlan == null) return false;
-            if (ActivePlan.IsDirty) return false;
-
-            if (currentYear > ActivePlan.PlanDeadlineYear ||
-               (currentYear == ActivePlan.PlanDeadlineYear && currentMonth > ActivePlan.PlanDeadlineMonth))
-                return false;
-
-            var p = ActivePlan.CurrentPhase;
-            if (p != null && (currentYear > p.DeadlineYear ||
-                             (currentYear == p.DeadlineYear && currentMonth > p.DeadlineMonth)))
-            {
-                return AdvancePhase();
-            }
-
-            return true;
-        }
-
-        private void MarkOperationDecision(
-            PhaseTruthOutput truth,
-            OperationPosture posture,
-            bool allowAttack,
-            bool allowReinforce,
-            bool probeOnly,
-            int currentMonth,
-            int currentYear)
-        {
-            if (ActivePlan == null) return;
-            ActivePlan.OperationPosture = posture;
-            ActivePlan.OperationLastDecisionDaySerial = currentYear * 372 + currentMonth * 31;
-            ActivePlan.PendingRetarget = false;
-            ActivePlan.PendingRetargetReason = truth?.Reason;
-
-            var phase = ActivePlan.CurrentPhase;
-            if (phase == null) return;
-            phase.OperationPosture = posture;
-            phase.AllowCoordinatedAttack = allowAttack;
-            phase.AllowReinforcementPackage = allowReinforce;
-            phase.AllowProbeOnly = probeOnly;
-        }
-
-        public bool AdvancePhase()
-        {
-            if (ActivePlan == null) return false;
-            if (ActivePlan.CurrentPhaseIndex + 1 < ActivePlan.Phases.Count)
-            {
-                ActivePlan.CurrentPhaseIndex++;
+            int daySerial = currentYear * 372 + currentMonth * 31 + day;
+            int phaseBefore = ActivePlan.CurrentPhaseIndex;
+            var outcome = CicReviewRouter.Route(ActivePlan, truth, daySerial, currentMonth, currentYear);
+            if (ActivePlan.CurrentPhaseIndex != phaseBefore)
                 EmitCampaignInfo($"[Plan:{OfficerName}] action=phase-advanced phase={ActivePlan.CurrentPhaseIndex}");
-                return true;
-            }
-            ActivePlan.IsDirty = true;
-            return false;
-        }
 
-        public void Replan(EraStageManager era, int currentMonth, int currentYear)
-        {
-            int daySerial = currentYear * 372 + currentMonth * 31 + 1;
-            Replan(
-                era,
-                currentMonth,
-                currentYear,
-                daySerial,
-                ResolveCurrentChapter(),
-                null,
-                null);
+            if (outcome == CicRouteOutcome.AbandonPlan)
+            {
+                ActivePlan = null;
+                return false;
+            }
+            return outcome == CicRouteOutcome.KeepPlan;
         }
 
         public void Replan(
@@ -161,7 +104,7 @@ namespace WhiskeyRealism.Strategic
             DirectorPosture posture,
             HistoricalOperationContext context)
         {
-            var availableObjectives = GetAvailableObjectivesViaReflection(AllianceId);
+            var availableObjectives = AvailableObjectivesProvider(AllianceId);
             int objCount = availableObjectives?.Count ?? -1;
             if (availableObjectives == null || availableObjectives.Count == 0)
             {
@@ -184,11 +127,11 @@ namespace WhiskeyRealism.Strategic
             }
 
             scored.Sort((a, b) => b.score.CompareTo(a.score));
-            bool doctrineEnabled = Plugin.Instance == null ||
-                Plugin.Instance.EnableHistoricalOperationDoctrine == null ||
-                Plugin.Instance.EnableHistoricalOperationDoctrine.Value;
+            var availableIds = new HashSet<int>();
+            for (int i = 0; i < scored.Count; i++)
+                availableIds.Add(GetObjectiveId(scored[i].obj));
 
-            if (doctrineEnabled)
+            if (CicSettings.HistoricalOperationDoctrine)
             {
                 string requestedOperationId = ActivePlan?.PendingRetarget == true
                     ? ActivePlan.PendingRetargetReason
@@ -198,6 +141,7 @@ namespace WhiskeyRealism.Strategic
                     var requested = SelectRequestedHistoricalPlan(
                         requestedOperationId,
                         scored,
+                        availableIds,
                         p,
                         strategy,
                         currentMonth,
@@ -210,8 +154,9 @@ namespace WhiskeyRealism.Strategic
                     }
                 }
 
-                ActivePlan = SelectHistoricalPlan(
+                var historical = SelectHistoricalPlan(
                     scored,
+                    availableIds,
                     p,
                     strategy,
                     era.Stage,
@@ -221,15 +166,49 @@ namespace WhiskeyRealism.Strategic
                     vanillaChapter,
                     posture,
                     context);
+                if (historical != null)
+                {
+                    ActivePlan = historical;
+                    return;
+                }
+                // R5(d): no historical profile fits — fall back to the generic plan below
+                // instead of leaving the faction with no plan (which used to block vanilla's
+                // PickCampaignObjective and freeze followedcampaignobjective).
+            }
+
+            // Generic fallback only over objectives vanilla itself would pick and can act on:
+            //  - in vanilla's own candidate set, GetAvailableObjectives(alliance) with the default
+            //    mintownobjectives = 1 (PickCampaignObjective 17782 / 178827), and
+            //  - owning at least one town/IIP: followedcampaignobjective only adds importance
+            //    through the objective's towns/IIPs (UpdateImportanceValues 14922/14961). This is
+            //    checked separately because vanilla's IIP counter (num2) is not reset per
+            //    objective, so an abstract objective can slip through mintownobjectives = 1.
+            // Abstract objectives 0-28 (e.g. 4 "Capture Washington") never qualify; with no such
+            // candidate there is no plan and vanilla's PickCampaignObjective runs.
+            var vanillaPickable = new HashSet<int>();
+            var pickableList = VanillaPickableObjectivesProvider(AllianceId);
+            if (pickableList != null)
+                foreach (var obj in pickableList) vanillaPickable.Add(GetObjectiveId(obj));
+            var reachable = new List<(object obj, float score, ObjectiveMetadata meta)>();
+            for (int i = 0; i < scored.Count; i++)
+            {
+                int id = GetObjectiveId(scored[i].obj);
+                if (vanillaPickable.Contains(id) && ObjectiveHasGround(scored[i].obj) && TargetPositionResolves(id))
+                    reachable.Add(scored[i]);
+            }
+            if (reachable.Count == 0)
+            {
+                EmitPlanDecision("clear", "no-objective-with-ground", "alliance=" + AllianceId + "|decision=clear|objectiveCount=" + scored.Count, ev => ev.WithField("objectiveCount", scored.Count));
+                ActivePlan = null;
                 return;
             }
 
-            var top3 = scored.GetRange(0, Math.Min(3, scored.Count));
+            var top3 = reachable.GetRange(0, Math.Min(3, reachable.Count));
             var picked = WeightedPick(top3);
 
             ActivePlan = BuildLegacyGenericPlan(picked.obj, picked.meta, p, strategy, currentMonth, currentYear);
 
-            if (ActivePlan != null && Plugin.Instance.PlanTrace.Value)
+            if (ActivePlan != null && CicSettings.PlanTrace)
             {
                 EmitPlanDecision("select", ActivePlan.Rationale, "alliance=" + AllianceId + "|officer=" + OfficerName + "|phases=" + ActivePlan.Phases.Count + "|deadline=" + ActivePlan.PlanDeadlineYear + "-" + ActivePlan.PlanDeadlineMonth.ToString("D2"), ev => ev
                     .WithField("phases", ActivePlan.Phases.Count)
@@ -243,6 +222,7 @@ namespace WhiskeyRealism.Strategic
         private OperationalPlan SelectRequestedHistoricalPlan(
             string operationId,
             List<(object obj, float score, ObjectiveMetadata meta)> scored,
+            HashSet<int> availableIds,
             PersonalityVector p,
             GrandStrategyProfile strategy,
             int currentMonth,
@@ -252,6 +232,11 @@ namespace WhiskeyRealism.Strategic
             if (!HistoricalOperationCatalog.TryGetById(operationId, out var profile))
             {
                 EmitHistoricalOperation("no-profile", operationId, -1, null, "alternate-not-found", null);
+                return null;
+            }
+            if (!HistoricalOperationCatalog.PhaseTargetsAvailable(profile, availableIds))
+            {
+                EmitHistoricalOperation("no-profile", operationId, profile.PrimaryObjectiveId, null, "alternate-phase-target-unavailable", null);
                 return null;
             }
 
@@ -317,6 +302,7 @@ namespace WhiskeyRealism.Strategic
 
         private OperationalPlan SelectHistoricalPlan(
             List<(object obj, float score, ObjectiveMetadata meta)> scored,
+            HashSet<int> availableIds,
             PersonalityVector p,
             GrandStrategyProfile strategy,
             EraStage era,
@@ -350,7 +336,8 @@ namespace WhiskeyRealism.Strategic
                     strategy,
                     p,
                     posture,
-                    context);
+                    context,
+                    availableIds);
                 if (match.Kind != HistoricalOperationMatchKind.Matched)
                 {
                     EmitHistoricalOperation("no-profile-candidate", null, objId, null, match.Reason, null);
@@ -415,6 +402,15 @@ namespace WhiskeyRealism.Strategic
                     "historical-operation:no-profile:" + AllianceId + ":" + (profile?.OperationId ?? "<null>"),
                     $"CIC historical operation profile invalid alliance={AllianceId} operation={profile?.OperationId ?? "<null>"} reason={reason}");
                 return null;
+            }
+
+            for (int i = 0; i < profile.Phases.Length; i++)
+            {
+                if (!TargetPositionResolves(profile.Phases[i].TargetObjectiveId))
+                {
+                    EmitHistoricalOperation("no-profile", profile.OperationId, GetObjectiveId(pickedObjective), profile.Phases[i].PhaseId, "phase-target-position-unresolved", null);
+                    return null;
+                }
             }
 
             int monthsAhead = 6;
@@ -494,8 +490,10 @@ namespace WhiskeyRealism.Strategic
                 IsDirty              = false
             };
 
+            int planStartSerial = currentYear * 372 + currentMonth * 31 + 1;
             plan.Phases.Add(new Phase
             {
+                PhaseStartedDaySerial  = planStartSerial,
                 TargetAreaId           = -1,
                 TargetObjectiveId      = objId,
                 ForceFractionRequired  = forceFraction,
@@ -503,15 +501,15 @@ namespace WhiskeyRealism.Strategic
                 DeadlineMonth          = deadline.month,
                 DeadlineYear           = deadline.year,
                 OperationPosture        = OperationPosture.ProbeAndDevelop,
-                AllowCoordinatedAttack  = true,
-                AllowReinforcementPackage = true,
                 Fallback               = null
             });
+            ApplyGenericFlags(plan.Phases[plan.Phases.Count - 1]);
 
             if (phaseCount >= 3)
             {
                 plan.Phases.Insert(0, new Phase
                 {
+                    PhaseStartedDaySerial = planStartSerial,
                     TargetAreaId          = -1,
                     TargetObjectiveId     = objId,
                     ForceFractionRequired = Math.Max(0.2f, forceFraction - 0.2f),
@@ -519,15 +517,21 @@ namespace WhiskeyRealism.Strategic
                     DeadlineMonth         = AddMonths(currentMonth, currentYear, monthsAhead / 3).month,
                     DeadlineYear          = AddMonths(currentMonth, currentYear, monthsAhead / 3).year,
                     OperationPosture       = OperationPosture.ProbeAndDevelop,
-                    AllowCoordinatedAttack = false,
-                    AllowReinforcementPackage = true,
-                    AllowProbeOnly         = true,
                     Fallback              = null
                 });
+                ApplyGenericFlags(plan.Phases[0]);
                 plan.CurrentPhaseIndex = 0;
             }
 
             return plan;
+        }
+
+        private static void ApplyGenericFlags(Phase phase)
+        {
+            CicReviewRouter.GenericPhaseFlags(phase.Transition, out bool attack, out bool reinforce, out bool probeOnly);
+            phase.AllowCoordinatedAttack = attack;
+            phase.AllowReinforcementPackage = reinforce;
+            phase.AllowProbeOnly = probeOnly;
         }
 
         private static (int month, int year) AddMonths(int month, int year, int delta)
@@ -539,6 +543,20 @@ namespace WhiskeyRealism.Strategic
         }
 
         private static int GetObjectiveId(object campaignObjective)
+        {
+            return ObjectiveIdReader(campaignObjective);
+        }
+
+        // CampaignObjective.objectives: the Town/IIP list loaded from campaignobjectives.dat
+        // (InitializeObjectives 178635).
+        private static bool ReadObjectiveHasGroundViaReflection(object campaignObjective)
+        {
+            if (campaignObjective == null) return false;
+            var list = AccessTools.Field(campaignObjective.GetType(), "objectives")?.GetValue(campaignObjective) as IList;
+            return list != null && list.Count > 0;
+        }
+
+        private static int ReadObjectiveIdViaReflection(object campaignObjective)
         {
             if (campaignObjective == null) return -1;
             var f = AccessTools.Field(campaignObjective.GetType(), "UniqueObjectiveID");
@@ -600,22 +618,7 @@ namespace WhiskeyRealism.Strategic
             TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
         }
 
-        private static int ResolveCurrentChapter()
-        {
-            try
-            {
-                var t = AccessTools.TypeByName("Policy");
-                var f = t != null ? AccessTools.Field(t, "CurrentChapter") : null;
-                if (f == null) return -1;
-                return (int)f.GetValue(null);
-            }
-            catch
-            {
-                return -1;
-            }
-        }
-
-        private static IList GetAvailableObjectivesViaReflection(int allianceId)
+        private static IList GetAvailableObjectivesViaReflection(int allianceId, int minTownObjectives)
         {
             try
             {
@@ -631,7 +634,7 @@ namespace WhiskeyRealism.Strategic
                 // mintownobjectives=0 lets abstract win-condition objectives pass.
                 var m = AccessTools.Method(t, "GetAvailableObjectives", new[] { typeof(int), typeof(bool), typeof(int) });
                 if (m == null) { Plugin.Log.LogWarning("[CIC] CampaignObjective.GetAvailableObjectives(int,bool,int) not found"); return null; }
-                return m.Invoke(null, new object[] { allianceId, false, 0 }) as IList;
+                return m.Invoke(null, new object[] { allianceId, false, minTownObjectives }) as IList;
             }
             catch (Exception ex)
             {

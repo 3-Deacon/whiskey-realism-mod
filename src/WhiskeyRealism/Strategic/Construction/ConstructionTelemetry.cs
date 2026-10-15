@@ -43,27 +43,6 @@ namespace WhiskeyRealism.Strategic.Construction
             return FormatSummary(buildings, rail, last);
         }
 
-        public string RecentSummary(int alliance)
-        {
-            int buildings = 0;
-            int rail = 0;
-            string last = "<none>";
-
-            for (int i = 0; i < _recentStarts.Count; i++)
-            {
-                if (_recentStarts[i].AllianceId != alliance) continue;
-
-                if (_recentStarts[i].Kind == ConstructionCandidateKind.Railroad)
-                    rail++;
-                else
-                    buildings++;
-
-                last = _recentStarts[i].Kind + ":" + (_recentStarts[i].Name ?? "<unnamed>");
-            }
-
-            return FormatSummary(buildings, rail, last);
-        }
-
         private static string LastLabel(ConstructionStartEvent start)
         {
             return start.Kind + ":" + (start.Name ?? "<unnamed>");

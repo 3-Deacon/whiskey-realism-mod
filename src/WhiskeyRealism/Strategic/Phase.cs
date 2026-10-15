@@ -36,7 +36,8 @@ namespace WhiskeyRealism.Strategic
         public int    AssignedTheaterId;
         public string OperationId;
         public string OperationName;
-        public OperationTempoPreset OperationTempo;
+        // Generic (non-historical) plans keep the default tempo; saved by name.
+        public OperationTempoPreset OperationTempo = OperationTempoPreset.Deliberate;
         public OperationPosture OperationPosture;
         public int    OperationStartedDaySerial;
         public int    OperationLastDecisionDaySerial;

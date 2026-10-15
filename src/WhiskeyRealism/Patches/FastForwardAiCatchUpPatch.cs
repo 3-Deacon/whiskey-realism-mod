@@ -8,11 +8,13 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla AICampaign.Update scales campaign AI work as sqrt(gamespeed):
-    // 20x runs four UpdateUnitAI passes per frame and 50x runs seven. This
-    // Postfix adds a small, budgeted catch-up allowance at high campaign speeds
+    // Vanilla AICampaign.Update (decompile 11195-11199) scales campaign AI work as
+    // sqrt(gamespeed): 20x runs four UpdateUnitAI passes per frame and 50x runs seven.
+    // This Postfix adds a small, budgeted catch-up allowance at high campaign speeds
     // so strategic jobs are less starved during fast-forward without trying to
-    // preserve full 1x AI density.
+    // preserve full 1x AI density. When Campaign AI Governor is enabled the governor
+    // runs these same extras itself (after vanilla's owed passes are paid), so this
+    // Postfix stands down to avoid double catch-up.
     [HarmonyPatch(typeof(AICampaign), "Update")]
     internal static class FastForwardAiCatchUpPatch
     {
@@ -21,6 +23,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.fast-forward-ai-catchup.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.fast-forward-ai-catchup.prefix");
                 _updateStartTicks = Stopwatch.GetTimestamp();
             }
         }
@@ -30,6 +33,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.fast-forward-ai-catchup.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.fast-forward-ai-catchup.postfix");
             try
             {
                 if (__instance == null) return;

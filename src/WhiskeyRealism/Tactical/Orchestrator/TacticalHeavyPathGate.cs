@@ -32,6 +32,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // ============================================================
     public static class TacticalHeavyPathGate
     {
+        private const float ClockRewindToleranceHours = 0.001f;
+
         public enum Action
         {
             Skip = 0,
@@ -101,7 +103,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return new Decision(Action.Run, "first-tick");
             }
 
+            // Battle clock behind the last heavy review: the battle was reloaded or
+            // restarted (GameVars.currenttimefromstart = Hour + battlepasseddays*24,
+            // SetTimeVariables 93545, is monotonic within one battle). Clamping elapsed
+            // to 0 here used to suppress every refresh until the new clock passed the
+            // old one, so the previous battle's snapshot was reused. Rebuild now.
             float elapsed = now - last;
+            if (elapsed < -ClockRewindToleranceHours)
+            {
+                return new Decision(Action.Run, "clock-rewind");
+            }
             if (elapsed < 0f) elapsed = 0f;
             if (IsUnderRealtimeFloor(input))
             {

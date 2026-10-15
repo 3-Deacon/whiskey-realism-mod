@@ -11,7 +11,18 @@ namespace WhiskeyRealism.Strategic
 {
     internal static class OperationalProbeRuntime
     {
+        static OperationalProbeRuntime()
+        {
+            CampaignScope.Register("operational-probe", ResetForNewCampaign);
+        }
+
+        // Static, bounded keys only (alliance id / fixed strings).
         private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
+
+        internal static void ResetForNewCampaign()
+        {
+            LogOnceKeys.Clear();
+        }
 
         internal static OperationalProbeInput BuildInput(
             int allianceId,
@@ -24,13 +35,16 @@ namespace WhiskeyRealism.Strategic
             int policyChapter,
             int campaignMonth,
             PersonalityVector personality,
-            IReadOnlyList<BattleHistoryRecord> battleHistory)
+            IReadOnlyList<BattleHistoryRecord> battleHistory,
+            float localOwnStrength,
+            float localEnemyStrength)
         {
             int objectiveId = cic?.ActivePlan?.CurrentPhase?.TargetObjectiveId ?? -1;
             var target = ObjectiveAdapter.ResolveObjectivePosition(objectiveId);
             string areaKey = target.HasValue ? ArmyAreaRuntime.AreaKey(target.Value) : null;
-            string sectorKey = target.HasValue ? FrontSectorRuntime.SectorKey(target.Value) : null;
-            var targetSector = fronts?.GetSector(sectorKey);
+            // C-Probe: a probe state is only valid for the target it was opened against.
+            if (previous != null && !ProbeHysteresis.KeepPreviousState(previous.TargetAreaKey, areaKey))
+                previous = null;
 
             var input = new OperationalProbeInput
             {
@@ -41,8 +55,10 @@ namespace WhiskeyRealism.Strategic
                 Fronts = fronts,
                 FormationDirectives = formation,
                 Previous = previous,
-                CurrentEnemyStrength = targetSector?.EnemyStrength ?? -1f,
-                CurrentFriendlyStrength = targetSector?.OwnStrength ?? -1f,
+                // C-Probe: LOCAL strengths within the near-target radius, not the whole
+                // theater sector (one probe formation vs. a theater total always withdrew).
+                CurrentEnemyStrength = target.HasValue ? localEnemyStrength : -1f,
+                CurrentFriendlyStrength = target.HasValue ? localOwnStrength : -1f,
                 Options = OperationalTempoDoctrine.For(
                     allianceId,
                     era,
@@ -149,11 +165,15 @@ namespace WhiskeyRealism.Strategic
                 {
                     var pausedUnit = FindUnit(ownUnits, output.SelectedUnitKey);
                     if (pausedUnit == null) return;
-                    if (offensive.Contains(pausedUnit))
-                    {
-                        offensive.Remove(pausedUnit);
-                        EmitOperationalProbeWrite(allianceId, output, "remove-offensive", pausedUnit, null, null, null);
-                    }
+                    bool inOffensive = offensive.Contains(pausedUnit);
+                    if (!inOffensive) return;
+                    // Vanilla ends an operation with StopRegiment(skipfinalrotation, manualstop)
+                    // under the W&L under-commander guard (decompile 13838-13843); removing the
+                    // unit from unitsinoffensiveoperations alone left it marching on the target.
+                    if (ProbeHysteresis.ShouldStopUnit(inOffensive, pausedUnit.inbattle, pausedUnit.dlcw_isundercommander, DLC_WL.dlc_scenarioactive))
+                        pausedUnit.StopRegiment(skipfinalrotation: true, manualstop: true);
+                    offensive.Remove(pausedUnit);
+                    EmitOperationalProbeWrite(allianceId, output, output.Decision == OperationalProbeDecision.Pause ? "pause-stop" : "withdraw-stop", pausedUnit, null, null, null);
                     return;
                 }
 
@@ -206,7 +226,7 @@ namespace WhiskeyRealism.Strategic
                             targetName,
                             "commit-failed");
                         OnceLog.Warning(
-                            "coordinated-ops:probe:package-no-commit:" + allianceId + ":" + (output.Package?.Signature() ?? "-"),
+                            "coordinated-ops:probe:package-no-commit",
                             "Coordinated operation probe package did not commit alliance=" + allianceId +
                             " reason=commit-failed package=" + (output.Package?.Signature() ?? "-"));
                     }
@@ -255,7 +275,7 @@ namespace WhiskeyRealism.Strategic
                 if (!bridgeDecision.MayDirectMove)
                 {
                     EmitOperationalProbeWriteOnce(
-                        $"operational-probe:wl-skip:{allianceId}:{UnitKey(unit)}:{bridgeDecision.Result}",
+                        "operational-probe:wl-skip",
                         allianceId,
                         output,
                         "skip-direct-move",
@@ -399,27 +419,6 @@ namespace WhiskeyRealism.Strategic
             return -1;
         }
 
-        private static bool ReadBool(object target, string field)
-        {
-            try
-            {
-                var f = AccessTools.Field(target.GetType(), field);
-                if (f != null) return Convert.ToBoolean(f.GetValue(target));
-            }
-            catch { }
-            return false;
-        }
 
-        private static object ReadObject(object target, string field)
-        {
-            try
-            {
-                return AccessTools.Field(target.GetType(), field)?.GetValue(target);
-            }
-            catch
-            {
-                return null;
-            }
-        }
     }
 }

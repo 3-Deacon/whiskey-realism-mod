@@ -35,6 +35,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.fleet-patrol-reset", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.fleet-patrol-reset");
             try
             {
                 if (!Enabled() || __instance == null) return;

@@ -507,11 +507,40 @@ namespace WhiskeyRealism.Strategic
                 active.TargetPoint.ValidExitPoint);
         }
 
+        // Vanilla campaign save folder = "Campaigns/" + GamePrefs.leveltoload + "/" +
+        // GamePrefs.subleveltoload + "/" + Saving.latestfolder (decompile 30006);
+        // scenario config folder = "Campaigns/" + SceneManagement.currentcampaignscenario
+        // (23730). The old key read SceneManagement.currentcampaign/currentsave,
+        // which do not exist, so every career shared one dedupe context.
+        // Saving.latestfolder is set on load (216750) and on every save/autosave
+        // (216806-217062), so a save also rotates the key; that only clears the
+        // dedupe cache, which costs at most one re-issued current order.
+        internal static readonly (Type Owner, string Field)[] CampaignContextSources =
+        {
+            (typeof(SceneManagement), "currentcampaignscenario"),
+            (typeof(GamePrefs), "leveltoload"),
+            (typeof(GamePrefs), "subleveltoload"),
+            (typeof(Saving), "latestfolder"),
+        };
+
+        internal static string BuildCampaignContextKey(int allianceId, int aifactionIndex, string scenario, string level, string sublevel, string saveFolder)
+        {
+            return "campaign:" + allianceId + ":" + aifactionIndex + ":" +
+                (scenario ?? string.Empty) + ":" +
+                (level ?? string.Empty) + "/" +
+                (sublevel ?? string.Empty) + "/" +
+                (saveFolder ?? string.Empty);
+        }
+
         private static string CampaignContextKey(WlStrategicOrderRequest request)
         {
-            return "campaign:" + request.AllianceId + ":" + request.AifactionIndex + ":" +
-                SafeStaticField(typeof(SceneManagement), "currentcampaign") + ":" +
-                SafeStaticField(typeof(SceneManagement), "currentsave");
+            return BuildCampaignContextKey(
+                request.AllianceId,
+                request.AifactionIndex,
+                SafeStaticField(CampaignContextSources[0].Owner, CampaignContextSources[0].Field),
+                SafeStaticField(CampaignContextSources[1].Owner, CampaignContextSources[1].Field),
+                SafeStaticField(CampaignContextSources[2].Owner, CampaignContextSources[2].Field),
+                SafeStaticField(CampaignContextSources[3].Owner, CampaignContextSources[3].Field));
         }
 
         private static string UnitKey(Regiment unit)

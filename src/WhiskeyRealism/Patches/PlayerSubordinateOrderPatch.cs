@@ -2,7 +2,6 @@ using System;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
-using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.PlayerOrders;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -40,6 +39,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.player-subordinate-order-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.player-subordinate-order-prefix");
                 __state = default(PatchState);
                 if (!MasterEnabled()) return;
 
@@ -49,7 +49,7 @@ namespace WhiskeyRealism.Patches
                 }
                 catch (Exception ex)
                 {
-                    Warn("prefix", ex);
+                    Warn("player-order-patch:prefix", "prefix", ex);
                 }
             }
         }
@@ -58,6 +58,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.player-subordinate-order", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.player-subordinate-order");
             try
             {
                 if (!MasterEnabled()) return;
@@ -66,7 +67,7 @@ namespace WhiskeyRealism.Patches
                     Plugin.EnablePlayerOrderDoctrineDiagnostics.Value;
                 bool doctrineEnabled = Plugin.EnablePlayerOrderDoctrine != null &&
                     Plugin.EnablePlayerOrderDoctrine.Value;
-                bool modeAllowsWrites = TacticalCommanderModePolicy.AllowsWrites(Plugin.Instance.TacticalCommanderModeValue);
+                bool modeAllowsWrites = TacticalWriteGuard.ModeAllowsWrites();
                 bool writesEnabled = doctrineEnabled && modeAllowsWrites;
                 if (!diagnosticsEnabled && !writesEnabled) return;
 
@@ -125,15 +126,17 @@ namespace WhiskeyRealism.Patches
                         evaluation.Tick);
                     if (diagnosticsEnabled) Log("issue", decision.Reason, candidate, afterIssue);
                 }
-                else if (diagnosticsEnabled)
+                else
                 {
+                    // Recorded whatever the diagnostics setting, or the
+                    // 120-tick throttle never applies to a rejected order.
                     DedupeState.RecordAttempt(candidate, evaluation.Tick);
-                    Log("suppress", "vanilla-bridge-no-match", candidate, afterIssue);
+                    if (diagnosticsEnabled) Log("suppress", "vanilla-bridge-no-match", candidate, afterIssue);
                 }
             }
             catch (Exception ex)
             {
-                Warn("postfix", ex);
+                Warn("player-order-patch:postfix", "postfix", ex);
             }
             } // end using TelemetryPerf.Scope
         }
@@ -227,13 +230,13 @@ namespace WhiskeyRealism.Patches
             return candidate.TargetPoint.X.ToString("F0") + "," + candidate.TargetPoint.Z.ToString("F0");
         }
 
-        private static void Warn(string key, Exception ex)
+        private static void Warn(string onceKey, string stage, Exception ex)
         {
             try
             {
                 OnceLog.Warning(
-                    "player-order-patch:" + key,
-                    "[PlayerOrderIntent] patch " + key + " failed: " + ex.GetType().Name + " " + ex.Message);
+                    onceKey,
+                    "[PlayerOrderIntent] patch " + stage + " failed: " + ex.GetType().Name + " " + ex.Message);
             }
             catch { }
         }

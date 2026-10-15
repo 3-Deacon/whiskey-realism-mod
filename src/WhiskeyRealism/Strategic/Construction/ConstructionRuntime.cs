@@ -77,31 +77,30 @@ namespace WhiskeyRealism.Strategic.Construction
                 {
                     input.LowSupplyFormationCount = formation.Pressure.LowSupplyCount;
                     input.LowAmmoFormationCount = formation.Pressure.LowAmmoCount;
+                    input.FormationCount = formation.Assignments != null ? formation.Assignments.Count : 0;
+                    // Area key (ArmyAreaClassifier), kept separate from the fiscal Theater name.
                     if (!string.IsNullOrEmpty(formation.Pressure.TopSupplyAreaKey))
-                        input.TopSupplyTheater = formation.Pressure.TopSupplyAreaKey;
+                        input.TopSupplyAreaKey = formation.Pressure.TopSupplyAreaKey;
                 }
 
                 if (front == null || front.Sectors == null) return;
 
                 int count = 0;
                 float supply = 0f;
-                float threat = 0f;
                 foreach (var sector in front.Sectors)
                 {
                     if (sector == null) continue;
                     count++;
                     supply += 1f - Clamp01(sector.AverageSupply);
-                    if (sector.IsCritical && sector.Posture == FrontPosture.Hold)
-                        threat += Clamp01(sector.StrategicImportance);
                 }
 
+                ConstructionThreat.Apply(input, front);
                 if (count <= 0) return;
                 input.SupplyPressure = Clamp01(supply / count);
-                input.AmmoPressure = input.LowAmmoFormationCount > 0
+                input.AmmoPressure = ConstructionIntentLedger.HasLowFormationShare(input.LowAmmoFormationCount, input.FormationCount, null)
                     ? Clamp01(input.SupplyPressure + 0.15f)
                     : Clamp01(input.SupplyPressure * 0.5f);
                 input.TransportPressure = input.LogisticsExpansion ? Math.Max(input.SupplyPressure, 0.35f) : input.SupplyPressure;
-                input.CapitalThreat = Clamp01(threat / count);
             }
             catch (Exception ex)
             {
@@ -198,15 +197,17 @@ namespace WhiskeyRealism.Strategic.Construction
                 for (int i = 0; i < sites.Count; i++)
                 {
                     if (!(sites[i] is Vector3 position)) continue;
+                    var theater = TheaterFromPosition(position);
+                    float siteThreat = ConstructionThreat.ForTheater(input.SectorThreats, theater);
                     input.Candidates.Add(new ConstructionCandidate
                     {
                         Kind = ConstructionCandidateKind.Fort,
                         Name = "fort-site-" + i,
-                        Theater = TheaterFromPosition(position),
+                        Theater = theater,
                         VanillaValid = true,
                         SafeRear = SafeRear(position, input.AllianceId),
-                        CriticalDefense = input.CapitalThreat > 0.35f,
-                        CapitalThreat = input.CapitalThreat
+                        CriticalDefense = siteThreat > 0.35f,
+                        CapitalThreat = siteThreat
                     });
                 }
             }
@@ -278,17 +279,18 @@ namespace WhiskeyRealism.Strategic.Construction
         {
             return input.SupplyProtection ||
                 input.LogisticsExpansion ||
-                input.CapitalThreat > 0.35f ||
+                ConstructionThreat.ForTheater(input.SectorThreats, TheaterFromPosition(position)) > 0.35f ||
                 TheaterMatchesTopSupply(position, input);
         }
 
         private static bool TheaterMatchesTopSupply(Vector3 position, ConstructionInput input)
         {
-            if (string.IsNullOrEmpty(input.TopSupplyTheater)) return false;
-            return string.Equals(
-                TheaterFromPosition(position).ToString(),
+            if (string.IsNullOrEmpty(input.TopSupplyTheater) && string.IsNullOrEmpty(input.TopSupplyAreaKey)) return false;
+            return ConstructionSupplyCorridor.Matches(
                 input.TopSupplyTheater,
-                StringComparison.OrdinalIgnoreCase);
+                input.TopSupplyAreaKey,
+                TheaterFromPosition(position),
+                ArmyAreaClassifier.FromPosition(position.x, position.z));
         }
 
         private static bool RailroadVanillaValid(object railroad, int alliance)

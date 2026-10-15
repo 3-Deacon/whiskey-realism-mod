@@ -29,7 +29,6 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> PlanTrace;
         internal ConfigEntry<bool> SuccessionTrace;
         internal ConfigEntry<bool> FiscalTrace;
-        internal ConfigEntry<bool> FiscalTelemetryCsv;
         internal ConfigEntry<bool> DirectorVerboseTrace;
         internal ConfigEntry<string> TelemetryLoggingProfileRaw;
         internal ConfigEntry<int> TelemetryMaxTuningLogMb;
@@ -53,8 +52,6 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalHqLinkGuard;
         internal ConfigEntry<bool> EnableTacticalReserveOrderDelayGuard;
         internal ConfigEntry<bool> EnableWlTacticalChargeGuard;
-        internal ConfigEntry<bool> EnableWlPlayerSubordinateOrderBridge;
-        internal ConfigEntry<bool> EnableWlPlayerOrderDoctrineDiagnostics;
         internal ConfigEntry<bool> EnableWlOperationNullGuard;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
@@ -62,7 +59,6 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalLocalReactionDoctrine;
         internal ConfigEntry<bool> EnableTacticalChargeDenial;
         internal ConfigEntry<bool> EnableTacticalReserveIntentTelemetry;
-        internal ConfigEntry<bool> EnableTacticalReserveListMutation;
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrine { get; private set; }
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrineDiagnostics { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
@@ -70,12 +66,10 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalBattleOrchestrator;
         public static ConfigEntry<bool> EnableTacticalOrchestratorArmy;
         public static ConfigEntry<int> TacticalOrchestratorMinReplanSeconds;
-        public static ConfigEntry<bool> TacticalOrchestratorVerboseLogging;
         public static ConfigEntry<bool> EnableTacticalOrchestratorIntentInference;
         public static ConfigEntry<bool> EnableTacticalOrchestratorDirectChildGate;
         internal ConfigEntry<string> TacticalCommanderModeRaw;
         internal ConfigEntry<bool> EnableTacticalOrchestratorReserveCommitGate;
-        internal ConfigEntry<bool> EnableTacticalOrchestratorChargeGate;
         public static ConfigEntry<bool> EnableTacticalRegimentDiagnostics;
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalMapKnowledgeDiagnostics;
@@ -84,28 +78,31 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
         public static ConfigEntry<bool> EnableSinglePassObjectiveRecords;
+        public static ConfigEntry<bool> EnableVanillaMacroAiSync;
+        public static ConfigEntry<bool> EnableGeometricPlayTemplates;
+        public static ConfigEntry<float> BattleGroupStanceMinIntervalSeconds;
+        public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
+        public static ConfigEntry<float> BrigadeTaskHoldSeconds;
+        public static ConfigEntry<bool> EnableArtilleryAllStanceAudit;
+        public static ConfigEntry<bool> EnableArtilleryWaypointVeto;
+        public static ConfigEntry<float> ArtilleryAuditMinHoldSeconds;
         public static ConfigEntry<float> TacticalDeploymentTerrainMaxCorrectionMeters;
         public static ConfigEntry<int> TacticalDeploymentTerrainMaxCandidates;
         public static ConfigEntry<float> TacticalDeploymentFacingPreferredDeltaDegrees;
         internal ConfigEntry<bool> EnableTacticalHeavyPathThrottling;
         internal ConfigEntry<float> TacticalHeavyReviewCycleHours;
         internal ConfigEntry<float> TacticalHeavyReviewMinRealtimeSeconds;
-        public const int TacticalMoraleSnapshotLedgerCapacity = 4;
-        public static TacticalMoraleSnapshotLedger MoraleSnapshotLedger;
         internal ConfigEntry<bool> EnableConstructionIntentLedger;
         internal ConfigEntry<bool> EnableHistoricalOperationDoctrine;
         internal ConfigEntry<bool> EnableDefenseIntentLedger;
         internal ConfigEntry<bool> DefenseIntentVerboseLogging;
         internal ConfigEntry<bool> EnableConstructionSiteSteering;
-        internal ConfigEntry<bool> EnableSupplyDepotSteering;
-        internal ConfigEntry<bool> EnableFortSteering;
         internal ConfigEntry<bool> FortConstructionGovernorEnabled;
         internal ConfigEntry<bool> EnableTelegraphAI;
-        internal ConfigEntry<bool> EnableRailroadSteering;
         internal ConfigEntry<bool> ConstructionTelemetryEnabled;
         internal ConfigEntry<bool> ConstructionVerboseLogging;
         internal ConfigEntry<int> MaxActiveTelegraphConstructionsPerFaction;
-        internal ConfigEntry<int> MaxRailroadStartsPerFactionPerMonth;
+        public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -133,7 +130,7 @@ namespace WhiskeyRealism
         internal ConfigEntry<int>  LockedDifficulty;
 
         // Diagnostic test mode — bypass date + war-state gates and force all
-        // 12 scripted succession events to fire on first strategic review. For
+        // 12 scripted succession events to fire on the first monthly tick. For
         // verifying the commander-swap apply mechanic without playing through
         // a multi-month campaign. Default off; remember to disable before
         // playing for real.
@@ -143,11 +140,12 @@ namespace WhiskeyRealism
         private bool _loggedTacticalCommanderMode;
         private TelemetryRuntime _telemetryRuntime;
 
-        internal TacticalCommanderMode TacticalCommanderModeValue =>
-            ResolveTacticalCommanderMode();
+        // Parsed once and re-parsed only when the config value changes; this is
+        // read from per-group hot paths.
+        private TacticalCommanderMode? _cachedTacticalCommanderMode;
 
-        internal bool TacticalOperationsLedgerEnabled =>
-            TacticalCommanderModePolicy.RunsLedger(TacticalCommanderModeValue);
+        internal TacticalCommanderMode TacticalCommanderModeValue =>
+            _cachedTacticalCommanderMode ?? (_cachedTacticalCommanderMode = ResolveTacticalCommanderMode()).Value;
 
         internal bool TacticalOperationsLedgerAllowsWrites =>
             TacticalCommanderModePolicy.AllowsWrites(TacticalCommanderModeValue);
@@ -157,9 +155,13 @@ namespace WhiskeyRealism
 
         private TacticalCommanderMode ResolveTacticalCommanderMode()
         {
-            var mode = TacticalCommanderModePolicy.Parse(
-                TacticalCommanderModeRaw?.Value,
-                TacticalCommanderMode.Active);
+            string raw = TacticalCommanderModeRaw?.Value;
+            var mode = TacticalCommanderModePolicy.Parse(raw, TacticalCommanderMode.Active);
+            if (!TacticalCommanderModePolicy.IsRecognized(raw))
+            {
+                Log?.LogWarning(
+                    $"[TacticalCommanderMode] unrecognized value '{raw}' — expected Off, MonitorOnly or Active; using {mode}.");
+            }
 
             LogTacticalCommanderModeOnce(mode);
             return mode;
@@ -182,30 +184,30 @@ namespace WhiskeyRealism
                 "General", "Enabled", true,
                 "Master enable. Disable to short-circuit every patch in this mod.");
             VerboseLogging = Config.Bind(
-                "Diagnostics", "Verbose Logging", false,
-                "Emit per-patch first-fire markers and decision-trace logs to LogOutput.log.");
+                "Diagnostics", "Verbose Logging", true,
+                "Default ON. Emits campaign decision-trace rows: daily ledger summaries (DailyOps, front, army-area, formation-directive, fiscal, defense, construction) every day instead of only on change, plus plan steering rows (importance target, campaign objective, unit transfer — each only when its signature changes) and construction probability-bias rows. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             PlanTrace = Config.Bind(
-                "Diagnostics", "Plan Trace Logging", false,
-                "On each strategic review tick, dump CIC's plan reasoning (objective scores, top-3, picked, phases, deadline).");
+                "Diagnostics", "Plan Trace Logging", true,
+                "Default ON. When the CIC builds a generic (non-historical) plan, emits the pick and the top-5 objective scores (id, score, theater, category). Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             SuccessionTrace = Config.Bind(
-                "Diagnostics", "Succession Trace Logging", false,
-                "On each strategic review tick, log every succession event check (date gate, war-state gate, fired/not-fired).");
+                "Diagnostics", "Succession Trace Logging", true,
+                "Default ON. Each day, per alliance, emits one row per not-yet-fired scripted succession event with its date-gate and war-state-gate result (at most 24 rows a day, fewer as events fire). Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             FiscalTrace = Config.Bind(
-                "Diagnostics", "Fiscal Trace Logging", false,
-                "Emit fiscal posture, gate, supply, and finance override reasoning.");
-            FiscalTelemetryCsv = Config.Bind(
-                "Diagnostics", "Fiscal Telemetry Csv", false,
-                "Reserved for future CSV telemetry export. Current fiscal telemetry is emitted to LogOutput.log.");
+                "Diagnostics", "Fiscal Trace Logging", true,
+                "Default ON. Emits the daily fiscal posture, gate, supply and finance-override row for each alliance every day instead of only when its signature changes. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             DirectorVerboseTrace = Config.Bind(
                 "Telemetry",
                 "Director Verbose Trace",
-                false,
-                "When true, logs detailed Director slice traces every advanced game day. Default off — only [CampaignPace] and [CollapseRisk] level-change lines emit.");
+                true,
+                "Default ON. Emits one detailed Director trace row per alliance per game day, in addition to the [CampaignPace] and [CollapseRisk] level-change rows. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             TelemetryLoggingProfileRaw = Config.Bind(
                 "Telemetry",
                 "Logging Profile",
                 "TacticalTuning",
-                "Off, TacticalTuning, CampaignTuning, or FullTuning. Default TacticalTuning per 2026-05-18 user direction so battles produce diagnostic sidecars by default. Set to Off if disk usage is a concern (sidecars under <GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session>/ — bounded by Max Tuning Log MB). This setting controls structured tuning sidecars only; it does not enable or disable tactical/campaign behavior gates.");
+                "Off, TacticalTuning, CampaignTuning or FullTuning. Default TacticalTuning. Picks which structured rows reach the tuning sidecars " +
+                "under <GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session>/: TacticalTuning = battle rows, CampaignTuning = campaign rows " +
+                "(including every Diagnostics trace), FullTuning = both. Total size is capped by Max Tuning Log MB. Does not enable or disable any " +
+                "tactical or campaign behavior.");
             TelemetryMaxTuningLogMb = Config.Bind(
                 "Telemetry",
                 "Max Tuning Log MB",
@@ -231,17 +233,18 @@ namespace WhiskeyRealism
                 "Telemetry",
                 "Emit Human Summary",
                 true,
-                "Reserved for human-readable summary output at shutdown.");
+                "Default ON. At telemetry shutdown, writes summary.md in the session folder, built from up to 32 MB of that session's telemetry rows.");
             TelemetryPerformanceWarnings = Config.Bind(
                 "Telemetry",
                 "Telemetry Performance Warnings",
                 true,
-                "Emit bounded telemetry performance warning rows when the writer detects pressure.");
+                "Default ON. true = individual slow-scope rows (at most 8 per scope per 5 s window, counted per thread); false = slow calls counted " +
+                "only in PerformanceAggregate rows.");
             TelemetryCreateIssueBundleOnShutdown = Config.Bind(
                 "Telemetry",
                 "Create Issue Bundle On Shutdown",
-                false,
-                "When true, future telemetry closeout may create a redacted issue bundle on shutdown.");
+                true,
+                "Default ON. At telemetry shutdown, writes issue-bundle.json in the session folder: a redacted index of that session's own telemetry files for bug reports (copies nothing). Nothing is written when Logging Profile is Off.");
             TelemetryQueueCapacity = Config.Bind(
                 "Telemetry",
                 "Telemetry Queue Capacity",
@@ -266,13 +269,14 @@ namespace WhiskeyRealism
             EnableTacticalObserver = Config.Bind(
                 "Tactical",
                 "Enable Tactical Observer",
-                false,
-                "Default ON for Slice B B0. Emits bounded read-only battle telemetry when enabled; does not change tactical AI behavior.");
+                true,
+                "Default ON. Emits tactical observer summaries, decision-matrix rows, ops-ledger/posture rows and the commander-intent/reserve-drift rows to the tactical tuning sidecar, deduped per signature (Tactical Observer Min Seconds Between Summaries). " +
+                "It is also a prerequisite of the legacy local-reaction producer that feeds Enable Tactical Charge Denial while Enable Tactical Orchestrator Army is off; with the orchestrator army on the observer changes no battle state.");
             TacticalObserverVerboseLogging = Config.Bind(
                 "Tactical",
                 "Tactical Observer Verbose Logging",
-                false,
-                "Emit lower-throttle tactical observer detail for focused smoke runs. Default observer mode remains signature-gated.");
+                true,
+                "Default ON. Shortens the tactical observer, bug-telemetry and decision-matrix repeat window to one row per key and signature per second (instead of the configured interval). Rows still go only to the tactical tuning sidecar, capped by Max Tuning Log MB.");
             TacticalObserverMinSecondsBetweenSummaries = Config.Bind(
                 "Tactical",
                 "Tactical Observer Min Seconds Between Summaries",
@@ -282,7 +286,9 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Decision Matrix Logging",
                 true,
-                "When Tactical Observer is enabled, emit high-volume [TacticalDecisionMatrix] battle/group rows for tactical AI bug hunts. Disable this switch to remove matrix noise without disabling the rest of the observer.");
+                "Default ON. While Tactical Observer is on, emits high-volume [TacticalDecisionMatrix] battle and group rows to the tactical tuning " +
+                "sidecar, at most one snapshot per event signature per Tactical Decision Matrix Min Seconds Between Snapshots. Disable to drop the " +
+                "matrix without disabling the rest of the observer.");
             TacticalDecisionMatrixMinSecondsBetweenSnapshots = Config.Bind(
                 "Tactical",
                 "Tactical Decision Matrix Min Seconds Between Snapshots",
@@ -295,23 +301,25 @@ namespace WhiskeyRealism
                 "Tactical Decision Matrix Max Rows",
                 80,
                 new ConfigDescription(
-                    "Maximum group rows emitted per tactical decision-matrix snapshot. Lower this if LogOutput.log gets too large.",
+                    "Maximum group rows per tactical decision-matrix snapshot. Lower it if the tactical tuning sidecar fills too fast.",
                     new AcceptableValueRange<int>(1, 300)));
             EnableTacticalBugTelemetry = Config.Bind(
                 "Tactical",
                 "Enable Tactical Bug Telemetry",
-                false,
-                "Default ON. Emits focused read-only telemetry for tactical order/current-order bug hunts; does not change battlefield behavior.");
+                true,
+                "Default ON. Emits read-only tactical sidecar rows when vanilla current-order, courier, waypoint, path, formation, reserve or objective-chain handling looks risky; deduped per signature, no behavior change.");
             EnableTacticalFallbackRetreatNullGuard = Config.Bind(
                 "Tactical",
                 "Enable Tactical Fallback Retreat Null Guard",
                 true,
-                "Default ON. Suppresses NullReferenceException from two vanilla tactical fallback/retreat methods during focused bug-smoke runs; all non-null exceptions still propagate.");
+                "Default ON. Suppresses NullReferenceException from three vanilla tactical fallback/retreat methods (MicroAICheckForRetreats, CheckLineFallbacks, CheckOutOfFireRange) during focused bug-smoke runs; all non-null exceptions still propagate.");
             EnableTacticalPathfinderDiscipline = Config.Bind(
                 "Tactical",
                 "Enable Tactical Pathfinder Discipline",
                 true,
-                "Default ON. Corrects BUG-TAC-010 by accepting close complete tactical path endpoints, removing failed non-target path fragments, and rejecting non-complete NavMesh paths before they poison movement retries.");
+                "Default ON. Postfix on Regiment.AddPath (BUG-TAC-010): ends vanilla's path retry loop early when the segment just added already " +
+                "ends within 5 m of the target, so AI units stop piling up sliver segments. Never removes a segment. AI units only (Tactical " +
+                "Commander Mode and W&L/player protection apply); player orders are untouched.");
             EnableTacticalHqLinkGuard = Config.Bind(
                 "Tactical",
                 "Enable Tactical HQ Link Guard",
@@ -326,17 +334,10 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable W&L Tactical Charge Guard",
                 true,
-                "Default ON for Slice B1/BUG-TAC-005. When enabled, blocks ungated W&L AI feud/charge/objective-chain movement for player-subordinate units while preserving charge cancellation and AI-vs-AI behavior.");
-            EnableWlPlayerSubordinateOrderBridge = Config.Bind(
-                "W&L",
-                "Enable Player Order Doctrine",
-                true,
-                "Default ON. When true, the tactical operations ledger may issue player-subordinate W&L current orders through vanilla AIBattle.CheckCurrentOrderUpdate after vanilla UpdateDLCPlayerOrders runs.");
-            EnableWlPlayerOrderDoctrineDiagnostics = Config.Bind(
-                "W&L",
-                "Enable Player Order Doctrine Diagnostics",
-                true,
-                "Logs bounded classify/dedupe/issue decisions for the player-order doctrine. Diagnostics do not issue orders when Enable Player Order Doctrine is off.");
+                "Default ON. #42: Whiskey runs its own copy of vanilla AIBattle.CheckForFeudGroupActions: feud moves target only the nearest " +
+                "visible enemy within vanilla's feud distance, W&L player-subordinate groups never feud-move, and the orchestrator direct-child " +
+                "gate is applied. Needs Tactical Commander Mode = Active. Off: vanilla feud movement runs unmodified and the direct-child gate is " +
+                "skipped too. (The old charge and objective-chain guards were removed; the key name is kept for existing cfg files.)");
             EnableWlOperationNullGuard = Config.Bind(
                 "W&L",
                 "Enable Operation Null Guard",
@@ -345,70 +346,87 @@ namespace WhiskeyRealism
             EnablePlayerOrderDoctrine = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine",
-                false,
-                "Default-off write valve for Whiskey-authored player-facing W&L orders. Per AGENTS.md named-exception scope, #62 PlayerSubordinateOrderPatch stays default-off until focused smoke proves no player-subordinate retasking. Diagnostics can run while this is disabled.");
+                true,
+                "Default ON. W&L only: after vanilla AIBattle.UpdateDLCPlayerOrders, the tactical operations ledger may give the player's command its current order (the order your AI superior issues you) through vanilla AIBattle.CheckCurrentOrderUpdate. Yields to vanilla's own order transitions, dedupes repeats and retries a rejected order at most once per 120 ticks, and writes only when Tactical Commander Mode = Active.");
             EnablePlayerOrderDoctrineDiagnostics = Config.Bind(
                 "W&L",
                 "Enable Player Order Doctrine Diagnostics",
                 true,
-                "Logs bounded classify/dedupe/issue decisions for the player-order doctrine.");
+                "Default ON. Writes the player-order doctrine's issue/suppress/skip decisions as TacticalPlayerOrder rows to the tactical tuning sidecar, once per distinct unit + decision signature (the last 128 signatures are remembered). Logs even when Enable Player Order Doctrine is off (decisions then show reason writes-disabled).");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",
                 true,
-                "Default ON for Slice B4. Uses B3 odds doctrine to bias battle-level macroai after vanilla dynamic macro logic runs.");
+                "Default ON. #44: after vanilla AIBattle.CheckGlobalAIStrategy, sets each AI side's battle-level AIBattle.macroai from the " +
+                "operations-ledger operation, otherwise from the doctrine fallback (or, with Enable Tactical Orchestrator Army off, the legacy odds " +
+                "scorer). Never writes retreat (3) and defers to scripted values. Off: vanilla macroai.");
             EnableTacticalGroupSectorStance = Config.Bind(
                 "Tactical",
                 "Enable Tactical Group Sector Stance",
                 true,
-                "Default ON for Slice B5. Uses B3 sector doctrine to bias group ai_stance without issuing movement, reserve, artillery, fallback, or charge orders.");
+                "Default ON. Lets the sector-odds scorer bias ai_stance (1-3) of AI brigade groups that have no doctrine or ledger task. Stance " +
+                "writes only, no movement. Doctrine and ledger-task stance writes do not depend on this flag; they follow Tactical Commander Mode (written only when Active).");
             EnableTacticalCommanderIntentDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Commander Intent Doctrine",
                 true,
-                "Default ON for Slice B6a. Computes tactical commander intent and playbook from B3-B5 evidence and the active OperationPosture, and emits read-only [TacticalIntent] and [TacticalPlaybook] telemetry. Does not change any vanilla battle state.");
+                "Default ON. Computes the tactical commander intent and playbook from vanilla battle context and emits read-only [TacticalIntent] / " +
+                "[TacticalPlaybook] telemetry; changes no battle state. Required by Enable Tactical Local Reaction Doctrine.");
             EnableTacticalLocalReactionDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Local Reaction Doctrine",
                 true,
-                "Default ON for Slice B6c. Computes per-group local reactions from B6a intent + playbook + B3 evidence and emits read-only [TacticalLocalReaction] telemetry. Enables stance-4 preservation/demotion contract in BattleGroupStancePatch.");
+                "Default ON. Computes per-group local reactions from the commander intent and emits read-only [TacticalLocalReaction] telemetry; " +
+                "required by Enable Tactical Reserve Intent Telemetry. While Enable Tactical Orchestrator Army is off, a DenyCharge reaction is " +
+                "also a reason for Enable Tactical Charge Denial to demote a vanilla assault; with the army on it changes no battle state.");
             EnableTacticalChargeDenial = Config.Bind(
                 "Tactical",
                 "Enable Tactical Charge Denial",
                 true,
-                "Default ON for Slice B6c. When local reaction is not PermitCharge, BattleGroupStancePatch demotes vanilla stance 4 to 3 with [TacticalChargeDeny] telemetry, and BattleChargeGatePatch denies SetMovementMode(3) at the per-unit charge initiation surface as defense in depth.");
+                "Default ON. When vanilla escalates an AI group to the assault stance (ai_stance 4) that the command doctrine says must not " +
+                "attack (reserve held, or falling back to the line), demotes it to defend (2): no cover-skipping assault approach, skirmishers may " +
+                "deploy again, and its cavalry stops picking charge targets. Infantry melee from contact is not affected. With Enable Tactical " +
+                "Orchestrator Army off, a legacy local-reaction DenyCharge also demotes an assault, to attack (3). Logs [TacticalChargeDeny] / " +
+                "[TacticalChargePreserved]; writes need Tactical Commander Mode = Active; W&L/player groups are never touched.");
             EnableTacticalReserveIntentTelemetry = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reserve Intent Telemetry",
                 true,
-                "Default ON for Slice B6c. Emits read-only [TacticalReserveIntent] lines aggregating LineReliefRequest signals + reserve availability per side. Does not mutate reserve lists.");
-            EnableTacticalReserveListMutation = Config.Bind(
-                "Tactical",
-                "Enable Tactical Reserve List Mutation",
-                true,
-                "Default ON for Slice B6c. Allows BattleReserveDoctrinePatch to bias objectivechain[i].reservegroups membership under snapshot/restore protection when reserve intent allows mutation. W&L ownership and stale-order gates apply.");
+                "Default ON. Emits read-only [TacticalReserveIntent] rows (line-relief requests and reserve availability per side) and the " +
+                "[TacticalReserveDrift] observer rows. Requires Enable Tactical Local Reaction Doctrine. Never changes reserve lists.");
             EnableTacticalArtilleryDoctrine = Config.Bind(
                 "Tactical Doctrine",
                 "Enable Tactical Artillery Doctrine",
                 true,
-                "Default-off. When true, B7 may rewrite vanilla artillery combatbehaviorordered to favor counter-battery, preserve-fire, or cancel-bombard decisions based on doctrine. Read the patch source before enabling.");
+                "Default ON. B7: Postfix on AIBattle.CheckAIBombardment. For AI batteries in groups at ai_stance 3/4, applies the artillery " +
+                "micro-doctrine (limber/unlimber, rotate, fallback) and rewrites combatbehaviorordered: bombard 9 to counter-battery 8 or cancel to " +
+                "7; also releases counter-battery 8 to 7 once no enemy battery is in range. Needs Tactical Commander Mode = Active; W&L/player " +
+                "units are protected.");
             EnableTacticalWithdrawalDoctrine = Config.Bind(
                 "Tactical Doctrine",
                 "Enable Tactical Withdrawal Doctrine",
                 true,
-                "Default-off. When true, B8 may call BattleUnits.SetWithdrawal for individual units classified as WithdrawalCandidate or CollapseCandidate by TacticalWithdrawalDoctrine. Read the patch source before enabling.");
+                "Default ON. B8: in AIBattle.CheckUseOfReserves, attached AI infantry/cavalry that the withdrawal doctrine marks for fallback or " +
+                "retreat get vanilla's own tactical fallback move (RegimentSetPath along the retreat angle plus SetMovementMode 2); never " +
+                "Regiment.SetWithdrawal. Needs Tactical Commander Mode = Active; W&L/player units are protected. Off: no fallback writes; the " +
+                "reserve doctrine-deny rollback still runs.");
             TacticalCommanderModeRaw = Config.Bind(
                 "Tactical Orchestrator",
                 "Tactical Commander Mode",
                 // User-approved default for the full doctrine feature: Active. Existing config files still take precedence over this default.
                 "Active",
-                "Default Active. Off disables the operations-ledger command system; MonitorOnly runs vision/ledger/tasks/monitor without vanilla writes; Active runs the full tactical command system for AI sides.");
+                "Default Active. Values: Off, MonitorOnly, Active (case-insensitive). Off disables every Whiskey battle write (full tactical rollback); MonitorOnly runs vision/ledger/tasks/monitor without any vanilla writes; Active runs the full tactical command system for AI-controlled units. Unrecognized values log a warning and fall back to Active.");
+            TacticalCommanderModeRaw.SettingChanged += (_, __) =>
+            {
+                _cachedTacticalCommanderMode = null;
+                _loggedTacticalCommanderMode = false;
+            };
             _ = TacticalCommanderModeValue;
             EnableTacticalHeavyPathThrottling = Config.Bind(
                 "TacticalTickOptimization",
                 "Enable Tactical Heavy Path Throttling",
                 true,
-                "Enable the heavy path throttle for side-wide evidence, vision, and doctrine assignment (default ON per 2026-05-18 user direction; smoke verified).");
+                "Default ON. Throttles the side-wide evidence, vision and doctrine-assignment heavy path to the Heavy Ledger Review Cycle Hours / Min Realtime Seconds cadence.");
             TacticalHeavyReviewCycleHours = Config.Bind(
                 "TacticalTickOptimization",
                 "Heavy Ledger Review Cycle Hours",
@@ -417,37 +435,30 @@ namespace WhiskeyRealism
             TacticalHeavyReviewMinRealtimeSeconds = Config.Bind(
                 "TacticalTickOptimization",
                 "Heavy Ledger Review Min Realtime Seconds",
-                2.0f,
-                "Minimum real seconds between heavy planning passes under time compression. First tick still runs; urgent recovery still uses the latest snapshot plus live vanilla reads.");
+                4.0f,
+                "Minimum real seconds between heavy planning passes under time compression (default 4.0; raised from 2.0 on 2026-05-20 to halve heavy-rebuild rate at 10×/20× compression where the snapshot rebuild was the dominant orchestrator-tick cost). First tick still runs; urgent recovery still uses the latest snapshot plus live vanilla reads.");
             EnableTacticalBattleOrchestrator = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Battle Orchestrator",
                 true,
-                "Master switch for the multi-echelon tactical battle orchestrator. " +
-                "Default on per orchestrator umbrella spec. Disable to revert to vanilla " +
-                "+ existing default-off Slice B scorer paths.");
+                "Default ON. Master switch for the per-battle tactical orchestrator (army plan, operations ledger, direct-child and reserve gates). " +
+                "Off: no orchestrator, so the ledger-driven writes, the orchestrator macroai source and the reserve commit gate stop. Independent " +
+                "bug-fix patches still run.");
             EnableTacticalOrchestratorArmy = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Army",
                 true,
-                "Default ON. O1: instantiate the per-side ArmyOrchestrator at battle start, " +
-                "pick a personality-keyed playbook, and let BattleMacroStrategyPatch read " +
-                "ArmyOrchestrator.CurrentMacroAi instead of running the doctrine scorer. " +
-                "Disable to fall back to the scorer-driven macro behavior for regression triage.");
+                "Default ON. Attaches the per-side ArmyOrchestrator (plan, direct children, command tree) at battle start and makes the operations " +
+                "ledger the macroai source for #44. Off: #44 uses the legacy odds scorer and the legacy local-reaction path writes reactions.");
             TacticalOrchestratorMinReplanSeconds = Config.Bind(
                 "Tactical Orchestrator",
                 "Min Replan Seconds",
-                60,
+                600,
                 new ConfigDescription(
-                    "Minimum wall-clock seconds between army replan events. Triggers may detect " +
-                    "earlier; orchestrator rate-limits actual plan re-pick to avoid thrash.",
-                    new AcceptableValueRange<int>(10, 600)));
-            TacticalOrchestratorVerboseLogging = Config.Bind(
-                "Tactical Orchestrator",
-                "Verbose Logging",
-                false,
-                "Default ON. When true, emit per-tick [TacticalCascade] and per-trigger " +
-                "[TacticalReplan] lines instead of just first-fire and on-change markers.");
+                    "Minimum battle seconds between army replans, measured on the doctrine battle clock (frozen overnight), so it covers the same span " +
+                    "of battle at any time compression. Replan triggers may fire earlier; the re-pick waits until the cooldown has passed. The " +
+                    "new-battle-day replan counts against it. Default 600.",
+                    new AcceptableValueRange<int>(60, 3600)));
             EnableTacticalOrchestratorIntentInference = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Intent Inference",
@@ -460,80 +471,118 @@ namespace WhiskeyRealism
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Direct-Child Gate",
                 true,
-                "Default ON. O3: when true, BattleFeudActionGatePatch (#42) consults " +
-                "ArmyOrchestrator.GetDirectChildRole(group) between the W&L decision and " +
-                "SetWaypoint, denying off-axis Main/SupportMain, wide Fix, out-of-sector " +
-                "Screen/Refuse, toward-enemy Fallback, and any Reserve movement on AI- " +
-                "controlled sides. Disable to keep #42's existing W&L-only behavior. " +
-                "Telemetry runs regardless of this flag; only deny actions are gated.");
+                "Default ON. O3: inside the W&L feud guard (#42), denies AI feud moves for Reserve-role children, Fix children moving beyond 70% of " +
+                "the feud distance, and Fallback children moving toward the enemy. Requires Enable W&L Tactical Charge Guard and Tactical Commander " +
+                "Mode = Active. Off: the gate is skipped silently.");
             EnableTacticalOrchestratorReserveCommitGate = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Tactical Orchestrator Reserve Commit Gate",
                 true,
-                "Default ON. Slice 1: when true, AIBattle.CheckUseOfReserves consults " +
-                "the command-node intent for the calling command group and rolls back new " +
-                "vanilla reserve support paths when the group resolves to a Reserve role. " +
-                "Allowed vanilla reserve movement remains eligible for the separate order-delay guard.");
-            EnableTacticalOrchestratorChargeGate = Config.Bind(
-                "Tactical Orchestrator",
-                "Enable Tactical Orchestrator Charge Gate",
-                true,
-                "Default ON. Slice 3: when true, AIBattle.MicroAICheckForCharges consults " +
-                "the command-node intent for the calling command group before allowing vanilla " +
-                "SetMovementMode(3) charge initiation. Main charges require favorable local odds; " +
-                "SupportMain requires main-effort support evidence; Fix/Reserve/Fallback/Refuse/Screen " +
-                "roles deny charge initiation unless the Screen routed-target exception is proven.");
+                "Default ON. AIBattle.CheckUseOfReserves consults the command-node intent for the calling command group and rolls back new vanilla " +
+                "reserve support paths when the group resolves to a Reserve role. Allowed vanilla reserve movement remains eligible for the " +
+                "separate order-delay guard. Requires Enable Tactical Battle Orchestrator.");
             EnableSinglePassObjectiveRecords = Config.Bind(
                 "Tactical Orchestrator",
                 "Enable Single-Pass Objective Records",
                 true,
-                "Single-pass aggregation for ObjectiveRecord building. Walks " +
-                "BattleUnits.completeunitlist once instead of six times. Default ON. " +
-                "Set false to roll back to the legacy per-walk path if a regression " +
-                "appears. Default-on per AGENTS.md tactical policy. Measured " +
-                "performance characteristics are documented in docs/telemetry.md " +
-                "once smoke-verified.");
+                "Default ON. Builds objective records in one walk of BattleUnits.completeunitlist instead of six. Set false to fall back to the " +
+                "per-walk builder.");
+            BattleGroupStanceMinIntervalSeconds = Config.Bind(
+                "Tactical Orchestrator",
+                "Battle Group Stance Min Interval Seconds",
+                1.5f,
+                "Wall-clock cooldown, per AI battle side, between BattleGroupStancePatch passes over the side's groups (at 20x/50x vanilla calls " +
+                "AdjustGroupAIStance many times per real second). Default 1.5. 0 disables the cooldown.");
+            EnableArtilleryWaypointVeto = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Artillery Waypoint Veto",
+                true,
+                "Default ON. Postfix on BattleUnits.SetWaypoint: when vanilla AI orders an AI battery to within 60 m of a visible enemy, cancels " +
+                "the order, limbers and pulls it back along its retreat angle by vanilla's artillery fallback distance (200 m if that is unset). " +
+                "Player orders are never touched. Set false for rollback.");
+            EnableArtilleryAllStanceAudit = Config.Bind(
+                "Tactical Orchestrator",
+                "Enable Artillery All-Stance Audit",
+                true,
+                "Default ON. Each BattleGroupStancePatch pass (at most every Battle Group Stance Min Interval Seconds per side) walks the side's " +
+                "AI batteries in every group stance (vanilla CheckAIBombardment only covers stances 3/4) and applies the artillery micro-doctrine " +
+                "through vanilla calls: limber or retreat when the enemy is within 60 m, or within 100 m with no interposed infantry/cavalry and group " +
+                "morale below 0.6 (idle batteries only); unlimber and face an enemy in fire range; turn toward a visible enemy beyond range (only when off by vanilla's " +
+                "turn trigger); cancel bombardment below 10% ammo (mean of the three ammo slots). A battery is left alone for Artillery Audit Min " +
+                "Hold Seconds after a write. AI batteries only (W&L/player units protected); writes need Tactical Commander Mode = Active.");
+            ArtilleryAuditMinHoldSeconds = Config.Bind(
+                "Tactical Orchestrator",
+                "Artillery Audit Min Hold Seconds",
+                3.0f,
+                "Per-battery hold after an All-Stance Audit write before the next one. Battle seconds on the battle clock, 1x-equivalent (600 per " +
+                "battle hour, so 3 = 18 battle seconds), the same span at any time compression. Default 3.");
+            BrigadeTaskHoldSeconds = Config.Bind(
+                "Tactical Orchestrator",
+                "Brigade Task Hold Seconds",
+                12.0f,
+                "After a brigade is given a task waypoint (probe/screen/guard-flank/...), the same task is not re-issued for this long; a different " +
+                "task bypasses the hold. Battle seconds on the battle clock, 1x-equivalent (600 per battle hour, so 12 = 72 battle seconds), the " +
+                "same span at any time compression. Default 12. 0 disables.");
+            OpportunityHysteresisMinHoldSeconds = Config.Bind(
+                "Tactical Orchestrator",
+                "Opportunity Hysteresis Min Hold Seconds",
+                10f,
+                "Value is battle MINUTES (the key says Seconds only so existing cfg files keep working). Once the reinforcement-opportunity " +
+                "doctrine commits to a category (AttackNow / DefensiveHold / WaitAndConsolidate / WithdrawalToFightLater) it is held for this many " +
+                "minutes of battle time on the doctrine clock (frozen overnight) before it may change; an escalation to WithdrawalToFightLater " +
+                "bypasses the hold. Default 10. 0 disables.");
             EnableTacticalRegimentDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Regiment Diagnostics",
                 true,
-                "Default-on. Per-regiment delta logger for diagnosing stuck-retreat / stuck-charge " +
-                "/ unit-state bugs that the matrix observer (#35) cannot see. Pure observation; " +
-                "no behavior writes. Bounded by Tactical Regiment Diagnostic Names watch list, " +
-                "per-unit min 0.5s sample interval, and a hard cap of 2000 lines per battle.");
+                "Default ON. Read-only per-regiment delta logger for stuck-retreat / stuck-charge / unit-state bugs. Watches only regiments matched " +
+                "by Tactical Regiment Diagnostic Names (default empty = nothing), at most one sample per unit per 0.5 s and 2000 lines per battle. " +
+                "Also required for the map-knowledge watched-regiment rows.");
             TacticalRegimentDiagnosticNames = Config.Bind(
                 "Tactical Diagnostics",
                 "Tactical Regiment Diagnostic Names",
-                "Hampton,Tennessee",
-                "Comma-separated case-insensitive substrings matched against Regiment names. " +
-                "Default seeds Hampton's Legion + any Tennessee-named regiment (the reported " +
-                "stuck-retreat units). Add more as needed: 'Hampton,Tennessee,2nd_South_Carolina'. " +
-                "Empty string disables logging (feature stays enabled but watches nothing).");
+                "",
+                "Comma-separated case-insensitive substrings matched against regiment names, e.g. 'Hampton,Tennessee'. " +
+                "Default empty = nothing watched, nothing scanned: the regiment and map-knowledge diagnostics skip the unit walk entirely. " +
+                "Each name you add makes those diagnostics read every unit's name once per AI cycle to find matches.");
             EnableTacticalMapKnowledgeDiagnostics = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Map Knowledge Diagnostics",
-                false,
-                "Default ON. Read-only tactical scene-object probe for map-knowledge debugging. " +
-                "When enabled, emits bounded [TacticalMapKnowledge] rows for Objectives, EntryPoints, " +
-                "AIFortifications, FortificationGroup, road/railroad anchors, and watched-regiment " +
-                "cover/facing context. Does not change unit orders, facing, formation, or pathing.");
+                true,
+                "Default ON. Read-only. Emits one [TacticalMapKnowledge] scene-anchor inventory row per battle (objectives, entry points, AI fortifications, " +
+                "fortification groups, road/railroad anchors) to the tactical tuning sidecar, plus cover/facing/objective context rows (at most one per unit " +
+                "per 2 s, 1000 per battle) for regiments matched by Tactical Regiment Diagnostic Names. Does not change orders, facing, formation or pathing.");
             EnableTacticalContactFacingPulse = Config.Bind(
                 "Tactical",
                 "Enable Tactical Contact Facing Pulse",
                 true,
-                "Default ON. The active operations-ledger posture executor may run a " +
-                "bounded division/brigade/regiment contact-facing pulse after vanilla formation adjustment. " +
-                "Division scope only publishes/logs axis intent; brigade scope may correct command-group " +
-                "frontage; regiment scope may reform and face attached combat regiments under visible " +
-                "contact. Disable this flag for rollback without turning off Tactical Commander Mode.");
+                "Default ON. The active operations-ledger posture executor may run a bounded division/brigade/regiment contact-facing pulse after " +
+                "vanilla formation adjustment. Division scope only publishes/logs axis intent; brigade scope may correct command-group frontage; " +
+                "regiment scope may rotate attached combat regiments in place to face visible contact. Disable for rollback without turning off " +
+                "Tactical Commander Mode.");
             EnableTacticalReinforcementOpportunityDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reinforcement Opportunity Doctrine",
                 true,
-                "Default ON. Refreshes a per-army reinforcement-opportunity decision (AttackNow / WaitAndConsolidate / DefensiveHold / WithdrawalToFightLater) " +
-                "from BattleUnits.scheduledarrival + sideinformation.totalactiveforce. Considers current force ratio, per-arrival timing, and commander " +
-                "aggression. Telemetry: TacticalReinforcementOpportunity events with currentRatio, enemyParityHours, ownParityHours, threshold, window. " +
-                "Disable to fall back to the previous purely-current-strength playbook selection.");
+                "Default ON. Refreshes a per-army reinforcement-opportunity decision (AttackNow / WaitAndConsolidate / DefensiveHold / " +
+                "WithdrawalToFightLater) from BattleUnits.scheduledarrival and sideinformation.totalactiveforce, weighing the current force ratio, " +
+                "arrival timing and commander aggression. Telemetry: TacticalReinforcementOpportunity events. Off: the decision stops refreshing, " +
+                "which disables the opportunity replan trigger, the brigade task overrides that use it and the Vanilla Macro AI Sync fallback.");
+            EnableVanillaMacroAiSync = Config.Bind(
+                "Tactical",
+                "Enable Vanilla Macro AI Sync",
+                true,
+                "Default ON. When the operations ledger has no macro opinion for an AI side, #44 uses the reinforcement-opportunity decision " +
+                "(AttackNow / DefensiveHold / WaitAndConsolidate / WithdrawalToFightLater, mapped to macroai 0-2) as the fallback AIBattle.macroai. " +
+                "Never writes for the W&L player side. Requires Enable Tactical Macro Stance Scorer and Enable Tactical Orchestrator Army.");
+            EnableGeometricPlayTemplates = Config.Bind(
+                "Tactical",
+                "Enable Geometric Play Templates",
+                true,
+                "Default ON. When the army selects a playbook (DoubleEnvelopment / PreparedDefense / ...), looks up its geometric template " +
+                "(army-relative rectangles, each tagged LeftWing / Center / Reserve / ...), projects it to world coordinates from the army centroid " +
+                "and enemy direction, and assigns corps to rectangles by closest distance. The role allocator then uses the rectangle kind as the " +
+                "role basis. Falls back to evidence-based allocation when no template exists or positions cannot be computed.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",
@@ -543,70 +592,78 @@ namespace WhiskeyRealism
                 "Tactical",
                 "Enable Tactical Deployment Terrain Discipline",
                 true,
-                "Default off. When enabled, may correct clear AI deployment terrain or deployment-zone failures after vanilla deployment using bounded terrain-safe candidates. Visible enemy bearing may align final facing only as part of those terrain corrections.");
+                "Default ON. #60: after vanilla AI deployment, moves AI groups standing in water or outside the deployment zone to the best nearby " +
+                "safe point through SetGroupFormation. Visible enemy bearing only adds a facing bonus to candidate points. Fortification-line " +
+                "placements and the player's side are left alone.");
             TacticalDeploymentTerrainMaxCorrectionMeters = Config.Bind(
                 "Tactical",
                 "Tactical Deployment Terrain Discipline Max Correction Meters",
                 60f,
-                "Maximum candidate correction distance sampled for default-off AI deployment terrain or deployment-zone corrections.");
+                "Maximum distance sampled when correcting an AI deployment terrain/zone failure. The sample rings are fixed at 0/8/16/32/48/60 m, " +
+                "so values above 60 change nothing.");
             TacticalDeploymentTerrainMaxCandidates = Config.Bind(
                 "Tactical",
                 "Tactical Deployment Terrain Discipline Max Candidates",
                 16,
-                "Maximum candidate points sampled around a failed AI deployment placement.");
+                "Maximum sample points tried around a failed AI deployment placement.");
             TacticalDeploymentFacingPreferredDeltaDegrees = Config.Bind(
                 "Tactical",
                 "Tactical Deployment Facing Preferred Delta Degrees",
                 90f,
-                "Preferred maximum final facing delta from visible enemy bearing for deployment terrain corrections.");
+                "During deployment correction, candidate points whose facing is within this many degrees of the visible enemy bearing score higher " +
+                "(a soft bonus, not a limit).");
             EnableConstructionIntentLedger = Config.Bind(
-                "Construction", "Enable Construction Intent Ledger", true,
-                "Compute weekly construction intent for telemetry and later steering. Does not directly change vanilla construction by itself.");
+                "Construction",
+                "Enable Construction Intent Ledger",
+                true,
+                "Default ON. Computes the per-alliance construction intent weekly (sooner when its inputs change) during the daily strategic " +
+                "review. Feeds construction telemetry, Construction Site Steering and Telegraph AI; off disables those.");
             EnableHistoricalOperationDoctrine = Config.Bind(
                 "Strategic",
                 "Enable Historical Operation Doctrine",
                 true,
-                "Enable named historical operation doctrine for AI CIC planning. When enabled, catalog misses are logged as NoProfile and do not create generic replacement plans.");
+                "Default ON. AI CICs plan named historical operations when one fits. With no matching profile the CIC uses a generic plan only on " +
+                "objectives vanilla itself would pick that have towns/IIPs; otherwise vanilla picks. A phase in a defensive posture never sets the " +
+                "campaign objective. Off: historical operations are skipped and only generic plans are built.");
             EnableDefenseIntentLedger = Config.Bind(
                 "Defense Intent Ledger",
                 "Enable Defense Intent Ledger",
                 true,
-                "Compute the daily defense ledger (Slice 1 observer). Disable to suppress all [DefenseIntent] output.");
+                "Default ON. Computes the daily defense-intent ledger and uses it to keep forbidden units out of vanilla defensive operations " +
+                "(#25). Off: no [DefenseIntent] output and no candidate filtering.");
             DefenseIntentVerboseLogging = Config.Bind(
                 "Defense Intent Ledger",
                 "Defense Intent Verbose Logging",
-                false,
-                "Log per-tick defense intent telemetry even when the signature has not changed.");
+                true,
+                "Default ON. Emits the daily defense-intent package rows every day instead of only on change, plus defensive-operation candidate filter/revert rows and coastal-defense custom-order rows. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             EnableConstructionSiteSteering = Config.Bind(
-                "Construction", "Enable Construction Site Steering", false,
-                "Default ON. Enables ConstructionIntentLedger private-building probability steering without replacing bestiipplaces or bypassing vanilla gates.");
-            EnableSupplyDepotSteering = Config.Bind(
-                "Construction", "Enable Supply Depot Steering", false,
-                "Default ON. Future valve for supply depot steering after observer telemetry proves safe candidate selection.");
-            EnableFortSteering = Config.Bind(
-                "Construction", "Enable Fort Steering", false,
-                "Default ON. Future valve for fort site steering after fort-site and unit-range telemetry prove realizable sites.");
+                "Construction", "Enable Construction Site Steering", true,
+                "Default ON. AI factions only: during vanilla Economy.UpdateCompanyFoundations, multiplies vanilla's private-building construction probabilities (bestiipplacesprob) by the Construction Intent Ledger's steering score (clamped 0.1-3). Keeps vanilla's candidate per building group, its build-rate cap and its subsidy/funding/rating gates, and restores the slots vanilla did not consume.");
             FortConstructionGovernorEnabled = Config.Bind(
                 "Construction", "Fort Construction Governor Enabled", true,
                 "Default ON. Filters saturated vanilla fort construction sites before AICampaign.CheckFortConstruction so either side cannot stack excessive forts in one local area unless threat justifies more.");
             EnableTelegraphAI = Config.Bind(
-                "Construction", "Enable Telegraph AI", false,
-                "Default ON. Enables conservative connected-chain telegraph construction with support-unit and final-placement validation.");
-            EnableRailroadSteering = Config.Bind(
-                "Construction", "Enable Railroad Steering", false,
-                "Default ON. Future valve for per-line railroad steering. Observation remains active through telemetry.");
+                "Construction", "Enable Telegraph AI", true,
+                "Default ON. AI factions only: when the construction intent updates (weekly), may start vanilla telegraph-station construction wishes that extend the faction's connected chain toward a large, uncovered, enemy-free field command, paid through vanilla. " +
+                "Capped by Max Active Telegraph Constructions Per Faction, skipped in the EmergencyHold fiscal posture, and a final placement that fails its connection/support/safe-rear checks is removed with the wish cost refunded (treasury, subsidy funding and spending stats as charged; the interest re-roll vanilla did when charging stays). A wish vanilla itself drops for lack of a site is not refunded, as in vanilla.");
             ConstructionTelemetryEnabled = Config.Bind(
-                "Construction", "Construction Telemetry", true,
-                "Emit no-spam construction intent and actual-start heartbeat lines.");
+                "Construction",
+                "Construction Telemetry",
+                true,
+                "Default ON. Emits the monthly construction heartbeat (intent summary plus observed vanilla construction starts). Intent-change " +
+                "rows are emitted regardless.");
             ConstructionVerboseLogging = Config.Bind(
-                "Construction", "Construction Verbose Logging", false,
-                "Emit verbose construction candidate and actual-start details.");
+                "Construction", "Construction Verbose Logging", true,
+                "Default ON. Emits the daily construction-intent row every day instead of only on change, every actual construction start, and telegraph no-start/reject reasons (once per alliance and reason). Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             MaxActiveTelegraphConstructionsPerFaction = Config.Bind(
-                "Construction", "Max Active Telegraph Constructions Per Faction", 1,
-                "Caps simultaneously active Whiskey telegraph constructions per faction when Telegraph AI is enabled.");
-            MaxRailroadStartsPerFactionPerMonth = Config.Bind(
-                "Construction", "Max Railroad Starts Per Faction Per Month", 1,
-                "Future railroad steering cap. Current slice observes vanilla railroad starts only.");
+                "Construction",
+                "Max Active Telegraph Constructions Per Faction",
+                1,
+                "Telegraph AI starts no new station while the faction already has this many telegraph stations under construction or damaged plus " +
+                "pending AI placements (vanilla's and Whiskey's together). Default 1; a negative value counts as 1.");
+            EnableArtilleryCombineGunSync = Config.Bind(
+                "Campaign", "Enable Artillery Combine Gun Sync", true,
+                "Default ON. After BattleUnits.CombineUnits merges artillery on the campaign map, sets the receiving battery's guns (and the surviving source battery's, if it was not deleted) to GetSollGuns(true) and refreshes gun stats — the value the next Regiment.Initialize would compute on load. Set false for rollback to vanilla, which leaves guns stale until the next load.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");
@@ -629,14 +686,25 @@ namespace WhiskeyRealism
                 "Performance", "Campaign AI Governor Enabled", true,
                 "Default ON. Replaces vanilla AICampaign.Update high-speed pass scheduling with a bounded wrapper that preserves vanilla side effects.");
             CampaignAiGovernorMaxPasses20x = Config.Bind(
-                "Performance", "Campaign AI Governor Max Passes At 20x", 2,
-                "Maximum vanilla AICampaign.UpdateUnitAI passes per frame at 20x when Campaign AI Governor is enabled. Vanilla normally runs 4.");
+                "Performance",
+                "Campaign AI Governor Max Passes At 20x",
+                2,
+                "Vanilla AICampaign.UpdateUnitAI passes guaranteed every frame at 20x (the lower of this and vanilla's 4), run regardless of the " +
+                "frame budget. Passes the governor defers are owed and repaid later (up to 2x vanilla per frame under budget, forced past an " +
+                "8-frame backlog), so no AI work is lost. Default 2.");
             CampaignAiGovernorMaxPasses50x = Config.Bind(
-                "Performance", "Campaign AI Governor Max Passes At 50x", 3,
-                "Maximum vanilla AICampaign.UpdateUnitAI passes per frame at 50x when Campaign AI Governor is enabled. Vanilla normally runs 7.");
+                "Performance",
+                "Campaign AI Governor Max Passes At 50x",
+                3,
+                "Vanilla AICampaign.UpdateUnitAI passes guaranteed every frame at 50x (the lower of this and vanilla's 7), run regardless of the " +
+                "frame budget. Passes the governor defers are owed and repaid later (up to 2x vanilla per frame under budget, forced past an " +
+                "8-frame backlog), so no AI work is lost. Default 3.");
             CampaignAiGovernorFrameBudgetMs = Config.Bind(
-                "Performance", "Campaign AI Governor Frame Budget Ms", 3f,
-                "Maximum wall-clock milliseconds per AICampaign.Update wrapper frame before the governor stops issuing more UpdateUnitAI passes.");
+                "Performance",
+                "Campaign AI Governor Frame Budget Ms",
+                3f,
+                "Wall-clock milliseconds per AICampaign.Update frame above which the governor stops running passes beyond the guaranteed ones, " +
+                "unless the owed backlog forces catch-up. Default 3.");
             EnableWlCampAccountingFix = Config.Bind(
                 "W&L Camp", "Enable W&L Camp Accounting Fix", true,
                 "Default ON. Corrects vanilla short-camp minimum allocation so credited station time sums to actual camp time.");
@@ -675,18 +743,26 @@ namespace WhiskeyRealism
                     "Power applied to commanded-unit count for unit-facing camp effects. 0.5 uses square-root scaling; 1.0 is vanilla-equivalent.",
                     new AcceptableValueRange<float>(0.5f, 1.0f)));
             EnableWlCampVerboseTrace = Config.Bind(
-                "W&L Camp", "Enable W&L Camp Verbose Trace", false,
-                "Emit bounded W&L camp accounting and modifier trace lines for focused smoke tests.");
+                "W&L Camp", "Enable W&L Camp Verbose Trace", true,
+                "Default ON. Emits W&L camp accounting and modifier trace rows, each kind only when its value signature changes. Rows go to the campaign tuning sidecar only (never LogOutput.log) and appear only when Logging Profile is CampaignTuning or FullTuning; bounded by Max Tuning Log MB.");
             OverrideVanillaSettings = Config.Bind(
-                "Strategic", "Override Vanilla Settings", true,
-                "When true, Whiskey Realism locks Aggressiveness to Mediocre, Historic AI Personality to true, and Difficulty to the value of LockedDifficulty (default Hard) at campaign creation. " +
-                "Set false to allow vanilla settings to apply (advanced — may produce incoherent AI behavior or weak historical immersion).");
+                "Strategic",
+                "Override Vanilla Settings",
+                true,
+                "Default ON. At campaign creation locks Aggressiveness to Mediocre, Historic AI Personality to true and Difficulty to Locked " +
+                "Difficulty (default Hard), and forces Fog of War, order delays, feuds, readiness gameplay and all automanage options on with those " +
+                "menu controls frozen. The locked difficulty also feeds the CIC personality modifier. Set false to allow vanilla settings " +
+                "(advanced; may produce incoherent AI behavior).");
             LockedDifficulty = Config.Bind(
                 "Strategic", "Locked Difficulty", 3,
                 "Difficulty index 0-4 to lock when OverrideVanillaSettings is true. 0=Very Easy, 1=Easy, 2=Mediocre, 3=Hard (default — historical brutality), 4=Very Hard.");
             ForceAllSuccessionEvents = Config.Bind(
-                "Diagnostics", "Force All Succession Events", false,
-                "TEST MODE — bypass date and war-state gates and force all 12 scripted succession events to fire on first strategic review tick. Lets you verify the concrete commander-swap mechanic in seconds without playing through a multi-month campaign. DISABLE before a real playthrough.");
+                "Diagnostics",
+                "Force All Succession Events",
+                false,
+                "Default OFF. TEST MODE cheat: bypasses the date and war-state gates and fires all 12 scripted succession events on the first " +
+                "monthly strategic tick, falling back to any AI army group when the historical one is missing. Forced events are not saved to the " +
+                "sidecar. Corrupts a real playthrough; leave false outside testing.");
 
             if (!Enabled.Value)
             {
@@ -709,7 +785,6 @@ namespace WhiskeyRealism
             // never see a null Instance on their first invocation.
             StrategicCoordinator.Bootstrap();
 
-            MoraleSnapshotLedger = new TacticalMoraleSnapshotLedger(capacity: TacticalMoraleSnapshotLedgerCapacity);
 
             StartTelemetryRuntime();
 
@@ -719,6 +794,24 @@ namespace WhiskeyRealism
             _harmony.PatchAll(typeof(Plugin).Assembly);
 
             Log.LogInfo($"{GUID} v0.2.2 loaded — strategic-brain patches registered.");
+        }
+
+        // Per-frame hitch probe for the telemetry sidecar, and one doctrine clock
+        // sample per frame so the clock sees every end-of-day frame even when no
+        // doctrine reader runs overnight (a sample is skipped off the battle map).
+        // Neither throws, but a Unity message must not either, so the guard stays.
+        private void Update()
+        {
+            try
+            {
+                if (Enabled == null || !Enabled.Value) return;
+                WhiskeyRealism.Telemetry.TelemetryFrameProbe.Tick(UnityEngine.Time.unscaledDeltaTime);
+                WhiskeyRealism.Tactical.Orchestrator.TacticalBattleCoordinator.SampleDoctrineClock();
+            }
+            catch
+            {
+                // Telemetry must never break the frame.
+            }
         }
 
         private void OnDestroy()

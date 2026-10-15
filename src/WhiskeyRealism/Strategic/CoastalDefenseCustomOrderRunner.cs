@@ -12,15 +12,29 @@ namespace WhiskeyRealism.Strategic
     // Coordinator-driven custom defensive movement order runner.
     //
     // Runs after DefenseIntentLedger.Build emits its responses for an
-    // alliance. Issues MoveUnitTo + unitsindefensiveoperations.Add for
-    // selected packages where vanilla CheckForDefensiveOperations would
-    // not (rate-limited landings, relaxed-filter CoastalGuard candidates
+    // alliance. Commits selected packages where vanilla CheckForDefensiveOperations
+    // would not (rate-limited landings, relaxed-filter CoastalGuard candidates
     // vanilla's downstream gates would reject). Does NOT touch the static
     // AICampaign.defensiveoperations list — that surface is owned by
     // vanilla's commit path. Release happens on a future tick when the
     // builder transitions to Recovered + cooldown expires.
+    //
+    // 2026-10-14 (C-Coastal): commits now mirror vanilla's defensive-operation
+    // commit (decompile 13713-13719): queue an AICampaign.DefensiveMovingOrder
+    // (executed by UpdateOrders, 79295), AIBattle.CheckCurrentOrderUpdate type 7,
+    // remove from unitsinoffensiveoperations, add to unitsindefensiveoperations.
+    // The destination keeps the nearest enemy inside 0.8 x buglerange, because
+    // vanilla CheckForEndOfDefensiveOperations (13836) stops and drops any
+    // defensive-op unit with no enemy within buglerange of its destination - the
+    // old asset-anchored MoveUnitTo produced a daily stop/go. Release mirrors
+    // vanilla's end of operation (RemoveOrder, StopRegiment, remove).
     internal static class CoastalDefenseCustomOrderRunner
     {
+        static CoastalDefenseCustomOrderRunner()
+        {
+            CampaignScope.Register("coastal-defense", ResetForNewCampaign);
+        }
+
         // Per-alliance dedup of "first assignment per (threat, unit) tuple"
         // log lines — keys are "<allianceId>|<threatSignature>|<unitInstanceId>".
         private static readonly HashSet<string> _firstAssignmentLogged = new HashSet<string>();
@@ -29,11 +43,38 @@ namespace WhiskeyRealism.Strategic
         // prior tick. Used to detect when a threat signature disappears from the current
         // tick's output and release the previously-assigned units from defensiveoperations.
         // Key: allianceId → threatSignature → set of UnitInstanceIds.
-        // Cross-campaign bleed is accepted as a known limitation (same as _firstAssignmentLogged).
+        // Cleared per campaign (CampaignScope).
         private static readonly Dictionary<int, Dictionary<string, HashSet<int>>> _assignedByThreat =
             new Dictionary<int, Dictionary<string, HashSet<int>>>();
         private static readonly HashSet<string> _wlCurrentOrderAttempts = new HashSet<string>();
         private static readonly HashSet<string> _logOnceKeys = new HashSet<string>();
+
+        internal static void ResetForNewCampaign()
+        {
+            _firstAssignmentLogged.Clear();
+            _assignedByThreat.Clear();
+            _wlCurrentOrderAttempts.Clear();
+            _logOnceKeys.Clear();
+        }
+
+        // True while this runner holds `unitInstanceId` on a custom defensive
+        // order for any live threat signature of `allianceId`. Other steering
+        // (capital pledges) must not pull such units away.
+        internal static bool IsCustomOrdered(int allianceId, int unitInstanceId)
+        {
+            if (!_assignedByThreat.TryGetValue(allianceId, out var bySignature)) return false;
+            foreach (var units in bySignature.Values)
+                if (units != null && units.Contains(unitInstanceId)) return true;
+            return false;
+        }
+
+        private static bool HasAssignments(int allianceId)
+        {
+            if (!_assignedByThreat.TryGetValue(allianceId, out var bySignature)) return false;
+            foreach (var units in bySignature.Values)
+                if (units != null && units.Count > 0) return true;
+            return false;
+        }
 
         internal static void Run(int allianceId, DefenseIntentLedgerOutput output)
         {
@@ -43,7 +84,10 @@ namespace WhiskeyRealism.Strategic
                 // defensive movement orders. Our per-alliance state structures are sized
                 // for Union=0 and CSA=1 only; reject anything outside that range.
                 if (allianceId < 0 || allianceId > 1) return;
-                if (output == null || output.Responses == null || output.Responses.Count == 0) return;
+                var responses = output?.Responses ?? new List<DefenseResponse>();
+                // With no responses there is nothing to issue, but units held from
+                // earlier ticks must still be released below.
+                if (responses.Count == 0 && !HasAssignments(allianceId)) return;
 
                 int aifactionIndex = ResolveAifactionIndex(allianceId);
                 if (aifactionIndex < 0) return;
@@ -51,11 +95,11 @@ namespace WhiskeyRealism.Strategic
                 var faction = AICampaignReflect.GetFaction(aifactionIndex);
                 if (faction == null) return;
 
-                var defOpsField = AccessTools.Field(faction.GetType(), "unitsindefensiveoperations");
-                var ownUnitsField = AccessTools.Field(faction.GetType(), "ownunits");
-                var defOps = defOpsField?.GetValue(faction) as IList;
-                var ownUnits = ownUnitsField?.GetValue(faction) as IList;
+                var defOps = VanillaFieldCache.List(faction, "unitsindefensiveoperations");
+                var ownUnits = VanillaFieldCache.List(faction, "ownunits");
                 if (defOps == null || ownUnits == null) return;
+                var offensive = VanillaFieldCache.Get(faction, "unitsinoffensiveoperations") as IList;
+                var enemyUnits = VanillaFieldCache.Get(faction, "enemyunits") as IList;
 
                 bool verbose = Plugin.Instance != null && Plugin.Instance.DefenseIntentVerboseLogging.Value;
 
@@ -63,7 +107,7 @@ namespace WhiskeyRealism.Strategic
                 // Populated during the assignment loop below; used afterwards for release tracking.
                 var thisTick = new Dictionary<string, HashSet<int>>();
 
-                foreach (var response in output.Responses)
+                foreach (var response in responses)
                 {
                     if (response?.SelectedPackage == null || response.SelectedPackage.Count == 0) continue;
                     if (!DefenseCustomOrderPolicy.RequiresCustomOrder(response)) continue;
@@ -108,14 +152,17 @@ namespace WhiskeyRealism.Strategic
                         }
                         else if (bridgeDecision.MayDirectMove)
                         {
-                            if (!SafeMoveUnitTo(unit, anchor))
+                            var destination = InterceptDestination(enemyUnits, anchor, unit);
+                            string orderName = string.IsNullOrEmpty(response.Threat.AssetName) ? "Coastal defense" : response.Threat.AssetName;
+                            if (!QueueVanillaDefensiveMove(unit, destination, orderName))
                             {
                                 EmitCampaignInfoOnce(
                                     $"defense-intent:custom-order:move-skip:{allianceId}:{sig}:{candidate.UnitInstanceId}",
-                                    $"[DefenseIntent] source=CoastalDefense alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} reason=moveunitto-failed");
+                                    $"[DefenseIntent] source=CoastalDefense alliance={allianceId} action=skip-direct-move unit={SafeName(unit, candidate.UnitInstanceId)} reason=defensive-order-failed");
                                 continue;
                             }
 
+                            offensive?.Remove(unit);
                             if (!defOps.Contains(unit)) defOps.Add(unit);
                         }
                         else
@@ -146,7 +193,7 @@ namespace WhiskeyRealism.Strategic
                 // Also record threat signatures present this tick even when no
                 // custom order was issued (Recovered responses with empty SelectedPackage
                 // keep units assigned — do NOT release while the threat is still in output).
-                foreach (var response in output.Responses)
+                foreach (var response in responses)
                 {
                     string sig = response?.Threat?.Signature;
                     if (string.IsNullOrEmpty(sig)) continue;
@@ -154,10 +201,17 @@ namespace WhiskeyRealism.Strategic
                         thisTick[sig] = new HashSet<int>(); // empty sentinel — signature is still active
                 }
 
-                // Release units for threat signatures that have fully disappeared
-                // from this tick's output (not present in thisTick at all).
+                // Carry units committed on earlier ticks (still in defensive ops) under
+                // their live signatures, then release units for threat signatures that
+                // have fully disappeared from this tick's output.
                 if (_assignedByThreat.TryGetValue(allianceId, out var prior))
                 {
+                    CampaignMilitaryGates.CarryForwardCustomOrders(prior, thisTick, id =>
+                    {
+                        var held = FindUnitByInstanceId(ownUnits, id);
+                        return held != null && defOps.Contains(held);
+                    });
+
                     foreach (var kv in prior)
                     {
                         if (thisTick.ContainsKey(kv.Key)) continue; // signature still active — keep units assigned
@@ -167,7 +221,7 @@ namespace WhiskeyRealism.Strategic
                             _wlCurrentOrderAttempts.Remove($"{allianceId}|{kv.Key}|{unitId}");
                             if (unit == null) continue;
                             if (!defOps.Contains(unit)) continue;
-                            defOps.Remove(unit);
+                            EndDefensiveOperation(unit, defOps);
                             TelemetryRouter.LegacyInfo(
                                 $"[DefenseIntent] released alliance={allianceId} " +
                                 $"threat={kv.Key} " +
@@ -208,14 +262,7 @@ namespace WhiskeyRealism.Strategic
 
         private static bool IsPlayerControlled(Regiment unit)
         {
-            try
-            {
-                var dlcType = AccessTools.TypeByName("DLC_WL");
-                if (dlcType == null) return false;
-                var method = AccessTools.Method(dlcType, "IsMovedByPlayer", new[] { typeof(Regiment) });
-                if (method == null) return false;
-                return (bool)method.Invoke(null, new object[] { unit });
-            }
+            try { return DLC_WL.IsMovedByPlayer(unit); }
             catch { return false; }
         }
 
@@ -232,32 +279,85 @@ namespace WhiskeyRealism.Strategic
             tickSet.Add(unitInstanceId);
         }
 
-        private static bool SafeMoveUnitTo(Regiment unit, Vector3 position)
+        // Vanilla defensive-operation commit (decompile 13713-13719).
+        private static bool QueueVanillaDefensiveMove(Regiment unit, Vector3 destination, string orderName)
         {
             if (unit == null) return false;
-            try { return AICampaign.MoveUnitTo(unit, position, true); }
+            try
+            {
+                if (!unit.dlcw_isundercommander || !DLC_WL.dlc_scenarioactive)
+                {
+                    AICampaign.DefensiveMovingOrder.RemoveOrder(unit);
+                    // The ctor creates AICampaign.orders when null (9911) but does not enqueue itself.
+                    var order = new AICampaign.DefensiveMovingOrder(
+                        unit, destination, 30f, (float)unit.groupstrengthactive * unit.groupmorale, _alwaysblockforts: false);
+                    AICampaign.orders.Add(order);
+                }
+                AIBattle.CheckCurrentOrderUpdate(unit, 7, destination, orderName, -1f, 20f, 20f, calledfromcampaign: true);
+                return true;
+            }
             catch (Exception ex)
             {
-                OnceLog.Warning("defense-intent:custom-order:moveunitto",
-                    "CoastalDefenseCustomOrderRunner MoveUnitTo failed: " + ex.Message);
+                OnceLog.Warning("defense-intent:custom-order:queue",
+                    "CoastalDefenseCustomOrderRunner defensive order failed: " + ex.Message);
                 return false;
             }
         }
 
-        private static int ResolveAifactionIndex(int allianceId)
+        // Vanilla CheckForEndOfDefensiveOperations (13836): units already stopped,
+        // retreating or in battle are just dropped; moving ones are stopped first.
+        private static void EndDefensiveOperation(Regiment unit, IList defOps)
         {
             try
             {
-                var aicType = AccessTools.TypeByName("AICampaign");
-                var list = AccessTools.Field(aicType, "aifaction")?.GetValue(null) as IList;
-                if (list == null) return -1;
-                for (int i = 0; i < list.Count; i++)
+                AICampaign.DefensiveMovingOrder.RemoveOrder(unit);
+                bool moving = unit.regimentpaths > 0 && !unit.onretreat && !unit.inbattle;
+                if (moving && (!unit.dlcw_isundercommander || !DLC_WL.dlc_scenarioactive))
+                    unit.StopRegiment(skipfinalrotation: true, manualstop: true);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("defense-intent:custom-order:release",
+                    "CoastalDefenseCustomOrderRunner release stop failed: " + ex.Message);
+            }
+            defOps.Remove(unit);
+        }
+
+        private static Vector3 InterceptDestination(IList enemyUnits, Vector3 anchor, Regiment unit)
+        {
+            Vector3 enemy = anchor;
+            float best = float.MaxValue;
+            if (enemyUnits != null)
+            {
+                for (int i = 0; i < enemyUnits.Count; i++)
                 {
-                    int aid = AICampaignReflect.GetAllianceId(i);
-                    if (aid == allianceId) return i;
+                    var e = enemyUnits[i] as Regiment;
+                    if ((UnityEngine.Object)(object)e == (UnityEngine.Object)null) continue;
+                    var p = ((Component)e).transform.position;
+                    float dx = p.x - anchor.x;
+                    float dz = p.z - anchor.z;
+                    float d = dx * dx + dz * dz;
+                    if (d < best)
+                    {
+                        best = d;
+                        enemy = p;
+                    }
                 }
             }
-            catch { }
+            float searchRadius = GamePrefs.maxdistancedefensiveoperations;
+            if (best > searchRadius * searchRadius) enemy = anchor;
+
+            CampaignMilitaryGates.CoastalInterceptPoint(anchor.x, anchor.z, enemy.x, enemy.z, unit.buglerange, out float x, out float z);
+            return new Vector3(x, anchor.y, z);
+        }
+
+        private const int AifactionScanLimit = 8;
+
+        private static int ResolveAifactionIndex(int allianceId)
+        {
+            // AICampaign.aifaction holds one entry per alliance (incl. Europe = 2).
+            for (int i = 0; i < AifactionScanLimit; i++)
+                if (AICampaignReflect.GetAllianceId(i) == allianceId) return i;
             return -1;
         }
 

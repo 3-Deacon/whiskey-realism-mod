@@ -25,6 +25,7 @@ namespace WhiskeyRealism.Patches
             {
                 using (TelemetryPerf.Scope("campaign.patch.recruitment.zone-scope.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
+                    PatchFirstFire.Mark("campaign.patch.recruitment.zone-scope.prefix");
                     _zoneDepth++;
                     _activeAifaction = _aifaction;
                 }
@@ -35,6 +36,7 @@ namespace WhiskeyRealism.Patches
             {
                 using (TelemetryPerf.Scope("campaign.patch.recruitment.zone-scope.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
+                    PatchFirstFire.Mark("campaign.patch.recruitment.zone-scope.finalizer");
                     _zoneDepth--;
                     if (_zoneDepth <= 0)
                     {
@@ -72,6 +74,7 @@ namespace WhiskeyRealism.Patches
             {
                 using (TelemetryPerf.Scope("campaign.patch.recruitment.state-steer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                 {
+                    PatchFirstFire.Mark("campaign.patch.recruitment.state-steer");
                 try
                 {
                     if (_zoneDepth <= 0 || _activeAifaction != _aifaction) return;
@@ -240,9 +243,11 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // No active plan / TargetObjectiveId == -1 => Unknown, which makes the ledger keep
+        // vanilla's state unless the capital area is threatened.
         private static Theater DefaultRecruitmentTheater(int alliance)
         {
-            return Theater.East;
+            return Theater.Unknown;
         }
 
         private static Theater StateTheater(int stateId)

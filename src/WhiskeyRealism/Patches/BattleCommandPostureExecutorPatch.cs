@@ -19,26 +19,48 @@ namespace WhiskeyRealism.Patches
     [HarmonyPatch(typeof(AIBattle), "AdjustGroupFormations")]
     internal static class BattleCommandPostureExecutorPatch
     {
-        private const float RecentOrderSeconds = 30f;
-        private const float UrgentFormationRetrySeconds = 5f;
+        static BattleCommandPostureExecutorPatch()
+        {
+            BattleScope.Register("posture-executor", Reset);
+        }
+
+        // Doctrine timers run on the doctrine clock (TacticalBattleCoordinator.
+        // DoctrineBattleHours: battle hours, frozen overnight). Former wall-clock
+        // values were tuned at 1x and convert 1:1 at 1x.
+        private static readonly float RecentOrderHours = TacticalBattleClock.RealSecondsAtOneXToHours(30f);
         private const float TelemetrySeconds = 30f;
         private const float ObjectiveApproachStandOff = 75f;
         private const float AssemblyStandOff = 200f;
         private const float ReserveStandOff = 350f;
         private const float FallbackStandOff = 250f;
         private const float MaxConservativeWaypointDistance = 2500f;
-        private const float MinWaypointDistance = 15f;
+        // Bumped 15f → 60f on 2026-05-21 to fix unit "microshift" pattern at high
+        // compression: probe targets drift by 20-50m as units move; with the prior
+        // 15m tolerance the executor re-issued SetWaypoint every cycle, triggering a
+        // vanilla pathfinder recompute that visibly reversed the unit's direction
+        // briefly. 60m covers typical probe drift while still letting a genuine
+        // 100m+ relocation bypass dedup.
+        private const float MinWaypointDistance = 60f;
         private const float VanillaBlockedMoveDistance = 150f;
         private const float FacingRefreshToleranceDegrees = 15f;
+        // CommandDoctrineOrder.CourierIntervalSeconds is battle seconds: 900 = 0.25 game-hours.
         private const float OutboundCourierIntervalSeconds = 900f;
-        private const float FireControlOrderCooldownSeconds = 45f;
-        private const float BrigadeFacingPulseCooldownSeconds = 12f;
-        private const float RegimentFacingPulseCooldownSeconds = 5f;
+        private static readonly float FireControlOrderCooldownHours = TacticalBattleClock.RealSecondsAtOneXToHours(45f);
+        private static readonly float BrigadeFacingPulseCooldownHours = TacticalBattleClock.RealSecondsAtOneXToHours(12f);
+        private static readonly float RegimentFacingPulseCooldownHours = TacticalBattleClock.RealSecondsAtOneXToHours(5f);
         private const int MaxRegimentFacingPulseWritesPerGroup = 4;
 
         private static readonly Dictionary<int, float> _lastExecutorOrderAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _lastFacingPulseAt = new Dictionary<int, float>();
         private static readonly Dictionary<int, float> _lastFireControlAt = new Dictionary<int, float>();
+        private static readonly Dictionary<int, float> _lastFormationWriteAt = new Dictionary<int, float>();
+        private static readonly Dictionary<int, float> _writeBackoffUntil = new Dictionary<int, float>();
+        private static readonly TacticalFriendlySpatialGrid _friendlyGrid = new TacticalFriendlySpatialGrid();
+        private static int _friendlyGridAlliance = -1;
+        // Up to 4 nav plans (12 NavMesh.CalculatePath) per Postfix call.
+        private static readonly NavPlanBudget _navBudget = new NavPlanBudget(4);
+        private static bool _navPlanDeferred;
+        private static FieldInfo _bfsField;
         private static readonly Dictionary<string, float> _lastCourierAt = new Dictionary<string, float>();
         private static readonly Dictionary<string, string> _lastOutboundOrderSignatureByGroup = new Dictionary<string, string>();
         private static readonly Dictionary<string, float> _lastTelemetryAt = new Dictionary<string, float>();
@@ -55,23 +77,30 @@ namespace WhiskeyRealism.Patches
         [HarmonyPriority(Priority.Last)]
         internal static void Postfix(AIBattle __instance)
         {
-            if (!EnabledForWrites() || __instance == null) return;
+            using (TelemetryPerf.Scope("tactical.patch.posture-executor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
+            {
+                PatchFirstFire.Mark("tactical.patch.posture-executor");
+                if (!EnabledForWrites() || __instance == null) return;
 
-            try
-            {
-                OnceLog.Info("tactical-command-posture-executor", "BattleCommandPostureExecutorPatch wired");
-                Apply(__instance);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-command-posture-executor:failed",
-                    "BattleCommandPostureExecutorPatch failed: " + ex.Message);
+                try
+                {
+                    OnceLog.Info("tactical-command-posture-executor", "BattleCommandPostureExecutorPatch wired");
+                    Apply(__instance);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning(
+                        "tactical-command-posture-executor:failed",
+                        "BattleCommandPostureExecutorPatch failed: " + ex.Message);
+                }
             }
         }
 
         private static void Apply(AIBattle battle)
         {
+            _supportMainPositionsByAlliance.Clear();
+            _friendlyGridAlliance = -1;
+
             int state = SafeIntField(battle, ref _stateField, "state", -1);
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
             int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
@@ -79,19 +108,29 @@ namespace WhiskeyRealism.Patches
             var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
             var units = SafeList(battle, ref _unitsUsedField, "unitsused");
 
-            if (state < 5 || macro < 0 || side < 0 || bunits == null || units == null) return;
-            if (isPlayerAiOrFeud != 0 && !GameVars.ai_vs_ai) return;
-
-            Dictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders = BuildRuntimeDivisionPlayOrders(units);
-            var iteratedInstanceIds = new HashSet<int>();
-            for (int i = 0; i < units.Count; i++)
+            if (side < 0 || bunits == null || units == null) return;
+            // B-macro3: stand down for vanilla army retreat (macroai 3), the
+            // end-of-day phase, and the W&L feud instance.
+            if (!PostureExecutorBattleGate.Allows(state, macro, SafeEodCycle(bunits), isPlayerAiOrFeud, GameVars.ai_vs_ai, out string gateReason))
             {
-                var group = units[i] as Regiment;
+                if (gateReason == "vanilla-retreat") TacticalStanceWriter.ReleaseForRetreat(battle);
+                return;
+            }
+
+            Dictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders = BuildRuntimeDivisionPlayOrders(bunits, units);
+            var iteratedInstanceIds = new HashSet<int>();
+            // Start where the NavMesh budget stopped last time so groups the
+            // budget deferred are served first (resumable queue).
+            int start = _navBudget.StartIndex(units.Count);
+            for (int n = 0; n < units.Count; n++)
+            {
+                var group = units[(start + n) % units.Count] as Regiment;
                 if (!IsEligibleCommandGroup(group)) continue;
                 int unitInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
                 if (unitInstanceId != 0) iteratedInstanceIds.Add(unitInstanceId);
                 TryApplyGroup(battle, bunits, side, group, runtimePlayOrders);
             }
+            _navBudget.NextApply(units.Count);
 
             // Second pass: walk leaf brigades nested inside divisions that
             // vanilla excluded from unitsused. These are the Union-AI-doesn't-
@@ -192,30 +231,65 @@ namespace WhiskeyRealism.Patches
                     state.TaskState);
             }
 
+            // Army opportunity override (2026-05-21). Same logic the leaf-cascade
+            // path already uses, but applied at the BRIGADE-POSTURE layer too —
+            // smoke revealed that brigades coming through TryApplyGroup (vs
+            // TryApplyLeafBrigade) bypassed the override, so half the army got
+            // FallBackToLine on Withdrawal opportunity while the other half kept
+            // its playbook Probe/Screen/AttackObjective task, producing crossing
+            // paths ("H formation") and "indecisive" appearance for brigades
+            // pulled between opportunity-aware and opportunity-blind paths.
+            //
+            // Brigade level doesn't carry a DirectChildRole; we pass Main as the
+            // safe default. WithdrawalToFightLater / DefensiveHold / WaitAndConsolidate
+            // branches don't read role; the AttackNow branch's upgrade is safe on
+            // any brigade because we only upgrade Hold/Consolidate to AttackObjective
+            // (not other defensive tasks).
+            ReinforcementOpportunity opportunityForBrigade = ReinforcementOpportunity.NoOpportunity;
+            try
+            {
+                if (orchestrator?.Army != null)
+                    opportunityForBrigade = orchestrator.Army.CurrentReinforcementOpportunity.Opportunity;
+            }
+            catch { /* default NoOpportunity preserves prior behavior */ }
+            string brigadeOverrideReason;
+            CommandTaskType brigadeOverriddenTask = TacticalOpportunityTaskOverride.Override(
+                state.Task,
+                WhiskeyRealism.Tactical.Orchestrator.DirectChildRole.Main,
+                opportunityForBrigade,
+                out brigadeOverrideReason);
+            if (brigadeOverriddenTask != state.Task && brigadeOverrideReason != null)
+            {
+                OnceLog.Info(
+                    "tactical-brigade-posture:opportunity-override:" + side + ":" + opportunityForBrigade,
+                    "[TacticalBrigadePosture] opportunity override: " + state.Task
+                    + " → " + brigadeOverriddenTask + " (opportunity=" + opportunityForBrigade
+                    + " reason=" + brigadeOverrideReason + " unit=" + SafeName(group) + ")");
+                state = new CommandNodeOperationalState(
+                    state.NodeId,
+                    state.Echelon,
+                    state.Role,
+                    brigadeOverriddenTask,
+                    state.TaskState);
+                // Also override the doctrine-order task so target resolution
+                // downstream uses the new task. Mirrors the leaf-cascade fix.
+                if (hasDoctrineOrder)
+                {
+                    doctrineOrder = doctrineOrder.WithTask(brigadeOverriddenTask, brigadeOverrideReason);
+                }
+            }
+
             TacticalRefuseFlankIntent.Decision refusedFlank = ResolveRefusedFlank(group, state.Task, closeEngaged, flankRisk);
             int targetFormation = TargetFormationForTask(state.Task, group);
-            bool visibleFormationMismatch = CommandFormationCorrection.NeedsCorrection(
-                SafeFormation(group),
-                SafeFormationOrdered(group),
-                SafeGroupFormation(group),
-                targetFormation);
             bool allowStaleQueuedBypass = CanBypassStaleQueuedOrder(state.Task);
-            bool allowPendingLocalFormation = CommandFormationCorrection.CanBypassPendingOrderForLocalFormation(
-                closeEngaged,
-                flankRisk,
-                visibleFormationMismatch,
-                state.Task);
-            bool orderPending = HasPendingOrder(group, allowStaleQueuedBypass) && !allowPendingLocalFormation;
-            float recentOrderSeconds = CommandFormationCorrection.RecentOrderCooldownSeconds(
-                closeEngaged,
-                visibleFormationMismatch,
-                state.Task,
-                RecentOrderSeconds,
-                UrgentFormationRetrySeconds);
+            // R8: no pending-order bypass and no shortened cooldown in contact —
+            // the old 5 s "urgent" retry re-laid engaged brigades repeatedly.
+            bool orderPending = HasPendingOrder(group, allowStaleQueuedBypass);
+            float recentOrderHours = RecentOrderHours;
             bool recentOrder = CommandPostureExecutor.ShouldBlockForRecentOrder(
                 state.Task,
                 physical,
-                HasRecentExecutorOrder(instanceId, recentOrderSeconds));
+                HasRecentExecutorOrder(instanceId, recentOrderHours));
             bool alreadyCorrect = IsAlreadyDoingCorrectTask(group, state, physical, targetFormation, idle);
             bool pendingOrderOnChild = HasPendingOrder(group);
 
@@ -245,26 +319,36 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
+            // M3: a write that failed to materialize backs off on battle time.
+            if (_writeBackoffUntil.TryGetValue(instanceId, out float backoffUntil) &&
+                CommandWaypointWritePolicy.IsBackedOff(BattleHours(), backoffUntil))
+            {
+                EmitPostureTelemetry(side, group, state,
+                    new PostureExecutionDecision(PostureExecutionAction.NoWrite, "write-backoff"),
+                    idle, applied: false, extraReason: "write-backoff");
+                return;
+            }
+
             PostureExecutionDecision decision;
-            using (TelemetryPerf.Scope("tactical.posture-executor", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope("tactical.patch.posture-executor.decide", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 decision = hasDoctrineOrder
-                    ? CommandPostureExecutor.Decide(doctrineOrder, physical, eligibility, Time.realtimeSinceStartup)
+                    ? CommandPostureExecutor.Decide(doctrineOrder, physical, eligibility, BattleHours())
                     : CommandPostureExecutor.Decide(state, physical, eligibility);
             }
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
                 if (TryApplyContactFacingPulse(bunits, side, group, state, closeEngaged, flankRisk))
                 {
-                    _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                    _lastExecutorOrderAt[instanceId] = BattleHours();
                     EmitPostureTelemetry(side, group, state, decision, idle, applied: true, extraReason: "contact-facing-pulse");
                     return;
                 }
 
-                if (CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass) &&
+                if (CanWrite(group, state.Task, eligibility, physical, recentOrderHours, allowStaleQueuedBypass) &&
                     TryApplyFireControl(bunits, group, state, out TacticalFireControlDecision fireDecision))
                 {
-                    _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                    _lastExecutorOrderAt[instanceId] = BattleHours();
                     EmitPostureTelemetry(side, group, state, decision, idle, applied: true, extraReason: "fire-control-" + fireDecision.Reason);
                     return;
                 }
@@ -273,13 +357,18 @@ namespace WhiskeyRealism.Patches
                 return;
             }
 
-            if (!CanWrite(group, state.Task, eligibility, physical, recentOrderSeconds, allowPendingLocalFormation, allowStaleQueuedBypass))
+            if (!CanWrite(group, state.Task, eligibility, physical, recentOrderHours, allowStaleQueuedBypass))
             {
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "write-gate-denied");
                 return;
             }
 
             bool hasTarget = TryResolveTarget(group, orchestrator, state, doctrineOrder, decision.Target, out Vector3 target);
+            if (!hasTarget && _navPlanDeferred)
+            {
+                EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: "nav-budget-deferred");
+                return;
+            }
             string outboundSignature = OutboundOrderSignature(state, decision, targetFormation, hasTarget, target);
             if (!AllowsOutboundOrderLedger(
                     group,
@@ -315,14 +404,16 @@ namespace WhiskeyRealism.Patches
 
             if (wrote)
             {
-                _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+                _lastExecutorOrderAt[instanceId] = BattleHours();
                 RecordOutboundOrder(group, state, outboundSignature);
                 if (hasDoctrineOrder && doctrineOrder.Delivery == TacticalOrderDelivery.Courier)
-                    _lastCourierAt[CourierParentKey(side, doctrineOrder)] = Time.realtimeSinceStartup;
+                    _lastCourierAt[CourierChildKey(side, doctrineOrder)] = BattleHours();
+                _writeBackoffUntil.Remove(instanceId);
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: true, extraReason: decision.Reason);
             }
             else
             {
+                _writeBackoffUntil[instanceId] = CommandWaypointWritePolicy.FailedWriteBackoffUntil(BattleHours());
                 EmitPostureTelemetry(side, group, state, decision, idle, applied: false, extraReason: hasTarget ? "movement-unmaterialized" : "target-unresolved");
             }
         }
@@ -339,24 +430,32 @@ namespace WhiskeyRealism.Patches
             public TacticalDivisionPlaySubordinate Subordinate { get; }
         }
 
-        private static Dictionary<string, TacticalDivisionPlayOrder> BuildRuntimeDivisionPlayOrders(IList units)
+        private static Dictionary<string, TacticalDivisionPlayOrder> BuildRuntimeDivisionPlayOrders(BattleUnits bunits, IList units)
         {
             var result = new Dictionary<string, TacticalDivisionPlayOrder>();
             if (units == null) return result;
 
             var byParent = new Dictionary<string, List<RuntimePlayChild>>();
+            var defendingByAlliance = new Dictionary<int, bool>();
+            var allianceByParent = new Dictionary<string, int>();
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i] as Regiment;
                 if (!IsEligibleCommandGroup(group)) continue;
+                // A W&L-protected group neither receives a play order nor
+                // anchors one for its AI siblings.
+                if (IsPlayerProtected(group)) continue;
                 if (!TryResolveLedgerState(group, out CommandNodeOperationalState state, out _)) continue;
 
-                string parentKey = ParentNodeKey(group, state);
+                // Vanilla command parent; groups directly under the units root
+                // have no division to play with (B-divplay).
+                string parentKey = ParentNodeKey(group);
                 if (string.IsNullOrWhiteSpace(parentKey)) continue;
                 if (!byParent.TryGetValue(parentKey, out List<RuntimePlayChild> children))
                 {
                     children = new List<RuntimePlayChild>();
                     byParent[parentKey] = children;
+                    allianceByParent[parentKey] = group.alliance;
                 }
 
                 children.Add(new RuntimePlayChild(
@@ -370,7 +469,10 @@ namespace WhiskeyRealism.Patches
                         inTrouble: HasLocalFlankRisk(group) || SafeMorale(group) < 0.35f,
                         isArtillery: HasArtilleryCapability(group),
                         enemyDistance: SafeEnemyDistance(group),
-                        hasOrders: HasPendingOrder(group) || HasActiveMoveMakingProgress(group))));
+                        hasOrders: HasPendingOrder(group) || HasActiveMoveMakingProgress(group),
+                        currentTask: state.Task)));
+                if (!defendingByAlliance.ContainsKey(group.alliance))
+                    defendingByAlliance[group.alliance] = SideDefending(bunits, group.alliance);
             }
 
             foreach (var pair in byParent)
@@ -379,8 +481,10 @@ namespace WhiskeyRealism.Patches
                 var subordinates = new TacticalDivisionPlaySubordinate[pair.Value.Count];
                 for (int i = 0; i < pair.Value.Count; i++) subordinates[i] = pair.Value[i].Subordinate;
 
+                bool defending = allianceByParent.TryGetValue(pair.Key, out int parentAlliance) &&
+                    defendingByAlliance.TryGetValue(parentAlliance, out bool d) && d;
                 TacticalDivisionPlayDecision decision = TacticalDivisionPlayExecutor.Decide(
-                    new TacticalDivisionPlayInput(pair.Key, Time.realtimeSinceStartup, subordinates));
+                    new TacticalDivisionPlayInput(pair.Key, subordinates, defending));
                 if (!decision.HasAnchor) continue;
 
                 for (int i = 0; i < decision.Orders.Count; i++)
@@ -466,7 +570,7 @@ namespace WhiskeyRealism.Patches
             {
                 updatedOrder = doctrineOrder
                     .WithTask(task, follow.Reason)
-                    .WithDelivery(TacticalOrderDelivery.Courier, ParentNodeKey(group, state), OutboundCourierIntervalSeconds, follow.Reason);
+                    .WithDelivery(TacticalOrderDelivery.Courier, ParentNodeKey(group), OutboundCourierIntervalSeconds, follow.Reason);
             }
 
             return true;
@@ -530,19 +634,21 @@ namespace WhiskeyRealism.Patches
             bool childActiveMove,
             out TacticalOutboundCourierDecision decision)
         {
-            string parentKey = CourierParentKey(side, order);
-            _lastCourierAt.TryGetValue(parentKey, out float lastCourierAt);
+            // Courier cadence per child on battle time (B-61clock): a parent
+            // sends to each subordinate on its own interval instead of one
+            // courier per parent starving the siblings.
+            _lastCourierAt.TryGetValue(CourierChildKey(side, order), out float lastCourierAt);
             decision = TacticalOutboundCourierCadence.Decide(
                 new TacticalOutboundCourierInput(
-                    parentKey,
+                    CourierParentKey(side, order),
                     order.NodeId,
-                    Time.realtimeSinceStartup,
+                    BattleHours(),
                     lastCourierAt,
                     pendingOrderOnChild,
                     commanderHasOrder: order.HasPurpose,
                     commanderHasPlay: order.Task != CommandTaskType.None,
                     childIsPlayerControlled: playerProtected,
-                    courierIntervalSeconds: order.CourierIntervalSeconds,
+                    courierIntervalSeconds: order.CourierIntervalSeconds / 3600f,
                     allowObjectiveMovementContinuation: IsCourierObjectiveContinuationTask(order.Task) && order.HasConcreteMovementTarget,
                     childActiveMove: childActiveMove));
             return decision.AllowIssue;
@@ -631,6 +737,11 @@ namespace WhiskeyRealism.Patches
             return (int)Math.Round(value / 10f, MidpointRounding.AwayFromZero);
         }
 
+        private static string CourierChildKey(int side, CommandDoctrineOrder order)
+        {
+            return "side-" + side + ":child:" + (string.IsNullOrWhiteSpace(order.NodeId) ? "unknown" : order.NodeId);
+        }
+
         private static string CourierParentKey(int side, CommandDoctrineOrder order)
         {
             if (!string.IsNullOrWhiteSpace(order.ParentNodeId)) return order.ParentNodeId;
@@ -655,20 +766,28 @@ namespace WhiskeyRealism.Patches
                     return SetFormation(bunits, group, state.Task, targetFormation, closeEngaged, refusedFlank);
                 case PostureExecutionAction.SetFormationAndWaypoint:
                     if (!hasTarget) return false;
-                    bool formed = SetFormation(bunits, group, state.Task, targetFormation, closeEngaged, refusedFlank);
-                    return SetWaypoint(battle, bunits, group, state.Task, target) || formed;
+                    // Vanilla never re-forms a group that has a path
+                    // (AdjustGroupFormations 5886); a courier formation order
+                    // delivered mid-move re-lays the group at its current
+                    // position (SetGroupFormation newpath, 91884) and cancels
+                    // the move. Move first; re-form only when no move went out.
+                    if (SetWaypoint(battle, bunits, group, state.Task, target)) return true;
+                    return SetFormation(bunits, group, state.Task, targetFormation, closeEngaged, refusedFlank);
                 case PostureExecutionAction.SetWaypoint:
                 case PostureExecutionAction.ReleaseReserve:
                 case PostureExecutionAction.FallbackToLine:
                 case PostureExecutionAction.RecoverInterruptedOrder:
                     return hasTarget && SetWaypoint(battle, bunits, group, state.Task, target);
                 case PostureExecutionAction.ChangeStance:
-                    return ChangeStance(bunits, group, StanceForTask(state.Task));
+                    return TacticalStanceWriter.EnsureStanceForTask(bunits, group, state.Task, null, StanceWriteSource.Executor);
                 default:
                     return false;
             }
         }
 
+        // R8: formation/facing writes follow CommandFormationWritePolicy —
+        // never a re-lay in contact, vanilla SetFormation (courier) for real
+        // formation changes, battle-time cooldown that is longer under fire.
         private static bool SetFormation(
             BattleUnits bunits,
             Regiment group,
@@ -695,28 +814,102 @@ namespace WhiskeyRealism.Patches
                 refusedFlank,
                 task,
                 closeEngaged);
-            bool needsRefusedFlank = refuseFlankParameter >= 0;
-            if (!needsFormation && !needsFacing && !needsRefusedFlank) return false;
-            bool useNewPath = CommandFormationCorrection.ShouldUseNewPathForFormationCorrection(
-                closeEngaged,
-                needsFormation);
 
-            bunits.SetGroupFormation(
-                group,
-                targetFormation,
-                manualfinalrotation: hasThreatFacing ? manualFinalRotation : -1f,
-                targetpos: default(Vector3),
-                immediateplacement: false,
-                newpath: useNewPath,
-                modifylastwaypoint: !useNewPath && needsFacing,
-                newstate: 2,
-                refuseflank: refuseFlankParameter,
-                ignoredeplyomentzone: false,
-                skiprotation: false,
-                showmovementoptions: false,
-                placeentrenchments: false,
-                adjustbyterrainshape: true);
-            return true;
+            int instanceId = SafeInstanceId(group);
+            float now = BattleHours();
+            float last = _lastFormationWriteAt.TryGetValue(instanceId, out float l) ? l : -1f;
+            FormationWriteDecision decision;
+            try
+            {
+                decision = CommandFormationWritePolicy.Decide(new FormationWriteInput(
+                    needsFormation,
+                    needsFacing,
+                    refuseFlankParameter >= 0,
+                    group.combatstatussubordinates,
+                    group.groupsubordinatesmoving,
+                    group.regimentpaths,
+                    group.covervaluesubordinates,
+                    now,
+                    last,
+                    group.groupenemiesinrange));
+            }
+            catch
+            {
+                return false;
+            }
+
+            bool wrote = false;
+            switch (decision.Kind)
+            {
+                case FormationWriteKind.RotateInPlace:
+                    wrote = RotateRegimentsInPlace(group, manualFinalRotation) > 0;
+                    break;
+                case FormationWriteKind.WheelGroup:
+                {
+                    int current = SafeGroupFormation(group);
+                    bunits.SetGroupFormation(
+                        group,
+                        current >= 0 && current <= 4 ? current : targetFormation,
+                        manualfinalrotation: hasThreatFacing ? manualFinalRotation : -1f,
+                        targetpos: default(Vector3),
+                        immediateplacement: false,
+                        newpath: false,
+                        modifylastwaypoint: true,
+                        newstate: 2,
+                        refuseflank: refuseFlankParameter,
+                        ignoredeplyomentzone: false,
+                        skiprotation: false,
+                        showmovementoptions: false,
+                        placeentrenchments: false,
+                        adjustbyterrainshape: true);
+                    wrote = true;
+                    break;
+                }
+                case FormationWriteKind.VanillaFormation:
+                {
+                    int index = CommandFormationWritePolicy.VanillaSetFormationIndexForGroup(targetFormation);
+                    GameObject gameObject = UnityObject(group);
+                    if (index < 0 || gameObject == null) return false;
+                    bunits.SetFormation(gameObject, index, exitifsameformation: true);
+                    wrote = true;
+                    break;
+                }
+            }
+
+            if (wrote) _lastFormationWriteAt[instanceId] = now;
+            return wrote;
+        }
+
+        // Rotate each settled combat regiment of the group in place, the way
+        // vanilla turns a unit toward an enemy (UnlimberArtilleryAIMicro 3491:
+        // RotateRegiment). No ClearTargets, no new slots. Artillery is left to
+        // vanilla (RotateRegiment re-applies lastformation, which may unlimber
+        // or limber a battery, 135440-135452).
+        private static int RotateRegimentsInPlace(Regiment group, float rotation)
+        {
+            int rotated = 0;
+            try
+            {
+                Regiment[] units = group.allattachedunits;
+                if (units == null) return 0;
+                for (int i = 0; i < units.Length; i++)
+                {
+                    Regiment unit = units[i];
+                    if (unit == null || unit.unittyp > TacticalUnitType.MaxCombat) continue;
+                    if (unit.unittyp == TacticalUnitType.Artillery) continue;
+                    if (unit.isrouted || unit.markedforrout || unit.permanentlydetached) continue;
+                    if (unit.regimentpaths > 0 || unit.withinrotationprocess || unit.movementmode == 3) continue;
+                    if ((UnityEngine.Object)unit.chargetarget != null) continue;
+                    GameObject gameObject = UnityObject(unit);
+                    if (gameObject == null || !gameObject.activeInHierarchy) continue;
+                    if (!CommandFormationCorrection.NeedsFacingCorrection(SafeRotationY(unit), rotation, FacingRefreshToleranceDegrees)) continue;
+                    unit.RotateRegiment(rotation);
+                    rotated++;
+                }
+            }
+            catch { }
+
+            return rotated;
         }
 
         private static bool TryThreatFacingRotation(
@@ -763,14 +956,44 @@ namespace WhiskeyRealism.Patches
             if (!IsSafeWaypoint(group, target)) return false;
             if (ShouldSkipDuplicateWaypoint(group, target)) return false;
 
+            // Brigade task-commitment hold (2026-05-22). Ports Scourge's
+            // offai.cpp:343 `if (Orders()) return` semantic: once we've given
+            // a brigade a task waypoint, don't re-issue the SAME task for the
+            // hold window. Brigade gets to actually execute the order. Task
+            // changes (Probe → AttackObjective) bypass the hold so legitimate
+            // role transitions still propagate.
+            if (ShouldSuppressTaskRefresh(group, task))
+            {
+                EmitTaskHoldSuppressedTelemetry(group, task);
+                return false;
+            }
+
             if (TryQueueBlockedMovingOrder(battle, group, task, target))
             {
                 MarkGroupMovementStarted(group, task);
                 return true;
             }
 
+            // Scope B refactor (2026-05-22). Plug Whiskey into vanilla/W&L's
+            // canonical order pipeline: ChangeStance(mapped_stance) BEFORE
+            // SetWaypoint. ChangeStance updates ai_stanceordered (vanilla
+            // micro-AI reads this for execution context), manages aibattle[1]
+            // pool membership when player-side, and cascades to subordinates
+            // through groupaiobject. Doing only SetWaypoint orphans the unit
+            // from vanilla's stance-driven decision pipeline — which is why
+            // 4th Michigan-style units behaved erratically (movement but no
+            // stance context).
+            //
+            // Map task → vanilla stance. Skip if already at target stance
+            // (prevents redundant W&L queue entries).
+            EnsureStanceMatchesTask(bunits, group, task);
+
             int beforeMovingPaths = CountMovingPaths(group);
-            bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(task, battleActive: true);
+            int beforeQueued = QueuedOrderCount(group);
+            bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(
+                task,
+                battleActive: true,
+                inContactWithdrawal: HasCloseEngagement(group) || HasLocalFlankRisk(group));
 
             bunits.SetWaypoint(
                 group,
@@ -789,10 +1012,12 @@ namespace WhiskeyRealism.Patches
                 checkforreadiness: true,
                 clearinterruptionpaths: true);
 
-            if (!MovementMaterialized(group, beforeMovingPaths))
+            if (!CommandWaypointWritePolicy.MovementIssued(beforeMovingPaths, CountMovingPaths(group), beforeQueued, QueuedOrderCount(group)))
                 return false;
 
             MarkGroupMovementStarted(group, task);
+            RecordTaskWrite(group, task);  // task-hold (2026-05-22)
+
             return true;
         }
 
@@ -826,6 +1051,65 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // Brigade task-commitment state (2026-05-22). Per-instance (instanceId →
+        // last task + timestamp). On SetWaypoint, if the proposed task matches
+        // the last-written task within the hold window, suppress. Different
+        // task bypasses. Cleared at battle end (Reset).
+        private static readonly Dictionary<int, (CommandTaskType task, float ts)> _brigadeTaskHoldState
+            = new Dictionary<int, (CommandTaskType, float)>();
+
+        // Returns true when the proposed task waypoint should be suppressed
+        // because the brigade was given the SAME task recently. Hold window
+        // is Plugin.BrigadeTaskHoldSeconds (default 12), read as real seconds
+        // at 1x and run on battle time. Set to 0 to disable.
+        private static bool ShouldSuppressTaskRefresh(Regiment group, CommandTaskType task)
+        {
+            try
+            {
+                float holdSeconds = Plugin.BrigadeTaskHoldSeconds != null
+                    ? Plugin.BrigadeTaskHoldSeconds.Value
+                    : 12.0f;
+                if (holdSeconds <= 0f) return false;
+                float hold = TacticalBattleClock.RealSecondsAtOneXToHours(holdSeconds);
+                int id = SafeInstanceId(group);
+                if (id == 0) return false;
+                if (!_brigadeTaskHoldState.TryGetValue(id, out var prior)) return false;
+                if (prior.task != task) return false;  // legitimate task change — bypass
+                float age = BattleHours() - prior.ts;
+                return age >= 0f && age < hold;
+            }
+            catch { return false; }
+        }
+
+        // Records a successful write so subsequent SetWaypoint calls in the
+        // hold window are suppressed for the same task. Called from the
+        // vanilla-SetWaypoint success path below.
+        private static void RecordTaskWrite(Regiment group, CommandTaskType task)
+        {
+            try
+            {
+                int id = SafeInstanceId(group);
+                if (id == 0) return;
+                _brigadeTaskHoldState[id] = (task, BattleHours());
+            }
+            catch { }
+        }
+
+        // Telemetry for suppressed writes — bounded by OnceLog (the same task
+        // for the same group during a sustained hold doesn't spam).
+        private static void EmitTaskHoldSuppressedTelemetry(Regiment group, CommandTaskType task)
+        {
+            try
+            {
+                int id = SafeInstanceId(group);
+                OnceLog.Info(
+                    "tactical-brigade-task-hold:suppressed:" + task,
+                    "[TacticalBrigadeTaskHold] suppressed " + task + " write for "
+                    + SafeName(group) + " (id=" + id + ") — within hold window");
+            }
+            catch { }
+        }
+
         private static void MarkGroupMovementStarted(Regiment group, CommandTaskType task)
         {
             try
@@ -838,17 +1122,26 @@ namespace WhiskeyRealism.Patches
             catch { }
         }
 
-        private static bool MovementMaterialized(Regiment group, int beforeMovingPaths)
+        // SetWaypoint with order delay queues the move on the command parent
+        // (or the unit itself at the Units root) via AddToOrderQueue (91470-91500).
+        private static int QueuedOrderCount(Regiment group)
         {
             try
             {
-                if (group == null) return false;
-                if (group.regimentpaths > 0) return true;
-                return CountMovingPaths(group) > beforeMovingPaths;
+                if (group == null) return 0;
+                int count = group.orderqueue != null ? group.orderqueue.Count : 0;
+                GameObject self = ((Component)group).gameObject;
+                GameObject parentObject = BattleUnits.GrabNextParentUnit(self);
+                if (parentObject != null && parentObject != self)
+                {
+                    Regiment parent = parentObject.GetComponent<Regiment>();
+                    if (parent != null && parent.orderqueue != null) count += parent.orderqueue.Count;
+                }
+                return count;
             }
             catch
             {
-                return false;
+                return 0;
             }
         }
 
@@ -894,18 +1187,6 @@ namespace WhiskeyRealism.Patches
             {
                 return false;
             }
-        }
-
-        private static bool ChangeStance(BattleUnits bunits, Regiment group, int stance)
-        {
-            if (stance < 0 || stance > 3) return false;
-            if (group.ai_stanceordered == stance) return false;
-
-            GameObject gameObject = UnityObject(group);
-            if (gameObject == null || !gameObject.activeInHierarchy) return false;
-
-            bunits.ChangeStance(gameObject, stance, immediate: false, overwriteaigroups: false);
-            return true;
         }
 
         private static bool TryApplyContactFacingPulse(
@@ -994,11 +1275,13 @@ namespace WhiskeyRealism.Patches
 
             bool closeEngaged = groupCloseEngaged || HasCloseEngagement(unit);
             bool flankRisk = groupFlankRisk || HasLocalFlankRisk(unit);
+            // R9: regiments only rotate — the current formation is passed as
+            // the target so the doctrine never asks for a formation change.
             if (!TryEvaluateFacingPulse(
                     unit,
                     state.Task,
                     TacticalFacingPulseScope.Regiment,
-                    targetFormation: 0,
+                    targetFormation: SafeFormation(unit),
                     closeEngaged,
                     flankRisk,
                     out TacticalFacingPulseDecision decision,
@@ -1036,8 +1319,8 @@ namespace WhiskeyRealism.Patches
             source = hasThreatFacing ? TacticalFacingThreatSource.Visible : TacticalFacingThreatSource.None;
             int instanceId = SafeInstanceId(unit);
             float cooldown = scope == TacticalFacingPulseScope.Regiment
-                ? RegimentFacingPulseCooldownSeconds
-                : BrigadeFacingPulseCooldownSeconds;
+                ? RegimentFacingPulseCooldownHours
+                : BrigadeFacingPulseCooldownHours;
 
             decision = TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
                 scope,
@@ -1055,24 +1338,26 @@ namespace WhiskeyRealism.Patches
                 HasPendingOrder(unit, allowStaleQueuedBypass: true),
                 HasActiveMoveMakingProgress(unit),
                 HasRecentFacingPulse(instanceId, cooldown),
-                FacingRefreshToleranceDegrees));
+                FacingRefreshToleranceDegrees,
+                isArtillery: IsArtilleryUnit(unit),
+                threatWithinFireRange: ThreatWithinFireRange(unit)));
 
             return decision.Action != TacticalFacingPulseAction.NoWrite || source != TacticalFacingThreatSource.None;
         }
 
+        // Vanilla turns a single unit toward an enemy with RotateRegiment
+        // (UnlimberArtilleryAIMicro 3491) — no formation change. Artillery
+        // never reaches here (doctrine: artillery-vanilla).
         private static bool ApplyRegimentFacingPulse(Regiment unit, TacticalFacingPulseDecision decision)
         {
-            if (unit == null || !decision.ShouldWrite) return false;
-            if (decision.TargetFormation < 0 || decision.TargetFormation > 4) return false;
+            if (unit == null || decision.Action != TacticalFacingPulseAction.CorrectFacing) return false;
+            if (IsArtilleryUnit(unit)) return false;
+            if (!WhiskeyRealism.Tactical.TacticalWriteGuard.CanWrite(unit)) return false;
 
             try
             {
-                unit.ChangeRegimentFormation(GameVars.SetFormationParam(
-                    decision.TargetFormation,
-                    manualset: true,
-                    newmounted: -1,
-                    manualrotationtarget: decision.TargetFacingDegrees,
-                    setalsoformationorderedvariable: true));
+                if (unit.regimentpaths > 0 || unit.withinrotationprocess || (UnityEngine.Object)unit.chargetarget != null) return false;
+                unit.RotateRegiment(decision.TargetFacingDegrees);
                 return true;
             }
             catch (Exception ex)
@@ -1163,10 +1448,8 @@ namespace WhiskeyRealism.Patches
                     unit.combatbehaviorordered));
 
                 if (!decision.ShouldWrite) return false;
-                if (decision.RecommendedCombatBehavior == unit.combatbehaviorordered) return false;
-
-                bunits.ChangeCombatBehavior(gameObject, decision.RecommendedCombatBehavior);
-                _lastFireControlAt[instanceId] = Time.realtimeSinceStartup;
+                if (!TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, decision.RecommendedCombatBehavior)) return false;
+                _lastFireControlAt[instanceId] = BattleHours();
                 return true;
             }
             catch
@@ -1184,6 +1467,7 @@ namespace WhiskeyRealism.Patches
             out Vector3 target)
         {
             target = default(Vector3);
+            _navPlanDeferred = false;
             bool resolved;
             switch (targetKind)
             {
@@ -1253,6 +1537,13 @@ namespace WhiskeyRealism.Patches
                 targetKind != PostureExecutionTarget.DoctrineFallbackTarget)
                 return IsSafeWaypoint(group, target);
 
+            if (!_navBudget.TryConsume())
+            {
+                _navPlanDeferred = true;
+                return false;
+            }
+
+            using (TelemetryPerf.Scope("tactical.patch.posture-executor.nav-plan", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             try
             {
                 Vector3 own = SafePosition(group);
@@ -1345,6 +1636,7 @@ namespace WhiskeyRealism.Patches
 
                 direction.Normalize();
                 Vector3 lateral = new Vector3(-direction.z, 0f, direction.x);
+                ApplyVanillaPathAreaCosts();
                 return new[]
                 {
                     BuildPathQualitySample(group, own, target, task, hasThreat, threat, hasCurrentWaypoint, currentWaypoint),
@@ -1356,6 +1648,30 @@ namespace WhiskeyRealism.Patches
             {
                 return Array.Empty<TacticalPathQualitySample>();
             }
+        }
+
+        // Set the global NavMesh area costs AddPath would use for this move
+        // before probing; no restore needed, every AddPath sets them again.
+        private static void ApplyVanillaPathAreaCosts()
+        {
+            try
+            {
+                SetAreaCost(VanillaPathAreaCosts.RiversAreaName, VanillaPathAreaCosts.Rivers(GameVars.isfrozen()));
+                SetAreaCost(VanillaPathAreaCosts.RoadsAreaName, VanillaPathAreaCosts.Roads);
+                SetAreaCost(VanillaPathAreaCosts.BridgesAreaName, VanillaPathAreaCosts.Bridges);
+                SetAreaCost(VanillaPathAreaCosts.FencesWallsAreaName, VanillaPathAreaCosts.FencesWalls);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-command-posture:area-cost-failed",
+                    "BattleCommandPostureExecutorPatch area costs failed: " + ex.Message);
+            }
+        }
+
+        private static void SetAreaCost(string areaName, float cost)
+        {
+            int area = NavMesh.GetAreaFromName(areaName);
+            if (area >= 0) NavMesh.SetAreaCost(area, cost);
         }
 
         private static TacticalPathQualitySample BuildPathQualitySample(
@@ -1481,50 +1797,38 @@ namespace WhiskeyRealism.Patches
             }
         }
 
+        // Friendly corridor blocker via a per-Postfix spatial grid of the
+        // group's alliance (built once, reused for every candidate path and
+        // fire-control check in this call).
         private static float EstimateFriendlyFrontBlocker(Regiment group, Vector3 own, Vector3 candidate)
         {
             try
             {
-                if (group == null || IsDefaultVector(own) || IsDefaultVector(candidate))
-                    return 0f;
-                var units = BattleUnits.completeunitlist as IList;
-                if (units == null || units.Count == 0) return 0f;
-
-                Vector3 axis = candidate - own;
-                axis.y = 0f;
-                float axisLength = axis.magnitude;
-                if (axisLength < 1f) return 0f;
-                axis.Normalize();
-
-                float worst = 0f;
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var friend = units[i] as Regiment;
-                    if (friend == null || friend == group) continue;
-                    if (friend.alliance != group.alliance) continue;
-                    if (friend.isrouted || friend.markedforrout || friend.permanentlydetached) continue;
-                    if (friend.unittyp > 14) continue;
-
-                    Vector3 pos = SafePosition(friend);
-                    if (IsDefaultVector(pos)) continue;
-                    Vector3 rel = pos - own;
-                    rel.y = 0f;
-                    float forward = Vector3.Dot(rel, axis);
-                    if (forward < 30f || forward > axisLength + 120f) continue;
-
-                    float lateral = (rel - axis * forward).magnitude;
-                    if (lateral > 120f) continue;
-                    float distanceToCandidate = Vector3.Distance(pos, candidate);
-                    float proximity = distanceToCandidate <= 80f ? 1f : Math.Max(0f, 1f - ((distanceToCandidate - 80f) / 220f));
-                    float lateralBlock = 1f - Math.Min(1f, lateral / 120f);
-                    worst = Math.Max(worst, Math.Max(proximity, lateralBlock * 0.8f));
-                }
-
-                return Math.Min(1f, worst);
+                if (group == null || IsDefaultVector(own) || IsDefaultVector(candidate)) return 0f;
+                if (_friendlyGridAlliance != group.alliance) BuildFriendlyGrid(group.alliance);
+                return _friendlyGrid.EstimateFrontBlocker(SafeInstanceId(group), own.x, own.z, candidate.x, candidate.z);
             }
             catch
             {
                 return 0f;
+            }
+        }
+
+        private static void BuildFriendlyGrid(int alliance)
+        {
+            _friendlyGrid.Clear();
+            _friendlyGridAlliance = alliance;
+            var units = BattleUnits.completeunitlist as IList;
+            if (units == null) return;
+            for (int i = 0; i < units.Count; i++)
+            {
+                var friend = units[i] as Regiment;
+                if (friend == null || friend.alliance != alliance) continue;
+                if (friend.isrouted || friend.markedforrout || friend.permanentlydetached) continue;
+                if (friend.unittyp > 14) continue;
+                Vector3 pos = SafePosition(friend);
+                if (IsDefaultVector(pos)) continue;
+                _friendlyGrid.Add(SafeInstanceId(friend), pos.x, pos.z);
             }
         }
 
@@ -1735,8 +2039,7 @@ namespace WhiskeyRealism.Patches
             CommandTaskType task,
             WriteEligibilitySnapshot eligibility,
             CommandPhysicalState physical,
-            float recentOrderSeconds,
-            bool allowPendingLocalFormation,
+            float recentOrderHours,
             bool allowStaleQueuedBypass)
         {
             if (!eligibility.ModeAllowsWrites) return false;
@@ -1745,11 +2048,11 @@ namespace WhiskeyRealism.Patches
             if (eligibility.OrderPending) return false;
             if (eligibility.RecentOrder) return false;
             if (physical.ActiveMove) return false;
-            if (!allowPendingLocalFormation && HasPendingOrder(group, allowStaleQueuedBypass)) return false;
+            if (HasPendingOrder(group, allowStaleQueuedBypass)) return false;
             if (CommandPostureExecutor.ShouldBlockForRecentOrder(
                     task,
                     physical,
-                    HasRecentExecutorOrder(SafeInstanceId(group), recentOrderSeconds)))
+                    HasRecentExecutorOrder(SafeInstanceId(group), recentOrderHours)))
                 return false;
             return true;
         }
@@ -1873,50 +2176,6 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        // Cache for extended probe lists per alliance. completeunitlist may have
-        // 200+ regiments and walking it twice per Postfix per side is expensive.
-        // Cache invalidated by a coarse signature (alliance unit count + frame
-        // index) so a fresh probe build happens only when the unit roster
-        // materially changes between ticks.
-        private static readonly Dictionary<int, CachedExtendedProbes> _extendedProbeCache = new Dictionary<int, CachedExtendedProbes>();
-
-        private readonly struct CachedExtendedProbes
-        {
-            public CachedExtendedProbes(int unitCount, int frame, IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> probes)
-            {
-                UnitCount = unitCount; Frame = frame; Probes = probes;
-            }
-            public int UnitCount { get; }
-            public int Frame { get; }
-            public IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> Probes { get; }
-        }
-
-        private static IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> GetCachedExtendedProbes(int allianceId)
-        {
-            int frame = -1;
-            int unitCount = -1;
-            try
-            {
-                var units = BattleUnits.completeunitlist as System.Collections.IList;
-                unitCount = units != null ? units.Count : 0;
-                frame = UnityEngine.Time.frameCount;
-            }
-            catch { }
-            if (_extendedProbeCache.TryGetValue(allianceId, out var cached) &&
-                cached.UnitCount == unitCount &&
-                cached.Frame == frame &&
-                cached.Probes != null)
-                return cached.Probes;
-            var probes = DirectChildDiscovery.BuildExtendedProbesForAlliance(allianceId);
-            _extendedProbeCache[allianceId] = new CachedExtendedProbes(unitCount, frame, probes);
-            return probes;
-        }
-
-        internal static void ResetExtendedProbeCache()
-        {
-            _extendedProbeCache.Clear();
-        }
-
         /// <summary>
         /// Second pass that writes posture decisions for leaf brigades nested
         /// inside division-tier nodes. Builds the depth-agnostic leaf brigade
@@ -1944,48 +2203,11 @@ namespace WhiskeyRealism.Patches
                     : -1;
                 if (allianceId < 0 || allianceId >= 2) return;
 
-                var sideOrch = TacticalBattleCoordinator.GetSideOrchestrator(allianceId);
-                ArmyOrchestrator army = sideOrch?.Army;
+                // B-61state: the leaf map, live initiative and reinforcement
+                // opportunity are refreshed by the coordinator tick
+                // (ArmyPostureInputsRuntime.Refresh); this Postfix only reads them.
+                ArmyOrchestrator army = TacticalBattleCoordinator.GetSideOrchestrator(allianceId)?.Army;
                 if (army == null) return;
-
-                var extendedProbes = GetCachedExtendedProbes(allianceId);
-                if (extendedProbes == null || extendedProbes.Count == 0) return;
-
-                var tree = TacticalCommandTreeProbe.BuildTree(extendedProbes, 0);
-                army.UpdateLeafBrigadeMap(tree);
-
-                // Refresh the reinforcement-opportunity decision off the same
-                // Postfix tick as the leaf-map update. Reads BattleUnits.
-                // scheduledarrival + sideinformation; bounded by the doctrine's
-                // own pure deterministic path. Default-on rollback via
-                // Enable Tactical Reinforcement Opportunity Doctrine config flag.
-                if (Plugin.EnableTacticalReinforcementOpportunityDoctrine != null
-                    && Plugin.EnableTacticalReinforcementOpportunityDoctrine.Value)
-                {
-                    // Refresh live commander initiative from vanilla using the
-                    // proven pattern from BattleMacroStrategyPatch.CommanderAggression01:
-                    // bunits.GetCommandingOfficerFromSide(side) → GameVars.commander[id]
-                    // .GetCommanderInitiative(). The orchestrator caches the validated
-                    // value; doctrine consumes it via army.LiveCommanderInitiative01.
-                    float liveInitiative01 = ReadLiveCommanderInitiative01(bunits, side);
-                    army.UpdateLiveCommanderInitiative(liveInitiative01);
-
-                    // Aggression remains the PersonalityVector-derived historical
-                    // baseline (Hood vs McClellan etc.) — distinct from live
-                    // initiative which may differ per vanilla state. Map from
-                    // [-1, 1] PersonalityVector range to [0, 1] doctrine domain.
-                    float commanderAggression01 = (army.CommanderPersonality.Aggression + 1f) * 0.5f;
-                    if (commanderAggression01 < 0f) commanderAggression01 = 0f;
-                    if (commanderAggression01 > 1f) commanderAggression01 = 1f;
-
-                    var forceBalance = ArmyEvidenceBuilder.BuildForceBalance(
-                        battle, allianceId, army.LiveCommanderInitiative01, commanderAggression01);
-                    if (forceBalance.HasValue)
-                    {
-                        army.UpdateReinforcementOpportunity(forceBalance.Value);
-                        EmitReinforcementOpportunityTelemetry(side, army.CurrentReinforcementOpportunity);
-                    }
-                }
 
                 var leafMap = army.CurrentLeafBrigadeMap;
                 if (leafMap == null || leafMap.Count == 0) return;
@@ -2039,21 +2261,211 @@ namespace WhiskeyRealism.Patches
             // DirectChildAllocator for direct children so downstream resolvers
             // can still pattern-match.
             int instanceId = TacticalPatchIds.GameObjectInstanceId(group);
+
+            // Opportunity-override (2026-05-21). Without this, the cascade applies
+            // the brigade's role-default task (e.g. RefuseLeft → GuardFlank) regardless
+            // of what the army's high-level opportunity analysis has decided
+            // (WithdrawalToFightLater, AttackNow, DefensiveHold, WaitAndConsolidate).
+            // The user observed that "withdrawal" opportunity decisions never
+            // propagated to brigade behavior — brigades kept guarding their flank
+            // even when the army wanted to withdraw. Wire the decision through.
+            ReinforcementOpportunity opportunity = ReinforcementOpportunity.NoOpportunity;
+            ArmyOrchestrator army = null;
+            try
+            {
+                var sideOrch = group != null
+                    ? TacticalBattleCoordinator.GetSideOrchestrator(group.alliance)
+                    : null;
+                army = sideOrch?.Army;
+                if (army != null)
+                {
+                    opportunity = army.CurrentReinforcementOpportunity.Opportunity;
+                }
+            }
+            catch { /* default = NoOpportunity, preserves prior behavior */ }
+
+            CommandTaskType effectiveTask = TacticalOpportunityTaskOverride.Override(
+                leafAssignment.LeafTask,
+                leafAssignment.LeafRole,
+                opportunity,
+                out string overrideReason);
+
+            // Arrival synchronization (2026-05-25 / B): a Main-effort brigade
+            // committed to AttackObjective must not charge in alone. Hold it as
+            // Screen (skirmish forward, ai_stance=1) until its SupportMain
+            // siblings close the line, the hold budget elapses, or an aggressive
+            // commander (≥ 0.7) overrides. Wires the previously-dead
+            // TacticalMainArrivalSynchronizer — root cause of the "lone brigade
+            // attacks a superior force without support" smoke pattern.
+            if (effectiveTask == CommandTaskType.AttackObjective
+                && leafAssignment.LeafRole == DirectChildRole.Main
+                && army != null)
+            {
+                float aggr01 = (army.CommanderPersonality.Aggression + 1f) * 0.5f;
+                if (aggr01 < 0f) aggr01 = 0f;
+                if (aggr01 > 1f) aggr01 = 1f;
+                var heldTask = ResolveMainArrivalHold(
+                    group, instanceId, army, aggr01, effectiveTask,
+                    out bool arrivalHolding, out string arrivalReason);
+                if (arrivalHolding)
+                {
+                    effectiveTask = heldTask;
+                    if (overrideReason == null) overrideReason = arrivalReason;
+                }
+            }
+            else
+            {
+                // Role/task changed: the next Main attack may arm a fresh hold.
+                _mainArrivalHold.Remove(instanceId);
+            }
+
+            // Override-propagation fix (2026-05-21): the earlier override fix only
+            // updated synthesizedState.Task, but the leaf move read
+            // leafAssignment.LeafTask directly to pick the movement target — so the
+            // unit still moved per its ORIGINAL role (e.g. RefuseLeft → GuardFlank
+            // position) even when the army said WithdrawalToFightLater. Smoke logs
+            // showed Union brigades still getting `applied-GuardFlank` despite the
+            // opportunity decision being Withdrawal.
+            //
+            // Fix: when the override changes the task, construct a NEW LeafAssignment
+            // with the overridden task and pass that downstream. All target-resolution
+            // and telemetry paths now see the overridden task.
+            TacticalLeafBrigadeMap.LeafAssignment effectiveLeafAssignment = effectiveTask == leafAssignment.LeafTask
+                ? leafAssignment
+                : new TacticalLeafBrigadeMap.LeafAssignment(
+                    instanceId: leafAssignment.InstanceId,
+                    displayName: leafAssignment.DisplayName,
+                    leafRole: leafAssignment.LeafRole,
+                    leafTask: effectiveTask,
+                    cascadeChain: leafAssignment.CascadeChain,
+                    parentNameChain: leafAssignment.ParentNameChain,
+                    topLevelChildIndex: leafAssignment.TopLevelChildIndex);
+
+            if (overrideReason != null)
+            {
+                OnceLog.Info(
+                    "tactical-leaf-cascade:opportunity-override:" + side + ":" + leafAssignment.LeafRole + ":" + opportunity,
+                    "[TacticalLeafCascade] opportunity override: " + leafAssignment.LeafTask
+                    + " → " + effectiveTask + " (role=" + leafAssignment.LeafRole
+                    + " opportunity=" + opportunity + " reason=" + overrideReason + ")");
+            }
+
             var synthesizedState = new CommandNodeOperationalState(
                 nodeId: "leaf-" + instanceId,
                 echelon: CommandEchelonKind.BrigadeLike,
                 role: MapDirectChildRoleToNodeRole(leafAssignment.LeafRole),
-                task: leafAssignment.LeafTask,
+                task: effectiveTask,
                 taskState: CommandTaskState.Planning);
 
             // Reuse the same physical/eligibility/decision pipeline as the
             // primary unitsused iteration, but with the synthesized leaf state.
             // The TryApplyGroup signature requires resolving ledger state; for
             // nested brigades we don't have ledger state, so we replicate the
-            // minimal posture flow inline.
-            ApplyLeafBrigadePosture(battle, bunits, side, group, synthesizedState, leafAssignment, runtimePlayOrders);
+            // minimal posture flow inline. Pass effectiveLeafAssignment so target
+            // resolution sees the overridden task.
+            ApplyLeafBrigadePosture(battle, bunits, side, group, synthesizedState, effectiveLeafAssignment, runtimePlayOrders);
         }
 
+        // ---- Arrival synchronization (BR-M1) ----
+        // Per-Main latch on battle time (MainArrivalHoldLatch): arms once per
+        // role/task assignment, stays released after expiry until the leaf's
+        // role/task changes. Cleared on battle end.
+        private static readonly Dictionary<int, MainArrivalHoldLatch.State> _mainArrivalHold =
+            new Dictionary<int, MainArrivalHoldLatch.State>();
+        private static readonly List<TacticalMainArrivalSynchronizer.SupportMainPosition> _arrivalSupportScratch =
+            new List<TacticalMainArrivalSynchronizer.SupportMainPosition>(8);
+
+        // SupportMain leaf positions, built once per Apply per alliance instead
+        // of a completeunitlist walk per Main brigade (BR-M6).
+        private static readonly Dictionary<int, List<Vector3>> _supportMainPositionsByAlliance =
+            new Dictionary<int, List<Vector3>>();
+
+        private static List<Vector3> SupportMainPositions(int alliance, IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap)
+        {
+            if (_supportMainPositionsByAlliance.TryGetValue(alliance, out List<Vector3> cached)) return cached;
+            var positions = new List<Vector3>(8);
+            var units = BattleUnits.completeunitlist as IList;
+            if (units != null)
+            {
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var r = units[i] as Regiment;
+                    if (r == null || r.alliance != alliance) continue;
+                    if (r.unittyp < TacticalUnitType.BattleGroupBrigade) continue;
+                    int id = TacticalPatchIds.GameObjectInstanceId(r);
+                    if (id == 0 || !leafMap.TryGetValue(id, out var la)) continue;
+                    if (la.LeafRole != DirectChildRole.SupportMain || SafeRouted(r)) continue;
+                    if (WhiskeyRealism.Tactical.TacticalWriteGuard.IsPlayerProtected(r)) continue;
+                    positions.Add(SafePosition(r));
+                }
+            }
+            _supportMainPositionsByAlliance[alliance] = positions;
+            return positions;
+        }
+
+        /// <summary>
+        /// Holds a Main-effort brigade on AttackObjective as Screen until its
+        /// SupportMain siblings close on it, the hold budget elapses, or an
+        /// aggressive commander releases it. Battle time; never throws.
+        /// </summary>
+        private static CommandTaskType ResolveMainArrivalHold(
+            Regiment mainGroup,
+            int mainInstanceId,
+            ArmyOrchestrator army,
+            float commanderAggression01,
+            CommandTaskType attackTask,
+            out bool holding,
+            out string reason)
+        {
+            holding = false;
+            reason = null;
+            try
+            {
+                var leafMap = army?.CurrentLeafBrigadeMap;
+                if (leafMap == null || mainGroup == null) return attackTask;
+
+                _mainArrivalHold.TryGetValue(mainInstanceId, out MainArrivalHoldLatch.State latch);
+                if (!MainArrivalHoldLatch.ShouldEvaluate(latch)) return attackTask;
+
+                Vector3 mainPos = SafePosition(mainGroup);
+                var supports = _arrivalSupportScratch;
+                supports.Clear();
+                List<Vector3> supportPositions = SupportMainPositions(mainGroup.alliance, leafMap);
+                for (int i = 0; i < supportPositions.Count; i++)
+                    supports.Add(new TacticalMainArrivalSynchronizer.SupportMainPosition(SafeDistance(supportPositions[i], mainPos)));
+
+                // Battle seconds on the doctrine clock (hours x 3600).
+                float now = BattleHours();
+                float elapsedSeconds = MainArrivalHoldLatch.ElapsedBattleSeconds(latch, now);
+                var resolved = TacticalMainArrivalSynchronizer.ResolveMainAttackTask(
+                    DirectChildRole.Main, attackTask, supports,
+                    commanderAggression01, elapsedSeconds,
+                    TacticalMainArrivalSynchronizer.DefaultSupportProximityThresholdMeters,
+                    MainArrivalHoldLatch.MaxHoldBattleSeconds,
+                    out holding);
+
+                _mainArrivalHold[mainInstanceId] = MainArrivalHoldLatch.Next(latch, now, holding);
+                if (holding)
+                {
+                    reason = "arrival-hold-screen(supports=" + supports.Count
+                        + " elapsedSeconds=" + elapsedSeconds.ToString("0") + ")";
+                }
+                return resolved;
+            }
+            catch (Exception e)
+            {
+                OnceLog.Warning("tactical-arrival-sync:resolve-failed",
+                    "ResolveMainArrivalHold failed: " + e.GetType().Name + " " + e.Message);
+                holding = false;
+                return attackTask;
+            }
+        }
+
+        // B-leaf: a leaf brigade nested inside an AI group is moved only for
+        // movement tasks, only to its slot in the parent's formation, never
+        // while the parent has an order in flight, and through the same gates
+        // as the group path (LeafBrigadeMovePolicy). No stance write: the leaf
+        // is not an AI group (TacticalStanceWriter refuses it anyway).
         private static void ApplyLeafBrigadePosture(
             AIBattle battle,
             BattleUnits bunits,
@@ -2063,79 +2475,70 @@ namespace WhiskeyRealism.Patches
             TacticalLeafBrigadeMap.LeafAssignment leafAssignment,
             IReadOnlyDictionary<string, TacticalDivisionPlayOrder> runtimePlayOrders)
         {
-            // Minimal posture write path for a leaf brigade that doesn't carry
-            // its own ledger state. Reuses the same player-protected, routed,
-            // recent-order, and active-move gates as the primary flow, but
-            // simplifies the doctrine-order resolution (we synthesize the
-            // doctrine order from the leaf assignment task).
             try
             {
-                bool playerProtected = IsPlayerProtected(group);
-                if (playerProtected) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "player-protected", false); return; }
+                if (IsPlayerProtected(group)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "player-protected", false); return; }
                 if (SafeRouted(group)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "routed", false); return; }
 
                 int instanceId = TacticalPatchIds.GameObjectInstanceId(group);
                 if (HasRecentExecutorOrder(instanceId)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "recent-order", false); return; }
-                if (group.regimentpaths > 0 || group.movementmode > 0)
+                if (_writeBackoffUntil.TryGetValue(instanceId, out float backoffUntil) &&
+                    CommandWaypointWritePolicy.IsBackedOff(BattleHours(), backoffUntil))
                 {
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "movement-in-progress", false);
+                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "write-backoff", false);
                     return;
                 }
 
-                // Mirror the primary executor's pending-order gate: don't overwrite
-                // a vanilla courier-in-flight or a queued order. Without this check
-                // the cascade could clobber an order that's already on its way.
-                if (HasPendingOrder(group, allowStaleQueuedBypass: false))
+                Regiment parent = CommandParent(group);
+                bool parentActive = parent != null &&
+                    (parent.regimentpaths > 0 || HasPendingOrder(parent) || HasActiveMoveMakingProgress(parent));
+                bool hasSlot = TryFormationSlot(group, parent, out Vector3 target, out float slotRotation);
+                LeafMoveDecision move = LeafBrigadeMovePolicy.Decide(
+                    leafAssignment.LeafTask,
+                    parentActive,
+                    hasSlot,
+                    HasCloseEngagement(group),
+                    HasPendingOrder(group),
+                    HasActiveMoveMakingProgress(group));
+                if (!move.Move) { EmitLeafCascadeTelemetry(side, group, leafAssignment, move.Reason, false); return; }
+                if (!IsSafeWaypoint(group, target)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "unsafe-target", false); return; }
+                if (ShouldSkipDuplicateWaypoint(group, target)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "duplicate-waypoint", false); return; }
+                if (ShouldSuppressTaskRefresh(group, leafAssignment.LeafTask)) { EmitLeafCascadeTelemetry(side, group, leafAssignment, "task-hold", false); return; }
+
+                int beforeMovingPaths = CountMovingPaths(group);
+                int beforeQueued = QueuedOrderCount(group);
+                bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(
+                    leafAssignment.LeafTask,
+                    battleActive: true,
+                    inContactWithdrawal: HasLocalFlankRisk(group));
+                bunits.SetWaypoint(
+                    group,
+                    target,
+                    newpath: true,
+                    doublequick: false,
+                    manualfinalrotation: slotRotation,
+                    modifylastwaypoint: false,
+                    useorderdelay: useOrderDelay,
+                    timetomove: -1f,
+                    direction: -1,
+                    showmovementoptions: false,
+                    ignorebattlemonuments: false,
+                    groupmoveonly: false,
+                    ignoredisabledships: false,
+                    checkforreadiness: true,
+                    clearinterruptionpaths: true);
+
+                if (!CommandWaypointWritePolicy.MovementIssued(beforeMovingPaths, CountMovingPaths(group), beforeQueued, QueuedOrderCount(group)))
                 {
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "order-pending", false);
+                    _writeBackoffUntil[instanceId] = CommandWaypointWritePolicy.FailedWriteBackoffUntil(BattleHours());
+                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "movement-unmaterialized", false);
                     return;
                 }
 
-                // W&L feud-action gate parity: if the group contains a player-
-                // subordinate attached unit (dlcw_isundercommander), deny the
-                // write. Mirrors the IsPlayerProtected walk used elsewhere in
-                // this patch — the existing IsPlayerProtected check above only
-                // catches the group itself, not its attached units.
-                if (HasPlayerSubordinateAttached(group))
-                {
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "wl-player-subordinate-attached", false);
-                    return;
-                }
-
-                // Emit the cascade telemetry BEFORE attempting the write, so we
-                // always see "what task was derived for this brigade" even if
-                // the actual write is gated.
-                EmitLeafCascadeTelemetry(side, group, leafAssignment, "considering", false);
-
-                // For the actual movement write, we use vanilla SetWaypoint via
-                // the existing flow. Build a minimal CommandDoctrineOrder so the
-                // executor can pick a target.
-                if (TryResolveLeafMovementTarget(group, leafAssignment, out Vector3 target))
-                {
-                    bool useOrderDelay = CommandWaypointWritePolicy.ShouldUseOrderDelayForExecutorWaypoint(state.Task, battleActive: true);
-                    bunits.SetWaypoint(
-                        group,
-                        target,
-                        newpath: true,
-                        doublequick: false,
-                        manualfinalrotation: -1f,
-                        modifylastwaypoint: false,
-                        useorderdelay: useOrderDelay,
-                        timetomove: -1f,
-                        direction: -1,
-                        showmovementoptions: false,
-                        ignorebattlemonuments: false,
-                        groupmoveonly: false,
-                        ignoredisabledships: false,
-                        checkforreadiness: true,
-                        clearinterruptionpaths: true);
-                    _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "applied-" + leafAssignment.LeafTask.ToString(), true);
-                }
-                else
-                {
-                    EmitLeafCascadeTelemetry(side, group, leafAssignment, "no-target", false);
-                }
+                _lastExecutorOrderAt[instanceId] = BattleHours();
+                _writeBackoffUntil.Remove(instanceId);
+                RecordTaskWrite(group, leafAssignment.LeafTask);
+                EmitLeafCascadeTelemetry(side, group, leafAssignment, "applied-" + leafAssignment.LeafTask, true);
             }
             catch (Exception ex)
             {
@@ -2144,27 +2547,99 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static bool HasPlayerSubordinateAttached(Regiment group)
+        // Vanilla command parent (BattleUnits.GrabNextParentUnit 86886): the
+        // transform parent, or null at the Units root.
+        private static Regiment CommandParent(Regiment group)
         {
             try
             {
-                if (group == null) return false;
-                if (group.dlcw_isundercommander) return true;
-                var units = group.allattachedunits;
-                if (units == null) return false;
-                for (int i = 0; i < units.Length; i++)
-                {
-                    var unit = units[i];
-                    if (unit == null) continue;
-                    if (unit.dlcw_isundercommander) return true;
-                }
-                return false;
+                if (group == null) return null;
+                GameObject self = ((Component)group).gameObject;
+                GameObject parent = BattleUnits.GrabNextParentUnit(self);
+                if (parent == null || parent == self) return null;
+                return parent.GetComponent<Regiment>();
             }
             catch
             {
-                // Fail closed: assume player-attached on error so we never write
-                // to a unit we can't verify is safe.
-                return true;
+                return null;
+            }
+        }
+
+        // The brigade's slot in its parent's formation, computed the way
+        // SetGroupFormation places a group child (92060-92075): from the
+        // parent's last waypoint and rotation, offset by
+        // groupposition.unitoffsetposition[i] (lookup as GetOffsetPositionInGroup)
+        // plus the child's group depth, then clamped to the map like
+        // RegimentSetPath (131054-131071). No parent or slot → no move.
+        private static bool TryFormationSlot(Regiment group, Regiment parent, out Vector3 slot, out float rotation)
+        {
+            slot = default(Vector3);
+            rotation = -1f;
+            try
+            {
+                if (group == null || parent == null || parent.groupposition == null) return false;
+                Vector3 anchor = parent.lastsetwaypointposition;
+                if (IsDefaultVector(anchor)) return false;
+
+                BattleUnits.GroupPosition layout = parent.groupposition;
+                GameObject self = ((Component)group).gameObject;
+                int index = -1;
+                for (int i = 0; layout.attachedunitid != null && i < layout.attachedunitid.Length; i++)
+                {
+                    if (layout.attachedunitid[i] == self) { index = i; break; }
+                }
+                if (index < 0 || layout.unitoffsetposition == null || index >= layout.unitoffsetposition.Length) return false;
+
+                Vector3 offset = layout.unitoffsetposition[index];
+                float depth = group.groupposition != null ? group.groupposition.groupdepth : 0f;
+                rotation = parent.lastsetwaypointrotation;
+                LeafFormationSlot.OffsetXZ(anchor.x, anchor.z, rotation, -offset.x, offset.z + depth, out float x, out float z);
+                Vector3 size = TerrainSize();
+                VanillaMapBounds.ClampXZ(x, z, size.x, size.z, out x, out z);
+                slot = new Vector3(x, anchor.y, z);
+                return !IsDefaultVector(slot);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Terrain.activeTerrain.terrainData.size for the vanilla map clamp,
+        // read by reflection (UnityEngine.TerrainModule is not referenced);
+        // zero when unavailable, and VanillaMapBounds then leaves the target
+        // unchanged.
+        private static PropertyInfo _activeTerrainProperty;
+        private static PropertyInfo _terrainDataProperty;
+        private static PropertyInfo _terrainSizeProperty;
+        private static bool _terrainReflectionTried;
+
+        private static Vector3 TerrainSize()
+        {
+            try
+            {
+                if (!_terrainReflectionTried)
+                {
+                    _terrainReflectionTried = true;
+                    Type terrainType = AccessTools.TypeByName("UnityEngine.Terrain");
+                    Type terrainDataType = AccessTools.TypeByName("UnityEngine.TerrainData");
+                    _activeTerrainProperty = terrainType != null ? AccessTools.Property(terrainType, "activeTerrain") : null;
+                    _terrainDataProperty = terrainType != null ? AccessTools.Property(terrainType, "terrainData") : null;
+                    _terrainSizeProperty = terrainDataType != null ? AccessTools.Property(terrainDataType, "size") : null;
+                    if (_activeTerrainProperty == null || _terrainDataProperty == null || _terrainSizeProperty == null)
+                        OnceLog.Warning("tactical-command-posture:terrain-size-missing",
+                            "BattleCommandPostureExecutorPatch: Terrain size not readable; leaf targets are not map-clamped");
+                }
+
+                if (_activeTerrainProperty == null || _terrainDataProperty == null || _terrainSizeProperty == null)
+                    return Vector3.zero;
+                object terrain = _activeTerrainProperty.GetValue(null, null);
+                object data = terrain != null ? _terrainDataProperty.GetValue(terrain, null) : null;
+                return data != null ? (Vector3)_terrainSizeProperty.GetValue(data, null) : Vector3.zero;
+            }
+            catch
+            {
+                return Vector3.zero;
             }
         }
 
@@ -2182,151 +2657,6 @@ namespace WhiskeyRealism.Patches
                 case DirectChildRole.Fallback:    return CommandNodeRole.FallbackGuard;
                 case DirectChildRole.Unknown:
                 default:                          return CommandNodeRole.Unknown;
-            }
-        }
-
-        private static bool TryResolveLeafMovementTarget(
-            Regiment group,
-            TacticalLeafBrigadeMap.LeafAssignment leafAssignment,
-            out Vector3 target)
-        {
-            target = default(Vector3);
-            try
-            {
-                if (group == null) return false;
-                Vector3 own = SafePosition(group);
-                if (IsDefaultVector(own)) return false;
-
-                // Priority 1: parent regiment's last waypoint (SoW brigade-think
-                // pattern of following parent TACOBJLoc). Most accurate when the
-                // orchestrator has already issued a move to the parent division.
-                try
-                {
-                    var parentTransform = ((Component)group).gameObject.transform != null
-                        ? ((Component)group).gameObject.transform.parent
-                        : null;
-                    if (parentTransform != null)
-                    {
-                        var parentReg = parentTransform.GetComponent<Regiment>();
-                        if (parentReg != null && !IsDefaultVector(parentReg.lastsetwaypointposition))
-                        {
-                            target = parentReg.lastsetwaypointposition;
-                            return true;
-                        }
-                    }
-                }
-                catch { }
-
-                // Priority 2: fall back to the GROUP's own last-set waypoint
-                // (vanilla may have ordered the brigade before the orchestrator
-                // came online). Keeps the brigade on its existing line of
-                // advance rather than redirecting.
-                try
-                {
-                    if (!IsDefaultVector(group.lastsetwaypointposition))
-                    {
-                        target = group.lastsetwaypointposition;
-                        return true;
-                    }
-                }
-                catch { }
-
-                // Priority 3: nudge the brigade forward in its facing direction.
-                // 150m (was 75m) is large enough that vanilla won't immediately
-                // gate the order as "already there"; bounded so the brigade
-                // doesn't run off the map if facing is malformed.
-                try
-                {
-                    var tf = ((Component)group).gameObject.transform;
-                    if (tf == null) return false;
-                    Vector3 forward = tf.forward;
-                    // Guard against zero-length forward (malformed transform).
-                    float fwdLen = forward.x * forward.x + forward.z * forward.z;
-                    if (fwdLen < 0.001f) return false;
-                    target = new Vector3(own.x + forward.x * 150f, own.y, own.z + forward.z * 150f);
-                    return true;
-                }
-                catch
-                {
-                    return false;
-                }
-            }
-            catch
-            {
-                target = default(Vector3);
-                return false;
-            }
-        }
-
-
-        /// <summary>
-        /// Live commander initiative for the given side, read defensively from
-        /// vanilla. Mirrors the proven BattleMacroStrategyPatch.CommanderAggression01
-        /// pattern: bunits.GetCommandingOfficerFromSide(side) → GameVars.commander[id]
-        /// .GetCommanderInitiative(), with NaN/range guards. Returns 0.5 mid-band
-        /// on any failure so the doctrine degrades gracefully rather than locking
-        /// to a misleading 0 or NaN.
-        /// </summary>
-        private static float ReadLiveCommanderInitiative01(BattleUnits bunits, int side)
-        {
-            try
-            {
-                if (bunits == null || bunits.alliance == null) return 0.5f;
-                if (side < 0 || side >= bunits.alliance.Length) return 0.5f;
-                int commanderId = bunits.GetCommandingOfficerFromSide(side);
-                if (GameVars.commander == null || commanderId < 0 || commanderId >= GameVars.commander.Count) return 0.5f;
-                var commander = GameVars.commander[commanderId];
-                if (commander == null) return 0.5f;
-                float init = commander.GetCommanderInitiative();
-                if (float.IsNaN(init) || float.IsInfinity(init)) return 0.5f;
-                if (init < 0f) return 0f;
-                if (init > 1f) return 1f;
-                return init;
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-reinforcement-opportunity:init-read-failed",
-                    "ReadLiveCommanderInitiative01 threw: " + ex.GetType().Name + " " + ex.Message);
-                return 0.5f;
-            }
-        }
-
-        private static void EmitReinforcementOpportunityTelemetry(int side, ReinforcementOpportunityDecision decision)
-        {
-            try
-            {
-                string sig = "TacticalReinforcementOpportunity|side=" + side
-                    + "|outcome=" + decision.Opportunity
-                    + "|reason=" + decision.Reason
-                    + "|ratio=" + decision.CurrentRatio.ToString("0.00")
-                    + "|enemyParityHrs=" + (decision.ParityHoursForEnemy >= 999f ? "never" : decision.ParityHoursForEnemy.ToString("0.0"))
-                    + "|ownParityHrs=" + (decision.ParityHoursForOwn >= 999f ? "never" : decision.ParityHoursForOwn.ToString("0.0"))
-                    + "|threshold=" + decision.AttackThreshold.ToString("0.00")
-                    + "|window=" + decision.AttackWindowHours.ToString("0.0");
-                string key = "tactical-reinforcement-opportunity:" + side;
-                if (!TacticalTelemetry.ShouldEmit(_lastTelemetryAt, key, sig, Time.realtimeSinceStartup, TelemetrySeconds, false))
-                    return;
-
-                TelemetryRouter.Emit(
-                    TelemetryLayer.Tactical,
-                    TelemetryCategory.Decision,
-                    "TacticalReinforcementOpportunity",
-                    TelemetrySeverity.Info,
-                    ev => ev
-                        .WithSide(side)
-                        .WithDecision("TacticalReinforcementOpportunity", decision.Opportunity.ToString(), sig)
-                        .WithField("outcome", decision.Opportunity.ToString())
-                        .WithField("reason", decision.Reason)
-                        .WithField("currentRatio", decision.CurrentRatio)
-                        .WithField("enemyParityHours", decision.ParityHoursForEnemy >= 999f ? -1f : decision.ParityHoursForEnemy)
-                        .WithField("ownParityHours", decision.ParityHoursForOwn >= 999f ? -1f : decision.ParityHoursForOwn)
-                        .WithField("attackThreshold", decision.AttackThreshold)
-                        .WithField("attackWindowHours", decision.AttackWindowHours));
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-reinforcement-opportunity:telemetry-failed",
-                    "EmitReinforcementOpportunityTelemetry threw: " + ex.GetType().Name + " " + ex.Message);
             }
         }
 
@@ -2397,31 +2727,12 @@ namespace WhiskeyRealism.Patches
 
         private static bool IsPlayerProtected(Regiment group)
         {
-            try
-            {
-                if (group == null) return true;
-                // Removed 2026-05-19: the prior blanket alliance check
-                // `group.alliance == GameVars.playeralliance && !ai_vs_ai`
-                // returned true for EVERY unit on the player's alliance,
-                // not just the player's directly-commanded unit. Symptom:
-                // in W&L play the AI could not issue orders to any brigade
-                // on the player's side because the protection fired on
-                // every group — the player's own brigade just sat at
-                // vanilla "hold" with no orchestrator activity.
-                //
-                // W&L scope is the player's specific commanded unit +
-                // ancestors/descendants of it (via transform chain) +
-                // any DLC-taken-over unit. The three checks below capture
-                // that scope correctly.
-                if (!WlOwnershipSafe(group)) { EmitPlayerProtectedDiagnostic(group, "wl-ownership"); return true; }
-                if (IsWlCurrentCommandOrChain(group)) { EmitPlayerProtectedDiagnostic(group, "wl-current-command"); return true; }
-                if (SafeDlcTakenOver(group)) { EmitPlayerProtectedDiagnostic(group, "dlc-taken-over"); return true; }
-                return false;
-            }
-            catch
-            {
-                return true;
-            }
+            // Scope lives in TacticalWriteGuard (shared by every battle writer):
+            // player-owned units, the W&L player's command + chain, units with
+            // dlcw_isundercommander attached, and DLC-taken-over units.
+            if (!WhiskeyRealism.Tactical.TacticalWriteGuard.IsPlayerProtected(group, out string reason)) return false;
+            EmitPlayerProtectedDiagnostic(group, reason);
+            return true;
         }
 
         /// <summary>
@@ -2460,68 +2771,25 @@ namespace WhiskeyRealism.Patches
         private static readonly System.Collections.Generic.Dictionary<string, float> _lastPlayerProtectedTelemetryAt = new System.Collections.Generic.Dictionary<string, float>();
         private const float PlayerProtectedTelemetrySeconds = 30f;
 
-        private static bool WlOwnershipSafe(Regiment group)
-        {
-            try
-            {
-                if (!DLC_WL.dlc_scenarioactive) return true;
-                if (GameVars.ai_vs_ai) return true;
-                if (group == null) return false;
-                if (group.dlcw_isundercommander) return false;
-                if (group.allattachedunits == null) return true;
-
-                for (int i = 0; i < group.allattachedunits.Length; i++)
-                {
-                    Regiment unit = group.allattachedunits[i];
-                    if (unit != null && unit.dlcw_isundercommander) return false;
-                }
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static bool IsWlCurrentCommandOrChain(Regiment group)
-        {
-            try
-            {
-                if (!DLC_WL.dlc_scenarioactive) return false;
-                if (DLC_WL.dlc_chosencommander < 0) return false;
-                if (GameVars.commander == null || DLC_WL.dlc_chosencommander >= GameVars.commander.Count) return true;
-
-                Regiment current = GameVars.commander[DLC_WL.dlc_chosencommander].currentcommand;
-                if ((UnityEngine.Object)current == null) return false;
-                if ((UnityEngine.Object)current == (UnityEngine.Object)group) return true;
-
-                Transform currentTransform = current.transform;
-                Transform groupTransform = group.transform;
-                if (currentTransform == null || groupTransform == null) return true;
-
-                return currentTransform.IsChildOf(groupTransform) || groupTransform.IsChildOf(currentTransform);
-            }
-            catch
-            {
-                return true;
-            }
-        }
-
         private static bool HasPendingOrder(Regiment group)
         {
             return HasPendingOrder(group, allowStaleQueuedBypass: false);
         }
 
+        // allattachedunits holds every descendant, so sub-units use their own
+        // fields only (no nested CountMovingPaths walk) — O(A), not O(A²).
         private static bool HasPendingOrder(Regiment group, bool allowStaleQueuedBypass)
         {
-            if (PendingOrderOn(group, allowStaleQueuedBypass)) return true;
+            if (PendingOrderOn(group, allowStaleQueuedBypass, HasActiveMoveMakingProgress(group))) return true;
             try
             {
                 if (group == null || group.allattachedunits == null) return false;
                 for (int i = 0; i < group.allattachedunits.Length; i++)
                 {
-                    if (PendingOrderOn(group.allattachedunits[i], allowStaleQueuedBypass)) return true;
+                    Regiment unit = group.allattachedunits[i];
+                    if (unit == null) continue;
+                    bool activeMove = !unit.pathinterrupted && unit.regimentpaths > 0 && unit.movementmode > 0;
+                    if (PendingOrderOn(unit, allowStaleQueuedBypass, activeMove)) return true;
                 }
             }
             catch
@@ -2532,7 +2800,7 @@ namespace WhiskeyRealism.Patches
             return false;
         }
 
-        private static bool PendingOrderOn(Regiment unit, bool allowStaleQueuedBypass)
+        private static bool PendingOrderOn(Regiment unit, bool allowStaleQueuedBypass, bool activeMove)
         {
             try
             {
@@ -2544,7 +2812,7 @@ namespace WhiskeyRealism.Patches
                     RegimentPaths = unit.regimentpaths,
                     PathInterrupted = unit.pathinterrupted,
                     MovementMode = unit.movementmode,
-                    ActiveMove = HasActiveMoveMakingProgress(unit),
+                    ActiveMove = activeMove,
                     AllowStaleQueuedBypass = allowStaleQueuedBypass
                 });
             }
@@ -2556,36 +2824,44 @@ namespace WhiskeyRealism.Patches
 
         private static bool HasRecentExecutorOrder(int instanceId)
         {
-            return HasRecentExecutorOrder(instanceId, RecentOrderSeconds);
+            return HasRecentExecutorOrder(instanceId, RecentOrderHours);
         }
 
-        private static bool HasRecentExecutorOrder(int instanceId, float cooldownSeconds)
+        private static bool HasRecentExecutorOrder(int instanceId, float cooldownHours)
         {
             if (instanceId == 0) return true;
             if (!_lastExecutorOrderAt.TryGetValue(instanceId, out float last)) return false;
-            return Time.realtimeSinceStartup - last < Math.Max(0f, cooldownSeconds);
+            return WithinBattleWindow(last, cooldownHours);
         }
 
-        private static bool HasRecentFacingPulse(int instanceId, float cooldownSeconds)
+        private static bool HasRecentFacingPulse(int instanceId, float cooldownHours)
         {
             if (instanceId == 0) return true;
             if (!_lastFacingPulseAt.TryGetValue(instanceId, out float last)) return false;
-            return Time.realtimeSinceStartup - last < Math.Max(0f, cooldownSeconds);
+            return WithinBattleWindow(last, cooldownHours);
+        }
+
+        // True while stampHours + windowHours is ahead of the battle clock. A
+        // clock that went backwards (reload, new battle) expires the window.
+        private static bool WithinBattleWindow(float stampHours, float windowHours)
+        {
+            float age = BattleHours() - stampHours;
+            return age >= 0f && age < Math.Max(0f, windowHours);
         }
 
         private static void MarkFacingPulse(Regiment unit)
         {
             int instanceId = SafeInstanceId(unit);
             if (instanceId == 0) return;
-            _lastFacingPulseAt[instanceId] = Time.realtimeSinceStartup;
-            _lastExecutorOrderAt[instanceId] = Time.realtimeSinceStartup;
+            _lastFacingPulseAt[instanceId] = BattleHours();
+            _lastExecutorOrderAt[instanceId] = BattleHours();
         }
 
         private static bool HasRecentFireControlOrder(int instanceId)
         {
             if (instanceId == 0) return true;
             if (!_lastFireControlAt.TryGetValue(instanceId, out float last)) return false;
-            return Time.realtimeSinceStartup - last < FireControlOrderCooldownSeconds;
+            return WithinBattleWindow(last, FireControlOrderCooldownHours);
         }
 
         private static bool HasActiveMoveMakingProgress(Regiment group)
@@ -2653,6 +2929,21 @@ namespace WhiskeyRealism.Patches
             {
                 return false;
             }
+        }
+
+        private static bool IsArtilleryUnit(Regiment unit)
+        {
+            try { return unit != null && (unit.unittyp == TacticalUnitType.Artillery || unit.guns > 0); }
+            catch { return true; }
+        }
+
+        // Vanilla UnlimberArtilleryAIMicro only turns toward
+        // GetClosestEnemyUnit(firerange) (3487).
+        private static bool ThreatWithinFireRange(Regiment unit)
+        {
+            float range = SafeFireRange(unit);
+            float distance = SafeEnemyDistance(unit);
+            return range > 0f && distance > 0f && distance <= range;
         }
 
         private static bool IsCombatRegiment(Regiment unit)
@@ -3025,26 +3316,34 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static string ParentNodeKey(Regiment group, CommandNodeOperationalState state)
+        // Vanilla command parent: BattleUnits.GrabNextParentUnit (86886) walks
+        // transform.parent and returns the unit itself at the "Units" root;
+        // GetAttachedUnitsReg(directonly) (119854) defines direct subordinates
+        // the same way. Groups under the root have no parent node (null) —
+        // the old "role-parent" fallback lumped every such group of an echelon
+        // into one play.
+        private static string ParentNodeKey(Regiment group)
         {
             try
             {
-                if (group != null)
-                {
-                    FieldInfo parentField = AccessTools.Field(typeof(Regiment), "parentregiment");
-                    object parent = parentField != null ? parentField.GetValue(group) : null;
-                    var parentGameObject = parent as GameObject;
-                    if (parentGameObject != null) return "parent-go:" + parentGameObject.GetInstanceID();
-                    var parentComponent = parent as Component;
-                    if (parentComponent != null) return "parent-co:" + parentComponent.GetInstanceID();
-
-                    Transform parentTransform = group.transform != null ? group.transform.parent : null;
-                    if (parentTransform != null) return "parent-tr:" + parentTransform.GetInstanceID();
-                }
+                if (group == null) return null;
+                GameObject self = ((Component)group).gameObject;
+                GameObject parent = BattleUnits.GrabNextParentUnit(self);
+                if (parent == null || parent == self) return null;
+                return "parent-go:" + parent.GetInstanceID();
             }
-            catch { }
+            catch
+            {
+                return null;
+            }
+        }
 
-            return "role-parent:" + state.Echelon + ":" + state.Role;
+        // Vanilla GetBattleType (86095) with readiness, as AdjustGroupAIStance
+        // uses it (4252): 2 = this alliance holds the objectives (defending).
+        private static bool SideDefending(BattleUnits bunits, int alliance)
+        {
+            try { return bunits != null && bunits.GetBattleType(alliance, usereadinesswhendraw: true) == 2; }
+            catch { return false; }
         }
 
         private static TacticalRefuseFlankIntent.Decision ResolveRefusedFlank(
@@ -3102,33 +3401,32 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static int StanceForTask(CommandTaskType task)
+        // Stance before waypoint (vanilla ChangeStance → SetWaypoint pipeline).
+        // Goes through the single stance owner: refused for non-AI groups
+        // (attached sub-units, nested leaf brigades), deduped on
+        // ai_stanceordered, and held against #45 / vanilla flips.
+        private static void EnsureStanceMatchesTask(BattleUnits bunits, Regiment group, CommandTaskType task)
         {
-            switch (task)
-            {
-                case CommandTaskType.AttackObjective:
-                case CommandTaskType.SupportAttack:
-                    return 3;
-                case CommandTaskType.FixEnemy:
-                case CommandTaskType.HoldObjective:
-                case CommandTaskType.HoldChoke:
-                case CommandTaskType.ReserveWait:
-                case CommandTaskType.FallBackToLine:
-                    return 2;
-                default:
-                    return -1;
-            }
+            TacticalStanceWriter.EnsureStanceForTask(bunits, group, task, null, StanceWriteSource.Executor);
+        }
+
+        // Doctrine clock (battle hours, frozen across the night end-of-day
+        // cycle). Every doctrine timer in this patch runs on it; only
+        // comparisons against vanilla-stamped fields read the raw clock.
+        private static float BattleHours()
+        {
+            return (float)TacticalBattleCoordinator.DoctrineBattleHours;
+        }
+
+        private static int SafeEodCycle(BattleUnits bunits)
+        {
+            try { return bunits != null ? bunits.eodcycle : 1; }
+            catch { return 1; }
         }
 
         private static bool SafeRouted(Regiment group)
         {
             try { return group == null || group.isrouted || group.markedforrout; }
-            catch { return true; }
-        }
-
-        private static bool SafeDlcTakenOver(Regiment group)
-        {
-            try { return DLC_WL.dlc_scenarioactive && group != null && DLC_WL.IsUnitTakenOver(group); }
             catch { return true; }
         }
 
@@ -3162,12 +3460,15 @@ namespace WhiskeyRealism.Patches
             catch { return default(Vector3); }
         }
 
+        // BattleUnits keeps the scene's BattlefieldSetup in a private static
+        // (set at 79055/79132, nulled on destroy at 79230); read it instead of
+        // GameObject.Find("GameController") per call.
         private static BattlefieldSetup SafeBattlefieldSetup()
         {
             try
             {
-                GameObject controller = GameObject.Find("GameController");
-                return controller != null ? controller.GetComponent<BattlefieldSetup>() : null;
+                if (_bfsField == null) _bfsField = AccessTools.Field(typeof(BattleUnits), "bfs");
+                return _bfsField != null ? _bfsField.GetValue(null) as BattlefieldSetup : null;
             }
             catch
             {
@@ -3252,7 +3553,14 @@ namespace WhiskeyRealism.Patches
                     .WithField("paths", SafeRegimentPaths(group))
                     .WithField("movingFlag", SafeGroupMovingFlag(group))
                     .WithField("pathInterrupted", group != null && group.pathinterrupted)
-                    .WithField("activeMove", HasActiveMoveMakingProgress(group)));
+                    .WithField("activeMove", HasActiveMoveMakingProgress(group))
+                    // Microshift-fix diagnostic fields (2026-05-21). Smoke can now verify
+                    // whether near-duplicate waypoint targets are being deduped correctly
+                    // by comparing currentWaypointX/Z to targetX/Z in tactical.jsonl.
+                    .WithField("currentWaypointX", group != null ? group.lastsetwaypointposition.x : 0f)
+                    .WithField("currentWaypointZ", group != null ? group.lastsetwaypointposition.z : 0f)
+                    .WithField("groupPositionX", group != null ? SafePosition(group).x : 0f)
+                    .WithField("groupPositionZ", group != null ? SafePosition(group).z : 0f));
         }
 
         private static void EmitFacingPulseTelemetry(
@@ -3343,9 +3651,17 @@ namespace WhiskeyRealism.Patches
             _lastExecutorOrderAt.Clear();
             _lastFacingPulseAt.Clear();
             _lastFireControlAt.Clear();
+            _lastFormationWriteAt.Clear();
+            _writeBackoffUntil.Clear();
+            _friendlyGrid.Clear();
+            _friendlyGridAlliance = -1;
+            _brigadeTaskHoldState.Clear();
             _lastCourierAt.Clear();
             _lastOutboundOrderSignatureByGroup.Clear();
             _lastTelemetryAt.Clear();
+            _mainArrivalHold.Clear();
+            _supportMainPositionsByAlliance.Clear();
+            _lastPlayerProtectedTelemetryAt.Clear();
         }
 
         private static int SafeIntField(object instance, ref FieldInfo cache, string name, int fallback)

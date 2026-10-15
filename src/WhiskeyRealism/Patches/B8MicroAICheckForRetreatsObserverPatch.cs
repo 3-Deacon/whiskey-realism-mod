@@ -15,6 +15,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.b8-retreats-observer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.b8-retreats-observer");
                 try
                 {
                     OnceLog.Info("b8-microai-check-retreats", "");

@@ -9,3 +9,8 @@ refs
 *.user
 .vs/
 .idea/
+
+# Local scratch / personal artifacts (never commit)
+error.log
+.grok/
+*.jpg

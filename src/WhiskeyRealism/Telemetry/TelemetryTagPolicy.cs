@@ -56,7 +56,6 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalIntent", TelemetryCategory.Decision);
             AddTactical("TacticalLocalReaction", TelemetryCategory.Decision);
             AddTactical("TacticalReplan", TelemetryCategory.Decision);
-            AddTactical("TacticalCascade", TelemetryCategory.Trace);
             AddTactical("TacticalMacro", TelemetryCategory.State);
             AddTactical("TacticalMacroDecision", TelemetryCategory.Decision);
             AddTactical("TacticalGroup", TelemetryCategory.State);
@@ -83,27 +82,31 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalReserveOrderDelayGuard", TelemetryCategory.Gate);
             AddTactical("TacticalChargeDeny", TelemetryCategory.Gate);
             AddTactical("TacticalChargePreserved", TelemetryCategory.Gate);
-            AddTactical("TacticalChargeGuard", TelemetryCategory.Gate);
-            AddTactical("TacticalDoctrineCharge", TelemetryCategory.Gate);
-            AddTactical("TacticalOrchestratorChargeGate", TelemetryCategory.Gate);
             AddTactical("TacticalFeud", TelemetryCategory.Gate);
             AddTactical("TacticalFeudGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDirectChildDiscovery", TelemetryCategory.State);
             AddTactical("TacticalDirectChildIntent", TelemetryCategory.Decision);
+            AddTactical("TacticalPlayExecution", TelemetryCategory.Decision);
             AddTactical("TacticalDirectChildGate", TelemetryCategory.Gate);
             AddTactical("TacticalDeploymentPhase", TelemetryCategory.State);
             AddTactical("TacticalRegimentDiagnostics", TelemetryCategory.Trace);
             AddTactical("TacticalRegimentTrace", TelemetryCategory.Trace);
             AddTactical("TacticalMapKnowledge", TelemetryCategory.Trace);
             AddTactical("TacticalLeafCascade", TelemetryCategory.Decision);
+            // Scope B alignment (2026-05-22): canonical stance-write event +
+            // newer telemetry tags that emit but were not yet registered.
+            // Unregistered tags fall through to default routing which can
+            // dump them into the main log instead of the tactical sidecar.
+            AddTactical("TacticalStanceWrite", TelemetryCategory.Write);
+            AddTactical("TacticalArtilleryDecision", TelemetryCategory.Decision);
+            AddTactical("TacticalBrigadeTaskHold", TelemetryCategory.Gate);
+            AddTactical("TacticalBrigadePosture", TelemetryCategory.Decision);
+            AddTactical("TacticalArtilleryWaypointVeto", TelemetryCategory.Gate);
             AddTactical("TacticalReinforcementOpportunity", TelemetryCategory.Decision);
             AddTactical("TacticalCommandTreeProbeHealth", TelemetryCategory.Health);
-            AddTactical("TacticalPlaybookFactionBias", TelemetryCategory.Decision);
             AddTactical("TacticalPlayerProtected", TelemetryCategory.Gate);
-            AddTactical("TacticalObjectiveGuard", TelemetryCategory.Gate);
             AddTactical("TacticalObjectiveMove", TelemetryCategory.Write);
             AddTactical("TacticalObjectiveMutation", TelemetryCategory.Write);
-            AddTactical("TacticalObjectiveRecordsParityMismatch", TelemetryCategory.Gate);
             AddTactical("TacticalOrchestrator", TelemetryCategory.State);
             AddTactical("TacticalPathfinderDiscipline", TelemetryCategory.Gate);
             AddTactical("TacticalHqLinkGuard", TelemetryCategory.Gate);
@@ -133,7 +136,6 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("Director:trace", TelemetryCategory.Trace);
             AddCampaign("OperationalProbe", TelemetryCategory.Decision);
             AddCampaign("CoordinatedOps", TelemetryCategory.Write);
-            AddCampaign("CoordinatedOps:Perf", TelemetryCategory.Performance);
             AddCampaign("ProjectDoctrine", TelemetryCategory.Decision);
             AddCampaign("ProjectAppointed", TelemetryCategory.State);
             AddCampaign("ProjectUnlock", TelemetryCategory.State);
@@ -225,18 +227,51 @@ namespace WhiskeyRealism.Telemetry
                 || string.Equals(tag, "HistoricalOperation", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsSeriousLine(string line)
+        // Serious = a whole word token (failed/failure/exception/error/fatal, plural ok), a
+        // CamelCase exception type name (…Exception), or the missing-anchor / missing
+        // required phrases. Substrings inside other words ("errorBudget", "failureRisk",
+        // "exceptional") are not serious; they used to promote doctrine rows to Failure.
+        internal static bool IsSeriousLine(string line)
         {
             if (string.IsNullOrWhiteSpace(line))
                 return false;
 
-            return line.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("failure", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("exception", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("missing-anchor", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("missing required", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("fatal", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (line.IndexOf("missing-anchor", StringComparison.OrdinalIgnoreCase) >= 0
+                || line.IndexOf("missing required", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            int i = 0;
+            while (i < line.Length)
+            {
+                while (i < line.Length && !char.IsLetter(line[i]))
+                    i++;
+                int start = i;
+                while (i < line.Length && char.IsLetterOrDigit(line[i]))
+                    i++;
+                if (i > start && IsSeriousToken(line, start, i - start))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static readonly string[] SeriousWords =
+        {
+            "failed", "failure", "failures", "exception", "exceptions", "error", "errors", "fatal"
+        };
+
+        private static bool IsSeriousToken(string line, int start, int length)
+        {
+            for (int w = 0; w < SeriousWords.Length; w++)
+            {
+                string word = SeriousWords[w];
+                if (word.Length == length && string.Compare(line, start, word, 0, length, StringComparison.OrdinalIgnoreCase) == 0)
+                    return true;
+            }
+
+            const string typeSuffix = "Exception";
+            return length > typeSuffix.Length
+                && string.CompareOrdinal(line, start + length - typeSuffix.Length, typeSuffix, 0, typeSuffix.Length) == 0;
         }
 
         private static TelemetryTagRoute Serious(TelemetryTagRoute route)

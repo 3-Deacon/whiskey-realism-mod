@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using WhiskeyRealism.Strategic;
@@ -8,14 +9,14 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla CheckAIPolicyChange walks the active AI personality policy list.
-    // This Prefix intervenes only when fiscal or grand-strategy policy scoring
-    // has a clear win, or when the vanilla first-available policy is fiscally suppressed.
+    // Vanilla Policies.CheckAIPolicyChange (decompile 211017-211086) researches the first
+    // available AI-personality policy. This Prefix intervenes only when fiscal or
+    // grand-strategy scoring has a clear win, or swaps a fiscally suppressed first policy
+    // for the first non-suppressed one. If every available policy is suppressed it lets
+    // vanilla run (FiscalPolicySelector) instead of stalling research.
     [HarmonyPatch(typeof(Policies), "CheckAIPolicyChange")]
     internal static class PolicySelectionPatch
     {
-        private const float MinimumPolicyScore = 0.75f;
-        private const float PolicyWinMargin = 0.35f;
         private static readonly MethodInfo IsDeactivatedMethod = AccessTools.Method(typeof(Policies), "IsDeactivated", new[] { typeof(Policy) });
 
         [HarmonyPrefix]
@@ -23,6 +24,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.policy-selection", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.policy-selection");
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return true;
@@ -46,16 +48,10 @@ namespace WhiskeyRealism.Patches
                 if (state.GetActivatedPolicies(includeactsinresearch: true, includegrandpolicies: false, researchedonly: true) > 0) return true;
 
                 var profile = ResolveProfile(alliance);
-                int firstVanillaPolicy = -1;
-                float firstVanillaScore = 0f;
-                int firstNonSuppressedPolicy = -1;
-                float firstNonSuppressedScore = 0f;
-                float firstNonSuppressedFiscalScore = 0f;
-                float firstNonSuppressedStrategyScore = 0f;
-                int bestPolicy = -1;
-                float bestScore = MinimumPolicyScore;
-                float bestFiscalScore = 0f;
-                float bestStrategyScore = 0f;
+                var ids = new List<int>();
+                var scores = new List<float>();
+                var fiscalScores = new List<float>();
+                var strategyScores = new List<float>();
 
                 for (int i = 0; i < personality.policies.Count; i++)
                 {
@@ -65,72 +61,27 @@ namespace WhiskeyRealism.Patches
 
                     float fiscalScore = FiscalPolicyScorer.PolicyWeight(intent, alliance, policyId);
                     float strategyScore = GrandStrategyPolicyScorer.PolicyWeight(profile, alliance, policyId);
-                    float score = fiscalScore < 0f ? fiscalScore : fiscalScore + strategyScore;
-                    if (firstVanillaPolicy < 0)
-                    {
-                        firstVanillaPolicy = policyId;
-                        firstVanillaScore = score;
-                    }
-                    if (firstNonSuppressedPolicy < 0 && score >= 0f)
-                    {
-                        firstNonSuppressedPolicy = policyId;
-                        firstNonSuppressedScore = score;
-                        firstNonSuppressedFiscalScore = fiscalScore;
-                        firstNonSuppressedStrategyScore = strategyScore;
-                    }
-
-                    if (score > bestScore)
-                    {
-                        bestScore = score;
-                        bestPolicy = policyId;
-                        bestFiscalScore = fiscalScore;
-                        bestStrategyScore = strategyScore;
-                    }
+                    ids.Add(policyId);
+                    scores.Add(fiscalScore < 0f ? fiscalScore : fiscalScore + strategyScore);
+                    fiscalScores.Add(fiscalScore);
+                    strategyScores.Add(strategyScore);
                 }
 
-                string reason = "fiscal-win";
-                int selectedPolicyId = -1;
-                float selectedScore = 0f;
-                float selectedFiscalScore = bestFiscalScore;
-                float selectedStrategyScore = bestStrategyScore;
-                if (bestPolicy >= 0 && bestPolicy != firstVanillaPolicy && bestScore >= firstVanillaScore + PolicyWinMargin)
-                {
-                    reason = bestStrategyScore > bestFiscalScore ? "strategy-win" : "fiscal-win";
-                    selectedPolicyId = bestPolicy;
-                    selectedScore = bestScore;
-                }
-                else if (firstVanillaPolicy >= 0 && firstVanillaScore < 0f)
-                {
-                    reason = "suppress-force-growth";
-                    if (firstNonSuppressedPolicy < 0)
-                    {
-                        OnceLog.Info("policy-selection", "PolicySelectionPatch wired");
-                        if (Plugin.Instance.VerboseLogging.Value)
-                        {
-                            EmitFiscalIntentPolicy(
-                                alliance,
-                                "block-policy",
-                                intent,
-                                firstVanillaPolicy,
-                                selectedPolicyId: -1,
-                                firstVanillaScore,
-                                selectedScore,
-                                selectedFiscalScore,
-                                selectedStrategyScore,
-                                reason);
-                        }
-                        return false;
-                    }
+                // Index -1 => vanilla researches its first available policy. The selector
+                // never blocks research when every available policy is penalised.
+                var decision = FiscalPolicySelector.Select(ids, scores);
+                if (decision.Index < 0) return true;
 
-                    selectedPolicyId = firstNonSuppressedPolicy;
-                    selectedScore = firstNonSuppressedScore;
-                    selectedFiscalScore = firstNonSuppressedFiscalScore;
-                    selectedStrategyScore = firstNonSuppressedStrategyScore;
-                }
-                else
-                {
-                    return true;
-                }
+                int pick = decision.Index;
+                int firstVanillaPolicy = ids[0];
+                float firstVanillaScore = scores[0];
+                int selectedPolicyId = ids[pick];
+                float selectedScore = scores[pick];
+                float selectedFiscalScore = fiscalScores[pick];
+                float selectedStrategyScore = strategyScores[pick];
+                string reason = decision.Reason == "score-win"
+                    ? (selectedStrategyScore > selectedFiscalScore ? "strategy-win" : "fiscal-win")
+                    : decision.Reason;
 
                 var selected = Policy.GetPolicyFromID(selectedPolicyId);
                 if (selected == null) return true;

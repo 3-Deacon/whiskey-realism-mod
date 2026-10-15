@@ -19,6 +19,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.b8-line-fallbacks-observer", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("tactical.patch.b8-line-fallbacks-observer");
                 try
                 {
                     OnceLog.Info("b8-check-line-fallbacks", "");
@@ -40,7 +41,7 @@ namespace WhiskeyRealism.Patches
                 return;
 
             OnceLog.Info(
-                "b8-check-line-fallbacks-task:" + SafeInstanceId(group) + ":" + state.Task + ":" + operation.Phase,
+                "b8-check-line-fallbacks-task:" + state.Task + ":" + operation.Phase,
                 "[B8] plannedFallback group=" + SafeName(group) + "#" + SafeInstanceId(group) +
                 " task=" + state.Task +
                 " taskState=" + state.TaskState +

@@ -10,12 +10,25 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla AIBattle.CheckUseOfReserves(Regiment) at decompile line 6062 supports
-    // outflanked friendly units by moving an unengaged reserve toward them. This
-    // Postfix uses the same input set to compute TacticalWithdrawalDoctrine.Decision
-    // per attached unit, emits a help-request telemetry sink, and conditionally
-    // issues SetWithdrawal calls when the config flag is on. Reserve-list mutation
-    // is NOT performed here -- vanilla owns that.
+    // B8 — Postfix on AIBattle.CheckUseOfReserves(Regiment) (decompile 6062,
+    // micro-AI task slot 23 in UpdateMicroAI 5543). Vanilla moves one unengaged
+    // reserve toward an outflanked friendly unit (RegimentSetPath at 6170).
+    //
+    // This patch:
+    //  1. doctrine deny: when the command doctrine keeps the group in Reserve,
+    //     rolls back the reserve path vanilla just issued (Prefix snapshot);
+    //  2. withdrawal doctrine: for attached infantry/cavalry classified
+    //     RearGuard/FullRetreat, issues vanilla's OWN tactical fallback
+    //     (CheckLineFallbacks 5118 / MicroAICheckForRetreats 4825):
+    //     RegimentSetPath(GetAngleTerrainPos(pos, unitrange.retreatangle, d),
+    //     newpath, skipcover) + SetMovementMode(2).
+    //     It never calls the campaign Regiment.SetWithdrawal (116116): that ends
+    //     with onretreat = true, BattleUnits.SetWaypoint returns early for
+    //     onretreat (91361) and nothing in battle clears it (R1).
+    // Every write/deny goes through TacticalWriteGuard (Tactical Commander Mode
+    // Active + W&L/player protection); per-unit vanilla PerformAIActionDLCWL
+    // (5101) and the feud rule (ai_feudstance == -1 | isplayeraiorfeud == 2)
+    // still apply. Reserve-list mutation is NOT performed here.
     [HarmonyPatch(typeof(AIBattle), "CheckUseOfReserves")]
     public static class B8CheckUseOfReservesPatch
     {
@@ -34,6 +47,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.b8-check-reserves-prefix", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.b8-check-reserves-prefix");
                 __state = null;
 
                 if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
@@ -41,18 +55,21 @@ namespace WhiskeyRealism.Patches
 
                 try
                 {
+                    // No denial is possible when vanilla cannot commit a reserve
+                    // this call, or when Whiskey may not write for this group.
+                    if (!BattleReserveCommitGatePatch.VanillaMayCommitReserve(aigroup)) return;
+                    if (!TacticalWriteGuard.CanWrite(aigroup)) return;
                     if (!TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder doctrineOrder)) return;
 
                     DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
                         doctrineOrder,
-                        BuildOperationalReserveInput(aigroup),
-                        SafeCurrentTimeSeconds());
+                        BuildOperationalReserveInput(aigroup));
                     if (doctrineDecision.Action != DoctrineConsumerAction.Deny) return;
 
                     __state = new ReserveMovementState
                     {
                         DoctrineDecision = doctrineDecision,
-                        Units = SnapshotUnits(aigroup)
+                        Units = BattleReserveCommitGatePatch.SnapshotReserveCandidates(aigroup)
                     };
                 }
                 catch
@@ -67,6 +84,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.b8-check-reserves", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.b8-check-reserves");
             if (Plugin.Instance == null || Plugin.Instance.Enabled == null || !Plugin.Instance.Enabled.Value) return;
             if (aigroup == null) return;
 
@@ -74,107 +92,64 @@ namespace WhiskeyRealism.Patches
             {
                 OnceLog.Info("b8-check-reserves", "B8 CheckUseOfReserves Postfix wired.");
 
-                var allUnits = aigroup.allattachedunits;
-
-                int? isPlayerAiOrFeud = IsPlayerAiOrFeud(__instance);
-                if (!isPlayerAiOrFeud.HasValue) return;
-                if (!HasPerformAiActionDlcWl()) return;
-
                 if (__state != null && __state.DoctrineDecision.Action == DoctrineConsumerAction.Deny)
                 {
                     RemoveDeniedReserveMovement(aigroup, __state);
-                    EmitHelpRequest(aigroup, TacticalWithdrawalDoctrine.Decision.HoldLine);
                     OnceLog.Info(
-                        "b8-check-reserves:doctrine-deny:" + SafeInstanceId(aigroup),
-                        "[B8] reserve doctrine denied reserve mutation reason=" + __state.DoctrineDecision.Reason +
+                        "b8-check-reserves:doctrine-deny",
+                        "[B8] reserve doctrine denied reserve movement reason=" + __state.DoctrineDecision.Reason +
                         " task=" + __state.DoctrineDecision.Task +
                         " group=" + SafeName(aigroup));
                     return;
                 }
 
-                if (TryResolveDoctrineOrder(aigroup, out CommandDoctrineOrder doctrineOrder))
-                {
-                    DoctrineReserveDecision doctrineDecision = DoctrineConsumerDecisions.DecideReserve(
-                        doctrineOrder,
-                        BuildOperationalReserveInput(aigroup),
-                        SafeCurrentTimeSeconds());
-                    if (doctrineDecision.Action == DoctrineConsumerAction.Deny)
-                    {
-                        RemoveDeniedReserveMovement(aigroup, __state);
-                        EmitHelpRequest(aigroup, TacticalWithdrawalDoctrine.Decision.HoldLine);
-                        OnceLog.Info(
-                            "b8-check-reserves:doctrine-deny:" + SafeInstanceId(aigroup),
-                            "[B8] reserve doctrine denied reserve mutation reason=" + doctrineDecision.Reason +
-                            " task=" + doctrineDecision.Task +
-                            " group=" + SafeName(aigroup));
-                        return;
-                    }
-                }
-
-                if (allUnits == null)
-                {
-                    EmitHelpRequest(aigroup, TacticalWithdrawalDoctrine.Decision.HoldLine);
-                    return;
-                }
-
                 bool writesEnabled = Plugin.EnableTacticalWithdrawalDoctrine != null
                     && Plugin.EnableTacticalWithdrawalDoctrine.Value;
+                if (!writesEnabled) return;
 
-                List<Regiment> withdrawalList = null;
-                TacticalWithdrawalDoctrine.Decision strongestDecision = TacticalWithdrawalDoctrine.Decision.HoldLine;
+                var allUnits = aigroup.allattachedunits;
+                if (allUnits == null) return;
 
+                int? isPlayerAiOrFeud = IsPlayerAiOrFeud(__instance);
+                if (!isPlayerAiOrFeud.HasValue) return;
+                if (!TacticalGateHelpers.PassesWlOwnership(aigroup.ai_feudstance, isPlayerAiOrFeud.Value)) return;
+                if (!HasPerformAiActionDlcWl()) return;
+                if (!TacticalWriteGuard.CanWrite(aigroup)) return;
+
+                BattleUnits bunits = null;
+                int applied = 0;
                 for (int i = 0; i < allUnits.Length; i++)
                 {
                     var unit = allUnits[i];
                     if (unit == null) continue;
                     if (unit.unittyp > TacticalUnitType.Cavalry) continue;
-                    if (unit.isrouted || unit.markedforrout) continue;
-                    if (unit.permanentlydetached) continue;
-                    if (!TacticalGateHelpers.PassesWlOwnership(aigroup.ai_feudstance, isPlayerAiOrFeud.Value))
-                        continue;
+                    if (unit.isrouted || unit.markedforrout || unit.permanentlydetached) continue;
                     if (!PerformAiActionDlcWl(unit, aigroup)) continue;
 
                     var snapshot = BuildSnapshot(unit, aigroup, isPlayerAiOrFeud.Value);
-                    var moraleInput = TacticalWithdrawalInputAdapter.ToMoralePressureInput(snapshot);
-                    var moraleResult = TacticalMoralePressure.Score(moraleInput);
-
-                    var quadrantInput = TacticalWithdrawalInputAdapter.ToQuadrantInput(snapshot);
-                    var quadrantOutput = TacticalQuadrantThreatScorer.Score(quadrantInput);
-
+                    var moraleResult = TacticalMoralePressure.Score(TacticalWithdrawalInputAdapter.ToMoralePressureInput(snapshot));
+                    var quadrantOutput = TacticalQuadrantThreatScorer.Score(TacticalWithdrawalInputAdapter.ToQuadrantInput(snapshot));
                     var fatigueResult = TacticalFatigueState.Score(snapshot.Fatigue);
 
-                    var doctrineInput = new TacticalWithdrawalDoctrine.Input
+                    var decision = TacticalWithdrawalDoctrine.Score(new TacticalWithdrawalDoctrine.Input
                     {
                         MoralePressure = moraleResult,
                         RearPressureFlag = quadrantOutput.RearPressureFlag,
                         Fatigue = fatigueResult,
                         AiFeudStance = snapshot.AiFeudStance,
                         IsPlayerAiOrFeud = snapshot.IsPlayerAiOrFeud,
-                    };
-                    var decision = TacticalWithdrawalDoctrine.Score(doctrineInput);
+                    });
 
-                    if (DecisionRank(decision) > DecisionRank(strongestDecision))
-                        strongestDecision = decision;
+                    var kind = TacticalWithdrawalDoctrine.PlanTacticalFallback(decision, FallbackState(unit));
+                    if (kind == TacticalWithdrawalDoctrine.FallbackKind.None) continue;
 
-                    if (writesEnabled
-                        && PassesWithdrawalWriteEnvelope(unit)
-                        && (decision == TacticalWithdrawalDoctrine.Decision.RearGuard
-                            || decision == TacticalWithdrawalDoctrine.Decision.FullRetreat))
-                    {
-                        if (withdrawalList == null) withdrawalList = new List<Regiment>();
-                        withdrawalList.Add(unit);
-                    }
+                    if (bunits == null) bunits = GetBattleUnits(__instance);
+                    if (bunits == null) return;
+                    if (ApplyTacticalFallback(bunits, aigroup, unit, kind)) applied++;
                 }
 
-                EmitHelpRequest(aigroup, strongestDecision);
-
-                if (withdrawalList != null && withdrawalList.Count > 0)
-                {
-                    if (!TryGetWithdrawalEndDate(__instance, out float endDate)) return;
-                    Vector3 fromPosition = new Vector3();
-                    BattleUnits.SetWithdrawal(endDate, withdrawalList, aigroup.alliance, fromPosition, false);
-                    OnceLog.Info("b8-set-withdrawal", "B8 SetWithdrawal applied count=" + withdrawalList.Count);
-                }
+                if (applied > 0)
+                    OnceLog.Info("b8-tactical-fallback", "B8 tactical fallback applied count=" + applied + " (vanilla CheckLineFallbacks shape, no SetWithdrawal).");
             }
             catch (System.Exception ex)
             {
@@ -183,26 +158,73 @@ namespace WhiskeyRealism.Patches
             } // end using TelemetryPerf.Scope
         }
 
-        private static BattleReserveCommitGatePatch.UnitState[] SnapshotUnits(Regiment group)
+        private static TacticalWithdrawalDoctrine.FallbackUnitState FallbackState(Regiment unit)
+        {
+            return new TacticalWithdrawalDoctrine.FallbackUnitState(
+                unit.unittyp,
+                unit.isrouted,
+                unit.markedforrout,
+                unit.permanentlydetached,
+                unit.onretreat,
+                unit.regimentpaths,
+                unit.movementmode,
+                (UnityEngine.Object)unit.chargetarget != null,
+                unit.inmelee);
+        }
+
+        // Vanilla shapes: CheckLineFallbacks 5168-5180 (fallback) and
+        // MicroAICheckForRetreats 4843-4898 (retreat distance, current facing,
+        // roads off for the path). Both end in SetMovementMode(2) and stamp the
+        // group's lastfeudactiontime in battle hours.
+        private static bool ApplyTacticalFallback(
+            BattleUnits bunits,
+            Regiment aigroup,
+            Regiment unit,
+            TacticalWithdrawalDoctrine.FallbackKind kind)
         {
             try
             {
-                if (group == null || group.allattachedunits == null)
-                    return System.Array.Empty<BattleReserveCommitGatePatch.UnitState>();
+                if (unit.unitrange == null) return false;
+                bool fallback = kind == TacticalWithdrawalDoctrine.FallbackKind.Fallback;
+                float distance = fallback ? GamePrefs.standardfallbackdistance : GamePrefs.standardretreatdistance;
+                if (!(distance > 0f)) return false;
 
-                BattleReserveCommitGatePatch.UnitState[] units =
-                    new BattleReserveCommitGatePatch.UnitState[group.allattachedunits.Length];
-                for (int i = 0; i < group.allattachedunits.Length; i++)
+                float retreatAngle = unit.unitrange.retreatangle;
+                Vector3 position = ((Component)unit).transform.position;
+                if (!TacticalTerrainProbe.TryVanillaAnglePoint(position, retreatAngle, distance, out Vector3 target)) return false;
+
+                if (fallback)
                 {
-                    Regiment unit = group.allattachedunits[i];
-                    units[i] = BattleReserveCommitGatePatch.SnapshotUnit(unit);
+                    unit.RegimentSetPath(target, newpath: true, skipcover: true, retreatAngle + 180f, modifylastwaypoint: true, 2, -1f, null, autoadvancefallback: true, uimovement: false);
+                }
+                else
+                {
+                    unit.useroads = false;
+                    try
+                    {
+                        unit.RegimentSetPath(target, newpath: true, skipcover: true, ((Component)unit).transform.eulerAngles.y, modifylastwaypoint: false, 2, -1f, null, autoadvancefallback: true, uimovement: false);
+                    }
+                    finally
+                    {
+                        unit.useroads = true;
+                    }
                 }
 
-                return units;
+                unit.SetMovementMode(2);
+                if (fallback)
+                {
+                    unit.combatbehavior = 2;
+                    unit.combatbehaviorordered = 2;
+                }
+
+                if (bunits.uniStormSystem != null)
+                    aigroup.lastfeudactiontime = bunits.uniStormSystem.Hour + (float)(bunits.battlepasseddays * 24);
+                return true;
             }
-            catch
+            catch (System.Exception ex)
             {
-                return System.Array.Empty<BattleReserveCommitGatePatch.UnitState>();
+                OnceLog.Warning("b8-tactical-fallback-error", "[B8] tactical fallback write failed: " + ex.Message);
+                return false;
             }
         }
 
@@ -217,6 +239,7 @@ namespace WhiskeyRealism.Patches
                     BattleReserveCommitGatePatch.UnitState before = state.Units[i];
                     Regiment unit = before.Unit;
                     if (unit == null) continue;
+                    if (!before.RollbackSafe) continue;
 
                     int afterPaths = SafePathCount(unit);
                     int afterQueue = SafeQueueCount(unit);
@@ -234,7 +257,7 @@ namespace WhiskeyRealism.Patches
                     BattleReserveCommitGatePatch.RemoveAddedPaths(unit, before.Paths, afterPaths);
                     BattleReserveCommitGatePatch.RestoreMovementState(unit, before);
                     OnceLog.Info(
-                        "b8-check-reserves:doctrine-remove:" + SafeInstanceId(unit),
+                        "b8-check-reserves:doctrine-remove",
                         "[B8] reserve doctrine removed vanilla direct path reason=" +
                         state.DoctrineDecision.Reason +
                         " unit=" + SafeName(unit) +
@@ -282,7 +305,11 @@ namespace WhiskeyRealism.Patches
             try
             {
                 if (unit.unitrange != null) slices = unit.unitrange.enemystrengthwithinangle;
-                if (GamePrefs.aidefensiveslices > 0) sliceWidth = 360f / GamePrefs.aidefensiveslices;
+                // Vanilla bins enemystrengthwithinangle by FloorToInt(angle /
+                // aidefensiveslices) (122732) and reads slice j at
+                // j * aidefensiveslices degrees (4800): the pref is the slice
+                // width in degrees, not a slice count.
+                if (GamePrefs.aidefensiveslices > 0) sliceWidth = GamePrefs.aidefensiveslices;
             }
             catch { }
 
@@ -308,86 +335,6 @@ namespace WhiskeyRealism.Patches
                 SliceWidthDegrees = sliceWidth,
                 UnitFacingDegrees = facing,
             };
-        }
-
-        private static void EmitHelpRequest(Regiment aigroup, TacticalWithdrawalDoctrine.Decision decision)
-        {
-            int sectorId = aigroup.GetInstanceID();
-            TacticalHelpRequest.Decision request;
-            switch (decision)
-            {
-                case TacticalWithdrawalDoctrine.Decision.Screen:
-                    request = TacticalHelpRequest.Decision.RequestReserveScreen;
-                    break;
-                case TacticalWithdrawalDoctrine.Decision.RearGuard:
-                    request = TacticalHelpRequest.Decision.RequestLineRelief;
-                    break;
-                case TacticalWithdrawalDoctrine.Decision.FullRetreat:
-                    request = TacticalHelpRequest.Decision.RequestMainEffortShift;
-                    break;
-                default:
-                    request = TacticalHelpRequest.Decision.NoRequest;
-                    break;
-            }
-            TacticalSectorLedger.SetHelpRequest(sectorId, request);
-        }
-
-        private static int DecisionRank(TacticalWithdrawalDoctrine.Decision decision)
-        {
-            switch (decision)
-            {
-                case TacticalWithdrawalDoctrine.Decision.FullRetreat:
-                    return 3;
-                case TacticalWithdrawalDoctrine.Decision.RearGuard:
-                    return 2;
-                case TacticalWithdrawalDoctrine.Decision.Screen:
-                    return 1;
-                default:
-                    return 0;
-            }
-        }
-
-        private static bool PassesWithdrawalWriteEnvelope(Regiment unit)
-        {
-            if (unit == null) return false;
-            if (unit.isrouted || unit.markedforrout) return false;
-            if (unit.permanentlydetached) return false;
-            if (unit.regimentpaths > 0) return false;
-            return true;
-        }
-
-        private static bool TryGetWithdrawalEndDate(AIBattle battle, out float endDate)
-        {
-            endDate = 0f;
-
-            BattleUnits bunits = GetBattleUnits(battle);
-            if (bunits == null) return false;
-
-            try
-            {
-                if (bunits.uniStormSystem == null)
-                {
-                    OnceLog.Warning("b8-check-reserves-missing-unistorm", "[B8] Missing BattleUnits.uniStormSystem; skipping withdrawal writes.");
-                    return false;
-                }
-
-                endDate = new Tools.Date(
-                    bunits.uniStormSystem.dayCounter,
-                    bunits.uniStormSystem.monthCounter,
-                    bunits.year).yearfraction;
-                if (endDate <= 0f)
-                {
-                    OnceLog.Warning("b8-check-reserves-invalid-withdrawal-date", "[B8] Invalid campaign withdrawal date; skipping withdrawal writes.");
-                    return false;
-                }
-
-                return true;
-            }
-            catch (System.Exception ex)
-            {
-                OnceLog.Warning("b8-check-reserves-withdrawal-date-error", "[B8] Failed computing campaign withdrawal date: " + ex.Message);
-                return false;
-            }
         }
 
         private static BattleUnits GetBattleUnits(AIBattle battle)
@@ -677,12 +624,6 @@ namespace WhiskeyRealism.Patches
             return value > 1f ? 1f : value;
         }
 
-        private static float SafeCurrentTimeSeconds()
-        {
-            try { return Time.realtimeSinceStartup; }
-            catch { return 0f; }
-        }
-
         private static int SafePathCount(Regiment unit)
         {
             try { return unit != null ? System.Math.Max(0, unit.regimentpaths) : 0; }
@@ -705,12 +646,6 @@ namespace WhiskeyRealism.Patches
         {
             if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
             return value;
-        }
-
-        private static int SafeInstanceId(Regiment group)
-        {
-            try { return group != null ? group.GetInstanceID() : 0; }
-            catch { return 0; }
         }
 
         private static string SafeName(Regiment group)

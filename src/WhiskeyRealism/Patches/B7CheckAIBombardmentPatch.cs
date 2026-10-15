@@ -10,12 +10,22 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla AIBattle.CheckAIBombardment(Regiment) at decompile line 3869 evaluates
-    // each artillery sub-unit and may set combatbehaviorordered to 9 (bombardment),
-    // or cancel an active bombardment. This Postfix reads the
-    // post-vanilla state, runs TacticalArtilleryDoctrine.Score, and selectively
-    // rewrites combatbehaviorordered when the doctrine output disagrees with vanilla.
-    // Default-off behind Plugin.EnableTacticalArtilleryDoctrine.
+    // B7 — Postfix on AIBattle.CheckAIBombardment(Regiment) (decompile 3869,
+    // micro-AI task slot 2). Vanilla only acts for groups in ai_stance 3/4 and
+    // may set combatbehaviorordered to 9 (bombardment) or cancel it to 7 (3904).
+    // This Postfix runs TacticalArtilleryDoctrine / TacticalArtilleryMicroDoctrine
+    // per battery and applies their writes through TacticalArtilleryApplier
+    // (MountUnits limber/unlimber, RotateRegiment, CheckArtyFallback-shaped
+    // retreat; never a stance write on a battery - BR-H3), and releases
+    // counter-battery fire (8 -> 7) once no enemy battery is in fire range:
+    // vanilla's own release branch in CheckCounterBatteryFire is unreachable
+    // because its loop skips units already at 8 (3834).
+    // Every write is behind TacticalWriteGuard.CanWrite (Commander Mode Active +
+    // W&L/player protection: MonitorOnly and Off write nothing), checked for the
+    // group on entry before any write (and again per battery for the
+    // micro-doctrine writes in TacticalArtilleryApplier), plus vanilla's per-unit
+    // envelope (feud rule, PerformAIActionDLCWL 5101).
+    // Default ON behind Plugin.EnableTacticalArtilleryDoctrine.
     [HarmonyPatch(typeof(AIBattle), "CheckAIBombardment")]
     public static class B7CheckAIBombardmentPatch
     {
@@ -28,10 +38,10 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("tactical.patch.b7-bombardment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
+                PatchFirstFire.Mark("tactical.patch.b7-bombardment");
             if (Plugin.EnableTacticalArtilleryDoctrine == null) return;
             if (!Plugin.EnableTacticalArtilleryDoctrine.Value) return;
             if (aigroup == null) return;
-            if (aigroup.ai_stance != 3 && aigroup.ai_stance != 4) return;
 
             try
             {
@@ -46,6 +56,11 @@ namespace WhiskeyRealism.Patches
                 int? isPlayerAiOrFeud = IsPlayerAiOrFeud(__instance);
                 if (!isPlayerAiOrFeud.HasValue) return;
                 if (!HasPerformAiActionDlcWl()) return;
+                if (!TacticalWriteGuard.CanWrite(aigroup)) return;
+
+                ReleaseStaleCounterBattery(__instance, bunits, aigroup, allUnits, isPlayerAiOrFeud.Value);
+
+                if (aigroup.ai_stance != 3 && aigroup.ai_stance != 4) return;
 
                 for (int i = 0; i < allUnits.Length; i++)
                 {
@@ -107,7 +122,7 @@ namespace WhiskeyRealism.Patches
                         canWheel: true,
                         frontalTargetInRange: HasFrontalTargetInRange(unit)));
 
-                    ApplyMicroDecision(bunits, unit, snapshot, micro);
+                    TacticalArtilleryApplier.ApplyMicroDecision(bunits, unit, snapshot.CombatBehaviorOrdered, micro, "b7");
                     ApplyDecision(bunits, unit, snapshot, decision);
                 }
             }
@@ -120,16 +135,9 @@ namespace WhiskeyRealism.Patches
 
         private static TacticalArtilleryInputAdapter.Snapshot BuildSnapshot(Regiment unit, Regiment aigroup, int isPlayerAiOrFeud)
         {
-            float ammoTotal = 0f;
             float canister = 0f;
-            int slots = 0;
-            if (unit.ammo != null)
-            {
-                slots = unit.ammo.Length;
-                for (int i = 0; i < slots; i++) ammoTotal += unit.ammo[i];
-                if (slots > 2) canister = unit.ammo[2];
-            }
-            float ammoRatio = (slots > 0) ? ammoTotal / slots : 0f;
+            if (unit.ammo != null && unit.ammo.Length > 2) canister = unit.ammo[2];
+            float ammoRatio = TacticalArtilleryInputAdapter.ArtilleryAmmoRatio01(unit.ammo);
 
             float fallbackThreshold = 0.4f;
             try
@@ -200,6 +208,8 @@ namespace WhiskeyRealism.Patches
             return count;
         }
 
+        // Mirrors CheckCounterBatteryFire's enemy-battery test (3843):
+        // non-routed, active enemy artillery in enemyinfirerangereg.
         private static bool HasEnemyArtilleryInFireRange(Regiment unit)
         {
             try
@@ -210,11 +220,34 @@ namespace WhiskeyRealism.Patches
                     var enemy = unit.unitrange.enemyinfirerangereg[i];
                     if (enemy == null) continue;
                     if (enemy.isrouted) continue;
+                    if (!((Component)enemy).gameObject.activeInHierarchy) continue;
                     if (enemy.unittyp == TacticalUnitType.Artillery) return true;
                 }
             }
             catch { }
             return false;
+        }
+
+        private static void ReleaseStaleCounterBattery(
+            AIBattle battle,
+            BattleUnits bunits,
+            Regiment aigroup,
+            Regiment[] allUnits,
+            int isPlayerAiOrFeud)
+        {
+            for (int i = 0; i < allUnits.Length; i++)
+            {
+                var unit = allUnits[i];
+                if (unit == null || unit.unittyp != TacticalUnitType.Artillery) continue;
+                if (!BattleWriterPolicy.ShouldReleaseCounterBattery(unit.combatbehaviorordered, HasEnemyArtilleryInFireRange(unit)))
+                    continue;
+                if (unit.isrouted || unit.markedforrout || unit.guns <= 0 || unit.permanentlydetached) continue;
+                if (!(aigroup.ai_feudstance == -1 || isPlayerAiOrFeud == 2)) continue;
+                if (!PerformAiActionDlcWl(battle, unit, aigroup)) continue;
+
+                bunits.ChangeCombatBehavior(((Component)unit).gameObject, 7);
+                OnceLog.Info("b7-counterbattery-release", "B7 released counter-battery fire (8 -> 7): no enemy battery in fire range.");
+            }
         }
 
         private static bool HasFriendlyCloseRangeRisk(Regiment unit, float fireRange)
@@ -322,92 +355,6 @@ namespace WhiskeyRealism.Patches
             return PerformAiActionDlcWl(battle, unit, aigroup);
         }
 
-        private static void ApplyMicroDecision(
-            BattleUnits bunits,
-            Regiment unit,
-            in TacticalArtilleryInputAdapter.Snapshot snapshot,
-            TacticalArtilleryMicroDecision decision)
-        {
-            try
-            {
-                if (bunits == null || unit == null) return;
-                switch (decision.Action)
-                {
-                    case TacticalArtilleryMicroAction.Limber:
-                        if (unit.mounted != 1)
-                        {
-                            unit.ChangeRegimentFormation(GameVars.SetFormationParam(0, manualset: true, 1));
-                            OnceLog.Info("b7-artillery-limber", "B7 artillery limber decision applied.");
-                        }
-                        break;
-                    case TacticalArtilleryMicroAction.Unlimber:
-                        if (unit.mounted != 0)
-                        {
-                            unit.ChangeRegimentFormation(GameVars.SetFormationParam(0, manualset: true, 0));
-                            TryRotateTowardClosestEnemy(unit);
-                            OnceLog.Info("b7-artillery-unlimber", "B7 artillery unlimber decision applied.");
-                        }
-                        break;
-                    case TacticalArtilleryMicroAction.Retreat:
-                        ApplyArtilleryRetreat(bunits, unit);
-                        OnceLog.Info("b7-artillery-retreat", "B7 artillery retreat decision applied.");
-                        break;
-                    case TacticalArtilleryMicroAction.WheelToBestThreat:
-                        if (TryRotateTowardClosestEnemy(unit))
-                            OnceLog.Info("b7-artillery-wheel", "B7 artillery wheel decision applied.");
-                        break;
-                    case TacticalArtilleryMicroAction.ConserveAmmo:
-                        if (snapshot.CombatBehaviorOrdered == 9)
-                        {
-                            bunits.ChangeCombatBehavior(((Component)unit).gameObject, 7);
-                            unit.bombardstarttime = 0f;
-                            OnceLog.Info("b7-artillery-conserve", "B7 artillery conserve-ammo decision applied.");
-                        }
-                        break;
-                }
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("b7-artillery-micro-error", "[B7] Artillery micro decision failed: " + ex.Message);
-            }
-        }
-
-        private static void ApplyArtilleryRetreat(BattleUnits bunits, Regiment unit)
-        {
-            Regiment enemy = ClosestEnemy(unit);
-            if (enemy == null) return;
-
-            Vector3 own = ((Component)unit).transform.position;
-            Vector3 enemyPos = ((Component)enemy).transform.position;
-            Vector3 away = own - enemyPos;
-            away.y = 0f;
-            if (away.sqrMagnitude < 1f) return;
-            away.Normalize();
-
-            float distance = GamePrefs.artilleryfallbackenemyclosedist > 0f
-                ? GamePrefs.artilleryfallbackenemyclosedist
-                : 180f;
-            Vector3 target = own + away * distance;
-            unit.ChangeRegimentFormation(GameVars.SetFormationParam(0, manualset: true, 1));
-            bunits.SetWaypoint(
-                unit,
-                target,
-                newpath: true,
-                doublequick: false,
-                manualfinalrotation: -1f,
-                modifylastwaypoint: false,
-                useorderdelay: true,
-                timetomove: -1f,
-                direction: -1,
-                showmovementoptions: false,
-                ignorebattlemonuments: false,
-                groupmoveonly: false,
-                ignoredisabledships: false,
-                checkforreadiness: true,
-                clearinterruptionpaths: true);
-            unit.SetMovementMode(4);
-        }
-
         private static TacticalArtilleryLimberState LimberState(Regiment unit)
         {
             try
@@ -492,25 +439,6 @@ namespace WhiskeyRealism.Patches
             catch
             {
                 return 0f;
-            }
-        }
-
-        private static bool TryRotateTowardClosestEnemy(Regiment unit)
-        {
-            try
-            {
-                Regiment enemy = ClosestEnemy(unit);
-                if (unit == null || enemy == null) return false;
-                Vector3 own = ((Component)unit).transform.position;
-                Vector3 enemyPos = ((Component)enemy).transform.position;
-                float rotation = Tools.GetAngle(own, enemyPos) + 180f;
-                if (float.IsNaN(rotation) || float.IsInfinity(rotation)) return false;
-                unit.RotateRegiment(rotation);
-                return true;
-            }
-            catch
-            {
-                return false;
             }
         }
 

@@ -66,12 +66,6 @@ namespace WhiskeyRealism.Tactical.Operations
             return objective.EnemyStrength <= 0f;
         }
 
-        public static bool ShouldDowngradeCommittedContact(BattlefieldObjectiveEstimate objective)
-        {
-            return objective.EnemyStrength > 0f &&
-                !HasFormedMainLineEvidence(objective);
-        }
-
         public static bool ShouldCommitFixAndFlank(
             BattlefieldObjectiveEstimate objective,
             float ownStrength,

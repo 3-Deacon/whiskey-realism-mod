@@ -11,12 +11,14 @@ The rules are identical to [`../Strategic/AGENTS.md`](../Strategic/AGENTS.md) �
 - Put reflection-heavy extraction in runtime adapter classes (e.g. `TacticalBattleCoordinatorRuntime.cs`, `DirectChildDiscoveryRuntime.cs`), not pure logic. Use `partial class` to split a type into a pure half (in-test-csproj) and a runtime half (excluded from test csproj).
 - Orchestrator state writes belong in coordinator cadence/event handlers and the per-battle orchestrator tick cycle, not Harmony patches.
 - Prefer deterministic inputs/outputs that can be covered by the console test harness.
-- Use focused DTOs for telemetry signatures so logs can be bounded and compared. `OnceLog.Info(key, message)` already wraps the message with `[once:KEY]` — do not duplicate the prefix in the message body.
+- Use focused DTOs for telemetry signatures so logs can be bounded and compared. `OnceLog.Info(key, message)` already wraps the message with `[once:KEY]` — do not duplicate the prefix in the message body. OnceLog keys are static strings: never embed instance ids or unit names in a key.
+- Per-battle static state (caches, stamps, cooldowns, latches) registers its reset with `BattleScope.Register(name, reset)` from the owner's static constructor (`Util/ScopedState.cs`); per-campaign state uses `CampaignScope.Register`. Coordinator teardown calls `BattleScope.ResetAll()` — never add a hand-wired reset call to a teardown path. Caches hold only immutable data; read live owner/rout/active flags each tick.
+- Battle writes go through `TacticalWriteGuard` and the single owners (`Util/TacticalStanceWriter` for `ai_stance`, #44 for `macroai`); see root `AGENTS.md` § Patch hygiene.
 
 ## Cadence Rules
 
-- Per-tick allocations must signature-skip unchanged input. `DirectChildEvidence.SignatureEquals` and the orchestrator's idempotent `ObserveDirectChildEvidence` short-circuit are the reference pattern; `ReferenceEquals` on the cached intent list is part of the contract.
-- Replan-style transitions invalidate stale evidence caches (`ArmyOrchestrator.Replan` sets `_hasObservedEvidence = false`).
+- Doctrine timers (phase budgets, windows, cooldowns, hysteresis, holds, ledger decay) read `TacticalDoctrineTime` — battle game-hours from the coordinator, frozen across vanilla's night end-of-day cycle. Never use wall-clock time for doctrine.
+- Avoid per-tick allocation: build evidence once per side per tick and reuse scratch buffers; gate heavy work on a content signature (`TacticalBattleStateSignature.SignatureEquals`, `DirectChildEvidence.SignatureEquals`) rather than on reference identity. Where a step must run every tick (e.g. `ArmyOrchestrator.ObserveDirectChildEvidenceWithZones`, whose hysteresis counts consecutive cycles), say so in a comment.
 - Runtime adapters degrade to empty/no-op inputs on reflection failure and log a bounded warning. Never throw out of the orchestrator tick path.
 
 ## Tests

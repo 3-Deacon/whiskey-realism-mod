@@ -7,9 +7,13 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // Vanilla UpdateFinancialAI issues/redeems bonds, nudges one random tax lane,
-    // and raises/cuts one random subsidy lane. This Postfix keeps vanilla bond
-    // behavior intact, then applies bounded corrections from FiscalIntent.
+    // Vanilla AICampaign.UpdateFinancialAI (decompile 15352-15447; called from
+    // UpdateAllianceData 81739 and Policies.UpdateSubsidyEffect 209511) issues/redeems
+    // bonds, nudges one random tax lane 0-3 up (balance < trigger) or down (balance >
+    // reduce trigger), and raises/cuts one random subsidy lane. This Postfix keeps vanilla
+    // behavior intact and applies at most one-step corrections only when a lane sits
+    // outside FiscalIntent's directional band (floor/ceiling), so vanilla nudges in the
+    // allowed direction survive.
     [HarmonyPatch(typeof(AICampaign), "UpdateFinancialAI")]
     internal static class FinancialAIPatch
     {
@@ -20,6 +24,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.financial-ai", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.financial-ai");
             try
             {
                 if (Plugin.Instance == null || !Plugin.Instance.Enabled.Value) return;
@@ -40,7 +45,8 @@ namespace WhiskeyRealism.Patches
                 OnceLog.Info("financial-ai", "FinancialAIPatch wired");
 
                 int moves = 0;
-                moves += MoveTaxTowardTarget(alliance, state.tax, intent, 1);
+                moves += MoveTaxTowardTarget(alliance, state.tax, intent, FiscalIntentLedger.GameTaxTariffs);
+                if (moves < 2) moves += MoveTaxTowardTarget(alliance, state.tax, intent, 1);
                 if (moves < 2) moves += MoveTaxTowardTarget(alliance, state.tax, intent, 2);
                 if (moves < 2) moves += MoveSubsidyTowardTarget(alliance, state.subsidies, intent, aiPersonality.subsidyfocus, 3);
                 if (moves < 2) moves += MoveSubsidyTowardTarget(alliance, state.subsidies, intent, aiPersonality.subsidyfocus, 4);
@@ -58,16 +64,9 @@ namespace WhiskeyRealism.Patches
             float old = tax[lane];
             float targetMin = UnityEngine.Mathf.Clamp(intent.TargetTaxMin[lane], 0f, 1f);
             float targetMax = UnityEngine.Mathf.Clamp(intent.TargetTaxMax[lane], 0f, 1f);
-            float step = GamePrefs.taxstepsai;
-
-            if (old < targetMin)
-                tax[lane] = UnityEngine.Mathf.Clamp(UnityEngine.Mathf.Min(targetMin, old + step), 0f, 1f);
-            else if (old > targetMax)
-                tax[lane] = UnityEngine.Mathf.Clamp(UnityEngine.Mathf.Max(targetMax, old - step), 0f, 1f);
-            else
-                return 0;
-
-            if (NearlyEqual(old, tax[lane])) return 0;
+            float next = Clamp01(FiscalIntentLedger.StepTowardBand(old, targetMin, targetMax, GamePrefs.taxstepsai));
+            if (NearlyEqual(old, next)) return 0;
+            tax[lane] = next;
             LogCorrection(alliance, "tax", lane, old, tax[lane], intent.Posture);
             return 1;
         }
@@ -97,14 +96,11 @@ namespace WhiskeyRealism.Patches
                 if (targetMin > targetMax) targetMin = targetMax;
             }
 
+            // Vanilla itself clamps a raised subsidy to subsidyfocus (decompile 15443).
             if (focusCap.HasValue && old > focusCap.Value)
                 subsidies[lane] = focusCap.Value;
-            else if (old < targetMin)
-                subsidies[lane] = UnityEngine.Mathf.Min(targetMax, UnityEngine.Mathf.Min(targetMin, old + step));
-            else if (old > targetMax)
-                subsidies[lane] = UnityEngine.Mathf.Max(targetMax, old - step);
             else
-                return 0;
+                subsidies[lane] = FiscalIntentLedger.StepTowardBand(old, targetMin, targetMax, step);
 
             subsidies[lane] = Clamp01(subsidies[lane]);
             if (NearlyEqual(old, subsidies[lane])) return 0;

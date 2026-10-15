@@ -46,13 +46,6 @@ namespace WhiskeyRealism.Strategic
 
         public float[] ToArray() => new[] { Aggression, Caution, Audacity, CasualtyTolerance, PoliticalResponsiveness };
 
-        public static PersonalityVector FromArray(float[] a)
-        {
-            if (a == null || a.Length < 5)
-                return default(PersonalityVector);
-            return new PersonalityVector(a[0], a[1], a[2], a[3], a[4]);
-        }
-
         public override string ToString()
             => $"P(agg={Aggression:F2} caut={Caution:F2} aud={Audacity:F2} cas={CasualtyTolerance:F2} pol={PoliticalResponsiveness:F2})";
     }

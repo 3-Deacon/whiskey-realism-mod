@@ -11,7 +11,6 @@ namespace WhiskeyRealism.Tactical.Operations
         Ridge = 6,
         ChokePoint = 7,
         EnemyLine = 8,
-        FriendlyLine = 9,
         FallbackLine = 10,
         StagingArea = 11
     }
@@ -23,7 +22,6 @@ namespace WhiskeyRealism.Tactical.Operations
         CurrentSetObjective = 2,
         VisibleEnemyLine = 3,
         FriendlyLineShape = 4,
-        TerrainSample = 5,
         VerifiedSceneObject = 6
     }
 

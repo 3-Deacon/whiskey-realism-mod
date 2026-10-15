@@ -8,9 +8,7 @@ namespace WhiskeyRealism.Tactical.Operations
         EntryPoint = 1,
         ScheduledArrival = 2,
         DeploymentGroup = 3,
-        VisibleEnemyLine = 4,
-        MovementAnchor = 5,
-        SyntheticMapSide = 6
+        VisibleEnemyLine = 4
     }
 
     public readonly struct TacticalApproachAvenueObservation

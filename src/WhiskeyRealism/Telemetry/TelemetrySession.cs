@@ -39,11 +39,6 @@ namespace WhiskeyRealism.Telemetry
         internal string DirectoryName { get; private set; }
         internal DateTime? ManifestStartUtc { get; private set; }
         internal DateTime LastWriteUtc { get; private set; }
-
-        internal DateTime EffectiveStartUtc
-        {
-            get { return ManifestStartUtc.HasValue ? ManifestStartUtc.Value : LastWriteUtc; }
-        }
     }
 
     internal static class TelemetrySession
@@ -106,13 +101,6 @@ namespace WhiskeyRealism.Telemetry
                 "BepInEx",
                 "WhiskeyRealism",
                 "tuning-logs");
-        }
-
-        internal static string CreateSessionDirectory(string gameRoot, string sessionId)
-        {
-            string directory = SessionDirectory(gameRoot, sessionId);
-            Directory.CreateDirectory(directory);
-            return directory;
         }
 
         internal static TelemetrySessionDirectory CreateUniqueSessionDirectory(string gameRoot, string baseSessionId)

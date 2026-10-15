@@ -221,13 +221,16 @@ namespace WhiskeyRealism.Strategic
             memory.DaysSinceLastBattle     = dto.DaysSinceLastBattle;
             memory.LastSourceSignature     = dto.LastSourceSignature;
             memory.RecentEventSummaries    = dto.RecentEventSummaries ?? new System.Collections.Generic.List<string>();
-            memory.LastPosture = new DirectorPosture
+            if (dto.Pace.HasValue && dto.Intent.HasValue && dto.Risk.HasValue)
             {
-                Pace            = (CampaignPace)dto.Pace,
-                Intent          = (StrategicIntent)dto.Intent,
-                Risk            = (CollapseRisk)dto.Risk,
-                TheaterPriority = (Theater)dto.TheaterPriority
-            };
+                memory.LastPosture = new DirectorPosture
+                {
+                    Pace            = (CampaignPace)dto.Pace.Value,
+                    Intent          = (StrategicIntent)dto.Intent.Value,
+                    Risk            = (CollapseRisk)dto.Risk.Value,
+                    TheaterPriority = (Theater)(dto.TheaterPriority ?? (int)Theater.Unknown)
+                };
+            }
             return memory;
         }
 

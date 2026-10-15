@@ -11,14 +11,17 @@
 > **Quick reference:**
 > - **Build:** `./build.sh` → `dist/WhiskeyRealism.dll`
 > - **Deploy:** `cp dist/WhiskeyRealism.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/BepInEx/plugins/"` (game must be closed — Windows holds an exclusive lock on loaded DLLs)
-> - **Test:** `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` (console harness; covers all pure strategic AND tactical logic — scorers, ledgers, doctrines, cascade, allocators, gates. Harness count was 1244 PASS / 0 FAIL as of 2026-05-19.)
+> - **Test:** `dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` (console harness; covers all pure strategic AND tactical logic — scorers, ledgers, doctrines, cascade, allocators, gates, play templates, stance gating. 1680 PASS / 0 FAIL as of 2026-10-15; `docs/handoff.md` carries the current count.)
 > - **Required for every DLL-affecting change:** build, deploy, then verify the deployed DLL matches `dist/WhiskeyRealism.dll` by timestamp/size and `sha256sum`. Do not report an implementation as ready from build output alone.
 > - **Agent instructions file:** `AGENTS.md` is the source. `CLAUDE.md` at the repo root is a symlink to it so Claude Code and Codex pick up the same content. Edit `AGENTS.md`; never write into `CLAUDE.md` directly.
 > - **Source-of-truth order:** shipped code > [`docs/patch-catalog.md`](docs/patch-catalog.md) > per-patch design doc > umbrella spec > archived plan
 > - **Master handoff:** [`docs/handoff.md`](docs/handoff.md) — read first at session start
 > - **Tactical/strategic living docs:** [`docs/tactical-orchestrator.md`](docs/tactical-orchestrator.md), [`docs/tactical-operations-ledger.md`](docs/tactical-operations-ledger.md), [`docs/tactical-terrain-facing-discipline.md`](docs/tactical-terrain-facing-discipline.md), [`docs/tactical-brain.md`](docs/tactical-brain.md), [`docs/scourge-of-war-ai-anchors.md`](docs/scourge-of-war-ai-anchors.md), [`docs/strategic-recon-commitment.md`](docs/strategic-recon-commitment.md), [`docs/wl-player-order-doctrine.md`](docs/wl-player-order-doctrine.md), [`docs/telemetry.md`](docs/telemetry.md) — current per-workstream state; consult before archived specs/plans
+> - **Battle stance + plays:** `BattleStance` (Meeting/Attacker/Defender, from vanilla `BattleUnits.GetBattleType`) is defined in `src/WhiskeyRealism/Tactical/Orchestrator/TacticalForceBalanceEvidence.cs` and read by `ArmyEvidenceBuilder.ReadBattleStance`; a Defender side never gets attack doctrine or offensive playbooks. 18 geometric play templates live in `src/WhiskeyRealism/Tactical/Orchestrator/Plays/`. Background: [`docs/scourge-of-war-ai-anchors.md`](docs/scourge-of-war-ai-anchors.md) § "2026-05-23 Scourge grand-strategy + play-template architecture".
+> - **Battle write owners:** every Whiskey write into vanilla battle state passes `Tactical/TacticalWriteGuard`; `ai_stance` is written only by `Util/TacticalStanceWriter`; the per-instance `AIBattle.macroai` only by #44 `BattleMacroStrategyPatch` (it only reads the scripted `sideinformation[side].macroai` override). See [`docs/patch-catalog.md`](docs/patch-catalog.md).
+> - **Tools:** `python3 -I tools/config-audit.py .` and `python3 -I tools/orphan-sweep.py .` must report 0 findings (see § Testing).
 > - **Repository memory:** [`MEMORY.md`](MEMORY.md) — short durable state/index; read after `AGENTS.md` when resuming or updating project context
-> - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266k lines; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
+> - **Decompile:** `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (266,136 lines for Steam build 14703111; regenerate with the steps in [`docs/findings.md`](docs/findings.md) if `/tmp` was wiped)
 > - **Scourge of War Remastered reference install:** Windows `C:\Program Files (x86)\Steam\steamapps\common\Scourge Of War - Remastered`; WSL `/mnt/c/Program Files (x86)/Steam/steamapps/common/Scourge Of War - Remastered/`. Use this for Scourge-of-War reference/anchor work; do not confuse it with the GTCW vanilla decompile above.
 > - **Parallel sessions are normal.** Another agent may be working concurrently — run `git log --oneline -10` and `git status` before committing to detect parallel work.
 
@@ -31,9 +34,11 @@
 A BepInEx plugin for Grand Tactician: The Civil War (1861-1865) that layers surgical Harmony patches on top of vanilla. Two shipped workstreams on `main`:
 
 - **Strategic brain (Slice A, v0.2.2):** era × faction × officer-personality scoring replacing the vanilla random-objective picker. CIC + theater commanders, daily ledger cadence, JSON sidecar persistence.
-- **Tactical orchestrator / operations ledger:** per-battle echelon stack (`TacticalBattleCoordinator` + per-side `TacticalBattleOrchestrator` → `ArmyOrchestrator` → command-node tree and direct-child role allocation), army-intent inference with adversarial replan loop, #42 W&L feud-action gate consultation, #58 deployment observer telemetry, #59 reserve commitment gate, #60 deployment terrain/facing discipline, and #61 operations-ledger posture execution. `Tactical Commander Mode = Active` is the approved release/default mode for the operations-ledger command system; `MonitorOnly` is diagnostics/smoke and `Off` is rollback. Tactical-orchestrator state has the same read-only-to-patches contract as strategic state.
+- **Tactical orchestrator / operations ledger:** per-battle echelon stack (`TacticalBattleCoordinator` + per-side `TacticalBattleOrchestrator` → `ArmyOrchestrator` → command-node tree and direct-child role allocation), army-intent inference with adversarial replan loop, #42 W&L feud-action gate consultation, #58 deployment observer telemetry, #59 reserve commitment gate, #60 deployment terrain/facing discipline, and #61 operations-ledger posture execution. Tactical-orchestrator state has the same read-only-to-patches contract as strategic state.
 
 All tactical AI work follows the same shipped-code/decompile-first rule. See `docs/handoff.md` for the current shipped state, deployed DLL hash, and active workstream.
+
+Battle architecture: Whiskey does not block vanilla AI for the units it commands. Doctrine sets intent and drives vanilla's own pipeline — `ChangeStance` (through `TacticalStanceWriter`), `SetWaypoint`, and the per-instance `AIBattle.macroai` that vanilla's per-group stance cascade reads (#44). The coordinator ticks once per vanilla side-stat cycle (skipping the second side's call in the same cycle), each AI side against that side's own `AIBattle` on one doctrine clock (`TacticalDoctrineTime`: battle game-hours, frozen across vanilla's night end-of-day cycle); the W&L feud instance never drives it. Battle stance (`BattleStance` from vanilla `GetBattleType`) hard-filters doctrine and playbook selection. The 2026-10-14/15 review remediation (see `docs/handoff.md`) deleted the worker thread, the #41/#46 guards and `BattleMacroAIOverridePatch`.
 
 Six locked design choices (Slice A umbrella spec, archived after ship: [`docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md`](docs/superpowers/specs/archive/2026-05-02-strategic-brain-design.md)):
 1. Slice A — strategic brain (campaign layer first; tactical layer is a later slice)
@@ -42,6 +47,8 @@ Six locked design choices (Slice A umbrella spec, archived after ship: [`docs/su
 4. Triggered-scripted officer succession (~12 historical events; ~60-80% historical fidelity)
 5. Phased operational plans (2-4 phases per plan, one active per side)
 6. Daily + event-triggered AI cadence; adjust-current-plan by default, replan only on assumption-invalidating events. Monthly is a visible heartbeat/checkpoint boundary only. (Migrated from weekly to daily on 2026-05-04 by the Defense Intent Ledger slice; `DefenseCooldownTable` per-cycle idempotency and `FrontSectorRuntime.Signature` 0.5-bucket ratios make daily safe from thrash.)
+
+> Choices #3-#6 will be superseded by the approved live theater campaign planner ([`docs/superpowers/specs/2026-10-14-campaign-planner-design.md`](docs/superpowers/specs/2026-10-14-campaign-planner-design.md)) once that slice ships (roadmap stage G). Until then they describe shipped behaviour.
 
 Design architecture: two-tier hierarchy (CIC + theater commanders), startup heartbeat plus daily front/army-area/formation-directive/fiscal/construction/defense ledgers after vanilla `AICampaign.aifaction` initializes, historical army-group steering through vanilla `ArmyGroup` APIs, additive personality composition with `[-1, 1]` clamp, JSON sidecar persistence next to game saves, read-only mod state from Harmony patches.
 
@@ -103,16 +110,17 @@ whiskey-realism-mod/
 ├── LICENSE                         ← MIT
 ├── NuGet.config                    ← BepInEx package feed
 ├── build.sh
+├── tools/                          ← config-audit.py, orphan-sweep.py
 ├── refs/                           ← symlinks to GTCW DLLs (gitignored)
 ├── src/WhiskeyRealism/
 │   ├── WhiskeyRealism.csproj
 │   ├── Plugin.cs                   ← BepInEx entry, ConfigEntry definitions
 │   ├── Strategic/                  ← strategic-brain core types: coordinator, CIC + theater commanders, era/personality/succession, per-cadence ledgers (front, army-area, formation-directive, fiscal, construction, defense intent), and supporting catalogs/runtimes. See files in directory; `docs/patch-catalog.md` is the canonical patch ordinal map.
-│   ├── Tactical/                   ← tactical-brain logic. `Orchestrator/` holds the per-battle echelon stack (`TacticalBattleCoordinator` + per-side `TacticalBattleOrchestrator`, `ArmyOrchestrator`, `DirectChildAllocator`/`Discovery`/`Gate`, `ArmyIntentInference`, `EnemyVisibleState`, etc.). Top-level files hold pure scorers/ledgers (`TacticalSectorLedger`, `TacticalOddsDoctrine`, `TacticalCommanderIntent`, `TacticalDeploymentTelemetry`, etc.). Same pure/runtime split as `Strategic/` — runtime adapters live alongside but are excluded from the test csproj.
+│   ├── Tactical/                   ← tactical-brain logic. `Orchestrator/` holds the per-battle echelon stack (`TacticalBattleCoordinator` + per-side `TacticalBattleOrchestrator`, `ArmyOrchestrator`, `DirectChildAllocator`/`Discovery`/`Gate`, `ArmyIntentInference`, `EnemyVisibleState`, `TacticalFrontAxis`, `TacticalDoctrineTime`, etc.). `Orchestrator/Plays/` holds the geometric play layer (`PlayTemplateCatalog` with 18 templates, `PlayProjection`, `PlayCorpsAssignment`, `PlayExecutorRuntime`). `Operations/` holds the operations-ledger command system (#61 posture executor model, operation director, commander mode). Top-level files hold pure scorers/ledgers plus `TacticalWriteGuard`, `TacticalStanceOwnership`, `TacticalChargeDenial`, `TacticalCommandTaskToStanceMapper`. Same pure/runtime split as `Strategic/` — runtime adapters live alongside but are excluded from the test csproj.
 │   ├── Patches/                    ← Harmony patches; one concern per file
 │   │   └── See docs/patch-catalog.md for the canonical numbered ordinal map; coordinator-driven runtimes are listed there too without ordinals.
-│   └── Util/                       ← shared infrastructure
-│       └── OnceLog / reflection helpers
+│   ├── Telemetry/                  ← structured telemetry pipeline (see docs/telemetry.md)
+│   └── Util/                       ← OnceLog, Reflection, ScopedState (BattleScope/CampaignScope), TacticalStanceWriter, TacticalCombatBehaviorWriter
 ├── docs/
 │   ├── handoff.md                  ← session-start master plan
 │   ├── findings.md                 ← decompile coordinates + reflection gotchas
@@ -181,15 +189,17 @@ Use the relevant Superpowers or repo skill before acting when the task matches i
 - Every Harmony patch class lives under `src/WhiskeyRealism/Patches/`. One concern per file.
 - Wrap reflection lookups in try/catch and log via `Plugin.Log.LogWarning(...)` on failure. **Never throw from a patch.** A single throw on every Postfix tick produces 40k log lines per session.
 - Strategic AND tactical-orchestrator mod state is **read-only** to Harmony patches. Patches read CIC / TheaterCommander / ledger / orchestrator state (`ArmyOrchestrator.GetDirectChildRole`, `TacticalBattleCoordinator.GetSideOrchestrator`, etc.) and steer existing AI methods. State writes happen only on daily strategic review, event-trigger handlers, and the per-battle orchestrator tick cycle.
-- **Default-on policy** (2026-05-18 user direction): new tactical behavior patches that write vanilla battle state (`macroai`, `ai_stance`, movement, reserves, artillery, fallback, retreat, charge) ship with their config flag default-`true`. Patches must still:
+- **All-on config rule:** every gameplay AND diagnostic/telemetry/verbose flag in `Plugin.cs` defaults `true`. Only debug cheats that would corrupt a real playthrough (`Force All Succession Events`) default off. A gameplay flag with no working feature behind it is implemented or deleted — never shipped as an off valve for future work. `python3 -I tools/config-audit.py .` enforces this (OFF / UNREAD / DUPLICATE / DESC findings must be zero). Every patch behind a flag must still:
   - Wrap reflection lookups in try/catch + `Plugin.Log.LogWarning(...)`. Never throw from Harmony.
-  - Bound their logs (OnceLog / time-bucketed signatures). Respect W&L/player-subordinate protection.
-  - Document a rollback config flag so the user can flip them off if smoke reveals side effects.
-- **Release mode contract:** `Tactical Commander Mode = Active` is the release default; `MonitorOnly` is diagnostics/smoke with no writes; `Off` is full rollback.
+  - Bound its logs (OnceLog with static keys / time-bucketed signatures / the TelemetryRouter tuning-log sink with its MB cap). A default-on diagnostic must never write unbounded raw `Plugin.Log` lines per tick or per unit. Respect W&L/player-subordinate protection.
+  - Have a rollback config flag so the user can flip it off if smoke reveals side effects.
+- **Release mode contract:** `Tactical Commander Mode` (`Off` / `MonitorOnly` / `Active`, case-insensitive, parsed once and cached). `Active` is the release default and the only mode in which `TacticalWriteGuard.ModeAllowsWrites()` is true. `MonitorOnly` runs vision/ledger/tasks/monitor and telemetry with no vanilla writes. `Off` disables every Whiskey battle write (full tactical rollback).
+- **Scoped static state:** static state that lives for one battle or one campaign registers its own reset with `BattleScope.Register(name, reset)` / `CampaignScope.Register(name, reset)` (`Util/ScopedState.cs`), from the owner's static constructor. Battle teardown calls `BattleScope.ResetAll()`; `StrategicCoordinator.ResetAll()` calls `CampaignScope.ResetAll()`. Never hand-wire a reset into a teardown path.
 - **Tuning telemetry default-on:** `Logging Profile = TacticalTuning` writes sidecars under `<GTCW>/BepInEx/WhiskeyRealism/tuning-logs/<session>/` bounded by `Max Tuning Log MB` (default 250) so disk usage stays bounded.
-- **Default-off exceptions** (flip on per-investigation only): the truly noisy/expensive observers — `Enable Tactical Map Knowledge Diagnostics`, verbose-tracing flags. As of 2026-05-19 there are NO named default-off behavioral exceptions; the prior `#62 Enable Player Order Doctrine` carve-out is retired.
 - **Description-string sync:** `Plugin.cs` config description strings must reflect the actual code default (no stale "Default OFF" wording on flags whose default is `true`). The CFG file's existing values override C# defaults once written, so a user reading `dev.kyle.whiskey-realism.cfg` sees the description as truth — update both code default and description in the same edit.
 - **Diagnostic scope on every patch entry (2026-05-19 user direction):** every `static Prefix`/`Postfix`/`Finalizer` method must wrap its body in `using (TelemetryPerf.Scope("<layer>.patch.<short-name>", TelemetryLayer.<Layer>, TelemetryCategory.Performance, 2.0)) { … }`. Naming: `tactical.patch.<short-name>` for battle patches (AIBattle/BattleUnits/Regiment), `campaign.patch.<short-name>` for campaign/strategic patches (AICampaign/ArmyGroup/etc). Multi-method files use `<short-name>.<method>` to distinguish entries. Threshold 2.0ms standard, 5.0ms for known-heavy paths. Transpilers are exempt (cost is JIT-emit, not per-call). This is non-negotiable: without scopes we lose visibility into which patch is eating frame budget — see the 5–7s 20×-compression hitch investigation for the consequences.
+- **Battle write owners:** every write into vanilla battle state checks `Tactical/TacticalWriteGuard.CanWrite(unit)` (Mode Active, AI-controlled unit, W&L player command/chain/DLC-taken-over units protected, fail closed); battle-level writers also skip the W&L feud instance (`IsFeudInstance`). `Util/TacticalStanceWriter` is the only `ChangeStance` caller — it refuses attached sub-units, dedups on `ai_stanceordered`, stamps the hold, and yields per `Tactical/TacticalStanceOwnership`. The per-instance `AIBattle.macroai` is written only by #44 `BattleMacroStrategyPatch`, whose non-blocking Prefix first restores vanilla's own value so vanilla's timers see their own state; `sideinformation[side].macroai` is a scripted override Whiskey only reads. Use `Util/TacticalCombatBehaviorWriter` for `ChangeCombatBehavior` outside the artillery battery paths. Task → stance mapping comes only from `Tactical/TacticalCommandTaskToStanceMapper` (vanilla stance names at decompile 65061).
+- **Clocks:** battle doctrine timers read the coordinator's doctrine clock (`TacticalDoctrineTime`, battle game-hours, frozen overnight), never `Time.realtimeSinceStartup`/`DateTime`/`Environment.TickCount`. Real time is only for telemetry throttles and CPU budgets.
 - Add a header comment explaining what the vanilla method does and what the patch changes.
 
 ### Build
@@ -206,6 +216,15 @@ Use the console harness for pure strategic logic when touched:
 dotnet run --project tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj
 ```
 
+Static checks (both exit 1 on findings; keep them at 0):
+
+```bash
+python3 -I tools/config-audit.py .                         # Plugin.cs: UNREAD / DUPLICATE / OFF / DESC config entries
+python3 -I tools/orphan-sweep.py . [--include-test-only]   # src members nothing in src references (or only tests reach)
+```
+
+`config-audit` enforces the all-on config rule above. `orphan-sweep` is name-based: an empty report is necessary, not sufficient.
+
 For DLL-affecting changes: build, deploy, verify deployed DLL hash, run GTCW, start a career, observe. After deploy, tail `BepInEx/LogOutput.log` and scan for the per-patch first-fire markers.
 
 The test project at `tests/WhiskeyRealism.Tests/WhiskeyRealism.Tests.csproj` uses **explicit `<Compile Include>` entries** for each strategic source file it consumes — not glob patterns. When you add a new file under `src/WhiskeyRealism/Strategic/` (or a subfolder), add a matching `<Compile Include="..\..\src\WhiskeyRealism\Strategic\<File>.cs" Link="<File>.cs" />` line to the csproj or the test project will not see the new type. Same applies to file deletions (remove the corresponding entry).
@@ -217,7 +236,7 @@ When GTCW patches: re-decompile `Assembly-CSharp.dll`, diff our patch sites, reb
 ### Doc lifecycle
 
 - **Living docs** churn with shipped state: `docs/handoff.md`, `docs/patch-catalog.md`, `docs/findings.md`, the per-workstream living docs under `docs/` (`tactical-orchestrator.md`, `tactical-operations-ledger.md`, `tactical-terrain-facing-discipline.md`, `tactical-brain.md`, `scourge-of-war-ai-anchors.md`, `strategic-recon-commitment.md`, `wl-player-order-doctrine.md`, `telemetry.md`), `MEMORY.md`, this `AGENTS.md`, and `README.md`. Update them as work ships.
-- **Specs** under `docs/superpowers/specs/` are point-in-time design artifacts. Move a spec to `docs/superpowers/specs/archive/` once its corresponding patches ship and are smoke-verified. Do not mutate archived specs after shipping; record deltas in `docs/handoff.md` "What just shipped" and the archive `README.md` index.
+- **Specs** under `docs/superpowers/specs/` are point-in-time design artifacts. Move a spec to `docs/superpowers/specs/archive/` once its corresponding patches ship and are smoke-verified. Do not mutate archived specs after shipping; record deltas in `docs/handoff.md` and the archive `README.md` index.
 - **Plans** under `docs/superpowers/plans/` are execution artifacts. Move them to `docs/superpowers/plans/archive/` once their patches ship.
 - When archiving, rewrite internal `docs/superpowers/{specs,plans}/2026-…` cross-references to the corresponding archive paths so historical traceability stays intact.
 
@@ -228,9 +247,9 @@ When GTCW patches: re-decompile `Assembly-CSharp.dll`, diff our patch sites, reb
 - Don't edit the game install (`/mnt/c/Program Files (x86)/Steam/steamapps/common/Grand Tactician The Civil War (1861-1865)/`) directly. Mod via plugin only.
 - Don't ship copies of `0Harmony.dll` or any GTCW/Unity DLL with our plugin — BepInEx loads HarmonyX itself, the game loads Unity itself.
 - Don't add Prefix-blocking or Transpiler patches without consulting the user — they're brittle to game updates and easy to get wrong.
-- Don't write Harmony patches that mutate strategic mod state. State writes happen ONLY on daily strategic review and event-trigger handlers. Patches READ; they don't WRITE. (Targeted candidate-list filtering via Prefix-snapshot/Postfix-restore is permitted as the spec'd Slice 2 enforcement surface — see #25 — but the snapshot/restore must be try/finally-safe.)
+- Don't write Harmony patches that mutate strategic mod state. State writes happen ONLY on daily strategic review and event-trigger handlers. Patches READ; they don't WRITE. (Targeted candidate-list filtering via Prefix-snapshot plus restore is permitted — see #25 — and the restore belongs in a `[HarmonyFinalizer]` so it runs even when vanilla throws.)
 - Don't size per-alliance state arrays to 2 without bound-checking. `AICampaign.aifaction` includes alliance 2 (Europe) — `AICampaignReflect.GetAllianceId(_aifaction)` can return 2, so any `someArray[allianceId]` access where `someArray.Length == 2` must guard with `if (allianceId < 0 || allianceId >= someArray.Length) return;` (or short-circuit alliance > 1 entirely if Europe shouldn't get the treatment).
-- Don't use `GameObject.transform.parent` to walk command hierarchy. In GTCW, corps/divisions are scene-graph **siblings** under a common units root — `transform.parent` returns null/0 for most command relationships. The vanilla command hierarchy lives in `Regiment.allattachedunits` / `Regiment.GetAttachedUnitsReg(...)`. The synth-army cascade degradation bug shipped on 2026-05-19 was exactly this mistake: `DirectChildDiscoveryRuntime` computed `parentInstanceId` from transform.parent, returned 0 for most units, fell through to synthetic placeholders, and the role cascade Main role never propagated to combat brigades — no `attack-objective` writes even when doctrine fired AttackNow. Fix pattern: build a reverse map (child → parent) during the existing `GetAttachedUnitsReg` walk, then use vanilla command parent as the primary source.
+- Don't use `GameObject.transform.parent` to find a unit's **command** parent (corps → division → brigade → regiment). Corps/divisions are scene-graph siblings under a common units root, so `transform.parent` is null/the root for most command relationships. The command hierarchy is `Regiment.allattachedunits` / `Regiment.GetAttachedUnitsReg(...)`: build a child → parent map during that walk and use it. (`transform.parent` is fine for genuine Unity scene-graph questions, e.g. finding a scene anchor.) The 2026-05-19 synth-army cascade bug in `DirectChildDiscoveryRuntime` was this mistake.
 - Don't expand workstream scope without an aligned spec/plan. Use `docs/handoff.md` for the current active workstream; AGENTS.md must not duplicate volatile slice status. Confirmed vanilla bug fixes may be tracked under `docs/bug-fixes/`, but do not treat broad doctrine or feature work as a bug fix.
 
 ---

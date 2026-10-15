@@ -29,6 +29,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.difficulty-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.difficulty-lock");
                 if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
                 try
                 {

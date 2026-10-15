@@ -34,8 +34,10 @@ namespace WhiskeyRealism.Telemetry
             int validRows,
             int invalidRows,
             int partialFinalLines,
-            IEnumerable<TelemetryValidationIssue> issues)
+            IEnumerable<TelemetryValidationIssue> issues,
+            int tornRows = 0)
         {
+            TornRows = Math.Max(0, tornRows);
             Success = success;
             Files = Math.Max(0, files);
             ValidRows = Math.Max(0, validRows);
@@ -59,6 +61,7 @@ namespace WhiskeyRealism.Telemetry
         internal int ValidRows { get; private set; }
         internal int InvalidRows { get; private set; }
         internal int PartialFinalLines { get; private set; }
+        internal int TornRows { get; private set; }
         internal List<TelemetryValidationIssue> Issues { get; private set; }
         internal string Summary { get; private set; }
 
@@ -70,7 +73,8 @@ namespace WhiskeyRealism.Telemetry
                 "files=" + Files.ToString(CultureInfo.InvariantCulture),
                 "validRows=" + ValidRows.ToString(CultureInfo.InvariantCulture),
                 "invalidRows=" + InvalidRows.ToString(CultureInfo.InvariantCulture),
-                "partialFinalLines=" + PartialFinalLines.ToString(CultureInfo.InvariantCulture)
+                "partialFinalLines=" + PartialFinalLines.ToString(CultureInfo.InvariantCulture),
+                "tornRows=" + TornRows.ToString(CultureInfo.InvariantCulture)
             };
 
             if (Issues.Count > 0)
@@ -94,12 +98,17 @@ namespace WhiskeyRealism.Telemetry
             int validRows = 0;
             int invalidRows = 0;
             int partialFinalLines = 0;
+            int tornRows = 0;
 
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
             {
                 issues.Add(new TelemetryValidationIssue(TelemetryEvent.Safe(path), 0, "directory not found"));
                 return new TelemetryValidationResult(false, 0, 0, 1, 0, issues);
             }
+
+            // The writer isolates an untruncatable torn write as its own line and counts it in
+            // manifest droppedCounters["tornRows"]; that many fragment lines are tolerated.
+            int tornAllowance = ManifestTornRows(path);
 
             foreach (string file in OrderedJsonlFiles(path))
             {
@@ -137,6 +146,12 @@ namespace WhiskeyRealism.Telemetry
                             continue;
                         }
 
+                        if (tornRows < tornAllowance && LooksLikePartialJson(line))
+                        {
+                            tornRows++;
+                            continue;
+                        }
+
                         invalidRows++;
                         issues.Add(new TelemetryValidationIssue(Path.GetFileName(file), lineNumber, "invalid JSON: " + ex.GetType().Name));
                     }
@@ -160,7 +175,23 @@ namespace WhiskeyRealism.Telemetry
                 issues.Add(new TelemetryValidationIssue(TelemetryEvent.Safe(path), 0, "no valid telemetry rows found"));
             }
 
-            return new TelemetryValidationResult(invalidRows == 0, files, validRows, invalidRows, partialFinalLines, issues);
+            return new TelemetryValidationResult(invalidRows == 0, files, validRows, invalidRows, partialFinalLines, issues, tornRows);
+        }
+
+        private static int ManifestTornRows(string path)
+        {
+            try
+            {
+                string manifestPath = Path.Combine(path, "manifest.json");
+                if (!File.Exists(manifestPath))
+                    return 0;
+                JToken torn = JObject.Parse(File.ReadAllText(manifestPath)).SelectToken("droppedCounters.tornRows");
+                return torn != null ? Math.Max(0, (int)Math.Min(int.MaxValue, torn.Value<long>())) : 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private static void ValidateTelemetryRow(JToken token)

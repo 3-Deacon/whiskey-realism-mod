@@ -1,5 +1,11 @@
 namespace WhiskeyRealism.Tactical
 {
+    // Is a unit's current vanilla order settled enough to accept a new one?
+    // Vanilla: a unit with regimentpaths > 0 and pathinterrupted == false is
+    // executing its path (RegimentMove); orderqueue / orderstate > 0 are courier
+    // orders not yet delivered or applied (AddToOrderQueue, 125380-125405).
+    // Only stalled or idle units are settled — a marching unit is not
+    // (T-settle, 2026-10-14 review).
     public static class TacticalOrderSettlementGate
     {
         public struct Input
@@ -61,6 +67,12 @@ namespace WhiskeyRealism.Tactical
 
             if (input.RegimentPaths > 0 && input.MovementMode == 3)
                 return new Decision(false, "active-movement");
+
+            if (input.RegimentPaths > 0)
+                return new Decision(false, "marching");
+
+            if (input.ActiveMove)
+                return new Decision(false, "active-move");
 
             return new Decision(true, "settled");
         }

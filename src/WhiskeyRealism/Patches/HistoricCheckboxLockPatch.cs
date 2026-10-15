@@ -8,7 +8,7 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Patches
 {
     // Bridge layer patch #12 — Postfix on MainMenu.CheckForCheckBoxUpdates
-    // (decompile line 193612). Vanilla pairs CheckBoxes[0] (Historic) and
+    // (decompile line 193614). Vanilla pairs CheckBoxes[0] (Historic) and
     // CheckBoxes[1] (Dynamic) as a mutually-exclusive radio. We force
     // CheckBoxes[0]=true / CheckBoxes[1]=false after every state-change pass
     // so the player visually cannot toggle to Dynamic.
@@ -32,6 +32,7 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.historic-checkbox-lock", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.historic-checkbox-lock");
             if (Plugin.Instance == null || !Plugin.Instance.OverrideVanillaSettings.Value) return;
             try
             {

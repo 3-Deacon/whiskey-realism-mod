@@ -35,6 +35,11 @@ namespace WhiskeyRealism.Tactical
         private const float DeploymentZoneToleranceMeters = 1.5f;
         private const int MaxFootprintSamples = 64;
 
+        private static bool _terrainReflectionResolved;
+        private static PropertyInfo _activeTerrainProperty;
+        private static PropertyInfo _terrainDataProperty;
+        private static PropertyInfo _terrainSizeProperty;
+
         private static readonly FieldInfo BattleUnitsBfsField =
             typeof(BattleUnits).GetField("bfs", BindingFlags.Static | BindingFlags.NonPublic);
 
@@ -181,6 +186,54 @@ namespace WhiskeyRealism.Tactical
             }
         }
 
+        // Vanilla's retreat/fallback point: GetAngleTerrainPosStatic (26891)
+        // from start along angleDegrees, clamped to the terrain bounds like
+        // vanilla (26908-26923), at the terrain height. False when there is no
+        // active terrain (vanilla returns Vector3.zero then) - callers skip.
+        internal static bool TryVanillaAnglePoint(Vector3 start, float angleDegrees, float distance, out Vector3 point)
+        {
+            point = start;
+            if (!TryTerrainSize(out float sizeX, out float sizeZ)) return false;
+            BattleWriterPolicy.AnglePointXZ(start.x, start.z, angleDegrees, distance, sizeX, sizeZ, out float x, out float z);
+            point = WithTerrainHeight(new Vector3(x, start.y, z));
+            return true;
+        }
+
+        // Terrain.activeTerrain.terrainData.size by reflection: the mod does not
+        // reference UnityEngine.TerrainModule.
+        private static bool TryTerrainSize(out float sizeX, out float sizeZ)
+        {
+            sizeX = 0f;
+            sizeZ = 0f;
+            try
+            {
+                if (!_terrainReflectionResolved)
+                {
+                    _terrainReflectionResolved = true;
+                    Type terrainType = Type.GetType("UnityEngine.Terrain, UnityEngine.TerrainModule");
+                    _activeTerrainProperty = terrainType?.GetProperty("activeTerrain", BindingFlags.Static | BindingFlags.Public);
+                    _terrainDataProperty = terrainType?.GetProperty("terrainData", BindingFlags.Instance | BindingFlags.Public);
+                    _terrainSizeProperty = _terrainDataProperty?.PropertyType.GetProperty("size", BindingFlags.Instance | BindingFlags.Public);
+                    if (_activeTerrainProperty == null || _terrainSizeProperty == null)
+                        OnceLog.Warning("tactical-terrain-probe:terrain-size", "TacticalTerrainProbe could not resolve Terrain.activeTerrain.terrainData.size; retreat points are skipped.");
+                }
+
+                if (_activeTerrainProperty == null || _terrainSizeProperty == null) return false;
+                object terrain = _activeTerrainProperty.GetValue(null);
+                if (!(terrain is UnityEngine.Object terrainObject) || terrainObject == null) return false;
+                object data = _terrainDataProperty.GetValue(terrain);
+                if (!(data is UnityEngine.Object dataObject) || dataObject == null) return false;
+                Vector3 size = (Vector3)_terrainSizeProperty.GetValue(data);
+                sizeX = size.x;
+                sizeZ = size.z;
+                return sizeX > 1f && sizeZ > 1f;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         internal static Vector3 WithTerrainHeight(Vector3 point)
         {
             try
@@ -192,23 +245,6 @@ namespace WhiskeyRealism.Tactical
             catch
             {
                 return point;
-            }
-        }
-
-        internal static bool CrossesWater(Vector3 from, Vector3 to)
-        {
-            try
-            {
-                BattlefieldSetup setup = GetBattlefieldSetup();
-                if ((object)setup == null) return true;
-                return setup.CheckTerrainLine(from, to, new[] { WaterTerrainId }, 2f);
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning(
-                    "tactical-terrain-probe:water-line",
-                    "TacticalTerrainProbe water line sample failed: " + ex.GetType().Name);
-                return true;
             }
         }
 

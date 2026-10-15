@@ -10,7 +10,9 @@ namespace WhiskeyRealism.Patches
 {
     // Vanilla DLC_WL.CommanderRelations.Operation.UpdateOperation reads
     // usedtopgroup.transform before its null cleanup branch, so missing units can
-    // throw before FinishOperation() runs.
+    // throw before FinishOperation() runs (decompile 41142: Vector3.Distance(...,
+    // usedtopgroup.transform.position) precedes the usedtopgroup null check). Only a
+    // null/missing-reference fault with no Whiskey Realism frame on the stack is handled.
     [HarmonyPatch(typeof(DLC_WL.CommanderRelations.Operation), "UpdateOperation")]
     internal static class WlOperationNullGuardPatch
     {
@@ -24,8 +26,11 @@ namespace WhiskeyRealism.Patches
         {
             using (TelemetryPerf.Scope("campaign.patch.wl-operation-null-guard", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                PatchFirstFire.Mark("campaign.patch.wl-operation-null-guard");
             if (__exception == null) return null;
             if (!Enabled()) return __exception;
+            if (!VanillaFaultSite.IsNullOrMissingReference(__exception) || VanillaFaultSite.IsModFault(__exception))
+                return __exception;
 
             try
             {

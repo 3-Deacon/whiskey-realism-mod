@@ -147,31 +147,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// Walks the tree from the given root and returns active leaf-tier nodes.
-        /// A "leaf" for the role cascade is a brigade-tier node (unittyp ==
-        /// BattleGroupBrigade = 14), NOT a regiment-tier combat unit below it.
-        /// Brigades are the SoW-equivalent of `eRankBrig` — the tier orders are
-        /// issued to; the regiments below them (Infantry/Cavalry/Artillery/
-        /// Skirmisher unittyps 0-3) inherit orders from their brigade via
-        /// vanilla.
-        ///
-        /// If a non-brigade node has no active brigade-or-above descendants we
-        /// also consider it a leaf, so degenerate hierarchies (a lone corps with
-        /// no brigades) still produce assignments.
-        /// </summary>
-        public static IReadOnlyList<ProbeNode> EnumerateLeaves(
-            int rootInstanceId,
-            IReadOnlyDictionary<int, ProbeNode> tree)
-        {
-            var leaves = new List<ProbeNode>();
-            if (tree == null || !tree.TryGetValue(rootInstanceId, out var root)) return leaves;
-            CollectLeaves(root, tree, leaves);
-            return leaves;
-        }
-
-        /// <summary>
-        /// Returns direct active children of the parent node, sorted by world X
-        /// (left to right) so the role-cascade can assign Main/SupportMain/Refuse
+        /// Returns direct active children of the parent node, sorted by world X (legacy;
+        /// see the front-axis overload) so the role-cascade can assign Main/SupportMain/Refuse
         /// based on geometric position. Filters out combat-unit children
         /// (unittyp &lt; BattleGroupBrigade) — those are regiments inside
         /// brigades and don't participate in the command-tier cascade.
@@ -179,6 +156,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public static IReadOnlyList<ProbeNode> EnumerateChildrenLeftToRight(
             int parentInstanceId,
             IReadOnlyDictionary<int, ProbeNode> tree)
+        {
+            return EnumerateChildrenLeftToRight(parentInstanceId, tree, TacticalFrontAxis.None);
+        }
+
+        /// <summary>
+        /// Front-aware overload: orders children by their lateral offset along
+        /// <paramref name="frontAxis"/> (left = negative lateral, the same
+        /// handedness as PlayProjection and the allocator). World X is only
+        /// "left to right" when the front faces +Z; facing east it is depth and
+        /// facing south it is mirrored. Without a valid axis the legacy
+        /// world-X order is kept.
+        /// </summary>
+        public static IReadOnlyList<ProbeNode> EnumerateChildrenLeftToRight(
+            int parentInstanceId,
+            IReadOnlyDictionary<int, ProbeNode> tree,
+            TacticalFrontAxis frontAxis)
         {
             if (tree == null || !tree.TryGetValue(parentInstanceId, out var parent))
                 return Array.Empty<ProbeNode>();
@@ -193,7 +186,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (child.UnitTyp < TacticalUnitType.BattleGroupBrigade) continue;
                 children.Add(child);
             }
-            children.Sort(CompareByWorldXAscending);
+            if (frontAxis.IsValid)
+            {
+                var axis = frontAxis;
+                children.Sort((a, b) =>
+                {
+                    int c = axis.LateralOf(a.WorldX, a.WorldZ).CompareTo(axis.LateralOf(b.WorldX, b.WorldZ));
+                    return c != 0 ? c : a.InstanceId.CompareTo(b.InstanceId);
+                });
+            }
+            else
+            {
+                children.Sort(CompareByWorldXAscending);
+            }
             return children;
         }
 
