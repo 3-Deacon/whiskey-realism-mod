@@ -65,5 +65,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (float.IsNaN(durationLeft) || float.IsInfinity(durationLeft) || durationLeft < 0f) return 0f;
             return durationLeft;
         }
+
+        /// <summary>
+        /// Strength a scheduled reinforcement brings. Vanilla's own estimate is
+        /// <c>regimentrefreg.groupstrength</c>, refreshed every side-stat cycle by
+        /// <c>UpdateGroupStrength(overridecalc: true, ignoreactivestate: true)</c>
+        /// (84828-84833 -> sideinformation.strengthtoarrive). The aigroup
+        /// figure is only a fallback for formations vanilla has not summed yet.
+        /// </summary>
+        internal static float ArrivalStrength(int groupStrength, int groupStrengthAiGroup)
+        {
+            if (groupStrength > 0) return groupStrength;
+            if (groupStrengthAiGroup > 0) return groupStrengthAiGroup;
+            return 0f;
+        }
     }
 }

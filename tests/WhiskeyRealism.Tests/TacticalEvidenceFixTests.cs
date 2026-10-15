@@ -17,6 +17,7 @@ internal static class TacticalEvidenceFixTests
         Run("ammo clamps to unit interval", AmmoClampsToUnitInterval);
         Run("alive combat unit needs strength active and not routed", AliveCombatUnitPredicate);
         Run("scheduled arrival durationleft is already hours", ScheduledArrivalDurationIsHours);
+        Run("scheduled arrival strength uses vanilla groupstrength", ScheduledArrivalStrengthUsesGroupStrength);
     }
 
     private static void Run(string name, Action test)
@@ -71,5 +72,15 @@ internal static class TacticalEvidenceFixTests
         TestHarness.AssertEqual(10f, ArmyEvidenceBuilder.ArrivalHoursFromDurationLeft(10f), "10 game-hours stays 10 hours");
         TestHarness.AssertEqual(0f, ArmyEvidenceBuilder.ArrivalHoursFromDurationLeft(-2f), "negative clamps to 0");
         TestHarness.AssertEqual(0f, ArmyEvidenceBuilder.ArrivalHoursFromDurationLeft(float.NaN), "NaN clamps to 0");
+    }
+
+    private static void ScheduledArrivalStrengthUsesGroupStrength()
+    {
+        // Vanilla sums regimentrefreg.groupstrength (after UpdateGroupStrength with
+        // ignoreactivestate) into strengthtoarrive (84828-84833). groupstrengthaigroup
+        // is 0 for not-yet-active formations.
+        TestHarness.AssertEqual(4200f, ArmyEvidenceBuilder.ArrivalStrength(groupStrength: 4200, groupStrengthAiGroup: 0), "groupstrength wins");
+        TestHarness.AssertEqual(900f, ArmyEvidenceBuilder.ArrivalStrength(0, 900), "aigroup fallback when groupstrength unset");
+        TestHarness.AssertEqual(0f, ArmyEvidenceBuilder.ArrivalStrength(-5, -5), "negatives clamp to 0");
     }
 }

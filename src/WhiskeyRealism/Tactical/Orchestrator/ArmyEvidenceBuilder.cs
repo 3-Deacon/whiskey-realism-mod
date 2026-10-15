@@ -913,26 +913,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                int sideAlliance = -1;
-                if (bunits != null && bunits.alliance != null && side >= 0 && side < bunits.alliance.Length)
-                    sideAlliance = bunits.alliance[side];
+                int sideAlliance = SafeAlliance(bunits, side);
                 if (sideAlliance < 0) return Array.Empty<ReinforcementArrival>();
 
-                var arrivalsList = ResolveScheduledArrivals(bunits);
-                if (arrivalsList == null || arrivalsList.Count == 0) return Array.Empty<ReinforcementArrival>();
+                var arrivals = bunits.scheduledarrival;
+                if (arrivals == null || arrivals.Count == 0) return Array.Empty<ReinforcementArrival>();
 
                 var result = new List<ReinforcementArrival>();
-                for (int i = 0; i < arrivalsList.Count; i++)
+                for (int i = 0; i < arrivals.Count; i++)
                 {
-                    object arrival = arrivalsList[i];
-                    if (arrival == null) continue;
-                    var regiment = SafeRegimentField(arrival, ref _arrivalRegimentField, "regimentrefreg");
+                    var arrival = arrivals[i];
+                    var regiment = arrival?.regimentrefreg;
                     if (regiment == null) continue;
                     if (regiment.alliance != sideAlliance) continue;
-                    float durationSeconds = SafeFloatField(arrival, ref _arrivalDurationField, "durationleft");
-                    if (durationSeconds < 0f) durationSeconds = 0f;
-                    float hours = durationSeconds / 3600f;
-                    float strength = EstimateReinforcementStrength(regiment);
+                    // durationleft is game hours (87562-87584) — no /3600.
+                    float hours = ArrivalHoursFromDurationLeft(arrival.durationleft);
+                    float strength = ArrivalStrength(regiment.groupstrength, regiment.groupstrengthaigroup);
                     if (strength <= 0f) continue;
                     result.Add(new ReinforcementArrival(hours, strength));
                 }
@@ -942,103 +938,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 return Array.Empty<ReinforcementArrival>();
             }
-        }
-
-        private static FieldInfo _scheduledArrivalsField;
-        private static FieldInfo _arrivalRegimentField;
-        private static FieldInfo _arrivalDurationField;
-
-        private static IList ResolveScheduledArrivals(BattleUnits bunits)
-        {
-            try
-            {
-                if (bunits == null) return null;
-                if (_scheduledArrivalsField == null)
-                    _scheduledArrivalsField = AccessTools.Field(typeof(BattleUnits), "scheduledarrival");
-                return _scheduledArrivalsField?.GetValue(bunits) as IList;
-            }
-            catch { return null; }
-        }
-
-        private static Regiment SafeRegimentField(object instance, ref FieldInfo cached, string name)
-        {
-            try
-            {
-                if (instance == null) return null;
-                if (cached == null) cached = AccessTools.Field(instance.GetType(), name);
-                return cached?.GetValue(instance) as Regiment;
-            }
-            catch { return null; }
-        }
-
-        private static float SafeFloatField(object instance, ref FieldInfo cached, string name)
-        {
-            try
-            {
-                if (instance == null) return 0f;
-                if (cached == null) cached = AccessTools.Field(instance.GetType(), name);
-                if (cached == null) return 0f;
-                object v = cached.GetValue(instance);
-                if (v is float f) return f;
-                return 0f;
-            }
-            catch { return 0f; }
-        }
-
-        /// <summary>
-        /// Estimates the strength a reinforcement Regiment will bring when it
-        /// activates. Tries groupstrengthaigroup first (works for already-
-        /// constructed reinforcements); falls back to summing the attached
-        /// units' numofmenoriginal so even not-yet-spawned forces report a
-        /// sensible estimate.
-        /// </summary>
-        private static float EstimateReinforcementStrength(Regiment regiment)
-        {
-            if (regiment == null) return 0f;
-            try
-            {
-                float aiGroup = SafeRegimentFloat(regiment, "groupstrengthaigroup");
-                if (aiGroup > 0f) return aiGroup;
-            }
-            catch { }
-
-            try
-            {
-                float total = 0f;
-                var units = regiment.allattachedunits;
-                if (units != null)
-                {
-                    for (int i = 0; i < units.Length; i++)
-                    {
-                        var unit = units[i];
-                        if (unit == null) continue;
-                        // numofmenoriginal is the rostered strength; fall back
-                        // to current strength fields if missing.
-                        float men = TryReadFloatField(unit, "numofmenoriginal");
-                        if (men <= 0f) men = TryReadFloatField(unit, "groupowninrange");
-                        total += Math.Max(0f, men);
-                    }
-                }
-                return total;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
-
-        private static float TryReadFloatField(Regiment regiment, string name)
-        {
-            try
-            {
-                var field = AccessTools.Field(regiment.GetType(), name);
-                if (field == null) return 0f;
-                object v = field.GetValue(regiment);
-                if (v is float f) return f;
-                if (v is int i) return i;
-                return 0f;
-            }
-            catch { return 0f; }
         }
     }
 }
