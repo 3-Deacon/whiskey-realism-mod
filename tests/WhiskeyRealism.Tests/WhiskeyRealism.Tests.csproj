@@ -86,6 +86,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MarchTime.cs" Link="Planner\MarchTime.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\HistoricalPriorTable.cs" Link="Planner\HistoricalPriorTable.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerState.cs" Link="Planner\PlannerState.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReserveRules.cs" Link="Planner\ReserveRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\TheaterPlanner.cs" Link="Planner\TheaterPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
