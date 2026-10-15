@@ -16,18 +16,16 @@ namespace WhiskeyRealism.Strategic
         // consumer's "never"). UniStorm's campaign calendar (calendarType 1) rolls months over with
         // Gregorian lengths and leap years (CalculateMonths 157818-157853, February 157834-157845)
         // and builds UniStormDate = new DateTime(year, month, day) from the counters (157889; 155866
-        // at load), so this is that date's day count; a month end adds no phantom days. Vanilla's
-        // "|| yearCounter % 400 == 0" sits outside its February test (157834), a precedence quirk
-        // that matters only in years divisible by 400: do not copy it here. GameVars.currenttimefromstart
+        // at load), so this is that date's day count; a month end adds no phantom days. month is
+        // vanilla's monthCounter, 1-12. Vanilla's February rollover has two quirks that bite only in
+        // years divisible by 100 ("|| yearCounter % 400 == 0" outside the February test, 157834; a
+        // non-leap century year falls through to a 30-day February, 157841): do not copy them here.
+        // GameVars.currenttimefromstart
         // is no day counter (30171: months are 1/12 year wide). The legacy year*372 + month*31 + day
         // serials of the CIC operations, battle history and capital threat are a different scale,
         // persisted in the sidecar: never compare the two.
         public static int DaySerial(int day, int month, int year)
         {
-            int m0 = month - 1;
-            int carry = m0 >= 0 ? m0 / 12 : (m0 - 11) / 12;
-            year += carry;
-            month = m0 - carry * 12 + 1;
             int y = month <= 2 ? year - 1 : year;
             int era = (y >= 0 ? y : y - 399) / 400;
             int yearOfEra = y - era * 400;
