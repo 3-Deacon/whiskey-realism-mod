@@ -45,9 +45,13 @@ namespace WhiskeyRealism.Strategic
             public Vector3 Destination;
             public float Distance;
             public bool WasInOffensive;
+            public bool Queued;
+            public WlMoveSource Source;
         }
 
         private static readonly List<PendingMove> _pending = new List<PendingMove>(MaxPending);
+        private static readonly int[] _pendingUnitIds = new int[MaxPending];
+        private static WlMoveSource _moveSource;
         private static readonly HashSet<string> _loggedSignatures = new HashSet<string>(StringComparer.Ordinal);
         private static readonly WlDispatchHistory _history = new WlDispatchHistory();
         private static CareerInformationPanel _panel;
@@ -63,6 +67,7 @@ namespace WhiskeyRealism.Strategic
         private static void Reset()
         {
             _pending.Clear();
+            _moveSource = WlMoveSource.Other;
             _loggedSignatures.Clear();
             _history.Clear();
             _panel = null;
@@ -74,8 +79,23 @@ namespace WhiskeyRealism.Strategic
                 && Plugin.EnableCampaignChainDispatches != null && Plugin.EnableCampaignChainDispatches.Value;
         }
 
+        // #69 context patches: the vanilla caller (RollUpEnemyObjectivesInZone,
+        // CheckFinalPositions) whose moves list membership cannot classify.
+        internal static void EnterMoveSource(WlMoveSource source)
+        {
+            _moveSource = source;
+        }
+
+        internal static void ExitMoveSource()
+        {
+            _moveSource = WlMoveSource.Other;
+        }
+
         // #69 MoveUnitTo Postfix. Cheap exits first: it runs for every AI move.
-        internal static void OnMoveUnitTo(Regiment unit, Vector3 destination, bool moved)
+        // destination is the caller's target as the Prefix read it (vanilla reassigns
+        // the argument to the stack position, 14498); queued is movearoundenemyunits,
+        // MoveUnitTo's DefensiveMovingOrder path (14517-14523).
+        internal static void OnMoveUnitTo(Regiment unit, Vector3 destination, bool queued, bool moved)
         {
             if (!moved || (UnityEngine.Object)unit == null || !DLC_WL.dlc_scenarioactive || !Enabled()) return;
             try
@@ -116,6 +136,8 @@ namespace WhiskeyRealism.Strategic
                     Destination = destination,
                     Distance = XZDistance(from, destination),
                     WasInOffensive = ListContains(faction, "unitsinoffensiveoperations", unit),
+                    Queued = queued,
+                    Source = _moveSource,
                 });
             }
             catch (Exception ex)
@@ -130,8 +152,14 @@ namespace WhiskeyRealism.Strategic
             if (_pending.Count == 0) return;
             try
             {
-                for (int i = 0; i < _pending.Count; i++)
+                int count = _pending.Count;
+                for (int i = 0; i < count; i++)
+                    _pendingUnitIds[i] = (UnityEngine.Object)_pending[i].Unit != null ? _pending[i].Unit.GetInstanceID() : 0;
+                for (int i = 0; i < count; i++)
+                {
+                    if (!WlCampaignDispatchPolicy.IsLastMoveOfUnit(_pendingUnitIds, count, i)) continue;
                     EmitPending(_pending[i]);
+                }
             }
             catch (Exception ex)
             {
@@ -167,12 +195,23 @@ namespace WhiskeyRealism.Strategic
             object faction = FactionOf(move.Unit.alliance, out int factionIndex);
             var context = new WlMoveContext
             {
+                Source = move.Source,
+                Queued = move.Queued,
+                QueuedStillRunning = move.Queued && AICampaign.DefensiveMovingOrder.OrderRunning(move.Unit),
                 WasInOffensive = move.WasInOffensive,
                 InOffensive = ListContains(faction, "unitsinoffensiveoperations", move.Unit),
                 InDefensive = ListContains(faction, "unitsindefensiveoperations", move.Unit),
                 InCapitalDefense = ListContains(faction, "groupstodefendcapital", move.Unit),
                 EnemyAtTarget = EnemyAtTarget(move.Destination, factionIndex),
             };
+            string skip = WlCampaignDispatchPolicy.PendingSkipReason(in context);
+            if (skip != null)
+            {
+                LogBounded(VanillaMoveTrigger + ":" + skip,
+                    "[W&LCampaignDispatch] trigger=" + VanillaMoveTrigger + " unit=" + SafeName(move.Unit) +
+                    " target=" + Fmt(move.Destination) + " action=skip reason=" + skip);
+                return;
+            }
             int type = WlCampaignDispatchPolicy.ClassifyType(in context);
 
             Vector3 target = move.Destination;
@@ -344,13 +383,19 @@ namespace WhiskeyRealism.Strategic
             return list != null && list.Contains(unit);
         }
 
-        // Vanilla's offensive enemy figure for an area (num2, 14215-14230).
+        // Vanilla's offensive enemy figure num2 for the target area (14228-14229).
         private static bool EnemyAtTarget(Vector3 destination, int factionIndex)
         {
             if (factionIndex < 0 || AICampaign.aiareas == null) return false;
             var area = AICampaign.AIArea.GetAIArea(AICampaign.aiareas.GetColorOnPos(destination));
-            var strength = area?.enemycampaignunitsstrengthclose;
-            return strength != null && factionIndex < strength.Length && strength[factionIndex] > 0f;
+            if (area == null) return false;
+            float[] strength = area.enemycampaignunitsstrengthclose;
+            float[] morale = area.avgtroopmoraleinzone;
+            float[] weapon = area.enemycampaignunitsstrengthcloseweapon;
+            if (strength == null || morale == null || weapon == null
+                || factionIndex >= strength.Length || factionIndex >= morale.Length || factionIndex >= weapon.Length) return false;
+            return WlCampaignDispatchPolicy.VanillaEnemyAtTarget(strength[factionIndex], morale[factionIndex],
+                GamePrefs.aiimportanceenemyunits, weapon[factionIndex], AICampaign.GetNationalMoraleFactor(factionIndex));
         }
 
         // Vanilla's capital-defense order target and name (11710-11711).

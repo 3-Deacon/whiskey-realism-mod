@@ -14,11 +14,24 @@ namespace WhiskeyRealism.Strategic
     //   AICampaign.MoveUnitTo 14479-14540: true after a direct SetWaypoint (14514) or
     //     a queued DefensiveMovingOrder (14523); the queued order re-enters MoveUnitTo
     //     when it executes (DefensiveMovingOrder.UpdateOrders, 10048).
-    //   Vanilla's own campaign order types for the same decisions: offensive 5 (no
-    //     enemy at the target area) / 16 (14449-14456), offensive micro-movement 6
-    //     (14052), engage 7 (13715, 13775), capital defense 8 (11864). The offensive
-    //     and the defensive attack branch list the unit only after MoveUnitTo returns
-    //     (14383-14386, 13771-13775), so the runtime classifies after the vanilla call.
+    //   AICampaign.MoveUnitTo reassigns its `position` argument to the stack position
+    //     (14498) before anything else, so #69 reads the caller's target in a Prefix;
+    //     `movearoundenemyunits` (never reassigned) selects the queued path.
+    //   Vanilla's own campaign order types for the same decisions: offensive 5 when
+    //     the target area's num2 <= 0, else 16 (num2 14228-14229, order 14449-14456),
+    //     offensive micro-movement 6 (14052), engage 7 (13715, 13775), capital defense
+    //     8 (11864). The offensive and the defensive attack branch list the unit only
+    //     after MoveUnitTo returns (14383-14386, 13771-13775), so the runtime
+    //     classifies after the vanilla call.
+    //   RollUpEnemyObjectivesInZone (13883-13966, UpdateUnitAI job 35, 11598) moves a
+    //     unit outside every operation (IsUnitAvailableForOffensiveOperations
+    //     14080-14159 with checkexistingoperations) to the closest objective of its own
+    //     area when the enemy there is no stronger (13944-13955); vanilla skips a W&L
+    //     player's unit without an order (13915). Its semantics are the micro-movement's
+    //     (same GetClosestObjectivePosOfArea target, 14024), whose order is 6 ("The enemy
+    //     appears to be weak ... occupy further ground", tooltip 1087).
+    //   CheckFinalPositions (17898-17936, job 34, 11593) moves a unit off terrain it
+    //     cannot hold; vanilla gives no order for it.
     //   Campaign orders have no vanilla dedupe: the 8640-8646 check is battle-only.
     internal struct WlMoveFacts
     {
@@ -33,15 +46,27 @@ namespace WhiskeyRealism.Strategic
         public bool MovedIsPlayerAlliance;
     }
 
+    // The vanilla caller of a MoveUnitTo, where list membership cannot tell it
+    // (#69 context patches on the two callers).
+    internal enum WlMoveSource
+    {
+        Other = 0,
+        FinalPositions = 1, // CheckFinalPositions 17928
+        RollUp = 2,         // RollUpEnemyObjectivesInZone 13955
+    }
+
     // The moved unit's vanilla operation lists before the MoveUnitTo call
     // (WasInOffensive) and after its caller finished (the rest).
     internal struct WlMoveContext
     {
+        public WlMoveSource Source;
+        public bool Queued;             // MoveUnitTo queued a DefensiveMovingOrder (14517-14523)
+        public bool QueuedStillRunning; // DefensiveMovingOrder.OrderRunning at flush (9933)
         public bool WasInOffensive;
         public bool InOffensive;
         public bool InDefensive;
         public bool InCapitalDefense;
-        public bool EnemyAtTarget; // AIArea.enemycampaignunitsstrengthclose > 0 at the destination
+        public bool EnemyAtTarget; // vanilla's num2 > 0 for the target area (VanillaEnemyAtTarget)
     }
 
     // The targets of the last Capacity dispatches this dispatcher emitted (ring).
@@ -131,10 +156,48 @@ namespace WhiskeyRealism.Strategic
             return true;
         }
 
+        public const string QueuedOrderCancelled = "queued-order-cancelled";
+        public const string PositionCorrection = "position-correction";
+
+        // A recorded move that is no order at flush, or null.
+        //   A queued move whose DefensiveMovingOrder is gone was cancelled after
+        //   MoveUnitTo returned true (#25 CancelQueuedDefensiveMove -> RemoveOrder 9949;
+        //   UpdateOrders 79295 runs outside UpdateUnitAI, so within the pass nothing
+        //   else consumes it). The corps never marches there.
+        //   A CheckFinalPositions move is a terrain correction vanilla gives no order for.
+        public static string PendingSkipReason(in WlMoveContext context)
+        {
+            if (context.Queued && !context.QueuedStillRunning) return QueuedOrderCancelled;
+            if (context.Source == WlMoveSource.FinalPositions) return PositionCorrection;
+            return null;
+        }
+
+        // Vanilla's num2 for the target area (CheckOffensiveMovements 14228-14229):
+        // enemy strength close x troop morale in zone x aiimportanceenemyunits x enemy
+        // weapon factor, divided by the national morale factor; order 5 when num2 <= 0,
+        // else 16 (14449-14456). Kept as vanilla's comparison, so NaN counts as enemy.
+        public static bool VanillaEnemyAtTarget(float strengthClose, float troopMorale, float importanceEnemyUnits, float weaponFactor, float nationalMoraleFactor)
+        {
+            float num2 = strengthClose * troopMorale * importanceEnemyUnits * weaponFactor;
+            num2 /= nationalMoraleFactor;
+            return !(num2 <= 0f);
+        }
+
+        // One UpdateUnitAI pass can move the player's corps more than once (#25's
+        // move back after a forbidden commit, a second job's move); only its last
+        // move is the order.
+        public static bool IsLastMoveOfUnit(int[] unitIds, int count, int index)
+        {
+            for (int i = index + 1; i < count; i++)
+                if (unitIds[i] == unitIds[index]) return false;
+            return true;
+        }
+
         public static int ClassifyType(in WlMoveContext context)
         {
             if (context.InDefensive) return Engage;
             if (context.InCapitalDefense) return DefendCapital;
+            if (context.Source == WlMoveSource.RollUp) return OffensiveOperation;
             if (context.InOffensive)
             {
                 if (context.WasInOffensive) return OffensiveOperation;

@@ -1,5 +1,8 @@
 using System;
+using System.IO;
+using System.Text.RegularExpressions;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Tactical.PlayerOrders;
 
 using static TestHarness;
@@ -29,6 +32,13 @@ internal static class WlCampaignDispatchTests
             ("wl campaign dispatch rate limits A after B within a day", RateLimitsAlternatingTargets),
             ("wl campaign dispatch history keeps the last four targets", HistoryKeepsLastFour),
             ("wl campaign dispatch subordinate orders keep vanilla zone and prestige", SubordinateOrdersKeepVanillaZone),
+            ("wl campaign dispatch drops a queued move whose order was cancelled", DropsCancelledQueuedMove),
+            ("wl campaign dispatch keeps a queued move whose order still runs", KeepsRunningQueuedMove),
+            ("wl campaign dispatch final-position correction is no order", FinalPositionCorrectionIsNoOrder),
+            ("wl campaign dispatch roll-up maps to offensive operation", RollUpMapsToOffensiveOperation),
+            ("wl campaign dispatch enemy at target is vanilla's num2", EnemyAtTargetIsVanillaNum2),
+            ("wl campaign dispatch keeps only the last move of a corps in one pass", KeepsLastMoveOfCorps),
+            ("wl campaign dispatch issue line reaches the main log", IssueLineReachesMainLog),
         });
     }
 
@@ -223,5 +233,66 @@ internal static class WlCampaignDispatchTests
         // (zone shown, CheckDLCWLTopics 123484-123517 unchanged).
         AssertTrue(WlCampaignDispatchPolicy.ShowsZone(subordinateDispatch: true), "subordinate: vanilla zone");
         AssertTrue(WlCampaignDispatchPolicy.ShowsZone(subordinateDispatch: false), "top-level player decides: zone");
+    }
+
+    // #25 cancels the queued DefensiveMovingOrder after MoveUnitTo returned true
+    // (13771 -> 14523, RemoveOrder 9949): the corps never marches.
+    private static void DropsCancelledQueuedMove()
+    {
+        var context = new WlMoveContext { Queued = true, QueuedStillRunning = false, InDefensive = true };
+        AssertEqual(WlCampaignDispatchPolicy.QueuedOrderCancelled, WlCampaignDispatchPolicy.PendingSkipReason(in context));
+    }
+
+    private static void KeepsRunningQueuedMove()
+    {
+        var running = new WlMoveContext { Queued = true, QueuedStillRunning = true, InDefensive = true };
+        AssertEqual(null, WlCampaignDispatchPolicy.PendingSkipReason(in running), "queued and running");
+        var direct = new WlMoveContext { Queued = false, QueuedStillRunning = false };
+        AssertEqual(null, WlCampaignDispatchPolicy.PendingSkipReason(in direct), "a direct move has no queued order");
+    }
+
+    private static void FinalPositionCorrectionIsNoOrder()
+    {
+        var context = new WlMoveContext { Source = WlMoveSource.FinalPositions, WasInOffensive = true, InOffensive = true };
+        AssertEqual(WlCampaignDispatchPolicy.PositionCorrection, WlCampaignDispatchPolicy.PendingSkipReason(in context));
+    }
+
+    private static void RollUpMapsToOffensiveOperation()
+    {
+        var context = new WlMoveContext { Source = WlMoveSource.RollUp };
+        AssertEqual(WlCampaignDispatchPolicy.OffensiveOperation, WlCampaignDispatchPolicy.ClassifyType(in context));
+        AssertEqual(null, WlCampaignDispatchPolicy.PendingSkipReason(in context), "roll-up is an order");
+    }
+
+    private static void EnemyAtTargetIsVanillaNum2()
+    {
+        AssertTrue(WlCampaignDispatchPolicy.VanillaEnemyAtTarget(500f, 0.8f, 1f, 1.1f, 1f), "enemy, morale and weapons");
+        AssertFalse(WlCampaignDispatchPolicy.VanillaEnemyAtTarget(500f, 0f, 1f, 1.1f, 1f), "zero morale makes num2 zero");
+        AssertFalse(WlCampaignDispatchPolicy.VanillaEnemyAtTarget(500f, 0.8f, 1f, 0f, 1f), "zero weapon factor makes num2 zero");
+        AssertFalse(WlCampaignDispatchPolicy.VanillaEnemyAtTarget(0f, 0.8f, 1f, 1.1f, 1f), "no enemy");
+        AssertTrue(WlCampaignDispatchPolicy.VanillaEnemyAtTarget(500f, 0.8f, 1f, 1.1f, 0f), "num2 / 0 is +inf: vanilla's num2 <= 0 is false");
+    }
+
+    private static void KeepsLastMoveOfCorps()
+    {
+        int[] ids = { 7, 9, 7, 0 };
+        AssertFalse(WlCampaignDispatchPolicy.IsLastMoveOfUnit(ids, 3, 0), "first move of 7 superseded");
+        AssertTrue(WlCampaignDispatchPolicy.IsLastMoveOfUnit(ids, 3, 1), "only move of 9");
+        AssertTrue(WlCampaignDispatchPolicy.IsLastMoveOfUnit(ids, 3, 2), "last move of 7");
+    }
+
+    // The issue line is the #69 smoke proof: its tag must allow the main log (the
+    // campaign-default route is sidecar-only and the default TacticalTuning profile
+    // drops the campaign layer), and the runtime must write it through
+    // LegacyInfoToMainLogIfAllowed. Skip lines keep the sidecar route.
+    private static void IssueLineReachesMainLog()
+    {
+        TelemetryTagRoute issue = TelemetryTagPolicy.Route("[W&LCampaignDispatch] trigger=vanilla-move type=5 unit=X issuer=Y target=1,2 dest=Objective zone=shown action=issue");
+        AssertTrue(issue.AllowMainLog, "issue line allowed on the main log");
+        AssertTrue(issue.RouteToSidecar, "issue line also on the campaign sidecar");
+        AssertEqual(TelemetryLayer.Campaign, issue.Layer);
+        string runtime = File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Strategic/WlCampaignDispatchRuntime.cs"));
+        AssertTrue(Regex.IsMatch(runtime, @"TelemetryRouter\.LegacyInfoToMainLogIfAllowed\(\s*""\[W&LCampaignDispatch\] trigger="""),
+            "the runtime writes the issue line through LegacyInfoToMainLogIfAllowed");
     }
 }

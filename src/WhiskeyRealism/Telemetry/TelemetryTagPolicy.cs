@@ -134,6 +134,10 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("ProjectUnlock", TelemetryCategory.State);
             AddCampaign("W&LStartSelection", TelemetryCategory.Decision);
             AddCampaign("W&LCamp", TelemetryCategory.Trace);
+            // #69: the issue line is the smoke proof and reaches LogOutput.log under every
+            // profile (bounded: one order per target per game day, last four targets);
+            // skip lines are written with LegacyInfo and stay on the campaign sidecar.
+            AddCampaignAndMainLog("W&LCampaignDispatch", TelemetryCategory.Decision);
             AddCampaign("Succession", TelemetryCategory.Decision);
             AddCampaign("Plan", TelemetryCategory.Decision);
         }
@@ -292,6 +296,11 @@ namespace WhiskeyRealism.Telemetry
         private static void AddCampaign(string tag, TelemetryCategory category)
         {
             Routes[tag] = Sidecar(tag, TelemetryLayer.Campaign, category, TelemetrySeverity.Info);
+        }
+
+        private static void AddCampaignAndMainLog(string tag, TelemetryCategory category)
+        {
+            Routes[tag] = new TelemetryTagRoute(tag, TelemetryLayer.Campaign, category, tag, TelemetrySeverity.Info, true, true);
         }
 
         private static void AddMainLog(string tag, TelemetryLayer layer, TelemetryCategory category)
