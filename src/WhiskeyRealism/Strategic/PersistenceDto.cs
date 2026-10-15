@@ -27,6 +27,9 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("probeState")] public OperationalProbeStateDto ProbeState;
         [JsonProperty("fiscalMemory")] public FiscalMemoryDto FiscalMemory;
         [JsonProperty("modWrittenObjective")] public int? ModWrittenObjective;
+        [JsonProperty("frontChangedDay")] public int? FrontChangedDay;
+        [JsonProperty("capitalStreakDay")] public int? CapitalStreakDay;
+        [JsonProperty("probeHysteresis")] public ProbeHysteresisDto ProbeHysteresis;
     }
 
     internal class OperationalProbeStateDto
@@ -38,6 +41,13 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("startedDaySerial")] public int StartedDaySerial;
         [JsonProperty("lastEnemy")] public float LastObservedEnemyStrength;
         [JsonProperty("lastFriendly")] public float LastObservedFriendlyStrength;
+    }
+
+    internal class ProbeHysteresisDto
+    {
+        [JsonProperty("withdrawStreak")] public int WithdrawStreak;
+        [JsonProperty("cooldownUntilDay")] public int CooldownUntilDay = int.MinValue;
+        [JsonProperty("cooldownTargetKey")] public string CooldownTargetKey;
     }
 
     internal class FiscalMemoryDto

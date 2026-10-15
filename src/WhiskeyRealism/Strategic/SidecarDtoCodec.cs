@@ -26,6 +26,10 @@ namespace WhiskeyRealism.Strategic
         public int LastSeenYear = -1;
         // followedcampaignobjective value PickCampaignObjectivePatch last wrote, per alliance.
         public int[] ModWrittenObjective = { -1, -1 };
+        // Runtime counters that would otherwise restart on every battle round-trip.
+        public int[] FrontChangedDay = { -1, -1 };
+        public int[] CapitalStreakDay = { -1, -1 };
+        public ProbeHysteresisDto[] ProbeHysteresis = new ProbeHysteresisDto[2];
 
         public static SidecarSnapshot Empty() => new SidecarSnapshot();
     }
@@ -159,6 +163,9 @@ namespace WhiskeyRealism.Strategic
                     DirectorMemory = StrategicResilienceDirector.MemoryToDto(snap.DirectorMemories[alliance]),
                     ProbeState = ProbeToDto(snap.ProbeStates[alliance]),
                     ModWrittenObjective = snap.ModWrittenObjective[alliance],
+                    FrontChangedDay = snap.FrontChangedDay[alliance],
+                    CapitalStreakDay = snap.CapitalStreakDay[alliance],
+                    ProbeHysteresis = snap.ProbeHysteresis[alliance],
                     FiscalMemory = FiscalToDto(snap.FiscalMemories[alliance])
                 };
                 if (faction.DirectorMemory != null)
@@ -213,6 +220,9 @@ namespace WhiskeyRealism.Strategic
                     result.ProbeStates[a] = ProbeFromDto(f.ProbeState);
                     result.FiscalMemories[a] = FiscalFromDto(f.FiscalMemory);
                     result.ModWrittenObjective[a] = f.ModWrittenObjective ?? -1;
+                    result.FrontChangedDay[a] = f.FrontChangedDay ?? -1;
+                    result.CapitalStreakDay[a] = f.CapitalStreakDay ?? -1;
+                    result.ProbeHysteresis[a] = f.ProbeHysteresis;
                 }
                 foreach (var m in dto.MinorOfficerProfiles)
                 {

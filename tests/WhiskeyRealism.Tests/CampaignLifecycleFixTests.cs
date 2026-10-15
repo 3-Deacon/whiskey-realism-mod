@@ -60,6 +60,7 @@ internal static class CampaignLifecycleFixTests
         Check("c1 per newer sidecar version is rejected", PerNewerVersionIsRejected);
         Check("c1 per forced succession ids are not persisted", PerForcedSuccessionIdsAreNotPersisted);
         Check("c1 per mod-written campaign objective survives reload", PerModWrittenObjectiveSurvivesReload);
+        Check("c1 per runtime counters survive a battle round trip", PerRuntimeCountersSurviveRoundTrip);
         Check("c1 per atomic write keeps bak and leaves no temp", PerAtomicWriteKeepsBakAndNoTemp);
         Check("c1 per replace fallback survives original already moved to bak", PerReplaceFallbackSurvivesMissingOriginal);
         Check("c1 per load falls back to bak when primary is corrupt", PerLoadFallsBackToBak);
@@ -695,6 +696,37 @@ internal static class CampaignLifecycleFixTests
         // After reload, a now-defensive/planless faction still clears the stale id it wrote.
         var steer = CampaignObjectiveSteering.Decide(false, -1, currentFollowed: 29, lastWrittenByMod: back.ModWrittenObjective[0]);
         TestHarness.AssertEqual(-1, steer.WriteFollowed, "stale mod objective cleared after reload");
+    }
+
+    private static void PerRuntimeCountersSurviveRoundTrip()
+    {
+        int day = Serial(1, 6, 1862);
+        var snap = SampleSnapshot();
+        snap.FrontChangedDay[1] = day - 40;
+        snap.CapitalStreakDay[0] = day - 1;
+        var hysteresis = new ProbeHysteresis();
+        hysteresis.Filter(OperationalProbeDecision.Withdraw, true, "a-1", day);
+        hysteresis.Filter(OperationalProbeDecision.Withdraw, true, "a-1", day + 1);
+        snap.ProbeHysteresis[0] = hysteresis.Snapshot();
+
+        var back = RoundTrip(snap);
+        TestHarness.AssertEqual(day - 40, back.FrontChangedDay[1], "front-change stamp");
+        TestHarness.AssertEqual(-1, back.FrontChangedDay[0], "unset stamp stays -1");
+        TestHarness.AssertEqual(day - 1, back.CapitalStreakDay[0], "capital streak day");
+        var restored = ProbeHysteresis.FromSnapshot(back.ProbeHysteresis[0]);
+        TestHarness.AssertEqual(OperationalProbeDecision.None, restored.Filter(OperationalProbeDecision.Probe, false, "a-1", day + 2), "reprobe cooldown survives reload");
+
+        var pending = new ProbeHysteresis();
+        pending.Filter(OperationalProbeDecision.Withdraw, true, "a-2", day);
+        var pendingBack = ProbeHysteresis.FromSnapshot(RoundTripHysteresis(pending.Snapshot()));
+        TestHarness.AssertEqual(OperationalProbeDecision.Withdraw, pendingBack.Filter(OperationalProbeDecision.Withdraw, true, "a-2", day + 1), "withdraw confirmation streak survives reload");
+    }
+
+    private static ProbeHysteresisDto RoundTripHysteresis(ProbeHysteresisDto dto)
+    {
+        var snap = SampleSnapshot();
+        snap.ProbeHysteresis[1] = dto;
+        return RoundTrip(snap).ProbeHysteresis[1];
     }
 
     private static void PerMissingFieldsDecodeSafely()

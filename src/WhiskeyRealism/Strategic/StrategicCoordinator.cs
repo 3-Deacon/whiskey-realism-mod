@@ -1784,6 +1784,9 @@ namespace WhiskeyRealism.Strategic
                 snap.RecentReplans[alliance] = OperationMemories[alliance]?.SnapshotRecentReplans();
                 snap.ProbeStates[alliance] = _operationalProbeStates[alliance];
                 snap.FiscalMemories[alliance] = _fiscalMemory[alliance];
+                snap.FrontChangedDay[alliance] = _frontChangedDay[alliance];
+                snap.CapitalStreakDay[alliance] = _capitalStreakDay[alliance];
+                snap.ProbeHysteresis[alliance] = _probeHysteresis[alliance].Snapshot();
             }
             foreach (var kv in MinorOfficerProfiles) snap.MinorOfficers[kv.Key] = kv.Value;
             snap.FiredEvents.UnionWith(Succession.FiredEventIds);
@@ -1808,6 +1811,9 @@ namespace WhiskeyRealism.Strategic
                 OperationMemories[alliance].RestoreRecentReplans(snap.RecentReplans[alliance]);
                 _operationalProbeStates[alliance] = snap.ProbeStates[alliance];
                 _fiscalMemory[alliance] = snap.FiscalMemories[alliance] ?? new FiscalStateMemory();
+                _frontChangedDay[alliance] = snap.FrontChangedDay[alliance];
+                _capitalStreakDay[alliance] = snap.CapitalStreakDay[alliance];
+                _probeHysteresis[alliance] = ProbeHysteresis.FromSnapshot(snap.ProbeHysteresis[alliance]);
             }
             MinorOfficerProfiles.Clear();
             foreach (var kv in snap.MinorOfficers) MinorOfficerProfiles[kv.Key] = kv.Value;

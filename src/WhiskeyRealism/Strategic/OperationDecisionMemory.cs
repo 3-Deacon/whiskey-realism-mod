@@ -131,6 +131,26 @@ namespace WhiskeyRealism.Strategic
 
         // A probe state belongs to one target area; when the plan target moves the old probe
         // is not this operation's probe any more.
+        internal ProbeHysteresisDto Snapshot()
+        {
+            return new ProbeHysteresisDto
+            {
+                WithdrawStreak = _withdrawStreak,
+                CooldownUntilDay = _cooldownUntilDay,
+                CooldownTargetKey = _cooldownTargetKey
+            };
+        }
+
+        internal static ProbeHysteresis FromSnapshot(ProbeHysteresisDto dto)
+        {
+            var h = new ProbeHysteresis();
+            if (dto == null) return h;
+            h._withdrawStreak = Math.Max(0, dto.WithdrawStreak);
+            h._cooldownUntilDay = dto.CooldownUntilDay;
+            h._cooldownTargetKey = dto.CooldownTargetKey;
+            return h;
+        }
+
         public static bool KeepPreviousState(string previousTargetAreaKey, string currentTargetAreaKey)
         {
             return !string.IsNullOrEmpty(currentTargetAreaKey) &&
