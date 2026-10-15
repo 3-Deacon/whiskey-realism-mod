@@ -68,6 +68,7 @@ internal static class TheaterPlannerTests
             ("MassOnlyWithinMarchHorizon", MassOnlyWithinMarchHorizon),
             ("RiverDiscountIsOrderIndependent", RiverDiscountIsOrderIndependent),
             ("ReviewTerrainRecordsEachUnknownOnce", ReviewTerrainRecordsEachUnknownOnce),
+            ("ReviewTerrainProbesInFixedOrder", ReviewTerrainProbesInFixedOrder),
             ("BusyFormationNeverTheCandidateForce", BusyFormationNeverTheCandidateForce),
             ("CandidateForceIsTheMainBody", CandidateForceIsTheMainBody),
             ("SeedFoldsDecisionSerialAndAlliance", SeedFoldsDecisionSerialAndAlliance),
@@ -142,10 +143,18 @@ internal static class TheaterPlannerTests
         HistoricalPriorTable.Entry east = default(HistoricalPriorTable.Entry);
         foreach (var e in HistoricalPriorTable.Entries)
             if (e.Id == "union-east-pressure") east = e;
-        AssertNear(0.5f, HistoricalPriorTable.Weight(east, east.EndSerial + 93), 0.0001f, "three months after the window");
-        AssertNear(0.25f, HistoricalPriorTable.Weight(east, east.EndSerial + 186), 0.0001f, "six months after");
-        AssertNear(0.5f, HistoricalPriorTable.Weight(east, east.StartSerial - 93), 0.0001f, "three months before");
+        double month = HistoricalPriorTable.MeanMonthDays;
+        AssertTrue(month >= 30.4 && month <= 31.0, "a month of the serial (30.44 calendar, 31 legacy): " + month);
+        AssertNear(0.5f, HistoricalPriorTable.Weight(east, east.EndSerial + (int)Math.Round(3 * month)), 0.005f, "three months after the window");
+        AssertNear(0.25f, HistoricalPriorTable.Weight(east, east.EndSerial + (int)Math.Round(6 * month)), 0.005f, "six months after");
+        AssertNear(0.5f, HistoricalPriorTable.Weight(east, east.StartSerial - (int)Math.Round(3 * month)), 0.005f, "three months before");
+        AssertNear((float)Math.Pow(0.5, 40 / month / 3.0), HistoricalPriorTable.Weight(east, east.EndSerial + 40), 0.0001f, "0.5^(days / month / 3)");
         AssertNear(1f, HistoricalPriorTable.Weight(east, east.EndSerial), 0.0001f, "the window's last day is inside");
+        AssertTrue(HistoricalPriorTable.Weight(east, east.EndSerial + 1) < 1f, "the next day is outside");
+        // A window ending in a 30-day month ends on the 30th, whatever the serial.
+        var june = new HistoricalPriorTable.Entry { StartSerial = east.StartSerial, EndSerial = ReviewCadenceCatchUp.DaySerial(1, 7, 1861) - 1, Priority = 3 };
+        AssertTrue(HistoricalPriorTable.Weight(june, ReviewCadenceCatchUp.DaySerial(30, 6, 1861)) == 1f, "30 June inside");
+        AssertTrue(HistoricalPriorTable.Weight(june, ReviewCadenceCatchUp.DaySerial(1, 7, 1861)) < 1f, "1 July outside");
     }
 
     private static void PriorTableMatchesCatalog()
@@ -157,7 +166,7 @@ internal static class TheaterPlannerTests
             AssertEqual(p.AllianceId, e.Alliance, e.Id + " alliance");
             AssertEqual(string.Join(",", p.ObjectiveAllowList), string.Join(",", e.ObjectiveIds), e.Id + " objectives");
             AssertEqual(ReviewCadenceCatchUp.DaySerial(1, p.StartMonth, p.StartYear), e.StartSerial, e.Id + " window start");
-            AssertEqual(ReviewCadenceCatchUp.DaySerial(31, p.EndMonth, p.EndYear), e.EndSerial, e.Id + " window end");
+            AssertEqual(ReviewCadenceCatchUp.DaySerial(1, p.EndMonth + 1, p.EndYear) - 1, e.EndSerial, e.Id + " window end: the end month's last day");
             AssertEqual(HistoricalPriorTable.TierOf(p.Priority), e.Priority, e.Id + " tier");
         }
         AssertEqual(3, HistoricalPriorTable.TierOf(10), "catalog 10 is the top tier");
@@ -290,12 +299,22 @@ internal static class TheaterPlannerTests
     private static void SeededChoiceReproducible()
     {
         var s = TwoTargets(0.5f, 0.5f);
+        var reversed = Line();
+        reversed.Objectives.Add(s.Objectives[1]);
+        reversed.Objectives.Add(s.Objectives[0]);
+        reversed.Own.Add(Corps(1, 200f, 20000f));
+        var seen = new HashSet<int>();
         for (long seed = 1; seed <= 20; seed++)
         {
             var a = new PlannerState { CampaignSeed = seed };
             var b = new PlannerState { CampaignSeed = seed };
-            AssertEqual(Plan(s, a).MainObjectiveId, Plan(s, b).MainObjectiveId, "same seed, same choice " + seed);
+            var c = new PlannerState { CampaignSeed = seed };
+            int choice = Plan(s, a).MainObjectiveId;
+            AssertEqual(choice, Plan(s, b).MainObjectiveId, "same seed, same choice " + seed);
+            AssertEqual(choice, Plan(reversed, c).MainObjectiveId, "same choice whatever order vanilla lists the objectives in, seed " + seed);
+            seen.Add(choice);
         }
+        AssertTrue(seen.Contains(98) && seen.Contains(99), "the seeds draw both");
     }
 
     private static void RandomOnlyWithinEpsilon()
@@ -926,7 +945,7 @@ internal static class TheaterPlannerTests
         s.Own.Add(Corps(4, 550f, 8000f));
         s.Beliefs.Add(Belief(600f, 0f, 10000f, 1f));
         AssertNear(20000f, Candidate(s, null, 98).Mass, 0.01f, "sector 2's hold, the player's map group and the busy corps stay out");
-        AssertNear(28000f, Candidate(s, null, 97).Mass, 0.01f, "attacking sector 2's own threat releases its hold");
+        AssertNear(28000f, Candidate(s, null, 97).Mass, 0.01f, "sector 2's hold masses for sector 2's own target");
         var plan = PlanOnce(s);
         AssertEqual(98, plan.MainObjectiveId, "main effort 98");
         AssertEqual("1", string.Join(",", plan.MassInstanceIds), "only corps 1 is massed");
@@ -949,8 +968,8 @@ internal static class TheaterPlannerTests
     // candidate gets a river discount the other lacks, and once the memo is complete both do.
     private static void RiverDiscountIsOrderIndependent()
     {
-        var forward = new MemoRiverAtZ(60f, 3);
-        var reversed = new MemoRiverAtZ(60f, 3);
+        var forward = new MemoRiverAtZ(60f, 1);
+        var reversed = new MemoRiverAtZ(60f, 1);
         var stateA = new PlannerState { CampaignSeed = 1L };
         var stateB = new PlannerState { CampaignSeed = 1L };
         bool complete = false;
@@ -990,6 +1009,43 @@ internal static class TheaterPlannerTests
         source.NewReview();
         AssertEqual(1, view.ProbeUnknown(), "probed once");
         AssertTrue(source.TryLine(0f, 0f, 200f, 0f, out _), "known after the probe");
+    }
+
+    // Unknown questions are probed capital first, then candidates by ascending objective id, not in
+    // the order they were asked.
+    private static void ReviewTerrainProbesInFixedOrder()
+    {
+        var areas = new List<AreaRecord>
+        {
+            new AreaRecord { Index = 0, X = 0f, Z = 0f, EdgeX = new[] { 0f }, EdgeZ = new[] { 0f } },
+            new AreaRecord { Index = 1, X = 200f, Z = 0f, EdgeX = new[] { 200f }, EdgeZ = new[] { 0f } },
+            new AreaRecord { Index = 2, X = 0f, Z = 200f, EdgeX = new[] { 0f }, EdgeZ = new[] { 200f } },
+        };
+        var source = new MemoRiverAtZ(60f, 1);
+        for (int review = 0; review < 3; review++)
+        {
+            source.NewReview();
+            var view = new ReviewTerrain(source, areas);
+            view.Mark(ReviewTerrain.GroupCandidate, 99, 200f, 0f);
+            view.Blocks(0f, 0f, 200f, 0f);
+            view.Mark(ReviewTerrain.GroupCandidate, 98, 0f, 200f);
+            view.Blocks(0f, 0f, 0f, 200f);
+            view.Mark(ReviewTerrain.GroupCapital, 0, 200f, 0f);
+            view.Blocks(200f, 0f, 0f, 200f);
+            view.ProbeUnknown();
+        }
+        AssertTrue(source.TryLine(200f, 0f, 0f, 200f, out _), "review 1: the capital's line");
+        AssertTrue(source.TryLine(0f, 0f, 0f, 200f, out _), "review 2: objective 98's line");
+        AssertTrue(source.TryLine(0f, 0f, 200f, 0f, out _), "review 3: objective 99's line");
+        var fresh = new MemoRiverAtZ(60f, 1);
+        fresh.NewReview();
+        var first = new ReviewTerrain(fresh, areas);
+        first.Mark(ReviewTerrain.GroupCandidate, 99, 200f, 0f);
+        first.Blocks(0f, 0f, 200f, 0f);
+        first.Mark(ReviewTerrain.GroupCandidate, 98, 0f, 200f);
+        first.Blocks(0f, 0f, 0f, 200f);
+        first.ProbeUnknown();
+        AssertTrue(fresh.TryLine(0f, 0f, 0f, 200f, out _) && !fresh.TryLine(0f, 0f, 200f, 0f, out _), "98 before 99 although 99 asked first");
     }
 
     private static CampaignSnapshot Mirror(bool reversed)

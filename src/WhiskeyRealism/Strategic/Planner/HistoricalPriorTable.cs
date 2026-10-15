@@ -7,8 +7,11 @@ namespace WhiskeyRealism.Strategic.Planner
     // reduced to (alliance, objective ids, date window, priority); the per-phase machinery is not
     // carried. Copied here so G6 can delete the catalog; TheaterPlannerTests.PriorTableMatchesCatalog
     // pins every row against the catalog until then.
-    //   Window: the first day of the start month to the last day (31) of the end month, as the
-    //     catalog's InDateWindow compares months; serials are ReviewCadenceCatchUp.DaySerial.
+    //   Window: the first day of the start month to the last day of the end month (the day before
+    //     the first of the next month), as the catalog's InDateWindow compares months; serials are
+    //     ReviewCadenceCatchUp.DaySerial. Outside the window the decay counts months of
+    //     MeanMonthDays, the serial's own mean month over four years (a leap cycle), so the table is
+    //     right whether DaySerial counts calendar days or the legacy 31-day months.
     //   Priority: the catalog sorts ascending (CompareMatches: 10 before 15 before 20), so its
     //     value is stored as a tier 3 / 2 / 1 (10 / 15 / 20) and the weight is x tier / 3, never
     //     above 1, so the planner's prior term PriorLambda x Weight stays within
@@ -26,7 +29,8 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public const int MaxTier = 3;
         public const float HalfLifeMonths = 3f;
-        private const int DaysPerMonth = 31; // ReviewCadenceCatchUp.DaySerial's month width
+        internal static readonly double MeanMonthDays =
+            (ReviewCadenceCatchUp.DaySerial(1, 1, 1865) - ReviewCadenceCatchUp.DaySerial(1, 1, 1861)) / 48.0;
 
         private static readonly Entry[] Table =
         {
@@ -46,7 +50,7 @@ namespace WhiskeyRealism.Strategic.Planner
             float window = 1f;
             int outside = daySerial < e.StartSerial ? e.StartSerial - daySerial
                 : daySerial > e.EndSerial ? daySerial - e.EndSerial : 0;
-            if (outside > 0) window = (float)Math.Pow(0.5, outside / (double)DaysPerMonth / HalfLifeMonths);
+            if (outside > 0) window = (float)Math.Pow(0.5, outside / MeanMonthDays / HalfLifeMonths);
             float tier = Math.Max(0, Math.Min(MaxTier, e.Priority)) / (float)MaxTier;
             return window * tier;
         }
@@ -84,7 +88,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 Alliance = alliance,
                 ObjectiveIds = objectives,
                 StartSerial = ReviewCadenceCatchUp.DaySerial(1, startMonth, startYear),
-                EndSerial = ReviewCadenceCatchUp.DaySerial(DaysPerMonth, endMonth, endYear),
+                EndSerial = ReviewCadenceCatchUp.DaySerial(1, endMonth + 1, endYear) - 1,
                 Priority = TierOf(catalogPriority)
             };
         }
