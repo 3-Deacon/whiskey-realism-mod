@@ -2,9 +2,39 @@ using System.Collections.Generic;
 
 namespace WhiskeyRealism.Tactical.PlayerOrders
 {
+    // Owned by TacticalPlayerDispatchRuntime (battle-core D9): one instance serves
+    // #62's player-order shadows and the emitter's last-dispatch record, so #62 and
+    // the executor's ancestor dispatches share one dedupe.
     internal sealed class PlayerOrderDedupeState
     {
         private readonly Dictionary<string, PlayerOrderShadow> _shadows = new Dictionary<string, PlayerOrderShadow>();
+        private bool _hasDispatch;
+        private int _dispatchType;
+        private float _dispatchX;
+        private float _dispatchZ;
+        private int _dispatchSession;
+
+        // The last emitted dispatch had the same vanilla type, a target within
+        // `meters`, and no given order has been issued since (vanilla bumps
+        // DLC_WL.GivenOrders.givenorderssession on every new order, 8651).
+        public bool IsDuplicateDispatch(int type, float x, float z, int givenOrderSession, float meters)
+        {
+            if (!_hasDispatch || _dispatchType != type || _dispatchSession != givenOrderSession) return false;
+            float dx = x - _dispatchX;
+            float dz = z - _dispatchZ;
+            return dx * dx + dz * dz < meters * meters;
+        }
+
+        // givenOrderSession is the session after the vanilla call, so an accepted
+        // order and a rejected attempt both dedupe until the next given order.
+        public void RecordDispatch(int type, float x, float z, int givenOrderSession)
+        {
+            _hasDispatch = true;
+            _dispatchType = type;
+            _dispatchX = x;
+            _dispatchZ = z;
+            _dispatchSession = givenOrderSession;
+        }
 
         public bool TryGetShadow(string unitKey, out PlayerOrderShadow shadow)
         {
@@ -38,11 +68,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public void ClearForBattleBoundary(string battleIdentity)
         {
             _shadows.Clear();
+            _hasDispatch = false;
         }
 
         public void ClearForPlayerCommandChange()
         {
             _shadows.Clear();
+            _hasDispatch = false;
         }
     }
 
