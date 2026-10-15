@@ -61,13 +61,20 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlStartSelectionRetryGate.cs" Link="WlStartSelectionRetryGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlDispatchSanitizer.cs" Link="WlDispatchSanitizer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlStrategicOrderBridge.cs" Link="WlStrategicOrderBridge.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignDispatchPolicy.cs" Link="WlCampaignDispatchPolicy.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampaignDispatchRuntime.cs" Link="WlCampaignDispatchRuntime.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\PlayerComplianceLedger.cs" Link="PlayerComplianceLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicFactionAiGuard.cs" Link="CicFactionAiGuard.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PersonalityVector.cs" Link="PersonalityVector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\HistoricalFigureRegistry.cs" Link="HistoricalFigureRegistry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Util\Reflection.cs" Link="Util\Reflection.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DifficultyPersonalityModifier.cs" Link="DifficultyPersonalityModifier.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\PerkSelectionScorer.cs" Link="PerkSelectionScorer.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\VanillaPerkTables.cs" Link="VanillaPerkTables.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\PerkIdIlRewrites.cs" Link="Patches\PerkIdIlRewrites.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Patches\PerkSwaps.cs" Link="Patches\PerkSwaps.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\FactionProfiles.cs" Link="FactionProfiles.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\EraStage.cs" Link="EraStage.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\StrategyTag.cs" Link="StrategyTag.cs" />

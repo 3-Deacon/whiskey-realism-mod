@@ -25,6 +25,8 @@ campaign.patch.save-load.load                      # AICampaign.Load: only when 
 campaign.patch.wl-camp-realism.*                   # Camp/Station/Diary: W&L career camp and diary only
 campaign.patch.wl-operation-null-guard             # DLC_WL.CommanderRelations.Operation.UpdateOperation: W&L operations only
 campaign.patch.dispatch-sanitizer                  # Messages.Message.GenerateMessageContent: W&L dispatches only
+campaign.patch.cic-faction-ai-guard.is-cic         # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
+campaign.patch.cic-faction-ai-guard.is-cic.prefix  # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
 
 # Campaign events that need not happen in a short session.
 campaign.patch.commander-prev-command.*            # Commander.AssignCommando: only when a commander is assigned to a unit
@@ -37,6 +39,7 @@ campaign.patch.project-appoint-observer.*          # Projects.AppointProject: on
 campaign.patch.recruitment.state-steer             # AIArea.GetBestRecruitingState: only when ZoneRecruiting picks a state to recruit in
 campaign.patch.arty-combine-gun-transfer.postfix   # BattleUnits.CombineUnits: only when two units are merged
 campaign.patch.fleet-patrol-reset                  # Regiment.StopRegiment on a fleet: naval patrol orders only
+tactical.patch.perk-ids.hq.engineers-choose       # Regiment.ChoosePerk: only when a unit picks a perk (an open slot with full perk experience)
 
 # Battle paths a single battle may not reach.
 tactical.patch.fallback-retreat-guard.MicroAICheckForRetreats  # AIBattle.MicroAICheckForRetreats: vanilla calls it only with macroai 3 (retreat) and ai_stance 1
@@ -44,4 +47,5 @@ tactical.patch.observer.retreats                   # same MicroAICheckForRetreat
 tactical.patch.observer.order-queue                # Regiment.AddToOrderQueue: player/UI order path; the battle AI does not call it
 tactical.patch.observer.courier*                   # Regiment.AddOrderCourierline: courier-delivered (player) orders only
 tactical.patch.observer.battle-units-destroy       # BattleUnits.OnDestroy: only when the battle scene is left
+tactical.patch.perk-ids.hq.cover.*                # Regiment.GetCoverValueFromID: only when a unit stands at a cover object (fence, wall, building)
 campaign.patch.battle-result-observer              # BattleMonument.UpdateAllianceWon: only when a finished battle is imported back to the campaign

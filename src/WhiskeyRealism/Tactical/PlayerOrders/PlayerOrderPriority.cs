@@ -19,10 +19,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 case PlayerOrderIntent.AdvanceToAssemblyArea:
                 case PlayerOrderIntent.ProbeObjective:
                     return 50;
-                case PlayerOrderIntent.BuildSupplyDepot:
-                case PlayerOrderIntent.BuildFort:
-                case PlayerOrderIntent.DefendCapital:
-                    return 30;
                 case PlayerOrderIntent.RecoverFromCombat:
                 case PlayerOrderIntent.ClearHoldTransition:
                     return 20;

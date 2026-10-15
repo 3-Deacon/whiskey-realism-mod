@@ -32,6 +32,8 @@ namespace WhiskeyRealism.Strategic
         public int[] FrontChangedDay = { -1, -1 };
         public int[] CapitalStreakDay = { -1, -1 };
         public ProbeHysteresisDto[] ProbeHysteresis = new ProbeHysteresisDto[2];
+        // W&L player compliance (PlayerComplianceRuntime); null when none.
+        public PlayerComplianceDto PlayerCompliance;
         // Stage E: smoothed policy needs (null = none yet) and the policy ledger pick (-1 = none).
         public float[][] PolicyNeeds = new float[2][];
         public int[] PolicyPicks = { -1, -1 };
@@ -150,7 +152,8 @@ namespace WhiskeyRealism.Strategic
             {
                 SaveSequence = snap.SaveSequence,
                 LastSeenMonth = snap.LastSeenMonth,
-                LastSeenYear = snap.LastSeenYear
+                LastSeenYear = snap.LastSeenYear,
+                PlayerCompliance = snap.PlayerCompliance
             };
             for (int alliance = 0; alliance < 2; alliance++)
             {
@@ -250,6 +253,7 @@ namespace WhiskeyRealism.Strategic
                 result.SaveSequence = dto.SaveSequence;
                 result.LastSeenMonth = dto.LastSeenMonth ?? -1;
                 result.LastSeenYear = dto.LastSeenYear ?? -1;
+                result.PlayerCompliance = dto.PlayerCompliance;
                 snap = result;
                 reason = "ok";
                 return true;

@@ -20,7 +20,7 @@ These rules apply to Harmony patches under `src/WhiskeyRealism/Patches/`.
 - Use `OnceLog` or signature-gated logging for first-fire and behavioral proof.
 - Preserve vanilla side effects unless the spec explicitly says to replace them.
 - Bound-check alliance indexes. `AICampaign.aifaction` can include alliance `2` for Europe.
-- Do not mutate strategic mod state from a patch. Patches may read ledgers and steer vanilla behavior only.
+- Do not mutate strategic mod state from a patch. Patches may read ledgers and steer vanilla behavior only. The one exception is W&L order bookkeeping (#62 shadow, #69 pending moves and dispatch history, player-compliance observations); see root `AGENTS.md` § Patch hygiene.
 - If a Prefix filters or temporarily rewrites vanilla state, restore it in a `[HarmonyFinalizer]` so the restore runs even when vanilla throws.
 - Battle writes: a patch does not call vanilla movement/stance/formation/facing/combat-behavior writers itself. It either steers vanilla's own inputs, or builds a `BattleOrderIntent` and runs it through `OrderExecutorRuntime.TryPlanInline` / `ExecutePlannedInline` (#42, #56); new Whiskey movers are battle-core producers, not patches. Any remaining direct write (#59 rollback, #60 deployment, #42's no-snapshot fallback) checks `TacticalWriteGuard.CanWrite(unit)` (and skips the W&L feud instance for battle-level writes). Write `ai_stance` only through `Util/TacticalStanceWriter`; only #44 writes `macroai`. Under `Tactical Commander Mode` `MonitorOnly`/`Off` nothing is written.
 - Battle doctrine timers use `TacticalDoctrineTime` (battle game-hours), never wall-clock time.
