@@ -135,11 +135,11 @@ namespace WhiskeyRealism.Patches
             catch { return true; }
         }
 
+        // Operations-ledger opinion; an army in Commander Mode Off has none
+        // (the plugin-level mode gate already stops writes in Off/MonitorOnly).
         private static int OrchestratorMacroOpinion(ArmyOrchestrator army)
         {
-            if (army.CommanderMode == TacticalCommanderMode.Off)
-                return army.HasPlan ? army.CurrentMacroAi : -1;
-
+            if (army.CommanderMode == TacticalCommanderMode.Off) return -1;
             return TacticalOperationsLedgerModel.OperationMacroAi(army.CurrentOperation);
         }
 
