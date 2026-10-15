@@ -15,7 +15,7 @@ internal static class CampaignMilitaryFixTests
         ForbiddenDefensiveCommitRevertMatchesHowVanillaMoved();
         TransferRequirementIsLocalNotTheaterWide();
         TransferSteersOnlyWhenPlanShortfallIsWorse();
-        TransferStrengthUsesVanillaHeatmapKernel();
+        TransferStrengthReadsVanillaHeatmapGrids();
         ImportanceRedirectHonoursVanillaCandidateGates();
         ImportanceRedirectStaysInPlanTheater();
         ArmyGroupManagementRepeatsVanillaGuard();
@@ -595,20 +595,25 @@ internal static class CampaignMilitaryFixTests
         LogPass("c2a forbidden defensive commit revert matches how vanilla moved");
     }
 
-    // L5: vanilla's deficit cell values come from Heatmap.PaintObject (34117):
-    // 20x20 grid, groupstrengthdirect painted at the unit's cell (floored at 999)
-    // and on rings 1..3 at 3/4, 1/2, 1/4 strength (rangetodraw 4, reduceintensity,
-    // UpdateHeatmaps 12332/12341). The plan side must use the same kernel.
-    private static void TransferStrengthUsesVanillaHeatmapKernel()
+    // L5 (re-review): vanilla's positiondeficit is read from the painted
+    // recruitment heatmap cells (ZoneRecruiting 12474-12476); PaintObject
+    // (34117-34197) samples ring points with angle rounding, so no closed-form
+    // kernel reproduces it (offset (1,1) = 1.25 x strength). The plan side must
+    // read the same painted grids via the public Heatmap.GetValueOnPos(Vector3,
+    // bool usearrayvalues) (33840). This pins the vanilla API the patch reads.
+    private static void TransferStrengthReadsVanillaHeatmapGrids()
     {
-        const float cell = 102.4f; // 2048 / 20
-        TestHarness.AssertEqual(5000f, CampaignMilitaryGates.HeatmapContribution(5000f, 10f, cell), "own cell: full strength");
-        TestHarness.AssertEqual(999f, CampaignMilitaryGates.HeatmapContribution(400f, 10f, cell), "own cell floored at 999");
-        TestHarness.AssertEqual(3750f, CampaignMilitaryGates.HeatmapContribution(5000f, 100f, cell), "ring 1: 3/4");
-        TestHarness.AssertEqual(2500f, CampaignMilitaryGates.HeatmapContribution(5000f, 210f, cell), "ring 2: 1/2");
-        TestHarness.AssertEqual(1250f, CampaignMilitaryGates.HeatmapContribution(5000f, 300f, cell), "ring 3: 1/4");
-        TestHarness.AssertEqual(0f, CampaignMilitaryGates.HeatmapContribution(5000f, 420f, cell), "ring 4+: nothing");
-        TestHarness.AssertEqual(0f, CampaignMilitaryGates.HeatmapContribution(0f, 10f, cell), "empty unit paints nothing");
-        LogPass("c2a transfer strength uses vanilla heatmap kernel");
+        var factionType = HarmonyLib.AccessTools.Inner(typeof(AICampaign), "AIFaction");
+        TestHarness.AssertTrue(factionType != null, "AICampaign.AIFaction exists");
+        TestHarness.AssertEqual(2, CampaignMilitaryGates.TransferHeatmapFields.Length, "own + enemy grids");
+        foreach (var name in CampaignMilitaryGates.TransferHeatmapFields)
+        {
+            var field = factionType.GetField(name);
+            TestHarness.AssertTrue(field != null, "AIFaction." + name + " is public");
+            TestHarness.AssertEqual(typeof(Heatmap), field.FieldType, name + " is a vanilla Heatmap");
+        }
+        var read = typeof(Heatmap).GetMethod("GetValueOnPos", new[] { typeof(UnityEngine.Vector3), typeof(bool) });
+        TestHarness.AssertTrue(read != null && read.IsPublic && !read.IsStatic, "public instance Heatmap.GetValueOnPos(Vector3, bool)");
+        LogPass("c2a transfer strength reads vanilla heatmap grids");
     }
 }
