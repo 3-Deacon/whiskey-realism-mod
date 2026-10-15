@@ -895,6 +895,8 @@ namespace WhiskeyRealism.Tactical.Operations
         {
             if (movingUnits <= 0) return false;
             if (unit.MovementMode > 0) return true;
+            // #61 read groupsubordinatesmoving > 0.05: a moving subordinate counts.
+            if (movingUnits > (unit.RegimentPaths > 0 ? 1 : 0)) return true;
             if (!HasPoint(unit.LastWaypointX, unit.LastWaypointZ)) return false;
             return Distance(unit.X, unit.Z, unit.LastWaypointX, unit.LastWaypointZ) > MinWaypointMeters;
         }
@@ -913,6 +915,31 @@ namespace WhiskeyRealism.Tactical.Operations
                 ActiveMove = activeMove,
                 AllowStaleQueuedBypass = allowStaleQueuedBypass,
             });
+        }
+
+        /// <summary>
+        /// The floor half of #61's safe-waypoint band (60 m): a target closer than
+        /// that is where the unit already stands. The executor dedupes a repeat of
+        /// the last waypoint but has no floor, and a move onto the unit's own
+        /// position adds no path (Failed, then a rotated retry of a ~0 m vector).
+        /// </summary>
+        public static bool IsMoveAway(in UnitRecord unit, float x, float z)
+        {
+            return HasPoint(x, z) && Distance(unit.X, unit.Z, x, z) >= MinWaypointMeters;
+        }
+
+        /// <summary>
+        /// The regiments #61 fire control orders (TryApplyFireControlToUnit):
+        /// infantry, skirmishers and cavalry. Never a battery — BC5b's artillery
+        /// doctrine owns battery combat behavior (7/8) on the same channel and
+        /// priority.
+        /// </summary>
+        public static bool IsFireControlUnit(in UnitRecord unit)
+        {
+            if ((unit.Flags & (UnitFlags.IsArtillery | UnitFlags.IsGroup)) != 0) return false;
+            return unit.UnitTyp == TacticalUnitType.Infantry ||
+                unit.UnitTyp == TacticalUnitType.Skirmisher ||
+                unit.UnitTyp == TacticalUnitType.Cavalry;
         }
 
         public static CommandPhysicalState Physical(in UnitRecord unit, int movingUnits)
@@ -1223,7 +1250,8 @@ namespace WhiskeyRealism.Tactical.Operations
     // layout nor the rotation is in the snapshot, so the slot is the leaf's
     // current offset from its command parent (the snapshot parent map, plan D5)
     // re-applied at the parent's last waypoint — the rule the executor uses for
-    // fanned-out children (OrderExecutor.OffsetTarget). The executor's validator
+    // fanned-out children (OrderExecutor.OffsetTarget); a slot within 60 m of
+    // the leaf is no move. The executor's validator
     // clamps it to the map (131057-131068).
     public static class LeafSlotTarget
     {
@@ -1240,7 +1268,8 @@ namespace WhiskeyRealism.Tactical.Operations
             if (!PostureSense.HasPoint(own[parent].LastWaypointX, own[parent].LastWaypointZ)) return false;
             x = own[parent].LastWaypointX + (own[leafIndex].X - own[parent].X);
             z = own[parent].LastWaypointZ + (own[leafIndex].Z - own[parent].Z);
-            return PostureSense.HasPoint(x, z);
+            // A leaf already at its slot has no move to make.
+            return PostureSense.IsMoveAway(own[leafIndex], x, z);
         }
     }
 

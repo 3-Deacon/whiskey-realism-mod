@@ -353,6 +353,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private static float EnemiesInRange(BattleSnapshot view, int index, OrderChannel channel)
         {
             if (channel != OrderChannel.Formation && channel != OrderChannel.Facing) return 0f;
+            // Only the group path reads it (a regiment rotates or re-forms directly).
+            if (index < 0 || index >= view.OwnCount || (view.Own[index].Flags & UnitFlags.IsGroup) == 0) return 0f;
             return PostureSense.EnemyStrengthInRange(view, index, LineOfSightRange());
         }
 

@@ -501,14 +501,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             if (decision.Action == PostureExecutionAction.NoWrite)
             {
-                PostureTelemetry.Group(s, i, state, decision, 0, decision.Reason);
+                PostureTelemetry.Group(s, i, reason, state, decision, 0, decision.Reason);
                 return false;
             }
 
             bool hasTarget = PostureTargets.TryResolve(s, t, i, side, state, order, decision.Target, out float x, out float z);
             if (!hasTarget && t.NavDeferred)
             {
-                PostureTelemetry.Group(s, i, state, decision, 0, "nav-budget-deferred");
+                PostureTelemetry.Group(s, i, reason, state, decision, 0, "nav-budget-deferred");
                 return false;
             }
 
@@ -540,7 +540,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 Reason = reason,
             };
             int submitted = PostureIntentPlan.Submit(sink, request);
-            PostureTelemetry.Group(s, i, state, decision, submitted, hasTarget ? decision.Reason : "target-unresolved");
+            PostureTelemetry.Group(s, i, reason, state, decision, submitted, hasTarget ? decision.Reason : "target-unresolved");
             return submitted > 0;
         }
 
@@ -698,11 +698,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             if (!resolved) return false;
-            if (kind != PostureExecutionTarget.DoctrinePrimaryTarget &&
-                kind != PostureExecutionTarget.DoctrineSupportTarget &&
-                kind != PostureExecutionTarget.DoctrineFallbackTarget)
-                return true;
-            return TryNavPlan(s, t, i, state, order, kind, ref x, ref z);
+            if ((kind == PostureExecutionTarget.DoctrinePrimaryTarget ||
+                 kind == PostureExecutionTarget.DoctrineSupportTarget ||
+                 kind == PostureExecutionTarget.DoctrineFallbackTarget) &&
+                !TryNavPlan(s, t, i, state, order, kind, ref x, ref z))
+                return false;
+            return PostureSense.IsMoveAway(s.Own[i], x, z);
         }
 
         internal static bool TryThreat(BattleSnapshot s, int i, out float x, out float z)
@@ -1026,15 +1027,17 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return names != null && names.TryGetValue(id, out string name) ? TacticalCurrentOrderSignature.Safe(name) : "#" + id;
         }
 
-        internal static void Group(BattleSnapshot s, int i, CommandNodeOperationalState state, PostureExecutionDecision decision,
-            int submitted, string reason)
+        internal static void Group(BattleSnapshot s, int i, string source, CommandNodeOperationalState state,
+            PostureExecutionDecision decision, int submitted, string reason)
         {
             try
             {
                 int id = s.Own[i].InstanceId;
                 string signature = s.Alliance + "|" + id + "|" + state.Task + "|" + decision.Action + "|" + decision.Target
                     + "|" + reason + "|" + submitted;
-                if (!TacticalTelemetry.ShouldEmit(_lastAt, "tactical-command-posture:" + s.Alliance + ":" + id, signature,
+                // Keyed per source: the posture and division-play passes decide the
+                // same group with different tasks; one key would flip every tick.
+                if (!TacticalTelemetry.ShouldEmit(_lastAt, "tactical-command-posture:" + source + ":" + s.Alliance + ":" + id, signature,
                         Time.realtimeSinceStartup, TelemetrySeconds, false))
                     return;
                 string unit = NameOf(s, i);
@@ -1043,6 +1046,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         .WithSide(s.Alliance)
                         .WithUnit(unit)
                         .WithDecision(decision.Action.ToString(), reason, signature)
+                        .WithField("source", source)
                         .WithField("node", TacticalOperationsTelemetry.SafeToken(state.NodeId))
                         .WithField("task", state.Task.ToString())
                         .WithField("selectedTarget", decision.Target.ToString())
@@ -1300,8 +1304,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             CommandNodeOperationalState state, IIntentSink sink)
         {
             ref UnitRecord unit = ref s.Own[u];
+            if (!PostureSense.IsFireControlUnit(unit)) return;
             int typ = unit.UnitTyp;
-            if (typ != TacticalUnitType.Infantry && typ != TacticalUnitType.Skirmisher && typ != TacticalUnitType.Cavalry) return;
             UnitFlags f = unit.Flags;
             if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached)) != 0 || (f & UnitFlags.Active) == 0) return;
             if (PostureSense.Routed(unit)) return;

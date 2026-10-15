@@ -33,6 +33,9 @@ internal static class PostureMigrationTests
             ("bc5a EnemyStrengthInRangeIsFogHonest", EnemyStrengthInRangeIsFogHonest),
             ("bc5a DivisionPlayInputFromTheSnapshot", DivisionPlayInputFromTheSnapshot),
             ("bc5a ExecutorOutcomeStampsDoctrineCooldowns", ExecutorOutcomeStampsDoctrineCooldowns),
+            ("bc5a LeafAtItsSlotHasNoMove", LeafAtItsSlotHasNoMove),
+            ("bc5a MovingSubordinateIsAnActiveMove", MovingSubordinateIsAnActiveMove),
+            ("bc5a FireControlNeverTargetsArtillery", FireControlNeverTargetsArtillery),
         });
     }
 
@@ -518,5 +521,50 @@ internal static class PostureMigrationTests
         AssertFalse(PostureIntentPlan.IssuedWithin(executor, 1, OrderChannel.Facing, IntentSource.PostureExecutor, 10.05, 0.1), "another source's write");
         AssertFalse(PostureIntentPlan.IssuedWithin(executor, 1, OrderChannel.Facing, IntentSource.FacingPulse, 9.0, 0.1), "clock went back: expired");
         AssertFalse(PostureIntentPlan.IssuedWithin(null, 1, OrderChannel.Facing, IntentSource.FacingPulse, 10.05, 0.1), "no executor");
+    }
+
+    private static void LeafAtItsSlotHasNoMove()
+    {
+        // The division arrived: its last waypoint is where it stands, so the leaf's
+        // slot is the leaf's own position — no move onto itself (Failed/retry churn).
+        var own = new[] { Group(10, 1000f, -1000f), Group(11, 1050f, -980f, typ: 14) };
+        own[0].LastWaypointX = 1010f;
+        own[0].LastWaypointZ = -1000f;
+        var s = Snapshot(own, new[] { -1, 0 });
+        AssertFalse(LeafSlotTarget.TryResolve(s, 1, out int parent, out _, out _), "slot within 60 m: no move");
+        AssertEqual(0, parent, "the parent is still reported");
+        AssertFalse(PostureSense.IsMoveAway(s.Own[1], 1080f, -980f), "30 m away is underfoot");
+        AssertTrue(PostureSense.IsMoveAway(s.Own[1], 1150f, -980f), "100 m away is a move");
+        AssertFalse(PostureSense.IsMoveAway(s.Own[1], 0f, 0f), "no point is no move");
+    }
+
+    private static void MovingSubordinateIsAnActiveMove()
+    {
+        // #61 IsExecutorMovementActive counted groupsubordinatesmoving: a brigade
+        // whose regiment marches is moving even with its own waypoint underfoot.
+        var own = new[] { Group(1, 0f, -1000f, typ: 14), Regiment(2, 0f, -1000f) };
+        own[0].RegimentPaths = 1;
+        own[0].LastWaypointX = 10f;
+        own[0].LastWaypointZ = -1000f;
+        own[1].RegimentPaths = 1;
+        var s = Snapshot(own, new[] { -1, 0 });
+        UnitFlags[] desc = null;
+        int[] moving = null;
+        PostureSense.AggregateDescendants(s, ref desc, ref moving);
+        AssertEqual(2, moving[0], "group and regiment moving");
+        AssertTrue(PostureSense.ActiveMove(s.Own[0], moving[0]), "a moving subordinate");
+        AssertFalse(PostureSense.ActiveMove(s.Own[0], 1), "only its own path near its waypoint: settled");
+    }
+
+    private static void FireControlNeverTargetsArtillery()
+    {
+        AssertTrue(PostureSense.IsFireControlUnit(Regiment(1, 0f, -10f)), "infantry");
+        AssertTrue(PostureSense.IsFireControlUnit(Regiment(2, 0f, -10f, TacticalUnitType.Cavalry)), "cavalry");
+        AssertTrue(PostureSense.IsFireControlUnit(Regiment(3, 0f, -10f, TacticalUnitType.Skirmisher)), "skirmishers");
+        AssertFalse(PostureSense.IsFireControlUnit(Regiment(4, 0f, -10f, TacticalUnitType.Artillery)),
+            "a battery belongs to the artillery doctrine (BC5b)");
+        AssertFalse(PostureSense.IsFireControlUnit(Regiment(5, 0f, -10f, flags: UnitFlags.IsArtillery)),
+            "anything flagged artillery");
+        AssertFalse(PostureSense.IsFireControlUnit(Group(6, 0f, -10f, typ: 14)), "never a group (D10)");
     }
 }
