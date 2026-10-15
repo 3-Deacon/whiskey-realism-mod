@@ -15,6 +15,7 @@ internal static class IntegrationFollowupTests
         ArtilleryFaceMirrorsVanillaTurnTrigger();
         TelegraphWishChargeMeasuresWhatPlaceTook();
         TelegraphWishChargeWithoutSpendIsNoCharge();
+        ConstructionObserverSkipsRemovedPlacement();
         ChargeDenialDemotesDoctrineDeniedAssaultWithArmyOn();
         ChargeDenialPreservesAssaultDoctrineAgreesWith();
         ChargeDenialLegacyReactionOnlyWithArmyOff();
@@ -145,6 +146,20 @@ internal static class IntegrationFollowupTests
         TestHarness.AssertFalse(TelegraphWishCharge.Measure(nullSubsidy, nan).HasCharge, "non-finite delta ignored");
         TestHarness.AssertFalse(default(TelegraphWishCharge).HasCharge, "default has no charge");
         Pass("telegraph wish charge without spend is no charge");
+    }
+
+    // TelegraphPlacementPatch (Priority.High) runs before the construction
+    // observer's Place postfix; a station it rejects is already out of
+    // BattleUnits.cbuildings (RemoveBuilding 98334) and must not be counted.
+    private static void ConstructionObserverSkipsRemovedPlacement()
+    {
+        TestHarness.AssertTrue(ConstructionStartFilter.CountsBuildingStart(true, 0, false, true), "real start counts");
+        TestHarness.AssertFalse(ConstructionStartFilter.CountsBuildingStart(true, 0, false, false), "removed before observed");
+        TestHarness.AssertFalse(ConstructionStartFilter.CountsBuildingStart(true, 1, true, true), "wish placeholder");
+        TestHarness.AssertFalse(ConstructionStartFilter.CountsBuildingStart(false, 1, false, true), "not newly created");
+        TestHarness.AssertFalse(ConstructionStartFilter.CountsBuildingStart(true, 2, false, true), "Europe");
+        TestHarness.AssertFalse(ConstructionStartFilter.CountsBuildingStart(true, -1, false, true), "no owner");
+        Pass("construction observer skips a placement removed before it is observed");
     }
 
     private static ChargeDenialDecision Deny(

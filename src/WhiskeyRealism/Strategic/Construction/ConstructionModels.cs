@@ -121,6 +121,21 @@ namespace WhiskeyRealism.Strategic.Construction
         public string Signature = "";
     }
 
+    // Which vanilla CBuilding.Place calls ConstructionObserverPatch counts as a
+    // construction start. Place (96163) registers a newly created building in
+    // BattleUnits.cbuildings; a construction wish first places an off-map
+    // placeholder (AddConstructionWish 97479, position -20000). A building
+    // already gone from cbuildings when the observer runs was removed by an
+    // earlier Place postfix (TelegraphPlacementPatch rejecting a station,
+    // RemoveBuilding 98334) and never became a construction.
+    public static class ConstructionStartFilter
+    {
+        public static bool CountsBuildingStart(bool newlyCreated, int owner, bool wishPlaceholder, bool stillRegistered)
+        {
+            return newlyCreated && owner >= 0 && owner < 2 && !wishPlaceholder && stillRegistered;
+        }
+    }
+
     public struct ConstructionStartEvent
     {
         public int AllianceId;

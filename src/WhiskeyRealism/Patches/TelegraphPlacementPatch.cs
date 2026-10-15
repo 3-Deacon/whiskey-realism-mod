@@ -16,10 +16,13 @@ namespace WhiskeyRealism.Patches
     // TelegraphConstructionRuntime: a station Telegraph AI started is checked
     // against its connection/support/safe-rear requirements; a rejected one is
     // removed and its wish charge refunded. Other placements pass untouched.
+    // Priority.High: runs before ConstructionObserverPatch's Place postfix so a
+    // rejected station is never counted as a construction start.
     [HarmonyPatch(typeof(CBuilding), "Place")]
     internal static class TelegraphPlacementPatch
     {
         [HarmonyPostfix]
+        [HarmonyPriority(Priority.High)]
         internal static void Postfix(
             CBuilding __result,
             int type,
