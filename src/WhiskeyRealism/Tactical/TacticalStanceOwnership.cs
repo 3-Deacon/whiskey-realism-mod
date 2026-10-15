@@ -20,11 +20,10 @@ namespace WhiskeyRealism.Tactical
     //     AdjustGroupFormations, so #45 (Postfix on the former) writes before
     //     #61 (Postfix on the latter) in the same macro cycle.
     //   groupstancename (65061): 0 none, 1 screen, 2 defend, 3 attack, 4 assault.
-    //     Assault (4) is vanilla's own strength-triggered micro decision (4239),
+    //     Assault (4) is vanilla's own strength-triggered micro decision (4240),
     //     and none (0) restores the vanilla AI group (RestoreOldAIGroup) — Whiskey
     //     writes neither.
     //   macroai == 3 (army retreat): vanilla forces every group to screen (4258).
-    //
     //
     // Ownership: a Whiskey write AND a Whiskey claim (agreement) stamp the
     // vanilla hold, so AdjustGroupAIStance leaves the group alone for
