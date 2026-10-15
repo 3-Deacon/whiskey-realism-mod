@@ -32,6 +32,12 @@ namespace WhiskeyRealism.Patches
     // in saves. The former BattleMacroAIOverridePatch wrote the persisted
     // sideinformation.macroai and is gone; its reinforcement-opportunity opinion
     // is consumed here as the fallback when the operations ledger has none.
+    // Deliberately no reset of sideinformation.macroai: a mid-battle save made
+    // with a pre-T3 build can carry a Whiskey-written value (saved 74819,
+    // loaded 74689), but it is indistinguishable from a genuine scripted value
+    // (scenario file 88254, honoured as an override at 6383). Such a save
+    // keeps that side on the stale value and this patch defers to it; only
+    // mid-battle dev saves from pre-T3 builds are affected.
     // W&L player side (docs/wl-player-model.md rule 4): its macroai produces
     // dispatches to the player, so only a planned-operation opinion that
     // differs from vanilla's current and pending (newmacroaitoset) value is
