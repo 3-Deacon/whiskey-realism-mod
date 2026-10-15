@@ -245,6 +245,10 @@ namespace WhiskeyRealism.Tactical.Battle
         private static bool IssueMove(BattleUnits bunits, Regiment unit, in BattleOrderIntent w, bool useOrderDelay, float x, float z)
         {
             Vector3 target = TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z));
+            // A limbered retreat (artillery producers): limber first, as
+            // CheckArtyFallback does before its path (3519).
+            if ((w.Flags & IntentFlags.Limber) != 0 && unit.unittyp == TacticalUnitType.Artillery && unit.mounted != 1)
+                bunits.MountUnits(unit, 1);
             bunits.SetWaypoint(
                 unit,
                 target,
@@ -279,8 +283,13 @@ namespace WhiskeyRealism.Tactical.Battle
                 case OrderChannel.Stance:
                     return TacticalStanceWriter.EnsureStance(bunits, unit, w.Value, w.Reason, w.Source);
                 case OrderChannel.CombatBehavior:
-                    return TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0);
+                    if (!TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0)) return false;
+                    // The artillery doctrine's cease-bombardment: vanilla pairs 7 with
+                    // bombardstarttime = 0 (CheckAIBombardment 3904).
+                    if (BattleWriterPolicy.ResetsBombardStart(w)) unit.bombardstarttime = 0f;
+                    return true;
                 case OrderChannel.Formation:
+                    if ((w.Flags & (IntentFlags.Limber | IntentFlags.Unlimber)) != 0) return IssueMount(bunits, unit, (w.Flags & IntentFlags.Limber) != 0);
                     return IssueFormation(bunits, unit, w.Value, nowHours);
                 case OrderChannel.Facing:
                     return IssueFacing(bunits, unit, w.Heading, feudReplay, nowHours);
@@ -293,6 +302,18 @@ namespace WhiskeyRealism.Tactical.Battle
                 default:
                     return false;
             }
+        }
+
+        // Artillery limber / unlimber: BattleUnits.MountUnits (90860-90890; formation
+        // 3 + mounted 1, or formation 0 + mounted 0). Never on a moving battery
+        // (BattleWriterPolicy.PlanArtilleryMicroWrite only plans idle ones).
+        private static bool IssueMount(BattleUnits bunits, Regiment unit, bool limber)
+        {
+            if (unit.unittyp != TacticalUnitType.Artillery) return false;
+            int mount = limber ? 1 : 0;
+            if (unit.mounted == mount) return false;
+            bunits.MountUnits(unit, mount);
+            return true;
         }
 
         private static bool IssueFormation(BattleUnits bunits, Regiment unit, int formation, double nowHours)

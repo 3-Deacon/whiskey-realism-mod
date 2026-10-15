@@ -157,14 +157,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         // "Cheap per-group" cache (2026-05-20). Populated in DriveTickCycle on
         // every heavy-gate-fire — one entry per commandable Regiment in
-        // bunits.unitsused for the firing side. Read by BattleGroupStancePatch's
-        // ApplyResolvedDecisionFast so the per-tick patch becomes O(1) per
-        // group: dict lookup + a few cheap field reads + a single ChangeStance
-        // call. Doctrine/ledger resolver walks, sector rebuild, and
-        // DecideGroupStance recompute all move to the gate-fire boundary.
+        // bunits.unitsused for the firing side. Read by the battle-core
+        // GroupStance and ChargeDemotion producers so each arbiter tick is O(1)
+        // per group (dict lookup + snapshot fields). Doctrine/ledger resolver
+        // walks, sector rebuild, and DecideGroupStance recompute all run at the
+        // gate-fire boundary.
         //
-        // Keyed by Regiment.GetInstanceID(); cache misses route to the legacy
-        // ApplyGroup path.
+        // Keyed by Regiment.GetInstanceID(); a miss means no stance intent and
+        // vanilla's AdjustGroupAIStance decides the group.
         //
         // Indexed by allianceId (0/1). Reset in ResetRuntimeTickState so
         // stale entries never leak between battles.
@@ -200,9 +200,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// "Cheap per-group" cache lookup. Returns the pre-resolved
         /// doctrine/ledger/charge decision for a Regiment when the most
         /// recent heavy-gate fire pre-computed one for the given alliance.
-        /// Returns false on miss; callers (currently
-        /// <c>BattleGroupStancePatch</c>) fall through to the legacy
-        /// resolver-driven apply path. Indexed by alliance id (0/1);
+        /// Returns false on miss; the battle-core stance producers then submit
+        /// nothing and vanilla decides. Indexed by alliance id (0/1);
         /// alliances &gt; 1 always miss.
         /// </summary>
         internal static bool TryGetResolvedGroupDecision(int allianceId, int instanceId, out TacticalResolvedGroupDecision resolved)
@@ -302,19 +301,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             {
                 Plugin.Log.LogWarning("[TacticalOrchestrator] scene-cache populate threw: "
                     + sce.GetType().Name + " " + sce.Message);
-            }
-
-            // Stage C perf cache (2026-05-21): pre-populate the per-group resolved
-            // decision cache with Skip defaults so BattleGroupStancePatch tier-1 hits
-            // from the very first patch invocation. Eliminates the battle-start window
-            // where tier-3 ApplyGroup fallback would fire on every group walk (~5-15 ms
-            // per missed group). First heavy-gate fire replaces these placeholders with
-            // real doctrine/ledger decisions via PopulateResolvedDecisionsForSide.
-            try { PrePopulateResolvedDecisionsAtBattleStart(); }
-            catch (Exception rce)
-            {
-                Plugin.Log.LogWarning("[TacticalOrchestrator] resolved-cache pre-populate threw: "
-                    + rce.GetType().Name + " " + rce.Message);
             }
         }
 
@@ -867,7 +853,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 unchecked { _snapshotGeneration[s]++; }
 
                 // "Cheap per-group" pre-compute (2026-05-20): resolved per-Regiment
-                // decisions read by BattleGroupStancePatch tier-1.
+                // decisions read by the battle-core stance producers.
                 using (TelemetryPerf.Scope("tactical.resolved-group-decisions.build", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
                 {
                     PopulateResolvedDecisionsForSide(side, battle, battleSnapshot, snap.EnemyVisible);
@@ -1604,8 +1590,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // "Cheap per-group" cache: clear so stale Regiment ids
                     // from the prior battle never poison the next one.
                     // Critical — Unity GameObject InstanceIDs are recycled
-                    // and a leaked entry would route to ApplyResolvedDecisionFast
-                    // with the wrong group's cached action.
+                    // and a leaked entry would hand the stance producers the
+                    // wrong group's cached action.
                     try { _resolvedDecisionsBySide[i]?.Clear(); } catch { }
                 }
                 _heavyTickParity = 0;
@@ -1709,108 +1695,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             OnBattleEnd();
         }
 
-        // Stage C perf cache (2026-05-21): pre-populates _resolvedDecisionsBySide at
-        // battle start with Skip defaults for every commandable Regiment in
-        // BattleUnits.completeunitlist. Eliminates the GAP between battle-start and
-        // first heavy-gate fire where BattleGroupStancePatch.TryApplyFromDecisionSnapshot
-        // tier-1 lookup would miss and fall through to tier-3 ApplyGroup (~5-15ms per
-        // missed group). After first heavy-gate fire, PopulateResolvedDecisionsForSide
-        // takes over with the normal Clear+Refill cycle.
-        //
-        // Diagnostic emissions:
-        //   tactical-resolved-cache:prepopulated:<allianceId> — first populate count per side
-        //
-        // Safe to call multiple times — clears + refills idempotently.
-        public static void PrePopulateResolvedDecisionsAtBattleStart()
-        {
-            try
-            {
-                var units = BattleUnits.completeunitlist as IList;
-                if (units == null || units.Count == 0) return;
-
-                // Skip default: Kind=Skip, FinalStance=-1, no charge override. Patch's
-                // tier-1 hit will see Kind != Apply, early-return without writing —
-                // identical to vanilla behavior until first heavy-gate fire replaces
-                // these placeholders with real doctrine/ledger decisions.
-                var skipDefault = new TacticalResolvedGroupDecision(
-                    finalStance: -1,
-                    kind: TacticalDoctrineDecisionKind.Skip,
-                    reason: "battle-start-noop",
-                    fromDoctrine: false,
-                    fromLedger: false,
-                    isChargeOverride: false,
-                    chargeAction: ChargeOverrideAction.None);
-
-                int[] counts = new int[_resolvedDecisionsBySide.Length];
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var reg = units[i] as Regiment;
-                    if (reg == null) continue;
-                    int alliance;
-                    int unittyp;
-                    int instanceId;
-                    try
-                    {
-                        alliance = reg.alliance;
-                        unittyp = reg.unittyp;
-                        instanceId = reg.GetInstanceID();
-                    }
-                    catch { continue; }
-
-                    if (alliance < 0 || alliance >= _resolvedDecisionsBySide.Length) continue;
-                    if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(unittyp)) continue;
-                    if (instanceId == 0) continue;
-
-                    var cache = _resolvedDecisionsBySide[alliance];
-                    if (cache == null) continue;
-                    cache[instanceId] = skipDefault;
-                    counts[alliance]++;
-                }
-
-                for (int s = 0; s < counts.Length; s++)
-                {
-                    if (counts[s] > 0)
-                    {
-                        OnceLog.Info(
-                            "tactical-resolved-cache:prepopulated:" + s,
-                            "[TacticalResolvedCache] pre-populated alliance=" + s
-                            + " count=" + counts[s]
-                            + " — battle-start gap closed; tier-1 hits begin immediately");
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                OnceLog.Warning(
-                    "tactical-resolved-cache:prepopulate-failed",
-                    "[TacticalResolvedCache] pre-populate failed: " + e.GetType().Name + " " + e.Message
-                    + " — tier-3 fallback path engages for the gap window");
-            }
-        }
-
         // ---- "Cheap per-group" pre-compute (2026-05-20) ----
         //
         // PopulateResolvedDecisionsForSide is called from DriveTickCycle on
         // every heavy-gate fire for a non-suppressed side. It rebuilds the
         // per-alliance _resolvedDecisionsBySide dict from scratch (Clear +
-        // walk + Add) so the patch never sees a half-populated state. The
-        // pre-compute mirrors BattleGroupStancePatch.ApplyGroup's branch
-        // order — doctrine first, charge override (vanillaOrdered==4) next,
-        // ledger task third, default scorer last — so the cached final-stance
-        // answer matches what the legacy path would have written.
+        // walk + Add) so the producers never see a half-populated state. Branch
+        // order (the former #45 order): doctrine first, charge override
+        // (vanillaOrdered==4) next, ledger task third, default scorer last.
         //
         // **PERFORMANCE COUPLING:** the cache only repopulates when the
         // heavy-gate fires. That gate is gated by `Enable Tactical Heavy
         // Path Throttling` (default true). If a user disables throttling,
         // this populate is never called, _resolvedDecisionsBySide stays
-        // empty, BattleGroupStancePatch always falls through to legacy
-        // ApplyGroup, and the per-tick p99 returns to pre-refactor levels
-        // (~13-15ms). This is by design — the throttle is what enables the
-        // cache cadence — but it is not obvious from outside.
+        // empty and the stance producers submit nothing (vanilla decides
+        // every group's stance).
         //
         // All reflection/Unity-API calls are try/catch guarded; on any
-        // failure the per-group entry is skipped, and the patch falls
-        // through to ApplyGroup for that Regiment.
+        // failure the per-group entry is skipped (no intent for it).
 
         private static void PopulateResolvedDecisionsForSide(TacticalBattleOrchestrator side, AIBattle battle,
             Battle.BattleSnapshot snapshot, EnemyVisibleState enemyVisible)
@@ -1956,14 +1858,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     {
                         int lStance = TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(
                             state.Task, TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector));
-                        // BattleGroupStancePatch.TryApplyLedgerTaskStance
-                        // claims ownership whenever the ledger resolves
-                        // (return true) — even when stance is invalid or
-                        // equals vanillaOrdered. Mirror that: write a Skip
-                        // with stance=-1 so the apply path treats this
-                        // group as "ledger had an opinion, no write
-                        // needed" and DOESN'T fall through to the default
-                        // scorer.
+                        // The ledger claims ownership whenever it resolves
+                        // (the former #45 rule) — even when the stance is
+                        // invalid or equals vanillaOrdered. A Skip with
+                        // stance=-1 records "ledger had an opinion, no write
+                        // needed" so the default scorer never runs for it.
                         if (lStance < 0)
                         {
                             cache[instanceId] = new TacticalResolvedGroupDecision(

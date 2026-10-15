@@ -91,9 +91,6 @@ internal static class TacticalLedgerTests
             ("tactical artillery doctrine W&L gate blocks", TacticalArtilleryDoctrineWlGateBlocks),
             ("tactical artillery doctrine friendly close deny cancels bombard", TacticalArtilleryDoctrineFriendlyCloseDenyCancelsBombard),
             ("tactical artillery doctrine support main effort suppresses strongpoint", TacticalArtilleryDoctrineSupportMainEffortSuppressesStrongpoint),
-            ("tactical artillery input adapter reads scalar fields", TacticalArtilleryInputAdapterReadsScalarFields),
-            ("tactical artillery input adapter rejects non-artillery", TacticalArtilleryInputAdapterRejectsNonArtillery),
-            ("tactical artillery input adapter rejects routed", TacticalArtilleryInputAdapterRejectsRouted),
             ("tactical morale pressure stable", TacticalMoralePressureStable),
             ("tactical morale pressure under pressure from outflanked tier", TacticalMoralePressureUnderPressureFromOutflankedTier),
             ("tactical morale pressure fallback candidate", TacticalMoralePressureFallbackCandidate),
@@ -955,8 +952,8 @@ internal static class TacticalLedgerTests
     {
         // Mid-band confidence (between low-confidence floor 0.40 and act floor 0.55)
         // returns Apply(vanillaStance, "pre-contact-preserve-vanilla") instead of
-        // Skip(low-confidence). BattleGroupStancePatch:109 short-circuits when
-        // decision.GroupStance == vanillaOrdered, so no actual stance write happens —
+        // Skip(low-confidence). With decision.GroupStance == vanillaOrdered the
+        // executor only refreshes vanilla's hold (a claim, no ChangeStance) —
         // movement orders flow through #61 / TacticalNavMeshPlanner independently.
         var sector = new TacticalSectorAssessment(
             sectorId: 0,
@@ -983,8 +980,8 @@ internal static class TacticalLedgerTests
     {
         // Regression: preserves whatever vanilla wanted (1, 2, or 3) for the
         // mid-band confidence range. The Apply-with-vanillaStance pattern means
-        // #45 BattleGroupStancePatch short-circuits the write since the new value
-        // equals the existing value.
+        // stance writer only claims (no ChangeStance) since the new value equals
+        // the existing value.
         var sector = new TacticalSectorAssessment(
             sectorId: 0, source: TacticalSectorSource.AngleSlice,
             ownStrength: 1000f, enemyStrength: 0f, confidence: 0.50f,
@@ -1625,61 +1622,6 @@ internal static class TacticalLedgerTests
 
         AssertEqual(TacticalArtilleryDoctrine.Decision.SuppressStrongpoint,
             TacticalArtilleryDoctrine.Score(input), "support main effort remains telemetry-only suppress strongpoint");
-    }
-
-    private static void TacticalArtilleryInputAdapterReadsScalarFields()
-    {
-        var snapshot = new TacticalArtilleryInputAdapter.Snapshot
-        {
-            UnitTyp = TacticalUnitType.Artillery,
-            Guns = 4,
-            IsRouted = false,
-            MarkedForRout = false,
-            AmmoTotalRatio = 0.55f,
-            CanisterAmmo = 0.30f,
-            Morale = 0.75f,
-            BattleStartMorale = 0.85f,
-            BattleStartMoraleInitialized = true,
-            DangerRadius = 100f,
-            ClosestEnemyDistance = 80f,
-            InfCavScreenCount = 2,
-            AiFeudStance = -1,
-            IsPlayerAiOrFeud = 0,
-            FallbackThreshold = 0.40f,
-            CombatBehaviorOrdered = 8,
-            VolleyDwellRemaining = 0f,
-        };
-        var input = TacticalArtilleryInputAdapter.ToSupportScreenInput(snapshot);
-        AssertEqual(0.75f, input.ProtectedUnitMorale, "morale carried");
-        AssertEqual(0.40f, input.MoraleFallbackThreshold, "threshold carried");
-        AssertEqual(0.85f, input.BattleStartMorale, "battle start carried");
-        AssertEqual(80f, input.EnemyDistance, "enemy distance carried");
-        AssertEqual(100f, input.DangerRadius, "danger radius carried");
-        AssertEqual(2, input.ScreenUnitCount, "inf/cav screen count carried");
-        AssertEqual(-1, input.AiFeudStance, "feud stance carried");
-    }
-
-    private static void TacticalArtilleryInputAdapterRejectsNonArtillery()
-    {
-        var snapshot = new TacticalArtilleryInputAdapter.Snapshot
-        {
-            UnitTyp = TacticalUnitType.Infantry,
-            Guns = 0,
-            AiFeudStance = -1,
-        };
-        AssertFalse(TacticalArtilleryInputAdapter.IsEligible(snapshot), "non-artillery rejected");
-    }
-
-    private static void TacticalArtilleryInputAdapterRejectsRouted()
-    {
-        var snapshot = new TacticalArtilleryInputAdapter.Snapshot
-        {
-            UnitTyp = TacticalUnitType.Artillery,
-            Guns = 4,
-            IsRouted = true,
-            AiFeudStance = -1,
-        };
-        AssertFalse(TacticalArtilleryInputAdapter.IsEligible(snapshot), "routed rejected");
     }
 
     private static void TacticalMoralePressureStable()

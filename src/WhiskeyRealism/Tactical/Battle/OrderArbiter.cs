@@ -73,6 +73,11 @@ namespace WhiskeyRealism.Tactical.Battle
         public void Submit(in BattleOrderIntent intent)
         {
             if (intent.GroupId == 0) return;
+            // FeudReplay is #42's inline replay of vanilla's own feud move and the
+            // only source the executor exempts from the Feud refusal; it reaches the
+            // executor through OrderExecutorRuntime.ExecuteInline only, never as a
+            // producer intent (so no arbiter claim or retry can carry the exemption).
+            if (intent.Source == IntentSource.FeudReplay) return;
             int channel = (int)intent.Channel;
             if (channel < 0 || channel >= OrderChannels.Count) return;
             if (_intentCount == _intents.Length)

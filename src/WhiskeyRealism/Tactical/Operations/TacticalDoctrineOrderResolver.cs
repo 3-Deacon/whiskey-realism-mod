@@ -8,10 +8,9 @@ namespace WhiskeyRealism.Tactical.Operations
     /// Resolves the per-Regiment <see cref="CommandDoctrineOrder"/> + matching
     /// <see cref="BattlefieldPictureSnapshot"/> from the side orchestrator's
     /// active operations ledger. Extracted from the inline
-    /// <c>BattleGroupStancePatch.TryResolveDoctrineOrder</c> so the
-    /// heavy-gate-fire pre-compute in
-    /// <see cref="TacticalBattleCoordinatorRuntime"/> and the legacy patch
-    /// fallback path call the same code.
+    /// #45 doctrine-order lookup; the heavy-gate-fire pre-compute in
+    /// <see cref="TacticalBattleCoordinatorRuntime"/> and the battle-core
+    /// artillery producer call it.
     ///
     /// Stateless (apart from reading the side orchestrator's published list).
     /// All exceptions degrade silently to "no order" — patches must never

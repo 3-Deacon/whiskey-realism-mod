@@ -30,8 +30,6 @@ internal static class BattleWriterFixTests
         ReserveDelayConversionOnlyWhereSetWaypointQueues();
         PathfinderNeverRemovesAddedPaths();
         PathfinderEndsRetryLoopOnlyWithinTolerance();
-        VetoSkipsPlayerUiOrdersAndNonAiUnits();
-        VetoMeasuresEnemyDistanceToTarget();
         ArtilleryMicroNeverInterruptsMovement();
         ArtilleryMicroMirrorsVanillaUnlimberRule();
         ArtilleryMicroMapsActionsToVanillaWrites();
@@ -412,41 +410,6 @@ internal static class BattleWriterFixTests
         var noCorners = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 0, vanillaResult: 0, finalDistance: 0f, tolerance: 5f);
         TestHarness.AssertFalse(noCorners.OverrideResult, "no corners never overrides");
         Pass("battle writers: #53 ends the retry loop only within endpoint tolerance");
-    }
-
-    private static bool Veto(
-        int unitTyp = 2,
-        int guns = 4,
-        bool routed = false,
-        bool detached = false,
-        bool showMovementOptions = false,
-        bool canWrite = true,
-        float nearestEnemyToTargetSq = 30f * 30f)
-    {
-        return BattleWriterPolicy.ShouldVetoArtilleryWaypoint(
-            unitTyp, guns, routed, detached, showMovementOptions, canWrite, nearestEnemyToTargetSq, 60f);
-    }
-
-    // BR-C2: SetWaypoint's showmovementoptions defaults true for UI orders;
-    // every vanilla AI call site passes false (e.g. 3139, 4146, 6235, 6959).
-    private static void VetoSkipsPlayerUiOrdersAndNonAiUnits()
-    {
-        TestHarness.AssertTrue(Veto(), "AI battery ordered to point blank");
-        TestHarness.AssertFalse(Veto(showMovementOptions: true), "player UI order");
-        TestHarness.AssertFalse(Veto(canWrite: false), "guard denies (player/W&L/mode)");
-        TestHarness.AssertFalse(Veto(unitTyp: 0), "infantry");
-        TestHarness.AssertFalse(Veto(guns: 0), "no guns");
-        TestHarness.AssertFalse(Veto(routed: true), "routed");
-        TestHarness.AssertFalse(Veto(detached: true), "detached");
-        Pass("battle writers: veto skips player UI orders and non-AI units");
-    }
-
-    private static void VetoMeasuresEnemyDistanceToTarget()
-    {
-        TestHarness.AssertFalse(Veto(nearestEnemyToTargetSq: 61f * 61f), "target beyond point blank");
-        TestHarness.AssertFalse(Veto(nearestEnemyToTargetSq: float.MaxValue), "no visible enemy");
-        TestHarness.AssertTrue(Veto(nearestEnemyToTargetSq: 59f * 59f), "target inside point blank");
-        Pass("battle writers: veto measures nearest visible enemy to the target");
     }
 
     private static ArtilleryMicroWrite Micro(

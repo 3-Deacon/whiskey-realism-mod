@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Telemetry;
@@ -56,6 +57,16 @@ namespace WhiskeyRealism.Patches
     // (scenario file 88254, honoured as an override at 6383). Such a save
     // keeps that side on the stale value and this patch defers to it; only
     // mid-battle dev saves from pre-T3 builds are affected.
+    // Battle core (BC5b): the legacy scorer's enemy pressure (sector and
+    // inferred strength) is the battle snapshot's slice pressure
+    // (BattleWriterPolicy.SnapshotPressure), no longer vanilla's
+    // enemystrengthwithinangle over true enemy positions (122719-122733), and
+    // its in-range enemy strength is BattleWriterPolicy.SnapshotEnemyStrengthInRange
+    // (perceived enemies within vanilla's line-of-sight reach) instead of
+    // groupenemiesinrange (120558-120563, not fog-filtered for the AI side), and
+    // its flank risk is BattleWriterPolicy.PerceivedFlankRisk (perceived flank
+    // pressure) instead of flanksthreated / outflanked (120566-120580 over the
+    // unfiltered range lists, 122650, 122976+).
     // W&L player side (docs/wl-player-model.md rule 4): its macroai produces
     // dispatches to the player, so only a planned-operation opinion that
     // differs from vanilla's current and pending (newmacroaitoset) value is
@@ -236,7 +247,8 @@ namespace WhiskeyRealism.Patches
             AIBattle battle)
         {
             var units = SafeList(battle, ref _unitsUsedField, "unitsused");
-            var odds = BuildRuntimeOdds(bunits, side, units);
+            BattleCore.TryGetSnapshot(ResolveAllianceId(bunits, side), out BattleSnapshot snapshot);
+            var odds = BuildRuntimeOdds(bunits, side, units, snapshot);
             var decision = TacticalDoctrineScorer.DecideMacro(new TacticalMacroDecisionInput(
                 vanillaMacro,
                 scriptedAiStrategy,
@@ -273,11 +285,16 @@ namespace WhiskeyRealism.Patches
             catch { return -1; }
         }
 
-        private static TacticalOddsAssessment BuildRuntimeOdds(BattleUnits bunits, int side, IList units)
+        // Enemy terms come from the battle snapshot (fog-honest): visible strength
+        // and per-group slice pressure. Own terms stay vanilla's own side
+        // information — totalactiveforce and reinforcementarrivalswithin24hrs
+        // (the side's OWN arrivals, read by vanilla for its own retreat test at
+        // 6414) — which the side legitimately knows.
+        private static TacticalOddsAssessment BuildRuntimeOdds(BattleUnits bunits, int side, IList units, BattleSnapshot snapshot)
         {
             float own = Math.Max(1f, SideInfoTotalActiveForce(bunits, side));
             float confirmedEnemy = EstimateVisibleEnemyStrength(units);
-            float inferredEnemy = EstimateInferredEnemyStrength(units);
+            float inferredEnemy = EstimateInferredEnemyStrength(units, snapshot);
             float reinforcements = SideInfoReinforcementsWithin24Hours(bunits, side);
             var contact = TacticalContactLedger.Classify(new TacticalContactInput(
                 confirmedEnemy,
@@ -295,7 +312,7 @@ namespace WhiskeyRealism.Patches
                 reinforcements,
                 0f,
                 contact,
-                BuildSectorAssessments(units)));
+                BuildSectorAssessments(units, snapshot)));
         }
 
         private static void LogDecision(
@@ -353,29 +370,40 @@ namespace WhiskeyRealism.Patches
             }
         }
 
-        private static TacticalSectorAssessment[] BuildSectorAssessments(IList units)
+        private static TacticalSectorAssessment[] BuildSectorAssessments(IList units, BattleSnapshot snapshot)
         {
             if (units == null) return Array.Empty<TacticalSectorAssessment>();
 
             var sectors = new List<TacticalSectorAssessment>();
             int sectorId = 0;
+            float sightRange = LineOfSightRange();
+            if (snapshot != null)
+            {
+                if (_flankThreatMean.Length < snapshot.OwnCount)
+                {
+                    _flankThreatMean = new float[snapshot.OwnCount * 2];
+                    _flankThreatCount = new int[snapshot.OwnCount * 2];
+                }
+                ArmyEvidenceBuilder.MeanFlankThreatByGroup(snapshot, _flankThreatMean, _flankThreatCount);
+            }
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i] as Regiment;
                 if (group == null || group.unittyp <= 13) continue;
 
+                int index = OwnIndex(snapshot, group);
                 Regiment closest = TacticalFogOfWarContact.ClosestVisibleEnemy(group);
                 sectors.Add(TacticalGroupSectorEstimator.BuildSector(new TacticalGroupContactInput(
                     sectorId++,
                     Math.Max(group.groupowninrange, group.groupstrengthaigroup),
-                    group.groupenemiesinrange,
-                    EnemyAngleStrength(group),
+                    BattleWriterPolicy.SnapshotEnemyStrengthInRange(snapshot, index, sightRange),
+                    BattleWriterPolicy.SnapshotPressure(snapshot, index),
                     closest != null ? closest.strength : 0f,
                     closest != null ? closest.unittyp : -1,
                     closest != null ? SafeName(closest) : string.Empty,
                     closest != null && closest.isrouted,
                     closest != null && closest.permanentlydetached,
-                    group.flanksthreated > 0f || group.outflanked > 0,
+                    BattleWriterPolicy.PerceivedFlankRisk(snapshot, index, _flankThreatMean),
                     group.covervalue > 0.5f || group.fortinrange)));
             }
 
@@ -387,38 +415,42 @@ namespace WhiskeyRealism.Patches
             return TacticalFogOfWarContact.VisibleEnemyStrength(units);
         }
 
-        private static float EstimateInferredEnemyStrength(IList units)
+        private static float EstimateInferredEnemyStrength(IList units, BattleSnapshot snapshot)
         {
-            if (units == null) return 0f;
+            if (units == null || snapshot == null) return 0f;
 
             float total = 0f;
             for (int i = 0; i < units.Count; i++)
-            {
-                var unit = units[i] as Regiment;
-                total += EnemyAngleStrength(unit);
-            }
-
+                total += BattleWriterPolicy.SnapshotPressure(snapshot, OwnIndex(snapshot, units[i] as Regiment));
             return total;
         }
 
-        private static float EnemyAngleStrength(Regiment unit)
+        // Per own record: mean vanilla outflanked weight of its regiments over the
+        // snapshot's flank pressure (grow-only scratch, main thread).
+        private static float[] _flankThreatMean = new float[64];
+        private static int[] _flankThreatCount = new int[64];
+
+        // vanilla's enemiesinrange reach: max(maximumlineofsight[unittyp],
+        // distancetoenemytocancelinterruption) (InitMaxUnitRanges 122510,
+        // UpdateUnitRangeFast 122608), over the combat unit types a group holds.
+        private static float LineOfSightRange()
         {
-            try
+            float range = GamePrefs.distancetoenemytocancelinterruption;
+            float[] sight = GamePrefs.maximumlineofsight;
+            if (sight != null)
             {
-                if (unit == null ||
-                    unit.unitrange == null ||
-                    unit.unitrange.enemystrengthwithinangle == null ||
-                    !TacticalFogOfWarContact.HasVisibleEnemy(unit))
-                    return 0f;
-                float total = 0f;
-                for (int i = 0; i < unit.unitrange.enemystrengthwithinangle.Length; i++)
-                    total += Math.Max(0f, unit.unitrange.enemystrengthwithinangle[i]);
-                return total;
+                for (int t = 0; t <= TacticalUnitType.Skirmisher && t < sight.Length; t++)
+                    if (sight[t] > range) range = sight[t];
             }
-            catch
-            {
-                return 0f;
-            }
+            return range;
+        }
+
+        // The unit's record in the side's snapshot (keyed by GameObject id), or -1.
+        private static int OwnIndex(BattleSnapshot snapshot, Regiment unit)
+        {
+            if (snapshot == null || (UnityEngine.Object)unit == null) return -1;
+            GameObject go = ((Component)unit).gameObject;
+            return go != null ? snapshot.IndexOfOwn(go.GetInstanceID()) : -1;
         }
 
         private static bool AnyReceivedFire(IList units)

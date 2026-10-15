@@ -1,4 +1,6 @@
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical
 {
@@ -83,6 +85,38 @@ namespace WhiskeyRealism.Tactical
             if (!input.OrchestratorArmyOn && input.LegacyReactionDeniesCharge)
                 return new ChargeDenialDecision(true, LegacyDemoteStance, "charge-demote");
             return Preserve("vanilla-charge-preserved");
+        }
+
+        // The charge-demotion intent (battle core, ChargeDemotionIntentProducer):
+        // an AI brigade that vanilla holds in assault (ai_stanceordered 4) and
+        // whose cached answer (TacticalBattleCoordinatorRuntime
+        // .PopulateResolvedDecisionsForSide, this class's decision) is
+        // DemoteToHold gets a Safety intent on the Stance channel to the cached
+        // stance (1-3, else LegacyDemoteStance). Safety outranks every other
+        // stance source on the arbiter, so it also beats the posture executor's
+        // assault and denies the infantry charge doctrine (BC6b reverts its
+        // charge once the group is out of assault). Not gated on the group being
+        // settled: a demotion that waits for the march to end is too late.
+        internal static bool TryDemotionIntent(in UnitRecord group, in TacticalResolvedGroupDecision resolved, out BattleOrderIntent intent)
+        {
+            intent = default(BattleOrderIntent);
+            if ((group.Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.UnitTyp)) return false;
+            if ((group.Flags & UnitFlags.PlayerOwned) != 0) return false;
+            if (group.AiStanceOrdered != TacticalCommandTaskToStanceMapper.StanceAssault) return false;
+            if (resolved.ChargeAction != ChargeOverrideAction.DemoteToHold) return false;
+
+            int stance = resolved.FinalStance >= 1 && resolved.FinalStance <= 3 ? resolved.FinalStance : LegacyDemoteStance;
+            intent = new BattleOrderIntent
+            {
+                GroupId = group.InstanceId,
+                Channel = OrderChannel.Stance,
+                Value = stance,
+                Heading = -1f,
+                Priority = IntentPriority.Safety,
+                Source = IntentSource.ChargeDemotion,
+                Reason = "charge-demotion",
+            };
+            return true;
         }
 
         private static ChargeDenialDecision Preserve(string reason)
