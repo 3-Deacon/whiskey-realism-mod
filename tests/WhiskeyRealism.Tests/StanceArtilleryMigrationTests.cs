@@ -1,0 +1,424 @@
+using System;
+using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
+using static TestHarness;
+
+// BC5b: #45 group stance, charge demotion, artillery (B7, applier, veto) and the
+// #42 feud replay migrated onto the order arbiter / executor
+// (docs/superpowers/plans/2026-10-15-battle-core.md § BC5b).
+internal static class StanceArtilleryMigrationTests
+{
+    public static void Run()
+    {
+        RunAll(new (string, Action)[]
+        {
+            ("battle-core GroupStanceProducerScorerPriority", GroupStanceProducerScorerPriority),
+            ("battle-core GroupStanceLeavesVanillaAssaultAndUnsettledGroups", GroupStanceLeavesVanillaAssaultAndUnsettledGroups),
+            ("battle-core ChargeDemotionIsSafetyStance", ChargeDemotionIsSafetyStance),
+            ("battle-core ChargeDemotionBeatsExecutorAssault", ChargeDemotionBeatsExecutorAssault),
+            ("battle-core FeudReplayNeverEntersTheArbiter", FeudReplayNeverEntersTheArbiter),
+            ("battle-core ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset", ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset),
+            ("battle-core CounterBatteryReleasedWhenTargetGone", CounterBatteryReleasedWhenTargetGone),
+            ("battle-core ArtilleryLimberUnlimberFaceAreFormationAndFacing", ArtilleryLimberUnlimberFaceAreFormationAndFacing),
+            ("battle-core ArtilleryRetreatTargetValidatedNotStraightLine180m", ArtilleryRetreatTargetValidatedNotStraightLine180m),
+            ("battle-core PointBlankVanillaMoveTriggersSafetyRetreat", PointBlankVanillaMoveTriggersSafetyRetreat),
+            ("battle-core ArtilleryNeverStanceWrites", ArtilleryNeverStanceWrites),
+            ("battle-core ArtilleryIgnoresFeudPlayerAndHeldBatteries", ArtilleryIgnoresFeudPlayerAndHeldBatteries),
+        });
+    }
+
+    private const int Brigade = TacticalUnitType.BattleGroupBrigade;
+
+    // ------------------------------------------------------------------ #45 group stance
+
+    private static void GroupStanceProducerScorerPriority()
+    {
+        UnitRecord group = Group(11, Brigade, aiStanceOrdered: 3);
+        AssertTrue(BattleWriterPolicy.TryGroupStanceIntent(group, Apply(2, fromLedger: true), out BattleOrderIntent intent), "ledger stance produces an intent");
+        AssertEqual(11, intent.GroupId, "group id is the snapshot instance id");
+        AssertEqual(OrderChannel.Stance, intent.Channel, "stance channel");
+        AssertEqual(2, intent.Value, "resolved final stance");
+        AssertEqual(IntentPriority.Scorer, intent.Priority, "the #45 scorer is the lowest rung");
+        AssertEqual(IntentSource.GroupStanceScorer, intent.Source, "source");
+        AssertEqual(-1f, intent.Heading, "no heading");
+        AssertEqual("group-stance-ledger", intent.Reason, "static reason by origin");
+
+        AssertTrue(BattleWriterPolicy.TryGroupStanceIntent(group, Apply(3, fromDoctrine: true), out intent), "doctrine stance");
+        AssertEqual("group-stance-doctrine", intent.Reason, "doctrine reason");
+        AssertTrue(BattleWriterPolicy.TryGroupStanceIntent(group, Apply(1), out intent), "scorer stance");
+        AssertEqual("group-stance-scorer", intent.Reason, "scorer reason");
+
+        AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(group, Skip(), out _), "Skip leaves vanilla alone");
+        AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(group, Apply(4), out _), "never writes assault");
+        AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(group, Apply(0), out _), "never writes stance 0 (stance-off re-attach)");
+        AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(Group(12, TacticalUnitType.BattleGroupDivision, 3), Apply(2), out _), "brigades only");
+
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        BattleWriterPolicy.TryGroupStanceIntent(group, Apply(2), out intent);
+        arbiter.Submit(intent);
+        arbiter.Submit(new BattleOrderIntent { GroupId = 11, Channel = OrderChannel.Stance, Value = 3, Heading = -1f, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "test" });
+        var winners = new BattleOrderIntent[4];
+        AssertEqual(1, arbiter.Resolve(winners), "one stance winner");
+        AssertEqual(IntentSource.PostureExecutor, winners[0].Source, "the posture executor outranks the scorer");
+    }
+
+    private static void GroupStanceLeavesVanillaAssaultAndUnsettledGroups()
+    {
+        AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(Group(11, Brigade, 4), Apply(3, fromDoctrine: true), out _),
+            "a vanilla assault is only ever demoted by the charge-demotion producer");
+        UnitRecord marching = Group(11, Brigade, 2);
+        marching.RegimentPaths = 2;
+        AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(marching, Apply(3), out _), "a marching group is not settled");
+        UnitRecord queued = Group(11, Brigade, 2);
+        queued.QueuedOrders = 1;
+        AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(queued, Apply(3), out _), "a courier order in flight is not settled");
+        UnitRecord owned = Group(11, Brigade, 2);
+        owned.Flags |= UnitFlags.PlayerOwned;
+        AssertFalse(BattleWriterPolicy.TryGroupStanceIntent(owned, Apply(3), out _), "player-owned group");
+    }
+
+    // ------------------------------------------------------------------ charge demotion
+
+    private static void ChargeDemotionIsSafetyStance()
+    {
+        UnitRecord assault = Group(21, Brigade, aiStanceOrdered: 4);
+        AssertTrue(TacticalChargeDenial.TryDemotionIntent(assault, Demote(2), out BattleOrderIntent intent), "doctrine deny demotes the assault");
+        AssertEqual(21, intent.GroupId, "group id");
+        AssertEqual(OrderChannel.Stance, intent.Channel, "stance channel");
+        AssertEqual(IntentPriority.Safety, intent.Priority, "safety rung");
+        AssertEqual(IntentSource.ChargeDemotion, intent.Source, "source");
+        AssertEqual(2, intent.Value, "demotes to the cached stance");
+        AssertEqual("charge-demotion", intent.Reason, "static reason");
+
+        AssertTrue(TacticalChargeDenial.TryDemotionIntent(assault, Demote(-1), out intent), "invalid cached stance");
+        AssertEqual(TacticalChargeDenial.LegacyDemoteStance, intent.Value, "falls back to the legacy demotion stance");
+
+        var preserve = new TacticalResolvedGroupDecision(3, TacticalDoctrineDecisionKind.Apply, "doctrine-attack", true, false, true, ChargeOverrideAction.PreserveVanilla);
+        AssertFalse(TacticalChargeDenial.TryDemotionIntent(assault, preserve, out _), "a preserved assault is left alone");
+        AssertFalse(TacticalChargeDenial.TryDemotionIntent(Group(21, Brigade, 3), Demote(2), out _), "nothing to demote below assault");
+        UnitRecord owned = assault;
+        owned.Flags |= UnitFlags.PlayerOwned;
+        AssertFalse(TacticalChargeDenial.TryDemotionIntent(owned, Demote(2), out _), "player-owned group");
+        UnitRecord marching = assault;
+        marching.RegimentPaths = 3;
+        AssertTrue(TacticalChargeDenial.TryDemotionIntent(marching, Demote(2), out _), "a Safety demotion is not held back by a march");
+    }
+
+    private static void ChargeDemotionBeatsExecutorAssault()
+    {
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        arbiter.Submit(new BattleOrderIntent { GroupId = 21, Channel = OrderChannel.Stance, Value = 4, Heading = -1f, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "test" });
+        TacticalChargeDenial.TryDemotionIntent(Group(21, Brigade, 4), Demote(2), out BattleOrderIntent demotion);
+        arbiter.Submit(demotion);
+        arbiter.Submit(new BattleOrderIntent { GroupId = 21, Channel = OrderChannel.Move, TargetX = 10f, TargetZ = -10f, Heading = -1f, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "test" });
+        var winners = new BattleOrderIntent[4];
+        AssertEqual(2, arbiter.Resolve(winners), "stance and move resolve independently");
+        AssertEqual(OrderChannel.Stance, winners[0].Channel, "stance first");
+        AssertEqual(IntentSource.ChargeDemotion, winners[0].Source, "the demotion outranks the executor's assault");
+        AssertEqual(2, winners[0].Value, "demoted stance");
+        AssertTrue(arbiter.TryGetClaim(21, OrderChannel.Stance, out BattleOrderIntent claim) && claim.Priority == IntentPriority.Safety,
+            "the published claim is the Safety demotion");
+    }
+
+    // ------------------------------------------------------------------ artillery
+
+    private const int Battery = 41;
+    private const int ParentBrigade = 40;
+
+    private static void ArtilleryCeaseBombardIsCombatBehavior7WithBombardReset()
+    {
+        // CheckAIBombardment 3904: cancelling bombardment is behavior 7 plus bombardstarttime = 0.
+        BattleSnapshot s = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f);
+        BattleArtilleryState b = State(ammo: 0.05f);
+        var buffer = new BattleOrderIntent[4];
+        int n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, b, Rules(), buffer);
+        AssertEqual(1, n, "one intent");
+        AssertEqual(OrderChannel.CombatBehavior, buffer[0].Channel, "combat behavior channel");
+        AssertEqual(7, buffer[0].Value, "cease bombardment = fire at will (7)");
+        AssertEqual(IntentSource.ArtilleryDoctrine, buffer[0].Source, "source");
+        AssertEqual(Battery, buffer[0].GroupId, "the battery itself");
+        AssertTrue(BattleWriterPolicy.ResetsBombardStart(buffer[0]), "the executor resets bombardstarttime for it");
+
+        BattleOrderIntent other = buffer[0];
+        other.Value = 8;
+        AssertFalse(BattleWriterPolicy.ResetsBombardStart(other), "counter-battery keeps the bombard clock");
+        other.Value = 7;
+        other.Source = IntentSource.FireControl;
+        AssertFalse(BattleWriterPolicy.ResetsBombardStart(other), "only the artillery doctrine's 7");
+
+        // Doctrine Deny (friendly danger close) cancels too; Allow keeps the bombardment.
+        b = State(ammo: 0.9f, doctrine: new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, "friendly-close-range"));
+        AssertEqual(1, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, b, Rules(), buffer), "deny cancels");
+        AssertEqual(7, buffer[0].Value, "deny cancels to 7");
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(ammo: 0.9f), Rules(), buffer), "a supported, supplied bombardment is left to vanilla");
+    }
+
+    private static void CounterBatteryReleasedWhenTargetGone()
+    {
+        // CheckCounterBatteryFire skips units already at 8 (3834), so vanilla never releases it.
+        var buffer = new BattleOrderIntent[4];
+        BattleSnapshot s = ArtillerySnapshot(cbo: 8, mounted: false, enemyDistance: 600f, enemyUnitTyp: TacticalUnitType.Infantry);
+        AssertEqual(1, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "no enemy battery in range");
+        AssertEqual(7, buffer[0].Value, "released to 7");
+        AssertEqual(OrderChannel.CombatBehavior, buffer[0].Channel, "combat behavior");
+
+        s = ArtillerySnapshot(cbo: 8, mounted: false, enemyDistance: 600f, enemyUnitTyp: TacticalUnitType.Artillery);
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "visible enemy battery in fire range keeps 8");
+
+        s = ArtillerySnapshot(cbo: 8, mounted: false, enemyDistance: 600f, enemyUnitTyp: TacticalUnitType.Artillery, enemyState: ObservationState.Remembered);
+        AssertEqual(1, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "a remembered battery is not a target in range");
+
+        s = ArtillerySnapshot(cbo: 8, mounted: false, enemyDistance: 1500f, enemyUnitTyp: TacticalUnitType.Artillery);
+        AssertEqual(1, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "an enemy battery beyond fire range");
+
+        BattleArtilleryRules off = Rules();
+        off.DoctrineOn = false;
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(ArtillerySnapshot(cbo: 8, mounted: false, enemyDistance: 600f), 1, State(), off, buffer),
+            "Enable Tactical Artillery Doctrine off: no release");
+    }
+
+    private static void ArtilleryLimberUnlimberFaceAreFormationAndFacing()
+    {
+        var buffer = new BattleOrderIntent[4];
+        // Limbered, idle, enemy in fire range: unlimber (formation 0, MountUnits 0) and face it.
+        BattleSnapshot s = ArtillerySnapshot(cbo: 7, mounted: true, enemyDistance: 600f);
+        int n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(mounted: true), Rules(), buffer);
+        AssertEqual(2, n, "unlimber + face");
+        AssertEqual(OrderChannel.Formation, buffer[0].Channel, "formation channel");
+        AssertEqual(0, buffer[0].Value, "unlimbered artillery formation (ChangeRegimentFormation 135450)");
+        AssertTrue((buffer[0].Flags & IntentFlags.Unlimber) != 0, "Unlimber flag");
+        AssertEqual(OrderChannel.Facing, buffer[1].Channel, "facing channel");
+        AssertNear(180f, buffer[1].Heading, 0.01f, "faces the enemy due south (Unity yaw, GetAngle + 180)");
+
+        // Unlimbered, enemy at 50 m: point-blank limber (formation 3, MountUnits 1).
+        s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 50f);
+        n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer);
+        AssertEqual(1, n, "limber only");
+        AssertEqual(OrderChannel.Formation, buffer[0].Channel, "formation");
+        AssertEqual(3, buffer[0].Value, "limbered artillery formation");
+        AssertTrue((buffer[0].Flags & IntentFlags.Limber) != 0, "Limber flag");
+
+        // Unlimbered, enemy only behind (out of the front quadrant, in range): wheel.
+        s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, facing: 0f);
+        n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer);
+        AssertEqual(1, n, "face only");
+        AssertEqual(OrderChannel.Facing, buffer[0].Channel, "wheel toward the threat");
+        AssertNear(180f, buffer[0].Heading, 0.01f, "heading");
+
+        // Already facing it: nothing (vanilla's turn trigger, 4599-4606).
+        s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, facing: 178f);
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer), "inside the turn trigger");
+
+        BattleArtilleryRules off = Rules();
+        off.AuditOn = false;
+        s = ArtillerySnapshot(cbo: 7, mounted: true, enemyDistance: 600f);
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(mounted: true), off, buffer), "Enable Artillery All-Stance Audit off: no micro writes");
+    }
+
+    private static void ArtilleryRetreatTargetValidatedNotStraightLine180m()
+    {
+        var buffer = new BattleOrderIntent[4];
+        // Limbered battery at (500, -500), enemy 40 m due south.
+        BattleSnapshot s = ArtillerySnapshot(cbo: 7, mounted: true, enemyDistance: 40f);
+        int n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(mounted: true), Rules(), buffer);
+        AssertEqual(1, n, "one retreat");
+        BattleOrderIntent retreat = buffer[0];
+        AssertEqual(OrderChannel.Move, retreat.Channel, "a Move through the executor, not RegimentSetPath");
+        AssertEqual(IntentPriority.Safety, retreat.Priority, "Safety");
+        AssertEqual(IntentSource.ArtilleryDoctrine, retreat.Source, "source");
+        AssertTrue((retreat.Flags & IntentFlags.InContactWithdrawal) != 0, "immediate, line-checked withdrawal");
+        AssertTrue((retreat.Flags & IntentFlags.Limber) != 0, "limbers before moving");
+        AssertTrue((retreat.Flags & IntentFlags.UseOrderDelay) == 0, "no courier");
+        AssertNear(500f, retreat.TargetX, 0.01f, "straight away from the visible enemy");
+        AssertNear(-500f + 180f, retreat.TargetZ, 0.01f, "by the fallback distance");
+        AssertNear(180f, retreat.Heading, 0.01f, "ends facing the enemy");
+
+        // The executor validates it: water on the raw 180 m point steps it back.
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), new WaterNorthOf(-500f + 150f));
+        executor.SetMapSize(2000f, 2000f);
+        ExecutionPlan plan = executor.Plan(s, retreat, 1.0);
+        AssertTrue(plan.Execute, "a dry point remains");
+        AssertTrue(plan.Z < retreat.TargetZ - 1f, "stepped back off the water");
+        AssertTrue(plan.Z <= -500f + 150f, "the validated target is dry");
+        AssertTrue(plan.UseOrderDelay == false, "immediate");
+    }
+
+    private static void PointBlankVanillaMoveTriggersSafetyRetreat()
+    {
+        // A battery vanilla sent (regimentpaths > 0) to within 60 m of a visible enemy.
+        BattleSnapshot s = ArtillerySnapshot(cbo: 7, mounted: true, enemyDistance: 400f, paths: 1, waypointToEnemy: 30f);
+        AssertTrue(BattleWriterPolicy.TryArtilleryPointBlankIntent(s, 1, 180f, out BattleOrderIntent intent), "watchdog fires");
+        AssertEqual(IntentSource.ArtilleryPointBlank, intent.Source, "source");
+        AssertEqual(IntentPriority.Safety, intent.Priority, "Safety");
+        AssertEqual(OrderChannel.Move, intent.Channel, "move");
+        AssertTrue((intent.Flags & IntentFlags.InContactWithdrawal) != 0, "immediate withdrawal");
+        AssertTrue(intent.TargetZ > -500f, "away from the enemy (north)");
+
+        AssertFalse(BattleWriterPolicy.TryArtilleryPointBlankIntent(
+            ArtillerySnapshot(cbo: 7, mounted: true, enemyDistance: 400f, paths: 1, waypointToEnemy: 90f), 1, 180f, out _), "waypoint outside 60 m");
+        AssertFalse(BattleWriterPolicy.TryArtilleryPointBlankIntent(
+            ArtillerySnapshot(cbo: 7, mounted: true, enemyDistance: 400f, paths: 0, waypointToEnemy: 30f), 1, 180f, out _), "not moving");
+        AssertFalse(BattleWriterPolicy.TryArtilleryPointBlankIntent(
+            ArtillerySnapshot(cbo: 7, mounted: true, enemyDistance: 400f, paths: 1, waypointToEnemy: 30f, enemyState: ObservationState.Remembered), 1, 180f, out _),
+            "a remembered enemy is not a point-blank threat");
+    }
+
+    private static void ArtilleryNeverStanceWrites()
+    {
+        // ChangeStance on a battery sets permanentlydetached (90788-90791) and vanilla
+        // artillery AI skips it for good (3789, 3834, 3890, 3928).
+        var buffer = new BattleOrderIntent[4];
+        float[] distances = { 30f, 50f, 90f, 400f, 600f, 1500f };
+        int[] behaviors = { 7, 8, 9 };
+        foreach (float d in distances)
+            foreach (int cbo in behaviors)
+                for (int m = 0; m < 2; m++)
+                {
+                    BattleSnapshot s = ArtillerySnapshot(cbo, m == 1, d, paths: 0, enemyUnitTyp: TacticalUnitType.Artillery);
+                    int n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(ammo: 0.05f, mounted: m == 1), Rules(), buffer);
+                    for (int i = 0; i < n; i++)
+                    {
+                        AssertTrue(buffer[i].Channel != OrderChannel.Stance, "no stance intent");
+                        AssertEqual(Battery, buffer[i].GroupId, "battery-level intents only");
+                    }
+                    if (BattleWriterPolicy.TryArtilleryPointBlankIntent(s, 1, 180f, out BattleOrderIntent pb))
+                        AssertTrue(pb.Channel != OrderChannel.Stance, "watchdog no stance");
+                }
+    }
+
+    private static void ArtilleryIgnoresFeudPlayerAndHeldBatteries()
+    {
+        var buffer = new BattleOrderIntent[4];
+        BattleSnapshot s = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f, parentFlags: UnitFlags.Feud);
+        AssertFalse(BattleWriterPolicy.ArtilleryBatteryEligible(s, 1), "vanilla's feud envelope is the group's (3890)");
+        s = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f, batteryFlags: UnitFlags.PlayerOwned);
+        AssertFalse(BattleWriterPolicy.ArtilleryBatteryEligible(s, 1), "player-owned battery");
+        s = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f, batteryFlags: UnitFlags.PermanentlyDetached);
+        AssertFalse(BattleWriterPolicy.ArtilleryBatteryEligible(s, 1), "detached battery (vanilla artillery AI skips it)");
+        s = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f);
+        AssertTrue(BattleWriterPolicy.ArtilleryBatteryEligible(s, 1), "AI battery");
+        AssertFalse(BattleWriterPolicy.ArtilleryBatteryEligible(s, 0), "a group is not a battery");
+
+        BattleArtilleryState held = State(ammo: 0.05f);
+        held.InHold = true;
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, held, Rules(), buffer), "per-battery hold on the doctrine clock");
+        AssertTrue(BattleWriterPolicy.ArtilleryHoldActive(1.0, 0.999, 0.005), "inside the hold");
+        AssertFalse(BattleWriterPolicy.ArtilleryHoldActive(1.0, 0.990, 0.005), "hold expired");
+        AssertFalse(BattleWriterPolicy.ArtilleryHoldActive(1.0, 1.5, 0.005), "a stamp from the future (reload) has expired");
+    }
+
+    // Brigade at index 0, battery at index 1 (500, -500) facing `facing`; one enemy
+    // `enemyDistance` due south. The battery's last waypoint sits `waypointToEnemy`
+    // north of that enemy when given.
+    private static BattleSnapshot ArtillerySnapshot(int cbo, bool mounted, float enemyDistance, int paths = 0, float waypointToEnemy = -1f,
+        int enemyUnitTyp = TacticalUnitType.Infantry, ObservationState enemyState = ObservationState.Visible, float facing = 180f,
+        UnitFlags parentFlags = UnitFlags.None, UnitFlags batteryFlags = UnitFlags.None)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.SetSliceCount(20);
+        var group = Group(ParentBrigade, Brigade, 3);
+        group.X = 500f;
+        group.Z = -450f;
+        group.Flags |= parentFlags;
+        s.AddOwn(group);
+        float ez = -500f - enemyDistance;
+        var battery = new UnitRecord
+        {
+            InstanceId = Battery, UnitTyp = TacticalUnitType.Artillery, X = 500f, Z = -500f, RotationY = facing,
+            CombatBehaviorOrdered = cbo, Formation = mounted ? 3 : 0, RegimentPaths = paths, Strength = 100,
+            LastWaypointX = 500f, LastWaypointZ = waypointToEnemy >= 0f ? ez + waypointToEnemy : 0f, ParentIndex = 0,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsArtillery | batteryFlags,
+        };
+        s.AddOwn(battery);
+        s.Own[1].ParentIndex = 0;
+        s.IndexCommandTree(null);
+        s.AddObservation(new EnemyObservation { InstanceId = 900, UnitTyp = enemyUnitTyp, X = 500f, Z = ez, Strength = 800f, State = enemyState, Confidence01 = 1f });
+        SlicePressureBuilder.Build(s, new SliceGeometry { MaxRangeMeters = 250f, FlankShiftMeters = 150f });
+        return s;
+    }
+
+    private static BattleArtilleryState State(float ammo = 0.9f, bool mounted = false, DoctrineArtilleryDecision doctrine = default(DoctrineArtilleryDecision))
+    {
+        return new BattleArtilleryState
+        {
+            Mounted = mounted ? 1 : 0, Guns = 4, FireRange = 1000f, AmmoRatio01 = ammo, CanisterAmmo = 1f, GroupMorale = 0.7f,
+            BattleStartMorale = 0.8f, FallbackMoraleThreshold = 0.4f, Doctrine = doctrine,
+        };
+    }
+
+    private static BattleArtilleryRules Rules()
+    {
+        return new BattleArtilleryRules
+        {
+            DoctrineOn = true, AuditOn = true, FallbackDistance = 180f, TurnTriggerDegrees = 20f, MaxCoverValueForRotation = 0.5f, AdditionalAngleInCover = 30f,
+        };
+    }
+
+    private sealed class AllowGuard : IOrderGuard
+    {
+        public bool CanWrite(in UnitRecord unit, out SkipReason reason)
+        {
+            reason = SkipReason.None;
+            return true;
+        }
+    }
+
+    // Water everywhere north of z (the battle z axis is negative; north = larger z).
+    private sealed class WaterNorthOf : ITerrainProbe
+    {
+        private readonly float _z;
+        public WaterNorthOf(float z) { _z = z; }
+        public bool IsWaterOrFence(float x, float z) => z > _z;
+        public bool LineCrossesWater(float x0, float z0, float x1, float z1) => z1 > _z;
+        public bool StepBackFromRiver(float x0, float z0, ref float x1, ref float z1) => false;
+    }
+
+    // ------------------------------------------------------------------ #42 feud replay
+
+    // The Feud write exemption belongs to #42's inline replay of vanilla's own
+    // feud move only (OrderExecutorRuntime.ExecuteInline). A FeudReplay-sourced
+    // intent submitted by a registered producer never enters the arbiter, so it
+    // can neither execute nor publish a claim (and so no retry of it can run).
+    private static void FeudReplayNeverEntersTheArbiter()
+    {
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        arbiter.Submit(new BattleOrderIntent { GroupId = 31, Channel = OrderChannel.Move, TargetX = 5f, TargetZ = -5f, Heading = -1f, Priority = IntentPriority.Support, Source = IntentSource.FeudReplay, Reason = "test" });
+        AssertEqual(0, arbiter.IntentCount, "a producer cannot submit a feud replay");
+        var winners = new BattleOrderIntent[2];
+        AssertEqual(0, arbiter.Resolve(winners), "nothing to execute");
+        AssertFalse(arbiter.TryGetClaim(31, OrderChannel.Move, out _), "no claim published");
+    }
+
+    // ------------------------------------------------------------------ fixtures
+
+    private static UnitRecord Group(int id, int unitTyp, int aiStanceOrdered)
+    {
+        return new UnitRecord
+        {
+            InstanceId = id, UnitTyp = unitTyp, AiStanceOrdered = aiStanceOrdered, AiStance = aiStanceOrdered, ParentIndex = -1,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup,
+        };
+    }
+
+    private static TacticalResolvedGroupDecision Apply(int stance, bool fromDoctrine = false, bool fromLedger = false)
+    {
+        return new TacticalResolvedGroupDecision(stance, TacticalDoctrineDecisionKind.Apply, "test", fromDoctrine, fromLedger, false, ChargeOverrideAction.None);
+    }
+
+    private static TacticalResolvedGroupDecision Skip()
+    {
+        return new TacticalResolvedGroupDecision(-1, TacticalDoctrineDecisionKind.Skip, "test", false, false, false, ChargeOverrideAction.None);
+    }
+
+    private static TacticalResolvedGroupDecision Demote(int stance)
+    {
+        return new TacticalResolvedGroupDecision(stance, TacticalDoctrineDecisionKind.Skip, "charge-demote-doctrine", false, false, true, ChargeOverrideAction.DemoteToHold);
+    }
+}

@@ -1,4 +1,6 @@
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical
 {
@@ -72,6 +74,37 @@ namespace WhiskeyRealism.Tactical
         public string Reason { get; }
     }
 
+    // Own-battery inputs the battle snapshot does not carry, read from the live
+    // battery by ArtilleryIntentProducer (own side only; every enemy input comes
+    // from the snapshot's observations).
+    internal struct BattleArtilleryState
+    {
+        public int Mounted;                  // Regiment.mounted: 1 = limbered
+        public int Guns;
+        public float FireRange;
+        public float AmmoRatio01;            // TacticalArtilleryInputAdapter.ArtilleryAmmoRatio01
+        public float CanisterAmmo;           // ammo[2]
+        public float Morale;
+        public float BattleStartMorale;
+        public float GroupMorale;            // groupmorale; the micro doctrine's morale bonus at >= 0.6
+        public float FallbackMoraleThreshold; // moraletriggerforfallbackifenemyclose[parent ai_stance]
+        public float CoverValue;
+        public int CoverObject;
+        public DoctrineArtilleryDecision Doctrine; // Observe without a doctrine order for the parent group
+        public bool InHold;                  // Artillery Audit Min Hold Seconds
+    }
+
+    // Config and vanilla prefs for the artillery producers, read once per tick.
+    internal struct BattleArtilleryRules
+    {
+        public bool DoctrineOn;              // Enable Tactical Artillery Doctrine
+        public bool AuditOn;                 // Enable Artillery All-Stance Audit
+        public float FallbackDistance;       // GamePrefs.artilleryfallbackenemyclosedist
+        public float TurnTriggerDegrees;     // GamePrefs.angletriggerforturningtowardsenemy
+        public float MaxCoverValueForRotation;
+        public float AdditionalAngleInCover;
+    }
+
     // Pure decisions behind the WS T3 battle writer/gate patches. Runtime
     // patches gather vanilla state and ask these functions what to do, so the
     // harness can pin each decision to the vanilla rule it mirrors.
@@ -120,6 +153,40 @@ namespace WhiskeyRealism.Tactical
                 : IsWritableMacro(input.FallbackOpinion) ? input.FallbackOpinion : NoMacroWrite;
             if (opinion == NoMacroWrite) return NoMacroWrite;
             return opinion == input.CurrentMacro ? NoMacroWrite : opinion;
+        }
+
+        // #45 group stance as an arbiter intent (GroupStanceIntentProducer). The
+        // answer is the coordinator's cached per-brigade decision
+        // (PopulateResolvedDecisionsForSide: doctrine, then ledger task, then the
+        // sector-odds scorer). Vanilla's AdjustGroupAIStance (4221-4278) writes
+        // 1-4 per pool group; Whiskey writes only 1-3 and never over a vanilla
+        // assault (4): an assault is either kept or demoted by the Safety
+        // charge-demotion intent (TacticalChargeDenial.TryDemotionIntent). The
+        // group must be settled — no path (regimentpaths) and no courier order in
+        // flight — as the #45 order-friction gate required
+        // (TacticalOrderSettlementGate: a marching or still-ordered group is not
+        // changed). Priority Scorer: every other stance source outranks it.
+        public static bool TryGroupStanceIntent(in UnitRecord group, in TacticalResolvedGroupDecision resolved, out BattleOrderIntent intent)
+        {
+            intent = default(BattleOrderIntent);
+            if ((group.Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.UnitTyp)) return false;
+            if ((group.Flags & UnitFlags.PlayerOwned) != 0) return false;
+            if (group.AiStanceOrdered == TacticalCommandTaskToStanceMapper.StanceAssault) return false;
+            if (group.RegimentPaths > 0 || group.QueuedOrders > 0) return false;
+            if (resolved.Kind != TacticalDoctrineDecisionKind.Apply) return false;
+            if (resolved.FinalStance < 1 || resolved.FinalStance > 3) return false;
+
+            intent = new BattleOrderIntent
+            {
+                GroupId = group.InstanceId,
+                Channel = OrderChannel.Stance,
+                Value = resolved.FinalStance,
+                Heading = -1f,
+                Priority = IntentPriority.Scorer,
+                Source = IntentSource.GroupStanceScorer,
+                Reason = resolved.FromDoctrine ? "group-stance-doctrine" : resolved.FromLedger ? "group-stance-ledger" : "group-stance-scorer",
+            };
+            return true;
         }
 
         // Cheap pre-check so the patch can skip building opinions when no write
@@ -248,29 +315,7 @@ namespace WhiskeyRealism.Tactical
             return new AddPathDecision(false, vanillaResult, "vanilla-chain");
         }
 
-        // BR-C2 artillery waypoint veto (BattleUnits.SetWaypoint Postfix, 91232).
-        // showmovementoptions is the player-UI flag: it defaults true and every
-        // vanilla AI call site passes false (3139, 3643, 4146, 4768, 4957, 6235,
-        // 6959), so a true value means a player order and is never vetoed.
-        // The distance is from the nearest visible enemy to the TARGET.
-        public static bool ShouldVetoArtilleryWaypoint(
-            int unitTyp,
-            int guns,
-            bool routedOrMarked,
-            bool permanentlyDetached,
-            bool showMovementOptions,
-            bool canWrite,
-            float nearestEnemyToTargetSq,
-            float pointBlankMeters)
-        {
-            if (unitTyp != 2 || guns <= 0) return false;
-            if (showMovementOptions) return false;
-            if (routedOrMarked || permanentlyDetached) return false;
-            if (!canWrite) return false;
-            return nearestEnemyToTargetSq <= pointBlankMeters * pointBlankMeters;
-        }
-
-        // BR-H3 / B7 artillery micro writes (TacticalArtilleryApplier).
+        // BR-H3 / B7 artillery micro writes (ArtilleryIntentProducer intents).
         // Vanilla anchors:
         //   MountUnits 90860-90890: limber = formation 3 + mounted 1, unlimber =
         //     formation 0 + mounted 0 (ChangeRegimentFormation 135440-135452
@@ -311,6 +356,416 @@ namespace WhiskeyRealism.Tactical
                 default:
                     return ArtilleryMicroWrite.None;
             }
+        }
+
+        // ---- Battle-core artillery (ArtilleryIntentProducer, plan BC5b) ----
+        //
+        // One pass per arbiter tick over the side's batteries replaces B7 (Postfix
+        // on CheckAIBombardment 3869), the #45 all-stance audit and the
+        // SetWaypoint point-blank veto. Enemy inputs come from the snapshot's
+        // observations only (Visible; a Remembered enemy is not a target in fire
+        // range); own-battery fields the snapshot does not carry (mounted, guns,
+        // fire range, ammo slots, cover) come in BattleArtilleryState. Writes:
+        //   CombatBehavior 7/8 (cease bombardment / counter-battery; vanilla
+        //     CheckAIBombardment 3895-3906, CheckCounterBatteryFire 3851-3861).
+        //     Bombardment (9) itself stays vanilla's: its ChangeCombatBehavior
+        //     comes with bombardposition/bombardrange (3898-3901), which the
+        //     CombatBehavior channel does not carry.
+        //   Formation 3 + Limber / 0 + Unlimber (MountUnits 90860-90890;
+        //     artillery formation 3 <=> mounted 1, ChangeRegimentFormation
+        //     135440-135452).
+        //   Facing: RotateRegiment toward the enemy (UnlimberArtilleryAIMicro
+        //     3482-3495; a standing battery only past vanilla's turn trigger,
+        //     4599-4606).
+        //   Move (Safety) for a retreat: away from the visible threat by the
+        //     fallback distance, validated by the executor (clamp, water/fence
+        //     step-back, in-contact line check) instead of CheckArtyFallback's
+        //     unchecked RegimentSetPath along retreatangle (3525), which vanilla
+        //     derives from true enemy slice strength (122717, 122830).
+        // Never a stance: ChangeStance on a battery sets permanentlydetached
+        // (90788-90791) and vanilla artillery AI then skips it (3789, 3834, 3890,
+        // 3928).
+
+        // UnlimberArtilleryAIMicro / audit: unsupported batteries panic inside
+        // musket range (Scourge's DistArtyPanic has no vanilla analog).
+        public const float ArtilleryPanicMeters = 100f;
+        public const int ArtilleryLimberedFormation = 3;
+        public const int ArtilleryUnlimberedFormation = 0;
+        public const int CombatBehaviorFireAtWill = 7;
+        public const int CombatBehaviorCounterBattery = 8;
+        public const int CombatBehaviorBombard = 9;
+        // Old audit/B7 interposition geometry: a friend shields the battery only
+        // within ~one regiment frontage of the battery-enemy line.
+        private const float InterposedLateralMeters = 100f;
+        private const float SupportFallbackRadiusMeters = 200f;
+
+        // A battery the artillery producers may act on: an AI battery, alive,
+        // active, not routing, not detached (vanilla artillery AI skips detached
+        // batteries for good), not player-owned, and neither it nor any command
+        // ancestor feuding (vanilla's envelope is the group's ai_feudstance, 3890).
+        public static bool ArtilleryBatteryEligible(BattleSnapshot s, int index)
+        {
+            if (s == null || index < 0 || index >= s.OwnCount) return false;
+            UnitRecord[] own = s.Own;
+            UnitFlags f = own[index].Flags;
+            if ((f & UnitFlags.IsArtillery) == 0 || (f & UnitFlags.IsGroup) != 0) return false;
+            if ((f & UnitFlags.Alive) == 0 || (f & UnitFlags.Active) == 0) return false;
+            if ((f & (UnitFlags.Routed | UnitFlags.MarkedForRout | UnitFlags.OnRetreat | UnitFlags.PermanentlyDetached | UnitFlags.PlayerOwned | UnitFlags.Feud)) != 0)
+                return false;
+            int p = own[index].ParentIndex;
+            for (int steps = 0; p >= 0 && p < s.OwnCount && steps < s.OwnCount; steps++)
+            {
+                if ((own[p].Flags & UnitFlags.Feud) != 0) return false;
+                p = own[p].ParentIndex;
+            }
+            return true;
+        }
+
+        // Per-battery hold (Artillery Audit Min Hold Seconds) on the doctrine
+        // clock: the battery's last executor outcome is younger than the hold. A
+        // stamp from the future (reload, new battle) has expired.
+        public static bool ArtilleryHoldActive(double nowHours, double lastOutcomeHours, double holdHours)
+        {
+            double age = nowHours - lastOutcomeHours;
+            return holdHours > 0.0 && age >= 0.0 && age < holdHours;
+        }
+
+        // The executor resets bombardstarttime with this write (vanilla
+        // CheckAIBombardment 3904 cancels a bombardment with ChangeCombatBehavior 7
+        // and bombardstarttime = 0).
+        public static bool ResetsBombardStart(in BattleOrderIntent intent)
+        {
+            return intent.Channel == OrderChannel.CombatBehavior &&
+                intent.Value == CombatBehaviorFireAtWill &&
+                intent.Source == IntentSource.ArtilleryDoctrine;
+        }
+
+        // Doctrine + micro intents for battery `index` (ArtilleryBatteryEligible
+        // checked by the caller). Returns how many were written to buffer (at most
+        // one per channel; up to 2).
+        public static int ArtilleryDoctrineIntents(BattleSnapshot s, int index, in BattleArtilleryState b, in BattleArtilleryRules r, BattleOrderIntent[] buffer)
+        {
+            if (s == null || buffer == null || buffer.Length < 2 || b.InHold || b.Guns <= 0) return 0;
+            ref UnitRecord battery = ref s.Own[index];
+            int n = 0;
+
+            int closest = s.ClosestVisibleEnemy(index, out float enemyDistance);
+            bool hasEnemy = closest >= 0;
+            float ex = hasEnemy ? s.Observations[closest].X : 0f;
+            float ez = hasEnemy ? s.Observations[closest].Z : 0f;
+            bool enemyArtilleryInRange = VisibleEnemyArtilleryWithin(s, battery.X, battery.Z, b.FireRange);
+            int support = CountInterposedSupport(s, index, hasEnemy, ex, ez, enemyDistance);
+
+            // 1. Counter-battery (8) has no reachable vanilla release (3834).
+            bool behaviorWritten = false;
+            if (r.DoctrineOn && ShouldReleaseCounterBattery(battery.CombatBehaviorOrdered, enemyArtilleryInRange))
+            {
+                buffer[n++] = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorFireAtWill, IntentPriority.Executor, "artillery-counterbattery-release");
+                behaviorWritten = true;
+            }
+
+            // 2. Doctrine over a vanilla bombardment (9): cancel (7) or counter-battery (8).
+            if (r.DoctrineOn && !behaviorWritten && battery.CombatBehaviorOrdered == CombatBehaviorBombard)
+            {
+                var screen = TacticalSupportScreen.Score(new TacticalSupportScreen.Input
+                {
+                    ProtectedUnitMorale = b.Morale,
+                    MoraleFallbackThreshold = b.FallbackMoraleThreshold,
+                    BattleStartMorale = b.BattleStartMorale,
+                    EnemyDistance = hasEnemy ? enemyDistance : 9999f,
+                    DangerRadius = r.FallbackDistance,
+                    ScreenUnitCount = support,
+                    AiFeudStance = -1,
+                    IsPlayerAiOrFeud = 0,
+                });
+                var decision = TacticalArtilleryDoctrine.Score(new TacticalArtilleryDoctrine.Input
+                {
+                    ScreenResult = screen,
+                    AmmoTotalRatio = b.AmmoRatio01,
+                    CanisterAmmo = b.CanisterAmmo,
+                    ClosestEnemyDistance = hasEnemy ? enemyDistance : 9999f,
+                    UnitFireRange = b.FireRange,
+                    EnemyArtilleryVisible = enemyArtilleryInRange,
+                    CombatBehaviorOrdered = battery.CombatBehaviorOrdered,
+                    AiFeudStance = -1,
+                    IsPlayerAiOrFeud = 0,
+                    DoctrineDecision = b.Doctrine,
+                });
+                if (decision == TacticalArtilleryDoctrine.Decision.CancelBombard)
+                {
+                    buffer[n++] = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorFireAtWill, IntentPriority.Executor, "artillery-cancel-bombard");
+                    behaviorWritten = true;
+                }
+                else if (decision == TacticalArtilleryDoctrine.Decision.CounterBattery)
+                {
+                    buffer[n++] = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorCounterBattery, IntentPriority.Executor, "artillery-counterbattery");
+                    behaviorWritten = true;
+                }
+            }
+
+            if (!r.AuditOn) return n;
+
+            // 3. Micro doctrine (limber / unlimber / face / retreat / conserve).
+            bool limbered = b.Mounted == 1;
+            QuadrantThreats(s, battery.X, battery.Z, battery.RotationY, b.FireRange, out float currentThreat, out float bestThreat);
+            var micro = TacticalArtilleryMicroDoctrine.Decide(new TacticalArtilleryMicroInput(
+                hasEnemy: hasEnemy,
+                enemyCloseDistance: enemyDistance,
+                panicDistance: ArtilleryPanicMeters,
+                supportCount: support,
+                moraleBonus: b.GroupMorale >= 0.6f,
+                enemyRoutedOrRetreating: false, // routed enemies leave the observations (BC2a)
+                limberState: limbered ? TacticalArtilleryLimberState.Limbered : TacticalArtilleryLimberState.Unlimbered,
+                ammoRatio01: b.AmmoRatio01,
+                targetDistance: enemyDistance,
+                maxRange: b.FireRange,
+                currentQuadrantThreat: currentThreat,
+                bestQuadrantThreat: bestThreat,
+                canWheel: battery.RegimentPaths <= 0 && !limbered,
+                frontalTargetInRange: currentThreat > 0f));
+            bool enemyInFireRange = hasEnemy && enemyDistance <= b.FireRange;
+            ArtilleryMicroWrite write = PlanArtilleryMicroWrite(micro.Action, b.Mounted, battery.RegimentPaths, battery.MovementMode,
+                battery.CombatBehaviorOrdered, enemyInFireRange);
+            float towardEnemy = hasEnemy ? HeadingTo(battery.X, battery.Z, ex, ez) : -1f;
+            switch (write)
+            {
+                case ArtilleryMicroWrite.CeaseBombard:
+                    if (!behaviorWritten)
+                        buffer[n++] = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorFireAtWill, IntentPriority.Executor, "artillery-conserve-ammo");
+                    break;
+                case ArtilleryMicroWrite.Limber:
+                {
+                    BattleOrderIntent limber = BatteryIntent(battery, OrderChannel.Formation, ArtilleryLimberedFormation, IntentPriority.Executor, "artillery-limber");
+                    limber.Flags = IntentFlags.Limber;
+                    buffer[n++] = limber;
+                    break;
+                }
+                case ArtilleryMicroWrite.UnlimberAndFace:
+                {
+                    BattleOrderIntent unlimber = BatteryIntent(battery, OrderChannel.Formation, ArtilleryUnlimberedFormation, IntentPriority.Executor, "artillery-unlimber");
+                    unlimber.Flags = IntentFlags.Unlimber;
+                    buffer[n++] = unlimber;
+                    if (towardEnemy >= 0f && n < buffer.Length)
+                    {
+                        BattleOrderIntent face = BatteryIntent(battery, OrderChannel.Facing, 0, IntentPriority.Executor, "artillery-unlimber-face");
+                        face.Heading = towardEnemy;
+                        buffer[n++] = face;
+                    }
+                    break;
+                }
+                case ArtilleryMicroWrite.Face:
+                    if (towardEnemy >= 0f &&
+                        ShouldRotateTowardTarget(battery.RotationY, towardEnemy, r.TurnTriggerDegrees, b.CoverValue, b.CoverObject,
+                            r.MaxCoverValueForRotation, r.AdditionalAngleInCover))
+                    {
+                        BattleOrderIntent face = BatteryIntent(battery, OrderChannel.Facing, 0, IntentPriority.Executor, "artillery-face");
+                        face.Heading = towardEnemy;
+                        buffer[n++] = face;
+                    }
+                    break;
+                case ArtilleryMicroWrite.Retreat:
+                    if (hasEnemy)
+                        buffer[n++] = ArtilleryRetreatIntent(battery, ex, ez, r.FallbackDistance, IntentSource.ArtilleryDoctrine, "artillery-retreat");
+                    break;
+            }
+            return n;
+        }
+
+        // Point-blank watchdog (replaces ArtillerySetWaypointVetoPatch): a battery
+        // vanilla sent (regimentpaths > 0; e.g. the delayed group move 4146) to a
+        // waypoint within ArtilleryPointBlankMeters of a visible enemy is pulled
+        // back with a Safety retreat. Whiskey's own targets never get there
+        // (WaypointValidator rejects them, PointBlank).
+        public static bool TryArtilleryPointBlankIntent(BattleSnapshot s, int index, float fallbackDistance, out BattleOrderIntent intent)
+        {
+            intent = default(BattleOrderIntent);
+            if (s == null || index < 0 || index >= s.OwnCount) return false;
+            ref UnitRecord battery = ref s.Own[index];
+            if (battery.RegimentPaths <= 0) return false;
+            if (battery.LastWaypointX == 0f && battery.LastWaypointZ == 0f) return false;
+            EnemyObservation[] obs = s.Observations;
+            float r2 = WaypointValidator.ArtilleryPointBlankMeters * WaypointValidator.ArtilleryPointBlankMeters;
+            int threat = -1;
+            float best = float.MaxValue;
+            for (int k = 0; k < s.ObservationCount; k++)
+            {
+                if (obs[k].State != ObservationState.Visible) continue;
+                float d2 = DistSq(obs[k].X, obs[k].Z, battery.LastWaypointX, battery.LastWaypointZ);
+                if (d2 <= r2 && d2 < best)
+                {
+                    best = d2;
+                    threat = k;
+                }
+            }
+            if (threat < 0) return false;
+            intent = ArtilleryRetreatIntent(battery, obs[threat].X, obs[threat].Z, fallbackDistance, IntentSource.ArtilleryPointBlank, "artillery-point-blank");
+            return true;
+        }
+
+        // Safety retreat away from (enemyX, enemyZ) by the fallback distance, ending
+        // facing the enemy (vanilla faces retreatangle + 180, 3525). Immediate and
+        // line-checked (InContactWithdrawal), limbered first (Limber), allowed onto
+        // the supporting line (ReliefOrSupport). The executor validates the target.
+        public static BattleOrderIntent ArtilleryRetreatIntent(in UnitRecord battery, float enemyX, float enemyZ, float fallbackDistance, IntentSource source, string reason)
+        {
+            float distance = fallbackDistance > 0f ? fallbackDistance : 200f;
+            float dx = battery.X - enemyX;
+            float dz = battery.Z - enemyZ;
+            float d = (float)System.Math.Sqrt(dx * dx + dz * dz);
+            float ux, uz;
+            if (d > 0.01f)
+            {
+                ux = dx / d;
+                uz = dz / d;
+            }
+            else
+            {
+                double rear = (battery.RotationY + 180f) * System.Math.PI / 180.0;
+                ux = (float)System.Math.Sin(rear);
+                uz = (float)System.Math.Cos(rear);
+            }
+            return new BattleOrderIntent
+            {
+                GroupId = battery.InstanceId,
+                Channel = OrderChannel.Move,
+                TargetX = battery.X + ux * distance,
+                TargetZ = battery.Z + uz * distance,
+                Heading = HeadingTo(battery.X, battery.Z, enemyX, enemyZ),
+                Priority = IntentPriority.Safety,
+                Source = source,
+                Flags = IntentFlags.InContactWithdrawal | IntentFlags.ReliefOrSupport | IntentFlags.Limber,
+                Task = CommandTaskType.FallBackToLine,
+                Reason = reason,
+            };
+        }
+
+        // Unity yaw from (x, z) toward (tx, tz), [0, 360): vanilla
+        // Tools.GetAngle(own, target) + 180 (151304: atan2(dx, dz) - 180).
+        public static float HeadingTo(float x, float z, float tx, float tz)
+        {
+            float h = (float)(System.Math.Atan2(tx - x, tz - z) * 180.0 / System.Math.PI);
+            if (h < 0f) h += 360f;
+            return h >= 360f ? h - 360f : h;
+        }
+
+        // Friendly infantry/cavalry (unittyp 0, 1, 4) between the battery and the
+        // enemy: on the enemy side, closer than the enemy and within one frontage
+        // of the line. Without an enemy, friends within 200 m. Port of the #45
+        // audit's CountFriendlyInfantryCavInterposed over the snapshot.
+        public static int CountInterposedSupport(BattleSnapshot s, int index, bool hasEnemy, float enemyX, float enemyZ, float enemyDistance)
+        {
+            UnitRecord[] own = s.Own;
+            float ax = own[index].X;
+            float az = own[index].Z;
+            int count = 0;
+            float tx = enemyX - ax;
+            float tz = enemyZ - az;
+            float len2 = tx * tx + tz * tz;
+            bool geometry = hasEnemy && enemyDistance > 1f && len2 >= 1f;
+            float len = geometry ? (float)System.Math.Sqrt(len2) : 0f;
+            for (int j = 0; j < s.OwnCount; j++)
+            {
+                if (j == index) continue;
+                ref UnitRecord f = ref own[j];
+                if (f.UnitTyp != TacticalUnitType.Infantry && f.UnitTyp != TacticalUnitType.Cavalry && f.UnitTyp != TacticalUnitType.Officer) continue;
+                if ((f.Flags & (UnitFlags.Routed | UnitFlags.MarkedForRout | UnitFlags.PermanentlyDetached)) != 0) continue;
+                if ((f.Flags & UnitFlags.Alive) == 0) continue;
+                float fx = f.X - ax;
+                float fz = f.Z - az;
+                if (!geometry)
+                {
+                    if (fx * fx + fz * fz <= SupportFallbackRadiusMeters * SupportFallbackRadiusMeters) count++;
+                    continue;
+                }
+                float dot = fx * tx + fz * tz;
+                if (dot <= 0f) continue;
+                float proj = dot / len;
+                if (proj >= len) continue;
+                float lateral2 = fx * fx + fz * fz - proj * proj;
+                if (lateral2 > InterposedLateralMeters * InterposedLateralMeters) continue;
+                count++;
+            }
+            return count;
+        }
+
+        // CheckCounterBatteryFire's enemy-battery test (3843) over what is seen:
+        // a visible enemy battery within fire range.
+        public static bool VisibleEnemyArtilleryWithin(BattleSnapshot s, float x, float z, float range)
+        {
+            EnemyObservation[] obs = s.Observations;
+            float r2 = range * range;
+            for (int k = 0; k < s.ObservationCount; k++)
+            {
+                if (obs[k].State != ObservationState.Visible || obs[k].UnitTyp != TacticalUnitType.Artillery) continue;
+                if (DistSq(obs[k].X, obs[k].Z, x, z) <= r2) return true;
+            }
+            return false;
+        }
+
+        // Visible enemy strength in fire range per 90-degree quadrant around the
+        // battery's facing: current = the front quadrant, best = the strongest.
+        // Feeds the micro doctrine's wheel test (best > current + 1000).
+        public static void QuadrantThreats(BattleSnapshot s, float x, float z, float facing, float range, out float current, out float best)
+        {
+            float q0 = 0f, q1 = 0f, q2 = 0f, q3 = 0f;
+            EnemyObservation[] obs = s.Observations;
+            float r2 = range * range;
+            for (int k = 0; k < s.ObservationCount; k++)
+            {
+                if (obs[k].State != ObservationState.Visible) continue;
+                if (DistSq(obs[k].X, obs[k].Z, x, z) > r2) continue;
+                float rel = HeadingTo(x, z, obs[k].X, obs[k].Z) - facing + 45f;
+                rel %= 360f;
+                if (rel < 0f) rel += 360f;
+                float strength = obs[k].Strength > 0f ? obs[k].Strength : 1f;
+                switch ((int)(rel / 90f))
+                {
+                    case 0: q0 += strength; break;
+                    case 1: q1 += strength; break;
+                    case 2: q2 += strength; break;
+                    default: q3 += strength; break;
+                }
+            }
+            current = q0;
+            best = System.Math.Max(System.Math.Max(q0, q1), System.Math.Max(q2, q3));
+        }
+
+        // Within max(80 m, 20 % of fire range) of a friendly infantry/cavalry
+        // regiment: the doctrine's danger-close input (B7 HasFriendlyCloseRangeRisk
+        // over the snapshot instead of vanilla's range list).
+        public static bool FriendlyDangerClose(BattleSnapshot s, int index, float fireRange)
+        {
+            UnitRecord[] own = s.Own;
+            float close = System.Math.Max(80f, fireRange * 0.20f);
+            for (int j = 0; j < s.OwnCount; j++)
+            {
+                if (j == index) continue;
+                if (own[j].UnitTyp != TacticalUnitType.Infantry && own[j].UnitTyp != TacticalUnitType.Cavalry) continue;
+                if ((own[j].Flags & (UnitFlags.Routed | UnitFlags.MarkedForRout)) != 0) continue;
+                if (DistSq(own[j].X, own[j].Z, own[index].X, own[index].Z) <= close * close) return true;
+            }
+            return false;
+        }
+
+        private static BattleOrderIntent BatteryIntent(in UnitRecord battery, OrderChannel channel, int value, IntentPriority priority, string reason)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = battery.InstanceId,
+                Channel = channel,
+                Value = value,
+                Heading = -1f,
+                Priority = priority,
+                Source = IntentSource.ArtilleryDoctrine,
+                Reason = reason,
+            };
+        }
+
+        private static float DistSq(float ax, float az, float bx, float bz)
+        {
+            float dx = ax - bx;
+            float dz = az - bz;
+            return dx * dx + dz * dz;
         }
 
         // Face writes (B7 + all-stance audit) follow vanilla's micro facing rule
