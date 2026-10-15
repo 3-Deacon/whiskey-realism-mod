@@ -43,7 +43,7 @@ namespace WhiskeyRealism.Tactical.Battle
     //   - Leaf-slot inputs (BC5a): lastsetwaypointrotation (stored with the group's
     //     waypoint, SetGroupFormation 92067-92068), groupposition.groupwidth /
     //     groupdepth and each group's layout entries attachedunitid[k] /
-    //     unitoffsetposition[k] (GroupPosition 78370-78382; 92094 places child k from
+    //     unitoffsetposition[k] (GroupPosition 78370-78382; 92086 places child k from
     //     them). Field reads only.
     //   - Vanilla's own ancestry test for the player's command is Transform.IsChildOf
     //     (CheckCurrentOrderUpdate 8272, IsUnitUnderCommander 91203); the parent map is

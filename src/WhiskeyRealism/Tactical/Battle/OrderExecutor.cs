@@ -426,6 +426,9 @@ namespace WhiskeyRealism.Tactical.Battle
         private readonly Dictionary<int, double> _courierAt = new Dictionary<int, double>(128);
         private readonly Dictionary<int, double> _backoffUntil = new Dictionary<int, double>(128);
         private readonly Dictionary<long, OrderOutcome> _lastOutcome = new Dictionary<long, OrderOutcome>(256);
+        // The flank each group's children were last refused on by an executed write
+        // (absent = unskewed). Read by the leaf slot (LeafSlotTarget).
+        private readonly Dictionary<int, RefuseFlank> _refuseByGroup = new Dictionary<int, RefuseFlank>(64);
         private PendingMove[] _pending = new PendingMove[32];
         // Parallel to _pending, pooled per slot: the units each pending move went
         // to, and the units whose waypoint was already on their target before it.
@@ -675,6 +678,24 @@ namespace WhiskeyRealism.Tactical.Battle
                 _tickets[t].Handed = true;
             }
             return n;
+        }
+
+        /// <summary>
+        /// A write re-laid the group's children through SetGroupFormation: the
+        /// refuse wheel with its refuseflank (92095-92101), or a move or courier
+        /// formation change with none (SetWaypoint passes direction -1, 91559). An
+        /// in-place rotation lays out nothing and is not noted.
+        /// </summary>
+        public void NoteChildLayout(int groupId, RefuseFlank refuse)
+        {
+            if (refuse == RefuseFlank.None) _refuseByGroup.Remove(groupId);
+            else _refuseByGroup[groupId] = refuse;
+        }
+
+        /// <summary>The flank the executor last refused on the group's children, or None.</summary>
+        public RefuseFlank LastIssuedRefuse(int groupId)
+        {
+            return _refuseByGroup.TryGetValue(groupId, out RefuseFlank refuse) ? refuse : RefuseFlank.None;
         }
 
         public bool TryGetLastOutcome(int groupId, OrderChannel channel, out OrderOutcome outcome)
@@ -951,6 +972,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _courierAt.Clear();
             _backoffUntil.Clear();
             _lastOutcome.Clear();
+            _refuseByGroup.Clear();
             _pendingCount = 0;
             _ticketCount = 0;
         }
