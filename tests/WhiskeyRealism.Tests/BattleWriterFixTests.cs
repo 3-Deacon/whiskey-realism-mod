@@ -1,5 +1,6 @@
 using System;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Operations;
 
 // WS T3 — battle writer & gate patch fixes. Every test pins a pure decision
 // extracted from a Harmony patch to the vanilla behavior it must respect.
@@ -23,6 +24,12 @@ internal static class BattleWriterFixTests
         ReserveGateRollbackOnlyWhenStopRegimentIsReversible();
         PathfinderNeverRemovesAddedPaths();
         PathfinderEndsRetryLoopOnlyWithinTolerance();
+        VetoSkipsPlayerUiOrdersAndNonAiUnits();
+        VetoMeasuresEnemyDistanceToTarget();
+        ArtilleryMicroNeverInterruptsMovement();
+        ArtilleryMicroMirrorsVanillaUnlimberRule();
+        ArtilleryMicroMapsActionsToVanillaWrites();
+        CounterBatteryReleasedWhenTargetGone();
     }
 
     private static void Pass(string name)
@@ -269,5 +276,95 @@ internal static class BattleWriterFixTests
         var noCorners = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 0, vanillaResult: 0, finalDistance: 0f, tolerance: 5f);
         TestHarness.AssertFalse(noCorners.OverrideResult, "no corners never overrides");
         Pass("battle writers: #53 ends the retry loop only within endpoint tolerance");
+    }
+
+    private static bool Veto(
+        int unitTyp = 2,
+        int guns = 4,
+        bool routed = false,
+        bool detached = false,
+        bool showMovementOptions = false,
+        bool canWrite = true,
+        float nearestEnemyToTargetSq = 30f * 30f)
+    {
+        return BattleWriterPolicy.ShouldVetoArtilleryWaypoint(
+            unitTyp, guns, routed, detached, showMovementOptions, canWrite, nearestEnemyToTargetSq, 60f);
+    }
+
+    // BR-C2: SetWaypoint's showmovementoptions defaults true for UI orders;
+    // every vanilla AI call site passes false (e.g. 3139, 4146, 6235, 6959).
+    private static void VetoSkipsPlayerUiOrdersAndNonAiUnits()
+    {
+        TestHarness.AssertTrue(Veto(), "AI battery ordered to point blank");
+        TestHarness.AssertFalse(Veto(showMovementOptions: true), "player UI order");
+        TestHarness.AssertFalse(Veto(canWrite: false), "guard denies (player/W&L/mode)");
+        TestHarness.AssertFalse(Veto(unitTyp: 0), "infantry");
+        TestHarness.AssertFalse(Veto(guns: 0), "no guns");
+        TestHarness.AssertFalse(Veto(routed: true), "routed");
+        TestHarness.AssertFalse(Veto(detached: true), "detached");
+        Pass("battle writers: veto skips player UI orders and non-AI units");
+    }
+
+    private static void VetoMeasuresEnemyDistanceToTarget()
+    {
+        TestHarness.AssertFalse(Veto(nearestEnemyToTargetSq: 61f * 61f), "target beyond point blank");
+        TestHarness.AssertFalse(Veto(nearestEnemyToTargetSq: float.MaxValue), "no visible enemy");
+        TestHarness.AssertTrue(Veto(nearestEnemyToTargetSq: 59f * 59f), "target inside point blank");
+        Pass("battle writers: veto measures nearest visible enemy to the target");
+    }
+
+    private static ArtilleryMicroWrite Micro(
+        TacticalArtilleryMicroAction action,
+        int mounted = 0,
+        int paths = 0,
+        int movementMode = 0,
+        int combatBehaviorOrdered = 7,
+        bool enemyInFireRange = true)
+    {
+        return BattleWriterPolicy.PlanArtilleryMicroWrite(action, mounted, paths, movementMode, combatBehaviorOrdered, enemyInFireRange);
+    }
+
+    // BR-H3/B7 thrash: RotateRegiment and RegimentSetPath(newpath) both run
+    // StopRegiment (130165, 130836); vanilla's artillery micro (3482, 3513)
+    // only acts on idle batteries.
+    private static void ArtilleryMicroNeverInterruptsMovement()
+    {
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Unlimber, mounted: 1, paths: 2), "unlimber while moving");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Retreat, mounted: 1, paths: 1), "retreat while moving");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Retreat, mounted: 1, movementMode: 4), "retreat while retreating");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.WheelToBestThreat, paths: 1), "wheel while moving");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Limber, paths: 1), "limber while moving");
+        Pass("battle writers: artillery micro never interrupts battery movement");
+    }
+
+    // UnlimberArtilleryAIMicro 3482: mounted == 1, no paths, enemy within fire range.
+    private static void ArtilleryMicroMirrorsVanillaUnlimberRule()
+    {
+        TestHarness.AssertEqual(ArtilleryMicroWrite.UnlimberAndFace, Micro(TacticalArtilleryMicroAction.Unlimber, mounted: 1), "unlimber in range");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Unlimber, mounted: 1, enemyInFireRange: false), "no enemy in fire range");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Unlimber, mounted: 0), "already unlimbered");
+        Pass("battle writers: artillery unlimber mirrors vanilla rule");
+    }
+
+    private static void ArtilleryMicroMapsActionsToVanillaWrites()
+    {
+        TestHarness.AssertEqual(ArtilleryMicroWrite.Limber, Micro(TacticalArtilleryMicroAction.Limber, mounted: 0), "limber");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Limber, mounted: 1), "already limbered");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.Retreat, Micro(TacticalArtilleryMicroAction.Retreat, mounted: 1), "retreat");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.Face, Micro(TacticalArtilleryMicroAction.WheelToBestThreat), "wheel");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.CeaseBombard, Micro(TacticalArtilleryMicroAction.ConserveAmmo, combatBehaviorOrdered: 9), "conserve cancels bombard");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.ConserveAmmo, combatBehaviorOrdered: 7), "conserve no bombard");
+        TestHarness.AssertEqual(ArtilleryMicroWrite.None, Micro(TacticalArtilleryMicroAction.Fire), "fire is vanilla");
+        Pass("battle writers: artillery micro maps actions to vanilla writes");
+    }
+
+    // CheckCounterBatteryFire 3834 skips combatbehaviorordered == 8, so its own
+    // 8 -> 7 release branch is unreachable; CheckAIBombardment 3890 skips 8 too.
+    private static void CounterBatteryReleasedWhenTargetGone()
+    {
+        TestHarness.AssertTrue(BattleWriterPolicy.ShouldReleaseCounterBattery(8, false), "no enemy artillery in fire range");
+        TestHarness.AssertFalse(BattleWriterPolicy.ShouldReleaseCounterBattery(8, true), "enemy artillery still in range");
+        TestHarness.AssertFalse(BattleWriterPolicy.ShouldReleaseCounterBattery(7, false), "not counter-battery");
+        Pass("battle writers: counter-battery released when the target is gone");
     }
 }

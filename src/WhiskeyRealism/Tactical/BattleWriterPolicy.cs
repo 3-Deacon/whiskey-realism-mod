@@ -1,5 +1,17 @@
+using WhiskeyRealism.Tactical.Operations;
+
 namespace WhiskeyRealism.Tactical
 {
+    internal enum ArtilleryMicroWrite
+    {
+        None = 0,
+        Limber = 1,
+        UnlimberAndFace = 2,
+        Retreat = 3,
+        Face = 4,
+        CeaseBombard = 5
+    }
+
     internal readonly struct MacroAiWriteInput
     {
         public MacroAiWriteInput(
@@ -168,6 +180,80 @@ namespace WhiskeyRealism.Tactical
             if (finalDistance >= 0f && finalDistance <= tolerance)
                 return new AddPathDecision(true, 1, "endpoint-within-tolerance");
             return new AddPathDecision(false, vanillaResult, "vanilla-chain");
+        }
+
+        // BR-C2 artillery waypoint veto (BattleUnits.SetWaypoint Postfix, 91232).
+        // showmovementoptions is the player-UI flag: it defaults true and every
+        // vanilla AI call site passes false (3139, 3643, 4146, 4768, 4957, 6235,
+        // 6959), so a true value means a player order and is never vetoed.
+        // The distance is from the nearest visible enemy to the TARGET.
+        public static bool ShouldVetoArtilleryWaypoint(
+            int unitTyp,
+            int guns,
+            bool routedOrMarked,
+            bool permanentlyDetached,
+            bool showMovementOptions,
+            bool canWrite,
+            float nearestEnemyToTargetSq,
+            float pointBlankMeters)
+        {
+            if (unitTyp != 2 || guns <= 0) return false;
+            if (showMovementOptions) return false;
+            if (routedOrMarked || permanentlyDetached) return false;
+            if (!canWrite) return false;
+            return nearestEnemyToTargetSq <= pointBlankMeters * pointBlankMeters;
+        }
+
+        // BR-H3 / B7 artillery micro writes (TacticalArtilleryApplier).
+        // Vanilla anchors:
+        //   MountUnits 90860-90890: limber = formation 3 + mounted 1, unlimber =
+        //     formation 0 + mounted 0 (ChangeRegimentFormation 135440-135452
+        //     turns SetFormationParam(0, ..., 1) on artillery into an UNLIMBER);
+        //   UnlimberArtilleryAIMicro 3482: only mounted, idle batteries with an
+        //     enemy inside fire range, then RotateRegiment toward it;
+        //   RotateRegiment (130159) and RegimentSetPath(newpath) (130836) both
+        //     StopRegiment, so nothing is written to a moving or retreating
+        //     battery (vanilla CheckArtyFallback 3513 likewise needs no paths);
+        //   CheckAIBombardment 3904: cancelling bombardment = combat behavior 7.
+        // No stance is ever written: batteries are attached sub-units and
+        // ChangeStance (90772) would set permanentlydetached, after which
+        // vanilla artillery AI skips them (3789, 3834, 3890, 3928).
+        public static ArtilleryMicroWrite PlanArtilleryMicroWrite(
+            TacticalArtilleryMicroAction action,
+            int mounted,
+            int regimentPaths,
+            int movementMode,
+            int combatBehaviorOrdered,
+            bool enemyInFireRange)
+        {
+            if (action == TacticalArtilleryMicroAction.ConserveAmmo)
+                return combatBehaviorOrdered == 9 ? ArtilleryMicroWrite.CeaseBombard : ArtilleryMicroWrite.None;
+
+            bool idle = regimentPaths <= 0 && movementMode != 2 && movementMode != 4 && movementMode != 5;
+            if (!idle) return ArtilleryMicroWrite.None;
+
+            switch (action)
+            {
+                case TacticalArtilleryMicroAction.Limber:
+                    return mounted != 1 ? ArtilleryMicroWrite.Limber : ArtilleryMicroWrite.None;
+                case TacticalArtilleryMicroAction.Unlimber:
+                    return mounted == 1 && enemyInFireRange ? ArtilleryMicroWrite.UnlimberAndFace : ArtilleryMicroWrite.None;
+                case TacticalArtilleryMicroAction.Retreat:
+                    return ArtilleryMicroWrite.Retreat;
+                case TacticalArtilleryMicroAction.WheelToBestThreat:
+                    return ArtilleryMicroWrite.Face;
+                default:
+                    return ArtilleryMicroWrite.None;
+            }
+        }
+
+        // Counter-battery (combat behavior 8) has no reachable vanilla release:
+        // CheckCounterBatteryFire skips units already at 8 (3834), so its own
+        // 8 -> 7 branch is dead, and CheckAIBombardment skips 8 too (3890).
+        // Release to fire-at-will (7) once no enemy battery is in fire range.
+        public static bool ShouldReleaseCounterBattery(int combatBehaviorOrdered, bool enemyArtilleryInFireRange)
+        {
+            return combatBehaviorOrdered == 8 && !enemyArtilleryInFireRange;
         }
 
         // #59 pre-check — AIBattle.CheckUseOfReserves 6093-6113: vanilla only
