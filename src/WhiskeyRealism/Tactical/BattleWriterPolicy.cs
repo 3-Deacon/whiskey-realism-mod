@@ -32,6 +32,20 @@ namespace WhiskeyRealism.Tactical
         public int DoctrineOpinion { get; }
     }
 
+    internal readonly struct AddPathDecision
+    {
+        public AddPathDecision(bool overrideResult, int result, string reason)
+        {
+            OverrideResult = overrideResult;
+            Result = result;
+            Reason = reason;
+        }
+
+        public bool OverrideResult { get; }
+        public int Result { get; }
+        public string Reason { get; }
+    }
+
     // Pure decisions behind the WS T3 battle writer/gate patches. Runtime
     // patches gather vanilla state and ask these functions what to do, so the
     // harness can pin each decision to the vanilla rule it mirrors.
@@ -131,6 +145,29 @@ namespace WhiskeyRealism.Tactical
             out float frontZ)
         {
             AnglePointXYXZ(hqX, hqZ, facingDegrees, 0f, -(groupDepth + groupUnitDistanceToBack), out frontX, out frontZ);
+        }
+
+        // #53 pathfinder discipline (Regiment.AddPath Postfix, 130259).
+        // Vanilla increments regimentpaths for a PathPartial/PathInvalid result
+        // only once iterations >= 15 (130511) - a deliberate last resort - and
+        // on an endpoint mismatch it keeps the segment and RegimentSetPath
+        // (131167-131178) continues from its last corner. So an added path is
+        // never removed. The only change: exact float endpoint equality
+        // (130517) never matches a navmesh-snapped target, so vanilla burns all
+        // 20 iterations adding slivers; an endpoint within tolerance ends it.
+        public static AddPathDecision DecideAddPath(
+            bool pathAdded,
+            int cornerCount,
+            int vanillaResult,
+            float finalDistance,
+            float tolerance)
+        {
+            if (!pathAdded) return new AddPathDecision(false, vanillaResult, "no-added-path");
+            if (vanillaResult != 0) return new AddPathDecision(false, vanillaResult, "vanilla-accepted");
+            if (cornerCount <= 0) return new AddPathDecision(false, vanillaResult, "no-corners");
+            if (finalDistance >= 0f && finalDistance <= tolerance)
+                return new AddPathDecision(true, 1, "endpoint-within-tolerance");
+            return new AddPathDecision(false, vanillaResult, "vanilla-chain");
         }
 
         // #59 pre-check — AIBattle.CheckUseOfReserves 6093-6113: vanilla only

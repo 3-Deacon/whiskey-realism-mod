@@ -21,6 +21,8 @@ internal static class BattleWriterFixTests
         ReserveGateMirrorsVanillaEndangeredFilter();
         ReserveGateSnapshotsOnlyPossibleSupportUnits();
         ReserveGateRollbackOnlyWhenStopRegimentIsReversible();
+        PathfinderNeverRemovesAddedPaths();
+        PathfinderEndsRetryLoopOnlyWithinTolerance();
     }
 
     private static void Pass(string name)
@@ -239,5 +241,33 @@ internal static class BattleWriterFixTests
         AssertNear(100f, x, "front x");
         AssertNear(-200f, z, "front z = hq moved forward by depth + back");
         Pass("battle writers: angle XY point matches vanilla GetAngleTerrainPosXY");
+    }
+
+    // Regiment.AddPath 130511: partial/invalid paths are accepted only once
+    // iterations >= 15 (deliberate); on endpoint mismatch the segment is kept
+    // and RegimentSetPath (131167-131178) chains from its last corner.
+    private static void PathfinderNeverRemovesAddedPaths()
+    {
+        var partial = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 8, vanillaResult: 0, finalDistance: 80f, tolerance: 5f);
+        TestHarness.AssertFalse(partial.OverrideResult, "far endpoint keeps vanilla result");
+        TestHarness.AssertEqual("vanilla-chain", partial.Reason, "far endpoint reason");
+        var none = BattleWriterPolicy.DecideAddPath(pathAdded: false, cornerCount: 0, vanillaResult: 0, finalDistance: 0f, tolerance: 5f);
+        TestHarness.AssertFalse(none.OverrideResult, "no added path");
+        var accepted = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 8, vanillaResult: 1, finalDistance: 0f, tolerance: 5f);
+        TestHarness.AssertFalse(accepted.OverrideResult, "vanilla accepted");
+        Pass("battle writers: #53 never removes added path segments");
+    }
+
+    // Exact float endpoint equality (130517) never matches a navmesh-snapped
+    // target, so vanilla burns all 20 RegimentSetPath iterations; a close
+    // endpoint ends the loop.
+    private static void PathfinderEndsRetryLoopOnlyWithinTolerance()
+    {
+        var near = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 8, vanillaResult: 0, finalDistance: 1.25f, tolerance: 5f);
+        TestHarness.AssertTrue(near.OverrideResult, "near endpoint overrides");
+        TestHarness.AssertEqual(1, near.Result, "near endpoint result");
+        var noCorners = BattleWriterPolicy.DecideAddPath(pathAdded: true, cornerCount: 0, vanillaResult: 0, finalDistance: 0f, tolerance: 5f);
+        TestHarness.AssertFalse(noCorners.OverrideResult, "no corners never overrides");
+        Pass("battle writers: #53 ends the retry loop only within endpoint tolerance");
     }
 }
