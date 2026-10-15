@@ -267,6 +267,28 @@ Anchors cited by the remediation commits (`git log 262a50d..`) and checked again
 | W&L CIC | `AICampaign.UpdateUnitAI` faction skip | 11620 | Correctly skips only the CIC player's own faction; contrast `BUG-WL-001`. |
 | W&L prestige | `DLC_WL.EarnPrestige` | 46601 (switch 46627, threshold 46702) | No case for order type 16; see `BUG-WL-002`. |
 
+## Policy selection (stage E)
+
+Full model and W&L notes: [`superpowers/specs/2026-10-14-need-driven-policy-design.md`](superpowers/specs/2026-10-14-need-driven-policy-design.md) § "Vanilla and W&L model".
+
+| Symbol | Line | Why it matters |
+|---|---|---|
+| `CampaignController.UpdateAllianceData` → `CheckAIPolicyChange` | 81488 → 81736 | Per-alliance cadence (`updaterhythmalliancedata`); runs before `UpdateProjects` and `UpdatePolicyResearch`. |
+| `Policies.CheckAIPolicyChange` | 211017-211098 | Player gate 211019 (no CIC exemption); emergency newspaper + cancel 211026-211074; one-at-a-time return 211061; personality walk 211076-211091. |
+| `GameVars.Alliance.GetAIPersonality` | 62716 | Emergency credit (101) / recruiting (100) personalities replace `usedaipersonality`. |
+| `GetActivatedPolicies` | 62803 | `researchedonly` counts every policy below progress 1 (incl. a player purchase); the default form counts non-act, non-grand slots. |
+| `Policies.LaunchPolicyEffect` | 209681-210955 | Every policy effect, hard-coded per id; magnitudes from `campaignprefs.txt` "Policies & Subsidies". |
+| `Policies.IsDeactivated` (private) | 210957 | Union 36 before 4 Mar 1861; CSA 170 while Virginia is Union. |
+| `Policies.UpdatePolicyResearch` | 209455-209482 | Speed ∝ `averagesupport / n^1.1 × (1 + 0.05 × project 95) / ResearchDuration`. |
+| `Policy.InitializeStatics` / `UpdateGrandStrategyIcons` | 211285 / 209337 | `grandpolicies` from the "GrandPolicies" folder; `markedasgrandpolicy` only once the panel opens. |
+| `Policy.GetAllianceFromPolicy` | 211392 | Folder name; ids < 100 Union, 100-199 CSA. |
+| `Policy.CheckSelections` | 211350-211368 | W&L prestige purchase (`CalculatePrestigeCostPolicy` 46081) starts research; career cannot cancel. |
+| `Policies.UpdateActivations` | 209248-209258 | W&L display bug (`BUG-WL-004`). |
+| `GameVars.Alliance.GetInterventionProbability` / `AdjustInterventionLevel` | 62822 / 62887 | CSA level − Union level; positive policy adjustments help the actor on either side; W&L effect 34 shifts it for the career's side. |
+| `BattleUnits.GetAverageBlockadeRatio` | 93766 | Blockade of the alliance's **own** harbors. |
+| `AIFaction.SeparateUnits` / `AICampaign.GetStrengthRatio` | 10462 / 12366 | Enemy lists hold visible units only, so the strength ratio is fog-honest. |
+| `Config/policies.dat` / `aipersonalities.dat` | `ImportPolicyData` 211717 / import 66144 | Record layouts (the harness fixture copies the 117 policy ids). |
+
 ## Game-update re-decompile inventory
 
 When GTCW patches:

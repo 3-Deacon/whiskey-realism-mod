@@ -11,6 +11,10 @@ These rules apply to non-patch logic under `src/WhiskeyRealism/Strategic/`. Iden
 - Prefer deterministic inputs/outputs that can be covered by the console test harness.
 - Use focused DTOs for telemetry signatures so logs can be bounded and compared.
 
+## Layout Notes
+
+- `Policies/` holds the stage E need-driven policy selection: pure `PolicyEffectCatalog`, `PolicyEligibility`, `PolicyNeedScorer`, `PolicyPlanLedger`, `PolicyEmergencyProtection`, and the runtime adapter `PolicyRuntime`. The needs come from `CampaignNeedBuilder` (pure) / `CampaignNeedRuntime` (runtime) in this folder and are shared with project selection. Inside `WhiskeyRealism.Strategic.*` the vanilla `Policies` class must be written `global::Policies` (the namespace shadows it).
+
 ## Cadence Rules
 
 - Daily ledgers must signature-skip unchanged input.

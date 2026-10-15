@@ -58,57 +58,64 @@
 
 ### Task 1: Policy effect catalog
 
-**Produces:** `NeedKind { Credit, Treasury, Manpower, ContractStability, Morale, Support, Recognition, Blockade, Industry, Agriculture, Logistics, Supply }`; `PolicyEffect { PolicyId, Weight(NeedKind), Cost(NeedKind), IrreversibleReason }`; `PolicyEffectCatalog.Get(id)`, `KnownIds`, `NeedKindCount`, `AllianceOf(id)`.
+**Produces:** `NeedKind { Credit, Treasury, Manpower, ContractStability, Morale, Support, Recognition, Blockade, Industry, Agriculture, Logistics, Supply }`; `PolicyEffect { PolicyId, Weight(NeedKind), Cost(NeedKind), IrreversibleReason }`; `PolicyEffectCatalog.Get(id)`, `NeedKindCount`, `AllianceOf(id)` (no id enumeration: the completeness test walks the `policies.dat` fixture).
 
-- [ ] Fixture of every policy id in `Config/policies.dat` (parsed: count line, then per record id, scenarios, prerequisite count + 5 slots, duration, act, chapter, headline, tooltip, newspaper flag, headline count + 5 slots, picture, picture headline, content). Failing tests: every non-grand fixture id has an entry and every grand id (70-79, 170-179) none; weights/costs in [0, 1]; irreversible set exactly 33, 39, 40, 48, 130, 133, 134, 139, 140, 144, 147; Bank Acts cost Support; Print Notes cost Treasury; Bounties cost Credit; Tariff and Letters of Marque cost Recognition; `AllianceOf` (< 100 Union, 100-199 CSA, else −1).
-- [ ] Implement as a static table, one line per id with a `LaunchPolicyEffect` line comment; weights from default campaignprefs magnitudes.
+- [x] Fixture of every policy id in `Config/policies.dat` (parsed: count line, then per record id, scenarios, prerequisite count + 5 slots, duration, act, chapter, headline, tooltip, newspaper flag, headline count + 5 slots, picture, picture headline, content). Failing tests: every non-grand fixture id has an entry and every grand id (70-79, 170-179) none; weights/costs in [0, 1]; irreversible set exactly 33, 39, 40, 48, 130, 133, 134, 139, 140, 144, 147; Bank Acts cost Support; Print Notes cost Treasury; Bounties cost Credit; Tariff and Letters of Marque cost Recognition; `AllianceOf` (< 100 Union, 100-199 CSA, else −1).
+- [x] Implement as a static table, one line per id with a `LaunchPolicyEffect` line comment; weights from default campaignprefs magnitudes.
 
 ### Task 2: Eligibility
 
 **Produces:** `PolicyCandidateFacts { PolicyId, IsGrand, IsAct, ActiveOrDone, ReferedChapter, CurrentChapter, HasPrePolicies, Deactivated, Blocked, AvailableInScenario, SlotFree, ResearchDuration }`; `PolicyEligibility.IsEligible(facts, alliance, out reason)`.
 
-- [ ] Failing tests per filter (alliance ≥ 2 / < 0, foreign id, grand incl. duration 0, active, chapter, prerequisites, deactivated, blocked, scenario, no slot for non-acts while acts pass, Union 36 in chapter 0 only), `reason` names the first failing filter.
-- [ ] Implement; `PolicyRuntime` reads the same vanilla fields as 211082 and `CanBeActivated` 209541; `IsDeactivated` via cached reflection, fail closed; dependents map from `NeededPrePolicies` excluding branches through an unheld grand act.
+- [x] Failing tests per filter (alliance ≥ 2 / < 0, foreign id, grand incl. duration 0, active, chapter, prerequisites, deactivated, blocked, scenario, no slot for non-acts while acts pass, Union 36 in chapter 0 only), `reason` names the first failing filter.
+- [x] Implement; `PolicyRuntime` reads the same vanilla fields as 211082 and `CanBeActivated` 209541; `IsDeactivated` via cached reflection, fail closed; dependents map from `NeededPrePolicies` excluding branches through an unheld grand act.
 
 ### Task 3: Campaign need vector
 
 **Produces:** `NeedSnapshot` (own/public fields only), `NeedVector` (`EmaDays = 14`, indexer by `NeedKind`, `Copy`), `CampaignNeedBuilder.Raw/Smooth/Next/ToProjectSignals`, `CampaignNeedRuntime.Read(alliance, era, fiscalInput, fiscalOutput)`.
 
-- [ ] Failing tests: Credit 1/0.75/0.25/0 by posture; Treasury from deficit/spending; Manpower from recruit ratio and recruitable states; ContractStability; Morale/Support inversions; Recognition = intervention probability for both sides; Blockade CSA own, Union 1 − CSA; Industry from weapon coverage; Logistics above 60 % peak; all in [0, 1], NaN → 0; EMA alpha 2/(EmaDays+1), `Smooth(p, r, 2) == Smooth(Smooth(p, r, 1), r, 1)`; emergencies force Credit/Manpower to 1 after smoothing; `ToProjectSignals` ports the `ProjectDoctrineSignalBuilder` assertions (posture → CreditStress, late-war collapse, clamps, null → neutral 0.5 blockade/port, non-finite logistics) and maps the new signals.
-- [ ] Implement builder and runtime (anchors per field in the spec table).
+- [x] Failing tests: Credit 1/0.75/0.25/0 by posture; Treasury from deficit/spending; Manpower from recruit ratio and recruitable states; ContractStability; Morale/Support inversions; Recognition = intervention probability for both sides; Blockade CSA own, Union 1 − CSA; Industry from weapon coverage; Logistics above 60 % peak; all in [0, 1], NaN → 0; EMA alpha 2/(EmaDays+1), `Smooth(p, r, 2) == Smooth(Smooth(p, r, 1), r, 1)`; emergencies force Credit/Manpower to 1 after smoothing; `ToProjectSignals` ports the `ProjectDoctrineSignalBuilder` assertions (posture → CreditStress, late-war collapse, clamps, null → neutral 0.5 blockade/port, non-finite logistics) and maps the new signals.
+- [x] Implement builder and runtime (anchors per field in the spec table).
 
 ### Task 4: Scorer, ledger, emergency protection
 
-**Produces:** `PolicyScore { PolicyId, Total, Need, Personality, Profile, LookAhead, SlotPressure, Duration, SideCost, Irreversible }`; `PolicyNeedScorer.Score(facts, need, personalityList, profile, usedSlots, maxSlots, dependents)`; `PolicyPlanLedger { CurrentPick, Ranked, Update(scored, need, previousNeed), NextEligible(stillEligible), Restore(pick) }`; `PolicyEmergencyProtection.ProtectedIds(researchIds, progress, personalityList)`.
+**Produces:** `PolicyScore { PolicyId, Total, Need, Personality, Profile, LookAhead, SlotPressure, Duration, SideCost, Irreversible }`; `PolicyNeedScorer.Score(facts, need, personalityList, profile, usedSlots, maxSlots, dependents)`; `PolicyPlanLedger { CurrentPick, Ranked, Update(scored, need, previousNeed), NextEligible(stillEligible), Restore(pick), DescribeTop(n) }`; `PolicyEmergencyProtection.ProtectedIds(researchIds, progress, personalityList)`, `Restore(list, originalCount)`.
 
-- [ ] Failing tests: credit crisis → War Bonds / Bank Act over Diplomacy; manpower crisis → drafts over Diplomacy; near tie → history wins; irreversible gated at 0.7; Bank Act penalised at low support; slot pressure non-acts only; look-ahead lifts a cheap prerequisite; ledger hysteresis, emergency switch, `NextEligible` order (pick first), `Restore`; protected ids (progress < 1, not already listed, distinct); constants pinned.
+- [x] Failing tests: credit crisis → War Bonds / Bank Act over Diplomacy; manpower crisis → drafts over Diplomacy; near tie → history wins; irreversible gated at 0.7; Bank Act penalised at low support; slot pressure non-acts only; look-ahead lifts a cheap prerequisite; ledger hysteresis, emergency switch, `NextEligible` order (pick first), `Restore`; protected ids (progress < 1, not already listed, distinct); constants pinned.
 
 ### Task 5: Wire review, persistence, patch; delete old scorers
 
-- [ ] `StrategicCoordinator`: `Needs`, `NeedSnapshots`, `PolicyPlans`; `UpdatePolicyPlan(alliance, era, reviewSerial)` after `UpdateFiscalIntent` inside `TelemetryPerf.Scope("campaign.policy-plan", …, 4.0)`; `policyMs` in `[DailyOps:Perf]`; reset in `ResetAll`; sidecar save/apply.
-- [ ] `PolicySelectionPatch`: Prefix order — master switch; alliance bounds; mirror 211019; personality; **emergency** → player alliance: append protected ids (`__state`), emit `emergency-protect`, return true; other alliances return true; `EnableNeedDrivenPolicySelection`; coordinator; player CIC; research in progress; `NextEligible` with live `PolicyRuntime.IsEligibleNow`; `TryStartResearch`; emit `select-policy`; return false. Finalizer restores the list.
-- [ ] Delete `GrandStrategyPolicyScorer.cs`, `FiscalPolicyScorer.PolicyWeight`, `PolicySelection`, `FiscalPolicySelector` and their tests; port the force-cap draft suppression to the new SideCost/eligibility semantics only if still wanted (it is not: force caps are a recruitment concern, drafts are judged by Manpower need).
-- [ ] Plugin flag; patch-catalog row #19 rewritten.
+- [x] `StrategicCoordinator`: `Needs`, `NeedSnapshots`, `PolicyPlans`; `UpdatePolicyPlan(alliance, era, reviewSerial)` after `UpdateFiscalIntent` inside `TelemetryPerf.Scope("campaign.policy-plan", …, 4.0)`; `policyMs` in `[DailyOps:Perf]`; reset in `ResetAll`; sidecar save/apply.
+- [x] `PolicySelectionPatch`: Prefix order — master switch; alliance bounds; mirror 211019; personality; **emergency** → player alliance: append protected ids (`__state`), emit `emergency-protect`, return true; other alliances return true; `EnableNeedDrivenPolicySelection`; coordinator; player CIC; research in progress; `NextEligible` with live `PolicyRuntime.IsEligibleNow`; `TryStartResearch`; emit `select-policy`; return false. Finalizer restores the list.
+- [x] Delete `GrandStrategyPolicyScorer.cs`, `FiscalPolicyScorer.PolicyWeight`, `PolicySelection`, `FiscalPolicySelector` and their tests; port the force-cap draft suppression to the new SideCost/eligibility semantics only if still wanted (it is not: force caps are a recruitment concern, drafts are judged by Manpower need).
+- [x] Plugin flag; patch-catalog row #19 rewritten.
 
 ### Task 6: Projects read the shared need vector
 
-- [ ] `ProjectSelectionPatch` uses `CampaignNeedBuilder.ToProjectSignals(NeedSnapshots[a], Needs[a])`; delete `BuildSignals`, `ReadRecognitionProbability`, `ProjectDoctrineSignalBuilder`, `ProjectDoctrineSignalInput` and the csproj line.
+- [x] `ProjectSelectionPatch` uses `CampaignNeedBuilder.ToProjectSignals(NeedSnapshots[a], Needs[a])`; delete `BuildSignals`, `ReadRecognitionProbability`, `ProjectDoctrineSignalBuilder`, `ProjectDoctrineSignalInput` and the csproj line.
 
 ### Task 7: Docs, sweep
 
-- [ ] `docs/patch-catalog.md` (#19, #20), `docs/handoff.md` open items, `docs/findings.md` "Policy selection" section, `docs/wl-player-model.md` (purchase starts research; bugs A/B; Lt Gen Act), `src/WhiskeyRealism/Strategic/AGENTS.md` (Policies folder), `tools/smoke-situational.txt` (finalizer always fires; no new situational id unless the prefix id changes).
+- [x] `docs/patch-catalog.md` (#17, #19, runtime row), `docs/handoff.md` open items, `docs/findings.md` "Policy selection" section, `docs/wl-player-model.md` (purchase starts research; bugs A/B; Lt Gen Act), `docs/bug-fixes/` (BUG-POL-002 mitigated, BUG-WL-003 fixed, BUG-WL-004 recorded), `src/WhiskeyRealism/Strategic/AGENTS.md` (Policies folder). No `tools/smoke-situational.txt` entry: the patch ids became `campaign.patch.policy-selection.prefix` / `.finalizer`, and both fire on every `CheckAIPolicyChange` call of any campaign session.
+
+## As built (2026-10-15)
+
+Commits `1833a80` (investigation + corrections), `60c6b2b` (implementation), `d34616f` (restore handle published before the vanilla list is touched). Harness 1948 PASS / 0 FAIL (1917 − 13 deleted tests of deleted code + 44 `NeedDrivenPolicyTests`); build and test build 0 warnings; config-audit 0 over 102 entries; orphan-sweep 0 and `--include-test-only` unchanged (29, all predating this slice); `test_smoke_check.py` OK. Not merged, not deployed.
+
+Deliberate deltas against vanilla's AI for the user: the Regulars Acts (48/147) and the other irreversible acts wait for their gating need (≥ 0.7) where some vanilla personalities took them early (Historical, which #12 forces, never lists 48/147); policies outside the personality list (e.g. CSA War Bonds/Bank Act) are now reachable when needed; a player-alliance emergency pick waits for the player's protected research.
 
 ## PROVE-MODE
 
-PROVE-MODE: harness for the pure layer, in-game smoke for the runtime. Per-slice proof is `NeedDrivenPolicyTests` (exit 0): catalog completeness against the `policies.dat` fixture, eligibility filters, need builder and project-signal port, scorer scenarios, ledger hysteresis and the emergency protected-id set. `PolicyRuntime`, `CampaignNeedRuntime`, the coordinator wiring and the patch are proven only in game (no Unity in the harness): the smoke items below.
+PROVE-MODE: harness for the pure layer, in-game smoke for the runtime. Per-slice proof is `NeedDrivenPolicyTests` (exit 0): catalog completeness against the `policies.dat` fixture, eligibility filters, need builder and project-signal port, scorer scenarios (credit crisis, manpower crisis, history tie-break, irreversible gate, support cost, slot pressure, look-ahead, profile, Union/CSA openings), ledger hysteresis, the emergency protected-id set and its restore. Mutation evidence: dropping the irreversible gate turned `need-policy irreversible acts wait for their need` red; swapping the Union/CSA blockade branch turned `need-policy blockade need per side` red; removing the `progress >= 1` skip turned `need-policy emergency protects only in-progress research` red (each exit 134). `PolicyRuntime`, `CampaignNeedRuntime`, the coordinator wiring and the patch are proven only in game (no Unity in the harness): the smoke items below.
 
 ## Smoke expectations (after BepInEx reinstall and deploy; not part of this slice's gate)
 
 1. LogOutput.log shows `[first-fire] campaign.patch.policy-selection.prefix` and `[first-fire] campaign.patch.policy-selection.finalizer` within the first campaign days.
 2. LogOutput.log shows `[once:policy-selection:wired] PolicySelectionPatch need-driven pick alliance=<a> policy=<id>` once per session after the first Whiskey pick.
-3. With `Logging Profile = CampaignTuning`, the campaign tuning sidecar has `FiscalIntent` rows with `source=PolicySelection`, `decision=select-policy` and fields `selectedPolicy`, `need`, `history`, `profile`, `cost`, `top2`, `top3` for both alliances in 1861-62, and `decision=policy-plan` rows when an alliance's ranked pick changes.
+3. With `Logging Profile = CampaignTuning`, the campaign tuning sidecar has `FiscalIntent` rows with `source=PolicySelection`, `decision=select-policy` and fields `selectedPolicy`, `score`, `need`, `history`, `profile`, `lookAhead`, `cost`, `top` (the top three as `id:total(need/history/profile/lookahead/cost)`) for both alliances in 1861-62, and `decision=policy-plan` rows (fields `pick`, `candidates`, `top`, `needs`) when an alliance's ranked pick changes.
 4. No research stall: whenever an AI alliance has nothing in research at a daily review, a `select-policy` row (or vanilla's pick) follows within one alliance-data update.
-5. Emergencies (rating past 0.4 notches or ≤ 4 recruitable states in war) still launch vanilla's newspaper event; for the player's alliance a `decision=emergency-protect` row with `protected=<n>` appears and the purchased policy keeps its progress.
+5. Emergencies (rating past 0.4 notches or ≤ 4 recruitable states in war) still launch vanilla's newspaper event; for the player's alliance with research in progress, LogOutput.log shows `[once:policy-selection:emergency-protect] PolicySelectionPatch kept the player's research through vanilla's emergency cancel alliance=<a> protected=<n>`, a `decision=emergency-protect` row follows, and the purchased policy keeps its progress.
+8. With `Logging Profile = CampaignTuning`, `[DailyOps:Perf]` rows in the campaign tuning sidecar carry `policyMs=`, and `campaign.policy-plan` rarely appears among slow scopes (threshold 4 ms).
 6. No `[once:policy-selection:*]` or `[once:policy-runtime:*]` warnings.
 7. W&L career as CIC: no `select-policy` rows for the player's alliance.
 
