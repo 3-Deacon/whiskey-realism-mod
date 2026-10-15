@@ -1,7 +1,7 @@
 using System;
 using HarmonyLib;
-using UnityEngine;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.PlayerOrders;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -13,12 +13,13 @@ namespace WhiskeyRealism.Patches
     // and 15 during CheckRemovalOfOrders. Whiskey snapshots before/after that
     // vanilla cadence, yields to vanilla transitions, and only asks the static
     // AIBattle.CheckCurrentOrderUpdate bridge for tactical orders; it never
-    // uses the campaign bypass from this patch.
+    // uses the campaign bypass from this patch. The call and the dedupe state go
+    // through TacticalPlayerDispatchRuntime (battle-core D9), the emitter the
+    // executor's ancestor dispatches share, so one dedupe covers both.
     [HarmonyPatch(typeof(AIBattle), "UpdateDLCPlayerOrders")]
     internal static class PlayerSubordinateOrderPatch
     {
-        private static readonly PlayerOrderDedupeState DedupeState = new PlayerOrderDedupeState();
-        private static readonly PlayerOrderRuntimeAdapter Runtime = new PlayerOrderRuntimeAdapter(DedupeState);
+        private static readonly PlayerOrderRuntimeAdapter Runtime = new PlayerOrderRuntimeAdapter(TacticalPlayerDispatchRuntime.Dedupe);
         private static readonly PlayerOrderDiagnostics Diagnostics = new PlayerOrderDiagnostics(128);
         private static string _lastBattleIdentity = string.Empty;
         private static string _lastCurrentCommandKey = string.Empty;
@@ -92,7 +93,7 @@ namespace WhiskeyRealism.Patches
                 PlayerOrderDedupeDecision decision = PlayerOrderDedupe.Preview(
                     candidate,
                     evaluation.ActiveOrder,
-                    DedupeState,
+                    TacticalPlayerDispatchRuntime.Dedupe,
                     throttleTicks: 120,
                     evaluation.Tick);
 
@@ -108,19 +109,18 @@ namespace WhiskeyRealism.Patches
                     return;
                 }
 
-                AIBattle.CheckCurrentOrderUpdate(
+                TacticalPlayerDispatchRuntime.Emit(
                     evaluation.CurrentCommand,
                     candidate.VanillaType,
-                    new Vector3(candidate.TargetPoint.X, 0f, candidate.TargetPoint.Z),
-                    DestinationName(candidate),
+                    candidate.TargetPoint.X,
+                    candidate.TargetPoint.Z,
                     candidate.Rotation,
-                    100f,
-                    50f);
+                    DestinationName(candidate));
 
                 var afterIssue = Runtime.Snapshot(__instance, forceVanillaProvenance: false).ActiveOrder;
                 if (Runtime.ActiveMatchesIssued(candidate, evaluation.ActiveOrder, afterIssue))
                 {
-                    DedupeState.RecordAccepted(
+                    TacticalPlayerDispatchRuntime.Dedupe.RecordAccepted(
                         Runtime.WithSession(candidate, afterIssue.GivenOrderSession),
                         Runtime.WithAcceptedOrder(candidate, afterIssue),
                         evaluation.Tick);
@@ -130,7 +130,7 @@ namespace WhiskeyRealism.Patches
                 {
                     // Recorded whatever the diagnostics setting, or the
                     // 120-tick throttle never applies to a rejected order.
-                    DedupeState.RecordAttempt(candidate, evaluation.Tick);
+                    TacticalPlayerDispatchRuntime.Dedupe.RecordAttempt(candidate, evaluation.Tick);
                     if (diagnosticsEnabled) Log("suppress", "vanilla-bridge-no-match", candidate, afterIssue);
                 }
             }
@@ -161,8 +161,8 @@ namespace WhiskeyRealism.Patches
                 !string.Equals(_lastCurrentCommandKey, snapshot.CurrentCommandKey, StringComparison.Ordinal) ||
                 _lastCicStatus != snapshot.IsCommanderInChief)
             {
-                DedupeState.ClearForPlayerCommandChange();
-                DedupeState.ClearForBattleBoundary(snapshot.BattleIdentity);
+                TacticalPlayerDispatchRuntime.Dedupe.ClearForPlayerCommandChange();
+                TacticalPlayerDispatchRuntime.Dedupe.ClearForBattleBoundary(snapshot.BattleIdentity);
                 _lastBattleIdentity = snapshot.BattleIdentity;
                 _lastCurrentCommandKey = snapshot.CurrentCommandKey;
                 _lastCicStatus = snapshot.IsCommanderInChief;

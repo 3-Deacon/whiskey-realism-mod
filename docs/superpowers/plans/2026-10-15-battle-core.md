@@ -317,7 +317,7 @@ internal static class BattlePerceptionProbe { // runtime
 
 ## BC3 — PlayerOwnership, TacticalWriteGuard, chain resolution, dispatch
 
-**Owned files:** create `Tactical/Battle/PlayerOwnership.cs` (pure), `Tactical/Battle/TacticalChainOrderPlanner.cs` (pure), `Tactical/Battle/TacticalDispatchTypeMapper.cs` (pure), `Tactical/Battle/TacticalPlayerDispatchRuntime.cs` (runtime); rewrite `Tactical/TacticalWriteGuard.cs`; modify `Patches/PlayerSubordinateOrderPatch.cs` (dedupe moves to the emitter), `Tactical/PlayerOrders/PlayerOrderDedupe.cs` (state type stays, owner changes); delete `PlayerCommandProbeFilter` (`CommandPostureExecutor.cs:439-453`, the class only) and `Tactical/TacticalWlActionGuard.cs` once BC5b removes its callers. BC3 deletes the class and BC5b deletes the calls, so the merge order BC5b → BC3-cleanup is handled in BC7. Test file `PlayerOwnershipTests.cs`.
+**Owned files:** create `Tactical/Battle/PlayerOwnership.cs` (pure), `Tactical/Battle/TacticalChainOrderPlanner.cs` (pure), `Tactical/Battle/TacticalDispatchTypeMapper.cs` (pure), `Tactical/Battle/TacticalPlayerDispatchRuntime.cs` (runtime); rewrite `Tactical/TacticalWriteGuard.cs`; modify `Patches/PlayerSubordinateOrderPatch.cs` (dedupe moves to the emitter), `Patches/BattleCommandPostureExecutorPatch.cs` (per-unit `CanWrite` in `RotateRegimentsInPlace` only; assigned by the integrator for the round-2 fix), `Tactical/PlayerOrders/PlayerOrderDedupe.cs` (state type stays, owner changes); create `Tactical/Battle/BattleSnapshot.Ownership.cs` (declares BC1's `Own`/`OwnCount` so BC3 compiles first; deleted at the BC1 merge). `PlayerCommandProbeFilter` (`CommandPostureExecutor.cs:439-453`) is **not** BC3's: its caller `ArmyPostureInputsRuntime.cs:105` and `PostureStanceFixTests.cs:679-686` are BC5a's, so BC5a deletes the class with its call. `Tactical/TacticalWlActionGuard.cs` is BC5b's: it deletes the file with its callers (`BattleFeudActionGatePatch.cs:88`, `BattleGroupStancePatch.cs:814`, `TacticalObserverPatch.cs:1832`). Test file `PlayerOwnershipTests.cs`.
 
 **Vanilla to read:**
 - `IsUnitUnderCommander` 91168-91222.
@@ -334,13 +334,16 @@ public static class PlayerOwnership {
   // Per unit: needs dlcw_isundercommander, takenOver, ai_feudstance, permanentlydetached captured by the builder into raw bits.
   public static UnitFlags Compute(in PlayerOwnershipInput input, int alliance, bool dlcwUnderCommander, bool takenOver, int aiFeudStance);
   public static void ApplyChainFlags(BattleSnapshot s, in PlayerOwnershipInput input); // AncestorOfPlayerCommand, PlayerCommandDetached, PlayerCommand
+  public static bool NeedsChainFanOut(BattleSnapshot s, int groupIndex);  // a group order would reach an exposed PlayerOwned descendant
+  public static bool IsExposedOwned(UnitFlags descendant, bool detachedNodeBetween);
+  public static bool DirectWriteProtected(UnitFlags flags, bool exposedOwnedDescendant, out SkipReason reason); // Regiment-overload decision
 }
 public static class TacticalWriteGuard { // thin reader; same file path
   public static bool ModeAllowsWrites();
   public static bool IsFeudInstance(AIBattle battle);
   public static bool CanWrite(in UnitRecord unit, out SkipReason reason);   // mode, PlayerOwned, Feud, NotAiControlled
-  public static bool CanWrite(Regiment unit);                               // fallback for deployment (#60) and inline paths: builds flags via PlayerOwnership.Compute
-  public static bool IsPlayerProtected(Regiment unit);                      // PlayerOwned only — ancestors are NOT protected
+  public static bool CanWrite(Regiment unit);                               // writers that cannot fan out (#61 until BC5a, deployment #60, inline paths): mode, PlayerOwned, Feud, exposed owned descendant
+  public static bool IsPlayerProtected(Regiment unit);                      // PlayerOwned, Feud, or a group with an exposed owned descendant; an ancestor of a DETACHED player command is not protected as a group, so any loop writing its descendants must call CanWrite per unit
 }
 public struct ChainResolution { public int Count; public int[] TargetIndices; public bool FannedOut; public bool PlayerShareNeedsDispatch; }
 public static class TacticalChainOrderPlanner {
@@ -357,11 +360,15 @@ internal static class TacticalPlayerDispatchRuntime { // runtime, BattleScope-re
 }
 ```
 **Rules:**
-- `PlayerOwned` = `dlcw_isundercommander` OR (`WlActive && takenOver`) OR (`alliance == PlayerAlliance && !AiVsAi && !DebugAllArmiesAi`).
+- `PlayerOwned` = (`WlActive` && (`dlcw_isundercommander` OR `takenOver` OR (`PlayerIsCic` && own alliance))) OR (!`WlActive` && `alliance == PlayerAlliance && !AiVsAi && !DebugAllArmiesAi`). The cached dlcw flag is gated on the career because vanilla also sets it outside one, to "alliance == player alliance" (Regiment initialize 113065 → 91170-91176).
 - `Feud` = `aiFeudStance >= 0`.
 - Ancestors are never `PlayerOwned`.
-- When the W&L player is CIC, every own-side unit has `dlcw_isundercommander` (91187), so it is owned. No special case is needed.
-- **Chain rule:** if `AncestorOfPlayerCommand` and `PlayerCommandDetached`, the target is the group itself. If `AncestorOfPlayerCommand` and not detached, the order fans out to the group's direct children, excluding the child that is (or contains) the player command. That repeats down the chain until reaching the player's direct parent, whose other children are ordered.
+- When the W&L player is CIC, every own-side unit is owned (91187); `PlayerIsCic` covers the lag before the cached flag refreshes.
+- **Exposure:** a `PlayerOwned` descendant is *exposed* to a group order when neither it nor any node between it and the group is `permanentlydetached`. Vanilla `SetGroupFormation` builds every level with `GetAttachedUnitsReg(excludedechainedunits)` (91988-92030, 119865), so a detached node and its whole subtree are skipped, and there is no dlcw filter. This covers the player's attached command and attached take-overs (`TakeOverUnitBattle` detaches, 164455; the player can re-attach).
+- **Chain rule:** a group with no exposed owned descendant is its own target (for the player's ancestors this is the detached case). Otherwise it is not ordered as a group: its direct children are ordered, skipping `PlayerOwned` children, and every child that itself has an exposed owned descendant fans out again. `PlayerShareNeedsDispatch` is set only on ancestors of the player's command.
+- **Regiment overloads:** until BC5a routes #61 through the executor, both `IsPlayerProtected(Regiment)` and `CanWrite(Regiment)` refuse a group with an exposed owned descendant, because those writers cannot fan out, and both refuse feuding units (#61 gates on `IsPlayerProtected` only).
+- **Per-unit guard:** group-level shielding follows vanilla's detached-subtree exclusion; any Whiskey loop that writes per descendant must call `CanWrite` per unit. `allattachedunits` is every transform descendant including the group itself (`UpdateAllAttachedUnits` 129574), so a writable group can hold player-owned regiments, which are never detached themselves in W&L (85316 needs `!ai_vs_ai`). Audited 2026-10-15: #61 `RotateRegimentsInPlace` (fixed), facing pulse (`CanWrite`), fire control (`IsPlayerProtected`), B7/B8 and the two CheckUseOfReserves patches (vanilla-selected units, `PerformAIActionDLCWL` 6129) guard every unit; the other `allattachedunits` walks only read.
+- **Dispatch dedupe cost (note for BC4):** vanilla 8643 rejects any repeat of the same order type > 0 whatever the distance; Emit re-arms beyond 110 m, so a rejected Emit costs vanilla's tooltip lookups and a terrain sample but no `Debug.Log` (only on accept, 8666). Today only #62 calls Emit, bounded by its signature check and 120-tick throttle; BC4's executor caller needs its own throttle.
 - **Dispatch mapping table (spec §C):**
 
   | Task | Vanilla order type |
@@ -395,8 +402,9 @@ internal static class TacticalPlayerDispatchRuntime { // runtime, BattleScope-re
   - `DispatchDedupeSameTypeWithin110m`
 - [ ] Rewrite `TacticalWriteGuard`. `IsWlCurrentCommandOrChain` and `WlOwnershipSafe` are deleted, and every existing caller keeps compiling through the `Regiment` overloads.
 - [ ] Move `DedupeState` from `PlayerSubordinateOrderPatch` to `TacticalPlayerDispatchRuntime.Dedupe`, and route #62's `CheckCurrentOrderUpdate` call through `Emit` (same arguments, width 100, depth 50). Scope `tactical.dispatch.emit`.
+- PROVE-MODE: per-slice proof is the harness (`PlayerOwnershipTests`). The Unity `Regiment` overloads (`TacticalWriteGuard` `HasExposedOwnedDescendant`/`DetachedNodeBetween`) and #61's per-unit guard are proven in the BC7 in-game smoke: a W&L battle where the player's command is detached and its AI parent is ordered and rotated — expect zero writes to player-owned regiments.
 - [ ] **Acceptance:**
-  - `rg -n "IsWlCurrentCommandOrChain|PlayerCommandProbeFilter" src` gives no hits; `TacticalWlActionGuard` callers are listed for BC5b.
+  - `rg -n "IsWlCurrentCommandOrChain|WlOwnershipSafe" src/WhiskeyRealism/Tactical/TacticalWriteGuard.cs` gives no hits. `PlayerCommandProbeFilter` (BC5a) and `TacticalWlActionGuard` (BC5b) are removed by those workstreams; BC7 checks both greps repo-wide.
   - Tests pass.
 
 ---
@@ -559,6 +567,7 @@ Every mover's private guard, dedupe, cooldown, waypoint and ownership code is de
   - The `groupsubordinatesmoving` stamp (L1118). The executor's Pending state replaces it; vanilla recomputes the field itself.
   - The `BlockedMovingOrder` path (L1038). Keep it as executor option `IntentFlags`? **No.** Delete it, because vanilla's `UpdateBlockedCrossings` (7917) handles crossings. This is recorded in the commit.
 - [ ] Scopes `tactical.producer.posture` and `tactical.producer.play` (2.0).
+- Scope note (BC3 verify r3): #61 `RotateRegimentsInPlace` rotates AI regiments inside detached AI sub-groups; when migrated to the arbiter it must follow vanilla's group-order exclusion of detached sub-groups (`GetAttachedUnitsReg(excludedechainedunits)` 119865).
 - [ ] **Acceptance:**
   - `rg -n "SetWaypoint\(|SetGroupFormation\(|RotateRegiment\(|ChangeCombatBehavior\(|EnsureStance" src/WhiskeyRealism/Tactical/Battle/Producers src/WhiskeyRealism/Tactical/Orchestrator` finds nothing.
   - No `GrabNextParentUnit` or `transform.parent` in the moved code.
@@ -708,6 +717,7 @@ The "leading" regiments are the `MaxLeadingRegimentsPerGroup` regiments closest 
   - Perf: `tactical.snapshot.build` p95 ≤ 1.5 ms per side, `tactical.arbiter.resolve` p95 ≤ 0.5 ms, no `tactical.patch.battle-core-arbiter` row above 5 ms more than 1 % of calls.
   - A line starting `[once:tactical-battle-core:charge-first-fire]` in an infantry assault (message text set by BC6b).
   - A W&L brigade career shows: player units never in `[OrderArbiter]` issued counts; a dispatch panel naming the superior when the parent division is moved; `[once:tactical-battle-core:ancestry-mismatch] [BattleSnapshot] parent map and Transform.IsChildOf disagree on the player's chain: alliance=<a> groups=<n>` absent, or explained.
+  - BC3 PROVE-MODE check: in a W&L battle with the player's command detached, the AI parent is ordered and rotated (RotateInPlace) and no player-owned regiment receives a Whiskey write (no movement, rotation, stance or formation change on the player's regiments); then, with the AI parent holding a stance (`ai_stanceordered > 0`; `ChangeStance` then sets the parent's own `permanentlydetached`, 90787-90794, which must not shield the re-attached player command below it), press the player's stance-off (re-attach) and confirm the parent is no longer ordered as a group (fan-out, or `TacticalPlayerProtected reason=owned-descendant-attached`).
 - [ ] Docs:
   - `docs/patch-catalog.md`: remove #41, #46, #45, #48, #49, #52, #61, veto; add the arbiter; note #59/#56/#42 as executor-inline.
   - `docs/tactical-orchestrator.md` and `docs/tactical-operations-ledger.md`: battle core section, D3/D4/D8.

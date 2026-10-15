@@ -2,9 +2,71 @@ using System.Collections.Generic;
 
 namespace WhiskeyRealism.Tactical.PlayerOrders
 {
+    // The player's current DLC_WL.givenorder as the dispatch emitter sees it.
+    internal readonly struct GivenOrderView
+    {
+        public GivenOrderView(bool hasOrder, int type, float x, float z, int session)
+        {
+            HasOrder = hasOrder;
+            Type = type;
+            X = x;
+            Z = z;
+            Session = session;
+        }
+
+        public bool HasOrder { get; }
+        public int Type { get; }
+        public float X { get; }
+        public float Z { get; }
+        public int Session { get; } // DLC_WL.GivenOrders.givenorderssession
+    }
+
+    // Owned by TacticalPlayerDispatchRuntime (battle-core D9): one instance serves
+    // #62's player-order shadows and the emitter's last-dispatch record, so #62 and
+    // the executor's ancestor dispatches share one dedupe.
     internal sealed class PlayerOrderDedupeState
     {
         private readonly Dictionary<string, PlayerOrderShadow> _shadows = new Dictionary<string, PlayerOrderShadow>();
+        private bool _hasDispatch;
+        private int _dispatchType;
+        private float _dispatchX;
+        private float _dispatchZ;
+        private int _dispatchSession;
+
+        // A dispatch repeats the last one only while the player still holds what it
+        // produced: same type, target within `meters` of the last emitted one, no
+        // given order issued since (vanilla bumps givenorderssession on every new
+        // order, 8651), and the current given order is still that dispatch. Vanilla
+        // clears givenorder without moving the session (end of day 47989, zone
+        // completion 123533), and a refused attempt leaves another order active;
+        // both re-arm. Type 11 is never suppressed: onto an active type 11 it is
+        // vanilla's in-place refresh (flag4, no session bump), which vanilla's own
+        // 8643 test already limits.
+        public bool IsDuplicateDispatch(int type, float x, float z, in GivenOrderView current, float meters)
+        {
+            if (!_hasDispatch || type == 11 || _dispatchType != type) return false;
+            if (!current.HasOrder || current.Session != _dispatchSession || current.Type != _dispatchType) return false;
+            return Within(x, z, _dispatchX, _dispatchZ, meters) &&
+                Within(current.X, current.Z, _dispatchX, _dispatchZ, meters);
+        }
+
+        private static bool Within(float ax, float az, float bx, float bz, float meters)
+        {
+            float dx = ax - bx;
+            float dz = az - bz;
+            return dx * dx + dz * dz < meters * meters;
+        }
+
+        // givenOrderSession is the session after the vanilla call, so an accepted
+        // order and a rejected attempt both dedupe until the next given order.
+        public void RecordDispatch(int type, float x, float z, int givenOrderSession)
+        {
+            _hasDispatch = true;
+            _dispatchType = type;
+            _dispatchX = x;
+            _dispatchZ = z;
+            _dispatchSession = givenOrderSession;
+        }
 
         public bool TryGetShadow(string unitKey, out PlayerOrderShadow shadow)
         {
@@ -38,11 +100,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public void ClearForBattleBoundary(string battleIdentity)
         {
             _shadows.Clear();
+            _hasDispatch = false;
         }
 
         public void ClearForPlayerCommandChange()
         {
             _shadows.Clear();
+            _hasDispatch = false;
         }
     }
 
