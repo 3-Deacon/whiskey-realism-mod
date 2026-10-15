@@ -267,6 +267,24 @@ Anchors cited by the remediation commits (`git log 262a50d..`) and checked again
 | W&L CIC | `AICampaign.UpdateUnitAI` faction skip | 11620 | Correctly skips only the CIC player's own faction; contrast `BUG-WL-001`. |
 | W&L prestige | `DLC_WL.EarnPrestige` | 46601 (switch 46627, threshold 46702) | No case for order type 16; see `BUG-WL-002`. |
 
+## W&L player-economy and battle-stat anchors (2026-10-15)
+
+Anchors behind `BUG-WL-005..010` and `BUG-TAC-018/019` (plan `superpowers/plans/2026-10-15-wl-economy-bugs.md`). The player-side model is in [`wl-player-model.md`](wl-player-model.md) § Player economy effects.
+
+| Area | Symbol | Line | Why it matters |
+|---|---|---|---|
+| W&L effects | `DLC_WL.cumulativeeffectsrunning` / `cumulativeeffectsonce` | 43199-43201 (private static, `float[100]`) | Running multipliers vs once values; read by reflection (`Patches/WlEffectArrays`). |
+| W&L effects | `DLC_WL.EffectMultiplier(id, type, isplayerunit)` | 44633 | Returns 1/0 when not in a career or `isplayerunit` is false; the default is `true`. |
+| W&L effects | `DLC_WL.UpdateCumulativeEffects` | 44662 (reset 44671-44675, actions 44753-44773) | Rebuilds both arrays from scratch each call; type 1/2 → once, 3/4 → running, type 0 ignored. Called from `UpdateAllianceData` (81821), `AppointStaffMember` (44475), `UpdateStaffAvailability` (44537). |
+| W&L attrition | `Regiment.UpdateCampaignUnitStats` | 114965 (sickness 115149-115151, desertion 115196-115198; medical 115107, training 115243, readiness 115276) | Runs for every regiment (120260, 120409); effect 22 read unscoped. |
+| W&L supply | `Regiment.UpdateIIPSupplyLink` (private) | 114074 (map-group return 114145; effects 10/11 114190-114195; `num15` 114320-114351; resupply 114379; effect 14 114555; camp 8 114575) | Per map group; `num15` is the resupply duration (campaignprefs `supplyspeeddistance0/2000`). |
+| W&L supply | `BattleUnits.GetCampaignGroup` | 82991 | The player's map group; vanilla's camp (172032) and `IsPlayerPartOfUnit` (47578) use it. |
+| W&L camp | `Camp.GetModifier` | 172524 | `1 + bonus × maxbonusmalus [/ commanded units]`, clamped at 0; station 5 (Inspect Logistics) not divided. |
+| W&L Buy Supplies | `DLC_WL.GetAverageSupplySubordinates` / `AddSuppliesSubordinates` | 47377 / 47411 (type test 47392, 47428) | Attribute 24 Get/Set (42235-42237, 42561-42563). |
+| W&L transfers | `AICampaign.CheckTransferOfUnits` / `BattleUnits.MoveUnit` | 17232 (purge 17255-17262, add 17327, move 17328) / 93091 (career guard 93099, `SetTransfer` 93147) | In a career the appended unit never moves; `transfertime > 0` marks a real transit. |
+| Battle stats | `BattleUnits.CalculateAllUnitsOfAlliance` | 87335 (averages 87396-87399) | `enemyentrenchmentlevel` divided by the player count; read by 85632-85642 and 87480-87481. |
+| Battle stats | `BattleUnits.AssignConditionToSubordinates` | 85453 (HQ lines 85469-85471, side averages 85473-85504; frame 26 at 23972-23975) | HQ horses/guns clamped by the men value. |
+
 ## Game-update re-decompile inventory
 
 When GTCW patches:

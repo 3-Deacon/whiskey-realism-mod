@@ -32,7 +32,19 @@ How the player works in a Whiskey & Lemons career, from the vanilla decompile (`
 - **Prestige economy:** moving a unit not under the player's command → "Request movement" (91663, cost `GetPrestigeCostTakeover` 45899) creating an Operation; forced march, fort/depot construction (`ConstructBuilding` 45977) and weapon upgrades (43949) cost prestige.
 - **Operations** (`CommanderRelations.Operation` 41029-41226) are *player-paid moves/take-overs of another commander's unit*, not AI operations. On finish, the original commander's relation changes (cause 4) by how the unit fared (rout time, condition, supply, attrition). Only capital defense respects `IsMovedByPlayer` (11753, 11791).
 - **Relations** (`CommanderRelations` 41027-41528): 11 causes, clamped [−1, 1], decay toward 0. Low relation with own subordinate commanders drives **feuds** (`Regiment.CalculateFeud` 116547; feuding units run in `aibattle[2]`, `isplayeraiorfeud = 2`).
-- **Effect multipliers** (`EffectMultiplier` 44633) from staff/companions/items/camp/incidents apply only to player-commanded units — incl. order delays (ids 12, 13), supply, morale, speed. Player units perform differently from identical AI units.
+- **Effect multipliers** (`EffectMultiplier` 44633) from staff/companions/items/camp/incidents are meant to apply only to player-commanded units — incl. order delays (ids 12, 13), supply, morale, speed. Player units perform differently from identical AI units. Vanilla exceptions and gaps (2026-10-15, `bug-fixes/vanilla-wl-career.md`): see § Player economy effects below.
+
+## Player economy effects (2026-10-15)
+
+How the player's staff, camp, actions and items reach units, from the decompile and `<GTCW>/Config/` data. Fixes are on `fix/wl-economy-bugs` (plan `superpowers/plans/2026-10-15-wl-economy-bugs.md`).
+
+- **Accumulation.** `UpdateCumulativeEffects` (44662) rebuilds two arrays every call: qualities of type 3/4 multiply `cumulativeeffectsrunning[id]` by `1 ± value` (staff: `× staffSkill`), type 1/2 add to `cumulativeeffectsonce[id]`; type 0 is ignored. `EffectMultiplier(id, 1, owned)` returns the running value, `(id, 0, owned)` the once value, and 1/0 when not in a career or `owned` is false. Ids with no once reader: 0-3, 6-19, 21-23, 27-33; once readers exist only for 4 (46139), 5 (41358), 20 (140542), 24-26 (140121-140131), 34 (62859), 35 (63655). A type-1 quality on a running-only id is dead (`BUG-WL-009`).
+- **Ownership scope per site.** Campaign-unit stats use the campaign group's flag (`UpdateCampaignUnitStats`: medical 115107, training 115243, readiness 115276) — except attrition, which vanilla left unscoped (115151, 115198) so it applied to every unit of both armies (`BUG-WL-005`, fixed to the group rule). Supply uses the map group's own flag (`UpdateIIPSupplyLink` 114192-114195, 114348-114351, 114555); camp station 8 recruitment is per attached unit (114575). Morale uses `parentcampaignunit` (127874).
+- **Below the map group.** The player's map group is `BattleUnits.GetCampaignGroup(currentcommand)` (`Camp.UpdateUnitRef` 172032, `IsPlayerPartOfUnit` 47578); for a brigade/regiment player or a division inside an AI corps it is the AI parent, which `IsUnitUnderCommander` never flags. Group-keyed effects are therefore inert for that player: supply staff and Inspect Logistics (`BUG-WL-007`, fixed by treating that one map group as the player's during the supply call), readiness staff/camp 11 and morale camp 7 / effect 16 (not fixed). Camp station 6 drill (per regiment, 115244-115246) and 8 recruitment work.
+- **Supply efficiency points the wrong way in vanilla.** `num15` in `UpdateIIPSupplyLink` is a resupply duration; effect 9 and camp station 5 multiply it, so the bonus slows supply (`BUG-WL-008`, fixed). Effects 10/11 (consumption) and 14 (reinforcement speed) point the right way.
+- **Buy Supplies** (action 34, attribute 24) fills the player's owned basic units by `FillUpStock`; vanilla tested the command's type, so HQ commanders got nothing (`BUG-WL-006`, fixed).
+- **Actions with dead bonuses:** 28 Logistics Corps / 50 Not Yet Ready (supply efficiency) and 27 Engineer Corps (engineering) fixed by folding the once value into the running multiplier; 40/41/49 (attrition "+") left vanilla as ambiguous; 17/19/27/0 and companion type-0 qualities recorded, not fixed (`BUG-WL-009`).
+- **Battle.** Engineering points per unit use `EffectMultiplier(23, 1, unit.dlcw_isundercommander)` (87433); movement speed effect 33 applies only to the player's current command in battle (133477-133481).
 
 ## Orders from superiors (dispatches)
 
@@ -101,6 +113,8 @@ It **prefers** the player's group: defensive ops treat player units within 150 a
 - **Guard:** the executor refuses `PlayerOwned` at plan time (`OrderExecutor.Plan` step 1) and re-checks every live target with `TacticalWriteGuard.CanWrite`; writers that cannot fan out (#59, #60, #42's fallback) refuse a group with an exposed owned descendant.
 
 ## Candidate vanilla bugs (not yet tracked)
+
+- Tracked since: player-economy effects `BUG-WL-005..009`, Whiskey #3 telemetry `BUG-WL-010` (see `bug-fixes/vanilla-wl-career.md`).
 
 - `CheckShipConstruction` (12012) and `CheckArmyGroupManagement` (17723) skip **every** faction when the W&L player is CIC (no alliance check) → the enemy stops building ships and managing army groups.
 - Possible prestige sign bugs: `EarnPrestige` passes negative gains with `AdjustPrestige` type 2 (subtract) (46733-46738); `IncreaseFiscalBudget` passes `0 − cost` with type 2 (226658). Code-read only, not reproduced.
