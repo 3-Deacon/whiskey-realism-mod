@@ -141,22 +141,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // the delay window expires regardless of casualties.
         public const float ProlongedDelayHoursThreshold = 6.0f;
 
-        // Confidence floor — if intel quality is below this, fall back to
-        // existing behavior (don't act on bad data). This is the ONLY gate
-        // that can block AttackNow regardless of ratio; everything else is
-        // dimensionless (ratios, fractions, hours) and scale-invariant.
+        // Intel gate: below this confidence the doctrine has no opinion
+        // (NoOpportunity) and vanilla's own pipeline decides. This is the only
+        // gate that can block AttackNow regardless of ratio; everything else
+        // is dimensionless (ratios, fractions, hours) and scale-invariant.
         //
-        // Per 2026-05-19 user direction: GTCW campaigns produce dynamic battle
-        // sizes from 1,500 to 60,000+ per side, so the doctrine must NOT carry
-        // any absolute headcount threshold. A 200-man cavalry detachment
-        // screening a major army's flank is a real tactical decision; telling
-        // it "you're too small to matter" is wrong. Small forces with poor
-        // intel naturally drop to NoOpportunity via this confidence gate.
+        // Confidence comes from TacticalEnemyContactLedger: observation
+        // coverage (recency of the ground in front of the line, softened by
+        // the share of enemy-side entry points watched) times contact
+        // recency. It says how well the side has looked, never how big the
+        // enemy is, so a small enemy force that is fully observed is a real
+        // opportunity at any battle size (1,500 to 60,000+ a side, per
+        // 2026-05-19 user direction: no absolute headcount thresholds).
         //
-        // 0.35: confidence is coverage x contact recency (TacticalEnemyContactLedger).
-        // A fully observed front with no enemy-side entry point watched reads
-        // 0.5, and with one of five coverage bands unobserved as well 0.4; both
-        // must act. A picket seen under low coverage (~0.1) must not.
+        // 0.35: a fully observed front with no enemy-side entry point watched
+        // reads 0.5, and with one of five coverage bands unobserved as well
+        // 0.4; both act. A picket seen under low coverage (~0.1) does not.
+        // The probe's commit gate (TacticalPhaseProgressionDoctrine) uses the
+        // same constant.
         public const float MinIntelConfidenceForAction = 0.35f;
 
         public static ReinforcementOpportunityDecision Decide(TacticalForceBalanceEvidence ev)
