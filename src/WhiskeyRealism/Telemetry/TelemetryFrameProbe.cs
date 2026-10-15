@@ -24,6 +24,7 @@ namespace WhiskeyRealism.Telemetry
         private static long _lastTickTimestamp;
         private static int _hitchRowsEmitted;
         private static bool _monoProfilerUnavailable;
+        private static readonly bool[] _collectionCountUnsupported = new bool[3];
 
         // Session statistics, read by the writer thread when it writes the manifest.
         private static long _statHitchCount;
@@ -49,8 +50,8 @@ namespace WhiskeyRealism.Telemetry
                 bool isHitch = State.Observe(
                     frameMs,
                     GC.CollectionCount(0),
-                    GC.CollectionCount(1),
-                    GC.CollectionCount(2),
+                    SafeCollectionCount(1),
+                    SafeCollectionCount(2),
                     out hitch);
                 PublishStats();
 
@@ -60,12 +61,32 @@ namespace WhiskeyRealism.Telemetry
                     EmitHitch(hitch);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                WhiskeyRealism.Util.OnceLog.Warning(
+                    "telemetry-frame-probe:tick-failed",
+                    "[Telemetry] frame hitch probe tick failed: " + ex.GetType().Name + ": " + ex.Message);
             }
             finally
             {
                 State.ResetFrameScopes();
+            }
+        }
+
+        // Boehm (Unity Mono) is non-generational; if a generation query is unsupported the
+        // probe keeps running with 0 for that generation instead of failing every frame.
+        private static long SafeCollectionCount(int generation)
+        {
+            if (_collectionCountUnsupported[generation])
+                return 0L;
+            try
+            {
+                return GC.CollectionCount(generation);
+            }
+            catch
+            {
+                _collectionCountUnsupported[generation] = true;
+                return 0L;
             }
         }
 
