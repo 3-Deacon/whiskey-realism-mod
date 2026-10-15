@@ -183,4 +183,17 @@ internal static partial class BattleMovementHonestyTests
         AssertNear(90f, memory[0].FireRange, 0.001f, "and fire range");
         AssertTrue(memory[0].Standing, "and the standing flag");
     }
+
+    // Vanilla's AIBattle.blockedcrossings is built from every enemy regiment on the map (7917-7973);
+    // nothing under Tactical/ reads it: the executor hands BlockedMovingOrder the perceived list.
+    private static void VanillaBlockedCrossingsListIsNeverRead()
+    {
+        string root = TestFixtures.FindRepoPath("src/WhiskeyRealism/Tactical");
+        var readers = new System.Collections.Generic.List<string>();
+        foreach (string path in System.IO.Directory.GetFiles(root, "*.cs", System.IO.SearchOption.AllDirectories))
+            if (StripComments(System.IO.File.ReadAllText(path)).Contains("blockedcrossings")) readers.Add(System.IO.Path.GetFileName(path));
+        AssertEqual("", string.Join(",", readers), "files that read vanilla's blockedcrossings");
+        string exec = Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs");
+        AssertTrue(exec.Contains("CoveredCrossings.BuildPoints("), "the executor builds the perceived list");
+    }
 }

@@ -37,6 +37,7 @@ internal static partial class BattleMovementHonestyTests
             ("bc10 CoverPointNotForForestCoverOrMovingEnemy", CoverPointNotForForestCoverOrMovingEnemy),
             ("bc10 CoveredCrossingsAllocateNothingAfterWarmup", CoveredCrossingsAllocateNothingAfterWarmup),
             ("bc10 PerceptionMemoryKeepsTheRowDetailWhileVisible", PerceptionMemoryKeepsTheRowDetailWhileVisible),
+            ("bc10 VanillaBlockedCrossingsListIsNeverRead", VanillaBlockedCrossingsListIsNeverRead),
             // perceived outflanking
             ("bc10 FlankCodesMatchVanillaSectors", FlankCodesMatchVanillaSectors),
             ("bc10 FlankFriendlyCloserClearsSector", FlankFriendlyCloserClearsSector),
