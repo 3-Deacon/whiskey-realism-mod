@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 
 namespace WhiskeyRealism.Patches
@@ -142,6 +143,45 @@ namespace WhiskeyRealism.Patches
             if (missing(model) || getActive(model) == active) return 0;
             setActive(model, active);
             return active ? 1 : -1;
+        }
+    }
+
+    // FoggedEmbarkationPatch: detaches a unit's own SoundEngine sound objects (go = null, so
+    // UpdateSoundObject turns them off and leaves them out of the nearest-source pick,
+    // 146438-146513) and reattaches them to their original GameObject (oldgo, vanilla's own
+    // restore in ClearGameObjectRefToPosition 146765). Only objects whose oldgo is the
+    // owner are touched: units without campaign sounds keep a zero-filled sound_objectref
+    // (InitSounds 124025) whose entries point at another unit's object. Returns the number
+    // of objects changed.
+    internal static class SoundObjectDetach
+    {
+        internal static int Apply(IList objects, int[] refs, int[] purposes, object owner, bool detach,
+            Func<object, object> getGo, Func<object, object> getOldGo, Action<object, object> setGo)
+        {
+            if (objects == null || refs == null || purposes == null || owner == null) return 0;
+            int changed = 0;
+            for (int i = 0; i < purposes.Length; i++)
+            {
+                int purpose = purposes[i];
+                if (purpose < 0 || purpose >= refs.Length) continue;
+                int id = refs[purpose];
+                if (id < 0 || id >= objects.Count) continue;
+                object soundObject = objects[id];
+                if (soundObject == null || !ReferenceEquals(getOldGo(soundObject), owner)) continue;
+                object go = getGo(soundObject);
+                if (detach)
+                {
+                    if (!ReferenceEquals(go, owner)) continue;
+                    setGo(soundObject, null);
+                    changed++;
+                }
+                else if (ReferenceEquals(go, null))
+                {
+                    setGo(soundObject, owner);
+                    changed++;
+                }
+            }
+            return changed;
         }
     }
 

@@ -26,6 +26,8 @@ internal static class CampaignLogisticsGlueTests
             ("logistics glue field mask masks and restores", FieldMaskMasksAndRestores),
             ("logistics glue list contents replaced only when different", ListContentsReplacedOnlyWhenDifferent),
             ("logistics glue shared sound array per engine", SharedSoundArrayPerEngine),
+            ("logistics glue sound detach touches only the owner's objects", SoundDetachTouchesOnlyOwnersObjects),
+            ("logistics glue sound detach ignores bad refs", SoundDetachIgnoresBadRefs),
             ("logistics glue embarkation recompute and sound sharing rules", EmbarkationRecomputeAndSoundRules),
             ("logistics glue raid rescale keeps the w&l player's raid groups", RaidRescaleKeepsPlayerRaidGroups),
             ("logistics glue random transpile returns vanilla on a mismatch", RandomTranspileReturnsVanillaOnMismatch),
@@ -34,6 +36,9 @@ internal static class CampaignLogisticsGlueTests
             ("logistics glue finalizers restore before anything else", FinalizersRestoreFirst),
             ("logistics glue prefixes write only through the swaps", PrefixesWriteOnlyThroughSwaps),
             ("logistics glue patches pass the decisions vanilla state", PatchesPassDecisionsVanillaState),
+            ("logistics glue camp placement budget wired", CampPlacementBudgetWired),
+            ("logistics glue hidden transport sounds wired", HiddenTransportSoundsWired),
+            ("logistics glue fog patches log through first-log flags", FogPatchesLogThroughFirstLogFlags),
         });
     }
 
@@ -215,6 +220,72 @@ internal static class CampaignLogisticsGlueTests
         AssertTrue(shared.TryGet(engine, out index) && index == 42, "an invalid index is not remembered");
     }
 
+    private sealed class SoundObj
+    {
+        internal object Go;
+        internal object OldGo;
+    }
+
+    private static int Detach(List<SoundObj> objects, int[] refs, object owner, bool detach)
+    {
+        return SoundObjectDetach.Apply(objects, refs, new[] { 2, 3, 4, 6 }, owner, detach,
+            o => ((SoundObj)o).Go, o => ((SoundObj)o).OldGo, (o, go) => ((SoundObj)o).Go = go);
+    }
+
+    private static void SoundDetachTouchesOnlyOwnersObjects()
+    {
+        var unit = new object();
+        var other = new object();
+        var objects = new List<SoundObj>();
+        for (int i = 0; i < 12; i++) objects.Add(new SoundObj { Go = other, OldGo = other });
+        var refs = new int[8];
+        foreach (int purpose in new[] { 2, 3, 4, 6 })
+        {
+            refs[purpose] = 5 + purpose;
+            objects[5 + purpose] = new SoundObj { Go = unit, OldGo = unit };
+        }
+        refs[0] = 1;
+        objects[1] = new SoundObj { Go = unit, OldGo = unit };   // the foot loop stays vanilla's
+        AssertEqual(4, Detach(objects, refs, unit, true), "four transport objects detached");
+        foreach (int purpose in new[] { 2, 3, 4, 6 })
+            AssertTrue(objects[refs[purpose]].Go == null, "purpose " + purpose + " detached");
+        AssertTrue(ReferenceEquals(unit, objects[1].Go), "foot loop untouched");
+        AssertEqual(0, Detach(objects, refs, unit, true), "detach is idempotent");
+        AssertEqual(4, Detach(objects, refs, unit, false), "reattached");
+        foreach (int purpose in new[] { 2, 3, 4, 6 })
+            AssertTrue(ReferenceEquals(unit, objects[refs[purpose]].Go), "purpose " + purpose + " back on its GameObject");
+        AssertEqual(0, Detach(objects, refs, unit, false), "reattach is idempotent");
+
+        // Zero-filled sound_objectref (InitSounds 124025): every entry is object 0, another unit's.
+        var zero = new int[8];
+        AssertEqual(0, Detach(objects, zero, unit, true), "another unit's object 0 is never detached");
+        AssertTrue(ReferenceEquals(other, objects[0].Go), "object 0 untouched");
+        objects[0].Go = null;
+        AssertEqual(0, Detach(objects, zero, unit, false), "another unit's detached object is never reattached to this unit");
+
+        // Someone else moved the object (SwitchGameObjectRef): left alone both ways.
+        var moved = new object();
+        objects[refs[2]].Go = moved;
+        AssertEqual(3, Detach(objects, refs, unit, true), "a moved object is not detached");
+        AssertTrue(ReferenceEquals(moved, objects[refs[2]].Go), "moved object kept");
+        AssertEqual(3, Detach(objects, refs, unit, false), "a moved object is not reattached");
+        AssertTrue(ReferenceEquals(moved, objects[refs[2]].Go), "moved object still kept");
+    }
+
+    private static void SoundDetachIgnoresBadRefs()
+    {
+        var unit = new object();
+        var objects = new List<SoundObj> { new SoundObj { Go = unit, OldGo = unit }, null };
+        AssertEqual(0, Detach(objects, null, unit, true), "no sound_objectref (no campaign sounds)");
+        AssertEqual(0, Detach(objects, new int[0], unit, true), "empty sound_objectref (#82's stand-in)");
+        AssertEqual(1, Detach(objects, new int[3], unit, true), "short array: purpose 2 -> its own object 0, 3/4/6 out of range");
+        objects[0].Go = unit;
+        AssertEqual(0, Detach(objects, new[] { 0, 0, 1, 1, 1, 0, 1, 0 }, unit, true), "null object");
+        AssertEqual(0, Detach(objects, new[] { 0, 0, 9, -1, 9, 0, 9, 0 }, unit, true), "ids out of range");
+        AssertEqual(0, Detach(null, new int[8], unit, true), "no SoundEngine list");
+        AssertEqual(0, Detach(objects, new int[8], null, true), "no owner");
+    }
+
     private static void EmbarkationRecomputeAndSoundRules()
     {
         AssertTrue(FoggedModelRule.VanillaRecomputedFog(true, false), "model removed: CheckRegimentVisibility re-ran");
@@ -362,6 +433,53 @@ internal static class CampaignLogisticsGlueTests
         AssertTrue(random.Contains("return result;") && random.Contains("if (site == null) return vanilla;"), "random transpiler emits the helper's choice");
         string trim = PatchSource("OffensiveWeaponTrimPatch.cs");
         AssertTrue(trim.Contains("return result;"), "trim transpiler emits the helper's choice");
+    }
+
+    // #82 budget: a fogged unit without a camp flips only with room this frame; a unit with
+    // a camp always flips; the Finalizer spends a placement on none -> camp.
+    private static void CampPlacementBudgetWired()
+    {
+        string camp = PatchSource("FoggedCampPatch.cs");
+        string prefix = MethodBody(camp, "Prefix");
+        string decide = System.Text.RegularExpressions.Regex.Replace(prefix, @"\s+", " ");
+        AssertTrue(decide.Contains("FoggedModelRule.ShouldFlipUnderPlacementBudget( hasCamp, BudgetEnabled(), Placements.HasRoom(frame, FoggedModelRule.EffectivePlacementsPerFrame(BudgetPerFrame()))))"), "budget decision wired");
+        AssertTrue(prefix.Contains("bool hasCamp = (UnityEngine.Object)__instance.campbuilding != null;"), "camp presence read before vanilla runs");
+        int state = prefix.IndexOf("__state = hasCamp;", StringComparison.Ordinal);
+        int apply = prefix.IndexOf("Flip.Apply(__instance);", StringComparison.Ordinal);
+        AssertTrue(state >= 0 && state < apply, "hadCamp carried in __state only for a flipped call");
+        AssertTrue(prefix.IndexOf("__state = false;", StringComparison.Ordinal) < System.Text.RegularExpressions.Regex.Match(prefix, @"\btry\b").Index, "__state cleared first");
+        string fin = MethodBody(camp, "Finalizer");
+        AssertTrue(fin.Contains("if (FoggedModelRule.PlacedNewCamp(flipped, __state, hasCamp))") && fin.Contains("Placements.Spend(Time.frameCount);"), "placement spent in the Finalizer");
+        AssertTrue(fin.IndexOf("Flip.Restore(", StringComparison.Ordinal) < fin.IndexOf("PlacedNewCamp", StringComparison.Ordinal), "restore before the count");
+    }
+
+    private static void HiddenTransportSoundsWired()
+    {
+        string embark = PatchSource("FoggedEmbarkationPatch.cs");
+        AssertTrue(embark.Contains("Regiment.csound_unitmovingtrain,") && embark.Contains("Regiment.csound_trainwhistle,")
+            && embark.Contains("Regiment.csound_steamshiprivermoving,") && embark.Contains("Regiment.csound_steamshipseamoving,"), "the four transport purposes");
+        string fin = MethodBody(embark, "Finalizer");
+        AssertTrue(fin.Contains("bool silence = FoggedModelRule.ShouldDetachTransportSounds(isPlayerAlliance, __instance.iswithinfog, hasModel, __instance.unittyp == 17);"), "decision from the restored fog flag and the model");
+        AssertTrue(fin.Contains("if (silence != Silenced.Contains(__instance))") && fin.Contains("SyncTransportSounds(__instance, silence);"), "sync only on a change");
+        string sync = MethodBody(embark, "void SyncTransportSounds");
+        AssertTrue(sync.Contains("((Component)unit).gameObject,"), "owner is the unit's own GameObject");
+        AssertTrue(sync.Contains("if (silence) Silenced.Add(unit);") && sync.Contains("else Silenced.Remove(unit);"), "state recorded");
+        AssertTrue(embark.Contains("CampaignScope.Register(\"fogged-embarkation\"") && embark.Contains("Silenced.Clear();"), "set cleared per campaign");
+    }
+
+    // L4: every OnceLog.Info in the two hot fog patches sits behind a static first-log
+    // flag reset per campaign, so a call costs a bool test instead of a lock and a lookup.
+    private static void FogPatchesLogThroughFirstLogFlags()
+    {
+        foreach (string file in new[] { "FoggedCampPatch.cs", "FoggedEmbarkationPatch.cs" })
+        {
+            string src = PatchSource(file);
+            int infos = System.Text.RegularExpressions.Regex.Matches(src, @"OnceLog\.Info\(").Count;
+            int flags = System.Text.RegularExpressions.Regex.Matches(src, @"_\w+Logged = true;").Count;
+            AssertTrue(infos > 0, file + " logs");
+            AssertEqual(infos, flags, file + " one first-log flag per OnceLog.Info");
+            AssertTrue(src.Contains("CampaignScope.Register("), file + " resets its flags per campaign");
+        }
     }
 
     private static string PatchSource(string file)

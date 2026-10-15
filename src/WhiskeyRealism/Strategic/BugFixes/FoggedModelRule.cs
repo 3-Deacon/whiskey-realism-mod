@@ -74,5 +74,67 @@ namespace WhiskeyRealism.Strategic.BugFixes
         {
             return !isPlayerAlliance && isWithinFog;
         }
+
+        // Per-frame camp placement budget. Night halt (133958) stops every hidden AI unit
+        // that marched that day at the same game hour, so ~2.2 game hours later
+        // (timetoopensummercamp, 115408) all of them place a camp within one regular cycle;
+        // CBuilding.Place fits the camp mesh to the ground per vertex (95840-95891). A
+        // fogged unit WITHOUT a camp is flipped only while the frame's budget has room: for
+        // it, iswithinfog is read only by the placement test (115408; the entrenchment model
+        // at 115455 needs a camp), so not flipping is exactly "no placement this cycle" and
+        // vanilla places it on a later regular cycle. A unit WITH a camp is always flipped,
+        // or vanilla's fog branch (115426) destroys the camp and entrenchment.
+        internal static bool ShouldFlipUnderPlacementBudget(bool hasCamp, bool budgetEnabled, bool budgetHasRoom)
+        {
+            return hasCamp || !budgetEnabled || budgetHasRoom;
+        }
+
+        // A flipped call that took a unit from no camp to a camp spent one placement.
+        internal static bool PlacedNewCamp(bool flipped, bool hadCamp, bool hasCamp)
+        {
+            return flipped && !hadCamp && hasCamp;
+        }
+
+        // A budget below one would never place a camp for a hidden AI unit.
+        internal static int EffectivePlacementsPerFrame(int configured)
+        {
+            return configured < 1 ? 1 : configured;
+        }
+
+        // While the player cannot see an embarked AI land unit, its train, whistle and
+        // steamboat sound objects are detached. Vanilla plays them for any unit with a model
+        // (RegimentMove 133623-133649, no fog test; SoundEngine has none either, 146421-146610),
+        // and before the embarkation fix a hidden unit never had one.
+        internal static bool ShouldDetachTransportSounds(bool isPlayerAlliance, bool isWithinFog, bool hasModel, bool isFleet)
+        {
+            return !isPlayerAlliance && !isFleet && isWithinFog && hasModel;
+        }
+    }
+
+    // Counts camp placements within one frame (Time.frameCount); a new frame starts at zero.
+    // Main thread only.
+    internal sealed class PerFrameBudget
+    {
+        private int _frame = int.MinValue;
+        private int _spent;
+
+        internal bool HasRoom(int frame, int perFrame)
+        {
+            Roll(frame);
+            return _spent < perFrame;
+        }
+
+        internal void Spend(int frame)
+        {
+            Roll(frame);
+            _spent++;
+        }
+
+        private void Roll(int frame)
+        {
+            if (frame == _frame) return;
+            _frame = frame;
+            _spent = 0;
+        }
     }
 }

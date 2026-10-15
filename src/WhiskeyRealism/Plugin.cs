@@ -118,6 +118,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableArtilleryCombineGunSync;
         public static ConfigEntry<bool> EnableRaidSupplyThresholdFix;
         public static ConfigEntry<bool> EnableFoggedAiCampFix;
+        public static ConfigEntry<bool> EnableFoggedAiCampPlacementBudget;
+        public static ConfigEntry<int> FoggedAiCampPlacementsPerFrame;
         public static ConfigEntry<bool> EnableFoggedAiEmbarkationFix;
         public static ConfigEntry<bool> EnableOrphanCampCleanup;
         public static ConfigEntry<bool> EnableAiAreaMembershipRefresh;
@@ -863,6 +865,12 @@ namespace WhiskeyRealism
             EnableFoggedAiCampFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Fogged AI Camp Fix", true,
                 "Default ON. Vanilla never lets an AI army the player cannot see encamp, take winter quarters or entrench (UpdateCampsAndEntrenchments requires the unit to be out of the player's fog), so hidden AI armies lose the winter supply/movement relief, readiness, drill, morale and entrenchment effects. AI land units in the player's fog now camp as visible ones do; the camp and entrenchment models (and the encamp bugle) stay hidden until the player can see the unit. Player units are never touched. Off: vanilla (visible units' models are still re-shown).");
+            EnableFoggedAiCampPlacementBudget = Config.Bind(
+                "Campaign Bug Fixes", "Enable Fogged AI Camp Placement Budget", true,
+                "Default ON. With the Fogged AI Camp Fix, hidden AI armies that halted for the night all reach vanilla's camp time in the same few seconds, and each camp placement fits its model to the ground. A hidden AI unit without a camp places one only while this frame's placement budget ('Fogged AI Camp Placements Per Frame') has room; the others place theirs on a later regular cycle (vanilla re-checks each unit every 25 frames). Each unit still gets its camp as in vanilla; only the moment is spread. Units that already have a camp are never deferred. Off: every hidden AI camp is placed on the first cycle it qualifies.");
+            FoggedAiCampPlacementsPerFrame = Config.Bind(
+                "Campaign Bug Fixes", "Fogged AI Camp Placements Per Frame", 2,
+                "Default 2. Most new camps placed per frame for AI units the player cannot see, when 'Enable Fogged AI Camp Placement Budget' is on. A value below 1 counts as 1.");
             EnableFoggedAiEmbarkationFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Fogged AI Embarkation Fix", true,
                 "Default ON. Vanilla creates a unit's train, river boat or ship model (which is its embarked state) only while the player can see it, so an AI land unit in the player's fog is never embarked: no rail speed, it halts at night, uses no transport capacity, locomotives or ships, skips the sea embarkation delay and keeps full rations and reinforcements. AI land units in fog now embark as visible ones do, with the transport model hidden until the player can see the unit; those models share one never-used ship-firing sound array instead of adding 20 sound objects each. Fleets and player units are never touched. Off: vanilla (visible units' models are still re-shown).");
