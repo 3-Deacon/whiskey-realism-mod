@@ -465,6 +465,11 @@ internal static class CampaignLogisticsGlueTests
         AssertTrue(sync.Contains("((Component)unit).gameObject,"), "owner is the unit's own GameObject");
         AssertTrue(sync.Contains("if (silence) Silenced.Add(unit);") && sync.Contains("else Silenced.Remove(unit);"), "state recorded");
         AssertTrue(embark.Contains("CampaignScope.Register(\"fogged-embarkation\"") && embark.Contains("Silenced.Clear();"), "set cleared per campaign");
+        // The names HiddenTransportSoundFieldsBind proves against the shipped Assembly-CSharp.
+        AssertTrue(embark.Contains("AccessTools.Field(typeof(SoundEngine), \"soundobject\")")
+            && embark.Contains("AccessTools.Inner(typeof(SoundEngine), \"SoundObject\")")
+            && embark.Contains("AccessTools.Field(soundObject, \"go\")")
+            && embark.Contains("AccessTools.Field(soundObject, \"oldgo\")"), "reflection names match the binding test");
     }
 
     // L4: every OnceLog.Info in the two hot fog patches sits behind a static first-log

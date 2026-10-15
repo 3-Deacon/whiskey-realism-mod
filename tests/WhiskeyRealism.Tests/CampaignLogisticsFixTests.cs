@@ -43,6 +43,7 @@ internal static class CampaignLogisticsFixTests
             ("logistics confiscation factor shortens the supply duration", ConfiscationFactorShortensTheSupplyDuration),
             ("logistics raid scale matches vanilla group supply state il", RaidScaleMatchesVanillaGroupSupplyStateIl),
             ("logistics patch targets bind the vanilla names", PatchTargetsBindTheVanillaNames),
+            ("logistics hidden transport sound fields bind", HiddenTransportSoundFieldsBind),
         });
     }
 
@@ -466,6 +467,36 @@ internal static class CampaignLogisticsFixTests
         AssertTrue(AccessTools.Field(typeof(Regiment), "csound_shipfiring") != null, "Regiment.csound_shipfiring");
         foreach (var field in new[] { "shownmodel", "currentmodeltype", "campbuilding", "entrenchment", "iswithinfog" })
             AssertTrue(AccessTools.Field(typeof(Regiment), field) != null, "Regiment." + field);
+    }
+
+    // BUG-LOG-015: FoggedEmbarkationPatch reaches SoundEngine's private sound objects by
+    // reflection (146307, 146174-146219) and detaches the four transport purposes
+    // (csounds.txt 2/3/4/6, Regiment 111536-111544).
+    private static void HiddenTransportSoundFieldsBind()
+    {
+        var list = AccessTools.Field(typeof(SoundEngine), "soundobject");
+        AssertTrue(list != null && list.FieldType.IsGenericType && list.FieldType.GetGenericTypeDefinition() == typeof(List<>), "SoundEngine.soundobject is a List<>");
+        var soundObject = AccessTools.Inner(typeof(SoundEngine), "SoundObject");
+        AssertTrue(soundObject != null && list.FieldType.GetGenericArguments()[0] == soundObject, "List<SoundEngine.SoundObject>");
+        foreach (var field in new[] { "go", "oldgo" })
+        {
+            var info = AccessTools.Field(soundObject, field);
+            AssertTrue(info != null && info.FieldType == typeof(UnityEngine.GameObject), "SoundObject." + field + " is a GameObject");
+        }
+        var expected = new Dictionary<string, int>
+        {
+            { "csound_unitmovingtrain", 2 },
+            { "csound_trainwhistle", 3 },
+            { "csound_steamshiprivermoving", 4 },
+            { "csound_steamshipseamoving", 6 },
+        };
+        foreach (var pair in expected)
+        {
+            var info = AccessTools.Field(typeof(Regiment), pair.Key);
+            AssertTrue(info != null && info.IsStatic && info.FieldType == typeof(int), "Regiment." + pair.Key);
+            AssertEqual(pair.Value, (int)info.GetValue(null), "Regiment." + pair.Key + " purpose id");
+        }
+        AssertTrue(AccessTools.Field(typeof(Regiment), "soundengine")?.FieldType == typeof(SoundEngine), "Regiment.soundengine");
     }
 
     private static void AssertHasParameters(MethodInfo method, params string[] names)
