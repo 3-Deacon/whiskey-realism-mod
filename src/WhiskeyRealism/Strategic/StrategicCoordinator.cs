@@ -1476,6 +1476,7 @@ namespace WhiskeyRealism.Strategic
                 if (existing.SameBattleKey(record)) return;
 
             BattleHistory.Add(record);
+            CampaignPlannerRuntime.OnBattleRecorded(record);
             while (BattleHistory.Count > 64) BattleHistory.RemoveAt(0);
 
             string scale = record.IsMajorResult ? "major" : "minor";

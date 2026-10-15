@@ -255,7 +255,8 @@ namespace WhiskeyRealism.Strategic.Planner
                             reg.liedown, layDown, incident63, fixPerkIds),
                         ParentInstanceId = -1,
                         UseRails = reg.userails,
-                        UseRivers = reg.userivers
+                        UseRivers = reg.userivers,
+                        GroupSpeed = reg.groupspeed
                     });
                 }
                 catch (Exception ex)

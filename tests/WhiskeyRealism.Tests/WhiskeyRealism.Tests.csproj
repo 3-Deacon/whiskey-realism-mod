@@ -73,6 +73,12 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\LogisticsGate.cs" Link="Planner\LogisticsGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlayerCommandClassifier.cs" Link="Planner\PlayerCommandClassifier.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignPlanStore.cs" Link="Planner\CampaignPlanStore.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\LogisticsGate.DepotTasks.cs" Link="Planner\LogisticsGate.DepotTasks.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RiverLines.cs" Link="Planner\RiverLines.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MarchTime.cs" Link="Planner\MarchTime.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\HistoricalPriorTable.cs" Link="Planner\HistoricalPriorTable.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerState.cs" Link="Planner\PlannerState.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\TheaterPlanner.cs" Link="Planner\TheaterPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WlCampRealism.cs" Link="WlCampRealism.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmyGroupDoctrine.cs" Link="ArmyGroupDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\CicFactionAiGuard.cs" Link="CicFactionAiGuard.cs" />

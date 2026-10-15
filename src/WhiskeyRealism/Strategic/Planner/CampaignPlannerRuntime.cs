@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Patches;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -21,6 +22,28 @@ namespace WhiskeyRealism.Strategic.Planner
     internal static class CampaignPlannerRuntime
     {
         private static readonly CampaignSnapshot[] Snapshots = { new CampaignSnapshot(), new CampaignSnapshot() };
+        // G3: each alliance's hysteresis/seed state, the battles each review still has to judge
+        // (P4) and the last [CampaignPlan] row (rows on change). Per campaign; G6 persists the state.
+        private static readonly PlannerState[] States = { new PlannerState(), new PlannerState() };
+        private static readonly BattleInbox Battles = new BattleInbox();
+        private static readonly List<BattleHistoryRecord> PendingBattles = new List<BattleHistoryRecord>();
+        private static readonly string[] LastPlanRow = new string[2];
+
+        static CampaignPlannerRuntime()
+        {
+            CampaignScope.Register("campaign-planner-plan-state", ResetPlanState);
+        }
+
+        private static void ResetPlanState()
+        {
+            for (int a = 0; a < States.Length; a++)
+            {
+                States[a] = new PlannerState();
+                LastPlanRow[a] = null;
+            }
+            Battles.Clear();
+            PendingBattles.Clear();
+        }
 
         internal static void ReviewPlan(int alliance, int day, int month, int year, DirectorPosture tempo)
         {
@@ -41,11 +64,21 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (mode == PlannerReviewMode.Bookkeeping) return;
 
                     var sectors = SectorModel.Build(snapshot);
-                    CampaignPlanStore.Publish(alliance,
-                        new TheaterPlan { Alliance = alliance, DaySerial = snapshot.DaySerial },
-                        new Allocation { Alliance = alliance },
-                        sectors);
+                    // G3 plan step (P3-P5): profiles -> plan with logistics and depot tasks.
+                    var state = States[alliance];
+                    if (state.CampaignSeed == 0L)
+                        state.CampaignSeed = PlannerState.ComputeCampaignSeed(SceneManagement.currentcampaignscenario, year, month, day);
+                    Battles.Take(alliance, PendingBattles);
+                    TheaterPlan plan;
+                    string trace;
+                    using (TelemetryPerf.Scope("campaign.planner.plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                    {
+                        plan = TheaterPlanner.Plan(snapshot, sectors, SectorProfileUntilG2, state, PendingBattles,
+                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace);
+                    }
+                    CampaignPlanStore.Publish(alliance, plan, new Allocation { Alliance = alliance }, sectors);
                     LogFirstReview(snapshot, sectors);
+                    EmitPlan(plan, trace, day, month, year);
                 }
                 catch (Exception ex)
                 {
@@ -72,6 +105,38 @@ namespace WhiskeyRealism.Strategic.Planner
                     OnceLog.Warning("campaign-planner:execute-failed", "[CampaignPlanner] executors failed: " + ex.Message);
                 }
             }
+        }
+
+        // A finished battle (StrategicCoordinator.RecordBattleOutcome, after BattleHistory.Add): both
+        // alliances judge it at their next plan (P4's decisive-battle trigger).
+        internal static void OnBattleRecorded(BattleHistoryRecord record)
+        {
+            Battles.Add(record);
+        }
+
+        // G2 SEAM: until CommanderProfiles (G2) merges every sector commander gets the all-zero
+        // profile (no odds shift, attack bias or supply slack); on merge this method goes and the
+        // call passes `id => CommanderProfiles.ForSector(snapshot.Commanders, id)`.
+        private static CommanderProfile SectorProfileUntilG2(int commanderId)
+        {
+            return new CommanderProfile { CommanderId = commanderId };
+        }
+
+        // [CampaignPlan] on change (one row per alliance per decision); the per-candidate trace
+        // under Plan Trace Logging (CicSettings.PlanTrace until G6 moves it to the planner).
+        private static void EmitPlan(TheaterPlan plan, string trace, int day, int month, int year)
+        {
+            string row = TheaterPlanner.Summary(plan);
+            int a = plan.Alliance;
+            if (a < 0 || a >= LastPlanRow.Length || string.Equals(LastPlanRow[a], row, StringComparison.Ordinal)) return;
+            LastPlanRow[a] = row;
+            TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);
+            if (!CicSettings.PlanTrace) return;
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Trace, "CampaignPlan:trace", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(a)
+                .WithDecision("trace", plan.SwitchReason ?? "none", row)
+                .WithField("date", year.ToString("D4") + "-" + month.ToString("D2") + "-" + day.ToString("D2"))
+                .WithField("candidates", trace ?? ""));
         }
 
         // DLC_WL reads as WlChainContext.Capture does: dlc_scenarioactive, IsCommanderInChief
