@@ -110,6 +110,27 @@ namespace WhiskeyRealism.Strategic
             return completedPasses < vanilla * 2;
         }
 
+        public static bool ShouldRunCatchUpPass(
+            int completedExtraPasses,
+            float totalElapsedMs,
+            float extraElapsedMs,
+            float owedPasses,
+            float gameSpeed,
+            CampaignAiGovernorOptions governor,
+            FastForwardAiOptions catchUp,
+            int unityFrame,
+            int cooldownUntilFrame)
+        {
+            // Extras beyond vanilla only once nothing is owed, outside a slow-frame
+            // cooldown, and while BOTH the whole governor frame (owed passes included)
+            // and the catch-up's own allowance have budget left.
+            if (owedPasses >= 1f) return false;
+            if (InCooldown(unityFrame, cooldownUntilFrame)) return false;
+            governor = governor ?? new CampaignAiGovernorOptions();
+            if (totalElapsedMs >= governor.FrameBudgetMs) return false;
+            return ShouldRunExtraPass(completedExtraPasses, extraElapsedMs, gameSpeed, catchUp);
+        }
+
         public static bool ShouldSkipCampaignAiUpdate(bool gamePaused, float gameSpeed)
         {
             return gamePaused || gameSpeed <= 0f;

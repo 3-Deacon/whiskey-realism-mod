@@ -42,6 +42,8 @@ internal static class CampaignEconomyFixTests
         GovernorGuaranteedPassesIgnoreBudget();
         GovernorRepaysBacklogOnCheapFramesUpToTwiceVanilla();
         GovernorRunsNothingWhenNothingOwed();
+        GovernorCatchUpRespectsCombinedFrameBudget();
+        GovernorCatchUpHonoursSlowFrameCooldown();
 
         FortGovernorSkipsScoringWhenFactionAlreadyBuilding();
         FortGovernorSkipsScoringForIneligibleUnit();
@@ -553,6 +555,43 @@ internal static class CampaignEconomyFixTests
         TestHarness.AssertFalse(FastForwardAiScheduler.ShouldRunGovernedPass(0, 0f, 0.5f, 50f, Governor), "nothing owed");
         TestHarness.AssertEqual(7f, FastForwardAiScheduler.AccrueOwedPasses(-3f, 50f), "negative owed clamps before accrual");
         LogPass("c2b governor runs nothing when nothing owed");
+    }
+
+    private static readonly FastForwardAiOptions CatchUp = new FastForwardAiOptions
+    {
+        Enabled = true,
+        MaxExtraPassesAt50x = 4,
+        FrameBudgetMs = 1.5f,
+        SlowFrameThresholdMs = 8f,
+        SlowFrameCooldownFrames = 180
+    };
+
+    private static void GovernorCatchUpRespectsCombinedFrameBudget()
+    {
+        TestHarness.AssertTrue(
+            FastForwardAiScheduler.ShouldRunCatchUpPass(0, totalElapsedMs: 1f, extraElapsedMs: 0f, owedPasses: 0f, gameSpeed: 50f, Governor, CatchUp, unityFrame: 10, cooldownUntilFrame: 0),
+            "cheap frame, nothing owed => catch-up");
+        TestHarness.AssertFalse(
+            FastForwardAiScheduler.ShouldRunCatchUpPass(0, totalElapsedMs: 3.2f, extraElapsedMs: 0f, owedPasses: 0f, gameSpeed: 50f, Governor, CatchUp, unityFrame: 10, cooldownUntilFrame: 0),
+            "owed passes already spent the frame budget => no extra pass");
+        TestHarness.AssertFalse(
+            FastForwardAiScheduler.ShouldRunCatchUpPass(1, totalElapsedMs: 2f, extraElapsedMs: 1.5f, owedPasses: 0f, gameSpeed: 50f, Governor, CatchUp, unityFrame: 10, cooldownUntilFrame: 0),
+            "catch-up budget spent");
+        TestHarness.AssertFalse(
+            FastForwardAiScheduler.ShouldRunCatchUpPass(0, totalElapsedMs: 0f, extraElapsedMs: 0f, owedPasses: 1f, gameSpeed: 50f, Governor, CatchUp, unityFrame: 10, cooldownUntilFrame: 0),
+            "vanilla work still owed => no extras");
+        LogPass("c2b governor catch-up respects combined frame budget");
+    }
+
+    private static void GovernorCatchUpHonoursSlowFrameCooldown()
+    {
+        TestHarness.AssertFalse(
+            FastForwardAiScheduler.ShouldRunCatchUpPass(0, 0f, 0f, 0f, 50f, Governor, CatchUp, unityFrame: 100, cooldownUntilFrame: 280),
+            "inside slow-frame cooldown");
+        TestHarness.AssertTrue(
+            FastForwardAiScheduler.ShouldRunCatchUpPass(0, 0f, 0f, 0f, 50f, Governor, CatchUp, unityFrame: 280, cooldownUntilFrame: 280),
+            "cooldown over");
+        LogPass("c2b governor catch-up honours slow-frame cooldown");
     }
 
     // ---------------------------------------------------------------- C-FortGov

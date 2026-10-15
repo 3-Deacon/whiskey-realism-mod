@@ -85,15 +85,28 @@ namespace WhiskeyRealism.Patches
                     }
 
                     int extraPasses = 0;
-                    if (_owedPasses < 1f)
+                    int unityFrame = Time.frameCount;
+                    var catchUp = BuildCatchUpOptions(plugin);
+                    if (FastForwardAiScheduler.ShouldThrottleAfterFrame((float)watch.Elapsed.TotalMilliseconds, 0f, catchUp))
+                        _catchUpCooldownUntilFrame = FastForwardAiScheduler.CooldownUntilFrame(unityFrame, catchUp);
+                    var catchUpWatch = Stopwatch.StartNew();
+                    while (FastForwardAiScheduler.ShouldRunCatchUpPass(
+                               extraPasses,
+                               (float)watch.Elapsed.TotalMilliseconds,
+                               (float)catchUpWatch.Elapsed.TotalMilliseconds,
+                               _owedPasses,
+                               gameSpeed,
+                               options,
+                               catchUp,
+                               unityFrame,
+                               _catchUpCooldownUntilFrame))
                     {
-                        var catchUp = BuildCatchUpOptions(plugin);
-                        var catchUpWatch = Stopwatch.StartNew();
-                        while (FastForwardAiScheduler.ShouldRunExtraPass(extraPasses, (float)catchUpWatch.Elapsed.TotalMilliseconds, gameSpeed, catchUp))
-                        {
-                            extraPasses++;
-                            updateUnitAi.Invoke(__instance, null);
-                        }
+                        long passStart = Stopwatch.GetTimestamp();
+                        extraPasses++;
+                        updateUnitAi.Invoke(__instance, null);
+                        float passMs = (float)((Stopwatch.GetTimestamp() - passStart) * 1000d / Stopwatch.Frequency);
+                        if (FastForwardAiScheduler.ShouldThrottleAfterFrame(0f, passMs, catchUp))
+                            _catchUpCooldownUntilFrame = FastForwardAiScheduler.CooldownUntilFrame(unityFrame, catchUp);
                     }
 
                     updateCompanyFoundationList.Invoke(__instance, null);
@@ -114,6 +127,7 @@ namespace WhiskeyRealism.Patches
 
         // Vanilla passes owed but not yet run (bounded by MaxBacklogFrames x vanilla).
         private static float _owedPasses;
+        private static int _catchUpCooldownUntilFrame;
         private static FieldInfo _initializedField;
         private static MethodInfo _initializeAiMethod;
         private static MethodInfo _updateUnitAiMethod;
@@ -141,7 +155,9 @@ namespace WhiskeyRealism.Patches
                 Enabled = plugin.FastForwardAiCatchUp.Value,
                 FrameBudgetMs = Math.Max(0f, plugin.FastForwardAiFrameBudgetMs.Value),
                 MaxExtraPassesAt20x = plugin.FastForwardAi20xExtraPasses.Value,
-                MaxExtraPassesAt50x = plugin.FastForwardAi50xExtraPasses.Value
+                MaxExtraPassesAt50x = plugin.FastForwardAi50xExtraPasses.Value,
+                SlowFrameThresholdMs = Math.Max(0.1f, plugin.FastForwardAiSlowFrameThresholdMs.Value),
+                SlowFrameCooldownFrames = Math.Max(0, plugin.FastForwardAiSlowFrameCooldownFrames.Value)
             };
         }
 
