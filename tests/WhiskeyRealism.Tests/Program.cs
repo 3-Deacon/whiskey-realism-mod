@@ -860,8 +860,6 @@ static class Program
             ("fast forward scheduler stops when frame budget is spent", FastForwardSchedulerStopsWhenFrameBudgetIsSpent),
             ("fast forward scheduler throttles after slow frames", FastForwardSchedulerThrottlesAfterSlowFrames),
             ("fast forward scheduler cooldown expires by frame", FastForwardSchedulerCooldownExpiresByFrame),
-            ("campaign ai governor caps vanilla passes", CampaignAiGovernorCapsVanillaPasses),
-            ("campaign ai governor respects frame budget before first pass", CampaignAiGovernorRespectsFrameBudgetBeforeFirstPass),
             ("campaign ai governor skips paused vanilla update", CampaignAiGovernorSkipsPausedVanillaUpdate),
             ("commander assignment guard clears stale previous command", CommanderAssignmentGuardClearsStalePreviousCommand),
             ("campaign filter map guard bounds repeated no progress", CampaignFilterMapGuardBoundsRepeatedNoProgress),
@@ -18023,35 +18021,6 @@ static class Program
         AssertEqual(true, FastForwardAiScheduler.InCooldown(1179, 1180));
         AssertEqual(false, FastForwardAiScheduler.InCooldown(1180, 1180));
         AssertEqual(false, FastForwardAiScheduler.InCooldown(1181, 1180));
-    }
-
-    private static void CampaignAiGovernorCapsVanillaPasses()
-    {
-        var options = new CampaignAiGovernorOptions
-        {
-            Enabled = true,
-            MaxPassesAt20x = 2,
-            MaxPassesAt50x = 3,
-            FrameBudgetMs = 3f
-        };
-
-        AssertEqual(2, FastForwardAiScheduler.GovernedPassCap(5f, options));
-        AssertEqual(2, FastForwardAiScheduler.GovernedPassCap(20f, options));
-        AssertEqual(3, FastForwardAiScheduler.GovernedPassCap(50f, options));
-    }
-
-    private static void CampaignAiGovernorRespectsFrameBudgetBeforeFirstPass()
-    {
-        var options = new CampaignAiGovernorOptions
-        {
-            Enabled = true,
-            MaxPassesAt50x = 3,
-            FrameBudgetMs = 1.5f
-        };
-
-        AssertEqual(true, FastForwardAiScheduler.ShouldRunGovernedPass(0, 0f, 50f, options));
-        AssertEqual(false, FastForwardAiScheduler.ShouldRunGovernedPass(0, 1.5f, 50f, options));
-        AssertEqual(false, FastForwardAiScheduler.ShouldRunGovernedPass(3, 0f, 50f, options));
     }
 
     private static void CampaignAiGovernorSkipsPausedVanillaUpdate()

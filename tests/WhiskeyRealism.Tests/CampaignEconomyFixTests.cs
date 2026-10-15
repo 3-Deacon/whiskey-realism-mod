@@ -34,6 +34,12 @@ internal static class CampaignEconomyFixTests
         ConstructionSupplyCorridorMatchesTheaterAgainstTheater();
         ConstructionCapitalThreatIsPerSiteTheater();
         ConstructionCapitalThreatPeakIsNotDilutedByQuietSectors();
+
+        GovernorMatchesVanillaPassesOnCheapFrames();
+        GovernorKeepsVanillaProgressionWhenEveryFrameIsOverBudget();
+        GovernorGuaranteedPassesIgnoreBudget();
+        GovernorRepaysBacklogOnCheapFramesUpToTwiceVanilla();
+        GovernorRunsNothingWhenNothingOwed();
     }
 
     private static void LogPass(string message)
@@ -402,5 +408,86 @@ internal static class CampaignEconomyFixTests
     {
         TestHarness.AssertEqual(0.9f, ConstructionThreat.Peak(Sectors), "peak, not 0.9/6");
         LogPass("c2b construction capital threat peak is not diluted by quiet sectors");
+    }
+
+    // ---------------------------------------------------------------- C-Governor
+    // Vanilla AICampaign.Update (decompile 11195-11199) runs floor(sqrt(gamespeed))
+    // UpdateUnitAI passes per frame; each pass advances one job of the per-faction job
+    // table (11372-11629; job 4 and job 21 iterate one area/unit per pass). The governor
+    // may smooth that work across frames but must not run fewer passes than vanilla over
+    // time (bounded lag).
+
+    private static readonly CampaignAiGovernorOptions Governor = new CampaignAiGovernorOptions
+    {
+        Enabled = true,
+        MaxPassesAt20x = 2,
+        MaxPassesAt50x = 3,
+        FrameBudgetMs = 3f,
+        MaxBacklogFrames = 8
+    };
+
+    // costMs = simulated cost of one pass; returns total passes, tracks peak backlog.
+    private static int SimulateGovernor(float speed, int frames, float costMs, out float peakOwed)
+    {
+        float owed = 0f;
+        int total = 0;
+        peakOwed = 0f;
+        for (int f = 0; f < frames; f++)
+        {
+            owed = FastForwardAiScheduler.AccrueOwedPasses(owed, speed);
+            int executed = 0;
+            float elapsed = 0f;
+            while (FastForwardAiScheduler.ShouldRunGovernedPass(executed, elapsed, owed, speed, Governor))
+            {
+                executed++;
+                owed -= 1f;
+                elapsed += costMs;
+                if (executed > 1000) throw new Exception("governor loop did not terminate");
+            }
+            total += executed;
+            if (owed > peakOwed) peakOwed = owed;
+        }
+        return total;
+    }
+
+    private static void GovernorMatchesVanillaPassesOnCheapFrames()
+    {
+        int total = SimulateGovernor(50f, 100, costMs: 0.1f, out _);
+        TestHarness.AssertEqual(700, total, "50x cheap frames run exactly vanilla's 7/frame");
+        total = SimulateGovernor(20f, 100, costMs: 0.1f, out _);
+        TestHarness.AssertEqual(400, total, "20x cheap frames run exactly vanilla's 4/frame");
+        LogPass("c2b governor matches vanilla passes on cheap frames");
+    }
+
+    private static void GovernorKeepsVanillaProgressionWhenEveryFrameIsOverBudget()
+    {
+        float peak;
+        int total = SimulateGovernor(50f, 100, costMs: 5f, out peak);
+        TestHarness.AssertTrue(total >= 700 - 7 * 8, "never more than MaxBacklogFrames of vanilla work behind (got " + total + ")");
+        TestHarness.AssertTrue(peak <= 7 * 8 + 1, "backlog bounded (peak " + peak + ")");
+        LogPass("c2b governor keeps vanilla progression when every frame is over budget");
+    }
+
+    private static void GovernorGuaranteedPassesIgnoreBudget()
+    {
+        TestHarness.AssertTrue(FastForwardAiScheduler.ShouldRunGovernedPass(0, 99f, 7f, 50f, Governor), "first pass always");
+        TestHarness.AssertTrue(FastForwardAiScheduler.ShouldRunGovernedPass(2, 99f, 7f, 50f, Governor), "guaranteed 3 at 50x");
+        TestHarness.AssertFalse(FastForwardAiScheduler.ShouldRunGovernedPass(3, 99f, 7f, 50f, Governor), "over budget after guarantee");
+        LogPass("c2b governor guaranteed passes ignore budget");
+    }
+
+    private static void GovernorRepaysBacklogOnCheapFramesUpToTwiceVanilla()
+    {
+        TestHarness.AssertTrue(FastForwardAiScheduler.ShouldRunGovernedPass(10, 0.5f, 20f, 50f, Governor), "cheap frame repays backlog past vanilla");
+        TestHarness.AssertFalse(FastForwardAiScheduler.ShouldRunGovernedPass(14, 0.5f, 20f, 50f, Governor), "ceiling 2x vanilla per cheap frame");
+        TestHarness.AssertTrue(FastForwardAiScheduler.ShouldRunGovernedPass(20, 99f, 7f * 8 + 2, 50f, Governor), "forced above backlog bound");
+        LogPass("c2b governor repays backlog on cheap frames up to twice vanilla");
+    }
+
+    private static void GovernorRunsNothingWhenNothingOwed()
+    {
+        TestHarness.AssertFalse(FastForwardAiScheduler.ShouldRunGovernedPass(0, 0f, 0.5f, 50f, Governor), "nothing owed");
+        TestHarness.AssertEqual(7f, FastForwardAiScheduler.AccrueOwedPasses(-3f, 50f), "negative owed clamps before accrual");
+        LogPass("c2b governor runs nothing when nothing owed");
     }
 }
