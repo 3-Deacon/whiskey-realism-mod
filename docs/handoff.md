@@ -30,6 +30,10 @@ Spec [`superpowers/specs/2026-10-15-battle-core-design.md`](superpowers/specs/20
 
 Patches deleted: #45, #48, #49, #50, #52, #61, #65 (see [`patch-catalog.md`](patch-catalog.md) § Removed patches). Flags deleted: `Enable Single-Pass Objective Records`, `Battle Group Stance Min Interval Seconds`, `Enable Artillery Waypoint Veto`. Flags added (BC0): `Enable Battle Fog-Honest Perception`, `Enable Infantry Charge Doctrine`.
 
+### BC9 — reconnaissance and probing (branch `feat/battle-recon`, not merged)
+
+Plan § "BC9 — reconnaissance and probing" in [`superpowers/plans/2026-10-15-battle-core.md`](superpowers/plans/2026-10-15-battle-core.md) (vanilla and W&L model, decisions, As built, smoke items 2.15-2.18). The fog-honest AI goes and looks: a Recon producer (Support; 12 producers) sends single AI cavalry regiments to unwatched enemy entry points, stale front bands or (before any contact) straight ahead; in the Probe phase one AI group per empty front band probes 200 m in screen stance and stops on contact; Scout/Probe tasks advance by such bounds instead of to an objective stand-off; screens face unwatched entry points; #69 `SkirmisherScreenDistancePatch` stands AI skirmisher screens 100 m out instead of 30 m. The operation director now scouts instead of committing on zero enemy strength at a newly selected objective. Flag `Enable Battle Reconnaissance` (default on). Harness 2001 PASS on the branch. Not deployed, not smoke-tested.
+
 ### What the remediation shipped
 
 Inputs: [`reviews/2026-10-14-full-mod-review.md`](reviews/2026-10-14-full-mod-review.md), [`reviews/2026-10-14-reanchor-on-branch.md`](reviews/2026-10-14-reanchor-on-branch.md), [`reviews/2026-10-14-tactical-logic-review.md`](reviews/2026-10-14-tactical-logic-review.md), [`reviews/2026-10-14-branch-delta-review.md`](reviews/2026-10-14-branch-delta-review.md). Plan: [`superpowers/plans/2026-10-14-full-review-remediation.md`](superpowers/plans/2026-10-14-full-review-remediation.md). Every workstream was reviewed against the vanilla decompile before merge; commit messages carry the anchors.

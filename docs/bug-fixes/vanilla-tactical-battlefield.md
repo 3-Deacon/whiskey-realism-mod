@@ -90,7 +90,7 @@ Classification:
 - `[TacDeployTerrainAdvice]`
 - `[Patch:WLOperationNullGuard]`
 - `[Patch:TacticalFallbackRetreatNullGuard]`
-- `[once:tactical-battle-core:producers] [BattleCore] producers count=11 order=…`
+- `[once:tactical-battle-core:producers] [BattleCore] producers count=12 order=…` (11 before BC9 added `Recon`)
 - `[OrderArbiter]` rows (and `[once:tactical-battle-core:arbiter-first-fire]`)
 - `[once:tactical-battle-core:charge-first-fire] [ChargeDoctrine] …` (BUG-TAC-016/017)
 - `[TacticalFeudGuard]` (#42)
