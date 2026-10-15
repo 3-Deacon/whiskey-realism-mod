@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text.RegularExpressions;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
@@ -22,6 +24,7 @@ internal static class StrategicLedgerSetTests
             ("ledger set publish keeps nulls", PublishKeepsNulls),
             ("ledger set formation clone keeps lookup and order", FormationCloneKeepsLookupAndOrder),
             ("succession applies only published fired events", SuccessionAppliesOnlyPublishedEvents),
+            ("ledger set copied types are written only by the review", CopiedTypesWrittenOnlyByReview),
         });
     }
 
@@ -222,5 +225,41 @@ internal static class StrategicLedgerSetTests
         pending.Clear();
         foreach (var e in succession.GetPendingApplications(1)) pending.Add(e.Id);
         AssertFalse(pending.Contains(7), "applied events are no longer pending");
+    }
+
+    // Patches read published copies of the CIC (and plan), era, director memory, policy plan and
+    // formation directives; a write from a patch would land on a copy the next publish discards.
+    // These types are written only by the review (StrategicCoordinator), their own files, the
+    // CIC plan router and the sidecar codec/restore.
+    private static void CopiedTypesWrittenOnlyByReview()
+    {
+        var rules = new (string pattern, string[] allowed)[]
+        {
+            (@"\.(OfficerName|OfficerPersonality|ActivePlan)\s*=[^=]", new[] { "StrategicCoordinator.cs", "CIC.cs", "SidecarDtoCodec.cs" }),
+            (@"ActivePlan\.\w+\s*=[^=]", new[] { "StrategicCoordinator.cs", "CIC.cs", "SidecarDtoCodec.cs", "CicReviewRouter.cs" }),
+            (@"\.(CheckTransition|ResetToDate)\(|Eras\[[^\]]*\]\.Stage\s*=[^=]", new[] { "StrategicCoordinator.cs", "EraStageManager.cs" }),
+            (@"\.(CapitalDangerStreakDays|DaysSinceLastBattle|LastFullRefreshDay|LastSourceSignature|LastPosture)\s*=[^=]|RecentEventSummaries\.(Add|Clear|Remove|Insert)", new[] { "StrategicCoordinator.cs", "StrategicResilienceDirector.cs", "DirectorMemory.cs" }),
+            (@"PolicyPlans\[[^\]]*\]\.(Update|Restore)\(|\bplan\.Update\(", new[] { "StrategicCoordinator.cs" }),
+            (@"ApplyOperationalProbe\(|GetAssignment\([^)]*\)\??\.\w+\s*=[^=]|Assignments\[[^\]]*\]\.\w+\s*=[^=]", new[] { "StrategicCoordinator.cs", "FormationDirectiveLedger.cs" }),
+        };
+        string root = TestFixtures.FindRepoPath("src/WhiskeyRealism");
+        var hits = new List<string>();
+        foreach (var file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
+        {
+            string name = Path.GetFileName(file);
+            string[] lines = File.ReadAllLines(file);
+            foreach (var (pattern, allowed) in rules)
+            {
+                if (Array.IndexOf(allowed, name) >= 0) continue;
+                var regex = new Regex(pattern);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i].TrimStart();
+                    if (line.StartsWith("//")) continue;
+                    if (regex.IsMatch(line)) hits.Add(name + ":" + (i + 1) + ": " + line);
+                }
+            }
+        }
+        AssertEqual("", string.Join("\n", hits), "writes to published copies outside the review");
     }
 }
