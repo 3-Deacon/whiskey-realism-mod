@@ -320,7 +320,10 @@ internal static class CampaignTerrainFixTests
 
         string engineer = File.ReadAllText(Path.Combine(dir, "EngineerBranchBonusPatch.cs"));
         AssertEqual(2, Regex.Matches(engineer, @"if \(!Enabled\(\)\) return;\s*if \(SwapAll\(Swap\)").Count, "both engineer Prefixes gate on the flag before swapping");
-        AssertEqual(2, Regex.Matches(engineer, @"\[HarmonyFinalizer\][\s\S]*?Swap\.Restore\(\)").Count, "both engineer Finalizers restore");
+        var finalizers = Regex.Matches(engineer, @"\[HarmonyFinalizer\]");
+        AssertEqual(2, finalizers.Count, "two engineer Finalizers");
+        foreach (Match f in finalizers)
+            AssertTrue(Body(engineer.Substring(f.Index), "internal static void Finalizer()").Contains("Swap.Restore()"), "each engineer Finalizer restores");
         AssertEqual(2, Regex.Matches(engineer, @"LogRestore\(Swap\.Restore\(\), ""engineer-branch:\w+:restore""\);\s*if \(!Enabled").Count, "both engineer Prefixes restore first");
 
         string ground = File.ReadAllText(Path.Combine(dir, "GoodGroundCoverCapPatch.cs"));
