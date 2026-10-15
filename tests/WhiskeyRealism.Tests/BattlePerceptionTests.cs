@@ -906,6 +906,9 @@ internal static class BattlePerceptionTests
         AssertEqual(1, ArmyEvidenceBuilder.ContactBucket(s),
             "three contacts (two visible range-list enemies, melee) -> bucket 1; counting unseen range-list enemies would make five (bucket 2)");
         AssertEqual(0, ArmyEvidenceBuilder.ContactBucket(ConsumerSnapshot(10.0, new[] { OwnUnit(1, 0f, -500f) })), "no contact");
+        AssertEqual(1, ArmyEvidenceBuilder.ContactBucket(ConsumerSnapshot(10.0, new[]
+            { OwnUnit(1, 0f, -500f, flags: UnitFlags.Active | UnitFlags.PathInterrupted) })),
+            "an interrupted own path is contact (shipped trigger)");
     }
 
     private static void GroupPressureHelpersReadTheSnapshot()

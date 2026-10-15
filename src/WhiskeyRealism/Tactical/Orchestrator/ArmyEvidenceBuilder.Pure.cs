@@ -408,9 +408,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// The heavy-gate signature's contact term over the side's own units: a unit is in
-        /// contact when in melee or when the first enemy of its range list
-        /// (UnitRecord.FirstEnemyInRangeId, enemyinrangereg[0]) is visible to the side.
+        /// The heavy-gate signature's contact term over the side's own units: a unit counts
+        /// when its path was interrupted (own-side pathinterrupted, set with StopRegiment on
+        /// contact 117330 - the shipped trigger), when in melee, or when the first enemy of
+        /// its range list (UnitRecord.FirstEnemyInRangeId, enemyinrangereg[0]) is visible.
         /// Buckets: 0 none, 1 for 1-3, 2 for 4-10, 3 above.
         /// </summary>
         internal static int ContactBucket(BattleSnapshot s)
@@ -420,7 +421,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             UnitRecord[] own = s.Own;
             for (int i = 0; i < s.OwnCount; i++)
             {
-                if ((own[i].Flags & UnitFlags.InMelee) != 0
+                if ((own[i].Flags & (UnitFlags.InMelee | UnitFlags.PathInterrupted)) != 0
                     || (own[i].FirstEnemyInRangeId != 0 && s.IsVisible(own[i].FirstEnemyInRangeId)))
                     contacts++;
             }
