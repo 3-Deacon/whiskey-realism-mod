@@ -319,17 +319,6 @@ static class Program
             ("regimental threat computer quadrant front detects centroid axis", RegimentalThreatComputerFrontQuadrant),
             ("regimental threat computer detects flank from three enemies", RegimentalThreatComputerDetectsFlankFromThreeEnemies),
             ("regimental threat computer isolation when no allies nearby", RegimentalThreatComputerIsolationWhenNoAllies),
-            ("friendly path gate empty list returns clear", FriendlyPathGateEmptyReturnsClear),
-            ("friendly path gate detects destination overlap", FriendlyPathGateDetectsDestinationOverlap),
-            ("friendly path gate detects narrow frontal cone block", FriendlyPathGateDetectsNarrowCone),
-            ("friendly path gate ignores friendly outside range", FriendlyPathGateIgnoresFriendlyOutsideRange),
-            ("friendly path gate cohesion fires when spread worsens", FriendlyPathGateCohesionWorsensSpread),
-            ("friendly path gate ignores cross-parent destination overlap", FriendlyPathGateIgnoresCrossParentDestinationOverlap),
-            ("friendly fire gate clear when no friendlies", FriendlyFireGateClearWhenEmpty),
-            ("friendly fire gate detects friend in line", FriendlyFireGateDetectsFriendInLine),
-            ("friendly fire gate ignores friend behind shooter", FriendlyFireGateIgnoresFriendBehind),
-            ("friendly fire gate ignores friend past target", FriendlyFireGateIgnoresFriendPastTarget),
-            ("friendly fire gate ignores friend outside lateral band", FriendlyFireGateIgnoresLateralFriend),
             ("opportunity hysteresis holds same category", OpportunityHysteresisHoldsSameCategory),
             ("opportunity hysteresis blocks transition within hold window", OpportunityHysteresisBlocksWithinHoldWindow),
             ("opportunity hysteresis allows transition after hold expires", OpportunityHysteresisAllowsAfterHold),
@@ -375,11 +364,6 @@ static class Program
             ("stance mapper attack tasks → stance 3", StanceMapperAttackTasksMapToStance3),
             ("stance mapper defensive tasks → stance 2", StanceMapperDefensiveTasksMapToStance2),
             ("stance mapper none → stance 0", StanceMapperNoneTaskMapsToStance0),
-            ("stance mapper identifies offensive commitment", StanceMapperIdentifiesOffensiveCommitment),
-            ("regimental positioner empty regiments returns empty", RegimentalPositionerEmptyReturnsEmpty),
-            ("regimental positioner single regiment goes to target", RegimentalPositionerSingleToTarget),
-            ("regimental positioner two regiments split symmetric", RegimentalPositionerTwoSplitSymmetric),
-            ("regimental positioner lane index alternates", RegimentalPositionerLaneIndexAlternates),
             ("tactical nav planner probes to standoff bound", TacticalNavPlannerProbesToStandoffBound),
             ("tactical nav planner breaks off close screen", TacticalNavPlannerBreaksOffCloseScreen),
             ("tactical nav planner offsets covered attack approach", TacticalNavPlannerOffsetsCoveredAttackApproach),
@@ -27134,107 +27118,6 @@ static class Program
     // gate logic produces the right block/clear results for common scenarios.
     // ============================================================================
 
-    private static void FriendlyPathGateEmptyReturnsClear()
-    {
-        var result = TacticalFriendlyPathBlockingGate.Evaluate(0f, 0f, 100f, 0f, false, new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>());
-        AssertFalse(result.Blocked, "no friendlies = clear");
-    }
-
-    private static void FriendlyPathGateDetectsDestinationOverlap()
-    {
-        // Sibling brigades (same parent=42): friendly at (50,50) with waypoint
-        // at (100, 0). I propose target (110, 0). Distance between targets is
-        // 10m — well under BrigadeSpacingMeters (280m). Layer 2 should fire
-        // because we're siblings (2026-05-22 scope fix #5: cross-parent
-        // overlap no longer triggers).
-        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
-        {
-            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                instanceId: 1,
-                currentX: 50f, currentZ: 50f,
-                waypointX: 100f, waypointZ: 0f,
-                hasWaypoint: true,
-                isLineFormation: false,
-                parentBrigadeInstanceId: 42),
-        };
-        var result = TacticalFriendlyPathBlockingGate.Evaluate(
-            0f, 0f, 110f, 0f, false, friendlies, myParentBrigadeInstanceId: 42);
-        AssertTrue(result.Blocked, "sibling destination overlap should block");
-        AssertEqual("destination-overlap-sibling-waypoint", result.Reason, "reason matches sibling-scoped Layer 2");
-    }
-
-    private static void FriendlyPathGateIgnoresCrossParentDestinationOverlap()
-    {
-        // Cross-parent brigades: friendly's parent=42, mine=99 (different).
-        // Same close destinations — Layer 2 must NOT fire (scope fix #5).
-        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
-        {
-            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                instanceId: 1,
-                currentX: 50f, currentZ: 50f,
-                waypointX: 100f, waypointZ: 0f,
-                hasWaypoint: true,
-                isLineFormation: false,
-                parentBrigadeInstanceId: 42),
-        };
-        var result = TacticalFriendlyPathBlockingGate.Evaluate(
-            0f, 0f, 110f, 0f, false, friendlies, myParentBrigadeInstanceId: 99);
-        AssertFalse(result.Blocked, "cross-parent destination overlap must NOT block");
-    }
-
-    private static void FriendlyPathGateDetectsNarrowCone()
-    {
-        // Friendly straight ahead at (0, 60), I'm at (0,0) moving to (0, 200).
-        // Friendly is within narrow cone (0°) and within NarrowConeRangeMeters (70m).
-        // Layer 1 narrow cone fires.
-        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
-        {
-            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                instanceId: 2,
-                currentX: 0f, currentZ: 60f,
-                waypointX: 0f, waypointZ: 0f,
-                hasWaypoint: false,
-                isLineFormation: false),
-        };
-        var result = TacticalFriendlyPathBlockingGate.Evaluate(0f, 0f, 0f, 200f, false, friendlies);
-        AssertTrue(result.Blocked, "narrow cone should block when friendly is in path");
-    }
-
-    private static void FriendlyPathGateIgnoresFriendlyOutsideRange()
-    {
-        // Friendly at (0, 500) — way beyond MediumConeRangeMeters (140m).
-        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
-        {
-            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                instanceId: 3,
-                currentX: 0f, currentZ: 500f,
-                waypointX: 0f, waypointZ: 0f,
-                hasWaypoint: false,
-                isLineFormation: false),
-        };
-        var result = TacticalFriendlyPathBlockingGate.Evaluate(0f, 0f, 0f, 100f, false, friendlies);
-        AssertFalse(result.Blocked, "friendly far outside range doesn't block");
-    }
-
-    private static void FriendlyPathGateCohesionWorsensSpread()
-    {
-        // Friendly already 200m away (> 115m cohesion max). My move to (400, 0)
-        // would make me 600m from friendly — way more spread.
-        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
-        {
-            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                instanceId: 4,
-                currentX: -200f, currentZ: 0f,
-                waypointX: 0f, waypointZ: 0f,
-                hasWaypoint: false,
-                isLineFormation: false),
-        };
-        // Move from (0,0) to (400, 0): friend now 600m away vs original 200m.
-        var result = TacticalFriendlyPathBlockingGate.Evaluate(0f, 0f, 400f, 0f, false, friendlies);
-        AssertTrue(result.Blocked, "cohesion gate should fire when move worsens spread");
-        AssertEqual("cohesion-spread-worsens", result.Reason, "reason matches Layer 3");
-    }
-
     // ============================================================================
     // Opportunity hysteresis tests (2026-05-21). Verify the smoother holds
     // decisions for the configured min-hold window and accepts escalations
@@ -27333,64 +27216,6 @@ static class Program
     // per-regiment slot computation produces sensible left/right symmetric
     // positions perpendicular to the brigade-→-target axis.
     // ============================================================================
-
-    private static void RegimentalPositionerEmptyReturnsEmpty()
-    {
-        var slots = TacticalRegimentalPositioner.ComputeSlots(
-            0f, 0f, 100f, 0f, new List<int>());
-        AssertEqual(0, slots.Count, "empty regiment list → empty slots");
-    }
-
-    private static void RegimentalPositionerSingleToTarget()
-    {
-        var slots = TacticalRegimentalPositioner.ComputeSlots(
-            0f, 0f, 200f, 0f, new List<int> { 42 });
-        AssertEqual(1, slots.Count, "one regiment → one slot");
-        AssertEqual(0, slots[0].LaneIndex, "lane = 0 (center)");
-        AssertEqual(42, slots[0].RegimentInstanceId, "instance ID preserved");
-        // Slot should be at target position (no offset for center lane).
-        AssertTrue(Math.Abs(slots[0].WorldX - 200f) < 0.001f, "centered at target X");
-        AssertTrue(Math.Abs(slots[0].WorldZ - 0f) < 0.001f, "centered at target Z");
-    }
-
-    private static void RegimentalPositionerTwoSplitSymmetric()
-    {
-        // Brigade at (0,0), target (0, 200) — moving north. Two regiments.
-        // Lane 0 (first regiment) at center. Lane -1 (second regiment) to the
-        // left (west of the centerline, perpendicular to north-bound axis).
-        var slots = TacticalRegimentalPositioner.ComputeSlots(
-            0f, 0f, 0f, 200f, new List<int> { 1, 2 });
-        AssertEqual(2, slots.Count, "two regiments → two slots");
-        AssertEqual(0, slots[0].LaneIndex, "first → center lane");
-        AssertEqual(-1, slots[1].LaneIndex, "second → first left lane");
-        // Center regiment at target.
-        AssertTrue(Math.Abs(slots[0].WorldX) < 0.001f, "center slot at X=0");
-        // Left regiment at -RegimentSpacing meters west (negative X for north-bound).
-        AssertTrue(Math.Abs(slots[1].WorldX - (-TacticalRegimentalPositioner.RegimentSpacingMeters)) < 0.001f,
-            "left slot at -spacing X");
-    }
-
-    private static void RegimentalPositionerLaneIndexAlternates()
-    {
-        // 0, 1, 2, 3, 4 → 0, -1, +1, -2, +2
-        AssertEqual(0, TacticalRegimentalPositioner.LaneIndexFor(0), "0 → 0");
-        AssertEqual(-1, TacticalRegimentalPositioner.LaneIndexFor(1), "1 → -1");
-        AssertEqual(1, TacticalRegimentalPositioner.LaneIndexFor(2), "2 → +1");
-        AssertEqual(-2, TacticalRegimentalPositioner.LaneIndexFor(3), "3 → -2");
-        AssertEqual(2, TacticalRegimentalPositioner.LaneIndexFor(4), "4 → +2");
-    }
-
-    private static void StanceMapperIdentifiesOffensiveCommitment()
-    {
-        AssertTrue(TacticalCommandTaskToStanceMapper.IsOffensiveCommitment(CommandTaskType.AttackObjective),
-            "AttackObjective is offensive");
-        AssertTrue(TacticalCommandTaskToStanceMapper.IsOffensiveCommitment(CommandTaskType.SupportAttack),
-            "SupportAttack is offensive");
-        AssertFalse(TacticalCommandTaskToStanceMapper.IsOffensiveCommitment(CommandTaskType.Screen),
-            "Screen is not offensive");
-        AssertFalse(TacticalCommandTaskToStanceMapper.IsOffensiveCommitment(CommandTaskType.FallBackToLine),
-            "FallBackToLine is not offensive");
-    }
 
     private static void OpportunityHysteresisAcceptsFirstDecision()
     {
@@ -28009,78 +27834,6 @@ static class Program
     // Friendly-fire gate tests (2026-05-21). Verify Scourge's StopOverlapTarget
     // analog correctly detects friendlies in the fire corridor.
     // ============================================================================
-
-    private static void FriendlyFireGateClearWhenEmpty()
-    {
-        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 100f, 0f, new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>());
-        AssertFalse(result.Blocked, "no friendlies = no fire-block");
-    }
-
-    private static void FriendlyFireGateDetectsFriendInLine()
-    {
-        // Shoot from (0,0) toward (200, 0). Friend at (100, 5) — directly in the
-        // line (5m off, well under LateralOffsetMeters = 30m), halfway to target.
-        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
-        {
-            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                instanceId: 5,
-                currentX: 100f, currentZ: 5f,
-                waypointX: 0f, waypointZ: 0f,
-                hasWaypoint: false,
-                isLineFormation: false),
-        };
-        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 200f, 0f, friendlies);
-        AssertTrue(result.Blocked, "friend in line should block fire");
-        AssertEqual(5, result.BlockerInstanceId, "correct blocker reported");
-    }
-
-    private static void FriendlyFireGateIgnoresFriendBehind()
-    {
-        // Friend at (-50, 0) — behind shooter facing (+200, 0).
-        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
-        {
-            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                instanceId: 6,
-                currentX: -50f, currentZ: 0f,
-                waypointX: 0f, waypointZ: 0f,
-                hasWaypoint: false,
-                isLineFormation: false),
-        };
-        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 200f, 0f, friendlies);
-        AssertFalse(result.Blocked, "friend behind shooter should not block fire");
-    }
-
-    private static void FriendlyFireGateIgnoresFriendPastTarget()
-    {
-        // Friend at (250, 0) — past the target at (200, 0).
-        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
-        {
-            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                instanceId: 7,
-                currentX: 250f, currentZ: 0f,
-                waypointX: 0f, waypointZ: 0f,
-                hasWaypoint: false,
-                isLineFormation: false),
-        };
-        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 200f, 0f, friendlies);
-        AssertFalse(result.Blocked, "friend past target should not block fire");
-    }
-
-    private static void FriendlyFireGateIgnoresLateralFriend()
-    {
-        // Friend at (100, 100) — 100m off the firing line. Well beyond LateralOffsetMeters (30m).
-        var friendlies = new List<TacticalFriendlyPathBlockingGate.FriendlySnapshot>
-        {
-            new TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                instanceId: 8,
-                currentX: 100f, currentZ: 100f,
-                waypointX: 0f, waypointZ: 0f,
-                hasWaypoint: false,
-                isLineFormation: false),
-        };
-        var result = TacticalFriendlyFireGate.Evaluate(0f, 0f, 200f, 0f, friendlies);
-        AssertFalse(result.Blocked, "friend far off the firing line should not block fire");
-    }
 
     // Helper: builds a minimal TacticalUnitObservation for regimental tests.
     // Captures only the fields the threat computer reads (position, alliance,

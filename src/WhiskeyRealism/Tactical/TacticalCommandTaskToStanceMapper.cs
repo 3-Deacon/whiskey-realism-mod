@@ -99,18 +99,5 @@ namespace WhiskeyRealism.Tactical
                     return -1;
             }
         }
-
-        public static bool IsOffensiveCommitment(CommandTaskType task)
-        {
-            switch (task)
-            {
-                case CommandTaskType.AttackObjective:
-                case CommandTaskType.SupportAttack:
-                case CommandTaskType.FixEnemy:
-                    return true;
-                default:
-                    return false;
-            }
-        }
     }
 }

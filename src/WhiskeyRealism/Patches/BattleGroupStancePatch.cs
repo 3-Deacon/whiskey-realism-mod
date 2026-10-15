@@ -35,7 +35,7 @@ namespace WhiskeyRealism.Patches
         private static Func<Regiment, int> _aiStanceOrderedGetter;
         private static bool _aiStanceOrderedGetterTried;
 
-        // Per-side wallclock cooldown (2026-05-21). At high time compression
+        // Per-AIBattle wallclock CPU throttle (2026-05-21). At high time compression
         // (20x / 50x), vanilla calls AdjustGroupAIStance N× more often per
         // wallclock — our Postfix walks unitsused on every call even when
         // ~99% of fires produce no write. Smoke at 20× compression showed
@@ -45,7 +45,7 @@ namespace WhiskeyRealism.Patches
         // BattleGroupStanceMinIntervalSeconds (default 1.5s, configurable).
         // Behavior preserved at low compression (1x-4x) because vanilla cadence
         // naturally fires Postfix less often than the cooldown.
-        private static readonly float[] _lastApplyRealtimeSeconds = { 0f, 0f };
+        private static readonly Dictionary<int, float> _lastApplyRealtimeSeconds = new Dictionary<int, float>();
 
         [HarmonyPostfix]
         [HarmonyPriority(Priority.Last)]
@@ -68,57 +68,19 @@ namespace WhiskeyRealism.Patches
 
         private static void Apply(AIBattle battle)
         {
-            // Three-tier read path (see TryApplyFromDecisionSnapshot for
-            // detail): "cheap per-group" resolved cache → worker snapshot →
-            // legacy ApplyGroup. The cache is populated on every
-            // heavy-gate fire by
-            // TacticalBattleCoordinatorRuntime.PopulateResolvedDecisionsForSide,
-            // so the dominant per-tick cost collapses to a dict lookup
-            // plus the cheap safety gates that need live Regiment state.
-            //
-            // Worst case (no orchestrator state, worker off, gate hasn't
-            // fired yet): the fallback below runs ApplyGroup for every
-            // commandable Regiment — the legacy pre-refactor path. We
-            // keep this fallback intact so suppressed-side / pre-bootstrap
-            // / config-flipped sessions still behave identically to the
-            // pre-refactor build.
-            // Per-side wallclock cooldown — see _lastApplyRealtimeSeconds field comment.
-            // Resolve side EARLY so we can gate the rest of Apply on it. We resolve here
-            // (not in Postfix entry) so the SafeIntField lookup is the only work paid on
-            // an early-return cooldown hit. Side resolution itself is a cached FieldInfo
-            // read — cheap (~1 µs).
-            int sideForCooldown = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
-            if (sideForCooldown >= 0 && sideForCooldown < _lastApplyRealtimeSeconds.Length)
+            // Per-AIBattle CPU throttle (real time is allowed for CPU budgets):
+            // at high compression vanilla calls AdjustGroupAIStance many times
+            // per real second. Keyed by AIBattle instance so the W&L feud
+            // instance (aibattle[2], same sideofai as side 0) does not share
+            // side 0's slot (BR-M6).
+            int battleKey = SafeInstanceId(battle);
+            float minInterval = SafeMinIntervalSeconds();
+            if (minInterval > 0f)
             {
-                float minInterval = SafeMinIntervalSeconds();
-                if (minInterval > 0f)
-                {
-                    float now = SafeRealtimeSeconds();
-                    float last = _lastApplyRealtimeSeconds[sideForCooldown];
-                    if (last > 0f && now - last < minInterval)
-                    {
-                        // Cooldown active for this side — skip the walk entirely.
-                        // Patches that wrote stance on the prior fire stay in place
-                        // (vanilla preserves them across cycles). No telemetry emit
-                        // on the cooldown branch; the Postfix scope still measures
-                        // the (now-cheap) call.
-                        return;
-                    }
-                    _lastApplyRealtimeSeconds[sideForCooldown] = now;
-                }
-            }
-
-            // Regimental intelligence pass (2026-05-21). Reads worker-published
-            // per-regiment decisions and either emits telemetry (write-disabled mode)
-            // or applies SetWaypoint / SetGroupFormation orders. Runs after the
-            // brigade-stance path so the regimental overrides have access to the
-            // most recent brigade-level state. Cheap: dict lookup per regiment
-            // walked.
-            try { ApplyRegimentalIntelligence(battle); }
-            catch (Exception ree)
-            {
-                OnceLog.Warning("tactical-regimental-intelligence:apply-failed",
-                    "ApplyRegimentalIntelligence threw: " + ree.GetType().Name + " " + ree.Message);
+                float now = SafeRealtimeSeconds();
+                if (_lastApplyRealtimeSeconds.TryGetValue(battleKey, out float last) && now - last >= 0f && now - last < minInterval)
+                    return;
+                _lastApplyRealtimeSeconds[battleKey] = now;
             }
 
             // Artillery all-stance audit (2026-05-21). Walks each artillery
@@ -133,287 +95,38 @@ namespace WhiskeyRealism.Patches
                     "ApplyArtilleryAudit threw: " + aex.GetType().Name + " " + aex.Message);
             }
 
-            if (TryApplyFromDecisionSnapshot(battle)) return;
-
             int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
             int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
             var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
             var units = SafeList(battle, ref _unitsUsedField, "unitsused");
             if (side < 0 || macro < 0 || bunits == null || units == null) return;
+            int allianceId = SafeAllianceForSide(bunits, side);
 
+            // Per group: the coordinator's resolved decision (populated at
+            // heavy-gate fire, TacticalBattleCoordinatorRuntime
+            // .PopulateResolvedDecisionsForSide) when present, otherwise the
+            // full decide-and-write path.
             for (int i = 0; i < units.Count; i++)
             {
                 var group = units[i] as Regiment;
                 if (group == null || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)) continue;
+
+                if (allianceId >= 0 && allianceId < 2 &&
+                    TacticalBattleCoordinator.TryGetResolvedGroupDecision(allianceId, SafeInstanceId(group), out TacticalResolvedGroupDecision resolved))
+                {
+                    ApplyResolvedDecisionFast(bunits, side, macro, group, resolved);
+                    continue;
+                }
+
                 ApplyGroup(bunits, side, macro, group, i);
             }
         }
-
-        // Regimental intelligence apply path (2026-05-21). Walks completeunitlist
-        // filtered to this AIBattle's alliance, reads worker decisions per
-        // regiment, emits telemetry, and optionally writes vanilla orders.
-        //
-        // Always-on: telemetry emission so smoke can verify the doctrine is
-        // making the right calls (which regiments get FallBack, which get
-        // RetreatToBrigade) before the user flips the write flag.
-        //
-        // Gated by Plugin.EnableRegimentalIntelligenceWrites: actual SetWaypoint
-        // / SetGroupFormation calls. Default OFF until decisions are verified.
-        // Scope B refactor (2026-05-22). The prior _whiskeyControlledRegiments
-        // HashSet + PerformAIActionDLCWLPatch Prefix architecture has been
-        // removed. New approach plugs into vanilla's W&L canonical pipeline:
-        //
-        //   doctrine decides → bunits.ChangeStance(reg, mapped_stance) +
-        //                       bunits.SetWaypoint(reg, target)
-        //
-        // ChangeStance updates `ai_stanceordered`, which vanilla's micro-AI
-        // respects natively (it's the same field the player's W&L UI writes).
-        // No need to gate vanilla AI via Prefix patch — vanilla AI executes
-        // ACCORDING to the stance we wrote, exactly as it would for a
-        // player-issued order.
-        //
-        // The hold-time gate is preserved at the brigade-task layer
-        // (BattleCommandPostureExecutorPatch.ShouldSuppressTaskRefresh) which
-        // suppresses re-writes for the same task within Plugin.BrigadeTaskHoldSeconds.
-        // Vanilla's "no stance write if already correct" semantics handle the
-        // regimental-level case (EnsureStanceMatchesTask checks ai_stance ==
-        // targetStance and skips if matching).
 
         // Resets between battles. Called from TacticalBattleCoordinatorRuntime.OnBattleEnd.
         internal static void ResetRegimentalControlForBattleEnd()
         {
             _artilleryLastActionRealtimeSeconds.Clear();
-        }
-
-        private static void ApplyRegimentalIntelligence(AIBattle battle)
-        {
-            if (battle == null) return;
-            var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
-            if (bunits == null) return;
-
-            int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
-            if (side < 0) return;
-            int allianceId = SafeAllianceForSide(bunits, side);
-            if (allianceId < 0 || allianceId >= 2) return;
-
-            var snapshot = TacticalDecisionSnapshot.Current;
-            if (snapshot == null || snapshot == TacticalDecisionSnapshot.Empty) return;
-            if (snapshot.BattleSequence != TacticalBattleCoordinator.BattleSequenceForParity) return;
-
-            var allUnits = BattleUnits.completeunitlist as System.Collections.IList;
-            if (allUnits == null) return;
-
-            bool writesOn = Plugin.EnableRegimentalIntelligenceWrites != null
-                && Plugin.EnableRegimentalIntelligenceWrites.Value;
-
-            float nowReal = SafeRealtimeSeconds();
-
-            // Friendly-fire detection telemetry (2026-05-21). Builds one
-            // friendly snapshot for the alliance, then per-regiment checks
-            // whether a friendly is in the fire corridor toward the regiment's
-            // in-range enemy. Telemetry only — emits TacticalFriendlyFireBlocked.
-            // Single walk before the per-regiment loop so we avoid N² cost.
-            bool fireDetectionOn = Plugin.EnableFriendlyFireDetection != null
-                && Plugin.EnableFriendlyFireDetection.Value;
-            List<WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.FriendlySnapshot> friendlyFireSnapshot = null;
-            if (fireDetectionOn)
-            {
-                friendlyFireSnapshot = BuildFriendlySnapshotForFireDetection(allUnits, allianceId);
-            }
-
-            for (int i = 0; i < allUnits.Count; i++)
-            {
-                var reg = allUnits[i] as Regiment;
-                if (reg == null) continue;
-                if (reg.alliance != allianceId) continue;
-
-                int instanceId;
-                try { instanceId = reg.GetInstanceID(); }
-                catch { continue; }
-                if (instanceId == 0) continue;
-
-                bool isDeadOrRouted = false;
-                try { isDeadOrRouted = reg.isrouted || reg.markedforrout || reg.permanentlydetached; }
-                catch { isDeadOrRouted = true; }
-
-                // Friendly-fire detection runs for every non-routed own regiment,
-                // independent of the regimental decision pipeline.
-                if (fireDetectionOn && friendlyFireSnapshot != null && !isDeadOrRouted)
-                {
-                    TryEmitFriendlyFireBlocked(reg, side, instanceId, friendlyFireSnapshot);
-                }
-
-                if (isDeadOrRouted) continue;
-
-                TacticalRegimentalDecision decision;
-                bool hasDecision = snapshot.TryGetRegimentalDecision(allianceId, instanceId, out decision);
-                if (!hasDecision || decision.Action == RegimentalAction.NoAction) continue;
-
-                // Respect player W&L command — never override. Emit telemetry
-                // for diagnostic visibility but don't write.
-                bool playerCommanded = false;
-                try { playerCommanded = reg.dlcw_isundercommander; } catch { playerCommanded = true; }
-                if (playerCommanded)
-                {
-                    EmitRegimentalIntelTelemetry(side, reg, decision);
-                    continue;
-                }
-
-                EmitRegimentalIntelTelemetry(side, reg, decision);
-
-                if (!writesOn) continue;
-
-                // Scope B refactor (2026-05-22): write via the canonical
-                // vanilla/W&L pipeline. ApplyRegimentalAction now calls
-                // ChangeStance(reg, defend) BEFORE SetWaypoint so vanilla
-                // micro-AI executes the withdrawal CORRECTLY. No claim-set
-                // tracking — stance write IS the standing order, vanilla
-                // ai_stanceordered carries the intent across cycles.
-                try
-                {
-                    ApplyRegimentalAction(bunits, reg, decision);
-                    EmitRegimentalControlEvent(side, reg, instanceId,
-                        "applied", decision.Action.ToString(), decision.Reason);
-                }
-                catch (Exception aex)
-                {
-                    OnceLog.Warning(
-                        "tactical-regimental-intelligence:write-failed:" + instanceId,
-                        "ApplyRegimentalAction failed for " + SafeRegimentName(reg)
-                        + ": " + aex.GetType().Name + " " + aex.Message);
-                }
-            }
-        }
-
-        // Emits a TacticalRegimentalControl event per claim/release transition.
-        // NOT routed through OnceLog — recurring transitions for the same regiment
-        // are valuable diagnostic signal (thrashing detection, etc). Telemetry
-        // dedup is keyed on (transition, reason) at the sink layer so a
-        // genuinely-different action/reason will surface.
-        private static void EmitRegimentalControlEvent(int side, Regiment reg, int instanceId, string transition, string action, string reason)
-        {
-            try
-            {
-                string unit = SafeRegimentName(reg);
-                string sig = "TacticalRegimentalControl|side=" + side
-                    + "|unit=" + unit
-                    + "|id=" + instanceId
-                    + "|transition=" + transition
-                    + "|action=" + action
-                    + "|reason=" + reason;
-                TelemetryRouter.Emit(
-                    TelemetryLayer.Tactical,
-                    TelemetryCategory.Decision,
-                    "TacticalRegimentalControl",
-                    TelemetrySeverity.Info,
-                    ev => ev
-                        .WithSide(side)
-                        .WithUnit(unit)
-                        .WithDecision(transition, reason, sig)
-                        .WithField("instanceId", instanceId)
-                        .WithField("transition", transition)
-                        .WithField("action", action)
-                        .WithField("reason", reason));
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-regimental-control:telemetry-failed",
-                    "EmitRegimentalControlEvent threw: " + ex.GetType().Name + " " + ex.Message);
-            }
-        }
-
-        // Executes the regimental-intelligence write for a single regiment.
-        // FallBack → SetWaypoint 100m behind the regiment along the front bearing.
-        // RetreatToBrigade → SetWaypoint 200m behind the front bearing.
-        // WheelToLeftFlank / WheelToRightFlank / WheelToRear → SetGroupFormation
-        // with manualfinalrotation set to face the threat direction.
-        //
-        // Targets are derived from the threat assessment's FrontBearingDegrees so
-        // we don't need to look up the brigade rally point (which would require
-        // walking command hierarchy). Falls-back targets behind the enemy bearing
-        // are a reasonable approximation of "toward friendly lines" — enemies
-        // are in front, friendlies are behind.
-        private static void ApplyRegimentalAction(
-            BattleUnits bunits,
-            Regiment reg,
-            TacticalRegimentalDecision decision)
-        {
-            if (bunits == null || reg == null) return;
-            var threats = decision.Threats;
-            float bearingDeg = threats.FrontBearingDegrees;
-
-            switch (decision.Action)
-            {
-                case RegimentalAction.FallBack:
-                case RegimentalAction.RetreatToBrigade:
-                    {
-                        // Move directly away from the enemy centroid.
-                        float fallbackMeters = decision.Action == RegimentalAction.FallBack ? 100f : 200f;
-                        UnityEngine.Vector3 target = OffsetByBearing(
-                            reg.transform.position,
-                            bearingDeg + 180f,  // reverse bearing = away from enemy
-                            fallbackMeters);
-                        // Friendly-path blocking gate (2026-05-21). Same Scourge-ported
-                        // gate the brigade-posture SetWaypoint uses — skip the write
-                        // if the proposed fallback target would cross/overlap a
-                        // friendly's path. Gate fail-open via try/catch; flag default OFF.
-                        if (Plugin.EnableFriendlyPathBlockingGate != null
-                            && Plugin.EnableFriendlyPathBlockingGate.Value
-                            && IsRegimentalWaypointBlocked(reg, target))
-                        {
-                            OnceLog.Info(
-                                "tactical-regimental-intelligence:path-blocked:" + reg.GetInstanceID(),
-                                "[TacticalRegimentalIntelligence] friendly-path-blocked: "
-                                + decision.Action + " waypoint refused for "
-                                + SafeRegimentName(reg) + " (unit holds; vanilla AI may resume)");
-                            return;
-                        }
-                        // Scope B refactor (2026-05-22): set defensive stance
-                        // BEFORE the waypoint so vanilla micro-AI knows this is
-                        // a withdrawal, not an advance. Stance 2 = defend.
-                        WhiskeyRealism.Util.TacticalStanceWriter.EnsureStance(
-                            bunits, reg, 2, contextTag: "regimental-fallback:" + SafeRegimentName(reg));
-                        bunits.SetWaypoint(
-                            reg,
-                            target,
-                            newpath: true,
-                            doublequick: decision.Action == RegimentalAction.RetreatToBrigade,
-                            manualfinalrotation: -1f,
-                            modifylastwaypoint: false,
-                            useorderdelay: false,
-                            timetomove: -1f,
-                            direction: -1,
-                            showmovementoptions: false,
-                            ignorebattlemonuments: false,
-                            groupmoveonly: false,
-                            ignoredisabledships: false,
-                            checkforreadiness: true,
-                            clearinterruptionpaths: true);
-                    }
-                    break;
-                case RegimentalAction.WheelToLeftFlank:
-                case RegimentalAction.WheelToRightFlank:
-                case RegimentalAction.WheelToRear:
-                    {
-                        float rotationDeg = bearingDeg;
-                        if (decision.Action == RegimentalAction.WheelToLeftFlank) rotationDeg = bearingDeg - 90f;
-                        else if (decision.Action == RegimentalAction.WheelToRightFlank) rotationDeg = bearingDeg + 90f;
-                        else if (decision.Action == RegimentalAction.WheelToRear) rotationDeg = bearingDeg + 180f;
-                        while (rotationDeg < 0f) rotationDeg += 360f;
-                        while (rotationDeg >= 360f) rotationDeg -= 360f;
-                        bunits.SetGroupFormation(
-                            reg,
-                            reg.formationordered,
-                            manualfinalrotation: rotationDeg,
-                            targetpos: default(UnityEngine.Vector3),
-                            immediateplacement: false,
-                            newpath: true,
-                            modifylastwaypoint: false,
-                            newstate: 2,
-                            refuseflank: -1);
-                    }
-                    break;
-            }
+            _lastApplyRealtimeSeconds.Clear();
         }
 
         // Artillery audit state (2026-05-21). Per-instance timestamp of the
@@ -431,7 +144,7 @@ namespace WhiskeyRealism.Patches
         //
         // Cost: one full completeunitlist walk per Apply call (gated by BGS's
         // 1.5s cooldown). Per-artillery doctrine call is O(1) + a small
-        // friendlies count loop. Comparable to ApplyRegimentalIntelligence.
+        // friendlies count loop.
         private static void ApplyArtilleryAudit(AIBattle battle)
         {
             if (Plugin.EnableArtilleryAllStanceAudit == null
@@ -728,354 +441,10 @@ namespace WhiskeyRealism.Patches
             catch { /* never throw out of audit */ }
         }
 
-        // Friendly snapshot built once per ApplyRegimentalIntelligence call
-        // for the fire-detection pass. Walks the already-acquired completeunitlist
-        // (no extra Unity API beyond what BGS already does) filtered to this
-        // alliance. Captures position only — fire detection doesn't need
-        // waypoints or formation.
-        private static List<WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.FriendlySnapshot> BuildFriendlySnapshotForFireDetection(
-            System.Collections.IList allUnits,
-            int allianceId)
-        {
-            var list = new List<WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.FriendlySnapshot>(64);
-            for (int i = 0; i < allUnits.Count; i++)
-            {
-                var reg = allUnits[i] as Regiment;
-                if (reg == null) continue;
-                if (reg.alliance != allianceId) continue;
-                if (reg.isrouted || reg.markedforrout || reg.permanentlydetached) continue;
-                int id;
-                try { id = reg.GetInstanceID(); } catch { continue; }
-                if (id == 0) continue;
-                var pos = reg.transform.position;
-                list.Add(new WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                    id, pos.x, pos.z, 0f, 0f, hasWaypoint: false, isLineFormation: false));
-            }
-            return list;
-        }
-
-        // Per-regiment fire-block telemetry emit. Reads the regiment's nearest
-        // in-fire-range enemy via vanilla's unitrange.enemyinfirerangereg (the
-        // same field vanilla uses for its own fire decisions). Excludes self
-        // from the friendly snapshot via the snapshot's instanceId filter.
-        // Bounded by OnceLog dedup keyed on (instanceId, blockerId) so the
-        // same fire-block doesn't spam during a sustained engagement.
-        private static void TryEmitFriendlyFireBlocked(
-            Regiment reg,
-            int side,
-            int instanceId,
-            List<WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.FriendlySnapshot> friendlies)
-        {
-            try
-            {
-                Regiment enemy = null;
-                try
-                {
-                    var enemyList = reg.unitrange?.enemyinfirerangereg;
-                    if (enemyList != null)
-                    {
-                        // First valid entry — vanilla doesn't expose a "closest"
-                        // index, but the list is small (typically 1-3 entries).
-                        for (int i = 0; i < enemyList.Count; i++)
-                        {
-                            var candidate = enemyList[i];
-                            if (candidate == null) continue;
-                            if (candidate.isrouted || candidate.permanentlydetached) continue;
-                            enemy = candidate;
-                            break;
-                        }
-                    }
-                }
-                catch { enemy = null; }
-                if (enemy == null) return;
-
-                var myPos = reg.transform.position;
-                var enemyPos = enemy.transform.position;
-
-                // Build a filtered view that excludes self — pure scorer doesn't
-                // know which entry is "me." Copy + filter is cheap (< 50 entries
-                // typically).
-                List<WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.FriendlySnapshot> filtered = friendlies;
-                bool needsFilter = false;
-                for (int i = 0; i < friendlies.Count; i++)
-                {
-                    if (friendlies[i].InstanceId == instanceId) { needsFilter = true; break; }
-                }
-                if (needsFilter)
-                {
-                    filtered = new List<WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.FriendlySnapshot>(friendlies.Count - 1);
-                    for (int i = 0; i < friendlies.Count; i++)
-                    {
-                        if (friendlies[i].InstanceId != instanceId) filtered.Add(friendlies[i]);
-                    }
-                }
-
-                var result = WhiskeyRealism.Tactical.TacticalFriendlyFireGate.Evaluate(
-                    myPos.x, myPos.z,
-                    enemyPos.x, enemyPos.z,
-                    filtered);
-                if (!result.Blocked) return;
-
-                string unit = SafeRegimentName(reg);
-                string enemyName;
-                try { enemyName = ((UnityEngine.Object)((UnityEngine.Component)enemy).gameObject).name ?? "<noname>"; }
-                catch { enemyName = "<error>"; }
-                string sig = "TacticalFriendlyFireBlocked|side=" + side
-                    + "|unit=" + unit
-                    + "|id=" + instanceId
-                    + "|enemy=" + enemyName
-                    + "|blocker=" + result.BlockerInstanceId;
-
-                TelemetryRouter.Emit(
-                    TelemetryLayer.Tactical,
-                    TelemetryCategory.Gate,
-                    "TacticalFriendlyFireBlocked",
-                    TelemetrySeverity.Info,
-                    ev => ev
-                        .WithSide(side)
-                        .WithUnit(unit)
-                        .WithDecision("Blocked", result.Reason, sig)
-                        .WithField("instanceId", instanceId)
-                        .WithField("enemyName", enemyName)
-                        .WithField("blockerInstanceId", result.BlockerInstanceId)
-                        .WithField("blockerDistanceFromLine", result.BlockerDistanceFromLine)
-                        .WithField("reason", result.Reason));
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-friendly-fire-detection:exception",
-                    "[TacticalFriendlyFireGate] TryEmitFriendlyFireBlocked threw: "
-                    + ex.GetType().Name + " " + ex.Message);
-            }
-        }
-
-        // Regimental-side wrapper around the friendly-path blocking gate. Walks
-        // completeunitlist filtered by alliance, builds a FriendlySnapshot list,
-        // calls the pure gate scorer. Used by ApplyRegimentalAction's
-        // FallBack/Retreat paths so regimental waypoints honor the same Scourge
-        // crossing-avoidance contract as brigade-posture writes.
-        private static bool IsRegimentalWaypointBlocked(Regiment reg, UnityEngine.Vector3 target)
-        {
-            try
-            {
-                if (reg == null) return false;
-                int allianceId = reg.alliance;
-                if (allianceId < 0) return false;
-                int selfId = 0;
-                try { selfId = reg.GetInstanceID(); } catch { selfId = 0; }
-
-                var units = BattleUnits.completeunitlist as System.Collections.IList;
-                if (units == null) return false;
-                var friendlies = new List<WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.FriendlySnapshot>(64);
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var other = units[i] as Regiment;
-                    if (other == null) continue;
-                    if (other.alliance != allianceId) continue;
-                    if (other.isrouted || other.markedforrout || other.permanentlydetached) continue;
-                    int oid;
-                    try { oid = other.GetInstanceID(); } catch { continue; }
-                    if (oid == 0 || oid == selfId) continue;
-                    var op = other.transform.position;
-                    UnityEngine.Vector3 wp = default(UnityEngine.Vector3);
-                    bool hasWp = false;
-                    try
-                    {
-                        wp = other.lastsetwaypointposition;
-                        hasWp = (wp.x != 0f || wp.z != 0f);
-                    }
-                    catch { hasWp = false; }
-                    int otherParentId = 0;
-                    try { var p = other.groupaiobjectreg; if (p != null) otherParentId = p.GetInstanceID(); }
-                    catch { otherParentId = 0; }
-                    friendlies.Add(new WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.FriendlySnapshot(
-                        oid, op.x, op.z, wp.x, wp.z, hasWp,
-                        isLineFormation: false,
-                        parentBrigadeInstanceId: otherParentId));
-                }
-                var myPos = reg.transform.position;
-                int myParentId = 0;
-                try { var p = reg.groupaiobjectreg; if (p != null) myParentId = p.GetInstanceID(); }
-                catch { myParentId = 0; }
-                var result = WhiskeyRealism.Tactical.TacticalFriendlyPathBlockingGate.Evaluate(
-                    myPos.x, myPos.z,
-                    target.x, target.z,
-                    myIsLineFormation: false,
-                    friendlies,
-                    myParentBrigadeInstanceId: myParentId);
-                return result.Blocked;
-            }
-            catch
-            {
-                return false;  // fail-open
-            }
-        }
-
-        private static UnityEngine.Vector3 OffsetByBearing(UnityEngine.Vector3 from, float bearingDegrees, float distance)
-        {
-            float radians = bearingDegrees * 0.01745329252f; // PI / 180
-            float dx = (float)System.Math.Sin(radians) * distance;
-            float dz = (float)System.Math.Cos(radians) * distance;
-            return new UnityEngine.Vector3(from.x + dx, from.y, from.z + dz);
-        }
-
-        // Player-protected check for the regimental path. Conservative — defaults
-        // to "protected" on any exception so we never overwrite a player order.
-        // W&L's dlcw_isundercommander marks units the player is actively commanding
-        // through the W&L feud system; same field BattleCommandPostureExecutorPatch
-        // checks at the brigade level.
-        private static bool IsPlayerProtectedForRegiment(Regiment reg)
-        {
-            try
-            {
-                if (reg == null) return true;
-                if (reg.dlcw_isundercommander) return true;
-            }
-            catch { return true; }
-            return false;
-        }
-
         private static string SafeRegimentName(Regiment reg)
         {
             try { return ((UnityEngine.Object)((UnityEngine.Component)reg).gameObject).name ?? "<noname>"; }
             catch { return "<error>"; }
-        }
-
-        // Telemetry per non-NoAction decision. Bounded by once-log dedup keyed on
-        // (instanceId, action) so the same unit doesn't spam if it sits in the
-        // same flanked-state across many cycles.
-        private static void EmitRegimentalIntelTelemetry(int side, Regiment reg, TacticalRegimentalDecision decision)
-        {
-            try
-            {
-                int instanceId;
-                try { instanceId = reg.GetInstanceID(); } catch { instanceId = 0; }
-                string unit = SafeRegimentName(reg);
-                var threats = decision.Threats;
-                string sig = "TacticalRegimentalIntel|side=" + side
-                    + "|unit=" + unit
-                    + "|id=" + instanceId
-                    + "|action=" + decision.Action
-                    + "|reason=" + decision.Reason
-                    + "|front=" + threats.FrontThreat.ToString("0")
-                    + "|left=" + threats.LeftFlankThreat.ToString("0")
-                    + "|right=" + threats.RightFlankThreat.ToString("0")
-                    + "|rear=" + threats.RearThreat.ToString("0")
-                    + "|pressed=" + threats.PressedCount
-                    + "|flanked=" + threats.IsFlanked
-                    + "|isolated=" + threats.IsIsolated;
-
-                TelemetryRouter.Emit(
-                    TelemetryLayer.Tactical,
-                    TelemetryCategory.Decision,
-                    "TacticalRegimentalIntel",
-                    TelemetrySeverity.Info,
-                    ev => ev
-                        .WithSide(side)
-                        .WithUnit(unit)
-                        .WithDecision(decision.Action.ToString(), decision.Reason, sig)
-                        .WithField("instanceId", instanceId)
-                        .WithField("frontThreat", threats.FrontThreat)
-                        .WithField("leftFlankThreat", threats.LeftFlankThreat)
-                        .WithField("rightFlankThreat", threats.RightFlankThreat)
-                        .WithField("rearThreat", threats.RearThreat)
-                        .WithField("pressedCount", threats.PressedCount)
-                        .WithField("isFlanked", threats.IsFlanked)
-                        .WithField("isIsolated", threats.IsIsolated)
-                        .WithField("totalEnemiesInRange", threats.TotalEnemiesInRange)
-                        .WithField("frontBearingDegrees", threats.FrontBearingDegrees));
-            }
-            catch (Exception ex)
-            {
-                OnceLog.Warning("tactical-regimental-intelligence:telemetry-failed",
-                    "EmitRegimentalIntelTelemetry threw: " + ex.GetType().Name + " " + ex.Message);
-            }
-        }
-
-        // Pre-computed decision read path.
-        //
-        // Three-tier lookup per Regiment:
-        //   1. _resolvedDecisionsBySide (TacticalBattleCoordinatorRuntime
-        //      cache, populated at heavy-gate-fire) — full doctrine + ledger
-        //      + charge + scorer resolution baked in. Apply path is O(1):
-        //      dict lookup + a few cheap safety gates + one ChangeStance.
-        //      This is the "cheap per-group" hot path.
-        //   2. Worker snapshot (TacticalDecisionSnapshot.Current) — partial
-        //      pre-compute from the worker thread. Still calls the doctrine
-        //      and ledger resolvers on main at apply time, but skips the
-        //      live BuildGroupSector + DecideGroupStance recompute.
-        //   3. ApplyGroup (legacy) — full resolver + sector rebuild + scorer
-        //      call. Runs on cache miss (worker disabled, pre-bootstrap,
-        //      gate hasn't fired yet, suppressed side, etc).
-        //
-        // Returns true whenever we owned the iteration (touched at least
-        // one group); the postfix then short-circuits because the caller
-        // already iterated all groups via one of the three branches.
-        private static bool TryApplyFromDecisionSnapshot(AIBattle battle)
-        {
-            try
-            {
-                int side = SafeIntField(battle, ref _sideOfAiField, "sideofai", -1);
-                int macro = SafeIntField(battle, ref _macroAiField, "macroai", -99);
-                var bunits = SafeField<BattleUnits>(battle, ref _bunitsField, "bunits");
-                var units = SafeList(battle, ref _unitsUsedField, "unitsused");
-                if (side < 0 || macro < 0 || bunits == null || units == null) return false;
-
-                int allianceId = SafeAllianceForSide(bunits, side);
-                if (allianceId < 0 || allianceId >= 2) return false;
-
-                bool workerOn = Plugin.EnableTacticalOrchestratorWorker != null
-                    && Plugin.EnableTacticalOrchestratorWorker.Value;
-                TacticalDecisionSnapshot snapshot = workerOn ? TacticalDecisionSnapshot.Current : null;
-                bool snapshotHasData = snapshot != null && snapshot != TacticalDecisionSnapshot.Empty;
-
-                bool touchedAny = false;
-                for (int i = 0; i < units.Count; i++)
-                {
-                    var group = units[i] as Regiment;
-                    if (group == null) continue;
-                    if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.unittyp)) continue;
-
-                    int instanceId;
-                    try { instanceId = group.GetInstanceID(); }
-                    catch { continue; }
-
-                    // Tier 1: cheap per-group cache. Populated on every
-                    // heavy-gate fire in DriveTickCycle; covers every
-                    // commandable Regiment for the firing side.
-                    TacticalResolvedGroupDecision resolved;
-                    if (TacticalBattleCoordinator.TryGetResolvedGroupDecision(allianceId, instanceId, out resolved))
-                    {
-                        ApplyResolvedDecisionFast(bunits, side, macro, group, resolved);
-                        touchedAny = true;
-                        continue;
-                    }
-
-                    // Tier 2: worker snapshot — partial pre-compute.
-                    if (snapshotHasData)
-                    {
-                        TacticalGroupStanceDecision cachedDecision;
-                        TacticalSectorAssessment cachedSector;
-                        if (snapshot.TryGetGroupStance(allianceId, instanceId, out cachedDecision)
-                            && snapshot.TryGetGroupSector(allianceId, instanceId, out cachedSector))
-                        {
-                            ApplyCachedDecision(bunits, side, macro, group, cachedDecision, cachedSector);
-                            touchedAny = true;
-                            continue;
-                        }
-                    }
-
-                    // Tier 3: legacy decide-and-write path.
-                    ApplyGroup(bunits, side, macro, group, i);
-                    touchedAny = true;
-                }
-
-                return touchedAny;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         /// <summary>
@@ -1239,72 +608,6 @@ namespace WhiskeyRealism.Patches
             }
 
             return SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
-        }
-
-        /// <summary>
-        /// Apply-cached fast path (gap-fill chunk 1). Replicates
-        /// <see cref="ApplyGroup"/>'s sequence but reads the sector +
-        /// default-scorer decision from the worker snapshot:
-        /// 1. WlAllowsControl + OrderFrictionAllowsChange enforced on main
-        ///    (require live Regiment state).
-        /// 2. TryApplyDoctrineStance using cached sector.
-        /// 3. Charge (vanillaOrdered == 4) branch — unchanged.
-        /// 4. TryApplyLedgerTaskStance using cached sector.
-        /// 5. Fallthrough: write cached default-scorer decision.
-        /// </summary>
-        private static void ApplyCachedDecision(
-            BattleUnits bunits,
-            int side,
-            int macro,
-            Regiment group,
-            TacticalGroupStanceDecision decision,
-            TacticalSectorAssessment sector)
-        {
-            if (!WlAllowsControl(group)) return;
-            if (!OrderFrictionAllowsChange(group)) return;
-
-            int vanillaOrdered = SafeIntField(group, ref _orderedStanceField, "ai_" + "stanceordered", group.ai_stanceordered);
-
-            if (TryApplyDoctrineStance(bunits, side, macro, group, vanillaOrdered, sector))
-                return;
-
-            if (vanillaOrdered == 4)
-            {
-                if (!Plugin.Instance.EnableTacticalChargeDenial.Value || !LocalReactionProducerEnabled())
-                {
-                    LogChargePreserved(side, group, "vanilla-charge-preserved");
-                    return;
-                }
-
-                var reaction = TacticalReactionContext.Shared.GetReaction(SafeInstanceId(group));
-                if (IsExplicitChargeDenial(reaction))
-                {
-                    if (!AllowsVanillaWrites())
-                    {
-                        LogChargePreserved(side, group, "mode-monitor-only");
-                        return;
-                    }
-
-                    DemoteCharge(bunits, group, side, reaction);
-                    return;
-                }
-
-                LogChargePreserved(side, group, "vanilla-charge-preserved");
-                return;
-            }
-
-            if (TryApplyLedgerTaskStance(bunits, side, macro, group, vanillaOrdered, sector))
-                return;
-
-            // Fallthrough — apply the worker's default-scorer decision.
-            // We do NOT call DecideGroupStance here; the worker already
-            // produced this decision on its thread.
-            if (!Plugin.Instance.EnableTacticalGroupSectorStance.Value) return;
-            if (decision.Kind != TacticalDoctrineDecisionKind.Apply) return;
-            if (decision.GroupStance < 1 || decision.GroupStance > 3) return;
-
-            if (TacticalStanceWriter.EnsureStance(bunits, group, decision.GroupStance, null, StanceWriteSource.Scorer))
-                LogDecision(side, group, sector, decision);
         }
 
         private static int SafeAllianceForSide(BattleUnits bunits, int side)

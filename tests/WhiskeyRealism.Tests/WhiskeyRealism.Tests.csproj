@@ -245,11 +245,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalRegimentalIntelligence.cs" Link="Orchestrator\TacticalRegimentalIntelligence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalRegimentalIntelligenceDoctrine.cs" Link="Orchestrator\TacticalRegimentalIntelligenceDoctrine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalRegimentalThreatComputer.cs" Link="Orchestrator\TacticalRegimentalThreatComputer.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalFriendlyPathBlockingGate.cs" Link="Tactical\TacticalFriendlyPathBlockingGate.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalFriendlyFireGate.cs" Link="Tactical\TacticalFriendlyFireGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalCommandTaskToStanceMapper.cs" Link="Tactical\TacticalCommandTaskToStanceMapper.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalStanceOwnership.cs" Link="Tactical\TacticalStanceOwnership.cs" />
-    <Compile Include="..\..\src\WhiskeyRealism\Tactical\TacticalRegimentalPositioner.cs" Link="Tactical\TacticalRegimentalPositioner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalOpportunityHysteresis.cs" Link="Orchestrator\TacticalOpportunityHysteresis.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalStableSceneCache.cs" Link="Orchestrator\TacticalStableSceneCache.cs" />
     <!-- TacticalCacheValidator is runtime-only (touches BattleUnits + CommandTreeRuntime Unity adapters); harness doesn't compile it. -->
