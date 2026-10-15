@@ -48,21 +48,22 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 strength reaches max(HoldNeed, MinGarrisonStrength) is withheld from vanilla's
     //                 offensive gather (CheckOffensiveMovements 14257-14275), the rest is not.
     //   Player        CarryingGroup (a player below map level) is an ordinary movable formation (F's
-    //                 MoveUnitTo Postfix dispatches its march). The player's own command, a CIC side
-    //                 and a PlayerMapGroup are never committed defenders (WlChainRules, spec C4,
-    //                 whatever the reliability): they count 0 in every hold, reserve and capital sum
-    //                 (ReserveRules, the planner's sector facts and this allocator), so the AI
-    //                 formations that hold a sector stay Hold and withheld while he stands in it, and a
-    //                 sector he alone stands in reports a shortfall. A PlayerMapGroup may receive his
-    //                 sector's role as an order (Support toward the main target in a Support or main
-    //                 sector, otherwise Hold in place as a position marker, never withheld): never mass,
-    //                 capital guard, Recover, depot builder or reserve. A CIC player's own side gets an
-    //                 empty allocation. The reliability and the run of unreliable days are telemetry
-    //                 and expectations (the [Allocation] row), not inputs.
+    //                 MoveUnitTo Postfix dispatches its march). The map-group player's group counts
+    //                 toward the hold of the sector where its last waypoint lies, at strength x morale,
+    //                 as vanilla counts it (WlChainRules.CountsTowardHold; integrator decision
+    //                 2026-10-15): the AI formations that would hold that sector are released while he
+    //                 stands in it, and the sector reports its shortfall (and keeps or gets an AI
+    //                 holder) the day he marches away. Counting is not committing: he is never mass,
+    //                 capital guard, Recover, depot builder or reserve, never withheld, never a
+    //                 surplus; his sector's role reaches him as an order only (Support toward the main
+    //                 target in a Support or main sector, otherwise Hold in place). The player's own
+    //                 command and a CIC side count nothing. A CIC player's own side gets an empty
+    //                 allocation. The reliability and the run of unreliable days are telemetry and
+    //                 expectations (the [Allocation] row), not inputs.
     // Shortfalls list the formations that carry an unmet need (the main effort below its required
     // force, the capital guard below the floor, a Hold sector below its target), worst first: an AI
     // formation, except that a threatened sector no AI formation holds names the map-group player's
-    // formation there as the position (G5b never routes to a player formation); Surpluses the Reserve and the EconomyOfForce Hold formations beyond their
+    // formation holding there as the position (G5b never routes to a player formation); Surpluses the Reserve and the EconomyOfForce Hold formations beyond their
     // garrison, largest first. G5b routes recruits and brigade transfers from one to the other.
     public static class ForceAllocator
     {
@@ -185,7 +186,6 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly float[] _tx, _tz;
             private readonly string[] _reason;
             private readonly bool[] _withheld;
-            private readonly float[] _weight;  // 1 for a committed defender, 0 for the player's formations (C4)
 
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
 
@@ -209,15 +209,13 @@ namespace WhiskeyRealism.Strategic.Planner
                 _tz = new float[_n];
                 _reason = new string[_n];
                 _withheld = new bool[_n];
-                _weight = new float[_n];
                 _need = new float[_sectorCount];
                 _nearX = new float[_sectorCount];
                 _nearZ = new float[_sectorCount];
 
                 for (int i = 0; i < _n; i++)
                 {
-                    _sector[i] = ReserveRules.SectorOf(sectors, s.Own[i]);
-                    _weight[i] = WlChainRules.CountsAsCommittedDefender(s.Own[i].Chain) ? 1f : 0f;
+                    _sector[i] = ReserveRules.HoldSectorOf(sectors, s.Own[i]); // the map-group player's group is where its last waypoint lies
                 }
             }
 
@@ -510,8 +508,15 @@ namespace WhiskeyRealism.Strategic.Planner
                 float sum = 0f;
                 for (int i = 0; i < _n; i++)
                     if (_role[i] == FormationRole.Hold && _sector[i] == sector && _roleSector[i] == sector)
-                        sum += Math.Max(0f, _s.Own[i].Strength) * _weight[i];
+                        sum += Counts(i);
                 return sum;
+            }
+
+            // What formation i adds to a hold sum: 0 unless WlChainRules.CountsTowardHold (the player's own
+            // command and a CIC side hold nothing), else ReserveRules.HoldStrength.
+            private float Counts(int i)
+            {
+                return WlChainRules.CountsTowardHold(_s.Own[i].Chain) ? ReserveRules.HoldStrength(_s.Own[i]) : 0f;
             }
 
             // Distance to the sector's nearest believed land enemy (centroid when none), the home
@@ -538,10 +543,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 });
             }
 
-            // What holds a sector anyway (immobile committed formations) counts first; the mobile Hold
-            // formations are then withheld, nearest the threat first, until the target is reached. An
-            // immobile formation is never withheld (it is not Whiskey's to steer), and neither is one that
-            // counts 0 (the player's formations never hold a sector: C4).
+            // What holds a sector anyway counts first: the immobile formations and the map-group player's
+            // group at strength x morale. The mobile Hold formations are then withheld, nearest the threat
+            // first, until the target is reached. An immobile formation is never withheld (it is not
+            // Whiskey's to steer), nor is the player's group (a W&L dispatch moves it) or a formation that
+            // counts nothing (the player's own command, a CIC side).
             private void WithholdHoldPrefixes()
             {
                 for (int k = 0; k < _sectorCount; k++)
@@ -550,8 +556,9 @@ namespace WhiskeyRealism.Strategic.Planner
                     float sum = 0f;
                     for (int i = 0; i < _n; i++)
                     {
-                        if (_role[i] != FormationRole.Hold || _sector[i] != k || _roleSector[i] != k || _weight[i] <= 0f) continue;
-                        if (IsImmobileReason(_reason[i])) sum += Math.Max(0f, _s.Own[i].Strength) * _weight[i];
+                        if (_role[i] != FormationRole.Hold || _sector[i] != k || _roleSector[i] != k
+                            || !WlChainRules.CountsTowardHold(_s.Own[i].Chain)) continue;
+                        if (IsImmobileReason(_reason[i]) || WlChainRules.OrderOnly(_s.Own[i].Chain)) sum += Counts(i);
                         else holds.Add(i);
                     }
                     if (holds.Count == 0) continue;
@@ -561,7 +568,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     {
                         int i = holds[p];
                         _withheld[i] = true;
-                        sum += Math.Max(0f, _s.Own[i].Strength) * _weight[i];
+                        sum += Counts(i);
                     }
                 }
             }
@@ -595,8 +602,9 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (counted >= target) continue;
                     if (holds.Count == 0)
                     {
-                        // A threatened sector no AI formation holds: the map-group player's formation there marks
-                        // the position (it counts 0; G5b never routes a reinforcement to a player formation).
+                        // A threatened sector no AI formation holds, and the map-group player's group holding it
+                        // (counted, but short of the target) marks the position; G5b never routes a
+                        // reinforcement to a player formation.
                         int marker = _need[k] > 0f ? PlayerMarkerIn(k) : -1;
                         if (marker >= 0) carriers.Add(new KeyValuePair<int, float>(_s.Own[marker].InstanceId, (target - counted) / target));
                         continue;

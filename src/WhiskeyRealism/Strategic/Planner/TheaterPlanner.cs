@@ -628,7 +628,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 var f = s.Own[i];
                 int sector = SectorOf(c.Sectors, f);
                 if (sector < 0 || sector >= n) continue;
-                if (WlChainRules.CountsAsCommittedDefender(f.Chain)) x.Own[sector] += Math.Max(0f, f.Strength); // C4: a player's formation never holds a sector
+                if (WlChainRules.CountsTowardHold(f.Chain))
+                {
+                    int holdSector = ReserveRules.HoldSectorOf(c.Sectors, f); // the map-group player holds where his last waypoint lies
+                    if (holdSector >= 0 && holdSector < n) x.Own[holdSector] += ReserveRules.HoldStrength(f);
+                }
                 x.Count[sector]++;
                 x.Supply[sector] += f.Supply01;
                 x.Morale[sector] += f.Morale;
@@ -740,8 +744,10 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                if (RiverLines.Distance(f.X, f.Z, s.CapitalX, s.CapitalZ) >= range) continue;
-                if (WlChainRules.CountsAsCommittedDefender(f.Chain)) own += Math.Max(0f, Math.Min(f.Strength, f.Strength * f.Morale));
+                if (!WlChainRules.CountsTowardHold(f.Chain)) continue;
+                ReserveRules.HoldPoint(f, out float hx, out float hz); // vanilla reads GetLastWaypointPos (11733-11740)
+                if (RiverLines.Distance(hx, hz, s.CapitalX, s.CapitalZ) >= range) continue;
+                own += Math.Max(0f, Math.Min(f.Strength, f.Strength * f.Morale));
             }
             threat01 = SnapshotRules.Clamp01(floor / Math.Max(1f, own));
         }

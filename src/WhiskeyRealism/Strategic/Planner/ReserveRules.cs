@@ -56,6 +56,40 @@ namespace WhiskeyRealism.Strategic.Planner
             });
         }
 
+        // The point a formation holds ground from: its position, except the map-group player's group,
+        // which holds where its last waypoint lies (vanilla's own capital count reads GetLastWaypointPos,
+        // AssignUnitToDefendCapital 11733-11740), so a player marching away stops covering the sector
+        // he is leaving the day his order is given.
+        internal static void HoldPoint(in FormationRecord f, out float x, out float z)
+        {
+            bool byWaypoint = f.Chain == WlChainClass.PlayerMapGroup && IsFinite(f.WaypointX) && IsFinite(f.WaypointZ);
+            x = byWaypoint ? f.WaypointX : f.X;
+            z = byWaypoint ? f.WaypointZ : f.Z;
+        }
+
+        // The sector a formation holds: SectorOf for the AI, the sector of the hold point for the
+        // map-group player (falling back to his position when the waypoint is off the sector map).
+        internal static int HoldSectorOf(SectorModel sectors, in FormationRecord f)
+        {
+            if (f.Chain != WlChainClass.PlayerMapGroup) return SectorOf(sectors, f);
+            HoldPoint(f, out float x, out float z);
+            int sector = sectors.SectorAt(x, z);
+            return sector >= 0 ? sector : SectorOf(sectors, f);
+        }
+
+        // What a formation adds to a hold sum (WlChainRules.CountsTowardHold decides who counts): its
+        // strength, and for the map-group player strength x morale, vanilla's own measure (11733-11740).
+        internal static float HoldStrength(in FormationRecord f)
+        {
+            float strength = System.Math.Max(0f, f.Strength);
+            return f.Chain == WlChainClass.PlayerMapGroup ? strength * SnapshotRules.Clamp01(f.Morale) : strength;
+        }
+
+        private static bool IsFinite(float v)
+        {
+            return !float.IsNaN(v) && !float.IsInfinity(v);
+        }
+
         // A formation the allocator sends to Recover: movable, and below the raw supply floor (spec C21)
         // or the movement morale minimum. It is leaving for a supply source, so it holds nothing.
         internal static bool Recovers(in FormationRecord f, float minMorale)
@@ -84,12 +118,14 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Each threatened sector's hold reserve: what holds there anyway (formations that cannot
         // be massed, and the capital reserve) counts first, then the massable formations nearest the
-        // sector's believed army until the hold need is met. Only a committed defender counts
-        // (WlChainRules.CountsAsCommittedDefender, spec C4): the W&L player's own command and a
-        // map-group player never hold a sector, whatever his reliability, so the AI formations that
-        // do are not massed away for a sector the player stands in. A formation that Recovers is
-        // leaving for supply and counts 0 as well, so a sector is never "held" by corps about to
-        // walk away (G4 verify r2 N2). holdReserved[i] is the sector whose hold
+        // sector's believed army until the hold need is met. What holds counts the way vanilla counts
+        // it (WlChainRules.CountsTowardHold, integrator decision 2026-10-15): a committed defender at
+        // its strength and the map-group player's group at strength x morale, in the sector where its
+        // last waypoint lies (HoldSectorOf), so a player standing in a sector releases the AI corps
+        // that would hold it and a player marching away stops covering it. The player's own command and
+        // a CIC side hold nothing. A formation that Recovers is leaving for supply and counts 0 (G4
+        // verify r2 N2). The player's group is never in the massable list (TheaterPlanner.MassEligible),
+        // so it is never reserved. holdReserved[i] is the sector whose hold
         // keeps formation i, -1 none. need/nearX/nearZ are per sector.
         internal static void Hold(CampaignSnapshot s, SectorModel sectors, float[] need, float[] nearX, float[] nearZ,
                                   bool[] capitalReserved, int[] holdReserved)
@@ -105,11 +141,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int i = 0; i < n; i++)
                 {
                     var f = s.Own[i];
-                    if (SectorOf(sectors, f) != sector) continue;
+                    if (HoldSectorOf(sectors, f) != sector) continue;
                     if (!TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) || capitalReserved[i])
                     {
-                        if (WlChainRules.CountsAsCommittedDefender(f.Chain) && !Recovers(f, s.MinMoraleForMovement))
-                            held += System.Math.Max(0f, f.Strength);
+                        if (WlChainRules.CountsTowardHold(f.Chain) && !Recovers(f, s.MinMoraleForMovement))
+                            held += HoldStrength(f);
                     }
                     else order.Add(i);
                 }
