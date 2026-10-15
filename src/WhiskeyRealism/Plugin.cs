@@ -61,6 +61,9 @@ namespace WhiskeyRealism
         internal ConfigEntry<bool> EnableTacticalReserveIntentTelemetry;
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrine { get; private set; }
         internal static ConfigEntry<bool> EnablePlayerOrderDoctrineDiagnostics { get; private set; }
+        internal static ConfigEntry<bool> EnableCampaignChainDispatches { get; private set; }
+        internal static ConfigEntry<bool> EnablePlayerComplianceLedger { get; private set; }
+        internal static ConfigEntry<bool> EnableCicFactionAiBugGuard { get; private set; }
         public static ConfigEntry<bool> EnableTacticalArtilleryDoctrine;
         public static ConfigEntry<bool> EnableTacticalWithdrawalDoctrine;
         public static ConfigEntry<bool> EnableTacticalBattleOrchestrator;
@@ -116,6 +119,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableOffensiveWeaponTrimFix;
         public static ConfigEntry<bool> EnableAiRandomCandidatePickFix;
         public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
+        internal static ConfigEntry<bool> FixPerkIdMismatches;
+        internal static ConfigEntry<bool> FixPerkEffectScope;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
         internal ConfigEntry<float> FastForwardAiFrameBudgetMs;
         internal ConfigEntry<int> FastForwardAi20xExtraPasses;
@@ -368,6 +373,33 @@ namespace WhiskeyRealism
                 "Enable Player Order Doctrine Diagnostics",
                 true,
                 "Default ON. Writes the player-order doctrine's issue/suppress/skip decisions as TacticalPlayerOrder rows to the tactical tuning sidecar, once per distinct unit + decision signature (the last 128 signatures are remembered). Logs even when Enable Player Order Doctrine is off (decisions then show reason writes-disabled).");
+            EnableCampaignChainDispatches = Config.Bind(
+                "W&L",
+                "Enable Campaign Chain Dispatches",
+                true,
+                "Default ON. #69: when vanilla moves the campaign-map group that carries a subordinate W&L player (a brigade or division " +
+                "inside a corps, which vanilla never sends campaign orders), the player gets the career-panel order vanilla would give a " +
+                "top-level player for that move (Redeploy, Offensive, Offensive Operation, Engage Enemy, Defend Capital), naming the " +
+                "commander of the moving formation, with vanilla's order zone and arrival prestige. Whiskey's own strategic orders to a " +
+                "top-level player's group use the same dispatcher. At most one order per target per game day (the last four targets " +
+                "are remembered). Whiskey never " +
+                "moves the player's command. Off: no Whiskey campaign orders; vanilla's own are unchanged.");
+            EnablePlayerComplianceLedger = Config.Bind(
+                "W&L",
+                "Enable Player Compliance Ledger",
+                true,
+                "Default ON. W&L: measures how often the player reaches the zone of the orders his superiors give (campaign: within three " +
+                "game days, only while his command is its own map group; battle: within half a battle hour) and keeps a per-career " +
+                "reliability (saved in the sidecar). The battle AI counts the player's regiments at that reliability when it weighs its " +
+                "sectors, so it does not build its main effort on a player who ignores orders. Starts at full trust; no penalty for the player. Off: the " +
+                "player's regiments count fully and nothing is recorded.");
+            EnableCicFactionAiBugGuard = Config.Bind(
+                "W&L",
+                "Enable CIC Faction AI Bug Guard",
+                true,
+                "Default ON. #70 (vanilla bug BUG-WL-001): when the W&L player is commander-in-chief, vanilla's ship-construction and " +
+                "army-group AI skip every faction, not only the player's. The guard lets the other factions run them; the player's own " +
+                "faction stays the player's. Off: vanilla behaviour (the enemy builds no ships and forms no army groups in a CIC career).");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",
@@ -766,6 +798,21 @@ namespace WhiskeyRealism
             EnableConfiscationSupplyFlowFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Confiscation Supply Flow Fix", true,
                 "Default ON. The Confiscation Act should improve supply on enemy soil by 'Confiscation, supply flow improvement' (1.15, manual: +15%), but vanilla multiplies the resupply duration by it, making supply slower. The duration is divided by it instead. Off: vanilla.");
+            FixPerkIdMismatches = Config.Bind(
+                "Campaign", "Fix Perk Id Mismatches", true,
+                "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on each perk does what " +
+                "its own tooltip says: Expert Scouts sight and concealment only for battle units with Expert Scouts / Expert Skirmishers (not a " +
+                "corps with Ambulance Corps or Bureau of Military Information, a fleet, or a battle HQ); a regiment's wounded mortality and " +
+                "forced-march sickness from its corps' and army's Ambulance Corps and Foot Cavalry; autoresolve battles use Sharpshooters, Zouave " +
+                "and River Expedition instead of their id neighbours; Foot Cavalry speed and marching experience only for land units, Sea " +
+                "Raiders trade-node raiding only for fleets; battle HQs no longer run, tire less, take cover or gain engineers from campaign perks " +
+                "read as battle perks; and Cold Steel III, not an impossible Expert Scouts/Cold Steel pair, keeps a unit from doubting its charge. " +
+                "Same rule for every side, including the W&L player. Set false for rollback to vanilla.");
+            FixPerkEffectScope = Config.Bind(
+                "Campaign", "Fix Perk Effect Scope", true,
+                "Default ON. Applies two perks only where their tooltips say: Foot Cavalry's forced-march speed only while the unit is on a " +
+                "forced march (vanilla applies it to every campaign move), and Embedded Reporters' fame bonus for the unit that has the perk at " +
+                "that unit's level (vanilla ignores a corps' own perk when the corps sits under an army, and reads the level from the corps even when its army holds the perk). Set false for rollback to vanilla.");
             FastForwardAiCatchUp = Config.Bind(
                 "Performance", "Fast Forward AI Catch Up", true,
                 "Default ON. At 20x/50x campaign speed, lets Whiskey run a bounded number of extra vanilla campaign-AI job passes per frame so strategy does not fall as far behind calendar time.");

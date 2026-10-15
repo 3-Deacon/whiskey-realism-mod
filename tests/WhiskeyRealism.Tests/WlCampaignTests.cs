@@ -57,9 +57,14 @@ internal static class WlCampaignTests
             ("wl bridge ineligible under commander blocks direct fallback", WlBridgeIneligibleUnderCommanderBlocksDirectFallback),
             ("wl bridge failed vanilla call blocks direct fallback", WlBridgeFailedVanillaCallBlocksDirectFallback),
             ("wl bridge part of player unit blocks direct fallback", WlBridgePartOfPlayerUnitBlocksDirectFallback),
-            ("wl bridge suppresses repeated campaign signature", WlBridgeSuppressesRepeatedCampaignSignature),
-            ("wl bridge does not replace active tactical without gap", WlBridgeDoesNotReplaceActiveTacticalWithoutGap),
-            ("wl bridge clears campaign cache for context", WlBridgeClearsCampaignCacheForContext),
+            ("wl chain player below map-group level: own command fixed, carrying group movable", WlChainPlayerBelowMapGroup),
+            ("wl chain player whose command is a map group: order-only, never a committed defender", WlChainPlayerMapGroup),
+            ("wl chain CIC player: Whiskey stands down for the side", WlChainCicPlayer),
+            ("wl chain ordinary units are movable and count", WlChainOrdinaryUnits),
+            ("wl bridge moves the AI group carrying a player below map-group level", WlBridgeMovesCarryingGroup),
+            ("wl chain classification does no reflection lookups", WlChainClassificationDoesNoReflection),
+            ("wl chain captured context carries a CIC player", WlChainContextCarriesCicPlayer),
+            ("wl defense ledger never counts a player-controlled candidate (threat and guard pools)", WlDefenseLedgerSkipsPlayerControlled),
             ("wl camp short camp credits normal rest", WlCampShortCampCreditsNormalRest),
             ("wl camp short camp credits wounded rest", WlCampShortCampCreditsWoundedRest),
             ("wl camp short camp credits preserve minimum proportions", WlCampShortCampCreditsPreserveMinimumProportions),
@@ -414,7 +419,6 @@ internal static class WlCampaignTests
         AssertEqual(false, decision.MayDirectMove);
         AssertEqual(false, decision.MayMutateOperationList);
     }
-
     private static void WlBridgeNonPlayerAllianceAllowsDirectMovement()
     {
         var decision = WlStrategicOrderBridge.Classify(
@@ -586,74 +590,6 @@ internal static class WlCampaignTests
         AssertEqual(false, decision.MayDirectMove);
         AssertEqual(false, decision.MayMutateOperationList);
         AssertTrue(decision.Reason.Contains("part-of-player-unit"), "blocked reason should name part-of-player-unit");
-    }
-
-    private static void WlBridgeSuppressesRepeatedCampaignSignature()
-    {
-        var state = new PlayerOrderDedupeState();
-        var active = PlayerOrderActive("campaign-u1", -1, scope: PlayerOrderScope.Campaign, battleIdentity: "campaign-a");
-        var candidate = WlStrategicOrderBridge.BuildCampaignCandidate(
-            WlStrategicIntent.DefendCapital,
-            "campaign-u1",
-            "campaign-a",
-            givenOrderSession: 4,
-            target: new PlayerOrderPoint(100f, 200f),
-            targetName: "Richmond");
-
-        var first = WlStrategicOrderBridge.DecideCampaignOrder(candidate, active, state, tick: 10);
-        AssertEqual(PlayerOrderDedupeDecisionKind.Issue, first.Kind, "first campaign issue");
-        state.RecordAccepted(candidate, candidate, tick: 10);
-
-        var second = WlStrategicOrderBridge.DecideCampaignOrder(candidate, active, state, tick: 800);
-        AssertEqual(PlayerOrderDedupeDecisionKind.SuppressSignature, second.Kind, "same campaign signature should suppress");
-    }
-
-    private static void WlBridgeDoesNotReplaceActiveTacticalWithoutGap()
-    {
-        var state = new PlayerOrderDedupeState();
-        var activeTactical = PlayerOrderActive(
-            "u1",
-            12,
-            scope: PlayerOrderScope.Tactical,
-            provenance: PlayerOrderProvenance.WhiskeyTactical,
-            battleIdentity: "battle-a");
-        var campaign = WlStrategicOrderBridge.BuildCampaignCandidate(
-            WlStrategicIntent.DefendCapital,
-            "u1",
-            "campaign-a",
-            givenOrderSession: 2,
-            target: new PlayerOrderPoint(100f, 200f),
-            targetName: "Richmond");
-
-        var decision = WlStrategicOrderBridge.DecideCampaignOrder(campaign, activeTactical, state, tick: 1000);
-        AssertEqual(PlayerOrderDedupeDecisionKind.BlockedByScopePriority, decision.Kind, "campaign order must not demote fresh tactical order without gap");
-    }
-
-    private static void WlBridgeClearsCampaignCacheForContext()
-    {
-        var state = new PlayerOrderDedupeState();
-        string currentContext = string.Empty;
-        var active = PlayerOrderActive("campaign-u1", -1, scope: PlayerOrderScope.Campaign, battleIdentity: "campaign-a");
-        var candidate = WlStrategicOrderBridge.BuildCampaignCandidate(
-            WlStrategicIntent.ConstructFort,
-            "campaign-u1",
-            "campaign-a",
-            givenOrderSession: 5,
-            target: new PlayerOrderPoint(300f, 400f),
-            targetName: "Fort");
-
-        WlStrategicOrderBridge.ClearCampaignCacheIfContextChanged(state, ref currentContext, "campaign-a");
-        state.RecordAccepted(candidate, candidate, tick: 10);
-        AssertEqual(
-            PlayerOrderDedupeDecisionKind.SuppressSignature,
-            WlStrategicOrderBridge.DecideCampaignOrder(candidate, active, state, tick: 800).Kind,
-            "same context keeps campaign shadow");
-
-        WlStrategicOrderBridge.ClearCampaignCacheIfContextChanged(state, ref currentContext, "campaign-b");
-        AssertEqual(
-            PlayerOrderDedupeDecisionKind.Issue,
-            WlStrategicOrderBridge.DecideCampaignOrder(candidate, active, state, tick: 801).Kind,
-            "new campaign context clears stale campaign shadow");
     }
 
     private static void WlCampShortCampCreditsNormalRest()
@@ -869,5 +805,202 @@ internal static class WlCampaignTests
         AssertNear(3f, minimumTotal, 0.0001f, "finite minimum total");
         AssertNear(-99f, corrected[0], 0.0001f, "sentinel 0 unchanged");
         AssertNear(-88f, corrected[1], 0.0001f, "sentinel 1 unchanged");
+    }
+
+    // Stage G decision C4 (stage F extras 1-4): one classification behind the
+    // bridge, DefensiveOpsPatch's pre-pledge, #25's revert, the probe stop, the
+    // coastal runner and defense coverage.
+    private static void WlChainPlayerBelowMapGroup()
+    {
+        // The player's brigade (player-owned, its command is not a map group).
+        var own = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isUnderCommander: true, isPartOfPlayerUnit: true);
+        AssertEqual(WlChainClass.PlayerCommand, WlChainRules.Classify(in own));
+        AssertFalse(WlChainRules.MayMove(WlChainClass.PlayerCommand), "own command never moved");
+        AssertFalse(WlChainRules.CountsAsCommittedDefender(WlChainClass.PlayerCommand), "own command not a defender");
+        AssertFalse(WlChainRules.OrderOnly(WlChainClass.PlayerCommand), "vanilla gives it no campaign order (8366)");
+
+        // The AI corps carrying him (IsPlayerPartOfUnit: the campaign group of his command).
+        var carrying = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPartOfPlayerUnit: true, isPlayerCampaignGroup: true);
+        AssertEqual(WlChainClass.CarryingGroup, WlChainRules.Classify(in carrying));
+        AssertTrue(WlChainRules.MayMove(WlChainClass.CarryingGroup), "movable AI asset, as vanilla moves it");
+        AssertTrue(WlChainRules.CountsAsCommittedDefender(WlChainClass.CarryingGroup), "an AI corps counts");
+
+        // A hidden sub-unit inside that corps is still part of the player's chain.
+        var inside = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPartOfPlayerUnit: true);
+        AssertEqual(WlChainClass.PlayerCommand, WlChainRules.Classify(in inside));
+
+        // A unit in the player's operation.
+        var operation = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isMovedByPlayer: true, isPartOfPlayerUnit: true, isPlayerCampaignGroup: true);
+        AssertEqual(WlChainClass.PlayerCommand, WlChainRules.Classify(in operation));
+    }
+
+    private static void WlChainPlayerMapGroup()
+    {
+        var mapGroup = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isUnderCommander: true,
+            isPartOfPlayerUnit: true, currentCommandIsCampaignGroup: true, currentCommandParentIsUnderTargetUnit: true, isPlayerCampaignGroup: true);
+        AssertEqual(WlChainClass.PlayerMapGroup, WlChainRules.Classify(in mapGroup));
+        AssertFalse(WlChainRules.MayMove(WlChainClass.PlayerMapGroup), "never moved");
+        AssertTrue(WlChainRules.OrderOnly(WlChainClass.PlayerMapGroup), "addressed by dispatch");
+        AssertFalse(WlChainRules.CountsAsCommittedDefender(WlChainClass.PlayerMapGroup), "unreliable executor");
+        AssertEqual(WlStrategicOrderResult.IssuedWlCurrentOrder, WlStrategicOrderBridge.Classify(WlStrategicIntent.DefendCapital, mapGroup).Result);
+
+        // Not his own map group: nothing carries him, so no unit is a carrying group.
+        var notCarrying = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPartOfPlayerUnit: true,
+            currentCommandIsCampaignGroup: true, isPlayerCampaignGroup: true);
+        AssertEqual(WlChainClass.PlayerCommand, WlChainRules.Classify(in notCarrying));
+    }
+
+    private static void WlChainCicPlayer()
+    {
+        var cic = new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPlayerCic: true, isPartOfPlayerUnit: true, isPlayerCampaignGroup: true);
+        AssertEqual(WlChainClass.CicSide, WlChainRules.Classify(in cic));
+        AssertFalse(WlChainRules.MayMove(WlChainClass.CicSide), "stand down");
+        AssertFalse(WlChainRules.CountsAsCommittedDefender(WlChainClass.CicSide), "stand down");
+        AssertFalse(WlChainRules.OrderOnly(WlChainClass.CicSide), "no orders either");
+    }
+
+    private static void WlChainOrdinaryUnits()
+    {
+        AssertEqual(WlChainClass.None, WlChainRules.Classify(new WlStrategicRoleFacts(wlActive: false, isPlayerAlliance: true, isUnderCommander: true)));
+        AssertEqual(WlChainClass.None, WlChainRules.Classify(new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: false, isPlayerCic: true)));
+        AssertEqual(WlChainClass.None, WlChainRules.Classify(new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true)));
+        AssertTrue(WlChainRules.MayMove(WlChainClass.None), "AI unit movable");
+        AssertTrue(WlChainRules.CountsAsCommittedDefender(WlChainClass.None), "AI unit counts");
+    }
+
+    private static void WlBridgeMovesCarryingGroup()
+    {
+        var decision = WlStrategicOrderBridge.Classify(
+            WlStrategicIntent.Offensive,
+            new WlStrategicRoleFacts(wlActive: true, isPlayerAlliance: true, isPartOfPlayerUnit: true, isPlayerCampaignGroup: true));
+        AssertEqual(WlStrategicOrderResult.DirectMovementAllowed, decision.Result);
+        AssertTrue(decision.MayDirectMove, "vanilla-style move; #69 dispatches it");
+        AssertTrue(decision.MayMutateOperationList, "listed like any AI group");
+        AssertEqual("carrying-group", decision.Reason);
+    }
+
+    // F-extra-4: DefenseIntentRuntime marks the player's command and map group
+    // PlayerControlled (WlChainRules.CountsAsCommittedDefender); the ledger keeps
+    // them out of both pools (DefenseIntentLedger threat pre-suppression and
+    // FilterGuardCandidates), so no must-hold coverage rests on the player.
+    private static void WlDefenseLedgerSkipsPlayerControlled()
+    {
+        var threat = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f };
+        threat.Threats.Add(new DefenseThreatSource
+        {
+            Kind = DefenseThreatSourceKind.SeaInvasion, InvasionForceInstanceId = 30, SpotName = "spot",
+            SourcePortName = "port", LandedSignal = true, AssetName = "harbor",
+            AssetRole = AssetStrategicRole.BlockadeRunnerPort, EnemyStrength = 6000f
+        });
+        threat.Candidates.Add(PlayerMapGroupCandidate());
+        threat.Candidates.Add(AiCandidate());
+        AssertPlayerNeverSelected(DefenseIntentLedger.Build(threat), "threat pool");
+
+        var guard = new DefenseIntentInput { AllianceId = 1, TotalAllianceEffectiveStrength = 60000f };
+        guard.GuardCandidateAssets.Add(new CampaignMapAsset
+        {
+            Kind = CampaignMapAssetKind.SeaHarbor, Name = "harbor", Owner = 1, StrategicRole = AssetStrategicRole.BlockadeRunnerPort
+        });
+        guard.Candidates.Add(PlayerMapGroupCandidate());
+        guard.Candidates.Add(new DefenseCandidate { UnitInstanceId = 2, ActiveStrength = 2500f, Morale = 0.9f, ReadinessStep = 2f, Tier = CandidateTier.Local, DistanceToThreat = 50f });
+        var output = DefenseIntentLedger.Build(guard);
+        AssertTrue(output.Responses.Exists(r => r.SelectedPackage.Exists(c => c.UnitInstanceId == 2)), "guard pool picks the AI unit");
+        AssertPlayerNeverSelected(output, "guard pool");
+    }
+
+    private static DefenseCandidate PlayerMapGroupCandidate()
+    {
+        return new DefenseCandidate { UnitInstanceId = 1, ActiveStrength = 20000f, Morale = 1f, ReadinessStep = 2f, Tier = CandidateTier.Local, DistanceToThreat = 10f, PlayerControlled = true };
+    }
+
+    private static DefenseCandidate AiCandidate()
+    {
+        return new DefenseCandidate { UnitInstanceId = 2, ActiveStrength = 8000f, Morale = 0.9f, ReadinessStep = 2f, Tier = CandidateTier.Local, DistanceToThreat = 50f };
+    }
+
+    private static void AssertPlayerNeverSelected(DefenseIntentLedgerOutput output, string pool)
+    {
+        AssertTrue(output.Responses.Count >= 1, pool + ": a response");
+        AssertFalse(output.Responses.Exists(r => r.SelectedPackage.Exists(c => c.UnitInstanceId == 1)), pool + ": the player's map group is no committed defender");
+    }
+
+    // F1 (verify round 2): ChainClassOf runs per unit in DefenseIntentRuntime,
+    // DefensiveOpsPatch, #25 and the coastal runner. AccessTools.TypeByName misses
+    // Type.GetType and scans every loaded type (~6 ms), so neither the bridge nor
+    // StrategicCoordinator.IsPlayerCICOf (every Whiskey CIC gate) may reflect, and
+    // the loops capture the player-level context once per pass.
+    private static void WlChainClassificationDoesNoReflection()
+    {
+        string bridge = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Strategic/WlStrategicOrderBridge.cs"));
+        foreach (string banned in new[] { "TypeByName", "GetMethod(", ".Invoke(", "AccessTools", "System.Reflection" })
+            AssertFalse(bridge.Contains(banned), "bridge uses " + banned);
+
+        string coordinator = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs"));
+        int start = coordinator.IndexOf("public static bool IsPlayerCICOf(", StringComparison.Ordinal);
+        AssertTrue(start >= 0, "IsPlayerCICOf found");
+        int end = coordinator.IndexOf("\n        }\n", start, StringComparison.Ordinal);
+        string body = coordinator.Substring(start, end - start);
+        foreach (string banned in new[] { "TypeByName", "AccessTools", ".Invoke(" })
+            AssertFalse(body.Contains(banned), "IsPlayerCICOf uses " + banned);
+
+        // Each consumer: the per-unit block that classifies (the loop, or the probe's
+        // pause branch) has no reflection lookup; loops classify with a context
+        // captured before the loop.
+        foreach (var (path, opener, captured) in new (string, string, bool)[]
+        {
+            ("src/WhiskeyRealism/Strategic/DefenseIntentRuntime.cs", "for (int i = 0; i < ownUnits.Count; i++)", true),
+            ("src/WhiskeyRealism/Patches/DefensiveOpsPatch.cs", "for (int i = 0; i < ownUnits.Count; i++)", true),
+            ("src/WhiskeyRealism/Patches/CheckForDefensiveOperationsCandidateFilterPatch.cs", "for (int i = defOps.Count - 1; i >= 0; i--)", true),
+            ("src/WhiskeyRealism/Strategic/CoastalDefenseCustomOrderRunner.cs", "foreach (var candidate in response.SelectedPackage)", true),
+            ("src/WhiskeyRealism/Strategic/OperationalProbeRuntime.cs", "if (output.Decision == OperationalProbeDecision.Pause ||", false),
+        })
+        {
+            string text = File.ReadAllText(FindRepoPath(path));
+            int call = text.IndexOf(captured ? "ChainClassOf(in " : "ChainClassOf(", StringComparison.Ordinal);
+            AssertTrue(call >= 0, path + " classifies");
+            int open = text.LastIndexOf(opener, call, StringComparison.Ordinal);
+            AssertTrue(open >= 0, path + " block found");
+            string block = BlockFrom(text, open);
+            AssertTrue(open + block.Length > call, path + " the classification is inside the block");
+            foreach (string banned in new[] { "TypeByName", "AccessTools", "GetMethod(", "GetField(", "GetType(\"", "Activator" })
+                AssertFalse(block.Contains(banned), path + " per-unit block uses " + banned);
+            if (captured)
+            {
+                int capture = text.LastIndexOf("WlChainContext.Capture()", call, StringComparison.Ordinal);
+                AssertTrue(capture >= 0 && capture < open, path + " captures the context once, before the loop");
+            }
+        }
+    }
+
+    // The opener's statement through its matching closing brace.
+    private static string BlockFrom(string text, int start)
+    {
+        int brace = text.IndexOf('{', start);
+        int depth = 0;
+        for (int i = brace; i < text.Length; i++)
+        {
+            if (text[i] == '{') depth++;
+            else if (text[i] == '}' && --depth == 0) return text.Substring(start, i - start + 1);
+        }
+        return text.Substring(start);
+    }
+
+    // The CIC fact comes from the captured context: Capture reads vanilla's
+    // IsCommanderInChief (47475) and every unit's facts start from PlayerFacts.
+    private static void WlChainContextCarriesCicPlayer()
+    {
+        var context = new WlChainContext { WlActive = true, PlayerAlliance = 0, PlayerIsCic = true };
+        var facts = context.PlayerFacts();
+        AssertTrue(facts.WlActive && facts.IsPlayerCic, "player-level facts");
+        facts.IsPlayerAlliance = true;
+        facts.IsPartOfPlayerUnit = true;
+        facts.IsPlayerCampaignGroup = true;
+        AssertEqual(WlChainClass.CicSide, WlChainRules.Classify(in facts), "a CIC context stands the side down, even for the carrying group");
+        var notCic = new WlChainContext { WlActive = true, PlayerAlliance = 0 }.PlayerFacts();
+        AssertFalse(notCic.IsPlayerCic, "not CIC");
+
+        string bridge = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Strategic/WlStrategicOrderBridge.cs"));
+        AssertTrue(bridge.Contains("context.PlayerIsCic = DLC_WL.IsCommanderInChief();"), "Capture reads the CIC fact");
+        AssertTrue(bridge.Contains("var facts = context.PlayerFacts();"), "per-unit facts start from the context");
     }
 }

@@ -1,7 +1,5 @@
 using System;
-using System.Reflection;
 using UnityEngine;
-using WhiskeyRealism.Tactical.PlayerOrders;
 
 namespace WhiskeyRealism.Strategic
 {
@@ -42,7 +40,8 @@ namespace WhiskeyRealism.Strategic
             bool isUnderCommander = false,
             bool isPartOfPlayerUnit = false,
             bool currentCommandIsCampaignGroup = false,
-            bool currentCommandParentIsUnderTargetUnit = false)
+            bool currentCommandParentIsUnderTargetUnit = false,
+            bool isPlayerCampaignGroup = false)
         {
             WlActive = wlActive;
             IsPlayerAlliance = isPlayerAlliance;
@@ -52,6 +51,7 @@ namespace WhiskeyRealism.Strategic
             IsPartOfPlayerUnit = isPartOfPlayerUnit;
             CurrentCommandIsCampaignGroup = currentCommandIsCampaignGroup;
             CurrentCommandParentIsUnderTargetUnit = currentCommandParentIsUnderTargetUnit;
+            IsPlayerCampaignGroup = isPlayerCampaignGroup;
         }
 
         internal bool WlActive;
@@ -62,6 +62,109 @@ namespace WhiskeyRealism.Strategic
         internal bool IsPartOfPlayerUnit;
         internal bool CurrentCommandIsCampaignGroup;
         internal bool CurrentCommandParentIsUnderTargetUnit;
+        internal bool IsPlayerCampaignGroup; // unit == BattleUnits.GetCampaignGroup(player's command)
+    }
+
+    // The W&L player's chain of command as Whiskey treats it (stage G spec decision
+    // C4, docs/wl-player-model.md):
+    //   CicSide        a CIC career: Whiskey stands down for the player's side.
+    //   PlayerCommand  the player's own command or a unit under it (player-owned,
+    //                  dlcw_isundercommander; in his operation, IsMovedByPlayer; a unit
+    //                  inside the map group that carries him; an army-group player's
+    //                  units): never moved, never stopped, never re-tasked by Whiskey.
+    //   PlayerMapGroup the player's command is itself a map group (vanilla's flag2,
+    //                  AIBattle.CheckCurrentOrderUpdate 8271-8274): order-only through
+    //                  a W&L dispatch, and an unreliable executor: never counted as a
+    //                  committed defender or the holder of a must-hold role.
+    //   CarryingGroup  the AI map group above a player whose command is below map-group
+    //                  level: a movable AI asset, as vanilla moves it (8366 sends that
+    //                  player no campaign order); #69 dispatches its march to him.
+    internal enum WlChainClass
+    {
+        None,
+        CicSide,
+        PlayerCommand,
+        PlayerMapGroup,
+        CarryingGroup,
+    }
+
+    internal static class WlChainRules
+    {
+        public static WlChainClass Classify(in WlStrategicRoleFacts facts)
+        {
+            if (!facts.WlActive || !facts.IsPlayerAlliance) return WlChainClass.None;
+            if (facts.IsPlayerCic) return WlChainClass.CicSide;
+            if (facts.IsMovedByPlayer) return WlChainClass.PlayerCommand;
+            if (facts.IsUnderCommander)
+                return facts.CurrentCommandIsCampaignGroup ? WlChainClass.PlayerMapGroup : WlChainClass.PlayerCommand;
+            if (facts.IsPartOfPlayerUnit)
+                return facts.IsPlayerCampaignGroup && !facts.CurrentCommandIsCampaignGroup
+                    ? WlChainClass.CarryingGroup
+                    : WlChainClass.PlayerCommand;
+            return WlChainClass.None;
+        }
+
+        // Moves, stops, operation-list changes, pledges and reverts.
+        public static bool MayMove(WlChainClass chain)
+        {
+            return chain == WlChainClass.None || chain == WlChainClass.CarryingGroup;
+        }
+
+        // Defense coverage (must-hold roles, committed defenders).
+        public static bool CountsAsCommittedDefender(WlChainClass chain)
+        {
+            return chain == WlChainClass.None || chain == WlChainClass.CarryingGroup;
+        }
+
+        // A unit Whiskey still addresses, by a W&L dispatch.
+        public static bool OrderOnly(WlChainClass chain)
+        {
+            return chain == WlChainClass.PlayerMapGroup;
+        }
+    }
+
+    // The W&L player's side of the chain, read once per pass (the per-unit facts
+    // are in WlStrategicOrderBridge.FactsFor). Direct reads of vanilla statics, no
+    // reflection: DLC_WL.dlc_scenarioactive, IsCommanderInChief (47475), the chosen
+    // commander's currentcommand, its campaign group (82991) and parent (93883).
+    internal struct WlChainContext
+    {
+        public bool WlActive;
+        public int PlayerAlliance;
+        public bool PlayerIsCic;
+        public Regiment Command;
+        public Regiment CampaignGroup;
+        public Regiment CommandParent;
+        public bool CommandIsCampaignGroup;
+
+        // The player-level facts every unit's classification starts from.
+        internal WlStrategicRoleFacts PlayerFacts()
+        {
+            return new WlStrategicRoleFacts { WlActive = WlActive, IsPlayerCic = PlayerIsCic };
+        }
+
+        internal static WlChainContext Capture()
+        {
+            var context = new WlChainContext { PlayerAlliance = -1 };
+            try
+            {
+                context.WlActive = DLC_WL.dlc_scenarioactive;
+                if (!context.WlActive) return context;
+                context.PlayerAlliance = GameVars.playeralliance;
+                context.PlayerIsCic = DLC_WL.IsCommanderInChief();
+                int chosen = DLC_WL.dlc_chosencommander;
+                if (chosen < 0 || GameVars.commander == null || chosen >= GameVars.commander.Count) return context;
+                context.Command = GameVars.commander[chosen].currentcommand;
+                if ((UnityEngine.Object)context.Command == null) return context;
+                context.CampaignGroup = BattleUnits.GetCampaignGroup(context.Command);
+                context.CommandParent = BattleUnits.GetParentUnit(context.Command);
+                context.CommandIsCampaignGroup = (UnityEngine.Object)context.CampaignGroup == (UnityEngine.Object)context.Command;
+            }
+            catch
+            {
+            }
+            return context;
+        }
     }
 
     internal readonly struct WlStrategicOrderDecision
@@ -107,90 +210,93 @@ namespace WhiskeyRealism.Strategic
     {
         internal const float DefaultOrderWidth = 20f;
         internal const float DefaultOrderDepth = 20f;
-        private const long CampaignThrottleTicks = 720;
-        private static readonly PlayerOrderDedupeState CampaignDedupeState = new PlayerOrderDedupeState();
-        private static string _campaignContextKey = string.Empty;
 
+        // A null request fails closed: no movement, no operation-list change.
+        private static WlStrategicOrderDecision InvalidRequest()
+        {
+            return Blocked(WlStrategicOrderResult.InvalidRequest, -1, "null-request");
+        }
+
+        // A player-owned top-level map group gets Whiskey's order as a W&L dispatch
+        // through the campaign dispatcher (chain-of-command spec §D trigger 2), never a
+        // move. Vanilla's own campaign gate (AIBattle.CheckCurrentOrderUpdate 8366)
+        // admits exactly that case; the dispatcher emits vanilla's order with the
+        // superior as issuer and its own dedupe.
         internal static WlStrategicOrderDecision TryIssue(WlStrategicOrderRequest request)
         {
-            if (request == null)
-            {
-                return new WlStrategicOrderDecision(
-                    WlStrategicOrderResult.InvalidRequest,
-                    wlOrderType: -1,
-                    mayDirectMove: false,
-                    mayMutateOperationList: false,
-                    reason: "null-request");
-            }
+            if (request == null) return InvalidRequest();
 
             var facts = BuildFacts(request);
             var decision = Classify(request.Intent, facts);
             if (decision.Result != WlStrategicOrderResult.IssuedWlCurrentOrder)
                 return decision;
 
-            string campaignContextKey = CampaignContextKey(request);
-            ClearCampaignCacheIfContextChanged(CampaignDedupeState, ref _campaignContextKey, campaignContextKey);
-            int beforeSession = ReadGivenOrdersSession();
-            object beforeOrder = ReadGivenOrder();
-            var candidate = BuildCampaignCandidate(
-                request.Intent,
-                UnitKey(request.Unit),
-                campaignContextKey,
-                beforeSession,
-                new PlayerOrderPoint(request.TargetPosition.x, request.TargetPosition.z),
-                string.IsNullOrEmpty(request.TargetName) ? "Objective" : request.TargetName);
-            var active = ReadActiveOrderSnapshot(campaignContextKey);
-            var dedupe = DecideCampaignOrder(candidate, active, CampaignDedupeState, Tick());
-            if (!dedupe.ShouldIssue)
-                return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, decision.WlOrderType, "campaign-dedupe:" + dedupe.Reason);
-
-            try
-            {
-                AIBattle.CheckCurrentOrderUpdate(
-                    request.Unit,
-                    decision.WlOrderType,
-                    request.TargetPosition,
-                    string.IsNullOrEmpty(request.TargetName) ? "Objective" : request.TargetName,
-                    -1f,
-                    DefaultWidth(request.Intent, request.Width),
-                    DefaultDepth(request.Intent, request.Depth),
-                    calledfromcampaign: true);
-            }
-            catch (Exception ex)
-            {
-                LogVanillaBridgeFailure(request, ex);
+            string outcome = WlCampaignDispatchRuntime.EmitForPlayerCommand(
+                request.Unit,
+                decision.WlOrderType,
+                request.TargetPosition,
+                string.IsNullOrEmpty(request.TargetName) ? "Objective" : request.TargetName,
+                DefaultWidth(request.Width),
+                DefaultDepth(request.Depth));
+            if (outcome == WlCampaignDispatchPolicy.Issue)
+                return decision;
+            if (outcome == "failed")
                 return Classify(request.Intent, facts, vanillaBridgeSucceeded: false);
-            }
-
-            int afterSession = ReadGivenOrdersSession();
-            object afterOrder = ReadGivenOrder();
-            if (beforeSession == afterSession && ReferenceEquals(beforeOrder, afterOrder))
-                return Classify(request.Intent, facts, vanillaBridgeSucceeded: false);
-
-            var accepted = ReadActiveOrderSnapshot(campaignContextKey);
-            if (ActiveMatchesCampaignCandidate(candidate, accepted, beforeSession))
-            {
-                CampaignDedupeState.RecordAccepted(
-                    WithSession(candidate, accepted.GivenOrderSession),
-                    WithAcceptedOrder(candidate, accepted),
-                    Tick());
-            }
-
-            return decision;
+            return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, decision.WlOrderType, "campaign-dispatch:" + outcome);
         }
 
         internal static WlStrategicOrderDecision ClassifyOnly(WlStrategicOrderRequest request)
         {
-            if (request == null)
-            {
-                return new WlStrategicOrderDecision(
-                    WlStrategicOrderResult.InvalidRequest,
-                    wlOrderType: -1,
-                    mayDirectMove: false,
-                    mayMutateOperationList: false,
-                    reason: "null-request");
-            }
+            if (request == null) return InvalidRequest();
             return Classify(request.Intent, BuildFacts(request));
+        }
+
+        // The unit's chain class for code that changes vanilla state without an
+        // order of its own (capital pre-pledge, #25 revert, probe stop, coastal
+        // runner, defense coverage). Loops capture the context once per pass.
+        internal static WlChainClass ChainClassOf(int allianceId, Regiment unit)
+        {
+            return ChainClassOf(WlChainContext.Capture(), allianceId, unit);
+        }
+
+        internal static WlChainClass ChainClassOf(in WlChainContext context, int allianceId, Regiment unit)
+        {
+            if (unit == null || !context.WlActive) return WlChainClass.None;
+            return WlChainRules.Classify(FactsFor(in context, allianceId, unit));
+        }
+
+        private static WlStrategicRoleFacts BuildFacts(WlStrategicOrderRequest request)
+        {
+            return FactsFor(WlChainContext.Capture(), request.AllianceId, request.Unit);
+        }
+
+        // Per-unit facts: unit fields and vanilla's own DLC_WL helpers only, no
+        // reflection (the player-level facts come from the context).
+        private static WlStrategicRoleFacts FactsFor(in WlChainContext context, int allianceId, Regiment unit)
+        {
+            var facts = context.PlayerFacts();
+            if (unit == null) return facts;
+            try
+            {
+                facts.IsPlayerAlliance = unit.alliance == context.PlayerAlliance && allianceId == context.PlayerAlliance;
+                if (!context.WlActive || !facts.IsPlayerAlliance) return facts;
+                facts.IsMovedByPlayer = DLC_WL.IsMovedByPlayer(unit);
+                facts.IsUnderCommander = unit.dlcw_isundercommander;
+                facts.IsPartOfPlayerUnit = DLC_WL.IsPlayerPartOfUnit(unit);
+                facts.CurrentCommandIsCampaignGroup = context.CommandIsCampaignGroup;
+                facts.IsPlayerCampaignGroup = (UnityEngine.Object)context.Command != null && (UnityEngine.Object)context.CampaignGroup == (UnityEngine.Object)unit;
+                facts.CurrentCommandParentIsUnderTargetUnit = (UnityEngine.Object)context.CommandParent != null
+                    && context.CommandParent.transform.IsChildOf(unit.transform);
+            }
+            catch
+            {
+                facts.IsMovedByPlayer = false;
+                facts.IsUnderCommander = false;
+                facts.IsPartOfPlayerUnit = false;
+                facts.IsPlayerCampaignGroup = false;
+                facts.CurrentCommandParentIsUnderTargetUnit = false;
+            }
+            return facts;
         }
 
         internal static WlStrategicOrderDecision Classify(
@@ -209,25 +315,27 @@ namespace WhiskeyRealism.Strategic
             if (intent == WlStrategicIntent.ReportOnly)
                 return Blocked(WlStrategicOrderResult.ReportOnly, orderType, "report-only");
 
-            if (facts.IsPlayerCic)
-                return Blocked(WlStrategicOrderResult.SkippedPlayerCic, orderType, "player-cic");
-
-            if (facts.IsMovedByPlayer)
-                return Blocked(WlStrategicOrderResult.SkippedPlayerControlled, orderType, "moved-by-player");
-
-            if (facts.IsUnderCommander)
+            switch (WlChainRules.Classify(in facts))
             {
-                if (!facts.CurrentCommandIsCampaignGroup || !facts.CurrentCommandParentIsUnderTargetUnit)
+                case WlChainClass.CicSide:
+                    return Blocked(WlStrategicOrderResult.SkippedPlayerCic, orderType, "player-cic");
+                case WlChainClass.PlayerCommand when facts.IsMovedByPlayer:
+                    return Blocked(WlStrategicOrderResult.SkippedPlayerControlled, orderType, "moved-by-player");
+                case WlChainClass.PlayerMapGroup:
+                    if (!facts.CurrentCommandParentIsUnderTargetUnit)
+                        return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "current-order-chain-ineligible");
+                    if (!vanillaBridgeSucceeded)
+                        return Blocked(WlStrategicOrderResult.FailedVanillaBridge, orderType, "vanilla-bridge-failed");
+                    return Blocked(WlStrategicOrderResult.IssuedWlCurrentOrder, orderType, "issued-current-order");
+                case WlChainClass.PlayerCommand when facts.IsUnderCommander:
                     return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "current-order-chain-ineligible");
-
-                if (!vanillaBridgeSucceeded)
-                    return Blocked(WlStrategicOrderResult.FailedVanillaBridge, orderType, "vanilla-bridge-failed");
-
-                return Blocked(WlStrategicOrderResult.IssuedWlCurrentOrder, orderType, "issued-current-order");
+                case WlChainClass.PlayerCommand:
+                    return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "part-of-player-unit");
+                case WlChainClass.CarryingGroup:
+                    // Vanilla moves this AI group (AICampaign.MoveUnitTo); #69's MoveUnitTo
+                    // Postfix turns the march into the player's dispatch.
+                    return Allowed(WlStrategicOrderResult.DirectMovementAllowed, orderType, "carrying-group");
             }
-
-            if (facts.IsPartOfPlayerUnit)
-                return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "part-of-player-unit");
 
             return Allowed(WlStrategicOrderResult.DirectMovementAllowed, orderType, "direct-movement-allowed");
         }
@@ -257,63 +365,14 @@ namespace WhiskeyRealism.Strategic
             }
         }
 
-        internal static float DefaultWidth(WlStrategicIntent intent, float requestedWidth)
+        internal static float DefaultWidth(float requestedWidth)
         {
             return requestedWidth > 0f ? requestedWidth : DefaultOrderWidth;
         }
 
-        internal static float DefaultDepth(WlStrategicIntent intent, float requestedDepth)
+        internal static float DefaultDepth(float requestedDepth)
         {
             return requestedDepth > 0f ? requestedDepth : DefaultOrderDepth;
-        }
-
-        internal static PlayerOrderCandidate BuildCampaignCandidate(
-            WlStrategicIntent intent,
-            string unitKey,
-            string campaignContextKey,
-            int givenOrderSession,
-            PlayerOrderPoint target,
-            string targetName)
-        {
-            return new PlayerOrderCandidate(
-                scope: PlayerOrderScope.Campaign,
-                intent: CampaignPlayerOrderIntent(intent),
-                vanillaType: WlOrderTypeForIntent(intent),
-                priority: CampaignPriorityForIntent(intent),
-                unitKey: unitKey,
-                battleIdentity: campaignContextKey,
-                givenOrderSession: givenOrderSession,
-                targetPoint: target,
-                rotation: -1f,
-                objectiveKey: string.IsNullOrWhiteSpace(targetName) ? "Objective" : targetName.Trim(),
-                reason: "wl-strategic:" + intent,
-                activeCampaignActionable: true,
-                campaignGroupFlag: true);
-        }
-
-        internal static PlayerOrderDedupeDecision DecideCampaignOrder(
-            PlayerOrderCandidate candidate,
-            PlayerOrderActiveSnapshot active,
-            PlayerOrderDedupeState state,
-            long tick)
-        {
-            return PlayerOrderDedupe.Decide(
-                candidate,
-                active,
-                state,
-                new PlayerOrderDedupeOptions(writesEnabled: true, throttleTicks: CampaignThrottleTicks),
-                tick);
-        }
-
-        internal static void ClearCampaignCacheIfContextChanged(
-            PlayerOrderDedupeState state,
-            ref string currentContextKey,
-            string nextContextKey)
-        {
-            nextContextKey = nextContextKey ?? string.Empty;
-            if (string.Equals(currentContextKey ?? string.Empty, nextContextKey, StringComparison.Ordinal)) return;
-            state?.ClearForPlayerCommandChange();
-            currentContextKey = nextContextKey;
         }
 
         private static WlStrategicOrderDecision Allowed(WlStrategicOrderResult result, int orderType, string reason)
@@ -324,395 +383,6 @@ namespace WhiskeyRealism.Strategic
         private static WlStrategicOrderDecision Blocked(WlStrategicOrderResult result, int orderType, string reason)
         {
             return new WlStrategicOrderDecision(result, orderType, mayDirectMove: false, mayMutateOperationList: false, reason);
-        }
-
-        private static PlayerOrderIntent CampaignPlayerOrderIntent(WlStrategicIntent intent)
-        {
-            switch (intent)
-            {
-                case WlStrategicIntent.Probe:
-                    return PlayerOrderIntent.ProbeObjective;
-                case WlStrategicIntent.Offensive:
-                case WlStrategicIntent.EngageEnemy:
-                    return PlayerOrderIntent.AttackObjective;
-                case WlStrategicIntent.DefendCapital:
-                    return PlayerOrderIntent.DefendCapital;
-                case WlStrategicIntent.ConstructFort:
-                    return PlayerOrderIntent.BuildFort;
-                case WlStrategicIntent.ConstructSupplyDepot:
-                    return PlayerOrderIntent.BuildSupplyDepot;
-                case WlStrategicIntent.Redeploy:
-                case WlStrategicIntent.Reinforce:
-                case WlStrategicIntent.OffensiveContinuation:
-                    return PlayerOrderIntent.AdvanceToAssemblyArea;
-                default:
-                    return PlayerOrderIntent.None;
-            }
-        }
-
-        private static int CampaignPriorityForIntent(WlStrategicIntent intent)
-        {
-            switch (intent)
-            {
-                case WlStrategicIntent.DefendCapital:
-                case WlStrategicIntent.ConstructFort:
-                case WlStrategicIntent.ConstructSupplyDepot:
-                    return 30;
-                case WlStrategicIntent.Offensive:
-                    return 60;
-                case WlStrategicIntent.EngageEnemy:
-                    return 80;
-                case WlStrategicIntent.Redeploy:
-                case WlStrategicIntent.Probe:
-                case WlStrategicIntent.Reinforce:
-                case WlStrategicIntent.OffensiveContinuation:
-                    return 50;
-                default:
-                    return 0;
-            }
-        }
-
-        private static PlayerOrderActiveSnapshot ReadActiveOrderSnapshot(string campaignContextKey)
-        {
-            try
-            {
-                var order = DLC_WL.givenorder;
-                int session = ReadGivenOrdersSession();
-                if (order == null)
-                    return new PlayerOrderActiveSnapshot(
-                        PlayerOrderScope.Campaign,
-                        PlayerOrderIntent.None,
-                        -1,
-                        0,
-                        string.Empty,
-                        campaignContextKey,
-                        session,
-                        default(PlayerOrderPoint),
-                        0f,
-                        string.Empty,
-                        "no-active-order",
-                        false,
-                        true,
-                        PlayerOrderProvenance.Unknown);
-
-                string unitKey = UnitKey(order.groupunit);
-                int currentOperation = SafeCurrentOperation();
-                bool inBattle = currentOperation == 1 || currentOperation == 3 || currentOperation == 8;
-                bool activeForScene = PlayerOrderVanillaScene.IsGivenOrderActiveForScene(order.type, currentOperation);
-                PlayerOrderScope scope = inBattle ? PlayerOrderScope.Tactical : PlayerOrderScope.Campaign;
-                var point = new PlayerOrderPoint(order.position.x, order.position.z);
-                var active = new PlayerOrderActiveSnapshot(
-                    scope,
-                    PlayerOrderIntent.None,
-                    order.type,
-                    PlayerOrderPriority.ForActiveVanillaType(order.type, scope, PlayerOrderProvenance.Unknown),
-                    unitKey,
-                    campaignContextKey,
-                    session,
-                    point,
-                    order.arearotation,
-                    order.destinationname,
-                    activeForScene ? "active-order" : "inactive-for-scene",
-                    scope == PlayerOrderScope.Campaign && activeForScene,
-                    scope == PlayerOrderScope.Campaign,
-                    PlayerOrderProvenance.Unknown,
-                    battleEnded: !activeForScene,
-                    stale: !activeForScene);
-                var provenance = ClassifyCampaignProvenance(active, unitKey);
-                return new PlayerOrderActiveSnapshot(
-                    scope,
-                    PlayerOrderIntent.None,
-                    order.type,
-                    PlayerOrderPriority.ForActiveVanillaType(order.type, scope, provenance),
-                    unitKey,
-                    campaignContextKey,
-                    session,
-                    point,
-                    order.arearotation,
-                    order.destinationname,
-                    active.Reason,
-                    active.ActiveCampaignActionable,
-                    active.CampaignGroupFlag,
-                    provenance,
-                    active.BattleEnded,
-                    active.Stale);
-            }
-            catch
-            {
-                return default(PlayerOrderActiveSnapshot);
-            }
-        }
-
-        private static PlayerOrderProvenance ClassifyCampaignProvenance(PlayerOrderActiveSnapshot active, string unitKey)
-        {
-            try
-            {
-                if (CampaignDedupeState.TryGetShadow(unitKey, out var shadow) &&
-                    shadow.ActiveSignature.MatchesActiveOrder(active))
-                    return PlayerOrderProvenance.WhiskeyCampaign;
-            }
-            catch { }
-
-            return PlayerOrderProvenance.Unknown;
-        }
-
-        private static bool ActiveMatchesCampaignCandidate(
-            PlayerOrderCandidate candidate,
-            PlayerOrderActiveSnapshot active,
-            int beforeSession)
-        {
-            if (!candidate.HasCandidate || !active.HasActiveOrder) return false;
-            if (active.GivenOrderSession <= beforeSession) return false;
-            if (active.VanillaType != candidate.VanillaType) return false;
-            if (Math.Abs(active.TargetPoint.X - candidate.TargetPoint.X) > 10f) return false;
-            if (Math.Abs(active.TargetPoint.Z - candidate.TargetPoint.Z) > 10f) return false;
-            return string.Equals(active.ObjectiveKey, candidate.ObjectiveKey, StringComparison.Ordinal);
-        }
-
-        private static PlayerOrderCandidate WithSession(PlayerOrderCandidate candidate, int session)
-        {
-            return new PlayerOrderCandidate(
-                candidate.Scope,
-                candidate.Intent,
-                candidate.VanillaType,
-                candidate.Priority,
-                candidate.UnitKey,
-                candidate.BattleIdentity,
-                session,
-                candidate.TargetPoint,
-                candidate.Rotation,
-                candidate.ObjectiveKey,
-                candidate.Reason,
-                candidate.ActiveCampaignActionable,
-                candidate.CampaignGroupFlag,
-                candidate.ValidExitPoint);
-        }
-
-        private static PlayerOrderCandidate WithAcceptedOrder(PlayerOrderCandidate candidate, PlayerOrderActiveSnapshot active)
-        {
-            return new PlayerOrderCandidate(
-                active.Scope,
-                candidate.Intent,
-                active.VanillaType,
-                candidate.Priority,
-                active.UnitKey,
-                active.BattleIdentity,
-                active.GivenOrderSession,
-                active.TargetPoint,
-                active.Rotation,
-                active.ObjectiveKey,
-                candidate.Reason,
-                active.ActiveCampaignActionable,
-                active.CampaignGroupFlag,
-                active.TargetPoint.ValidExitPoint);
-        }
-
-        // Vanilla campaign save folder = "Campaigns/" + GamePrefs.leveltoload + "/" +
-        // GamePrefs.subleveltoload + "/" + Saving.latestfolder (decompile 30006);
-        // scenario config folder = "Campaigns/" + SceneManagement.currentcampaignscenario
-        // (23730). The old key read SceneManagement.currentcampaign/currentsave,
-        // which do not exist, so every career shared one dedupe context.
-        // Saving.latestfolder is set on load (216750) and on every save/autosave
-        // (216806-217062), so a save also rotates the key; that only clears the
-        // dedupe cache, which costs at most one re-issued current order.
-        internal static readonly (Type Owner, string Field)[] CampaignContextSources =
-        {
-            (typeof(SceneManagement), "currentcampaignscenario"),
-            (typeof(GamePrefs), "leveltoload"),
-            (typeof(GamePrefs), "subleveltoload"),
-            (typeof(Saving), "latestfolder"),
-        };
-
-        internal static string BuildCampaignContextKey(int allianceId, int aifactionIndex, string scenario, string level, string sublevel, string saveFolder)
-        {
-            return "campaign:" + allianceId + ":" + aifactionIndex + ":" +
-                (scenario ?? string.Empty) + ":" +
-                (level ?? string.Empty) + "/" +
-                (sublevel ?? string.Empty) + "/" +
-                (saveFolder ?? string.Empty);
-        }
-
-        private static string CampaignContextKey(WlStrategicOrderRequest request)
-        {
-            return BuildCampaignContextKey(
-                request.AllianceId,
-                request.AifactionIndex,
-                SafeStaticField(CampaignContextSources[0].Owner, CampaignContextSources[0].Field),
-                SafeStaticField(CampaignContextSources[1].Owner, CampaignContextSources[1].Field),
-                SafeStaticField(CampaignContextSources[2].Owner, CampaignContextSources[2].Field),
-                SafeStaticField(CampaignContextSources[3].Owner, CampaignContextSources[3].Field));
-        }
-
-        private static string UnitKey(Regiment unit)
-        {
-            try
-            {
-                if (unit == null) return string.Empty;
-                var component = unit as Component;
-                if (component != null && component.gameObject != null)
-                    return "unit-" + component.gameObject.GetInstanceID();
-                return "unit-" + unit.GetInstanceID();
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        private static int SafeCurrentOperation()
-        {
-            try { return SceneManagement.currentoperation; }
-            catch { return 0; }
-        }
-
-        private static long Tick()
-        {
-            try { return GameVars.frame; }
-            catch { return Environment.TickCount; }
-        }
-
-        private static string SafeStaticField(Type type, string name)
-        {
-            try
-            {
-                FieldInfo field = type.GetField(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                object value = field?.GetValue(null);
-                return value == null ? string.Empty : value.ToString();
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        private static WlStrategicRoleFacts BuildFacts(WlStrategicOrderRequest request)
-        {
-            bool wlActive = SafeBool(() => DLC_WL.dlc_scenarioactive);
-            bool isPlayerAlliance = SafeBool(() =>
-                request.Unit != null &&
-                request.Unit.alliance == GameVars.playeralliance &&
-                request.AllianceId == GameVars.playeralliance);
-            bool isPlayerCic =
-                SafeBool(() => DLC_WL.IsCommanderInChief()) ||
-                SafeBool(() => IsPlayerCICViaCoordinator(request.AllianceId, GameVars.playeralliance));
-            bool isMovedByPlayer = SafeBool(() => DLC_WL.IsMovedByPlayer(request.Unit));
-            bool isUnderCommander = SafeBool(() => request.Unit != null && request.Unit.dlcw_isundercommander);
-            bool isPartOfPlayerUnit = SafeBool(() => DLC_WL.IsPlayerPartOfUnit(request.Unit));
-            bool currentCommandIsCampaignGroup = false;
-            bool currentCommandParentIsUnderTargetUnit = false;
-
-            try
-            {
-                Regiment current = GameVars.commander[DLC_WL.dlc_chosencommander].currentcommand;
-                Regiment campaignGroup = BattleUnits.GetCampaignGroup(current);
-                Regiment parent = BattleUnits.GetParentUnit(current);
-
-                currentCommandIsCampaignGroup = current != null && campaignGroup == current;
-                currentCommandParentIsUnderTargetUnit =
-                    parent != null &&
-                    request.Unit != null &&
-                    parent.transform.IsChildOf(request.Unit.transform);
-            }
-            catch
-            {
-                currentCommandIsCampaignGroup = false;
-                currentCommandParentIsUnderTargetUnit = false;
-            }
-
-            return new WlStrategicRoleFacts(
-                wlActive,
-                isPlayerAlliance,
-                isPlayerCic,
-                isMovedByPlayer,
-                isUnderCommander,
-                isPartOfPlayerUnit,
-                currentCommandIsCampaignGroup,
-                currentCommandParentIsUnderTargetUnit);
-        }
-
-        private static bool SafeBool(Func<bool> read)
-        {
-            try { return read(); }
-            catch { return false; }
-        }
-
-        private static void LogVanillaBridgeFailure(WlStrategicOrderRequest request, Exception ex)
-        {
-            string source = string.IsNullOrEmpty(request.SourceSystem) ? string.Empty : " source=" + request.SourceSystem;
-            string keySource = string.IsNullOrEmpty(request.SourceSystem) ? "unknown" : request.SourceSystem;
-            WarnOnce(
-                "wl-order-bridge:vanilla-call:" + keySource,
-                "[W&LOrderBridge] vanilla CheckCurrentOrderUpdate failed" +
-                source +
-                " unit=" + SafeUnitName(request.Unit) +
-                ": " + ex.Message);
-        }
-
-        private static string SafeUnitName(Regiment unit)
-        {
-            try { return unit != null ? unit.name : "null"; }
-            catch { return "unknown"; }
-        }
-
-        private static void WarnOnce(string key, string message)
-        {
-            try
-            {
-                Type onceLogType = typeof(WlStrategicOrderBridge).Assembly.GetType("WhiskeyRealism.Util.OnceLog");
-                MethodInfo warningMethod = onceLogType?.GetMethod(
-                    "Warning",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                    binder: null,
-                    types: new[] { typeof(string), typeof(string) },
-                    modifiers: null);
-                warningMethod?.Invoke(null, new object[] { key, message });
-            }
-            catch
-            {
-            }
-        }
-
-        private static object ReadGivenOrder()
-        {
-            try { return DLC_WL.givenorder; }
-            catch { return null; }
-        }
-
-        private static int ReadGivenOrdersSession()
-        {
-            try
-            {
-                Type givenOrdersType = typeof(DLC_WL).GetNestedType("GivenOrders", BindingFlags.Public | BindingFlags.NonPublic);
-                FieldInfo sessionField = givenOrdersType?.GetField(
-                    "givenorderssession",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                if (sessionField == null) return -1;
-                return Convert.ToInt32(sessionField.GetValue(null));
-            }
-            catch
-            {
-                return -1;
-            }
-        }
-
-        private static bool IsPlayerCICViaCoordinator(int allianceId, int playerAlliance)
-        {
-            try
-            {
-                Type coordinatorType = typeof(WlStrategicOrderBridge).Assembly.GetType("WhiskeyRealism.Strategic.StrategicCoordinator");
-                MethodInfo method = coordinatorType?.GetMethod(
-                    "IsPlayerCICOf",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                    binder: null,
-                    types: new[] { typeof(int), typeof(int) },
-                    modifiers: null);
-                if (method == null) return false;
-                return Convert.ToBoolean(method.Invoke(null, new object[] { allianceId, playerAlliance }));
-            }
-            catch
-            {
-                return false;
-            }
         }
     }
 }
