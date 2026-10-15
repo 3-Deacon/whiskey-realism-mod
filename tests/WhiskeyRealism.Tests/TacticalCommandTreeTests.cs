@@ -174,7 +174,7 @@ internal static class TacticalCommandTreeTests
         {
             new CommandNodeIntent("fix", "fix", DirectChildRole.Fix, DirectChildAxis.Hold, 3, 60, 0.3f, 2),
             new CommandNodeIntent("defend", "defend", DirectChildRole.RefuseLeft, DirectChildAxis.Hold, 3, 50, 0.3f, 2),
-        }, operation, objectives);
+        }, operation, objectives, BattleStance.Meeting);
 
         AssertEqual(CommandTaskType.FixEnemy, states[0].Task, "fixing force reacts to contested objective as contact");
         AssertEqual(CommandTaskType.HoldObjective, states[1].Task, "defender at contested objective holds instead of marching");
@@ -207,6 +207,7 @@ internal static class TacticalCommandTreeTests
             new CommandNodeIntent("node--27662", "node--26354", DirectChildRole.Main, DirectChildAxis.SectorAxis, 2, 100, 0.6f, 3),
             operation,
             objectives,
+            BattleStance.Meeting,
             out CommandNodeOperationalState state);
 
         AssertTrue(built, "fallback state built");

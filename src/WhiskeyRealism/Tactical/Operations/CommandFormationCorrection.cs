@@ -47,6 +47,17 @@ namespace WhiskeyRealism.Tactical.Operations
                 task == CommandTaskType.ReserveWait;
         }
 
+        /// <summary>
+        /// BC9: with the facing pulse's threat source, a Screen or Probe group with
+        /// nothing visible faces the stalest unwatched entry point (TacticalFacingThreatSource
+        /// .Entry); the holding tasks above face a threat as before.
+        /// </summary>
+        public static bool ShouldFaceThreat(CommandTaskType task, TacticalFacingThreatSource source)
+        {
+            return ShouldFaceThreat(task) ||
+                (source == TacticalFacingThreatSource.Entry && TacticalFacingPulseDoctrine.WatchesEntry(task));
+        }
+
         public static float ThreatFacingRotationDegrees(
             float ownX,
             float ownZ,

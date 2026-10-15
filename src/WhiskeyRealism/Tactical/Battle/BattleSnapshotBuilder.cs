@@ -57,6 +57,10 @@ namespace WhiskeyRealism.Tactical.Battle
     //     groupdepth and each group's layout entries attachedunitid[k] /
     //     unitoffsetposition[k] (GroupPosition 78370-78382; 92086 places child k from
     //     them). Field reads only.
+    //   - BC9 recon inputs: parentregiment (111132) of a skirmisher/scout company
+    //     (DetachCompany 90430-90515; the company is in completeunitlist after
+    //     DetachUnits' UpdateUnitList, 90239), mounted (111066) and unitlinkedto
+    //     (111136; UpdateUnitLink re-lays a linked unit, 124396-124500). Field reads only.
     //   - Vanilla's own ancestry test for the player's command is Transform.IsChildOf
     //     (CheckCurrentOrderUpdate 8272, IsUnitUnderCommander 91203); the parent map is
     //     compared against it for the player chain only and disagreements are counted.
@@ -298,6 +302,11 @@ namespace WhiskeyRealism.Tactical.Battle
             record.FireFromFlank = reg.firefromflank;
             var aiGroup = reg.groupaiobject;
             record.AiGroupId = aiGroup != null ? aiGroup.GetInstanceID() : 0;
+            // BC9: a detached skirmisher/scout company's source regiment (DetachCompany
+            // sets parentregiment, 90430-90515).
+            var sourceRegiment = reg.unittyp == TacticalUnitType.Skirmisher || reg.unittyp == TacticalUnitType.Scout
+                ? reg.parentregiment : null;
+            record.ParentRegimentId = sourceRegiment != null ? sourceRegiment.GetInstanceID() : 0;
             record.ParentIndex = -1;
             record.FirstEnemyInRangeId = FirstEnemyInRangeId(reg);
 
@@ -312,6 +321,9 @@ namespace WhiskeyRealism.Tactical.Battle
             if (reg.permanentlydetached) flags |= UnitFlags.PermanentlyDetached;
             if (reg.garrisonreference != null) flags |= UnitFlags.Garrisoned;
             if (reg.pathinterrupted) flags |= UnitFlags.PathInterrupted;
+            if (record.ParentRegimentId != 0) flags |= UnitFlags.DetachedCompany;
+            if (reg.mounted >= 1) flags |= UnitFlags.Mounted;
+            if (reg.unitlinkedto != null) flags |= UnitFlags.Linked;
             if (group) flags |= UnitFlags.IsGroup;
             else if (reg.unittyp == TacticalUnitType.Infantry) flags |= UnitFlags.IsInfantry;
             else if (reg.unittyp == TacticalUnitType.Cavalry) flags |= UnitFlags.IsCavalry;

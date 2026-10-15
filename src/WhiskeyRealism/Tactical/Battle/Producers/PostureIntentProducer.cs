@@ -258,6 +258,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 _mainArrivalHold.Remove(id);
             }
 
+            // BC9 stance guard: a Defender's leaf brigade gets no Probe or attack task.
+            task = PostureStanceGuard.Task(task, army.CurrentBattleStance);
+
             if (overrideReason != null)
                 OnceLog.Info("tactical-leaf-cascade:opportunity-override",
                     "[TacticalLeafCascade] opportunity override: " + leaf.LeafTask + " -> " + task
@@ -375,7 +378,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 CommandIntentResolution resolution = army.ResolveCommandIntentForGroup(0, instanceId);
                 return resolution.Found &&
                     CommandNodeOperationsRuntime.TryBuildSingle(resolution.Intent, army.CurrentOperation,
-                        side.OperationsLedger?.CurrentObjectives, out state);
+                        side.OperationsLedger?.CurrentObjectives, army.CurrentBattleStance, out state);
             }
             catch
             {
@@ -412,6 +415,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // CommandPostureExecutor.Decide and the target, as intents.
     internal static class PosturePipeline
     {
+        internal const string ProbeReason = "probe-nomination";
+
         internal static bool Run(
             BattleSnapshot s,
             PostureTick.State t,
@@ -437,16 +442,29 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             bool hasCavalry = ((rec.Flags | descendants) & UnitFlags.IsCavalry) != 0;
             bool visibleEnemy = s.ClosestVisibleEnemy(i, out _) >= 0;
+            BattleStance stance = army != null ? army.CurrentBattleStance : BattleStance.Meeting;
+            bool defender = stance == BattleStance.Defender;
+
+            // BC9 reconnaissance in force: the recon planner nominated this group as its
+            // band's probe in the Probe phase (BattleRecon.ProbeTick). The role is
+            // assigned here, by the rewrite: the allocator's DirectChildRole has no Probe.
+            bool probe = recordTick && ReconIntentProducer.TryProbe(s.Alliance, rec.InstanceId, out _, out _);
+            if (probe)
+            {
+                state = WithRoleAndTask(state, CommandNodeRole.Probe, CommandTaskType.Probe);
+                if (hasOrder) order = order.WithTask(CommandTaskType.Probe, ProbeReason);
+            }
 
             TacticalGrandTacticianReconDecision recon = TacticalGrandTacticianReconDoctrine.Decide(
-                new TacticalGrandTacticianReconInput(state.Role, state.Task, hasCavalry, visibleEnemy, underRecentFire: closeEngaged));
+                new TacticalGrandTacticianReconInput(state.Role, state.Task, visibleEnemy, underRecentFire: closeEngaged,
+                    sideDefending: defender));
             if (recon.Task != state.Task)
             {
                 state = WithRoleAndTask(state, state.Role, recon.Task);
                 if (hasOrder) order = order.WithTask(recon.Task, recon.Reason);
             }
 
-            if (hasCavalry && TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
+            if (hasCavalry && !probe && TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
             {
                 state = WithRoleAndTask(state, state.Role, cavalryTask);
                 if (hasOrder) order = order.WithTask(cavalryTask, cavalryReason);
@@ -471,6 +489,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 state = WithRoleAndTask(state, state.Role, overridden);
                 if (hasOrder) order = order.WithTask(overridden, overrideReason);
             }
+
+            // BC9 stance guard, after every rewrite above (GT recon, cavalry follow, local
+            // emergency, opportunity): a Defender gets no Probe and no attack task.
+            PostureStanceGuard.Apply(stance, ref state, hasOrder, ref order);
+
+            // BC9: a probe that ended short of a superior enemy holds the ground it gained
+            // while the ledger keeps the task it probed under (BattleRecon.ProbeTick).
+            float holdX = 0f, holdZ = 0f, holdDirX = 0f, holdDirZ = 0f;
+            bool holding = recordTick && !probe && ReconIntentProducer.TryHold(s.Alliance, rec.InstanceId, state.Task,
+                out holdX, out holdZ, out holdDirX, out holdDirZ);
 
             int targetFormation = rec.UnitTyp > TacticalUnitType.MaxCombat
                 ? CommandFormationCorrection.TargetFormationForTask(state.Task, rec.Formation)
@@ -516,6 +544,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 PostureTelemetry.Group(s, i, reason, state, decision, 0, "nav-budget-deferred");
                 return false;
             }
+            string targetReason = hasTarget ? decision.Reason : "target-unresolved";
+            if (hasTarget && holding && BattleRecon.HoldBlocks(decision.Target, holdX, holdZ, holdDirX, holdDirZ, x, z))
+            {
+                // No move back over the probe's ground: the move intents need a target.
+                hasTarget = false;
+                targetReason = BattleRecon.HoldReason;
+            }
 
             // #61 SetFormation: threat facing for holding tasks and the refused
             // flank in contact, on the formation channels.
@@ -557,7 +592,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (shapes && needsFacing && rec.UnitTyp > TacticalUnitType.MaxCombat)
                 submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, heading, state.Task, refuse,
                     priority, source, reason, t.RegimentQueue, t.Regiments);
-            PostureTelemetry.Group(s, i, reason, state, decision, submitted, hasTarget ? decision.Reason : "target-unresolved");
+            PostureTelemetry.Group(s, i, reason, state, decision, submitted, targetReason);
             return submitted > 0;
         }
 
@@ -598,21 +633,20 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             EnemyObservation[] obs = s.Observations;
             bool hasTarget = target >= 0;
             float fear = Mathf.Clamp01(s.Own[i].Morale + (flankRisk ? -0.25f : 0f));
+            // The target is the closest VISIBLE enemy, so it is never hidden; its square
+            // and its kind are read from its own record (BC6b precedent).
             TacticalCavalryFollowDecision follow = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
                 mode,
                 hasFollowTarget: hasTarget,
-                targetHidden: false,
-                targetIsOfficer: hasTarget && obs[target].UnitTyp == TacticalUnitType.Officer,
+                targetIsOfficer: hasTarget && BattleRecon.IsOfficerTarget(obs[target].UnitTyp),
                 targetInFort: hasTarget && TargetGarrisoned(s, t, obs[target].InstanceId),
-                targetInSquare: false,
+                targetInSquare: hasTarget && TargetInSquare(s, t, obs[target].InstanceId),
                 targetHasInfantryOrArtillerySupport: hasTarget && TargetHasCloseSupport(s, target),
                 canChargeTarget: hasTarget && distance <= 350f,
-                leaderAllowsCharge: true,
                 fearAdvantage01: fear,
                 enemyClose: hasTarget && distance > 0f && distance <= 350f,
                 enemyDistance: hasTarget ? distance : 0f,
-                longRange: 300f,
-                atFollowLocation: false));
+                longRange: 300f));
 
             switch (follow.Action)
             {
@@ -632,6 +666,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private static bool TargetGarrisoned(BattleSnapshot s, PostureTick.State t, int enemyId)
         {
             return t.EnemyIndexById.TryGetValue(enemyId, out int e) && (s.EnemyRecords[e].Flags & UnitFlags.Garrisoned) != 0;
+        }
+
+        // Regiment formation 4 is the square (118174).
+        private static bool TargetInSquare(BattleSnapshot s, PostureTick.State t, int enemyId)
+        {
+            return t.EnemyIndexById.TryGetValue(enemyId, out int e) &&
+                BattleRecon.IsSquare(s.EnemyRecords[e].UnitTyp, s.EnemyRecords[e].Formation);
         }
 
         // A visible infantry or artillery enemy within close contact of the target.
@@ -682,6 +723,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             x = 0f;
             z = 0f;
             t.NavDeferred = false;
+            // BC9: a Scout or Probe task's forward target is where the recon planner looks
+            // (its probe nomination, else BattleRecon.LookPoint), not an objective
+            // stand-off; a break-off or recovery keeps its own target.
+            if (BattleRecon.UsesLookPoint(state.Task, kind) && ReconIntentProducer.TryLookTarget(s, i, out x, out z))
+                return PostureSense.IsMoveAway(s.Own[i], x, z);
             bool resolved;
             switch (kind)
             {
@@ -792,29 +838,38 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         // Regiment.currentsetobjective, which the snapshot does not carry.)
         private static bool TryPrimaryObjectivePoint(BattleSnapshot s, int i, TacticalBattleOrchestrator side, out float x, out float z)
         {
-            x = 0f;
-            z = 0f;
-            var objectives = side?.OperationsLedger?.CurrentObjectives;
-            if (objectives != null && objectives.Count > 0)
-            {
-                string primary = side.Army != null ? side.Army.CurrentOperation.PrimaryObjectiveId : "objective-unknown";
-                for (int k = 0; k < objectives.Count; k++)
-                {
-                    if (!string.Equals(objectives[k].Observation.ObjectiveId, primary, StringComparison.Ordinal)) continue;
-                    x = objectives[k].Observation.Location.X;
-                    z = objectives[k].Observation.Location.Z;
-                    return PostureSense.HasPoint(x, z);
-                }
-                x = objectives[0].Observation.Location.X;
-                z = objectives[0].Observation.Location.Z;
-                return PostureSense.HasPoint(x, z);
-            }
+            if (TryOperationObjective(side, out x, out z, out bool listed) || listed) return PostureSense.HasPoint(x, z);
 
             ref UnitRecord rec = ref s.Own[i];
             x = rec.LastWaypointX;
             z = rec.LastWaypointZ;
             return PostureSense.HasPoint(x, z) &&
                 PostureSense.Distance(rec.X, rec.Z, x, z) >= PostureSense.MinWaypointMeters;
+        }
+
+        /// <summary>
+        /// The operation's primary objective from the ledger, else its first objective.
+        /// <paramref name="listed"/> is true when the ledger lists any objective.
+        /// </summary>
+        internal static bool TryOperationObjective(TacticalBattleOrchestrator side, out float x, out float z, out bool listed)
+        {
+            x = 0f;
+            z = 0f;
+            listed = false;
+            var objectives = side?.OperationsLedger?.CurrentObjectives;
+            if (objectives == null || objectives.Count == 0) return false;
+            listed = true;
+            string primary = side.Army != null ? side.Army.CurrentOperation.PrimaryObjectiveId : "objective-unknown";
+            int pick = 0;
+            for (int k = 0; k < objectives.Count; k++)
+            {
+                if (!string.Equals(objectives[k].Observation.ObjectiveId, primary, StringComparison.Ordinal)) continue;
+                pick = k;
+                break;
+            }
+            x = objectives[pick].Observation.Location.X;
+            z = objectives[pick].Observation.Location.Z;
+            return PostureSense.HasPoint(x, z);
         }
 
         private static bool TryNavPlan(BattleSnapshot s, PostureTick.State t, int i, CommandNodeOperationalState state,
@@ -1012,7 +1067,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         // BattleUnits keeps the scene's BattlefieldSetup in a private static (set at
         // 79055/79132, nulled on destroy at 79230).
-        private static BattlefieldSetup Bfs()
+        internal static BattlefieldSetup Bfs()
         {
             if (!_bfsResolved)
             {
@@ -1173,7 +1228,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     TacticalFacingPulseScope scope = ScopeFor(g.State.Echelon);
                     if (scope == TacticalFacingPulseScope.Division)
                     {
-                        TacticalFacingPulseDecision axis = Evaluate(s, t, executor, i, g.State.Task, scope, -1, g.CloseEngaged, g.FlankRisk);
+                        TacticalFacingPulseDecision axis = TacticalFacingPulseDoctrine.Decide(
+                            Input(s, t, executor, i, g.State.Task, scope, -1, g.CloseEngaged, g.FlankRisk, -1f));
                         PostureTelemetry.Facing(s, i, scope, g.State.Task, axis, false);
                         continue;
                     }
@@ -1181,26 +1237,21 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
                     ref UnitRecord rec = ref s.Own[i];
                     int targetFormation = CommandFormationCorrection.TargetFormationForTask(g.State.Task, rec.Formation);
-                    TacticalFacingPulseDecision brigade = Evaluate(s, t, executor, i, g.State.Task, scope, targetFormation, g.CloseEngaged, g.FlankRisk);
-                    bool submitted = false;
-                    if (brigade.ShouldWrite && brigade.TargetFormation >= 0 && brigade.TargetFormation != rec.Formation)
-                    {
-                        sink.Submit(PostureIntentPlan.FacingPulseFormation(rec.InstanceId, brigade.TargetFormation));
-                        submitted = true;
-                    }
+                    TacticalFacingPulseInput brigadeInput = Input(s, t, executor, i, g.State.Task, scope, targetFormation, g.CloseEngaged, g.FlankRisk, -1f);
+                    TacticalFacingPulseDecision brigade = TacticalFacingPulseDoctrine.Decide(brigadeInput);
                     // #61 sent the brigade pulse through SetFormation, whose threat
-                    // facing (holding tasks only) rotated the regiments in contact or
-                    // wheeled the group out of it. On a clean subtree the group order
-                    // is as shipped; a detached or player-owned descendant leaves the
-                    // facing to the per-regiment pulses below.
-                    if (brigade.ShouldWrite && CommandFormationCorrection.ShouldFaceThreat(g.State.Task) &&
-                        PostureSense.SubtreeAcceptsGroupFacing(t.Descendants[i]) &&
-                        CommandFormationCorrection.NeedsFacingCorrection(rec.RotationY, brigade.TargetFacingDegrees, PostureSense.FacingToleranceDegrees))
-                    {
-                        sink.Submit(PostureIntentPlan.FacingPulse(rec.InstanceId, brigade.TargetFacingDegrees));
-                        submitted = true;
-                    }
+                    // facing (holding tasks only; BC9: also a Screen/Probe watching an
+                    // entry point) rotated the regiments in contact or wheeled the group
+                    // out of it. On a clean subtree the group order is as shipped; a
+                    // detached or player-owned descendant leaves the facing to the
+                    // per-regiment pulses below.
+                    bool cleanSubtree = PostureSense.SubtreeAcceptsGroupFacing(t.Descendants[i]);
+                    bool submitted = PostureIntentPlan.SubmitBrigadePulse(sink, rec.InstanceId, brigadeInput, brigade, cleanSubtree) > 0;
                     PostureTelemetry.Facing(s, i, scope, g.State.Task, brigade, submitted);
+                    // BC9: regiments of a brigade turning to an entry point take the
+                    // brigade's bearing; on a clean subtree the group facing turns them.
+                    bool entry = brigade.ShouldWrite && brigadeInput.ThreatSource == TacticalFacingThreatSource.Entry;
+                    float entryHeading = entry ? brigade.TargetFacingDegrees : -1f;
 
                     int regiments = PostureSense.CollectRotatableRegiments(s, i, t.RegimentQueue, t.Regiments);
                     int pulses = 0;
@@ -1209,9 +1260,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         int u = t.Regiments[r];
                         bool engaged = g.CloseEngaged || PostureSense.CloseEngaged(s, u, t.Descendants[u]);
                         bool flank = g.FlankRisk || BattleWriterPolicy.PerceivedFlankRisk(s, u, t.FlankThreatMean);
+                        if (entry && cleanSubtree && s.ClosestVisibleEnemy(u, out _) < 0) continue;
                         // R9: regiments only rotate — the current formation is the target.
-                        TacticalFacingPulseDecision d = Evaluate(s, t, executor, u, g.State.Task, TacticalFacingPulseScope.Regiment,
-                            s.Own[u].Formation, engaged, flank);
+                        TacticalFacingPulseDecision d = TacticalFacingPulseDoctrine.Decide(Input(s, t, executor, u, g.State.Task,
+                            TacticalFacingPulseScope.Regiment, s.Own[u].Formation, engaged, flank, entry ? entryHeading : -2f));
                         if (d.Action != TacticalFacingPulseAction.CorrectFacing) continue;
                         sink.Submit(PostureIntentPlan.FacingPulse(s.Own[u].InstanceId, d.TargetFacingDegrees));
                         PostureTelemetry.Facing(s, u, TacticalFacingPulseScope.Regiment, g.State.Task, d, true);
@@ -1222,26 +1274,44 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
         }
 
-        private static TacticalFacingPulseDecision Evaluate(BattleSnapshot s, PostureTick.State t, OrderExecutor executor, int u,
-            CommandTaskType task, TacticalFacingPulseScope scope, int targetFormation, bool closeEngaged, bool flankRisk)
+        // entryHeading: >= 0 a bearing handed down by the brigade (regiments of an
+        // entry-facing brigade); -1 look up the unit's own entry bearing; -2 none.
+        private static TacticalFacingPulseInput Input(BattleSnapshot s, PostureTick.State t, OrderExecutor executor, int u,
+            CommandTaskType task, TacticalFacingPulseScope scope, int targetFormation, bool closeEngaged, bool flankRisk, float entryHeading)
         {
             ref UnitRecord rec = ref s.Own[u];
             int k = s.ClosestVisibleEnemy(u, out float distance);
             bool hasThreat = k >= 0;
             float heading = hasThreat ? PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z) : -1f;
+            TacticalFacingThreatSource source = hasThreat ? TacticalFacingThreatSource.Visible : TacticalFacingThreatSource.None;
+            // BC9: with nothing visible, a screen, probe or flank guard faces where
+            // unseen enemies come from (the doctrine refuses the source for other tasks).
+            if (!hasThreat && TacticalFacingPulseDoctrine.WatchesEntry(task))
+            {
+                if (entryHeading >= 0f)
+                {
+                    heading = entryHeading;
+                    source = TacticalFacingThreatSource.Entry;
+                }
+                else if (entryHeading > -1.5f && ReconIntentProducer.TryEntryBearing(s, u, out float own))
+                {
+                    heading = own;
+                    source = TacticalFacingThreatSource.Entry;
+                }
+            }
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[u]);
             bool recent = scope == TacticalFacingPulseScope.Regiment
                 ? PostureIntentPlan.IssuedWithin(executor, rec.InstanceId, OrderChannel.Facing, IntentSource.FacingPulse, s.DoctrineHours, RegimentCooldownHours)
                 : PostureIntentPlan.IssuedWithin(executor, rec.InstanceId, OrderChannel.Formation, IntentSource.FacingPulse, s.DoctrineHours, BrigadeCooldownHours);
-            return TacticalFacingPulseDoctrine.Decide(new TacticalFacingPulseInput(
+            return new TacticalFacingPulseInput(
                 scope,
                 task,
                 rec.Formation,
                 targetFormation,
                 rec.RotationY,
                 heading,
-                hasThreat,
-                hasThreat ? TacticalFacingThreatSource.Visible : TacticalFacingThreatSource.None,
+                source != TacticalFacingThreatSource.None,
+                source,
                 closeEngaged,
                 flankRisk,
                 (rec.Flags & UnitFlags.PlayerOwned) != 0,
@@ -1252,7 +1322,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 PostureSense.FacingToleranceDegrees,
                 isArtillery: (rec.Flags & UnitFlags.IsArtillery) != 0,
                 // Fire range is not in the snapshot: a visible threat within close contact.
-                threatWithinFireRange: hasThreat && distance <= PostureSense.CloseContactMeters));
+                threatWithinFireRange: hasThreat && distance <= PostureSense.CloseContactMeters);
         }
 
         private static TacticalFacingPulseScope ScopeFor(CommandEchelonKind echelon)
@@ -1332,7 +1402,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             TacticalFireControlDecision decision = TacticalFireControlDoctrine.Decide(new TacticalFireControlInput(
                 typ,
-                mounted: false,
+                mounted: (f & UnitFlags.Mounted) != 0,
                 state.Task,
                 state.Role,
                 hasTarget && distance > 0f,

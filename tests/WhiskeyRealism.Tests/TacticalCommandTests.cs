@@ -271,7 +271,7 @@ internal static class TacticalCommandTests
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
             new ForceAvailabilitySnapshot(3000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
-        ledger.StoreDoctrineForCommandStates(commandStates);
+        ledger.StoreDoctrineForCommandStates(commandStates, BattleStance.Meeting);
 
         AssertEqual(TacticalOperationPhase.Committed, ledger.CurrentOperation.Phase, "initial committed phase");
         AssertEqual("ridge-a", ledger.CurrentOperation.PrimaryObjectiveId, "initial primary");
@@ -283,7 +283,7 @@ internal static class TacticalCommandTests
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
             new ForceAvailabilitySnapshot(3000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
-        ledger.StoreDoctrineForCommandStates(commandStates);
+        ledger.StoreDoctrineForCommandStates(commandStates, BattleStance.Meeting);
 
         AssertEqual(TacticalOperationPhase.Committed, ledger.CurrentOperation.Phase, "committed phase preserved");
         AssertEqual("ridge-a", ledger.CurrentOperation.PrimaryObjectiveId, "committed primary preserved");
@@ -305,7 +305,7 @@ internal static class TacticalCommandTests
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
             new ForceAvailabilitySnapshot(3000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
-        ledger.StoreDoctrineForCommandStates(commandStates);
+        ledger.StoreDoctrineForCommandStates(commandStates, BattleStance.Meeting);
 
         AssertEqual(TacticalOperationPhase.Forming, ledger.CurrentOperation.Phase, "initial forming phase");
         AssertEqual("ridge-a", ledger.CurrentOperation.PrimaryObjectiveId, "initial primary");
@@ -317,7 +317,7 @@ internal static class TacticalCommandTests
             new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
             new ForceAvailabilitySnapshot(3000f, 0.30f),
             new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
-        ledger.StoreDoctrineForCommandStates(commandStates);
+        ledger.StoreDoctrineForCommandStates(commandStates, BattleStance.Meeting);
 
         AssertEqual(TacticalOperationPhase.Committed, ledger.CurrentOperation.Phase, "forming may retarget before commit");
         AssertEqual("ridge-b", ledger.CurrentOperation.PrimaryObjectiveId, "forming retargeted to live objective");

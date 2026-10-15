@@ -1236,126 +1236,99 @@ internal static class TacticalDoctrineTests
 
     private static void ScourgeCavalryFollowDoctrineFiltersRaidAndScreensAway()
     {
-        var hiddenScout = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
+        // BC9: targetHidden (structurally false on a closest-visible target),
+        // leaderAllowsCharge (a constant) and atFollowLocation (unread) are gone.
+        var scout = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
             TacticalCavalryFollowMode.Scout,
             hasFollowTarget: true,
-            targetHidden: true,
             targetIsOfficer: false,
             targetInFort: false,
             targetInSquare: false,
             targetHasInfantryOrArtillerySupport: false,
             canChargeTarget: false,
-            leaderAllowsCharge: false,
             fearAdvantage01: 0f,
             enemyClose: false,
             enemyDistance: 0f,
-            longRange: 300f,
-            atFollowLocation: false));
-        AssertEqual(TacticalCavalryFollowAction.ClearFollowTarget, hiddenScout.Action, "hidden scout target clears");
+            longRange: 300f));
+        AssertEqual(TacticalCavalryFollowAction.RequestScoutLocation, scout.Action, "a scout asks for a scout location (BattleRecon.LookPoint)");
 
         var invalidRaid = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
             TacticalCavalryFollowMode.Raid,
             hasFollowTarget: true,
-            targetHidden: false,
             targetIsOfficer: false,
             targetInFort: false,
             targetInSquare: true,
             targetHasInfantryOrArtillerySupport: false,
             canChargeTarget: true,
-            leaderAllowsCharge: true,
             fearAdvantage01: 1f,
             enemyClose: false,
             enemyDistance: 0f,
-            longRange: 300f,
-            atFollowLocation: false));
+            longRange: 300f));
         AssertEqual(TacticalCavalryFollowAction.ClearFollowTarget, invalidRaid.Action, "raid clears square target");
 
         var validRaid = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
             TacticalCavalryFollowMode.Raid,
             hasFollowTarget: true,
-            targetHidden: false,
             targetIsOfficer: false,
             targetInFort: false,
             targetInSquare: false,
             targetHasInfantryOrArtillerySupport: false,
             canChargeTarget: true,
-            leaderAllowsCharge: true,
             fearAdvantage01: 0.8f,
             enemyClose: false,
             enemyDistance: 120f,
-            longRange: 300f,
-            atFollowLocation: false));
+            longRange: 300f));
         AssertEqual(TacticalCavalryFollowAction.ChargeRaidTarget, validRaid.Action, "valid raid charges");
 
         var screen = TacticalCavalryFollowDoctrine.Decide(new TacticalCavalryFollowInput(
             TacticalCavalryFollowMode.Screen,
             hasFollowTarget: false,
-            targetHidden: false,
             targetIsOfficer: false,
             targetInFort: false,
             targetInSquare: false,
             targetHasInfantryOrArtillerySupport: false,
             canChargeTarget: false,
-            leaderAllowsCharge: false,
             fearAdvantage01: 0f,
             enemyClose: true,
             enemyDistance: 150f,
-            longRange: 300f,
-            atFollowLocation: false));
+            longRange: 300f));
         AssertEqual(TacticalCavalryFollowAction.GetAway, screen.Action, "screen falls back from close enemy");
     }
 
     private static void GrandTacticianReconDoctrineUsesCavalryScoutAndInfantryProbe()
     {
-        var cavalry = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+        // BC9: the cavalry branch is gone (a group with any cavalry was a "scout");
+        // regiment scouting is the recon producer's.
+        var probe = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
             CommandNodeRole.Probe,
             CommandTaskType.Probe,
-            hasCavalryCapability: true,
             hasFowVisibleEnemy: false,
             underRecentFire: false));
-        var infantry = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
-            CommandNodeRole.Probe,
-            CommandTaskType.Probe,
-            hasCavalryCapability: false,
-            hasFowVisibleEnemy: false,
-            underRecentFire: false));
-        var cavalryScreen = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+        var screen = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
             CommandNodeRole.ScreeningForce,
             CommandTaskType.Screen,
-            hasCavalryCapability: true,
             hasFowVisibleEnemy: false,
             underRecentFire: false));
 
-        AssertEqual(CommandTaskType.Scout, cavalry.Task, "cavalry probe scouts");
-        AssertEqual("cavalry-scout-fow", cavalry.Reason, "cavalry reason");
-        AssertEqual(CommandTaskType.Probe, infantry.Task, "infantry probes by bounds");
-        AssertEqual("infantry-probe-by-bounds", infantry.Reason, "infantry reason");
-        AssertEqual(CommandTaskType.Screen, cavalryScreen.Task, "cavalry screen screens");
+        AssertEqual(CommandTaskType.Probe, probe.Task, "probes by bounds");
+        AssertEqual("infantry-probe-by-bounds", probe.Reason, "probe reason");
+        AssertEqual(CommandTaskType.Screen, screen.Task, "screen screens");
     }
 
     private static void GrandTacticianReconDoctrinePreventsNoContactBlindAssault()
     {
-        var infantryMain = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
+        var blindMain = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
             CommandNodeRole.MainEffort,
             CommandTaskType.AttackObjective,
-            hasCavalryCapability: false,
-            hasFowVisibleEnemy: false,
-            underRecentFire: false));
-        var cavalryMain = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
-            CommandNodeRole.MainEffort,
-            CommandTaskType.AttackObjective,
-            hasCavalryCapability: true,
             hasFowVisibleEnemy: false,
             underRecentFire: false));
         var visibleMain = TacticalGrandTacticianReconDoctrine.Decide(new TacticalGrandTacticianReconInput(
             CommandNodeRole.MainEffort,
             CommandTaskType.AttackObjective,
-            hasCavalryCapability: false,
             hasFowVisibleEnemy: true,
             underRecentFire: false));
 
-        AssertEqual(CommandTaskType.Probe, infantryMain.Task, "infantry blind assault becomes probe");
-        AssertEqual(CommandTaskType.Scout, cavalryMain.Task, "cavalry blind assault becomes scout");
+        AssertEqual(CommandTaskType.Probe, blindMain.Task, "blind assault becomes probe");
         AssertEqual(CommandTaskType.AttackObjective, visibleMain.Task, "visible contact preserves attack");
     }
 

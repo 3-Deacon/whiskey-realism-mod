@@ -93,6 +93,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableBattleFogHonestPerception;
         public static ConfigEntry<bool> EnableInfantryChargeDoctrine;
         public static ConfigEntry<bool> EnableExperienceAndDrillAiWeighting;
+        public static ConfigEntry<bool> EnableBattleReconnaissance;
         public static ConfigEntry<float> OpportunityHysteresisMinHoldSeconds;
         public static ConfigEntry<float> BrigadeTaskHoldSeconds;
         public static ConfigEntry<bool> EnableArtilleryAllStanceAudit;
@@ -734,6 +735,25 @@ namespace WhiskeyRealism
                 "ratios x (1 + (1 - lead commander initiative) x vanilla's 0.25), as vanilla scales its own. Off: headcount ratios and " +
                 "sectors, undivided thresholds, no break-point withdrawal, no charge odds pre-filter, unscaled offensive ratios. The battle " +
                 "rules read this flag once per battle (a change applies from the next battle); the campaign scaling reads it on each call.");
+            EnableBattleReconnaissance = Config.Bind(
+                "Tactical",
+                "Enable Battle Reconnaissance",
+                true,
+                "Default ON. The fog-honest battle AI goes and looks. Cavalry reconnaissance: when an enemy-side entry point has not been " +
+                "watched for an hour, a stretch of the front has gone unobserved, or intel confidence is below 0.35 (straight ahead " +
+                "before any contact, the nearest remembered enemy after it), one standing AI cavalry regiment of a settled brigade rides to look (150 m short of an " +
+                "entry point, vanilla's out-of-contact distance), stops on first sight, watches for 3 battle minutes and rides back to its " +
+                "brigade; never toward a visible enemy at least as strong, at most 4 missions per side per battle hour. Reconnaissance in " +
+                "force: in the army's Probe phase, a side that is not the battle's defender advances one AI group per front band with no " +
+                "visible enemy 200 m (infantry sight) in screen stance and stops it on contact, once per band per battle hour; a probe " +
+                "that met no enemy at least its size holds the ground it gained until its ledger task changes. Scout and " +
+                "Probe tasks advance by such bounds along the front (toward the objective before any sighting) instead of to an " +
+                "objective stand-off; screening and probing brigades (and their regiments) with nothing in sight turn to face the " +
+                "stalest unwatched enemy entry point, flank guards too; holding and reserve tasks keep their front facing. Skirmisher screen: AI " +
+                "skirmisher companies of a screening (or advancing attack-stance) line stand 100 m ahead (vanilla's contact distance) " +
+                "instead of 30 m while nothing is in their range, and fall back to vanilla's 30 m on contact. Never W&L player-owned " +
+                "units; orders go through the battle-core order executor (Tactical Commander Mode = Active). Off: no recon or probe " +
+                "moves, the shipped objective stand-off for Scout/Probe tasks, vanilla's 30 m skirmish line.");
             EnableTacticalDeploymentObserver = Config.Bind(
                 "Tactical Diagnostics",
                 "Enable Tactical Deployment Observer",

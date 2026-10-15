@@ -60,6 +60,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private float _entryShare = 1f;
         private bool _hasCoverage;
 
+        // BC9 where-to-look reads: the enemy-side entry points with the doctrine hour an
+        // own unit last watched each (-1 never). Pooled, grow-only.
+        private int[] _entryIds = new int[8];
+        private float[] _entryX = new float[8];
+        private float[] _entryZ = new float[8];
+        private float[] _entryWatched = new float[8];
+        private int[] _prevIds = new int[8];
+        private float[] _prevWatched = new float[8];
+        private int _entryCount;
+
         public float EstimatedEnemyStrength => _largestSeen;
         public bool HadContact => _lastContactHours >= 0f;
 
@@ -74,6 +84,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _frameHeading = float.NaN;
             _entryShare = 1f;
             _hasCoverage = false;
+            _entryCount = 0;
         }
 
         /// <summary>
@@ -150,6 +161,95 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             float d = Math.Abs(a - b) % 360f;
             return d > 180f ? 360f - d : d;
+        }
+
+        /// <summary>
+        /// The enemy-side map entry points this build (ids, positions) and which an own
+        /// unit watches now (BuildEnemyVisibleState's watched set). A point keeps the hour
+        /// it was last watched across builds; one never watched reads -1. No allocation
+        /// once the arrays fit.
+        /// </summary>
+        public void ObserveEntryPoints(float nowHours, int[] ids, float[] xs, float[] zs, bool[] watched, int count)
+        {
+            if (!Finite(nowHours) || ids == null || xs == null || zs == null || watched == null) return;
+            if (count > ids.Length) count = ids.Length;
+            if (count > xs.Length) count = xs.Length;
+            if (count > zs.Length) count = zs.Length;
+            if (count > watched.Length) count = watched.Length;
+            if (count < 0) count = 0;
+
+            int previous = _entryCount;
+            if (_prevIds.Length < previous)
+            {
+                _prevIds = new int[_entryIds.Length];
+                _prevWatched = new float[_entryIds.Length];
+            }
+            Array.Copy(_entryIds, _prevIds, previous);
+            Array.Copy(_entryWatched, _prevWatched, previous);
+            if (_entryIds.Length < count)
+            {
+                int size = Math.Max(count, _entryIds.Length * 2);
+                _entryIds = new int[size];
+                _entryX = new float[size];
+                _entryZ = new float[size];
+                _entryWatched = new float[size];
+            }
+
+            for (int k = 0; k < count; k++)
+            {
+                float stamp = -1f;
+                for (int p = 0; p < previous; p++)
+                {
+                    if (_prevIds[p] != ids[k]) continue;
+                    stamp = _prevWatched[p];
+                    break;
+                }
+                if (watched[k]) stamp = nowHours;
+                _entryIds[k] = ids[k];
+                _entryX[k] = xs[k];
+                _entryZ[k] = zs[k];
+                _entryWatched[k] = stamp;
+            }
+            _entryCount = count;
+        }
+
+        public int EntryPointCount => _entryCount;
+
+        /// <summary>Entry point <paramref name="index"/>: position and the doctrine hour it was last watched (-1 never).</summary>
+        public bool TryGetEntryPoint(int index, out float x, out float z, out float lastWatchedHours)
+        {
+            x = 0f; z = 0f; lastWatchedHours = -1f;
+            if (index < 0 || index >= _entryCount) return false;
+            x = _entryX[index];
+            z = _entryZ[index];
+            lastWatchedHours = _entryWatched[index];
+            return true;
+        }
+
+        /// <summary>Heading of the lateral frame the coverage cells are kept in (NaN before any coverage).</summary>
+        public float FrameHeading => _frameHeading;
+
+        /// <summary>
+        /// The current coverage band whose ground was observed least recently: its
+        /// lateral centre in the ledger's world-anchored frame (x·right + z·right of
+        /// <see cref="FrameHeading"/>) and its recency on [0, 1].
+        /// </summary>
+        public bool TryStalestBand(float nowHours, out float lateralCenter, out float recency)
+        {
+            lateralCenter = 0f;
+            recency = 1f;
+            if (!_hasCoverage || _bandMin.Length == 0 || !Finite(nowHours)) return false;
+            int best = -1;
+            for (int b = 0; b < _bandMin.Length; b++)
+            {
+                float r = BandRecency(_bandMin[b], _bandMax[b], nowHours);
+                if (best >= 0 && r >= recency) continue;
+                best = b;
+                recency = r;
+            }
+            if (best < 0) return false;
+            lateralCenter = (_bandMin[best] + _bandMax[best]) * 0.5f;
+            return true;
         }
 
         /// <summary>

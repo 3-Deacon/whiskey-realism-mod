@@ -11,7 +11,8 @@ namespace WhiskeyRealism.Tactical.Battle
     //
     // The order is the order producers run in an arbiter tick. It matters only
     // where a producer reads what an earlier one decided this tick: the facing
-    // pulse and fire control read the posture producer's per-group record. Claims
+    // pulse, fire control and recon (BC9: a scout's brigade the posture producer
+    // ordered this tick is not used) read the posture producer's per-group record. Claims
     // themselves are resolved by priority, not order (OrderArbiter.Resolve). There
     // is no "Play" slot: the geometric play feeds the allocator's zone roles and
     // has no orders of its own (plan BC5a As built).
@@ -24,7 +25,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public static readonly IReadOnlyList<string> Order = new[]
         {
             "Withdrawal", "ArtilleryDoctrine", "ArtilleryPointBlank", "GroupStance", "ChargeDemotion", "Posture",
-            "FacingPulse", "FireControl", "DivisionPlay", "ReserveRelease", "Charge",
+            "FacingPulse", "FireControl", "DivisionPlay", "Recon", "ReserveRelease", "Charge",
         };
 
         private const string ThrewKeyPrefix = "tactical-battle-core:producer-threw:";
@@ -77,7 +78,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>
         /// OnceLog key for a producer that threw, built once per producer (a fixed
-        /// set of eleven, so the keys stay static); prefixed "tactical" so
+        /// set of twelve, so the keys stay static); prefixed "tactical" so
         /// OnceLog.ResetTactical re-arms it each battle.
         /// </summary>
         public string ThrewKey(int index) => _threwKeys[index];
