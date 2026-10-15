@@ -2,16 +2,16 @@
 
 Small arms and cannon: autoresolve damage, unit merges, AI purchasing, the W&L federal weapon budget, and Whiskey's own arming need. Decompile `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs`, Steam build 14703111. Config values from `<GTCW>/Config/` (`campaignprefs.txt`, `weapons.txt`, `dlcwl_config.dat`). Research record: the 2026-10-15 armament investigation (vanilla economy of arms, AI decisions, W&L, Whiskey use). Plan: [`../superpowers/plans/2026-10-15-arms-bugs.md`](../superpowers/plans/2026-10-15-arms-bugs.md).
 
-Ids continue past the highest used across the open branches on 2026-10-15 (`BUG-AI-016`, `BUG-WL-015`, `BUG-BAT-001`); renumber at merge if a sibling branch took them first. Every fix applies to every side the way vanilla's own rule does, the W&L player included.
+Ids continue past the highest used on `main` (`BUG-AI-016`, `BUG-WL-015`, `BUG-BAT-001`). Every fix applies to every side the way vanilla's own rule does, the W&L player included.
 
 | ID | Status | Area | Fix |
 |---|---|---|---|
-| `BUG-BAT-002` | In progress | Autoresolve | `AutoresolveStandardGunPatch` (Transpiler, user-approved) + one-shot count |
+| `BUG-BAT-002` | In progress | Autoresolve | #105 `AutoresolveStandardGunPatch` (Transpiler, user-approved) + one-shot count |
 | `BUG-BAT-003` | In progress | Unit merge | `ArtilleryCombineGunTransferPatch` (#34 file): Prefix snapshot + Postfix settle |
-| `BUG-WL-016` | In progress | W&L weapon budget | `WlWeaponBudgetPatch.OrderScope`: Prefix + Finalizer |
-| `BUG-WL-017` | In progress | W&L weapon budget | `WlWeaponBudgetPatch.PurchaseGate`: Prefix swap + Finalizer restore |
-| `BUG-AI-017` | In progress | AI purchasing | `AiWeaponPurchaseOrderablePatch`: Prefix mask + Finalizer restore |
-| `BUG-AI-018` | In progress | AI weapon factor | `GroupWeaponStrengthGuardPatch`: Postfix |
+| `BUG-WL-016` | In progress | W&L weapon budget | #106 `WlWeaponBudgetPatch.OrderScope`: Prefix + Finalizer |
+| `BUG-WL-017` | In progress | W&L weapon budget | #106 `WlWeaponBudgetPatch.PurchaseGate`: Prefix swap + Finalizer restore |
+| `BUG-AI-017` | In progress | AI purchasing | #107 `AiWeaponPurchaseOrderablePatch`: Prefix mask + Finalizer restore |
+| `BUG-AI-018` | In progress | AI weapon factor | #108 `GroupWeaponStrengthGuardPatch`: Postfix |
 | `BUG-AI-019` | Recorded | Import cost | Left as vanilla (needs a Transpiler; intent of the Union branch not certain) |
 | `BUG-AI-020` | Recorded | Weapon -1 index | Left as vanilla (not reachable on shipped data) |
 
