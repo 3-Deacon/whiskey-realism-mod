@@ -8,6 +8,7 @@ using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Strategic.Policies;
 
 using static TestHarness;
+using static TestFixtures;
 
 // The time-sliced daily strategic review (perf slice, M2). DailyReviewScheduler runs
 // DailyReviewJobList in order across frames; StrategicCoordinator publishes the working
@@ -228,6 +229,9 @@ internal static class DailyReviewSchedulerTests
 
         AssertDaysEqual(unsliced, oneJob, "one job per frame");
         AssertTrue(unsliced.Committed[Days - 1] != unsliced.Committed[Days - 2], "the model changes state from day to day");
+        string allocations = string.Join("", unsliced.CommittedPlanner);
+        foreach (string role in new[] { "MainEffort", "CapitalGuard", "Hold", "Recover", "Recon", "Reserve" })
+            AssertContains(allocations, ":" + role + "@", "the model's allocations exercise " + role + ": the sliced comparison covers the allocator");
     }
 
     private static void ReaderBetweenSlicesSeesPreviousDay()
@@ -315,6 +319,47 @@ internal static class DailyReviewSchedulerTests
         internal ModelReview(int costSeed = 0)
         {
             _cost = new Random(costSeed);
+        }
+
+        private readonly ReconMissionLedger[] _recon = { new ReconMissionLedger(), new ReconMissionLedger() };
+
+        // The allocation step of CampaignPlannerRuntime.ReviewPlan on a snapshot and plan that are a pure
+        // function of (day, alliance): the real tasks, allocator and mission sync, the ledger carried across days.
+        private string AllocateModelDay(int a, Random rng)
+        {
+            var s = new CampaignSnapshot();
+            s.Reset(a, a, 1000 + _day, PlayerCommandClass.NotCareer, -1, true, null);
+            s.RelocationRange = 150f;
+            s.OffensiveDominance = 1.1f;
+            s.MinStrengthForMovement = 1000f;
+            s.MinMoraleForMovement = 0.3f;
+            s.HasCapital = true;
+            for (int i = 0; i < 7; i++)
+                s.Areas.Add(new AreaRecord { Index = i, X = i * 100f, Z = 0f, EdgeX = new[] { i * 100f }, EdgeZ = new[] { 0f }, Importance = 1f, SupplyCapacity = 100f });
+            s.Supply.Add(new SupplySourceRecord { Id = 1, Kind = SupplySourceKind.Iip, Owner = a, X = 100f, Z = 0f, TransportCapacity = 10f, Condition = 1f, Built = true });
+            foreach (float x in new[] { 100f, 300f, 500f })
+                s.Objectives.Add(new ObjectiveRecord { ObjectiveId = (int)x, X = x, Z = 0f, HolderAlliance = 1 - a, Available = true, Importance01 = 0.5f });
+            for (int i = 1; i <= 7; i++)
+                s.Own.Add(new FormationRecord
+                {
+                    InstanceId = i, UnitKey = "m" + i + ":" + i, UnitTyp = 15, X = rng.Next(0, 600), Z = 0f, Strength = 3000f + rng.Next(9000),
+                    Morale = 0.8f, Supply01 = rng.Next(5) == 0 ? 0.2f : 0.9f, ReadinessStep = 3, CommandRange = 40f, BugleRange = 5f, CommanderId = i,
+                    AreaIndex = -1, Flags = FormationFlags.FightingForce | (rng.Next(6) == 0 ? FormationFlags.InBattle : FormationFlags.None),
+                    CavalryShare = rng.Next(3) == 0 ? 0.9f : 0f, SightRadius = 50f, Name = "m" + i, ParentInstanceId = -1
+                });
+            for (int i = 0; i < 2; i++)
+                s.Beliefs.Add(new EnemyBelief { InstanceId = -1, UnitKey = "e" + i + ":0", UnitTyp = 15, X = rng.Next(0, 600), Z = 0f, Strength = 4000f + rng.Next(9000), Confidence01 = 1f, LastSeenDay = s.DaySerial });
+            var sectors = SectorModel.Build(s);
+            var plan = new TheaterPlan { Alliance = a, DaySerial = s.DaySerial, MainSectorId = sectors.SectorAt(100f, 0f), MainObjectiveId = 100, MainRequiredRatio = 1.1f, CapitalFloorStrength = rng.Next(6000) };
+            plan.Sectors.Add(new SectorPlan { SectorId = plan.MainSectorId, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 100, TargetX = 100f, TargetZ = 0f });
+            plan.Sectors.Add(new SectorPlan { SectorId = sectors.SectorAt(550f, 0f), Posture = TheaterPosture.Hold, HoldNeed = rng.Next(9000) });
+            for (int i = 1; i <= 7; i++)
+                if (rng.Next(2) == 0) plan.MassInstanceIds.Add(i);
+            var tasks = new List<ReconTask>();
+            ReconPlanner.PlanTasks(s, sectors, plan, _recon[a], tasks);
+            var allocation = ForceAllocator.Allocate(plan, s, sectors, 1f, 0, HomeTheaterPrior.ForAlliance(a), tasks, _recon[a]);
+            _recon[a].Sync(s, tasks, allocation);
+            return AllocationSignature(allocation) + "#" + _recon[a].Missions.Count;
         }
 
         // StrategicCoordinator.View.
@@ -425,9 +470,10 @@ internal static class DailyReviewSchedulerTests
                 }
 
                 case DailyReviewJobKind.Plan:
-                    // Today's posture (CIC) and policy, yesterday's front (the front runs later).
+                    // Today's posture (CIC) and policy, yesterday's front (the front runs later); the force
+                    // allocation (G4) runs inside the Plan job, after the plan, with the recon ledger that carries over.
                     _plans[a] = "p" + _day + ":" + View.DirectorMemories[a].LastPosture.Pace + "/" + View.PolicyPlans[a].CurrentPick
-                        + "/" + (View.Fronts[a]?.Signature() ?? "-") + "/" + rng.Next(100);
+                        + "/" + (View.Fronts[a]?.Signature() ?? "-") + "/" + rng.Next(100) + "/alloc:" + AllocateModelDay(a, rng);
                     break;
 
                 case DailyReviewJobKind.Execute:

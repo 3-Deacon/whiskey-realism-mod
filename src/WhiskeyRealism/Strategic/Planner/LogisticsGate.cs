@@ -55,6 +55,31 @@ namespace WhiskeyRealism.Strategic.Planner
             return result;
         }
 
+        // The position of the nearest valid supply source of the snapshot's alliance, whatever the
+        // distance (a formation out of supply walks to it: ForceAllocator's Recover target).
+        public static bool NearestSource(CampaignSnapshot s, float x, float z, out float sourceX, out float sourceZ)
+        {
+            sourceX = 0f;
+            sourceZ = 0f;
+            if (s == null) return false;
+            float best = float.MaxValue;
+            bool found = false;
+            for (int i = 0; i < s.Supply.Count; i++)
+            {
+                var source = s.Supply[i];
+                if (!Supplies(s.Alliance, source)) continue;
+                float dx = source.X - x;
+                float dz = source.Z - z;
+                float d = dx * dx + dz * dz;
+                if (d >= best) continue;
+                best = d;
+                sourceX = source.X;
+                sourceZ = source.Z;
+                found = true;
+            }
+            return found;
+        }
+
         // Pulls a hold point back along the from -> to axis to the farthest in-reach point, sampled
         // every quarter of the reach range (at most 256 samples). Unchanged and true when the
         // point is already in reach; unchanged and false when no point on the axis is.

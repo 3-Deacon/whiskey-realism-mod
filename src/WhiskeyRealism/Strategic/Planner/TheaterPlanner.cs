@@ -693,6 +693,13 @@ namespace WhiskeyRealism.Strategic.Planner
             return total;
         }
 
+        // The same land threat with no terrain questions asked (straight distances): the allocator's
+        // main-effort sufficiency test, which must not probe the map (confidence-weighted, afloat excluded).
+        internal static float LandThreatAt(CampaignSnapshot s, float x, float z, float radius)
+        {
+            return LandThreatNear(new Inputs { S = s }, x, z, radius);
+        }
+
         // Land and afloat beliefs within half the relocation range of the force -> target segment and
         // outside the target's own radius (those are the target's balance).
         private static float FlankThreat(Inputs c, float fx, float fz, float tx, float tz, float range)

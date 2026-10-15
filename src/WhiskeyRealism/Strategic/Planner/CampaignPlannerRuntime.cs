@@ -33,6 +33,14 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly BattleInbox Battles = new BattleInbox();
         private static readonly List<BattleHistoryRecord> PendingBattles = new List<BattleHistoryRecord>();
         private static readonly string[] LastPlanRow = new string[2];
+        // G4: the allocation's [Allocation] row (rows on change) and the map-group player's run of
+        // unreliable days (the allocator covers his sector after NonComplianceDays). Per campaign.
+        private static readonly string[] LastAllocationRow = new string[2];
+        private static readonly ForceAllocator.PlayerNonCompliance[] NonCompliance =
+            { new ForceAllocator.PlayerNonCompliance(), new ForceAllocator.PlayerNonCompliance() };
+        // G1B SEAM: the recon tasks and the mission ledger come with G1b's runtime step (PlanTasks before the
+        // allocation, ReconMissionLedger.Sync after it, plan G1b "Split"); until then no task is placed.
+        private static readonly List<ReconTask> NoReconTasks = new List<ReconTask>();
 
         static CampaignPlannerRuntime()
         {
@@ -45,6 +53,8 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 States[a] = new PlannerState();
                 LastPlanRow[a] = null;
+                LastAllocationRow[a] = null;
+                NonCompliance[a].Reset();
             }
             Battles.Clear();
             PendingBattles.Clear();
@@ -91,9 +101,19 @@ namespace WhiskeyRealism.Strategic.Planner
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
                             TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace);
                     }
-                    CampaignPlanStore.Publish(alliance, plan, new Allocation { Alliance = alliance }, sectors);
+                    // G4: the force allocation over the plan, published with it (the working copy that joins PrepareDay).
+                    Allocation allocation;
+                    float reliability = PlayerComplianceRuntime.Reliability;
+                    using (TelemetryPerf.Scope("campaign.planner.allocate", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
+                    {
+                        NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);
+                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, reliability, NonCompliance[alliance].Days,
+                            HomeTheaterPrior.ForAlliance(alliance), NoReconTasks, null);
+                    }
+                    CampaignPlanStore.Publish(alliance, plan, allocation, sectors);
                     LogFirstReview(snapshot, sectors);
                     EmitPlan(plan, trace, day, month, year);
+                    EmitAllocation(allocation, plan, snapshot.Player, reliability);
                 }
                 catch (Exception ex)
                 {
@@ -145,6 +165,26 @@ namespace WhiskeyRealism.Strategic.Planner
                 .WithDecision("trace", plan.SwitchReason ?? "none", row)
                 .WithField("date", year.ToString("D4") + "-" + month.ToString("D2") + "-" + day.ToString("D2"))
                 .WithField("candidates", trace ?? ""));
+        }
+
+        // A map-group player (stage F's PlayerMapGroup) stands in this alliance's formations only on the
+        // player's own side: the run of unreliable days belongs to that alliance.
+        private static bool HasMapGroupFormation(CampaignSnapshot s)
+        {
+            for (int i = 0; i < s.Own.Count; i++)
+                if (s.Own[i].Chain == WlChainClass.PlayerMapGroup) return true;
+            return false;
+        }
+
+        // [Allocation] on change of its text (one row per alliance per change of roles or needs).
+        private static void EmitAllocation(Allocation allocation, TheaterPlan plan, PlayerCommandClass player, float reliability)
+        {
+            int a = allocation.Alliance;
+            if (a < 0 || a >= LastAllocationRow.Length) return;
+            string row = ForceAllocator.Summary(allocation, plan, player, reliability);
+            if (string.Equals(LastAllocationRow[a], row, StringComparison.Ordinal)) return;
+            LastAllocationRow[a] = row;
+            TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);
         }
 
         // DLC_WL reads as WlChainContext.Capture does: dlc_scenarioactive, IsCommanderInChief
