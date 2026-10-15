@@ -186,6 +186,8 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 _lastPlayerCommandId[alliance] = playerCommandId;
                 scratch.AncestryMismatchCount = CountAncestryMismatches(snapshot, ownUnits);
+                // "tactical" key prefix: OnceLog.ResetTactical releases it at battle end, so
+                // the line fires once per battle.
                 if (scratch.AncestryMismatchCount > 0)
                     OnceLog.Info("tactical-battle-core:ancestry-mismatch",
                         "[BattleSnapshot] parent map and Transform.IsChildOf disagree on the player's chain: alliance="
