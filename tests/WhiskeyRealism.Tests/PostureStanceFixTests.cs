@@ -23,6 +23,10 @@ internal static class PostureStanceFixTests
         Pass("vanilla hold stamp suppresses AdjustGroupAIStance until hold ends", VanillaHoldStampSuppressesAdjustGroupAIStance);
         Pass("task stance mapping matches vanilla stance semantics", TaskStanceMappingMatchesVanillaSemantics);
         Pass("group stance scorer uses the shared task mapping", GroupStanceScorerUsesSharedTaskMapping);
+
+        // T-settle
+        Pass("settlement gate does not treat a marching unit as settled", SettlementGateMarchingUnitIsNotSettled);
+        Pass("settlement gate does not treat an active move as settled", SettlementGateActiveMoveIsNotSettled);
     }
 
     private static void Pass(string name, Action test)
@@ -183,5 +187,36 @@ internal static class PostureStanceFixTests
         AssertEqual(2, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.FallBackToLine, false), "fallback");
         AssertEqual(-1, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.Screen, false), "screen is the executor's call");
         AssertEqual(-1, TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(CommandTaskType.None, true), "none");
+    }
+
+    private static void SettlementGateMarchingUnitIsNotSettled()
+    {
+        var input = new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 0,
+            OrderState = 0,
+            RegimentPaths = 2,
+            PathInterrupted = false,
+            MovementMode = 0,
+            ActiveMove = false
+        };
+        var d = TacticalOrderSettlementGate.Evaluate(input);
+        AssertFalse(d.AllowChange, "a unit following a path is not settled");
+        AssertEqual("marching", d.Reason, "reason");
+    }
+
+    private static void SettlementGateActiveMoveIsNotSettled()
+    {
+        var d = TacticalOrderSettlementGate.Evaluate(new TacticalOrderSettlementGate.Input
+        {
+            OrderQueueCount = 0,
+            OrderState = 0,
+            RegimentPaths = 0,
+            PathInterrupted = false,
+            MovementMode = 0,
+            ActiveMove = true
+        });
+        AssertFalse(d.AllowChange, "active move order is not settled");
+        AssertEqual("active-move", d.Reason, "reason");
     }
 }
