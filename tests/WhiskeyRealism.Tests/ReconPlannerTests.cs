@@ -86,6 +86,7 @@ internal static class ReconPlannerTests
             ("ReconLedgerHasNoReaderOutsideTheReview", ReconLedgerHasNoReaderOutsideTheReview),
             ("ReconFlagIsBoundAndRead", ReconFlagIsBoundAndRead),
             ("FirstReviewHasNoPreviousAllocation", FirstReviewHasNoPreviousAllocation),
+            ("ReconRowRoutesToTheRegisteredEvent", ReconRowRoutesToTheRegisteredEvent),
         });
     }
 
@@ -1390,6 +1391,19 @@ internal static class ReconPlannerTests
         AssertNear(10f, MissionOf(ledger, 2).HoldX, 0.01f, "to the capital: there is no allocation yet");
         ledger.OnReview(s, null);
         AssertEqual(ReconState.Recalled, MissionOf(ledger, 2).State, "and the next review without one is the same");
+    }
+
+    // The [Recon] row goes through TelemetryRouter.LegacyInfo like [Allocation]: its tag must be the event G0
+    // registered (Campaign layer, State), or the row would fall back to an unregistered main-log line.
+    private static void ReconRowRoutesToTheRegisteredEvent()
+    {
+        var counts = new ReconCounts { Screens = 2, Probes = 1, OldestBeliefDays = 9 };
+        var route = WhiskeyRealism.Telemetry.TelemetryTagPolicy.Route(counts.Row(1));
+        AssertTrue(route.RouteToSidecar, "the row reaches the campaign sidecar");
+        AssertEqual("Recon", route.EventName, "as the event G0 registered");
+        AssertEqual(WhiskeyRealism.Telemetry.TelemetryLayer.Campaign, route.Layer, "on the campaign layer");
+        AssertEqual(WhiskeyRealism.Telemetry.TelemetryCategory.State, route.Category, "as state");
+        AssertTrue(counts.Row(1).StartsWith("[Recon] alliance=1 screens=2 "), "the plan's row text");
     }
 
     private static void ReconFlagIsBoundAndRead()
