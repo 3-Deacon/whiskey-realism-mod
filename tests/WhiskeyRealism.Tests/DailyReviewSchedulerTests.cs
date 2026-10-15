@@ -540,9 +540,10 @@ internal static class DailyReviewSchedulerTests
                     BattleName = "b" + _day, Day = 1 + _day % 28, Month = 1 + _day / 28, Year = 1862, PositionX = 100f, PositionZ = 0f,
                     BattleResultType = 1, AllianceWon = rng.Next(2), Alliance = new[] { 0, 1 }
                 });
+            plan.MainEnemyStrength = 4000f + rng.Next(9000); // G4: the odds' enemy at the main objective (drawn last, so the earlier draws keep their stream)
             var tasks = new List<ReconTask>();
             ReconStep.Plan(s, sectors, plan, battles, BattleHistoryQuery.LegacySerial(1862, 1 + _day / 28, 1 + _day % 28), _recon[a], tasks);
-            var allocation = ForceAllocator.Allocate(plan, s, sectors, 1f, 0, HomeTheaterPrior.ForAlliance(a), tasks, _recon[a]);
+            var allocation = ForceAllocator.Allocate(plan, s, sectors, HomeTheaterPrior.ForAlliance(a), tasks, _recon[a]);
             _recon[a].Sync(s, tasks, allocation);
             _previousAllocation[a] = allocation;
             return AllocationSignature(allocation) + "#" + MissionSignature(_recon[a]) + "#" + ReconStep.CountsOf(s, _recon[a], tasks).Row(a);

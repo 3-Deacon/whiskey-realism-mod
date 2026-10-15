@@ -312,6 +312,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // and of every other sector's hold. G4 assigns MainEffort to exactly these instance ids.
         public List<int> MassInstanceIds = new List<int>();
         public float MassStrength;
+        // The believed land enemy G3 judged the main objective's odds against (confidence-weighted, river-
+        // weighted, within the relocation range of the objective itself, not of the clamped frontier point
+        // in SectorPlan.TargetX/Z): G4's reserve split keeps the odds it judged.
+        public float MainEnemyStrength;
     }
 
     public struct CommanderProfile

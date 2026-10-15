@@ -42,10 +42,19 @@ internal static class ForceAllocatorTests
             ("RecoverIsPerFormationAndWalksToSupply", RecoverIsPerFormationAndWalksToSupply),
             ("ReserveIsSurplusOverRequiredRatio", ReserveIsSurplusOverRequiredRatio),
             ("NoReserveWithoutBelievedEnemy", NoReserveWithoutBelievedEnemy),
+            ("ReserveKeepsTheMarginAboveRequired", ReserveKeepsTheMarginAboveRequired),
+            ("ReserveMeasuredAtTheMainObjectiveNotTheFrontier", ReserveMeasuredAtTheMainObjectiveNotTheFrontier),
             ("CarryingGroupIsMovable", CarryingGroupIsMovable),
             ("MapGroupPlayerNeverSoleMustHold", MapGroupPlayerNeverSoleMustHold),
-            ("MapGroupPlayerDiscountedByReliability", MapGroupPlayerDiscountedByReliability),
-            ("MapGroupPlayerCoveredAfterNonComplianceDays", MapGroupPlayerCoveredAfterNonComplianceDays),
+            ("MapGroupPlayerNeverCountsInAHoldSum", MapGroupPlayerNeverCountsInAHoldSum),
+            ("PlayerPresenceNeverReleasesTheSectorsHolders", PlayerPresenceNeverReleasesTheSectorsHolders),
+            ("RecoveringFormationsDoNotHoldTheirSector", RecoveringFormationsDoNotHoldTheirSector),
+            ("ReserveRulesHoldIgnoresRecoveringFormations", ReserveRulesHoldIgnoresRecoveringFormations),
+            ("StarvedMapGroupPlayerIsNeverRecover", StarvedMapGroupPlayerIsNeverRecover),
+            ("SectorHeldOnlyByThePlayerReportsAShortfall", SectorHeldOnlyByThePlayerReportsAShortfall),
+            ("MapGroupPlayerMayReceiveASupportOrderButIsNeverCounted", MapGroupPlayerMayReceiveASupportOrderButIsNeverCounted),
+            ("PlannerDoesNotCountThePlayersFormationAsHolding", PlannerDoesNotCountThePlayersFormationAsHolding),
+            ("ReserveRulesHoldCountsCommittedDefendersOnly", ReserveRulesHoldCountsCommittedDefendersOnly),
             ("NonComplianceCounterCountsConsecutiveUnreliableDays", NonComplianceCounterCountsConsecutiveUnreliableDays),
             ("CicPlayerYieldsEmptyAllocation", CicPlayerYieldsEmptyAllocation),
             ("HomeTheaterBreaksTies", HomeTheaterBreaksTies),
@@ -60,7 +69,6 @@ internal static class ForceAllocatorTests
             ("AllocatorReportsShortfallAgainstRoleNeed", AllocatorReportsShortfallAgainstRoleNeed),
             ("ShortfallsListWorstFirst", ShortfallsListWorstFirst),
             ("SurplusNeverFromMainEffortOrCapitalGuard", SurplusNeverFromMainEffortOrCapitalGuard),
-            ("PlayerFormationNeverShortfallTarget", PlayerFormationNeverShortfallTarget),
             ("SupportFollowsTheSupportSectorsTarget", SupportFollowsTheSupportSectorsTarget),
             ("AllianceTwoAndEmptyInputsYieldEmptyAllocation", AllianceTwoAndEmptyInputsYieldEmptyAllocation),
             ("AllocationSummaryNamesTheRoles", AllocationSummaryNamesTheRoles),
@@ -260,6 +268,8 @@ internal static class ForceAllocatorTests
         AssertEqual(far, x.SectorId, "in its own sector");
         AssertEqual(ForceAllocator.ReasonHoldReserve, x.Reason, "reason");
         AssertTrue(x.Withheld, "withheld from vanilla's offensive gather while its sector is at need");
+        AssertNear(550f, x.TargetX, 0.01f, "a hold reserve stays where it stands (x)");
+        AssertNear(0f, x.TargetZ, 0.01f, "...(z)");
         AssertEqual(FormationRole.MainEffort, Of(a, 1).Role, "the free corps masses");
     }
 
@@ -443,6 +453,7 @@ internal static class ForceAllocatorTests
         plan.MainSectorId = mainSector;
         plan.MainObjectiveId = 98;
         plan.MainRequiredRatio = 1.1f;
+        plan.MainEnemyStrength = 10000f;
         plan.Sectors.Add(new SectorPlan { SectorId = mainSector, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 98, TargetX = 100f, TargetZ = 0f });
         plan.MassInstanceIds.AddRange(new[] { 4, 5, 8 });
         plan.DepotTasks.Add(new DepotTask { X = 300f, Z = 0f, SectorId = Sectors(s).SectorAt(350f, 0f), Priority = 1f });
@@ -600,6 +611,47 @@ internal static class ForceAllocatorTests
             AssertEqual(FormationRole.MainEffort, Of(Alloc(MainPlan(s, new[] { 1, 2, 3 }, 100f), s), id).Role, "enemy elsewhere: still no reserve (corps " + id + ")");
     }
 
+    // M3: between the margins. Mass 7000 + 7000 + 8000 against a believed 10000 (required 11000): dropping the
+    // farthest leaves 14000, above 1.0 x but below 1.3 x (14300): no Reserve.
+    private static void ReserveKeepsTheMarginAboveRequired()
+    {
+        var s = Wide();
+        s.Own.Add(Corps(1, 110f, 7000f));
+        s.Own.Add(Corps(2, 200f, 7000f));
+        s.Own.Add(Corps(3, 350f, 8000f));
+        s.Beliefs.Add(Belief(120f, 0f, 10000f));
+        var a = Alloc(MainPlan(s, new[] { 1, 2, 3 }, 100f), s);
+        foreach (int id in new[] { 1, 2, 3 })
+            AssertEqual(FormationRole.MainEffort, Of(a, id).Role, "14000 left is under 1.3 x 11000: corps " + id + " is kept");
+    }
+
+    // F2 (G4 verify r1): objective 97 at x 600 is out of supply reach (sources at 100 and 300, range 40), so the
+    // gather point is clamped back; a small believed force stands near it, the 20000 defender at the objective.
+    // The reserve is measured against the enemy G3 judged at the objective, not against the frontier's.
+    private static void ReserveMeasuredAtTheMainObjectiveNotTheFrontier()
+    {
+        var s = Line(0, 7);
+        s.Objectives.Add(Target(97, 600f, 1f));
+        for (int i = 1; i <= 5; i++) s.Own.Add(Corps(i, 100f + 40f * i, 8000f));
+        s.Beliefs.Add(Belief(600f, 0f, 20000f));
+        s.Beliefs.Add(Belief(345f, 0f, 3000f));
+        var plan = PlanOf(s);
+        AssertEqual(97, plan.MainObjectiveId, "the out-of-reach objective is the main effort");
+        AssertNear(20000f, plan.MainEnemyStrength, 1f, "the enemy G3 judged the odds against, at the objective");
+        AssertTrue(MainTargetX(plan) < 500f, "the gather point is clamped back toward supply: " + MainTargetX(plan));
+        var a = Alloc(plan, s);
+        foreach (var x in a.Assignments)
+            AssertTrue(x.Role != FormationRole.Reserve, "no reserve is carved against the frontier's 3000 (corps " + x.InstanceId + " is " + x.Role + ")");
+        AssertEqual(0, a.Surpluses.Count, "and no surplus is listed for G5b");
+    }
+
+    private static float MainTargetX(TheaterPlan plan)
+    {
+        foreach (var sp in plan.Sectors)
+            if (sp.SectorId == plan.MainSectorId) return sp.TargetX;
+        throw new Exception("no main sector plan");
+    }
+
     // ---- W&L player classes (spec C4) ----
 
     private static void CarryingGroupIsMovable()
@@ -629,48 +681,265 @@ internal static class ForceAllocatorTests
         var x = Of(a, 1);
         AssertTrue(x.Role != FormationRole.CapitalGuard && x.Role != FormationRole.MainEffort, "never a capital guard or main effort on his own");
         AssertEqual(FormationRole.CapitalGuard, Of(a, 2).Role, "the AI corps guards the capital: the floor does not depend on the player");
-        AssertFalse(a.Shortfalls.Contains(1) || a.Surpluses.Contains(1), "never a reinforcement target");
+        AssertTrue(a.Shortfalls.Contains(1), "the threatened sector nothing committed holds reports a shortfall at his formation (position only)");
+        AssertFalse(a.Surpluses.Contains(1), "never a surplus");
     }
 
-    // Reliability 1: the player's 8000 alone holds the 5000 garrison, the AI division is released.
-    // Reliability 0.5: he counts 4000, so the division is withheld to reach 5000.
-    private static void MapGroupPlayerDiscountedByReliability()
+    // C4: the player's formations are never committed defenders. His 8000 does not hold the 5000 garrison,
+    // whatever his reliability (the allocator no longer takes one): the AI division is withheld to reach it, and
+    // is the sector's shortfall. The same for the player's own command (immobile Hold).
+    private static void MapGroupPlayerNeverCountsInAHoldSum()
     {
-        bool DivisionWithheld(float reliability)
+        foreach (var chain in new[] { WlChainClass.PlayerMapGroup, WlChainClass.PlayerCommand })
         {
             var s = Wide();
             var player = Corps(1, 550f, 8000f);
-            player.Chain = WlChainClass.PlayerMapGroup;
+            player.Chain = chain;
             s.Own.Add(player);
             s.Own.Add(Corps(2, 560f, 3000f));
-            var a = Alloc(ManualPlan(s), s, reliability);
-            AssertEqual(FormationRole.Hold, Of(a, 1).Role, "the map-group player holds his sector");
-            AssertEqual(ForceAllocator.ReasonPlayerMapGroup, Of(a, 1).Reason, "reason");
-            return Of(a, 2).Withheld;
+            var a = Alloc(ManualPlan(s), s);
+            AssertEqual(FormationRole.Hold, Of(a, 1).Role, chain + " stands in his sector as a position");
+            AssertFalse(Of(a, 1).Withheld, chain + ": a formation that counts 0 is not marked Withheld");
+            AssertTrue(Of(a, 2).Withheld, chain + ": the AI division is withheld: his 8000 does not reach the 5000 garrison");
+            AssertEqual("2", string.Join(",", a.Shortfalls), chain + ": and, 3000 short, carries the shortfall");
         }
-        AssertFalse(DivisionWithheld(1f), "a fully reliable player holds on his own");
-        AssertTrue(DivisionWithheld(0.5f), "half reliable: 4000 + 3000 reaches the garrison");
     }
 
-    // After NonComplianceDays he counts 0: the sector's AI formation is withheld to cover him and,
-    // short of the garrison, is the shortfall carrier.
-    private static void MapGroupPlayerCoveredAfterNonComplianceDays()
+    // F1 (G4 verify r1), through the real planner: with the map-group player standing in a threatened sector the
+    // AI corps that holds it stays Hold and withheld, with or without him there; the planner does not mass it away.
+    private static void PlayerPresenceNeverReleasesTheSectorsHolders()
     {
-        Allocation Run(int days)
+        foreach (bool withPlayer in new[] { false, true })
         {
             var s = Wide();
-            var player = Corps(1, 550f, 8000f);
+            s.Own.Add(Corps(1, 200f, 20000f));
+            s.Own.Add(Corps(4, 560f, 8000f));
+            if (withPlayer)
+            {
+                var player = Corps(5, 550f, 20000f);
+                player.Chain = WlChainClass.PlayerMapGroup;
+                s.Own.Add(player);
+            }
+            s.Beliefs.Add(Belief(600f, 0f, 10000f));
+            var plan = PlanOf(s);
+            var a = Alloc(plan, s);
+            AssertFalse(plan.MassInstanceIds.Contains(4), "withPlayer " + withPlayer + ": the planner keeps corps 4 out of the mass");
+            var x = Of(a, 4);
+            AssertEqual(FormationRole.Hold, x.Role, "withPlayer " + withPlayer + ": corps 4 holds");
+            AssertTrue(x.Withheld, "withPlayer " + withPlayer + ": and is withheld");
+            AssertEqual(ForceAllocator.ReasonHoldReserve, x.Reason, "withPlayer " + withPlayer + ": reason");
+            if (withPlayer) AssertFalse(Of(a, 5).Withheld, "his own formation is never withheld");
+        }
+    }
+
+    // N2 (G4 verify r2, integrator decision): a formation assigned Recover is leaving for supply, so it does
+    // not hold its sector. Two starved corps standing in a threatened sector no longer release the healthy
+    // corps that should hold it (verify r2 seed 6: sector need 15842 "held" by Recover corps of 16974 and
+    // 29399 while the four healthy corps massed). Through the real planner.
+    private static void RecoveringFormationsDoNotHoldTheirSector()
+    {
+        var s = Wide();
+        s.Own.Add(Corps(1, 200f, 20000f));
+        s.Own.Add(Corps(4, 560f, 8000f));
+        var starved = Corps(6, 555f, 16974f);
+        starved.Supply01 = 0.1f;
+        var demoralised = Corps(7, 565f, 29399f);
+        demoralised.Morale = 0.1f; // below aiminimummoraleformovement (0.3)
+        s.Own.Add(starved);
+        s.Own.Add(demoralised);
+        s.Beliefs.Add(Belief(600f, 0f, 10000f));
+        var plan = PlanOf(s);
+        var a = Alloc(plan, s);
+        AssertEqual(FormationRole.Recover, Of(a, 6).Role, "the starved corps recovers");
+        AssertEqual(FormationRole.Recover, Of(a, 7).Role, "so does the demoralised one");
+        AssertFalse(plan.MassInstanceIds.Contains(4), "the planner keeps the healthy corps out of the mass: the recovering ones do not hold the sector");
+        var holder = Of(a, 4);
+        AssertEqual(FormationRole.Hold, holder.Role, "the healthy corps holds");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, holder.Reason, "as the sector's hold reserve");
+        AssertTrue(holder.Withheld, "and is withheld");
+
+        // Too weak a holder: the sector reports its shortfall at the healthy corps, whatever walks away to recover.
+        var weak = Wide();
+        weak.Own.Add(Corps(1, 200f, 20000f));
+        weak.Own.Add(Corps(4, 560f, 3000f));
+        weak.Own.Add(starved);
+        weak.Own.Add(demoralised);
+        weak.Beliefs.Add(Belief(600f, 0f, 30000f));
+        var weakAllocation = Alloc(PlanOf(weak), weak);
+        AssertEqual(FormationRole.Hold, Of(weakAllocation, 4).Role, "the weak healthy corps still holds");
+        AssertTrue(weakAllocation.Shortfalls.Contains(4), "and the sector reports its shortfall there");
+        AssertFalse(weakAllocation.Shortfalls.Contains(6) || weakAllocation.Shortfalls.Contains(7), "never at a corps that is leaving");
+    }
+
+    // The AI cannot walk the map-group player's group to a depot: starved or demoralised he keeps his sector's
+    // order (Hold in place), never Recover (spec C4, plan G4 rules).
+    private static void StarvedMapGroupPlayerIsNeverRecover()
+    {
+        var s = Wide();
+        s.Own.Add(Corps(1, 200f, 20000f));
+        var player = Corps(5, 550f, 20000f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        player.Supply01 = 0.1f;
+        player.Morale = 0.1f;
+        s.Own.Add(player);
+        var a = Alloc(ManualPlan(s), s);
+        AssertEqual(FormationRole.Hold, Of(a, 5).Role, "the starved player stays Hold");
+        AssertFalse(Of(a, 5).Withheld, "and is not withheld");
+    }
+
+    // The rule itself, on ReserveRules.Hold: a formation below the supply or morale floor does not count
+    // toward what holds a sector anyway; a busy formation of the same strength still does (it stays).
+    private static void ReserveRulesHoldIgnoresRecoveringFormations()
+    {
+        var s = Wide();
+        s.Own.Add(Corps(4, 560f, 8000f));
+        var starved = Corps(6, 555f, 20000f);
+        starved.Supply01 = 0.1f;
+        s.Own.Add(starved);
+        var busy = WithFlags(Corps(7, 565f, 20000f), TheaterPlanner.Busy);
+        busy.Supply01 = 0.1f; // starved but in battle: it cannot walk away, so it still holds
+        var sectors = Sectors(s);
+        int k = sectors.SectorAt(560f, 0f);
+        var need = new float[sectors.Count];
+        var nearX = new float[sectors.Count];
+        var nearZ = new float[sectors.Count];
+        need[k] = 15000f;
+        nearX[k] = 600f;
+        var reserved = new bool[s.Own.Count];
+        var holdReserved = new int[s.Own.Count];
+        ReserveRules.Hold(s, sectors, need, nearX, nearZ, reserved, holdReserved);
+        AssertEqual(k, holdReserved[0], "the starved corps' 20000 does not count: the healthy corps is reserved");
+
+        s.Own.Add(busy);
+        reserved = new bool[s.Own.Count];
+        holdReserved = new int[s.Own.Count];
+        ReserveRules.Hold(s, sectors, need, nearX, nearZ, reserved, holdReserved);
+        AssertEqual(-1, holdReserved[0], "a busy formation stays, starved or not, and does count: nothing more is reserved");
+    }
+
+    // A threatened sector only the player stands in is Screen for the planner (nothing committed holds it) and
+    // reports a shortfall; his formation, which counts 0, marks the position.
+    private static void SectorHeldOnlyByThePlayerReportsAShortfall()
+    {
+        var s = Wide();
+        s.Own.Add(Corps(1, 200f, 20000f));
+        var player = Corps(5, 550f, 20000f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(player);
+        s.Beliefs.Add(Belief(600f, 0f, 10000f));
+        var plan = PlanOf(s);
+        int far = Sectors(s).SectorAt(550f, 0f);
+        AssertEqual(TheaterPosture.Screen, PostureOfSector(plan, far), "nothing committed holds the sector");
+        var a = Alloc(plan, s);
+        AssertEqual("5", string.Join(",", a.Shortfalls), "the sector's shortfall is reported at his formation");
+        AssertEqual(FormationRole.Hold, Of(a, 5).Role, "he stays a position marker");
+        AssertFalse(Of(a, 5).Withheld, "never withheld");
+        AssertFalse(a.Surpluses.Contains(5), "never a surplus");
+        AssertEqual(FormationRole.MainEffort, Of(a, 1).Role, "the free corps masses");
+
+        var quiet = Wide();
+        var rear = Corps(5, 550f, 20000f);
+        rear.Chain = WlChainClass.PlayerMapGroup;
+        quiet.Own.Add(rear);
+        var quietAllocation = Alloc(ManualPlan(quiet), quiet);
+        AssertEqual(0, quietAllocation.Shortfalls.Count, "a quiet sector he alone stands in is no shortfall (no hold need to report)");
+        AssertEqual(0, quietAllocation.Surpluses.Count, "and his unwithheld formation in a quiet sector is not a surplus either");
+    }
+
+    // M1: the player may receive his sector's role as an order: Support toward the main target in a Support
+    // sector (dispatch-only), never withheld, never a reinforcement target or surplus.
+    private static void MapGroupPlayerMayReceiveASupportOrderButIsNeverCounted()
+    {
+        var s = Wide();
+        s.Own.Add(Corps(1, 200f, 20000f));
+        var player = Corps(2, 350f, 6000f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(player);
+        var plan = ManualPlan(s);
+        int main = Sectors(s).SectorAt(100f, 0f);
+        int support = Sectors(s).SectorAt(350f, 0f);
+        plan.MainSectorId = main;
+        plan.MainObjectiveId = 98;
+        plan.Sectors.Add(new SectorPlan { SectorId = main, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 98, TargetX = 100f, TargetZ = 0f });
+        plan.Sectors.Add(new SectorPlan { SectorId = support, Posture = TheaterPosture.Support, TargetObjectiveId = 98, TargetX = 100f, TargetZ = 0f });
+        plan.MassInstanceIds.Add(1);
+        var a = Alloc(plan, s);
+        var x = Of(a, 2);
+        AssertEqual(FormationRole.Support, x.Role, "an order toward the main target");
+        AssertNear(100f, x.TargetX, 0.01f, "...with the main target");
+        AssertFalse(x.Withheld, "Support is vanilla's to use");
+        AssertTrue(!a.Shortfalls.Contains(2) && !a.Surpluses.Contains(2), "never a reinforcement target or a surplus");
+        AssertFalse(plan.MassInstanceIds.Contains(2), "and never in the mass");
+    }
+
+    // G3 half of F1: the planner's sector facts and the capital threat count committed defenders only.
+    private static void PlannerDoesNotCountThePlayersFormationAsHolding()
+    {
+        TheaterPosture Posture(bool aiCorps)
+        {
+            var s = Wide();
+            s.Own.Add(Corps(1, 200f, 20000f));
+            var player = Corps(5, 550f, 20000f);
             player.Chain = WlChainClass.PlayerMapGroup;
             s.Own.Add(player);
-            s.Own.Add(Corps(2, 560f, 3000f));
-            return Alloc(ManualPlan(s), s, 1f, days);
+            if (aiCorps) s.Own.Add(Corps(4, 560f, 8000f));
+            s.Beliefs.Add(Belief(600f, 0f, 10000f));
+            return PostureOfSector(PlanOf(s), Sectors(s).SectorAt(550f, 0f));
         }
-        var before = Run(ForceAllocator.NonComplianceDays - 1);
-        AssertFalse(Of(before, 2).Withheld, "four unreliable days: he still counts");
-        AssertEqual(0, before.Shortfalls.Count, "no shortfall while he counts");
-        var after = Run(ForceAllocator.NonComplianceDays);
-        AssertTrue(Of(after, 2).Withheld, "five days: the AI division covers his sector");
-        AssertEqual("2", string.Join(",", after.Shortfalls), "and, 3000 short of the garrison, carries the shortfall (not the player)");
+        AssertEqual(TheaterPosture.Screen, Posture(false), "his 20000 does not make the sector Hold");
+        AssertEqual(TheaterPosture.Hold, Posture(true), "an AI corps that covers the hold need does");
+
+        float CapitalTermWith(WlChainClass chain)
+        {
+            var s = Line(0, 5);
+            s.Objectives.Add(Target(99, 100f, 1f));
+            var defender = Corps(1, 50f, 12000f);
+            defender.Chain = chain;
+            s.Own.Add(defender);
+            s.Own.Add(Corps(2, 250f, 20000f));
+            s.Beliefs.Add(Belief(20f, 0f, 40000f));
+            var inputs = new TheaterPlanner.Inputs { S = s, Sectors = Sectors(s), Speed = Speed() };
+            var list = new List<TheaterPlanner.Candidate>();
+            TheaterPlanner.Evaluate(inputs, list);
+            return list[0].Capital;
+        }
+        AssertTrue(CapitalTermWith(WlChainClass.PlayerMapGroup) > CapitalTermWith(WlChainClass.None) + 0.01f,
+            "the capital threat is higher when the only defender near it is the player's (he defends nothing)");
+    }
+
+    // M4: pins the held sum of the shared hold reserve. Need 7000 in sector 2 facing an army at x 600:
+    // an AI corps in battle (3000) counts, the player's map group (5000) and own command (4000) count 0, so the
+    // nearest massable corps (4000, x 560) is picked and the next (x 540) is not. With a capital-reserved corps
+    // (2500, counts) the need is met by the nearest alone. Positions: the corps are the sector's own.
+    private static void ReserveRulesHoldCountsCommittedDefendersOnly()
+    {
+        var s = Wide();
+        s.Own.Add(WithFlags(Corps(1, 530f, 3000f), FormationFlags.InBattle));
+        var group = Corps(2, 520f, 5000f);
+        group.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(group);
+        var command = Corps(3, 510f, 4000f);
+        command.Chain = WlChainClass.PlayerCommand;
+        s.Own.Add(command);
+        s.Own.Add(Corps(4, 560f, 4000f));
+        s.Own.Add(Corps(5, 540f, 4000f));
+        var sectors = Sectors(s);
+        int sector = sectors.SectorAt(550f, 0f);
+        var need = new float[sectors.Count];
+        var nearX = new float[sectors.Count];
+        var nearZ = new float[sectors.Count];
+        need[sector] = 7000f;
+        nearX[sector] = 600f;
+        var capital = new bool[s.Own.Count];
+        var held = new int[s.Own.Count];
+        ReserveRules.Hold(s, sectors, need, nearX, nearZ, capital, held);
+        AssertEqual(sector, held[3], "the nearest massable corps is reserved (3000 held + 4000 = 7000)");
+        AssertEqual(-1, held[4], "the next is not: the player's 9000 counts 0");
+        for (int i = 0; i < 3; i++) AssertEqual(-1, held[i], "formation " + (i + 1) + " is never reserved");
+
+        capital[4] = true; // a capital-reserved corps (2500 of it counts, as the formation's 4000... full strength)
+        ReserveRules.Hold(s, sectors, need, nearX, nearZ, capital, held);
+        AssertEqual(-1, held[3], "a capital-reserved corps holds anyway (4000 + 3000 = 7000): nothing more is reserved");
     }
 
     private static void NonComplianceCounterCountsConsecutiveUnreliableDays()
@@ -712,10 +981,10 @@ internal static class ForceAllocatorTests
             return s;
         }
         var own = Side(0, WlChainClass.CicSide);
-        AssertEqual(0, ForceAllocator.Allocate(new TheaterPlan { Alliance = 0 }, own, Sectors(own), 1f, 0, null, null, null).Assignments.Count, "the CIC player's own side stands down");
+        AssertEqual(0, ForceAllocator.Allocate(new TheaterPlan { Alliance = 0 }, own, Sectors(own), null, null, null).Assignments.Count, "the CIC player's own side stands down");
         var enemy = Side(1, WlChainClass.None);
         enemy.Objectives.Add(new ObjectiveRecord { ObjectiveId = 1, X = 100f, Z = 0f, HolderAlliance = 0, Available = true, Importance01 = 1f });
-        AssertEqual(1, ForceAllocator.Allocate(new TheaterPlan { Alliance = 1 }, enemy, Sectors(enemy), 1f, 0, null, null, null).Assignments.Count,
+        AssertEqual(1, ForceAllocator.Allocate(new TheaterPlan { Alliance = 1 }, enemy, Sectors(enemy), null, null, null).Assignments.Count,
             "the enemy side of a CIC career keeps its allocation although the snapshot's Player class is global");
     }
 
@@ -732,7 +1001,7 @@ internal static class ForceAllocatorTests
             ohio.Name = "Army of the Ohio";
             s.Own.Add(plain);
             s.Own.Add(ohio);
-            var a = Alloc(ManualPlan(s), s, 1f, 0, useHome ? HomeTheaterPrior.ForAlliance(0) : null);
+            var a = Alloc(ManualPlan(s), s, useHome ? HomeTheaterPrior.ForAlliance(0) : null);
             AssertTrue(Of(a, 7).Withheld != Of(a, 8).Withheld, "exactly one of the two reaches the 5000 garrison (useHome " + useHome + ")");
             return Of(a, 8).Withheld;
         }
@@ -978,18 +1247,6 @@ internal static class ForceAllocatorTests
         }
     }
 
-    private static void PlayerFormationNeverShortfallTarget()
-    {
-        var s = Wide();
-        var player = Corps(1, 560f, 2000f);
-        player.Chain = WlChainClass.PlayerMapGroup;
-        s.Own.Add(player);
-        var plan = ManualPlan(s);
-        plan.Sectors.Add(new SectorPlan { SectorId = Sectors(s).SectorAt(550f, 0f), Posture = TheaterPosture.Screen, HoldNeed = 9000f });
-        var a = Alloc(plan, s);
-        AssertEqual(0, a.Shortfalls.Count, "the sector is short, but its only formation is the player's: no carrier");
-    }
-
     private static void SupportFollowsTheSupportSectorsTarget()
     {
         var s = Wide();
@@ -1017,15 +1274,15 @@ internal static class ForceAllocatorTests
         s.Own.Add(Corps(1, 200f, 20000f));
         var sectors = Sectors(s);
         var plan = ManualPlan(s);
-        AssertEqual(0, ForceAllocator.Allocate(null, s, sectors, 1f, 0, null, null, null).Assignments.Count, "no plan");
-        AssertEqual(0, ForceAllocator.Allocate(plan, null, sectors, 1f, 0, null, null, null).Assignments.Count, "no snapshot");
-        AssertEqual(0, ForceAllocator.Allocate(plan, s, null, 1f, 0, null, null, null).Assignments.Count, "no sectors");
+        AssertEqual(0, ForceAllocator.Allocate(null, s, sectors, null, null, null).Assignments.Count, "no plan");
+        AssertEqual(0, ForceAllocator.Allocate(plan, null, sectors, null, null, null).Assignments.Count, "no snapshot");
+        AssertEqual(0, ForceAllocator.Allocate(plan, s, null, null, null, null).Assignments.Count, "no sectors");
         var two = new CampaignSnapshot();
         two.Reset(2, 2, Day, PlayerCommandClass.NotCareer, -1, true, null);
         two.Own.Add(Corps(1, 200f, 20000f));
-        AssertEqual(0, ForceAllocator.Allocate(plan, two, sectors, 1f, 0, null, null, null).Assignments.Count, "alliance 2");
+        AssertEqual(0, ForceAllocator.Allocate(plan, two, sectors, null, null, null).Assignments.Count, "alliance 2");
         var none = Wide();
-        AssertEqual(0, ForceAllocator.Allocate(plan, none, Sectors(none), 1f, 0, null, null, null).Assignments.Count, "no formations");
+        AssertEqual(0, ForceAllocator.Allocate(plan, none, Sectors(none), null, null, null).Assignments.Count, "no formations");
     }
 
     private static void AllocationSummaryNamesTheRoles()
@@ -1110,8 +1367,7 @@ internal static class ForceAllocatorTests
         AssertTrue(bookkeeping >= 0 && plan > bookkeeping && scope > plan && allocate > scope && publish > allocate && emit > publish,
             "bookkeeping return, plan, allocate scope, allocate, publish of that allocation, row");
         AssertEqual(1, review.Split(new[] { "ForceAllocator.Allocate(" }, StringSplitOptions.None).Length - 1, "one allocation per review");
-        AssertContains(review, "ForceAllocator.Allocate(plan, snapshot, sectors, reliability, NonCompliance[alliance].Days,", "the plan, its snapshot and sectors, the reliability and the unreliable days");
-        AssertContains(review, "HomeTheaterPrior.ForAlliance(alliance)", "the alliance's home theaters");
+        AssertContains(review, "ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance]);", "the plan, its snapshot and sectors, the home theaters, this alliance's recon tasks and ledger; reliability and the unreliable days are telemetry only");
         AssertContains(review, "float reliability = PlayerComplianceRuntime.Reliability;", "stage F's live reliability (1 outside a career)");
         AssertContains(review, "NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);", "one count per review day, only with a map-group player");
         AssertFalse(review.Contains("new Allocation"), "no empty allocation stands in for the real one");
@@ -1263,21 +1519,29 @@ internal static class ForceAllocatorTests
         plan.MainSectorId = sector;
         plan.MainObjectiveId = 98;
         plan.MainRequiredRatio = 1.1f;
+        plan.MainEnemyStrength = EnemyBeliefQuery.StrengthWithin(s.Beliefs, targetX, 0f, s.RelocationRange); // what G3 judged at the objective
         plan.Sectors.Add(new SectorPlan { SectorId = sector, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 98, TargetX = targetX, TargetZ = 0f, RequiredRatio = 1.1f });
         plan.MassInstanceIds.AddRange(mass);
         return plan;
     }
 
-    private static Allocation Alloc(TheaterPlan plan, CampaignSnapshot s, float reliability = 1f, int nonCompliantDays = 0,
+    private static Allocation Alloc(TheaterPlan plan, CampaignSnapshot s,
                                     Func<string, Theater> home = null, IReadOnlyList<ReconTask> recon = null, ReconMissionLedger missions = null)
     {
-        return ForceAllocator.Allocate(plan, s, Sectors(s), reliability, nonCompliantDays, home, recon, missions);
+        return ForceAllocator.Allocate(plan, s, Sectors(s), home, recon, missions);
     }
 
     private static Assignment Of(Allocation a, int instanceId)
     {
         AssertTrue(a.TryGet(instanceId, out var x), "formation " + instanceId + " has an assignment");
         return x;
+    }
+
+    private static TheaterPosture PostureOfSector(TheaterPlan plan, int sectorId)
+    {
+        foreach (var sp in plan.Sectors)
+            if (sp.SectorId == sectorId) return sp.Posture;
+        throw new Exception("no plan for sector " + sectorId);
     }
 
     private static float HoldNeedOf(TheaterPlan plan, int sectorId)

@@ -25,7 +25,8 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 each SectorPlan.HoldNeed, never recomputed: G3 verify F9), less what G3 released
     //                 into the mass, plus the remainder (below).
     //   Recover       a movable formation below RecoverSupplyBelow raw supply or the movement morale
-    //                 minimum (spec C21), walked toward the nearest supply source; withheld.
+    //                 minimum (spec C21: ReserveRules.Recovers), walked toward the nearest supply
+    //                 source; withheld. It counts 0 toward its sector's hold (it is leaving).
     //   DepotBuilder  the smallest fighting formation in a depot task's sector; withheld.
     //   Recon         ReconPlanner.PickFormation per recon task, highest priority first; the Recon
     //                 assignment copies the task's SectorId and hold point so ReconMissionLedger.Sync
@@ -33,10 +34,12 @@ namespace WhiskeyRealism.Strategic.Planner
     //   MainEffort    exactly TheaterPlan.MassInstanceIds (G3 judged the odds on that set), less any
     //                 formation a Recon or DepotBuilder task took from it because no formation outside
     //                 the mass qualified, and less the Reserve below. Target = the main sector's target.
-    //   Reserve       force above ReserveSurplusMargin x the required force at the main target (the
-    //                 plan's MainRequiredRatio x the believed land enemy there, straight distances),
-    //                 farthest from the target first, stopping at the first formation the main effort
-    //                 cannot spare; withheld. None when no enemy is believed there.
+    //   Reserve       force above ReserveSurplusMargin x the required force at the main objective (the
+    //                 plan's MainRequiredRatio x TheaterPlan.MainEnemyStrength, the believed enemy G3
+    //                 judged the odds against at the objective itself, not at the clamped frontier
+    //                 point in SectorPlan.TargetX/Z), farthest from that gather point first, stopping
+    //                 at the first formation the main effort cannot spare; withheld. None when no
+    //                 enemy is believed at the objective.
     //   Support       the remainder in a Support (or the main) sector: toward the main target.
     //   Hold (rest)   the remainder anywhere else, Hold in place (EconomyOfForce garrison).
     //   Withheld      a sector's Hold formations are ordered by distance to the sector's nearest
@@ -45,21 +48,26 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 strength reaches max(HoldNeed, MinGarrisonStrength) is withheld from vanilla's
     //                 offensive gather (CheckOffensiveMovements 14257-14275), the rest is not.
     //   Player        CarryingGroup (a player below map level) is an ordinary movable formation (F's
-    //                 MoveUnitTo Postfix dispatches its march). PlayerMapGroup is order-only and an
-    //                 unreliable executor: never mass, capital or sole holder (G3 does not count it
-    //                 committed), Hold in its sector with its strength counted x
-    //                 PlayerComplianceLedger.StrengthWeight in the hold sums, and counted 0 after
-    //                 NonComplianceDays of unreliability, so the sector's AI Hold formations are
-    //                 withheld to cover it (spec C4). A CIC player's own side gets an empty allocation.
+    //                 MoveUnitTo Postfix dispatches its march). The player's own command, a CIC side
+    //                 and a PlayerMapGroup are never committed defenders (WlChainRules, spec C4,
+    //                 whatever the reliability): they count 0 in every hold, reserve and capital sum
+    //                 (ReserveRules, the planner's sector facts and this allocator), so the AI
+    //                 formations that hold a sector stay Hold and withheld while he stands in it, and a
+    //                 sector he alone stands in reports a shortfall. A PlayerMapGroup may receive his
+    //                 sector's role as an order (Support toward the main target in a Support or main
+    //                 sector, otherwise Hold in place as a position marker, never withheld): never mass,
+    //                 capital guard, Recover, depot builder or reserve. A CIC player's own side gets an
+    //                 empty allocation. The reliability and the run of unreliable days are telemetry
+    //                 and expectations (the [Allocation] row), not inputs.
     // Shortfalls list the formations that carry an unmet need (the main effort below its required
-    // force, the capital guard below the floor, a Hold sector below its target), worst first, AI
-    // formations only; Surpluses the Reserve and the EconomyOfForce Hold formations beyond their
+    // force, the capital guard below the floor, a Hold sector below its target), worst first: an AI
+    // formation, except that a threatened sector no AI formation holds names the map-group player's
+    // formation there as the position (G5b never routes to a player formation); Surpluses the Reserve and the EconomyOfForce Hold formations beyond their
     // garrison, largest first. G5b routes recruits and brigade transfers from one to the other.
     public static class ForceAllocator
     {
         public const float MinGarrisonStrength = 5000f;
-        public const float UnreliableBelow = 0.5f;
-        public const int NonComplianceDays = 5;
+        public const float UnreliableBelow = 0.5f; // telemetry: the [Allocation] row's run of unreliable days
         public const float HomeTheaterTieBreak = 0.05f;
         public const float ReserveSurplusMargin = 1.3f;
 
@@ -76,14 +84,13 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonGarrison = "garrison";
         internal const string ReasonPlayerMapGroup = "player-map-group";
 
-        public static Allocation Allocate(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, float playerReliability01,
-                                          int playerNonCompliantDays, Func<string, Theater> homeTheater,
+        public static Allocation Allocate(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, Func<string, Theater> homeTheater,
                                           IReadOnlyList<ReconTask> reconTasks, ReconMissionLedger missions)
         {
             var allocation = new Allocation { Alliance = s != null ? s.Alliance : -1 };
             if (s == null || plan == null || sectors == null || s.Alliance < 0 || s.Alliance > 1 || s.Own.Count == 0) return allocation;
             if (StandsDown(s)) return allocation;
-            new Pass(plan, s, sectors, playerReliability01, playerNonCompliantDays, homeTheater, reconTasks, missions).Run(allocation);
+            new Pass(plan, s, sectors, homeTheater, reconTasks, missions).Run(allocation);
             return allocation;
         }
 
@@ -97,7 +104,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return false;
         }
 
-        // One count per review day of consecutive unreliability; a day that goes backwards (a load)
+        // Telemetry only (the [Allocation] row): one count per review day of consecutive unreliability; a day that goes backwards (a load)
         // restarts it. Runtime state, per alliance, in CampaignPlannerRuntime.
         public sealed class PlayerNonCompliance
         {
@@ -169,7 +176,6 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly ReconMissionLedger _missions;
             private readonly int _n;
             private readonly int _sectorCount;
-            private readonly bool _coversPlayer;
 
             private readonly bool[] _done;
             private readonly bool[] _inMass;
@@ -179,11 +185,11 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly float[] _tx, _tz;
             private readonly string[] _reason;
             private readonly bool[] _withheld;
-            private readonly float[] _weight;  // strength weight in the hold sums
+            private readonly float[] _weight;  // 1 for a committed defender, 0 for the player's formations (C4)
 
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
 
-            internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, float reliability01, int nonCompliantDays,
+            internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors,
                           Func<string, Theater> home, IReadOnlyList<ReconTask> recon, ReconMissionLedger missions)
             {
                 _plan = plan;
@@ -194,7 +200,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 _missions = missions;
                 _n = s.Own.Count;
                 _sectorCount = sectors.Count;
-                _coversPlayer = nonCompliantDays >= NonComplianceDays;
                 _done = new bool[_n];
                 _inMass = new bool[_n];
                 _role = new FormationRole[_n];
@@ -209,11 +214,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 _nearX = new float[_sectorCount];
                 _nearZ = new float[_sectorCount];
 
-                float playerWeight = _coversPlayer ? 0f : PlayerComplianceLedger.StrengthWeight(true, reliability01);
                 for (int i = 0; i < _n; i++)
                 {
                     _sector[i] = ReserveRules.SectorOf(sectors, s.Own[i]);
-                    _weight[i] = s.Own[i].Chain == WlChainClass.PlayerMapGroup ? playerWeight : 1f;
+                    _weight[i] = WlChainRules.CountsAsCommittedDefender(s.Own[i].Chain) ? 1f : 0f;
                 }
             }
 
@@ -331,8 +335,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     if (_done[i] || _inMass[i]) continue;
                     var f = _s.Own[i];
-                    if (!WlChainRules.MayMove(f.Chain)) continue;
-                    if (f.Supply01 >= TheaterPlanner.RecoverSupplyBelow && f.Morale >= _s.MinMoraleForMovement) continue;
+                    if (!ReserveRules.Recovers(f, _s.MinMoraleForMovement)) continue;
                     if (!LogisticsGate.NearestSource(_s, f.X, f.Z, out float sx, out float sz))
                     {
                         sx = f.X;
@@ -415,9 +418,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 return f.Chain == WlChainClass.PlayerMapGroup ? 2 : f.CavalryShare >= ReconPlanner.MinCavalryShare ? 0 : 1;
             }
 
-            // The force above ReserveSurplusMargin x the required force at the main target becomes
-            // Reserve, farthest from the target first. The enemy is the believed land army within the
-            // relocation range of the target (straight distances; no terrain probe in the allocator).
+            // The force above ReserveSurplusMargin x the required force becomes Reserve, farthest from
+            // the gather point first. The required force is the plan's MainRequiredRatio x the enemy G3
+            // judged the odds against at the main objective (TheaterPlan.MainEnemyStrength): the same
+            // point and the same river-weighted odds, however far the gather point was clamped back.
             private void SplitReserve(out float required, out float massStrength)
             {
                 required = 0f;
@@ -431,7 +435,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         members.Add(i);
                         massStrength += Math.Max(0f, _s.Own[i].Strength);
                     }
-                float enemy = TheaterPlanner.LandThreatAt(_s, sp.TargetX, sp.TargetZ, _s.RelocationRange);
+                float enemy = _plan.MainEnemyStrength;
                 required = _plan.MainRequiredRatio * enemy;
                 if (enemy <= 0f || required <= 0f) return;
 
@@ -534,9 +538,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 });
             }
 
-            // What holds a sector anyway (immobile formations, at their weight) counts first; the mobile
-            // Hold formations are then withheld, nearest the threat first, until the target is reached.
-            // An immobile formation is never withheld: it is not Whiskey's to steer.
+            // What holds a sector anyway (immobile committed formations) counts first; the mobile Hold
+            // formations are then withheld, nearest the threat first, until the target is reached. An
+            // immobile formation is never withheld (it is not Whiskey's to steer), and neither is one that
+            // counts 0 (the player's formations never hold a sector: C4).
             private void WithholdHoldPrefixes()
             {
                 for (int k = 0; k < _sectorCount; k++)
@@ -545,7 +550,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     float sum = 0f;
                     for (int i = 0; i < _n; i++)
                     {
-                        if (_role[i] != FormationRole.Hold || _sector[i] != k || _roleSector[i] != k) continue;
+                        if (_role[i] != FormationRole.Hold || _sector[i] != k || _roleSector[i] != k || _weight[i] <= 0f) continue;
                         if (IsImmobileReason(_reason[i])) sum += Math.Max(0f, _s.Own[i].Strength) * _weight[i];
                         else holds.Add(i);
                     }
@@ -585,10 +590,17 @@ namespace WhiskeyRealism.Strategic.Planner
                     for (int i = 0; i < _n; i++)
                         if (_role[i] == FormationRole.Hold && _sector[i] == k && _roleSector[i] == k && WlChainRules.MayMove(_s.Own[i].Chain)
                             && !IsImmobileReason(_reason[i])) holds.Add(i);
-                    if (holds.Count == 0) continue;
                     float target = Target(k);
                     float counted = Counted(k);
                     if (counted >= target) continue;
+                    if (holds.Count == 0)
+                    {
+                        // A threatened sector no AI formation holds: the map-group player's formation there marks
+                        // the position (it counts 0; G5b never routes a reinforcement to a player formation).
+                        int marker = _need[k] > 0f ? PlayerMarkerIn(k) : -1;
+                        if (marker >= 0) carriers.Add(new KeyValuePair<int, float>(_s.Own[marker].InstanceId, (target - counted) / target));
+                        continue;
+                    }
                     SortByHoldKey(holds, k);
                     carriers.Add(new KeyValuePair<int, float>(_s.Own[holds[0]].InstanceId, (target - counted) / target));
                 }
@@ -599,6 +611,13 @@ namespace WhiskeyRealism.Strategic.Planner
                 });
                 for (int c = 0; c < carriers.Count; c++)
                     if (!allocation.Shortfalls.Contains(carriers[c].Key)) allocation.Shortfalls.Add(carriers[c].Key);
+            }
+
+            private int PlayerMarkerIn(int sector)
+            {
+                for (int i = 0; i < _n; i++)
+                    if (_role[i] == FormationRole.Hold && _sector[i] == sector && _s.Own[i].Chain == WlChainClass.PlayerMapGroup) return i;
+                return -1;
             }
 
             private float SumOf(FormationRole role)

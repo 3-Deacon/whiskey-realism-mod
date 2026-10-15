@@ -99,7 +99,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public int SectorId;
             public int Force;          // own formation index, -1 none
             public float Value, Balance, Reach, March, Exposure, Capital, PriorTerm, Score;
-            public float Ratio, Required, Mass;
+            public float Ratio, Required, Mass, Enemy;
             public bool Eligible, InReach, Retained;
             public string PriorId;
         }
@@ -164,6 +164,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 plan.MainSectorId = m.SectorId;
                 plan.MainRequiredRatio = m.Required;
                 plan.PriorId = m.PriorId;
+                plan.MainEnemyStrength = m.Enemy;
                 plan.MassStrength = MassFor(inputs, m.X, m.Z, m.SectorId, inputs.Scratch);
                 for (int k = 0; k < inputs.Scratch.Count; k++) plan.MassInstanceIds.Add(s.Own[inputs.Scratch[k]].InstanceId);
                 axisFromX = force.X;
@@ -220,6 +221,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
                 float enemy = LandThreatNear(c, o.X, o.Z, range);
                 float own = cand.Mass;
+                cand.Enemy = enemy;
                 cand.Ratio = enemy > 0f ? own / enemy : (cand.Force >= 0 ? float.MaxValue : 0f);
                 float balance = own + enemy > 0f ? own / (own + enemy) : 0f;
                 cand.Balance = SnapshotRules.Clamp01(balance * (1f + AttackBiasBalanceScale * profile.AttackBias));
@@ -626,7 +628,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var f = s.Own[i];
                 int sector = SectorOf(c.Sectors, f);
                 if (sector < 0 || sector >= n) continue;
-                x.Own[sector] += Math.Max(0f, f.Strength);
+                if (WlChainRules.CountsAsCommittedDefender(f.Chain)) x.Own[sector] += Math.Max(0f, f.Strength); // C4: a player's formation never holds a sector
                 x.Count[sector]++;
                 x.Supply[sector] += f.Supply01;
                 x.Morale[sector] += f.Morale;
@@ -693,13 +695,6 @@ namespace WhiskeyRealism.Strategic.Planner
             return total;
         }
 
-        // The same land threat with no terrain questions asked (straight distances): the allocator's
-        // main-effort sufficiency test, which must not probe the map (confidence-weighted, afloat excluded).
-        internal static float LandThreatAt(CampaignSnapshot s, float x, float z, float radius)
-        {
-            return LandThreatNear(new Inputs { S = s }, x, z, radius);
-        }
-
         // Land and afloat beliefs within half the relocation range of the force -> target segment and
         // outside the target's own radius (those are the target's balance).
         private static float FlankThreat(Inputs c, float fx, float fz, float tx, float tz, float range)
@@ -746,7 +741,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var f = s.Own[i];
                 if (RiverLines.Distance(f.X, f.Z, s.CapitalX, s.CapitalZ) >= range) continue;
-                own += Math.Max(0f, Math.Min(f.Strength, f.Strength * f.Morale));
+                if (WlChainRules.CountsAsCommittedDefender(f.Chain)) own += Math.Max(0f, Math.Min(f.Strength, f.Strength * f.Morale));
             }
             threat01 = SnapshotRules.Clamp01(floor / Math.Max(1f, own));
         }

@@ -35,7 +35,8 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly List<BattleHistoryRecord> PendingBattles = new List<BattleHistoryRecord>();
         private static readonly string[] LastPlanRow = new string[2];
         // G4: the allocation's [Allocation] row (rows on change) and the map-group player's run of
-        // unreliable days (the allocator covers his sector after NonComplianceDays). Per campaign.
+        // unreliable days (telemetry: the row reports it; the allocator never counts the player, C4).
+        // Per campaign, in memory (G6 adds it to the sidecar's planner state).
         private static readonly string[] LastAllocationRow = new string[2];
         private static readonly ForceAllocator.PlayerNonCompliance[] NonCompliance =
             { new ForceAllocator.PlayerNonCompliance(), new ForceAllocator.PlayerNonCompliance() };
@@ -122,8 +123,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     using (TelemetryPerf.Scope("campaign.planner.allocate", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);
-                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, reliability, NonCompliance[alliance].Days,
-                            HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance]);
+                        allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance]);
                     }
                     SyncRecon(snapshot, allocation);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);

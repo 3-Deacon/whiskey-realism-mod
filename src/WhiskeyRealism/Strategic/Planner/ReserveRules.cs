@@ -56,6 +56,14 @@ namespace WhiskeyRealism.Strategic.Planner
             });
         }
 
+        // A formation the allocator sends to Recover: movable, and below the raw supply floor (spec C21)
+        // or the movement morale minimum. It is leaving for a supply source, so it holds nothing.
+        internal static bool Recovers(in FormationRecord f, float minMorale)
+        {
+            return TheaterPlanner.Movable(f) && WlChainRules.MayMove(f.Chain)
+                && (f.Supply01 < TheaterPlanner.RecoverSupplyBelow || f.Morale < minMorale);
+        }
+
         // The capital reserve: the massable formations nearest the own capital until their
         // strength reaches the capital floor (P7).
         internal static void Capital(CampaignSnapshot s, float capitalFloor, bool[] reserved)
@@ -76,7 +84,12 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Each threatened sector's hold reserve: what holds there anyway (formations that cannot
         // be massed, and the capital reserve) counts first, then the massable formations nearest the
-        // sector's believed army until the hold need is met. holdReserved[i] is the sector whose hold
+        // sector's believed army until the hold need is met. Only a committed defender counts
+        // (WlChainRules.CountsAsCommittedDefender, spec C4): the W&L player's own command and a
+        // map-group player never hold a sector, whatever his reliability, so the AI formations that
+        // do are not massed away for a sector the player stands in. A formation that Recovers is
+        // leaving for supply and counts 0 as well, so a sector is never "held" by corps about to
+        // walk away (G4 verify r2 N2). holdReserved[i] is the sector whose hold
         // keeps formation i, -1 none. need/nearX/nearZ are per sector.
         internal static void Hold(CampaignSnapshot s, SectorModel sectors, float[] need, float[] nearX, float[] nearZ,
                                   bool[] capitalReserved, int[] holdReserved)
@@ -93,7 +106,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     var f = s.Own[i];
                     if (SectorOf(sectors, f) != sector) continue;
-                    if (!TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) || capitalReserved[i]) held += System.Math.Max(0f, f.Strength);
+                    if (!TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) || capitalReserved[i])
+                    {
+                        if (WlChainRules.CountsAsCommittedDefender(f.Chain) && !Recovers(f, s.MinMoraleForMovement))
+                            held += System.Math.Max(0f, f.Strength);
+                    }
                     else order.Add(i);
                 }
                 SortByDistance(s, order, nearX[sector], nearZ[sector]);
