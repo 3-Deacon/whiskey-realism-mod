@@ -11,7 +11,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// Runtime-only vanilla adapter. Extracts per-side army evidence from
     /// BattleUnits without throwing back into Harmony/runtime callers.
     /// </summary>
-    internal static class ArmyEvidenceBuilder
+    internal static partial class ArmyEvidenceBuilder
     {
         // Between ArmyIntentInference reserve thresholds: not committed, not uncommitted.
         private const float UnknownReserveCommitFraction = 0.35f;
@@ -153,10 +153,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// Walks BattleUnits.completeunitlist filtered to the given side and
-        /// returns the average fatigue and ammo01 across combat regiments.
-        /// Officer/HQ units are skipped (they have noisy values). Defaults to
-        /// 0.2 fatigue (fresh) and 0.9 ammo (well-supplied) on any reflection
-        /// failure to avoid spurious HoldFatigued decisions.
+        /// returns the average fatigue and ammo01 across alive combat regiments
+        /// (unittyp 0-3). Ammo uses vanilla's own per-unit rule
+        /// (<see cref="NormalizeAmmo01"/>: ammo[0], or SumUp/3 for artillery);
+        /// the alive filter is <see cref="IsAliveCombatUnit"/> (strength &gt; 0,
+        /// active, not routed) because groupstrengthactive is only maintained on
+        /// groups. Defaults to 0.2 fatigue / 0.9 ammo when nothing is sampled.
         /// </summary>
         private static void EstimateOwnAverages(BattleUnits bunits, int side, out float avgFatigue01, out float avgAmmo01)
         {
@@ -179,24 +181,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var unit = units[i] as Regiment;
                     if (unit == null) continue;
                     if (unit.alliance != sideAlliance) continue;
-                    // Skip officers/HQ — they have noisy fatigue/ammo. Combat
-                    // units (Infantry=0, Cavalry=1, Artillery=2, Skirmisher=3)
-                    // are the meaningful sample.
+                    // Combat regiments only (Infantry=0, Cavalry=1, Artillery=2,
+                    // Skirmisher=3); officers/HQ carry noisy values.
                     if (unit.unittyp > 3) continue;
-                    // Skip dead/empty regiments — they'd skew the average toward
-                    // 0 fatigue / 0 ammo, falsely reporting "fresh and well-supplied."
-                    float groupActive = SafeRegimentFloat(unit, "groupstrengthactive");
-                    if (groupActive <= 0f) continue;
+                    if (!IsAliveCombatUnit(unit.strength, SafeActive(unit), unit.isrouted)) continue;
 
-                    float fatigue = SafeRegimentFloat(unit, "fatigue");
-                    float ammo = SafeRegimentFloat(unit, "ammo");
+                    float fatigue = unit.fatigue;
+                    if (float.IsNaN(fatigue) || float.IsInfinity(fatigue)) continue;
                     if (fatigue < 0f) fatigue = 0f;
                     if (fatigue > 1f) fatigue = 1f;
-                    if (ammo < 0f) ammo = 0f;
-                    if (ammo > 1f) ammo = 1f;
 
                     fatigueSum += fatigue;
-                    ammoSum += ammo;
+                    ammoSum += NormalizeAmmo01(unit.ammo, unit.unittyp, 0.9f);
                     sampled++;
                 }
 
@@ -209,6 +205,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 avgFatigue01 = 0.2f;
                 avgAmmo01 = 0.9f;
             }
+        }
+
+        private static bool SafeActive(Regiment unit)
+        {
+            try { return unit != null && unit.gameObject != null && unit.gameObject.activeInHierarchy; }
+            catch { return false; }
         }
 
         /// <summary>
@@ -753,7 +755,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 if (regiment == null) return 0;
-                var field = AccessTools.Field(typeof(Regiment), fieldName);
+                var field = ResolveObjectField(typeof(Regiment), fieldName);
                 if (field == null) return 0;
                 object value = field.GetValue(regiment);
                 return value == null ? 0 : Convert.ToInt32(value);
@@ -769,7 +771,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             try
             {
                 if (regiment == null) return 0f;
-                var field = AccessTools.Field(typeof(Regiment), fieldName);
+                var field = ResolveObjectField(typeof(Regiment), fieldName);
                 if (field == null) return 0f;
                 object value = field.GetValue(regiment);
                 return value == null ? 0f : Convert.ToSingle(value);
