@@ -9,8 +9,16 @@ using static TestHarness;
 // mapping + emitter dedupe (§C).
 internal static class PlayerOwnershipTests
 {
-    private const int Own = 1;
-    private const int Enemy = 0;
+    private const int OwnSide = 1;
+    private const int EnemySide = 0;
+
+    // Literal flag shorthands for the fixtures.
+    private const UnitFlags PO = UnitFlags.PlayerOwned;
+    private const UnitFlags PD = UnitFlags.PermanentlyDetached;
+    private const UnitFlags Anc = UnitFlags.AncestorOfPlayerCommand;
+    private const UnitFlags Cmd = UnitFlags.PlayerCommand;
+    private const UnitFlags CD = UnitFlags.PlayerCommandDetached;
+    private const UnitFlags Chain = Anc | Cmd | CD;
 
     // Fixture command tree (own side), indices into the record array:
     //   0 army
@@ -47,7 +55,7 @@ internal static class PlayerOwnershipTests
         });
     }
 
-    // ---- fixtures -------------------------------------------------------
+    // ---- fixtures (literal flags; no rule under test builds them) --------
 
     private static PlayerOwnershipInput WlInput(int playerCommandId, bool cic = false)
     {
@@ -56,7 +64,7 @@ internal static class PlayerOwnershipTests
             WlActive = true,
             AiVsAi = true, // W&L forces ai_vs_ai (29787-29793, 23755-23768)
             DebugAllArmiesAi = false,
-            PlayerAlliance = Own,
+            PlayerAlliance = OwnSide,
             PlayerCommandInstanceId = playerCommandId,
             PlayerIsCic = cic,
         };
@@ -64,36 +72,45 @@ internal static class PlayerOwnershipTests
 
     private static int IdOf(int index) => 100 + index;
 
-    // Builds the fixture tree with ownership computed the way vanilla caches
-    // dlcw_isundercommander: the player's command and its descendants (91203).
-    private static UnitRecord[] Tree(PlayerOwnershipInput input, int playerIndex, bool playerDetached)
+    private static UnitRecord[] Records(params UnitFlags[] flags)
     {
         var records = new UnitRecord[FixtureParents.Length];
         for (int i = 0; i < records.Length; i++)
         {
-            bool dlcw = playerIndex >= 0 && IsSelfOrDescendant(i, playerIndex);
             records[i] = new UnitRecord
             {
                 InstanceId = IdOf(i),
-                Alliance = Own,
+                Alliance = OwnSide,
                 ParentIndex = FixtureParents[i],
-                Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup |
-                    PlayerOwnership.Compute(input, Own, dlcw, takenOver: false, aiFeudStance: -1),
+                Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup | flags[i],
             };
         }
-        if (playerIndex >= 0 && playerDetached) records[playerIndex].Flags |= UnitFlags.PermanentlyDetached;
-        PlayerOwnership.ApplyChainFlags(records, records.Length, input);
         return records;
     }
 
-    private static bool IsSelfOrDescendant(int index, int ancestor)
+    // Brigade A1a (5) is the player's command: it and its regiments 7, 8 carry
+    // dlcw_isundercommander (91203). Raw = as the builder captures it; Chained =
+    // with the chain flags written out by hand.
+    private static UnitRecord[] BrigadePlayerRaw(bool detached)
     {
-        for (int i = index; i >= 0; i = FixtureParents[i])
-            if (i == ancestor) return true;
-        return false;
+        UnitFlags d = detached ? PD : UnitFlags.None;
+        return Records(0, 0, 0, 0, 0, PO | d, 0, PO, PO, 0);
+    }
+
+    private static UnitRecord[] BrigadePlayerChained(bool detached)
+    {
+        UnitFlags d = detached ? PD : UnitFlags.None;
+        UnitFlags c = detached ? CD : UnitFlags.None;
+        return Records(Anc | c, Anc | c, 0, Anc | c, 0, PO | Cmd | c | d, 0, PO, PO, 0);
     }
 
     private static bool Has(UnitRecord r, UnitFlags flag) => (r.Flags & flag) == flag;
+
+    private static void AssertFlags(UnitRecord[] expected, UnitRecord[] actual, string label)
+    {
+        for (int i = 0; i < expected.Length; i++)
+            AssertEqual(expected[i].Flags, actual[i].Flags, label + " flags " + i);
+    }
 
     private static ChainResolution Resolve(UnitRecord[] records, int groupIndex)
     {
@@ -114,95 +131,95 @@ internal static class PlayerOwnershipTests
     private static void OwnershipBrigadePlayerOwnsDescendantsOnly()
     {
         var input = WlInput(IdOf(5));
-        var t = Tree(input, playerIndex: 5, playerDetached: true);
-        int[] owned = { 5, 7, 8 };
-        for (int i = 0; i < t.Length; i++)
+        bool[] dlcw = { false, false, false, false, false, true, false, true, true, false };
+        for (int i = 0; i < dlcw.Length; i++)
+            AssertEqual(dlcw[i] ? PO : UnitFlags.None, PlayerOwnership.Compute(input, OwnSide, dlcw[i], false, -1), "owned " + i);
+
+        foreach (bool detached in new[] { true, false })
         {
-            bool expectOwned = Array.IndexOf(owned, i) >= 0;
-            AssertEqual(expectOwned, Has(t[i], UnitFlags.PlayerOwned), "player-owned " + i);
+            var t = BrigadePlayerRaw(detached);
+            PlayerOwnership.ApplyChainFlags(t, t.Length, input);
+            AssertFlags(BrigadePlayerChained(detached), t, detached ? "detached" : "attached");
         }
-        AssertTrue(Has(t[5], UnitFlags.PlayerCommand), "brigade is the player command");
-        foreach (int a in new[] { 0, 1, 3 })
-            AssertTrue(Has(t[a], UnitFlags.AncestorOfPlayerCommand), "ancestor " + a);
-        foreach (int n in new[] { 2, 4, 5, 6, 7, 8, 9 })
-            AssertFalse(Has(t[n], UnitFlags.AncestorOfPlayerCommand), "not an ancestor " + n);
-        AssertTrue(Has(t[3], UnitFlags.PlayerCommandDetached), "ancestor carries the detach state");
     }
 
     private static void OwnershipDivisionCorpsArmyPlayer()
     {
-        foreach (int player in new[] { 3, 1, 0 })
+        // (player index, owned subtree, ancestors) written out per echelon.
+        var cases = new (int player, int[] owned, int[] ancestors)[]
         {
-            var input = WlInput(IdOf(player));
-            var t = Tree(input, player, playerDetached: true);
+            (3, new[] { 3, 5, 6, 7, 8, 9 }, new[] { 0, 1 }),
+            (1, new[] { 1, 3, 4, 5, 6, 7, 8, 9 }, new[] { 0 }),
+            (0, new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }, new int[0]),
+        };
+        foreach (var c in cases)
+        {
+            var raw = new UnitFlags[FixtureParents.Length];
+            foreach (int o in c.owned) raw[o] = PO;
+            var t = Records(raw);
+            PlayerOwnership.ApplyChainFlags(t, t.Length, WlInput(IdOf(c.player)));
             for (int i = 0; i < t.Length; i++)
             {
-                bool inSubtree = IsSelfOrDescendant(i, player);
-                bool isAncestor = !inSubtree && IsSelfOrDescendant(player, i);
-                AssertEqual(inSubtree, Has(t[i], UnitFlags.PlayerOwned), "player " + player + " owns " + i);
-                AssertEqual(isAncestor, Has(t[i], UnitFlags.AncestorOfPlayerCommand), "player " + player + " ancestor " + i);
+                AssertEqual(Array.IndexOf(c.owned, i) >= 0, Has(t[i], PO), "player " + c.player + " owns " + i);
+                AssertEqual(Array.IndexOf(c.ancestors, i) >= 0, Has(t[i], Anc), "player " + c.player + " ancestor " + i);
+                AssertEqual(i == c.player, Has(t[i], Cmd), "player " + c.player + " command " + i);
             }
         }
     }
 
     private static void OwnershipCicPlayerOwnsAll()
     {
-        // Vanilla 91185-91188: a CIC player owns every unit of the alliance. The
-        // cached dlcw flag lags a slow cycle (112240), so the CIC bit alone owns.
+        // Vanilla 91187: a CIC player owns every unit of the alliance. The cached
+        // dlcw flag can lag a refresh, so the CIC bit alone owns.
         var input = WlInput(IdOf(0), cic: true);
-        AssertTrue(Has(new UnitRecord { Flags = PlayerOwnership.Compute(input, Own, false, false, -1) }, UnitFlags.PlayerOwned),
-            "CIC owns own-alliance unit without dlcw");
-        AssertFalse(Has(new UnitRecord { Flags = PlayerOwnership.Compute(input, Enemy, false, false, -1) }, UnitFlags.PlayerOwned),
-            "CIC never owns the enemy");
+        AssertEqual(PO, PlayerOwnership.Compute(input, OwnSide, false, false, -1), "CIC owns own-alliance unit without dlcw");
+        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(input, EnemySide, false, false, -1), "CIC never owns the enemy");
     }
 
     private static void OwnershipTakeoverUnit()
     {
         var wl = WlInput(IdOf(5));
-        AssertEqual(UnitFlags.PlayerOwned, PlayerOwnership.Compute(wl, Own, false, takenOver: true, aiFeudStance: -1),
-            "W&L take-over is owned");
+        AssertEqual(PO, PlayerOwnership.Compute(wl, OwnSide, false, takenOver: true, aiFeudStance: -1), "W&L take-over is owned");
         var nonWl = wl;
         nonWl.WlActive = false;
-        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(nonWl, Own, false, takenOver: true, aiFeudStance: -1),
+        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(nonWl, OwnSide, false, takenOver: true, aiFeudStance: -1),
             "take-over list is ignored outside a career");
     }
 
     private static void OwnershipFeudUnitFlagged()
     {
         var input = WlInput(IdOf(5));
-        AssertEqual(UnitFlags.Feud, PlayerOwnership.Compute(input, Enemy, false, false, aiFeudStance: 2), "feud stance 2");
-        AssertEqual(UnitFlags.Feud, PlayerOwnership.Compute(input, Enemy, false, false, aiFeudStance: 0), "feud stance 0");
-        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(input, Enemy, false, false, aiFeudStance: -1), "no feud (vanilla default -1, 112841)");
+        AssertEqual(UnitFlags.Feud, PlayerOwnership.Compute(input, EnemySide, false, false, aiFeudStance: 2), "feud stance 2");
+        AssertEqual(UnitFlags.Feud, PlayerOwnership.Compute(input, EnemySide, false, false, aiFeudStance: 0), "feud stance 0");
+        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(input, EnemySide, false, false, aiFeudStance: -1), "no feud (vanilla default -1, 112841)");
         AssertFalse(PlayerOwnership.CanWrite(UnitFlags.Feud, modeAllowsWrites: true, out SkipReason reason), "feud refused");
         AssertEqual(SkipReason.Feud, reason, "feud reason");
     }
 
     private static void OwnershipNonWlPlayerSideOwnedUnlessAiVsAi()
     {
-        var input = new PlayerOwnershipInput { WlActive = false, AiVsAi = false, PlayerAlliance = Own };
-        AssertEqual(UnitFlags.PlayerOwned, PlayerOwnership.Compute(input, Own, false, false, -1), "player side owned");
-        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(input, Enemy, false, false, -1), "enemy not owned");
+        var input = new PlayerOwnershipInput { WlActive = false, AiVsAi = false, PlayerAlliance = OwnSide };
+        AssertEqual(PO, PlayerOwnership.Compute(input, OwnSide, false, false, -1), "player side owned");
+        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(input, EnemySide, false, false, -1), "enemy not owned");
 
         input.AiVsAi = true;
-        // Outside a career vanilla's slow tick still caches dlcw = (alliance ==
-        // player alliance) (112240 -> 91170-91176), so dlcw must not own here.
-        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(input, Own, dlcwUnderCommander: true, false, -1),
+        // Outside a career vanilla still caches dlcw = (alliance == player alliance)
+        // (Regiment initialize 113065 -> 91170-91176), so dlcw must not own here.
+        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(input, OwnSide, dlcwUnderCommander: true, false, -1),
             "ai_vs_ai: player side AI-run even with stale dlcw");
 
         input.AiVsAi = false;
         input.DebugAllArmiesAi = true;
-        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(input, Own, false, false, -1), "debug all-armies AI");
+        AssertEqual(UnitFlags.None, PlayerOwnership.Compute(input, OwnSide, false, false, -1), "debug all-armies AI");
     }
 
     private static void AncestorsNotProtected()
     {
-        var input = WlInput(IdOf(5));
         foreach (bool detached in new[] { true, false })
         {
-            var t = Tree(input, 5, detached);
+            var t = BrigadePlayerChained(detached);
             foreach (int a in new[] { 0, 1, 3 })
             {
-                AssertFalse(Has(t[a], UnitFlags.PlayerOwned), "ancestor " + a + " not owned");
                 AssertTrue(PlayerOwnership.CanWrite(t[a].Flags, true, out SkipReason r), "ancestor " + a + " writable");
                 AssertEqual(SkipReason.None, r, "ancestor reason");
             }
@@ -216,32 +233,23 @@ internal static class PlayerOwnershipTests
 
     private static void ChainFlagsResetWhenPlayerCommandChanges()
     {
-        var input = WlInput(IdOf(5));
-        var t = Tree(input, 5, playerDetached: false);
-        input.PlayerCommandInstanceId = IdOf(2);
-        PlayerOwnership.ApplyChainFlags(t, t.Length, input);
-        AssertFalse(Has(t[5], UnitFlags.PlayerCommand), "old command cleared");
-        AssertFalse(Has(t[3], UnitFlags.AncestorOfPlayerCommand), "old ancestor cleared");
-        AssertTrue(Has(t[2], UnitFlags.PlayerCommand), "new command flagged");
-        AssertTrue(Has(t[0], UnitFlags.AncestorOfPlayerCommand), "new ancestor flagged");
-        AssertFalse(Has(t[1], UnitFlags.AncestorOfPlayerCommand), "sibling corps not an ancestor");
+        var t = BrigadePlayerChained(detached: false);
+        PlayerOwnership.ApplyChainFlags(t, t.Length, WlInput(IdOf(2)));
+        AssertFlags(Records(Anc, 0, Cmd, 0, 0, PO, 0, PO, PO, 0), t, "command moved to corps B");
 
-        input.PlayerCommandInstanceId = 0;
-        PlayerOwnership.ApplyChainFlags(t, t.Length, input);
+        PlayerOwnership.ApplyChainFlags(t, t.Length, WlInput(0));
         for (int i = 0; i < t.Length; i++)
-            AssertEqual(UnitFlags.None, t[i].Flags & (UnitFlags.PlayerCommand | UnitFlags.AncestorOfPlayerCommand | UnitFlags.PlayerCommandDetached),
-                "no command clears chain flags " + i);
+            AssertEqual(UnitFlags.None, t[i].Flags & Chain, "no command clears chain flags " + i);
     }
 
     private static void DirectWriteRefusedOnUndetachedAncestor()
     {
-        var input = WlInput(IdOf(5));
-        var undetached = Tree(input, 5, playerDetached: false);
+        var undetached = BrigadePlayerChained(detached: false);
         AssertTrue(PlayerOwnership.NeedsChainFanOut(undetached[3].Flags), "undetached parent needs fan-out");
         AssertTrue(PlayerOwnership.NeedsChainFanOut(undetached[0].Flags), "undetached root ancestor needs fan-out");
         AssertFalse(PlayerOwnership.NeedsChainFanOut(undetached[6].Flags), "peer brigade orderable as a group");
 
-        var detached = Tree(input, 5, playerDetached: true);
+        var detached = BrigadePlayerChained(detached: true);
         AssertFalse(PlayerOwnership.NeedsChainFanOut(detached[3].Flags), "detached: vanilla skips the player's subtree");
     }
 
@@ -249,8 +257,7 @@ internal static class PlayerOwnershipTests
 
     private static void ChainDetachedOrdersGroup()
     {
-        var t = Tree(WlInput(IdOf(5)), 5, playerDetached: true);
-        var result = Resolve(t, 3);
+        var result = Resolve(BrigadePlayerChained(detached: true), 3);
         AssertTargets(result, new[] { 3 }, "detached");
         AssertFalse(result.FannedOut, "detached group order not fanned out");
         AssertTrue(result.PlayerShareNeedsDispatch, "ancestor order needs a player dispatch");
@@ -258,8 +265,7 @@ internal static class PlayerOwnershipTests
 
     private static void ChainNotDetachedFansOutSkippingPlayerChild()
     {
-        var t = Tree(WlInput(IdOf(5)), 5, playerDetached: false);
-        var result = Resolve(t, 3);
+        var result = Resolve(BrigadePlayerChained(detached: false), 3);
         AssertTargets(result, new[] { 6 }, "fan-out at the player's parent");
         AssertTrue(result.FannedOut, "fanned out");
         AssertTrue(result.PlayerShareNeedsDispatch, "player share dispatched");
@@ -267,19 +273,17 @@ internal static class PlayerOwnershipTests
 
     private static void ChainPlayerAtRootFansOutNothing()
     {
-        var t = Tree(WlInput(IdOf(0)), 0, playerDetached: false);
-        for (int i = 0; i < t.Length; i++)
-            AssertFalse(Has(t[i], UnitFlags.AncestorOfPlayerCommand), "no ancestors " + i);
-
+        var t = Records(PO | Cmd, PO, PO, PO, PO, PO, PO, PO, PO, PO);
         var root = Resolve(t, 0);
         AssertEqual(0, root.Count, "player command itself is never a target");
         AssertFalse(root.FannedOut, "nothing fanned out");
         AssertFalse(root.PlayerShareNeedsDispatch, "no dispatch");
+        AssertEqual(0, Resolve(t, 3).Count, "owned subordinate never a target");
     }
 
     private static void ChainPlayerTwoLevelsDownFansOutAtEachLevel()
     {
-        var t = Tree(WlInput(IdOf(5)), 5, playerDetached: false);
+        var t = BrigadePlayerChained(detached: false);
         var corps = Resolve(t, 1);
         AssertTargets(corps, new[] { 4, 6 }, "corps: division A2, then brigade A1b");
         AssertTrue(corps.FannedOut, "corps fanned out");
@@ -291,21 +295,20 @@ internal static class PlayerOwnershipTests
 
     private static void ChainNonAncestorTargetsItself()
     {
-        var t = Tree(WlInput(IdOf(5)), 5, playerDetached: false);
+        var t = BrigadePlayerChained(detached: false);
         var result = Resolve(t, 6);
         AssertTargets(result, new[] { 6 }, "peer brigade");
         AssertFalse(result.FannedOut, "no fan-out");
         AssertFalse(result.PlayerShareNeedsDispatch, "no dispatch for a peer");
 
-        var empty = Resolve(t, -1);
-        AssertEqual(0, empty.Count, "invalid index");
+        AssertEqual(0, Resolve(t, -1).Count, "invalid index");
     }
 
     private static void ChainFanOutSkipsPlayerOwnedChildren()
     {
-        var input = WlInput(IdOf(5));
-        var t = Tree(input, 5, playerDetached: false);
-        t[6].Flags |= PlayerOwnership.Compute(input, Own, false, takenOver: true, aiFeudStance: -1);
+        var t = BrigadePlayerChained(detached: false);
+        t[6].Flags |= PO; // brigade A1b taken over (45827)
+        t[9].Flags |= PO;
         var result = Resolve(t, 3);
         AssertEqual(0, result.Count, "taken-over peer is not ordered");
         AssertTrue(result.FannedOut, "still a fan-out");

@@ -295,7 +295,7 @@ internal static class BattlePerceptionProbe { // runtime
 
 ## BC3 — PlayerOwnership, TacticalWriteGuard, chain resolution, dispatch
 
-**Owned files:** create `Tactical/Battle/PlayerOwnership.cs` (pure), `Tactical/Battle/TacticalChainOrderPlanner.cs` (pure), `Tactical/Battle/TacticalDispatchTypeMapper.cs` (pure), `Tactical/Battle/TacticalPlayerDispatchRuntime.cs` (runtime); rewrite `Tactical/TacticalWriteGuard.cs`; modify `Patches/PlayerSubordinateOrderPatch.cs` (dedupe moves to the emitter), `Tactical/PlayerOrders/PlayerOrderDedupe.cs` (state type stays, owner changes); delete `PlayerCommandProbeFilter` (`CommandPostureExecutor.cs:439-453`, the class only) and `Tactical/TacticalWlActionGuard.cs` once BC5b removes its callers. BC3 deletes the class and BC5b deletes the calls, so the merge order BC5b → BC3-cleanup is handled in BC7. Test file `PlayerOwnershipTests.cs`.
+**Owned files:** create `Tactical/Battle/PlayerOwnership.cs` (pure), `Tactical/Battle/TacticalChainOrderPlanner.cs` (pure), `Tactical/Battle/TacticalDispatchTypeMapper.cs` (pure), `Tactical/Battle/TacticalPlayerDispatchRuntime.cs` (runtime); rewrite `Tactical/TacticalWriteGuard.cs`; modify `Patches/PlayerSubordinateOrderPatch.cs` (dedupe moves to the emitter), `Tactical/PlayerOrders/PlayerOrderDedupe.cs` (state type stays, owner changes); create `Tactical/Battle/BattleSnapshot.Ownership.cs` (declares BC1's `Own`/`OwnCount` so BC3 compiles first; deleted at the BC1 merge). `PlayerCommandProbeFilter` (`CommandPostureExecutor.cs:439-453`) is **not** BC3's: its caller `ArmyPostureInputsRuntime.cs:105` and `PostureStanceFixTests.cs:679-686` are BC5a's, so BC5a deletes the class with its call. `Tactical/TacticalWlActionGuard.cs` is BC5b's: it deletes the file with its callers (`BattleFeudActionGatePatch.cs:88`, `BattleGroupStancePatch.cs:814`, `TacticalObserverPatch.cs:1832`). Test file `PlayerOwnershipTests.cs`.
 
 **Vanilla to read:**
 - `IsUnitUnderCommander` 91168-91222.
@@ -374,7 +374,7 @@ internal static class TacticalPlayerDispatchRuntime { // runtime, BattleScope-re
 - [ ] Rewrite `TacticalWriteGuard`. `IsWlCurrentCommandOrChain` and `WlOwnershipSafe` are deleted, and every existing caller keeps compiling through the `Regiment` overloads.
 - [ ] Move `DedupeState` from `PlayerSubordinateOrderPatch` to `TacticalPlayerDispatchRuntime.Dedupe`, and route #62's `CheckCurrentOrderUpdate` call through `Emit` (same arguments, width 100, depth 50). Scope `tactical.dispatch.emit`.
 - [ ] **Acceptance:**
-  - `rg -n "IsWlCurrentCommandOrChain|PlayerCommandProbeFilter" src` gives no hits; `TacticalWlActionGuard` callers are listed for BC5b.
+  - `rg -n "IsWlCurrentCommandOrChain|WlOwnershipSafe" src/WhiskeyRealism/Tactical/TacticalWriteGuard.cs` gives no hits. `PlayerCommandProbeFilter` (BC5a) and `TacticalWlActionGuard` (BC5b) are removed by those workstreams; BC7 checks both greps repo-wide.
   - Tests pass.
 
 ---
