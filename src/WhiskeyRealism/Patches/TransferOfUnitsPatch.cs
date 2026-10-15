@@ -10,15 +10,24 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Patches
 {
     // v0.2.2 concrete steering for vanilla AICampaign.CheckTransferOfUnits.
-    // Vanilla transfers troops from a surplus position to a deficit position.
-    // We temporarily replace the deficit with the active CIC plan target, then
-    // restore vanilla state after the method runs. The actual MoveUnit call and
-    // all vanilla safety gates remain vanilla-owned.
+    // Vanilla (decompile 17232) transfers troops from positionsurplus toward
+    // positiondeficit, sized by deficit.enemystrength - deficit.ownstrength
+    // (num4, 17275). We temporarily replace the deficit with the active CIC
+    // plan target, then restore vanilla state after the method runs. The
+    // actual MoveUnit call and all vanilla safety gates remain vanilla-owned.
+    //
+    // 2026-10-14 (C-Transfer): steer only when the plan target's local
+    // shortfall is worse than the deficit vanilla found (or vanilla found none),
+    // so a genuinely threatened zone keeps its transfer; the plan requirement
+    // is local (CampaignMilitaryGates.PlanTransferRequiredAtTarget) instead of
+    // a share of the whole army. The deficit restore runs in a Finalizer so a
+    // vanilla exception cannot leave the plan target stored as positiondeficit.
     [HarmonyPatch(typeof(AICampaign), "CheckTransferOfUnits")]
     internal static class TransferOfUnitsPatch
     {
         private const float FallbackSearchRadius = 650f;
         private static readonly HashSet<string> LogOnceKeys = new HashSet<string>();
+        private static readonly Dictionary<int, TransferSteerState> _pending = new Dictionary<int, TransferSteerState>();
 
         internal sealed class TransferSteerState
         {
@@ -35,11 +44,11 @@ namespace WhiskeyRealism.Patches
         }
 
         [HarmonyPrefix]
-        internal static void Prefix(int _aifaction, out TransferSteerState __state)
+        internal static void Prefix(int _aifaction)
         {
             using (TelemetryPerf.Scope("campaign.patch.transfer-of-units.prefix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-            __state = null;
+            _pending.Remove(_aifaction);
             OnceLog.Info("transfer", "TransferOfUnitsPatch wired (concrete plan-target steering)");
 
             try
@@ -89,8 +98,19 @@ namespace WhiskeyRealism.Patches
                 float totalOwn = SumStrength(ownUnits);
                 if (totalOwn <= 0f) return;
 
-                float requiredAtTarget = Math.Max(2500f, totalOwn * Clamp(phase.ForceFractionRequired, 0.15f, 0.95f));
+                float requiredAtTarget = CampaignMilitaryGates.PlanTransferRequiredAtTarget(totalOwn, phase.ForceFractionRequired, enemyNear);
                 if (ownNear >= requiredAtTarget && ownNear >= enemyNear) return;
+
+                // The injected TransferData makes vanilla compute num4 = enemyProxy - ownNear;
+                // compare that with the deficit vanilla already found.
+                float enemyProxy = Math.Max(enemyNear, requiredAtTarget);
+                float planShortfall = enemyProxy - ownNear;
+                var vanillaDeficit = deficitField.GetValue(faction);
+                bool vanillaPresent = vanillaDeficit != null;
+                float vanillaEnemy = vanillaPresent ? ReadTransferFloat(vanillaDeficit, "enemystrength") : 0f;
+                float vanillaOwn = vanillaPresent ? ReadTransferFloat(vanillaDeficit, "ownstrength") : 0f;
+                if (!CampaignMilitaryGates.ShouldSteerTransfer(vanillaPresent, vanillaEnemy, vanillaOwn, planShortfall))
+                    return;
 
                 string sourceSector = null;
                 string destinationSector = FrontSectorRuntime.SectorKey(target.Value);
@@ -128,16 +148,14 @@ namespace WhiskeyRealism.Patches
                     OnceLog.Warning("transfer-budget:source-position", "[Patch:TransferBudget] could not read vanilla surplus position; front-budget gate skipped");
                 }
 
-                float enemyProxy = Math.Max(enemyNear, requiredAtTarget);
                 var transferData = CreateTransferData(factionType, target.Value, ownNear, enemyProxy);
                 if (transferData == null) return;
 
-                var originalDeficit = deficitField.GetValue(faction);
-                __state = new TransferSteerState
+                _pending[_aifaction] = new TransferSteerState
                 {
                     Faction = faction,
                     DeficitField = deficitField,
-                    OriginalDeficit = originalDeficit,
+                    OriginalDeficit = vanillaDeficit,
                     Changed = true,
                     AllianceId = allianceId,
                     ObjectiveId = phase.TargetObjectiveId,
@@ -168,36 +186,56 @@ namespace WhiskeyRealism.Patches
         }
 
         [HarmonyPostfix]
-        internal static void Postfix(TransferSteerState __state)
+        internal static void Postfix(int _aifaction)
         {
             using (TelemetryPerf.Scope("campaign.patch.transfer-of-units.postfix", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
-            if (__state == null || !__state.Changed) return;
+            if (!_pending.TryGetValue(_aifaction, out var state) || state == null || !state.Changed) return;
 
             try
             {
-                int afterTransferCount = TransferCount(__state.Faction);
-                if (afterTransferCount > __state.BeforeTransferCount)
+                int afterTransferCount = TransferCount(state.Faction);
+                if (afterTransferCount > state.BeforeTransferCount)
                 {
-                    EmitPlanTransferQueued(__state, afterTransferCount - __state.BeforeTransferCount);
+                    EmitPlanTransferQueued(state, afterTransferCount - state.BeforeTransferCount);
                 }
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("transfer:postfix-count", "[Patch:Transfer] postfix count failed: " + ex.Message);
             }
-            finally
+            } // end using TelemetryPerf.Scope
+        }
+
+        // Runs after Postfix and also when vanilla threw; restores vanilla's own
+        // positiondeficit. A void Finalizer leaves any exception untouched.
+        [HarmonyFinalizer]
+        internal static void Finalizer(int _aifaction)
+        {
+            using (TelemetryPerf.Scope("campaign.patch.transfer-of-units.finalizer", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
+                if (!_pending.TryGetValue(_aifaction, out var state)) return;
+                _pending.Remove(_aifaction);
+                if (state == null || !state.Changed) return;
                 try
                 {
-                    __state.DeficitField?.SetValue(__state.Faction, __state.OriginalDeficit);
+                    state.DeficitField?.SetValue(state.Faction, state.OriginalDeficit);
                 }
                 catch (Exception ex)
                 {
                     OnceLog.Warning("transfer:restore", "[Patch:Transfer] restore failed: " + ex.Message);
                 }
             }
-            } // end using TelemetryPerf.Scope
+        }
+
+        private static float ReadTransferFloat(object transferData, string fieldName)
+        {
+            try
+            {
+                var field = AccessTools.Field(transferData.GetType(), fieldName);
+                return field != null ? Convert.ToSingle(field.GetValue(transferData)) : 0f;
+            }
+            catch { return 0f; }
         }
 
         private static object GetFaction(int aifactionIndex)
@@ -305,13 +343,6 @@ namespace WhiskeyRealism.Patches
                 return Math.Max(1f, Convert.ToSingle(field.GetValue(null)));
             }
             catch { return fallback; }
-        }
-
-        private static float Clamp(float value, float min, float max)
-        {
-            if (value < min) return min;
-            if (value > max) return max;
-            return value;
         }
 
         private static void EmitPlanTransferSteer(

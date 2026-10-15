@@ -12,6 +12,8 @@ internal static class CampaignMilitaryFixTests
         WlCampaignContextKeyDistinguishesCareersAndSaves();
         ListSnapshotRestoreUndoesVanillaMutation();
         ListSnapshotRestoreIsIdempotent();
+        TransferRequirementIsLocalNotTheaterWide();
+        TransferSteersOnlyWhenPlanShortfallIsWorse();
     }
 
     private static void LogPass(string message)
@@ -104,5 +106,30 @@ internal static class CampaignMilitaryFixTests
         TestHarness.AssertFalse(CampaignMilitaryGates.RestoreListSnapshot(live, null), "missing snapshot is a no-op");
         TestHarness.AssertEqual(2, live.Count, "missing snapshot leaves list alone");
         LogPass("c2a list snapshot restore is idempotent and null-safe");
+    }
+
+    // C-Transfer: the plan requirement used totalOwn * ForceFractionRequired
+    // (up to 0.95 of the whole army), so the plan target always "needed"
+    // more than any vanilla deficit and the threatened zone never got troops.
+    private static void TransferRequirementIsLocalNotTheaterWide()
+    {
+        float undefended = CampaignMilitaryGates.PlanTransferRequiredAtTarget(totalOwn: 200000f, forceFraction: 0.8f, enemyNear: 0f);
+        TestHarness.AssertEqual(2500f, undefended, "no enemy near target -> token presence");
+        float contested = CampaignMilitaryGates.PlanTransferRequiredAtTarget(200000f, 0.8f, 20000f);
+        TestHarness.AssertEqual(25000f, contested, "local superiority over enemy near target");
+        float capped = CampaignMilitaryGates.PlanTransferRequiredAtTarget(30000f, 0.5f, 40000f);
+        TestHarness.AssertEqual(15000f, capped, "never more than the plan's commitment share");
+        LogPass("c2a transfer requirement is local, capped by commitment share");
+    }
+
+    private static void TransferSteersOnlyWhenPlanShortfallIsWorse()
+    {
+        // vanilla CheckTransferOfUnits severity = deficit.enemystrength - deficit.ownstrength (17275)
+        TestHarness.AssertTrue(CampaignMilitaryGates.ShouldSteerTransfer(false, 0f, 0f, 5000f), "no vanilla deficit -> steer");
+        TestHarness.AssertTrue(CampaignMilitaryGates.ShouldSteerTransfer(true, 1000f, 3000f, 5000f), "vanilla deficit not a shortfall -> steer");
+        TestHarness.AssertTrue(CampaignMilitaryGates.ShouldSteerTransfer(true, 12000f, 8000f, 5000f), "plan shortfall worse -> steer");
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldSteerTransfer(true, 20000f, 5000f, 5000f), "threatened zone worse -> vanilla keeps its deficit");
+        TestHarness.AssertFalse(CampaignMilitaryGates.ShouldSteerTransfer(false, 0f, 0f, 0f), "no plan shortfall -> nothing to steer");
+        LogPass("c2a transfer steers only when plan shortfall exceeds vanilla deficit");
     }
 }

@@ -46,5 +46,40 @@ namespace WhiskeyRealism.Strategic
                 live.Add(snapshot[i]);
             return true;
         }
+
+        // ---- C-Transfer ------------------------------------------------------
+        // Vanilla CheckTransferOfUnits (decompile 17232) sends troops toward
+        // positiondeficit sized by deficit.enemystrength - deficit.ownstrength
+        // (num4, 17275). The plan target only competes for that slot with a
+        // requirement on the same local scale: superiority over the enemy near
+        // the target, floored at a token presence, capped by the phase's
+        // commitment share of the whole army.
+        internal const float PlanTransferMinimumPresence = 2500f;
+        internal const float PlanTransferLocalSuperiority = 1.25f;
+
+        internal static float PlanTransferRequiredAtTarget(float totalOwn, float forceFraction, float enemyNear)
+        {
+            float share = Math.Max(0f, totalOwn) * Clamp(forceFraction, 0.15f, 0.95f);
+            float local = Math.Max(PlanTransferMinimumPresence, Math.Max(0f, enemyNear) * PlanTransferLocalSuperiority);
+            return Math.Max(PlanTransferMinimumPresence, Math.Min(share, local));
+        }
+
+        // Steer only when the plan's shortfall is worse than the deficit vanilla
+        // already found; otherwise the actually-threatened zone keeps its transfer.
+        internal static bool ShouldSteerTransfer(bool vanillaDeficitPresent, float vanillaDeficitEnemy, float vanillaDeficitOwn, float planShortfall)
+        {
+            if (planShortfall <= 0f) return false;
+            if (!vanillaDeficitPresent) return true;
+            float vanillaSeverity = vanillaDeficitEnemy - vanillaDeficitOwn;
+            if (vanillaSeverity <= 0f) return true;
+            return planShortfall > vanillaSeverity;
+        }
+
+        internal static float Clamp(float value, float min, float max)
+        {
+            if (value < min) return min;
+            if (value > max) return max;
+            return value;
+        }
     }
 }
