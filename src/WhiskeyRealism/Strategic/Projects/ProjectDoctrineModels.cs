@@ -12,6 +12,7 @@ namespace WhiskeyRealism.Strategic.Projects
         public float NavalDeficit;
         public float BlockadePressure;
         public float PortViability;
+        public float ArmsImportViability = 1f;  // vanilla's import factor under the own blockade (1 none .. 0.1 full)
         public float CreditStress;
         public float ManpowerStress;
         public float LogisticsTempoNeed;

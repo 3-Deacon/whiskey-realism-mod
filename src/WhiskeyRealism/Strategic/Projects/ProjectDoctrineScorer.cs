@@ -163,7 +163,8 @@ namespace WhiskeyRealism.Strategic.Projects
 
             float score = 0f;
             if (entry.Bucket == ProjectDoctrineBucket.ArmsImport)
-                score += signals.Alliance == 1 ? 0.8f + signals.WeaponDeficit : Math.Max(0f, signals.WeaponDeficit - 0.35f);
+                score += (signals.Alliance == 1 ? 0.8f + signals.WeaponDeficit : Math.Max(0f, signals.WeaponDeficit - 0.35f))
+                    * signals.ArmsImportViability;
             if (entry.Bucket == ProjectDoctrineBucket.DomesticWeapons)
                 score += (0.7f * signals.WeaponDeficit) + (0.5f * signals.ArtilleryDeficit) + (0.3f * signals.IndustryGap);
             if (entry.Bucket == ProjectDoctrineBucket.NavalBlockade)
@@ -317,6 +318,7 @@ namespace WhiskeyRealism.Strategic.Projects
                 NavalDeficit = SafeSignal(signals.NavalDeficit),
                 BlockadePressure = SafeSignal(signals.BlockadePressure),
                 PortViability = SafeSignal(signals.PortViability),
+                ArmsImportViability = float.IsNaN(signals.ArmsImportViability) || float.IsInfinity(signals.ArmsImportViability) ? 1f : SafeSignal(signals.ArmsImportViability),
                 CreditStress = SafeSignal(signals.CreditStress),
                 ManpowerStress = SafeSignal(signals.ManpowerStress),
                 LogisticsTempoNeed = SafeSignal(signals.LogisticsTempoNeed),

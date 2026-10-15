@@ -136,6 +136,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\CombineWeaponLedger.cs" Link="BugFixes\CombineWeaponLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\ArmsRules.cs" Link="BugFixes\ArmsRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\WeaponOrderability.cs" Link="WeaponOrderability.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\ArmsCoverage.cs" Link="ArmsCoverage.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Patches\ArmsSwaps.cs" Link="Patches\ArmsSwaps.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\RaidSupplyThreshold.cs" Link="BugFixes\RaidSupplyThreshold.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\BugFixes\RandomPickRangeIl.cs" Link="BugFixes\RandomPickRangeIl.cs" />

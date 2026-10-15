@@ -70,6 +70,7 @@ internal static class NeedDrivenPolicyTests
             ("need-policy recognition need is the intervention probability on both sides", NeedRecognitionBothSides),
             ("need-policy blockade need per side", NeedBlockadePerSide),
             ("need-policy industry and logistics needs", NeedIndustryAndLogistics),
+            ("need-policy arms coverage mirrors vanilla's count", ArmsCoverageMirrorsVanillaCount),
             ("need-policy needs stay in unit range and drop non-finite input", NeedValuesBoundedAndFinite),
             ("need-policy need smoothing is a reproducible daily ema", NeedSmoothingIsDailyEma),
             ("need-policy emergencies force their need after smoothing", NeedEmergencyForcesNeed),
@@ -441,20 +442,65 @@ internal static class NeedDrivenPolicyTests
         AssertNear(0.4f, CampaignNeedBuilder.Raw(union)[NeedKind.Blockade], 0.001f, "Union: blockade still to do");
     }
 
+    // Industry = own arming need (vanilla's purchase trigger and WSF, CheckPurchaseWeapons
+    // 16287-16335, alliance averages 81589-81605), whatever is in recruitment.
     private static void NeedIndustryAndLogistics()
     {
         var s = Snapshot();
-        s.TroopsInRecruitment = 100f;
-        s.WeaponStock = 25f;
+        s.MinEquippableShare = 0.15f;
+        // Rifles: equippable stock covers 15 % of 100 units, but the army averages Mixed
+        // Muskets (0.069) against an orderable Springfield (0.249): quality gap 0.723.
+        s.Rifles = new ArmsLane { Units = 100, AverageStrength = 0.069f, BestOrderableStrength = 0.249f, EquippableUnits = 15f };
+        // Guns: 1.5 equippable of the 3 vanilla wants (15 % of 20): coverage need 0.5;
+        // Napoleons (0.231) against an orderable 3-inch rifle (0.348): quality gap 0.336.
+        s.Guns = new ArmsLane { Units = 20, AverageStrength = 0.231f, BestOrderableStrength = 0.348f, EquippableUnits = 1.5f };
         s.PeakTransportUse = 0.8f;
         s.SupplyPressure = 0.3f;
         var v = CampaignNeedBuilder.Raw(s);
-        AssertNear(0.75f, v[NeedKind.Industry], 0.001f, "a quarter of the recruits armed");
+        AssertNear(1f - 0.069f / 0.249f, v[NeedKind.Industry], 0.001f, "the worse lane: rifle quality gap");
+        AssertNear(0.5f, CampaignNeedBuilder.LaneNeed(s.Guns, s.MinEquippableShare), 0.001f, "gun lane: coverage gap");
         AssertNear(0.5f, v[NeedKind.Logistics], 0.001f, "transport at 80 %");
         AssertNear(0.3f, v[NeedKind.Supply], 0.001f, "front supply pressure");
         AssertNear(0.3f, v[NeedKind.Agriculture], 0.001f, "agriculture feeds the front");
-        s.TroopsInRecruitment = 0f;
-        AssertEqual(0f, CampaignNeedBuilder.Raw(s)[NeedKind.Industry], "nobody to arm");
+
+        s.Rifles = new ArmsLane { Units = 100, AverageStrength = 0.249f, BestOrderableStrength = 0.249f, EquippableUnits = 0f };
+        AssertEqual(1f, CampaignNeedBuilder.LaneNeed(s.Rifles, 0.15f), "best model everywhere, nothing better in stock: unlocks needed");
+        s.Rifles = new ArmsLane { Units = 100, AverageStrength = 0.249f, BestOrderableStrength = 0.249f, EquippableUnits = 20f };
+        AssertEqual(0f, CampaignNeedBuilder.LaneNeed(s.Rifles, 0.15f), "covered and best: no need");
+        AssertEqual(0f, CampaignNeedBuilder.LaneNeed(new ArmsLane { Units = 0, AverageStrength = 0f, BestOrderableStrength = 0.3f }, 0.15f), "no units to arm");
+        AssertEqual(0f, CampaignNeedBuilder.LaneNeed(new ArmsLane { Units = 10, EquippableUnits = 5f, AverageStrength = 0.1f, BestOrderableStrength = 0f }, 0.15f), "nothing orderable: coverage only");
+        AssertEqual(0f, CampaignNeedBuilder.LaneNeed(null, 0.15f), "missing lane");
+        var idle = Snapshot();
+        AssertEqual(0f, CampaignNeedBuilder.Raw(idle)[NeedKind.Industry], "no units: no need");
+    }
+
+    // Vanilla's coverage count (16287-16312): per model better than the lane average,
+    // floor((stock + ordered - delivered) / pieces per unit); best orderable per lane.
+    private static void ArmsCoverageMirrorsVanillaCount()
+    {
+        var rifles = new ArmsLane { Units = 100, AverageStrength = 0.069f };
+        var guns = new ArmsLane { Units = 20, AverageStrength = 0.231f };
+        var models = new[]
+        {
+            new ArmsModel { IsArtillery = true, FitsBattery = true, Strength = 0.348f, StockAndOpenOrders = 90f, Orderable = true },    // 3-inch: 6 units
+            new ArmsModel { IsArtillery = true, FitsBattery = true, Strength = 0.434f, StockAndOpenOrders = 32f, Orderable = false },   // Gatling stock: 2 units
+            new ArmsModel { IsArtillery = true, FitsBattery = false, Strength = 0.890f, StockAndOpenOrders = 0f, Orderable = true },    // naval mortar
+            new ArmsModel { IsArtillery = true, FitsBattery = true, Strength = 0.105f, StockAndOpenOrders = 300f, Orderable = true },   // 6-pounder, below average
+            new ArmsModel { IsArtillery = false, FitsLine = true, Strength = 0.249f, StockAndOpenOrders = 18000f, Orderable = true },   // Springfield: 6 units
+            new ArmsModel { IsArtillery = false, FitsLine = true, Strength = 0.183f, StockAndOpenOrders = 2999f, Orderable = true },    // Spencer carbine: 0 units
+            new ArmsModel { IsArtillery = false, FitsLine = true, Strength = 0.595f, StockAndOpenOrders = 0f, Orderable = false },     // Whitworth, not imported
+        };
+        ArmsCoverage.Fill(models, rifles, guns, gunsPerUnit: 15f, riflesPerUnit: 3000f);
+        AssertEqual(8f, guns.EquippableUnits, "6 + 2 (stock counts orderable or not, as vanilla)");
+        AssertEqual(6f, rifles.EquippableUnits, "floor per model");
+        AssertNear(0.348f, guns.BestOrderableStrength, 0.0001f, "best orderable field gun");
+        AssertNear(0.249f, rifles.BestOrderableStrength, 0.0001f, "best orderable line weapon");
+        var none = new ArmsLane();
+        ArmsCoverage.Fill(null, none, none, 15f, 3000f);
+        AssertEqual(0f, none.EquippableUnits, "no models");
+        var zero = new ArmsLane { Units = 1 };
+        ArmsCoverage.Fill(models, zero, new ArmsLane(), 0f, 0f);
+        AssertFinite(zero.EquippableUnits, "zero pieces per unit stays finite");
     }
 
     private static void NeedValuesBoundedAndFinite()
@@ -517,6 +563,7 @@ internal static class NeedDrivenPolicyTests
         var neutral = CampaignNeedBuilder.ToProjectSignals(null, null);
         AssertEqual(0.5f, neutral.BlockadePressure, "neutral blockade before the first review");
         AssertEqual(0.5f, neutral.PortViability, "neutral port viability");
+        AssertEqual(1f, neutral.ArmsImportViability, "neutral import viability");
         AssertEqual(0f, neutral.CreditStress, "neutral credit");
 
         var s = Snapshot(0);
@@ -557,8 +604,10 @@ internal static class NeedDrivenPolicyTests
         s.RecruitsAvailable = 12.5f;
         s.AverageSupport = 0.6f;
         s.SupplyPressure = 0.4f;
-        s.TroopsInRecruitment = 10f;
-        s.WeaponStock = 5f;
+        s.MinEquippableShare = 0.15f;
+        s.Rifles = new ArmsLane { Units = 10, AverageStrength = 0.1f, BestOrderableStrength = 0.2f, EquippableUnits = 1.5f };
+        s.Guns = new ArmsLane { Units = 10, AverageStrength = 0.3f, BestOrderableStrength = 0.4f, EquippableUnits = 0.75f };
+        s.ImportCutAtFullBlockade = 0.1f;
         s.OwnBlockadeRatio = 0.8f;
         s.CsaBlockadeRatio = 0.8f;
         var v = CampaignNeedBuilder.Next(null, s, 1);
@@ -567,11 +616,12 @@ internal static class NeedDrivenPolicyTests
         AssertNear(0.4f, signals.CivilOrderRisk, 0.001f, "civil order risk from support");
         AssertNear(0.4f, signals.AgricultureFoodStress, 0.001f, "agriculture");
         AssertEqual(0f, signals.OffensiveTempoNeed, "no fog-honest enemy strength source yet (stage G)");
-        AssertNear(0.5f, signals.WeaponDeficit, 0.001f, "weapon deficit from own stock");
+        AssertNear(0.5f, signals.WeaponDeficit, 0.001f, "weapon deficit: worse lane (rifle quality 0.5, gun coverage 0.5)");
         AssertNear(0.5f, signals.IndustryGap, 0.001f, "industry gap");
         AssertNear(0.8f, signals.BlockadePressure, 0.001f, "CSA blockade pressure");
         AssertNear(0.2f, signals.PortViability, 0.001f, "CSA ports mostly closed");
-        AssertEqual(0f, signals.ArtilleryDeficit, "no fog-honest artillery source");
+        AssertNear(0.5f, signals.ArtilleryDeficit, 0.001f, "own gun lane (coverage 0.75 of 1.5)");
+        AssertNear(0.28f, signals.ArmsImportViability, 0.001f, "vanilla import factor at 80 % blockade (64120-64124)");
         AssertEqual(0f, signals.NavalDeficit, "no fog-honest naval source");
     }
 
