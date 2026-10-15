@@ -94,9 +94,10 @@ namespace WhiskeyRealism.Strategic
                 Eras[1] = Eras[1] ?? new EraStageManager { Stage = EraStage.Amateur1861 };
 
                 int playerAlliance = ResolvePlayerAlliance();
+                bool factionListReady = OperationalRuntimeReady();
                 for (int alliance = 0; alliance < 2; alliance++)
                 {
-                    if (IsPlayerCICOf(alliance, playerAlliance))
+                    if (!ShouldRunCicFor(alliance, playerAlliance, factionListReady))
                     {
                         CICs[alliance] = null;
                         continue;
@@ -269,13 +270,13 @@ namespace WhiskeyRealism.Strategic
 
             for (int alliance = 0; alliance < 2; alliance++)
             {
-                if (IsPlayerCICOf(alliance, playerAlliance))
+                if (!ShouldRunCicFor(alliance, playerAlliance, operationalRuntimeReady))
                 {
                     if (!_playerCicAnnounced[alliance])
                     {
                         _playerCicAnnounced[alliance] = true;
                         EmitCampaignInfoToMainLogIfAllowed(
-                            $"player is CIC of alliance {alliance} ({(alliance == 1 ? "CSA" : "Union")}) — mod stands down for that faction");
+                            $"alliance {alliance} ({(alliance == 1 ? "CSA" : "Union")}) is not run by vanilla campaign AI (player-controlled) — mod stands down for that faction");
                     }
                     CICs[alliance] = null;
                     continue;
@@ -392,8 +393,8 @@ namespace WhiskeyRealism.Strategic
             var newPosture  = StrategicResilienceDirector.ProposePosture(alliance, paceOutput, personality);
             newPosture.SourceSignature = DirectorSourceSignature(alliance);
 
-            // At most one full refresh per real second across both alliances combined.
-            if (_directorClamp.TryPublish(System.DateTime.UtcNow))
+            // At most one full refresh per alliance per game day (R16).
+            if (_directorClamp.TryPublish(alliance, daySerial))
             {
                 DirectorMemories[alliance].LastPosture          = newPosture;
                 DirectorMemories[alliance].LastFullRefreshDay   = daySerial;
@@ -1395,6 +1396,19 @@ namespace WhiskeyRealism.Strategic
                 return f != null ? (int)f.GetValue(null) : -1;
             }
             catch { return -1; }
+        }
+
+        private static bool ShouldRunCicFor(int alliance, int playerAlliance, bool factionListReady)
+        {
+            bool aiVsAi = false;
+            try { aiVsAi = GameVars.ai_vs_ai; } catch { }
+            return CicEligibility.ShouldRunCic(
+                alliance,
+                factionListReady,
+                factionListReady && ResolveAifactionIndexForAlliance(alliance) >= 0,
+                playerAlliance,
+                aiVsAi,
+                IsPlayerCICOf(alliance, playerAlliance));
         }
 
         public static bool IsPlayerCICOf(int allianceId, int playerAlliance)

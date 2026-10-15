@@ -30,6 +30,13 @@ internal static class CampaignLifecycleFixTests
         Check("c1 r4 major battle elsewhere does not dirty plan", R4MajorBattleElsewhereDoesNotDirtyPlan);
         Check("c1 r4 major battle in target theater dirties plan", R4MajorBattleInTargetTheaterDirtiesPlan);
         Check("c1 r4 major battle near target dirties plan", R4MajorBattleNearTargetDirtiesPlan);
+
+        // R16 — director clamp per alliance + AI-controlled alliance gate
+        Check("c1 r16 two alliances reviewed in the same instant both publish", R16TwoAlliancesSameInstantBothPublish);
+        Check("c1 r16 clamp dedupes same alliance same game day", R16ClampDedupesSameAllianceSameDay);
+        Check("c1 r16 player alliance outside w&l gets no cic", R16PlayerAllianceOutsideWlGetsNoCic);
+        Check("c1 r16 w&l ai-vs-ai keeps player alliance cic unless player is cic", R16WlAiVsAiKeepsPlayerAllianceCic);
+        Check("c1 r16 aifaction list is ground truth once ready", R16AiFactionListIsGroundTruth);
     }
 
     private static void Check(string name, Action test)
@@ -301,6 +308,46 @@ internal static class CampaignLifecycleFixTests
         var q = TargetQuery();
         q.BattleTheater = Theater.Unknown;
         TestHarness.AssertTrue(CicReviewRouter.BattleInvalidatesPlan(Battle(1, 800f, 100f), q), "major battle within radius");
+    }
+
+    // ------------------------------------------------------------------
+    // R16
+    // ------------------------------------------------------------------
+
+    private static void R16TwoAlliancesSameInstantBothPublish()
+    {
+        var clamp = new DirectorPublishClamp();
+        int day = Serial(3, 6, 1862);
+        TestHarness.AssertTrue(clamp.TryPublish(0, day), "alliance 0 publishes");
+        TestHarness.AssertTrue(clamp.TryPublish(1, day), "alliance 1 publishes in the same instant");
+    }
+
+    private static void R16ClampDedupesSameAllianceSameDay()
+    {
+        var clamp = new DirectorPublishClamp();
+        int day = Serial(3, 6, 1862);
+        TestHarness.AssertTrue(clamp.TryPublish(1, day), "first publish");
+        TestHarness.AssertFalse(clamp.TryPublish(1, day), "second publish same game day suppressed");
+        TestHarness.AssertTrue(clamp.TryPublish(1, day + 1), "next game day publishes");
+        TestHarness.AssertFalse(clamp.TryPublish(2, day), "out-of-range alliance rejected");
+    }
+
+    private static void R16PlayerAllianceOutsideWlGetsNoCic()
+    {
+        TestHarness.AssertFalse(CicEligibility.ShouldRunCic(0, factionListReady: false, hasAiFaction: false, playerAlliance: 0, aiVsAi: false, playerIsWlCic: false), "player alliance, no ai_vs_ai");
+        TestHarness.AssertTrue(CicEligibility.ShouldRunCic(1, factionListReady: false, hasAiFaction: false, playerAlliance: 0, aiVsAi: false, playerIsWlCic: false), "enemy alliance runs");
+    }
+
+    private static void R16WlAiVsAiKeepsPlayerAllianceCic()
+    {
+        TestHarness.AssertTrue(CicEligibility.ShouldRunCic(0, factionListReady: false, hasAiFaction: false, playerAlliance: 0, aiVsAi: true, playerIsWlCic: false), "w&l subordinate: vanilla AI runs player alliance");
+        TestHarness.AssertFalse(CicEligibility.ShouldRunCic(0, factionListReady: true, hasAiFaction: true, playerAlliance: 0, aiVsAi: true, playerIsWlCic: true), "w&l player is CIC");
+    }
+
+    private static void R16AiFactionListIsGroundTruth()
+    {
+        TestHarness.AssertFalse(CicEligibility.ShouldRunCic(1, factionListReady: true, hasAiFaction: false, playerAlliance: 0, aiVsAi: false, playerIsWlCic: false), "no AIFaction => no CIC");
+        TestHarness.AssertTrue(CicEligibility.ShouldRunCic(0, factionListReady: true, hasAiFaction: true, playerAlliance: 0, aiVsAi: true, playerIsWlCic: false), "AIFaction present => CIC");
     }
 
     // ------------------------------------------------------------------

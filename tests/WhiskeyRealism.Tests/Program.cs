@@ -20597,13 +20597,14 @@ static class Program
         AssertTrue(plan.IsDirty, "plan.IsDirty should be true after last phase exhausted by Advance");
     }
 
+    // R16: the clamp is per alliance per game day (no wall clock).
     private static void DirectorPublishClampSuppressesSecondPublishInSameRealSecond()
     {
         var clamp = new DirectorPublishClamp();
-        var stamp = new System.DateTime(2026, 5, 5, 12, 0, 0);
-        AssertTrue(clamp.TryPublish(stamp), "first publish in second should succeed");
-        AssertTrue(!clamp.TryPublish(stamp.AddMilliseconds(50)), "second publish 50ms later should be suppressed");
-        AssertTrue(clamp.TryPublish(stamp.AddSeconds(1).AddMilliseconds(1)), "publish past 1s boundary should succeed");
+        int day = 1862 * 372 + 5 * 31 + 5;
+        AssertTrue(clamp.TryPublish(0, day), "first publish on the day should succeed");
+        AssertTrue(!clamp.TryPublish(0, day), "second publish same alliance same day should be suppressed");
+        AssertTrue(clamp.TryPublish(0, day + 1), "publish on the next game day should succeed");
     }
 
     private static void DirectorRaisesCsaHoldRatioUnderTooFastCollapse()
