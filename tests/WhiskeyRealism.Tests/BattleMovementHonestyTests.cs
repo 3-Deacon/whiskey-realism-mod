@@ -11,7 +11,7 @@ using static TestFixtures;
 // Sections: arrival re-path sizing (#105 step A), terrain grid, covered crossings,
 // perceived outflanking, path probe scores, road routing, fog-honest deployment,
 // executor, avenues, write gate.
-internal static class BattleMovementHonestyTests
+internal static partial class BattleMovementHonestyTests
 {
     public static void Run()
     {
@@ -22,6 +22,12 @@ internal static class BattleMovementHonestyTests
             ("bc10 ShieldNeverPlayerOwnedOrFeud", ShieldNeverPlayerOwnedOrFeud),
             ("bc10 ShieldSkipsTopGroup", ShieldSkipsTopGroup),
             ("bc10 ShieldCoversMembersUnderAnOrderedSubGroup", ShieldCoversMembersUnderAnOrderedSubGroup),
+            // terrain grid
+            ("bc10 GridIndexesLikeGetCurrentTerrainOnPos", GridIndexesLikeGetCurrentTerrainOnPos),
+            ("bc10 GridSampleLineCountsForestShare", GridSampleLineCountsForestShare),
+            ("bc10 GridRiverImpassableUnlessFrozen", GridRiverImpassableUnlessFrozen),
+            ("bc10 GridSpeedCostFallsBackToGrassForUnknownIds", GridSpeedCostFallsBackToGrassForUnknownIds),
+            ("bc10 GridCrossingsAreCopiedAndBounded", GridCrossingsAreCopiedAndBounded),
         });
     }
 
