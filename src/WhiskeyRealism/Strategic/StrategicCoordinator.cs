@@ -106,6 +106,8 @@ namespace WhiskeyRealism.Strategic
             if (Instance != null) return;
             var go = new GameObject("WhiskeyRealismStrategicCoordinator");
             Instance = go.AddComponent<StrategicCoordinator>();
+            // The planner's stores serve the working copy inside a review job, the published one outside.
+            DailyReviewView.Attach(Instance.InReviewJob);
             DontDestroyOnLoad(go);
             EmitCampaignInfoToMainLogIfAllowed("[Coordinator] bootstrapped");
         }
@@ -820,10 +822,30 @@ namespace WhiskeyRealism.Strategic
                 RecordBattleOutcome(deferred[i]);
         }
 
+        // The day's one publish: the ledger set and the campaign planner's reader-facing copies
+        // (beliefs, plan store) are all copied first (PrepareDay) and swapped in only once every copy
+        // is complete, so a copy that throws leaves the whole previous day published and a reader
+        // outside the review never sees two days mixed.
         private void PublishStrategicState()
         {
-            ReviewDayCommit.Publish(ref _published, _work, StrategicLedgerSet.PublishedCopyOf);
+            ReviewDayCommit.Publish(ref _published, _work, PrepareDay);
+            EnemyBeliefStore.SwapPublished();
+            CampaignPlanStore.SwapPublished();
         }
+
+        private static StrategicLedgerSet PrepareDay(StrategicLedgerSet work)
+        {
+            var ledgers = StrategicLedgerSet.PublishedCopyOf(work);
+            EnemyBeliefStore.PreparePublish();
+            CampaignPlanStore.PreparePublish();
+            return ledgers;
+        }
+
+        private bool InReviewJob()
+        {
+            return _review.RunningJob;
+        }
+
         private void PublishDirectorPosture(int alliance, CIC cic, EraStageManager era, int day, int month, int year, int legacySerial)
         {
             var paceInput  = BuildCampaignPaceInput(alliance, day, month, year);

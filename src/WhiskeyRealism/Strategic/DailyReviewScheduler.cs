@@ -167,6 +167,68 @@ namespace WhiskeyRealism.Strategic
         }
     }
 
+    // Which copy a reader of the campaign planner's stores (EnemyBeliefStore, CampaignPlanStore)
+    // gets: inside a review job the working copy, outside it the copy published at the last
+    // commit, the rule StrategicCoordinator.View applies to StrategicLedgerSet. The coordinator
+    // attaches its scheduler's RunningJob at bootstrap; with nothing attached (the harness, menus
+    // before the coordinator exists) every read is a working read, as before the review was sliced.
+    internal static class DailyReviewView
+    {
+        private static Func<bool> _inJob;
+
+        internal static void Attach(Func<bool> inJob)
+        {
+            _inJob = inJob;
+        }
+
+        internal static bool ReadsWorking => _inJob == null || _inJob();
+    }
+
+    // One reader-facing copy of review state outside StrategicLedgerSet, published with it: the
+    // day's commit fills the spare copy from the working state (Prepare) and, once every copy of
+    // the day is complete, swaps it in (Swap). A fill that throws leaves the previous day
+    // published and nothing is swapped. The two copies alternate, so after warm-up a commit
+    // allocates nothing; the review runs on the main thread, so no reader holds a copy across
+    // the commit that refills it.
+    internal sealed class PublishedDay<T> where T : class
+    {
+        private T _published;
+        private T _spare;
+        private bool _prepared;
+
+        internal PublishedDay(T first, T second)
+        {
+            _published = first;
+            _spare = second;
+        }
+
+        internal T Published => _published;
+
+        internal void Prepare(Action<T> fill)
+        {
+            _prepared = false;
+            fill(_spare);
+            _prepared = true;
+        }
+
+        internal void Swap()
+        {
+            if (!_prepared) return;
+            T previous = _published;
+            _published = _spare;
+            _spare = previous;
+            _prepared = false;
+        }
+
+        // Clears both copies (a campaign reset).
+        internal void Reset(Action<T> clear)
+        {
+            clear(_published);
+            clear(_spare);
+            _prepared = false;
+        }
+    }
+
     // Commit of a completed review day (StrategicCoordinator.CommitReviewDay).
     internal static class ReviewDayCommit
     {

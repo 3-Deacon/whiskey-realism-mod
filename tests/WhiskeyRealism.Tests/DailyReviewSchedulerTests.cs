@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Strategic.Fiscal;
 using WhiskeyRealism.Strategic.Policies;
@@ -42,6 +43,8 @@ internal static class DailyReviewSchedulerTests
             ("daily review commit applies deferred battles even when the publish throws", CommitAppliesDeferredWhenPublishThrows),
             ("daily review commit keeps both failures when publish and deferred battles throw", CommitKeepsBothFailures),
             ("daily review jobs hand off what the single-frame review did", JobHandOffsPinned),
+            ("daily review published day swaps only a complete copy", PublishedDaySwapsOnlyCompleteCopy),
+            ("daily review commit prepares every copy before swapping any", CommitPreparesEveryCopyBeforeSwapping),
         });
     }
 
@@ -616,7 +619,8 @@ internal static class DailyReviewSchedulerTests
         AssertContains(Body(src, "private void PublishAndReportReviewDay("), "PublishStrategicState();", "the day is published on commit");
         AssertContains(Body(src, "private void ApplyDeferredBattleOutcomes("), "RecordBattleOutcome(deferred[i]);", "deferred battles recorded");
         string publish = Body(src, "private void PublishStrategicState(");
-        AssertContains(publish, "ReviewDayCommit.Publish(ref _published, _work, StrategicLedgerSet.PublishedCopyOf);", "published replaced by a complete copy");
+        AssertContains(publish, "ReviewDayCommit.Publish(ref _published, _work, PrepareDay);", "published replaced by a complete copy");
+        AssertContains(Body(src, "private static StrategicLedgerSet PrepareDay("), "StrategicLedgerSet.PublishedCopyOf(work);", "the ledger copy");
         AssertEqual(1, src.Split(new[] { "_published = " }, StringSplitOptions.None).Length - 1, "published assigned only at its declaration");
         AssertContains(src, "private StrategicLedgerSet _published = new StrategicLedgerSet();", "declaration");
     }
@@ -792,6 +796,78 @@ internal static class DailyReviewSchedulerTests
         AssertBefore(list, "Plan:0", "Front:0", "plan before the front ledger");
         AssertBefore(list, "Defense:0", "Execute:0", "executors after the defense ledger");
         AssertBefore(list, "Execute:0", "Formation:0", "executors before the formation directives");
+    }
+
+    // The planner's reader-facing copies (beliefs, plan store): a fill that throws keeps the
+    // previous day, and a swap only follows a complete fill.
+    private static void PublishedDaySwapsOnlyCompleteCopy()
+    {
+        var day = new PublishedDay<List<string>>(new List<string> { "monday" }, new List<string>());
+        day.Prepare(c => { c.Clear(); c.Add("tuesday"); });
+        AssertEqual("monday", day.Published[0], "prepared, not yet swapped");
+        day.Swap();
+        AssertEqual("tuesday", day.Published[0], "swapped");
+        bool threw = false;
+        try { day.Prepare(c => { c.Clear(); c.Add("half"); throw new InvalidOperationException("copy failed"); }); }
+        catch (InvalidOperationException) { threw = true; }
+        AssertTrue(threw, "the fill's exception reaches the commit");
+        day.Swap();
+        AssertEqual("tuesday", day.Published[0], "a throwing copy keeps the previous day");
+        day.Swap();
+        AssertEqual("tuesday", day.Published[0], "no swap without a complete prepare");
+        day.Reset(c => c.Clear());
+        AssertEqual(0, day.Published.Count, "reset clears");
+    }
+
+    // StrategicCoordinator.PublishStrategicState: every copy (ledgers, beliefs, plan store) is
+    // made inside the ledger copy's function, so any throw leaves the whole previous day
+    // published; the reference swaps follow only a complete set. The coordinator attaches the
+    // stores' view to its scheduler.
+    private static void CommitPreparesEveryCopyBeforeSwapping()
+    {
+        string src = Coordinator();
+        string prepare = Body(src, "private static StrategicLedgerSet PrepareDay(");
+        AssertBefore(prepare, "StrategicLedgerSet.PublishedCopyOf(work);", "EnemyBeliefStore.PreparePublish();", "ledgers, then beliefs");
+        AssertBefore(prepare, "EnemyBeliefStore.PreparePublish();", "CampaignPlanStore.PreparePublish();", "beliefs, then the plan store");
+        AssertBefore(prepare, "CampaignPlanStore.PreparePublish();", "return ledgers;", "all prepared before the ledger swap");
+        string publish = Body(src, "private void PublishStrategicState(");
+        AssertBefore(publish, "ReviewDayCommit.Publish(ref _published, _work, PrepareDay);", "EnemyBeliefStore.SwapPublished();", "stores swap after the ledgers");
+        AssertBefore(publish, "EnemyBeliefStore.SwapPublished();", "CampaignPlanStore.SwapPublished();", "both stores swap");
+        AssertContains(Body(src, "public static void Bootstrap("), "DailyReviewView.Attach(Instance.InReviewJob);", "stores follow the scheduler's view");
+        AssertContains(Body(src, "private bool InReviewJob("), "return _review.RunningJob;", "the same rule as View");
+
+        // A throwing copy, end to end on the stores: nothing of the new day is published.
+        bool inJob = false;
+        WhiskeyRealism.Util.CampaignScope.ResetAll();
+        DailyReviewView.Attach(() => inJob);
+        try
+        {
+            var plan = new TheaterPlan { Alliance = 0, DaySerial = 1 };
+            inJob = true;
+            CampaignPlanStore.Publish(0, plan, new Allocation(), null);
+            inJob = false;
+            StrategicLedgerSet published = new StrategicLedgerSet();
+            bool threw = false;
+            try
+            {
+                ReviewDayCommit.Publish(ref published, new StrategicLedgerSet(), w =>
+                {
+                    EnemyBeliefStore.PreparePublish();
+                    CampaignPlanStore.PreparePublish();
+                    throw new InvalidOperationException("ledger copy failed");
+                });
+                EnemyBeliefStore.SwapPublished();
+                CampaignPlanStore.SwapPublished();
+            }
+            catch (InvalidOperationException) { threw = true; }
+            AssertTrue(threw, "the copy threw");
+            AssertFalse(CampaignPlanStore.TryGetPlan(0, out _), "the plan of a failed commit is not published");
+        }
+        finally
+        {
+            DailyReviewView.Attach(null);
+            WhiskeyRealism.Util.CampaignScope.ResetAll();
+        }
     }
 
     private static void PatchesPumpAndDrain()

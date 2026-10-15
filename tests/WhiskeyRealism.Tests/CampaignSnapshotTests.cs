@@ -34,6 +34,7 @@ internal static class CampaignSnapshotTests
             ("SnapshotListsResetOnReuse", SnapshotListsResetOnReuse),
             ("AllocationTryGetFindsAssignment", AllocationTryGetFindsAssignment),
             ("PlanStorePublishReplacesAndResetClears", PlanStorePublishReplacesAndResetClears),
+            ("PlanStoreReaderOutsideReviewSeesCommittedPlan", PlanStoreReaderOutsideReviewSeesCommittedPlan),
             ("ViewerCoverageUsesEachViewersOwnRadius", ViewerCoverageUsesEachViewersOwnRadius),
             ("CoversFalseWithoutViewerInRadius", CoversFalseWithoutViewerInRadius),
             ("StrengthWithinIsConfidenceWeighted", StrengthWithinIsConfidenceWeighted),
@@ -290,6 +291,51 @@ internal static class CampaignSnapshotTests
         AssertFalse(CampaignPlanStore.TryGetPlan(0, out _), "reset clears plan");
         AssertFalse(CampaignPlanStore.TryGetAllocation(0, out _), "reset clears allocation");
         AssertFalse(CampaignPlanStore.TryGetSectors(0, out _), "reset clears sectors");
+    }
+
+    // Integrator decision after G3 verify r2: a patch outside a review job reads the plan of the
+    // last committed day; the planner's own jobs read the working plan.
+    private static void PlanStoreReaderOutsideReviewSeesCommittedPlan()
+    {
+        bool inJob = false;
+        CampaignScope.ResetAll();
+        DailyReviewView.Attach(() => inJob);
+        try
+        {
+            var sectors = SectorModel.Build(NewSnapshot(0));
+            var monday = new TheaterPlan { Alliance = 0, DaySerial = 10 };
+            var tuesday = new TheaterPlan { Alliance = 0, DaySerial = 11 };
+            inJob = true;
+            CampaignPlanStore.Publish(0, monday, new Allocation { Alliance = 0 }, sectors);
+            inJob = false;
+            AssertFalse(CampaignPlanStore.TryGetPlan(0, out _), "nothing committed yet");
+            CampaignPlanStore.PreparePublish();
+            CampaignPlanStore.SwapPublished();
+            AssertTrue(CampaignPlanStore.TryGetPlan(0, out var seen) && seen.DaySerial == 10, "Monday committed");
+
+            inJob = true;
+            CampaignPlanStore.Publish(0, tuesday, new Allocation { Alliance = 0 }, sectors);
+            AssertTrue(CampaignPlanStore.TryGetPlan(0, out var working) && working.DaySerial == 11, "inside a job: the working plan");
+            inJob = false;
+            AssertTrue(CampaignPlanStore.TryGetPlan(0, out var mid) && mid.DaySerial == 10, "between slices: Monday's plan");
+            AssertTrue(CampaignPlanStore.TryGetSectors(0, out var midSectors) && ReferenceEquals(sectors, midSectors), "and Monday's sectors");
+            CampaignPlanStore.PreparePublish();
+            CampaignPlanStore.SwapPublished();
+            AssertTrue(CampaignPlanStore.TryGetPlan(0, out var after) && after.DaySerial == 11, "after the commit: Tuesday");
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1000; i++)
+            {
+                CampaignPlanStore.PreparePublish();
+                CampaignPlanStore.SwapPublished();
+                CampaignPlanStore.TryGetPlan(0, out _);
+            }
+            AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "plan commit and published read bytes");
+        }
+        finally
+        {
+            DailyReviewView.Attach(null);
+            CampaignScope.ResetAll();
+        }
     }
 
     // ---- ViewerCoverage (spec C14) ----

@@ -113,9 +113,10 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The migrated ledgers' enemy picture (plan G1 fallback, decided by the flags only): with
-        // both flags on, the model as the last ReviewPlan left it (a reader that runs before today's
-        // ReviewPlan takes P1's one-day lag); with either off, vanilla's omniscient enemyunits at
-        // full confidence, the documented rollback.
+        // both flags on, inside a review job the model as the last ReviewPlan left it (a job before
+        // today's Plan job takes P1's one-day lag), outside a job the beliefs of the last committed
+        // review day (EnemyBeliefStore's published copy); with either off, vanilla's omniscient
+        // enemyunits at full confidence, the documented rollback.
         internal static IReadOnlyList<EnemyBelief> BeliefsFor(int alliance)
         {
             return EnemyBeliefStore.Select(alliance, FlagOn(Plugin.EnableCampaignPlanner), FlagOn(Plugin.EnableCampaignFogHonestBeliefs), OmniscientDelegate);

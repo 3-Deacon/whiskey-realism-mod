@@ -257,11 +257,19 @@ namespace WhiskeyRealism.Strategic.Planner
     // gets the model as the last review left it (empty on a new campaign's first day, sidecar-
     // restored after a load); only with either flag off does it get the rollback list (vanilla's
     // omniscient enemies at full confidence). Per campaign: cleared by CampaignScope.
+    // A reader inside a review job gets the model itself; a reader outside (a patch between the
+    // slices of a time-sliced review, RecruitmentPatch, FortConstructionGovernorPatch) gets the
+    // beliefs as the last committed day left them (DailyReviewView, PublishedDay), so it never
+    // sees today's beliefs next to yesterday's ledgers.
     internal static class EnemyBeliefStore
     {
         private const int Alliances = 2;
         private static readonly EnemyArmyModel[] Models = { new EnemyArmyModel(), new EnemyArmyModel() };
         private static readonly EnemyBelief[] None = new EnemyBelief[0];
+        private static readonly PublishedDay<List<EnemyBelief>[]> Day =
+            new PublishedDay<List<EnemyBelief>[]>(NewCopy(), NewCopy());
+        private static readonly Action<List<EnemyBelief>[]> Fill = FillFromModels;
+        private static readonly Action<List<EnemyBelief>[]> ClearCopy = ClearLists;
 
         static EnemyBeliefStore()
         {
@@ -279,12 +287,45 @@ namespace WhiskeyRealism.Strategic.Planner
             if (alliance < 0 || alliance >= Alliances) return None;
             if (!(plannerOn && fogHonestOn))
                 return (omniscient != null ? omniscient(alliance) : null) ?? None;
-            return Models[alliance].Beliefs;
+            return DailyReviewView.ReadsWorking ? Models[alliance].Beliefs : Day.Published[alliance];
+        }
+
+        // The day's commit (StrategicCoordinator.PublishStrategicState).
+        internal static void PreparePublish()
+        {
+            Day.Prepare(Fill);
+        }
+
+        internal static void SwapPublished()
+        {
+            Day.Swap();
+        }
+
+        private static List<EnemyBelief>[] NewCopy()
+        {
+            return new[] { new List<EnemyBelief>(), new List<EnemyBelief>() };
+        }
+
+        private static void FillFromModels(List<EnemyBelief>[] copy)
+        {
+            for (int a = 0; a < Alliances; a++)
+            {
+                var into = copy[a];
+                into.Clear();
+                var beliefs = Models[a].Beliefs;
+                for (int i = 0; i < beliefs.Count; i++) into.Add(beliefs[i]);
+            }
+        }
+
+        private static void ClearLists(List<EnemyBelief>[] copy)
+        {
+            for (int a = 0; a < copy.Length; a++) copy[a].Clear();
         }
 
         private static void Reset()
         {
             for (int a = 0; a < Alliances; a++) Models[a].Clear();
+            Day.Reset(ClearCopy);
         }
     }
 

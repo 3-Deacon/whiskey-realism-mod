@@ -69,10 +69,86 @@ internal static class EnemyArmyModelTests
             ("DetectionWiringPinned", DetectionWiringPinned),
             ("ReviewDayScalesNeverMix", ReviewDayScalesNeverMix),
             ("MigratedReadersReadBeliefsOnly", MigratedReadersReadBeliefsOnly),
+            ("ReaderOutsideReviewSeesCommittedBeliefs", ReaderOutsideReviewSeesCommittedBeliefs),
+            ("BeliefCommitAllocatesNothingOnceWarm", BeliefCommitAllocatesNothingOnceWarm),
         });
     }
 
     private const float NoDrift = 0f;
+
+    // Integrator decision after G3 verify r2: a reader outside a review job (a patch between the
+    // slices of a time-sliced review) sees the beliefs of the last committed day; inside a job,
+    // the model; after the commit, today's beliefs.
+    private static void ReaderOutsideReviewSeesCommittedBeliefs()
+    {
+        bool inJob = false;
+        CampaignScope.ResetAll();
+        DailyReviewView.Attach(() => inJob);
+        try
+        {
+            var model = EnemyBeliefStore.ModelFor(0);
+            inJob = true;
+            model.Update(List(Seen("Army of Northern Virginia:7", 1, 0f, 0f, 60000f)), 3, Drift(1f), NoMarch);
+            inJob = false;
+            AssertEqual(0, EnemyBeliefStore.Select(0, true, true, null).Count, "before any commit: nothing published");
+            EnemyBeliefStore.PreparePublish();
+            EnemyBeliefStore.SwapPublished();
+            AssertEqual(1, EnemyBeliefStore.Select(0, true, true, null).Count, "day 3 committed");
+
+            // Day 4 mid-flight: the Plan job adds a second army.
+            inJob = true;
+            model.Update(List(Seen("Army of Northern Virginia:7", 1, 0f, 0f, 60000f), Seen("Army of Tennessee:9", 2, 500f, 0f, 40000f)), 4, Drift(1f), NoMarch);
+            AssertEqual(2, EnemyBeliefStore.Select(0, true, true, null).Count, "inside a job: the model");
+            inJob = false;
+            AssertEqual(1, EnemyBeliefStore.Select(0, true, true, null).Count, "between slices: yesterday's beliefs");
+            EnemyBeliefStore.PreparePublish();
+            AssertEqual(1, EnemyBeliefStore.Select(0, true, true, null).Count, "prepared but not swapped: still yesterday");
+            EnemyBeliefStore.SwapPublished();
+            AssertEqual(2, EnemyBeliefStore.Select(0, true, true, null).Count, "after the commit: today's beliefs");
+            EnemyBeliefStore.SwapPublished();
+            AssertEqual(2, EnemyBeliefStore.Select(0, true, true, null).Count, "a swap without a prepare changes nothing");
+
+            CampaignScope.ResetAll();
+            AssertEqual(0, EnemyBeliefStore.Select(0, true, true, null).Count, "reset clears the published beliefs");
+        }
+        finally
+        {
+            DailyReviewView.Attach(null);
+            CampaignScope.ResetAll();
+        }
+    }
+
+    // The reader's path and the commit reuse their lists after warm-up.
+    private static void BeliefCommitAllocatesNothingOnceWarm()
+    {
+        bool inJob = false;
+        CampaignScope.ResetAll();
+        Func<bool> view = () => inJob;
+        DailyReviewView.Attach(view);
+        try
+        {
+            var detections = new List<EnemyDetection>();
+            for (int i = 0; i < 40; i++) detections.Add(Seen("army:" + i, i + 1, i * 50f, 0f, 10000f));
+            Func<int, float> drift = Drift(1f);
+            EnemyBeliefStore.ModelFor(0).Update(detections, 3, drift, NoMarch);
+            Action commit = () =>
+            {
+                EnemyBeliefStore.PreparePublish();
+                EnemyBeliefStore.SwapPublished();
+                var seen = EnemyBeliefStore.Select(0, true, true, null);
+                if (seen.Count != 40) throw new InvalidOperationException("count " + seen.Count);
+            };
+            for (int i = 0; i < 16; i++) commit();
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 500; i++) commit();
+            AssertEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before, "belief commit and published read bytes");
+        }
+        finally
+        {
+            DailyReviewView.Attach(null);
+            CampaignScope.ResetAll();
+        }
+    }
 
     private static EnemyDetection Seen(string key, int instanceId, float x, float z, float strength,
                                        int unitTyp = 15, DetectionSource source = DetectionSource.FogGrid,
