@@ -1026,8 +1026,15 @@ namespace WhiskeyRealism.Strategic.Construction
         // Reverses exactly what AddConstructionWish's Place(pay: true) moved for
         // this wish. The treasury is restored by field write: AdjustTreasury
         // (62571) rescales negative adjustments for AI alliances, so only a
-        // direct write is an exact inverse. UpdateMacroEconomy re-runs as it did
-        // after the charge (96235).
+        // direct write is an exact inverse.
+        //
+        // The charge path also ran Economy.UpdateMacroEconomy (96235). It is not
+        // rerun here: it reads only the date, economy cycle, surplus, debt,
+        // ratingmodifier and projects (32541-32602), none of which the refund
+        // touches, and it re-rolls every alliance's interest with Random.Range
+        // (32594-32597), so a rerun would add a random interest change instead
+        // of undoing one. The charge's own interest re-roll is not reversed (it
+        // cannot be); that is the one accepted difference from an exact inverse.
         private static bool RefundWishCharge(PendingTelegraph pending)
         {
             TelegraphWishCharge charge = pending.Charge;
@@ -1051,7 +1058,6 @@ namespace WhiskeyRealism.Strategic.Construction
                 alliance.cumulatedspending_construction -= charge.CumulatedSpendingConstructionDelta;
                 alliance.constructioncosts -= charge.ConstructionCostsDelta;
                 alliance.treasury -= charge.TreasuryDelta;
-                Economy.UpdateMacroEconomy();
                 return true;
             }
             catch (Exception ex)
