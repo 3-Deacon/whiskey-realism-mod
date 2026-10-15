@@ -902,9 +902,9 @@ internal static class TelemetryInfraFixTests
         TestHarness.AssertEqual(400.0, hitch.FrameMs, "frame ms");
         TestHarness.AssertEqual(3L, hitch.Gen0Delta, "gen0 delta");
         TestHarness.AssertEqual(0L, hitch.Gen1Delta, "gen1 delta");
-        TestHarness.AssertEqual(4, hitch.ScopeCount, "scope count");
+        TestHarness.AssertEqual(4, hitch.ScopeCount, "scope call count");
         TestHarness.AssertEqual(326.0, hitch.ScopeTotalMs, "scope total");
-        TestHarness.AssertEqual("b:300.0;b:20.0;c:5.0;a:1.0", hitch.TopScopes, "top scopes by duration");
+        TestHarness.AssertEqual("b:320.0x2;c:5.0x1;a:1.0x1", hitch.TopScopes, "top scopes aggregated by name, ordered by total ms");
         TestHarness.AssertFalse(hitch.Severe, "400 ms below severe threshold");
         state.ResetFrameScopes();
         TestHarness.AssertFalse(state.Observe(30.0, 13, 2, 1, out hitch), "back to normal");
@@ -931,13 +931,24 @@ internal static class TelemetryInfraFixTests
     private static void ProbeStateBoundsRecordedScopes()
     {
         var state = new FrameProbeState();
-        for (int i = 0; i < FrameProbeState.MaxScopesPerFrame + 40; i++)
-            state.RecordScope("s" + (i % 3).ToString(CultureInfo.InvariantCulture), 1.0);
+        var names = new string[FrameProbeState.MaxScopesPerFrame + 40];
+        for (int i = 0; i < names.Length; i++)
+            names[i] = "s" + i.ToString(CultureInfo.InvariantCulture);
+
+        // Per-regiment style churn: thousands of cheap calls across a few names must not
+        // crowd out the one slow orchestrator tick recorded late in the frame.
+        for (int i = 0; i < 5000; i++)
+            state.RecordScope("tactical.patch.per-regiment", 0.01);
+        for (int i = 0; i < names.Length; i++)
+            state.RecordScope(names[i], 1.0);
+        state.RecordScope("tactical.orchestrator-tick", 900.0);
+
         TelemetryFrameHitch hitch;
-        TestHarness.AssertTrue(state.Observe(600.0, 0, 0, 0, out hitch), "hitch");
-        TestHarness.AssertEqual(FrameProbeState.MaxScopesPerFrame + 40, hitch.ScopeCount, "all scopes counted");
-        TestHarness.AssertEqual(40, hitch.ScopeOverflow, "overflow counted");
-        TestHarness.AssertEqual((double)(FrameProbeState.MaxScopesPerFrame + 40), hitch.ScopeTotalMs, "total includes overflow");
+        TestHarness.AssertTrue(state.Observe(1200.0, 0, 0, 0, out hitch), "hitch");
+        TestHarness.AssertEqual(5000 + names.Length + 1, hitch.ScopeCount, "every call counted");
+        TestHarness.AssertTrue(hitch.ScopeNamesEvicted > 0, "distinct-name evictions counted");
+        TestHarness.AssertTrue(hitch.TopScopes.StartsWith("tactical.orchestrator-tick:900.0x1;tactical.patch.per-regiment:50.0x5000"), "slow late scope kept and ranked first: " + hitch.TopScopes);
+        TestHarness.AssertEqual(5000 * 0.01 + names.Length + 900.0, Math.Round(hitch.ScopeTotalMs, 6), "total includes evicted names");
         LogPass("probe state bounds recorded scopes");
     }
 

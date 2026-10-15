@@ -171,7 +171,7 @@ namespace WhiskeyRealism.Telemetry
                     .WithField("monoHeapBytes", (double)monoHeap)
                     .WithField("queueDepth", queueDepth)
                     .WithField("scopeCount", hitch.ScopeCount)
-                    .WithField("scopeOverflow", hitch.ScopeOverflow)
+                    .WithField("scopeNamesEvicted", hitch.ScopeNamesEvicted)
                     .WithField("scopeTotalMs", hitch.ScopeTotalMs)
                     .WithField("topScopes", hitch.TopScopes)
                     .WithField("protectedSummary", true));
@@ -214,7 +214,7 @@ namespace WhiskeyRealism.Telemetry
         internal long Gen1Delta;
         internal long Gen2Delta;
         internal int ScopeCount;
-        internal int ScopeOverflow;
+        internal int ScopeNamesEvicted;
         internal double ScopeTotalMs;
         internal string TopScopes;
     }
@@ -227,10 +227,15 @@ namespace WhiskeyRealism.Telemetry
         internal const int MaxScopesPerFrame = 64;
         internal const int TopScopesInRow = 8;
 
+        // Per-frame totals keyed by scope NAME (scope names are static literals), so
+        // thousands of cheap per-regiment calls cannot crowd out one slow tick. Up to
+        // MaxScopesPerFrame distinct names; a new name when full replaces the smallest.
         private readonly string[] _scopeNames = new string[MaxScopesPerFrame];
         private readonly double[] _scopeMs = new double[MaxScopesPerFrame];
-        private int _scopeCount;
-        private int _scopeOverflow;
+        private readonly int[] _scopeCalls = new int[MaxScopesPerFrame];
+        private int _distinctScopes;
+        private int _scopeCallTotal;
+        private int _scopeNamesEvicted;
         private double _scopeTotalMs;
         private bool _hasGcBaseline;
         private long _lastGen0;
@@ -245,23 +250,51 @@ namespace WhiskeyRealism.Telemetry
         internal void RecordScope(string name, double durationMs)
         {
             _scopeTotalMs += durationMs;
-            if (_scopeCount >= MaxScopesPerFrame)
+            _scopeCallTotal++;
+
+            int slot = -1;
+            for (int i = 0; i < _distinctScopes; i++)
             {
-                _scopeOverflow++;
-                return;
+                if (string.Equals(_scopeNames[i], name, StringComparison.Ordinal))
+                {
+                    slot = i;
+                    break;
+                }
             }
 
-            _scopeNames[_scopeCount] = name;
-            _scopeMs[_scopeCount] = durationMs;
-            _scopeCount++;
+            if (slot < 0)
+            {
+                if (_distinctScopes < MaxScopesPerFrame)
+                {
+                    slot = _distinctScopes++;
+                }
+                else
+                {
+                    slot = 0;
+                    for (int i = 1; i < _distinctScopes; i++)
+                    {
+                        if (_scopeMs[i] < _scopeMs[slot])
+                            slot = i;
+                    }
+                    _scopeNamesEvicted++;
+                }
+
+                _scopeNames[slot] = name;
+                _scopeMs[slot] = 0.0;
+                _scopeCalls[slot] = 0;
+            }
+
+            _scopeMs[slot] += durationMs;
+            _scopeCalls[slot]++;
         }
 
         internal void ResetFrameScopes()
         {
-            for (int i = 0; i < _scopeCount; i++)
+            for (int i = 0; i < _distinctScopes; i++)
                 _scopeNames[i] = null;
-            _scopeCount = 0;
-            _scopeOverflow = 0;
+            _distinctScopes = 0;
+            _scopeCallTotal = 0;
+            _scopeNamesEvicted = 0;
             _scopeTotalMs = 0.0;
         }
 
@@ -308,8 +341,8 @@ namespace WhiskeyRealism.Telemetry
                 Gen0Delta = gen0Delta,
                 Gen1Delta = gen1Delta,
                 Gen2Delta = gen2Delta,
-                ScopeCount = _scopeCount + _scopeOverflow,
-                ScopeOverflow = _scopeOverflow,
+                ScopeCount = _scopeCallTotal,
+                ScopeNamesEvicted = _scopeNamesEvicted,
                 ScopeTotalMs = _scopeTotalMs,
                 TopScopes = FormatTopScopes()
             };
@@ -318,11 +351,11 @@ namespace WhiskeyRealism.Telemetry
 
         private string FormatTopScopes()
         {
-            if (_scopeCount == 0)
+            if (_distinctScopes == 0)
                 return "-";
 
-            var order = new int[_scopeCount];
-            for (int i = 0; i < _scopeCount; i++)
+            var order = new int[_distinctScopes];
+            for (int i = 0; i < _distinctScopes; i++)
                 order[i] = i;
             Array.Sort(order, (left, right) =>
             {
@@ -331,14 +364,17 @@ namespace WhiskeyRealism.Telemetry
             });
 
             var builder = new StringBuilder(256);
-            int take = Math.Min(TopScopesInRow, _scopeCount);
+            int take = Math.Min(TopScopesInRow, _distinctScopes);
             for (int i = 0; i < take; i++)
             {
                 if (i > 0)
                     builder.Append(';');
-                builder.Append(TelemetryEvent.Safe(_scopeNames[order[i]]));
+                int slot = order[i];
+                builder.Append(TelemetryEvent.Safe(_scopeNames[slot]));
                 builder.Append(':');
-                builder.Append(_scopeMs[order[i]].ToString("0.0", CultureInfo.InvariantCulture));
+                builder.Append(_scopeMs[slot].ToString("0.0", CultureInfo.InvariantCulture));
+                builder.Append('x');
+                builder.Append(_scopeCalls[slot].ToString(CultureInfo.InvariantCulture));
             }
 
             return builder.ToString();
