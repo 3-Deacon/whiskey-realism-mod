@@ -86,6 +86,14 @@ namespace WhiskeyRealism.Tactical.Battle
         // BC10, additive: vanilla firerange (the unit's effective fire distance), captured for
         // own and enemy rows. CoveredCrossings reads an enemy's through its observation.
         public float FireRange;
+        // BC11, additive. ReceivedFire: vanilla receivedfire.Count > 0 (111858): the
+        // regiment took fire recently, which widens its micro turn reach from distancetoturntowardsenemy to its fire range (StopMicroUnitsCloseToEnemyAndRotateTowards
+        // 4560-4565). LastAiOrder: a group's lastaiorder (110990; 4 + direction after a vanilla
+        // FlankMove, 117107). UnitWidth: a regiment's GetWidth() (139382), the chord of
+        // SkewedPosition's rotation (78131-78167); a group carries GroupWidth instead.
+        public bool ReceivedFire;
+        public int LastAiOrder;
+        public float UnitWidth;
         // Charge doctrine inputs (BC6b): lastaichargetime (110798), the battle hour of
         // vanilla's last odds refusal (UpdateChargeTarget 122290-122292; 0 = never), and
         // the flank-sector code UpdateFlanking computes (122959-123175; 0 = not outflanked).
