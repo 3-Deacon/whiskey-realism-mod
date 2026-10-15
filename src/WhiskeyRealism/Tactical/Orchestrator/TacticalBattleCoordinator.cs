@@ -21,6 +21,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// Runtime entry points (OnBattleStart / OnBattleEnd / Tick) live in the runtime
     /// partial: TacticalBattleCoordinatorRuntime.cs (excluded from the test assembly).
     /// </summary>
+    internal enum TickReplanStep
+    {
+        None = 0,
+        NightReplan = 1,
+        Cadence = 2,
+    }
+
     public static partial class TacticalBattleCoordinator
     {
         private static TacticalBattleOrchestrator side0;
@@ -69,6 +76,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         internal static void StartDoctrineClock(double rawBattleHours)
         {
             _doctrineClock.Advance(rawBattleHours, suspended: false);
+        }
+
+        /// <summary>
+        /// Which replan path a side's tick takes. On the first fighting tick of a new
+        /// battle day the night replan runs INSTEAD of the cadence path (MaybeReplan),
+        /// so a side never replans twice on the same evidence in one tick.
+        /// </summary>
+        internal static TickReplanStep DecideTickReplanStep(bool nightReplanDue, bool hasPlan)
+        {
+            if (!hasPlan) return TickReplanStep.None;
+            return nightReplanDue ? TickReplanStep.NightReplan : TickReplanStep.Cadence;
+        }
+
+        /// <summary>
+        /// New battle day: re-infer the enemy's intent from the morning's evidence (AI
+        /// groups may have been redeployed when the deployment panel closed,
+        /// DoPlacementAIUnitsWithinDeploymentzoneNew 85524) and pick a plan on it. The
+        /// orchestrator and its plan memory are kept.
+        /// </summary>
+        internal static void ReplanForNewBattleDay(ArmyOrchestrator army, ArmyEvidence ownEvidence, EnemyVisibleState enemyVisible)
+        {
+            if (army == null || !army.HasPlan) return;
+            var intent = ArmyIntentInference.Build(ownEvidence, enemyVisible);
+            army.ObserveIntent(intent);
+            army.Replan(ownEvidence, intent);
         }
 
         /// <summary>Battle end / failure: clock back to 0, no suspension.</summary>

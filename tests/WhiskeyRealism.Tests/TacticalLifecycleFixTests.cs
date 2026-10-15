@@ -61,6 +61,9 @@ internal static class TacticalLifecycleFixTests
 
         Pass("perf command node id parse covers node child synth ids", PerfCommandNodeIdParse);
         Pass("perf command node id parse does not allocate", PerfCommandNodeIdParseDoesNotAllocate);
+
+        Pass("t9 resume tick runs the night replan instead of the cadence replan", ResumeTickNightReplanReplacesCadence);
+        Pass("t9 night replan re-plans on fresh intent", NightReplanUsesFreshIntent);
     }
 
     private static void Pass(string name, Action test)
@@ -563,5 +566,31 @@ internal static class TacticalLifecycleFixTests
                 + TacticalBattleCoordinator.ParseCommandNodeInstanceId(synth);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         TestHarness.AssertEqual(0L, allocated, "allocated bytes (sum " + sum + ")");
+    }
+
+    private static void ResumeTickNightReplanReplacesCadence()
+    {
+        TestHarness.AssertEqual(TickReplanStep.NightReplan, TacticalBattleCoordinator.DecideTickReplanStep(nightReplanDue: true, hasPlan: true), "resume tick");
+        TestHarness.AssertEqual(TickReplanStep.Cadence, TacticalBattleCoordinator.DecideTickReplanStep(nightReplanDue: false, hasPlan: true), "normal tick");
+        TestHarness.AssertEqual(TickReplanStep.None, TacticalBattleCoordinator.DecideTickReplanStep(nightReplanDue: true, hasPlan: false), "no plan");
+        TestHarness.AssertEqual(TickReplanStep.None, TacticalBattleCoordinator.DecideTickReplanStep(nightReplanDue: false, hasPlan: false), "no plan, no night");
+    }
+
+    private static void NightReplanUsesFreshIntent()
+    {
+        var evidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var visible = new EnemyVisibleState(
+            new[] { new EnemyVisibleSector(0, 5000f, 9000f, true) },
+            0.5f, anyContactSpotted: true, anyContactBroken: false, enemyReinforcementStrength24h: 0f);
+        var army = new ArmyOrchestrator(1, BuiltInPlaybooks.SeedCatalog(), default);
+        army.PickInitialPlan(evidence);
+        army.AdvancePlanAge(100f);
+
+        TacticalBattleCoordinator.ReplanForNewBattleDay(army, evidence, visible);
+
+        TestHarness.AssertTrue(army.HasPlan, "plan kept");
+        TestHarness.AssertEqual(0f, army.PlanAgeSeconds, "re-planned");
+        var expected = ArmyIntentInference.Build(evidence, visible);
+        TestHarness.AssertEqual(expected.PrimaryIntent, army.CurrentIntentModel.PrimaryIntent, "intent from the morning's evidence");
     }
 }

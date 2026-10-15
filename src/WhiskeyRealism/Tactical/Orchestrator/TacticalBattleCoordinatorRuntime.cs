@@ -453,18 +453,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             TelemetryRouter.LegacyInfo("[TacticalOrchestrator] new battle day: snapshots rebuilt and plans re-evaluated", TelemetryLayer.Tactical);
         }
 
-        private static void ReplanAfterNightIfDue(TacticalBattleOrchestrator side, AIBattle battle)
-        {
-            int s = side.AllianceId;
-            if (s < 0 || s > 1 || !_replanAfterNight[s]) return;
-            _replanAfterNight[s] = false;
-            if (side.Army == null || !side.Army.HasPlan) return;
-            ArmyEvidence evidence = IsHeavyThrottlingEnabled()
-                ? EnsureSideSnapshot(side, battle).OwnEvidence
-                : ArmyEvidenceBuilder.Build(battle, side.AllianceId).OwnEvidence;
-            side.Army.Replan(evidence, side.Army.CurrentIntentModel);
-        }
-
         private static bool SafeAiVsAi()
         {
             try { return GameVars.ai_vs_ai; }
@@ -499,7 +487,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 && Plugin.EnableTacticalOrchestratorIntentInference.Value)
             {
                 DriveTickCycle(side, battle, deltaSeconds);
-                ReplanAfterNightIfDue(side, battle);
                 AttachDirectChildrenIfReady(side, battle);
                 AttachCommandTreeIfReady(side, battle);
                 DriveDirectChildCycle(side, battle);
@@ -533,7 +520,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                if (side == null || side.Army == null || !side.Army.HasPlan) return;
+                if (side == null || side.Army == null) return;
+                int sideIdx = side.AllianceId;
+                if (sideIdx < 0 || sideIdx > 1) sideIdx = 0;
+                TickReplanStep step = DecideTickReplanStep(_replanAfterNight[sideIdx], side.Army.HasPlan);
+                if (step == TickReplanStep.None)
+                {
+                    _replanAfterNight[sideIdx] = false; // no plan to re-evaluate
+                    return;
+                }
 
                 ArmyEvidenceBuilder.Bundle bundleForReplan = IsHeavyThrottlingEnabled()
                     ? BundleFromSnapshot(EnsureSideSnapshot(side, battle))
@@ -549,8 +544,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 // proportionally faster than wallclock deltaSeconds. Drives
                 // phase progression budgets so commander decisions track
                 // battle pace, not wallclock pace. Hours→seconds conversion.
-                int sideIdx = side.AllianceId;
-                if (sideIdx < 0 || sideIdx > 1) sideIdx = 0;
                 float nowBattleHours = (float)DoctrineBattleHours;
                 float lastBattleHours = _lastTickBattleHours[sideIdx];
                 float battleDeltaSeconds;
@@ -566,6 +559,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     battleDeltaSeconds = deltaHours * 3600f;
                 }
                 _lastTickBattleHours[sideIdx] = nowBattleHours;
+
+                if (step == TickReplanStep.NightReplan)
+                {
+                    ReplanForNewBattleDay(side.Army, bundleForReplan.OwnEvidence, bundleForReplan.EnemyVisible);
+                    // Cleared only once the replan has run; a throw retries next tick.
+                    _replanAfterNight[sideIdx] = false;
+                    TelemetryRouter.LegacyInfo("[TacticalReplan] side=" + side.AllianceId
+                        + " trigger=NewBattleDay newPlan=" + side.Army.CurrentPlan.PlanId
+                        + " phase=" + side.Army.CurrentPlan.Phase, TelemetryLayer.Tactical);
+                    return;
+                }
 
                 var trigger = ArmyTickCycle.MaybeReplan(
                     side.Army,
