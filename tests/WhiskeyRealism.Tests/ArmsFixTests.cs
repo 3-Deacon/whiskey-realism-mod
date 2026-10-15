@@ -31,6 +31,14 @@ internal static class ArmsFixTests
             ("arms combine infantry matches vanilla where vanilla is right", CombineInfantryMatchesVanilla),
             ("arms combine no merge or no weapon is a no-op", CombineNoMergeNoOp),
             ("arms combine wiring", CombineWiring),
+            ("arms weapon budget spent only by the player's alliance", BudgetSpentOnlyByPlayerAlliance),
+            ("arms weapon budget purchase needs the prestige to pay", BudgetPurchaseNeedsPrestige),
+            ("arms weapon budget wiring", BudgetWiring),
+            ("arms orderability follows the order screen", OrderabilityFollowsOrderScreen),
+            ("arms list member mask hides and restores", ListMemberMaskHidesAndRestores),
+            ("arms purchase orderable wiring", PurchaseOrderableWiring),
+            ("arms group weapon factor nan guard", GroupWeaponFactorNanGuard),
+            ("arms realism lock stays on the setup screen", RealismLockSetupScreenOnly),
         });
     }
 
@@ -284,6 +292,141 @@ internal static class ArmsFixTests
         AssertTrue(snapshot.Contains("if (source.alliance != target.alliance)"), "cross-alliance merge keeps vanilla");
         AssertTrue(snapshot.Contains("if (id >= alliance.weaponstock.Length) return null;"), "ids bound-checked");
         AssertTrue(MethodBody(src, "StockFixEnabled").Contains("Plugin.EnableCombineWeaponStockFix.Value"), "stock flag");
+    }
+
+    // ------------------------------------------------------------------ BUG-WL-016 / 017
+
+    private static void BudgetSpentOnlyByPlayerAlliance()
+    {
+        AssertTrue(ArmsRules.OrderSpendsCareerBudget(0, 0), "own alliance (player or the AI for it)");
+        AssertFalse(ArmsRules.OrderSpendsCareerBudget(1, 0), "enemy");
+        AssertFalse(ArmsRules.OrderSpendsCareerBudget(2, 0), "Europe");
+        AssertEqual(5f, ArmsRules.BudgetAfterOrder(true, 1, 0, 5f, 0f), "enemy order: budget kept");
+        AssertEqual(2f, ArmsRules.BudgetAfterOrder(true, 0, 0, 5f, 2f), "own order: vanilla charge");
+        AssertEqual(0f, ArmsRules.BudgetAfterOrder(false, 1, 0, 5f, 0f), "flag off: vanilla");
+    }
+
+    // dlcwl_config.dat: cost -500; vanilla charge prestige - 500, gate prestige >= -500.
+    private static void BudgetPurchaseNeedsPrestige()
+    {
+        AssertTrue(ArmsRules.BudgetPurchaseUnaffordable(0f, -500f), "0 prestige cannot pay 500");
+        AssertTrue(ArmsRules.BudgetPurchaseUnaffordable(-500f, -500f), "vanilla lets -500 buy");
+        AssertTrue(ArmsRules.BudgetPurchaseUnaffordable(499f, -500f), "one short");
+        AssertFalse(ArmsRules.BudgetPurchaseUnaffordable(500f, -500f), "exactly enough");
+        AssertFalse(ArmsRules.BudgetPurchaseUnaffordable(-600f, -500f), "vanilla refuses already");
+        AssertFalse(ArmsRules.BudgetPurchaseUnaffordable(-10f, 0f), "free purchase config: vanilla");
+        AssertFalse(-499f >= float.MaxValue, "the swapped cost makes vanilla's own gate refuse");
+    }
+
+    private static void BudgetWiring()
+    {
+        string src = PatchSource("WlWeaponBudgetPatch.cs");
+        AssertTrue(MethodBody(src, "Prefix").Contains("__state = DLC_WL.accumulatedweaponbudget;"), "budget snapshot");
+        string fin = MethodBody(src, "Finalizer");
+        AssertTrue(fin.Contains("ArmsRules.BudgetAfterOrder(ScopeEnabled(), alliance, GameVars.playeralliance, __state, vanilla)"), "restore decided by the pure rule, flag read live");
+        AssertTrue(fin.Contains("DLC_WL.accumulatedweaponbudget = kept;"), "restore written");
+        AssertTrue(src.Contains("[HarmonyPatch(typeof(WeaponList), nameof(WeaponList.PlaceWeaponOrder))]"), "order target");
+        string gate = src.Substring(src.IndexOf("class PurchaseGate", StringComparison.Ordinal));
+        string gatePrefix = MethodBody(gate, "Prefix");
+        AssertTrue(gatePrefix.Contains("if (!GateEnabled()) return;"), "gate flag");
+        AssertTrue(gatePrefix.Contains("ArmsRules.BudgetPurchaseUnaffordable(DLC_WL.prestige, GamePrefs.dlcwl_weaponbudgetprestigecost)") && gatePrefix.Contains("Cost.Apply(float.MaxValue);"), "unaffordable: vanilla's gate made to refuse");
+        string gateFin = MethodBody(gate, "Finalizer");
+        AssertTrue(gateFin.Contains("string failure = Cost.Restore();"), "gate restored unconditionally");
+        AssertFalse(gateFin.Contains("if (") && gateFin.IndexOf("if (", StringComparison.Ordinal) < gateFin.IndexOf("Cost.Restore()", StringComparison.Ordinal), "restore before any condition");
+        AssertTrue(MethodBody(src, "ScopeEnabled").Contains("Plugin.EnableWlWeaponBudgetScopeFix.Value"), "scope flag");
+        AssertTrue(MethodBody(src, "GateEnabled").Contains("Plugin.EnableWlWeaponBudgetPrestigeGateFix.Value"), "gate flag");
+    }
+
+    // ------------------------------------------------------------------ BUG-AI-017
+
+    // weapons.txt: pm 0 for 12 Williams, 37 Gatling, 38 Coffee Mill (researched by projects
+    // 10/11, 213113-213124); 1 Napoleon pm 3.2, imported by project 3.
+    private static void OrderabilityFollowsOrderScreen()
+    {
+        AssertFalse(WhiskeyRealism.Strategic.WeaponOrderability.IsOrderable(true, false, 0f), "Gatling: researched, not produced");
+        AssertTrue(WhiskeyRealism.Strategic.WeaponOrderability.IsResearchedButUnorderable(true, false, 0f), "the AI's extra candidate");
+        AssertTrue(WhiskeyRealism.Strategic.WeaponOrderability.IsOrderable(true, false, 3.2f), "Napoleon produced");
+        AssertTrue(WhiskeyRealism.Strategic.WeaponOrderability.IsOrderable(false, true, 3.2f), "Napoleon imported");
+        AssertTrue(WhiskeyRealism.Strategic.WeaponOrderability.IsOrderable(true, true, 0f), "imported overrides pm 0 (GetAvailability 'Import only')");
+        AssertFalse(WhiskeyRealism.Strategic.WeaponOrderability.IsOrderable(false, false, 3.2f), "not researched, not imported");
+        AssertFalse(WhiskeyRealism.Strategic.WeaponOrderability.IsResearchedButUnorderable(false, false, 0f), "never a candidate in vanilla either");
+        AssertFalse(WhiskeyRealism.Strategic.WeaponOrderability.IsResearchedButUnorderable(true, true, 0f), "imported: vanilla candidate stays");
+    }
+
+    private sealed class Model
+    {
+        public List<int> Tech = new List<int>();
+    }
+
+    private static void ListMemberMaskHidesAndRestores()
+    {
+        var mask = new ListMemberMask<Model>(m => m.Tech, (m, l) => m.Tech = l);
+        var gatling = new Model { Tech = new List<int> { 0, 1 } };
+        var napoleon = new Model { Tech = new List<int> { 0 } };
+        var originalGatling = gatling.Tech;
+
+        AssertFalse(mask.Hide(gatling, 1), "no pass active");
+        AssertTrue(mask.Begin(), "pass starts");
+        AssertFalse(mask.Begin(), "nested pass refused");
+        AssertTrue(mask.Hide(gatling, 1), "CSA hidden from the Gatling");
+        AssertFalse(mask.Hide(napoleon, 1), "nothing to hide");
+        AssertFalse(gatling.Tech.Contains(1), "IsResearched(1) false during the call");
+        AssertTrue(originalGatling.Contains(1), "original list untouched");
+        AssertEqual(1, mask.Count, "one masked");
+        AssertEqual(null, mask.Restore(), "clean restore");
+        AssertTrue(ReferenceEquals(originalGatling, gatling.Tech), "original list back");
+        AssertFalse(mask.Active, "pass over");
+        AssertEqual(null, mask.Restore(), "second restore is a no-op");
+
+        mask.Begin();
+        mask.Hide(gatling, 0);
+        var replaced = new List<int> { 7 };
+        gatling.Tech = replaced;   // vanilla replaced the list during the call
+        mask.Restore();
+        AssertTrue(ReferenceEquals(replaced, gatling.Tech), "a list that is no longer ours is left alone");
+
+        var broken = new ListMemberMask<Model>(m => m.Tech, (m, l) => { if (l.Count > 1) throw new InvalidOperationException("boom"); m.Tech = l; });
+        var both = new Model { Tech = new List<int> { 0, 1 } };
+        broken.Begin();
+        AssertTrue(broken.Hide(both, 1), "copy of one written");
+        AssertEqual("boom", broken.Restore(), "restore failure reported");
+        AssertFalse(broken.Active, "pass over after a failure");
+    }
+
+    private static void PurchaseOrderableWiring()
+    {
+        string src = PatchSource("AiWeaponPurchaseOrderablePatch.cs");
+        string prefix = MethodBody(src, "Prefix");
+        AssertTrue(prefix.Contains("if (!Enabled() || !Research.Begin()) return;"), "flag and single pass");
+        AssertTrue(prefix.Contains("WeaponOrderabilityRuntime.IsResearchedButUnorderable(_alliance, id)") && prefix.Contains("Research.Hide(weapons[id], _alliance);"), "hides the ordering alliance only from unorderable models");
+        AssertFalse(prefix.Contains("return false"), "never skips vanilla");
+        string fin = MethodBody(src, "Finalizer");
+        AssertTrue(fin.Contains("string failure = Research.Restore();"), "restore");
+        AssertTrue(fin.IndexOf("Research.Restore()", StringComparison.Ordinal) < (fin.IndexOf("if (", StringComparison.Ordinal) < 0 ? int.MaxValue : fin.IndexOf("if (", StringComparison.Ordinal)), "restore before any condition");
+        AssertTrue(MethodBody(src, "Enabled").Contains("Plugin.EnableAiWeaponPurchaseOrderableFix.Value"), "flag");
+        AssertTrue(src.Contains("weapon => weapon.techavailableforalliance") && src.Contains("weapon.techavailableforalliance = list"), "masks the research list vanilla's IsResearched reads");
+    }
+
+    // ------------------------------------------------------------------ BUG-AI-018 / #14
+
+    private static void GroupWeaponFactorNanGuard()
+    {
+        AssertEqual(0f, ArmsRules.GroupWeaponFactor(0f / 0f), "0/0 -> 0");
+        AssertEqual(0f, ArmsRules.GroupWeaponFactor(float.PositiveInfinity), "infinity -> 0");
+        AssertEqual(0.249f, ArmsRules.GroupWeaponFactor(0.249f), "real value kept");
+        string src = PatchSource("GroupWeaponStrengthGuardPatch.cs");
+        string postfix = MethodBody(src, "Postfix");
+        AssertTrue(postfix.Contains("float guarded = ArmsRules.GroupWeaponFactor(__result);") && postfix.Contains("if (guarded == __result || !Enabled()) return;") && postfix.Contains("__result = guarded;"), "postfix applies the rule behind the flag");
+        AssertTrue(src.Contains("new[] { typeof(Regiment) }"), "the group overload only");
+        AssertTrue(MethodBody(src, "Enabled").Contains("Plugin.EnableGroupWeaponStrengthGuard.Value"), "flag");
+    }
+
+    private static void RealismLockSetupScreenOnly()
+    {
+        string postfix = MethodBody(PatchSource("RealismCheckboxesLockPatch.cs"), "Postfix");
+        int guard = postfix.IndexOf("if (SceneManagement.currentoperation > 0) return;", StringComparison.Ordinal);
+        AssertTrue(guard > 0, "mirrors vanilla's setup-screen guard (193616)");
+        AssertTrue(guard < postfix.IndexOf("SetValue(", StringComparison.Ordinal) && guard < postfix.IndexOf("_setAutomanageMethod", StringComparison.Ordinal), "before any write");
     }
 
     // ------------------------------------------------------------------ helpers

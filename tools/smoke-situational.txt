@@ -30,6 +30,7 @@ campaign.patch.wl-action-once-effects              # DLC_WL.UpdateCumulativeEffe
 campaign.patch.wl-staff-panel-scope.*              # CampaignArmyPanel.UpdateStats: only while a campaign group panel is open
 campaign.patch.cic-faction-ai-guard.is-cic         # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
 campaign.patch.cic-faction-ai-guard.is-cic.prefix  # DLC_WL.IsCommanderInChief: vanilla asks it only behind W&L career checks
+campaign.patch.wl-weapon-budget.purchase.*        # WeaponList.IncreaseFiscalBudget: W&L CIC buying weapon budget with prestige only
 
 # Campaign events that need not happen in a short session.
 campaign.patch.commander-prev-command.*            # Commander.AssignCommando: only when a commander is assigned to a unit
@@ -42,6 +43,8 @@ campaign.patch.project-appoint-observer.*          # Projects.AppointProject: on
 campaign.patch.recruitment.state-steer             # AIArea.GetBestRecruitingState: only when ZoneRecruiting picks a state to recruit in
 campaign.patch.arty-combine-gun-transfer.*         # BattleUnits.CombineUnits: only when two units are merged
 campaign.patch.autoresolve-standard-gun.count      # Autocalc.StartLandBattle: only when a land battle is autoresolved
+campaign.patch.autoresolve-standard-gun.hook       # Autocalc.FightUnit: only while an autoresolved battle, raid or skirmish fights
+campaign.patch.wl-weapon-budget.order.*           # WeaponList.PlaceWeaponOrder: only when an alliance places a weapon order (AI coverage below 15 %, or the player)
 campaign.patch.fleet-patrol-reset                  # Regiment.StopRegiment on a fleet: naval patrol orders only
 campaign.patch.raid-supply-threshold.*            # AICampaign.RaidForce.SearchObjective: only while a raid force exists (CheckCreationOfRaidForces raises them at random)
 campaign.patch.subordinate-strength-grab.postfix  # BattleUnits.GrabSubordinateByStrength: only when CheckTransferOfUnits finds a deficit and a surplus army

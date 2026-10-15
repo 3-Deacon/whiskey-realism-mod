@@ -129,6 +129,10 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableConfiscationSupplyFlowFix;
         public static ConfigEntry<bool> EnableAutoresolveStandardGunFix;
         public static ConfigEntry<bool> EnableCombineWeaponStockFix;
+        public static ConfigEntry<bool> EnableAiWeaponPurchaseOrderableFix;
+        public static ConfigEntry<bool> EnableGroupWeaponStrengthGuard;
+        public static ConfigEntry<bool> EnableWlWeaponBudgetScopeFix;
+        public static ConfigEntry<bool> EnableWlWeaponBudgetPrestigeGateFix;
         internal static ConfigEntry<bool> FixPerkIdMismatches;
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal ConfigEntry<bool> FastForwardAiCatchUp;
@@ -899,6 +903,18 @@ namespace WhiskeyRealism
             EnableCombineWeaponStockFix = Config.Bind(
                 "Campaign Bug Fixes", "Enable Combine Weapon Stock Fix", true,
                 "Default ON. When two units merge, vanilla's weapon-stock bookkeeping counts a battery's men as guns (100-240 phantom guns per merge when the target's model is short), returns a partly merged battery's whole gun count, draws more guns than the target gains (downgrading it to the standard gun when that count is short), and adds a standard-armed target's whole holding to stock before re-arming it with the same model. The stock is set to the correct count (guns for batteries, men otherwise; only what changes hands) and the target keeps its model whenever the stock covers what it gains; a real shortfall still re-arms it with the standard weapon, as vanilla does. Every side, W&L player merges included. Off: vanilla.");
+            EnableAiWeaponPurchaseOrderableFix = Config.Bind(
+                "Campaign Bug Fixes", "Enable AI Weapon Purchase Orderable Fix", true,
+                "Default ON. Vanilla AI weapon purchasing may order models it has researched but does not produce or import (Gatling, Coffee Mill and Williams Gun), which the player's order screen refuses; it pays the whole order up front for a delivery of up to two years. The AI now orders only models the order screen allows for its own alliance (researched and produced, or imported), choosing among them as vanilla does; units still receive the machine guns the projects stock. Every side, including the AI buying for the W&L player's alliance. Off: vanilla.");
+            EnableGroupWeaponStrengthGuard = Config.Bind(
+                "Campaign Bug Fixes", "Enable Group Weapon Strength Guard", true,
+                "Default ON. Vanilla's group weapon factor divides by the group's armed men with no zero check, so a group with no armed men returns NaN, which corrupts the campaign AI's area weapon averages and offensive outgunned tests. Such a group gets weapon factor 0. Off: vanilla.");
+            EnableWlWeaponBudgetScopeFix = Config.Bind(
+                "W&L", "Enable W&L Weapon Budget Scope Fix", true,
+                "Default ON. Vanilla subtracts every alliance's weapon orders, the enemy's included, from the W&L career player's federal weapon budget. Only orders of the player's own alliance (his own, or the AI's for his alliance) spend it now. Off: vanilla.");
+            EnableWlWeaponBudgetPrestigeGateFix = Config.Bind(
+                "W&L", "Enable W&L Weapon Budget Prestige Gate Fix", true,
+                "Default ON. Buying weapon budget as commander-in-chief costs 500 prestige, but vanilla only checks that prestige is at least -500, so it can be bought into negative prestige. The purchase now needs the prestige to pay for it; the charge is vanilla's. Off: vanilla.");
             FixPerkIdMismatches = Config.Bind(
                 "Campaign", "Fix Perk Id Mismatches", true,
                 "Default ON. Vanilla reads some perk ids from the wrong perk table (battle, campaign or fleet). With this on each perk does what " +
