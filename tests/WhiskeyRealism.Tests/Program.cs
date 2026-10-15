@@ -1392,6 +1392,7 @@ static class Program
         // External test suites
         TacticalUnitObservationAggregateTests.Run();
         ObjectiveRecordsFromAggregateTests.Run();
+        CampaignEconomyFixTests.Run();
         TacticalDecisionSnapshotTests.Run();
         TacticalResolvedGroupDecisionTests.Run();
 
