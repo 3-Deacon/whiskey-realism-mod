@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Strategic.Construction;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Operations;
 
@@ -12,6 +13,9 @@ internal static class IntegrationFollowupTests
         ArtilleryAmmoRatioTreatsMissingDataAsFull();
         ArtilleryFullBatteryIsNotConserveAmmo();
         ArtilleryFaceMirrorsVanillaTurnTrigger();
+        TelegraphWishChargeMeasuresWhatPlaceTook();
+        TelegraphWishChargeWithoutSpendIsNoCharge();
+        TelegraphRefundsOnlyWhiskeyRejections();
     }
 
     private static void Pass(string name)
@@ -81,6 +85,53 @@ internal static class IntegrationFollowupTests
         TestHarness.AssertEqual(20f, BattleWriterPolicy.AbsAngleDifference(350f, 10f), "vanilla wrap");
         TestHarness.AssertEqual(180f, BattleWriterPolicy.AbsAngleDifference(0f, 180f), "half turn");
         Pass("artillery face mirrors the vanilla turn trigger");
+    }
+
+    // AddConstructionWish -> Place(pay: true) (96215-96246): subsidy type >= 0
+    // moves subsidyfunding + cumulatedspending_construction, then the treasury
+    // pays the missing-subsidy cost; AdjustTreasury shrinks an AI's charge, so
+    // the measured delta (not the nominal cost) is what gets reversed.
+    private static void TelegraphWishChargeMeasuresWhatPlaceTook()
+    {
+        var before = new AllianceSpendSnapshot(1000f, new[] { 50f, 20f }, -300f, -400f);
+        var after = new AllianceSpendSnapshot(990f, new[] { 50f, 0f }, -320f, -410f);
+        var charge = TelegraphWishCharge.Measure(before, after);
+        AssertNear(-10f, charge.TreasuryDelta, "treasury delta");
+        AssertNear(0f, charge.SubsidyFundingDelta[0], "untouched subsidy");
+        AssertNear(-20f, charge.SubsidyFundingDelta[1], "subsidy delta");
+        AssertNear(-20f, charge.CumulatedSpendingConstructionDelta, "cumulated spending delta");
+        AssertNear(-10f, charge.ConstructionCostsDelta, "construction costs delta");
+        TestHarness.AssertTrue(charge.HasCharge, "has charge");
+
+        // The snapshot copies the array: later vanilla writes to the live array
+        // must not change what was measured.
+        var live = new[] { 5f };
+        var snap = new AllianceSpendSnapshot(0f, live, 0f, 0f);
+        live[0] = 99f;
+        AssertNear(5f, snap.SubsidyFunding[0], "snapshot copies subsidy funding");
+        Pass("telegraph wish charge measures what Place took");
+    }
+
+    private static void TelegraphWishChargeWithoutSpendIsNoCharge()
+    {
+        var same = new AllianceSpendSnapshot(1000f, new[] { 1f }, 0f, 0f);
+        TestHarness.AssertFalse(TelegraphWishCharge.Measure(same, same).HasCharge, "no movement");
+        var nullSubsidy = new AllianceSpendSnapshot(1000f, null, 0f, 0f);
+        TestHarness.AssertFalse(TelegraphWishCharge.Measure(nullSubsidy, nullSubsidy).HasCharge, "missing subsidy array");
+        var nan = new AllianceSpendSnapshot(float.NaN, null, 0f, 0f);
+        TestHarness.AssertFalse(TelegraphWishCharge.Measure(nullSubsidy, nan).HasCharge, "non-finite delta ignored");
+        TestHarness.AssertFalse(default(TelegraphWishCharge).HasCharge, "default has no charge");
+        Pass("telegraph wish charge without spend is no charge");
+    }
+
+    // Vanilla's own no-site cancellation (97578-97585) refunds nothing; only a
+    // placement vanilla accepted and Whiskey removed gets its charge back.
+    private static void TelegraphRefundsOnlyWhiskeyRejections()
+    {
+        TestHarness.AssertTrue(TelegraphWishCharge.Refunds(TelegraphWishOutcome.RejectedByWhiskey), "whiskey rejection");
+        TestHarness.AssertFalse(TelegraphWishCharge.Refunds(TelegraphWishOutcome.Placed), "kept placement");
+        TestHarness.AssertFalse(TelegraphWishCharge.Refunds(TelegraphWishOutcome.CancelledByVanilla), "vanilla cancellation");
+        Pass("telegraph refunds only Whiskey rejections");
     }
 
     private static void AssertNear(float expected, float actual, string label)

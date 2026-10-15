@@ -649,7 +649,7 @@ namespace WhiskeyRealism
             EnableTelegraphAI = Config.Bind(
                 "Construction", "Enable Telegraph AI", true,
                 "Default ON. AI factions only: when the construction intent updates (weekly), may start vanilla telegraph-station construction wishes that extend the faction's connected chain toward a large, uncovered, enemy-free field command, paid through vanilla. " +
-                "Capped by Max Active Telegraph Constructions Per Faction, skipped in the EmergencyHold fiscal posture, and an invalid final placement is removed (the paid cost is not refunded).");
+                "Capped by Max Active Telegraph Constructions Per Faction, skipped in the EmergencyHold fiscal posture, and a final placement that fails its connection/support/safe-rear checks is removed with the wish cost refunded (treasury, subsidy funding and spending stats, exactly as charged). A wish vanilla itself drops for lack of a site is not refunded, as in vanilla.");
             ConstructionTelemetryEnabled = Config.Bind(
                 "Construction",
                 "Construction Telemetry",
