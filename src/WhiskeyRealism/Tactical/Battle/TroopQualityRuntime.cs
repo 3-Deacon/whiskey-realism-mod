@@ -22,7 +22,8 @@ namespace WhiskeyRealism.Tactical.Battle
     //     (54776-54781).
     // Commander leadership for the break rule (GetCommanderLeadership 61134: parent commander
     // influence walks the command transform) is cached per commander for
-    // LeadershipRefreshHours of doctrine time.
+    // LeadershipRefreshHours of doctrine time, stretched by up to 7/8 by the commander id so
+    // the entries first stamped on the same build do not all expire on the same tick.
     internal static class TroopQualityRuntime
     {
         internal const double LeadershipRefreshHours = 0.25;
@@ -94,12 +95,14 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>
         /// The commander's vanilla leadership (GetCommanderLeadership 61134, with its parent
-        /// commander influence), cached per commander for LeadershipRefreshHours of doctrine
-        /// time. 0 for an unknown commander. Never throws.
+        /// commander influence), cached per commander for LeadershipRefreshHours (× 1 to
+        /// 1.875 by commander id, staggering the refreshes) of doctrine time. 0 for an
+        /// unknown commander. Never throws.
         /// </summary>
         internal static float Leadership(int commander, double nowHours)
         {
-            if (_leadershipAt.TryGetValue(commander, out double at) && nowHours - at < LeadershipRefreshHours && nowHours >= at)
+            double window = LeadershipRefreshHours * (1.0 + (commander & 7) / 8.0);
+            if (_leadershipAt.TryGetValue(commander, out double at) && nowHours - at < window && nowHours >= at)
                 return _leadership[commander];
             float value = 0f;
             try
