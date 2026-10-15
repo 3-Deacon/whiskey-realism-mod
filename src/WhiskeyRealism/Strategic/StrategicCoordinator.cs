@@ -44,11 +44,6 @@ namespace WhiskeyRealism.Strategic
             new DefenseCooldownTable()
         };
         private readonly string[] _defenseIntentSignatures = new string[2];
-        private readonly HashSet<string>[] _previousSifSignatures = new HashSet<string>[2]
-        {
-            new HashSet<string>(),
-            new HashSet<string>()
-        };
         public CampaignMapLedger CampaignMap = CampaignMapLedger.Build(null);
         internal SuccessionScheduler Succession = new SuccessionScheduler();
         public Dictionary<int, PersonalityVector> MinorOfficerProfiles = new Dictionary<int, PersonalityVector>();
@@ -159,7 +154,6 @@ namespace WhiskeyRealism.Strategic
                 DefenseIntents[a] = null;
                 _defenseCooldowns[a] = new DefenseCooldownTable();
                 _defenseIntentSignatures[a] = null;
-                _previousSifSignatures[a] = new HashSet<string>();
                 DirectorMemories[a] = new DirectorMemory();
                 OperationMemories[a] = new OperationDecisionMemory();
                 _directorPostureSignatures[a] = null;
@@ -411,6 +405,8 @@ namespace WhiskeyRealism.Strategic
                         cicEra.CheckTransition(month, year, cicWs.VicksburgFallen, cicWs.AtlantaThreatened);
                         fiscalMs += Measure(() => UpdateFiscalIntent(alliance, cicEra.Stage, day, month, year, logHeartbeat, publish: false));
                         policyMs += Measure(() => UpdatePolicyPlan(alliance, cicEra.Stage, reviewSerial));
+                        // G1: detection is bookkeeping; the planner itself stands down for this alliance.
+                        plannerMs += Measure(() => CampaignPlannerRuntime.ReviewPlan(alliance, day, month, year, DirectorMemories[alliance]?.LastPosture));
                     }
                     continue;
                 }
@@ -918,17 +914,10 @@ namespace WhiskeyRealism.Strategic
                     map: CampaignMap,
                     cooldown: _defenseCooldowns[alliance],
                     totalAllianceEffectiveStrength: total,
-                    profile: profile,
-                    previousSifSignatures: _previousSifSignatures[alliance]);
+                    profile: profile);
 
                 var output = DefenseIntentLedger.Build(input);
                 DefenseIntents[alliance] = output;
-
-                // Refresh the per-alliance "seen this tick" SIF set so the NEXT
-                // tick can mark a threat whose belief expired (BeliefExpired, G1).
-                // Source from input.Threats, not the builder output (which may
-                // filter Recovered/expired entries before output.Responses).
-                _previousSifSignatures[alliance] = CollectSifSignatures(input);
 
                 bool verbose = ConfigValue(plugin.VerboseLogging) || ConfigValue(plugin.DefenseIntentVerboseLogging);
                 if (verbose)
@@ -1014,20 +1003,6 @@ namespace WhiskeyRealism.Strategic
         {
             try { return GrandStrategyRegistry.Resolve(alliance, era); }
             catch { return null; }
-        }
-
-        private static HashSet<string> CollectSifSignatures(DefenseIntentInput input)
-        {
-            var set = new HashSet<string>();
-            if (input == null || input.Threats == null) return set;
-            foreach (var t in input.Threats)
-            {
-                if (t == null) continue;
-                if (t.Kind != DefenseThreatSourceKind.SeaInvasion) continue;
-                string sig = DefenseThreatSignature.ForSeaInvasion(t.EnemyUnitKey);
-                set.Add(sig);
-            }
-            return set;
         }
 
         // publish = false (a W&L CIC player's alliance): the posture feeds the policy needs

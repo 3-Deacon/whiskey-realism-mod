@@ -22,8 +22,9 @@ namespace WhiskeyRealism.Strategic
         public float EnemyStrength;
         public int[] EnemyInstanceIds;
         public bool LandedSignal;
-        // The sea-invasion belief that raised this threat last review expired (Recovered).
-        public bool BeliefExpired;
+        // The belief that raised this sea-invasion or raid threat last review no longer qualifies
+        // (LapsedThreatTracker): reported once more, as Recovered.
+        public bool SightingLapsed;
     }
 
     public sealed class DefenseIntentInput

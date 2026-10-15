@@ -28,6 +28,19 @@ namespace WhiskeyRealism.Strategic
 {
     internal static class DefenseIntentRuntime
     {
+        private static readonly LapsedThreatTracker[] LapseTrackers = { new LapsedThreatTracker(), new LapsedThreatTracker() };
+        private static readonly Func<DefenseThreatSource, string> LapseSignature = DefenseIntentLedger.BuildSignature;
+
+        static DefenseIntentRuntime()
+        {
+            CampaignScope.Register("defense-intent-lapse", ResetLapses);
+        }
+
+        private static void ResetLapses()
+        {
+            for (int a = 0; a < LapseTrackers.Length; a++) LapseTrackers[a].Clear();
+        }
+
         // Theater adjacency used by ExtractCandidateUnits Tier classification.
         private static readonly Dictionary<Theater, HashSet<Theater>> TheaterAdjacency =
             new Dictionary<Theater, HashSet<Theater>>
@@ -50,8 +63,7 @@ namespace WhiskeyRealism.Strategic
             CampaignMapLedger map,
             DefenseCooldownTable cooldown,
             float totalAllianceEffectiveStrength,
-            GrandStrategyProfile profile = null,
-            HashSet<string> previousSifSignatures = null)
+            GrandStrategyProfile profile = null)
         {
             if (cooldown == null)
             {
@@ -125,17 +137,23 @@ namespace WhiskeyRealism.Strategic
             }
 
             // The side's believed enemy armies (G1), shared by every extractor below: one
-            // picture per BuildInput call.
+            // picture per BuildInput call; order-raising threats need a recent sighting.
             var beliefs = EnemyDetectionRuntime.BeliefsFor(allianceId);
+            int today = EnemyDetectionRuntime.ReviewDayFor(allianceId);
             var enemyPositions = new List<Vector3>();
             for (int j = 0; j < beliefs.Count; j++)
                 if (beliefs[j].Confidence01 > 0f) enemyPositions.Add(new Vector3(beliefs[j].X, 0f, beliefs[j].Z));
 
-            try { ExtractSeaInvasionThreats(input, allianceId, beliefs, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions, previousSifSignatures); }
+            try { ExtractSeaInvasionThreats(input, allianceId, beliefs, today, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:sif", "[DefenseIntent] sif extract failed: " + ex.Message); }
 
-            try { ExtractRaidForceThreats(input, allianceId, beliefs, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
+            try { ExtractRaidForceThreats(input, allianceId, beliefs, today, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:raid", "[DefenseIntent] raid extract failed: " + ex.Message); }
+
+            // A sea-invasion or raid threat raised last review that no longer qualifies is
+            // reported once as Recovered (LapsedThreatTracker; alliances 0 and 1 only).
+            if (allianceId >= 0 && allianceId < LapseTrackers.Length)
+                LapseTrackers[allianceId].Close(input.Threats, LapseSignature);
 
             try { ExtractAssetProximityThreats(input, allianceId, beliefs, map, defOpsRadius, profile, capitalPos, capitalFound, enemyPositions); }
             catch (Exception ex) { OnceLog.Warning("defense-intent:runtime:proximity", "[DefenseIntent] proximity extract failed: " + ex.Message); }
@@ -174,21 +192,18 @@ namespace WhiskeyRealism.Strategic
         // ExtractSeaInvasionThreats
         // ---------------------------------------------------------------------------
 
-        // A believed group seen afloat off our coast (InvasionWatch) or seen ashore on our soil
-        // within 3 days of being seen afloat (landed, ActiveInvasion); keyed on its UnitKey. A
-        // threat raised last review whose belief expired this review is reported once as
-        // BeliefExpired (Recovered), so the ledger and the coastal runner release its units.
+        // A believed group seen afloat off our coast (InvasionWatch) or seen recently ashore on
+        // our soil within 3 days of being seen afloat (landed, ActiveInvasion); keyed on its UnitKey.
         private static void ExtractSeaInvasionThreats(
-            DefenseIntentInput input, int allianceId, IReadOnlyList<EnemyBelief> beliefs,
+            DefenseIntentInput input, int allianceId, IReadOnlyList<EnemyBelief> beliefs, int today,
             CampaignMapLedger map, float defOpsRadius,
             GrandStrategyProfile profile, Vector3 capitalPos, bool capitalFound,
-            List<Vector3> enemyPositions,
-            HashSet<string> previousSifSignatures)
+            List<Vector3> enemyPositions)
         {
             for (int i = 0; i < beliefs.Count; i++)
             {
                 var belief = beliefs[i];
-                if (!EnemyBeliefReadings.IsSeaInvasionThreat(in belief, out bool landed)) continue;
+                if (!EnemyBeliefReadings.IsSeaInvasionThreat(in belief, today, out bool landed)) continue;
 
                 var forcePos = new Vector3(belief.X, 0f, belief.Z);
                 CampaignMapAsset nearestAsset = FindNearestAsset(forcePos, allianceId, map, defOpsRadius);
@@ -205,27 +220,15 @@ namespace WhiskeyRealism.Strategic
                     AssetRole = AssetRoleOf(nearestAsset, profile, capitalPos, capitalFound, enemyPositions)
                 });
             }
-
-            var collapsed = new List<string>();
-            EnemyBeliefReadings.CollapsedSeaInvasionKeys(EnemyDetectionRuntime.ExpiredKeysFor(allianceId), previousSifSignatures, collapsed);
-            for (int i = 0; i < collapsed.Count; i++)
-            {
-                input.Threats.Add(new DefenseThreatSource
-                {
-                    Kind = DefenseThreatSourceKind.SeaInvasion,
-                    EnemyUnitKey = collapsed[i],
-                    BeliefExpired = true
-                });
-            }
         }
 
         // ---------------------------------------------------------------------------
         // ExtractRaidForceThreats
         // ---------------------------------------------------------------------------
 
-        // A cavalry-majority group seen on our soil near one of our assets.
+        // A cavalry-majority group seen recently on our soil near one of our assets.
         private static void ExtractRaidForceThreats(
-            DefenseIntentInput input, int allianceId, IReadOnlyList<EnemyBelief> beliefs,
+            DefenseIntentInput input, int allianceId, IReadOnlyList<EnemyBelief> beliefs, int today,
             CampaignMapLedger map, float defOpsRadius,
             GrandStrategyProfile profile, Vector3 capitalPos, bool capitalFound,
             List<Vector3> enemyPositions)
@@ -233,7 +236,7 @@ namespace WhiskeyRealism.Strategic
             for (int i = 0; i < beliefs.Count; i++)
             {
                 var belief = beliefs[i];
-                if (!EnemyBeliefReadings.IsRaidThreat(in belief)) continue;
+                if (!EnemyBeliefReadings.IsRaidThreat(in belief, today)) continue;
 
                 var raidPos = new Vector3(belief.X, 0f, belief.Z);
                 CampaignMapAsset nearestAsset = FindNearestAsset(raidPos, allianceId, map, defOpsRadius);

@@ -20,9 +20,13 @@ namespace WhiskeyRealism.Strategic.Planner
     // Per review, in order: (1) two live detections sharing one UnitKey each get the composite key
     // UnitKey#InstanceId and one bounded warning (never merged); (2) exact key match; (3) a
     // detection whose key no belief has re-keys an unmatched belief with the same unit name and
-    // UnitTyp (its commander changed); (4) a still-new key retires the nearest unmatched belief of
-    // the same UnitTyp whose uncertainty radius contains it (vanilla renamed the group, 17159); (5)
-    // anything left is a new belief. Two armies that are both seen are never merged.
+    // UnitTyp within its plausibility radius (its commander changed); (4) a still-new key retires
+    // the nearest unmatched belief of the same UnitTyp within its plausibility radius (vanilla
+    // renamed the group, 17159); (5) anything left is a new belief. Two armies that are both seen
+    // are never merged. The plausibility radius is a normal road march (CampaignSpeedBound
+    // .RoadMarchPerDay) x days unseen, at least one day and at most PlausibleDaysCap: identity
+    // asks where the group could normally be, not P6's loose uncertainty bound, which is for
+    // planning only (integrator decision 2026-10-15, verify-g1 F2).
     public sealed class EnemyArmyModel
     {
         public const int ExpireDays = 30;
@@ -30,6 +34,8 @@ namespace WhiskeyRealism.Strategic.Planner
         public const float MinConfidence = 0.05f;
         // A sighting reports the group's true GetPosition(), so a fresh belief is exact.
         public const float SeenRadius = 0f;
+        // Identity matching looks at most a week of normal road march back.
+        public const int PlausibleDaysCap = 7;
 
         private readonly List<EnemyBelief> _beliefs = new List<EnemyBelief>();
         private readonly List<string> _expired = new List<string>();
@@ -42,6 +48,7 @@ namespace WhiskeyRealism.Strategic.Planner
         private readonly List<bool> _matched = new List<bool>();  // per belief
         private readonly List<bool> _retired = new List<bool>();  // per belief
         private readonly List<float> _radius = new List<float>(); // per belief, at this review
+        private readonly List<float> _plausible = new List<float>(); // per belief, identity matching
         private readonly List<EnemyBelief> _next = new List<EnemyBelief>();
 
         public IReadOnlyList<EnemyBelief> Beliefs => _beliefs;
@@ -54,7 +61,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return (float)Math.Pow(0.5, Math.Max(0, days) / (double)HalfLifeDays);
         }
 
-        public void Update(IReadOnlyList<EnemyDetection> seen, int daySerial, Func<int, float> driftPerDay)
+        public void Update(IReadOnlyList<EnemyDetection> seen, int daySerial, Func<int, float> driftPerDay, Func<int, float> marchPerDay)
         {
             _expired.Clear();
             int detections = seen != null ? seen.Count : 0;
@@ -64,12 +71,14 @@ namespace WhiskeyRealism.Strategic.Planner
             _matched.Clear();
             _retired.Clear();
             _radius.Clear();
+            _plausible.Clear();
             _beliefByKey.Clear();
             for (int i = 0; i < beliefs; i++)
             {
                 _matched.Add(false);
                 _retired.Add(false);
                 _radius.Add(RadiusAt(_beliefs[i], daySerial, driftPerDay));
+                _plausible.Add(PlausibleRadiusAt(_beliefs[i], daySerial, marchPerDay));
                 if (_beliefs[i].UnitKey != null && !_beliefByKey.ContainsKey(_beliefs[i].UnitKey))
                     _beliefByKey[_beliefs[i].UnitKey] = i;
             }
@@ -91,6 +100,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     if (_matched[b] || _beliefs[b].UnitTyp != seen[d].UnitTyp) continue;
                     if (!string.Equals(NameOf(_beliefs[b].UnitKey), name, StringComparison.Ordinal)) continue;
+                    if (!WithinPlausible(b, seen[d].X, seen[d].Z)) continue;
                     _assigned[d] = b;
                     _matched[b] = true;
                     break;
@@ -105,10 +115,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int b = 0; b < beliefs; b++)
                 {
                     if (_matched[b] || _retired[b] || _beliefs[b].UnitTyp != seen[d].UnitTyp) continue;
+                    if (!WithinPlausible(b, seen[d].X, seen[d].Z)) continue;
                     float dx = _beliefs[b].X - seen[d].X;
                     float dz = _beliefs[b].Z - seen[d].Z;
                     float distSq = dx * dx + dz * dz;
-                    if (distSq > _radius[b] * _radius[b] || distSq >= best) continue;
+                    if (distSq >= best) continue;
                     best = distSq;
                     retire = b;
                 }
@@ -213,6 +224,24 @@ namespace WhiskeyRealism.Strategic.Planner
                     "[EnemyBeliefs] two live enemy groups share one name:commander key; each is kept under name:commander#instance");
         }
 
+        private bool WithinPlausible(int belief, float x, float z)
+        {
+            float dx = _beliefs[belief].X - x;
+            float dz = _beliefs[belief].Z - z;
+            float r = _plausible[belief];
+            return dx * dx + dz * dz <= r * r;
+        }
+
+        // Normal road march x days unseen, clamped to [1, PlausibleDaysCap]; a fort garrison does not move.
+        private static float PlausibleRadiusAt(in EnemyBelief belief, int daySerial, Func<int, float> marchPerDay)
+        {
+            if (belief.LastSource == DetectionSource.ObjectiveGarrison) return SeenRadius;
+            int days = Math.Min(PlausibleDaysCap, Math.Max(1, daySerial - belief.LastSeenDay));
+            float march = marchPerDay != null ? marchPerDay(belief.UnitTyp) : 0f;
+            if (float.IsNaN(march) || march < 0f) march = 0f;
+            return march * days;
+        }
+
         private static float RadiusAt(in EnemyBelief belief, int daySerial, Func<int, float> driftPerDay)
         {
             if (belief.LastSource == DetectionSource.ObjectiveGarrison) return SeenRadius;
@@ -288,7 +317,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   x max(1, retreat, fallback x cheat) x max(1, retreat)
     //   / 365.25
     // The last factor pair is G1's correction of P6: num28 takes speedfactorretreat for movement
-    // mode 5 (134058) and again when lastpathsetoutofsafetyzone on a group (unittyp > 13, 134061),
+    // mode 5 (134058) and again when lastpathsetoutofsafetyzone on a group (unittyp > 13, 134062),
     // or the fallback factor (with the AI cheat, 134050-134056) and the safety-zone retreat.
     // Every other term only shrinks the speed (transport cap and aiarrivalfactor <= 1,
     // commanderspeedadjustment 1 on the campaign 132838, wounded, state support, readiness,
@@ -298,6 +327,23 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         public const float SlopeCap = 2f;      // Mathf.Min(2f, ...) at 134013
         public const float DaysPerYear = 365.25f;
+
+        public const int RoadTerrain = 7;      // terrainspeccost[7], roads (GetTerrainSpeedAdjustment 132893)
+
+        // A normal campaign day on roads: vanilla's speed chain without P6's loose multipliers (no
+        // perks, no forced march, no slope, no retreat, no rail or river): unitbasicspeed[t,1]
+        // (133350-133354) x unitbasicspeed[15,1] (groupspeed ceiling, 120179, applied 133991) x
+        // basicunitspeed (133535) / terrainspeccost[7] (roads, 132888-132900) x
+        // generalcampaignunitspeedfactor (134083) / 365.25. Identity matching's plausibility radius.
+        public static float RoadMarchPerDay(in CampaignSpeedPrefs p, int unitTyp)
+        {
+            if (p.UnitBasicSpeedMounted == null || unitTyp < 0 || unitTyp >= p.UnitBasicSpeedMounted.Length) return 0f;
+            float road = p.TerrainSpecCost != null && RoadTerrain < p.TerrainSpecCost.Length && p.TerrainSpecCost[RoadTerrain] > 0f
+                ? p.TerrainSpecCost[RoadTerrain] : 1f;
+            float perDay = Math.Max(0f, p.UnitBasicSpeedMounted[unitTyp]) * Math.Max(0f, p.GroupSpeedCeiling) * Math.Max(0f, p.BasicUnitSpeed)
+                / road * Math.Max(0f, p.GeneralCampaignFactor) / DaysPerYear;
+            return float.IsNaN(perDay) || float.IsInfinity(perDay) ? 0f : perDay;
+        }
 
         public static float DriftPerDay(in CampaignSpeedPrefs p, int unitTyp)
         {
@@ -341,6 +387,21 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             return values != null && index >= 0 && index < values.Length ? values[index] : 0f;
         }
+    }
+
+    internal enum DetectionMode
+    {
+        FogGrid = 0,
+        OwnSideWithinFog = 1,
+        NoFog = 2,
+        ConfigOff = 3
+    }
+
+    internal enum UnitRelation
+    {
+        Ignore = 0,
+        Viewer = 1,
+        Enemy = 2
     }
 
     // The detection decision of spec component 2 (plan G1), applied by EnemyDetectionRuntime to
@@ -412,8 +473,9 @@ namespace WhiskeyRealism.Strategic.Planner
             return viewerCovers && gridVisible;
         }
 
-        // Within the own formation's bugle range or the enemy's own (vanilla's campaign reveal
-        // test, 127231, uses both).
+        // Within the own formation's bugle range or the enemy's own: vanilla's campaign contact
+        // (CheckEnemyContactCampaign 115634-115637) looks out to the closest enemy's bugle range
+        // x 1.1 when there is one, else the unit's own.
         internal static bool InBugleContact(float x, float z, float enemyBugle, float[] ownX, float[] ownZ, float[] ownBugle, int count)
         {
             if (ownX == null || ownZ == null || ownBugle == null) return false;
@@ -437,6 +499,67 @@ namespace WhiskeyRealism.Strategic.Planner
             if (onOwnSoil) traits |= EnemyTraits.OnOwnSoil;
             if (nearOwnCoast) traits |= EnemyTraits.NearOwnCoast;
             return traits;
+        }
+
+        // The review's mode for one side: the flags off -> ConfigOff, fog off -> NoFog (both
+        // omniscient, the rollback), the player-alliance side -> OwnSideWithinFog (rule c), any
+        // other side -> FogGrid (rule b).
+        internal static DetectionMode Mode(bool fogHonest, bool useFow, bool sideIsPlayerAlliance)
+        {
+            if (!fogHonest) return DetectionMode.ConfigOff;
+            if (!useFow) return DetectionMode.NoFog;
+            return sideIsPlayerAlliance ? DetectionMode.OwnSideWithinFog : DetectionMode.FogGrid;
+        }
+
+        internal static bool IsOmniscient(DetectionMode mode)
+        {
+            return mode == DetectionMode.NoFog || mode == DetectionMode.ConfigOff;
+        }
+
+        // A FogGrid review without the grid fails closed: contact only for that review, never
+        // omniscient.
+        internal static bool GridUnavailable(DetectionMode mode, bool gridPresent)
+        {
+            return mode == DetectionMode.FogGrid && !gridPresent;
+        }
+
+        // What a campaign group is to the side (SeparateUnits 10458-10515, AssignUnitToFOW
+        // 116520-116534): own or allied groups are viewers (fleets and garrisons paint the grid
+        // too); an enemy army is an at-war group that is neither a fleet nor a garrison (enemy
+        // garrisons are reached only through objective forts).
+        internal static UnitRelation RelationOf(int side, int other, bool alliedWithSide, bool atWarWithSide, bool isFleet, bool isGarrison)
+        {
+            if (other == side || alliedWithSide) return UnitRelation.Viewer;
+            if (atWarWithSide && !isFleet && !isGarrison) return UnitRelation.Enemy;
+            return UnitRelation.Ignore;
+        }
+
+        // Rule (b)'s grid answer: never asked with fog off (the concealment grid is unallocated,
+        // UnitIsHidden NREs at 101188) or without a usable grid; a probe exception answers
+        // "not visible" and reports `threw` so the caller detects by contact only for the rest
+        // of the review.
+        internal static bool GridVisible<TUnit>(bool useFow, bool gridUsable, Func<TUnit, bool> isHidden, TUnit unit, out bool threw)
+        {
+            threw = false;
+            if (!useFow || !gridUsable || isHidden == null) return false;
+            try
+            {
+                return !isHidden(unit);
+            }
+            catch
+            {
+                threw = true;
+                return false;
+            }
+        }
+
+        // An enemy objective fort's garrison enters the picture only when the side sees or
+        // contacts it (G0 landing F2).
+        internal static bool TryObjectiveGarrison(bool seen, int instanceId, string unitKey, int unitTyp, float x, float z, float strength,
+                                                  out EnemyDetection detection)
+        {
+            detection = seen ? ObjectiveGarrison(instanceId, unitKey, unitTyp, x, z, strength) : default(EnemyDetection);
+            return seen;
         }
 
         // An enemy objective fort's garrison that passed the rule above: one detection at the

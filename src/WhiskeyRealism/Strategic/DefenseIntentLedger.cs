@@ -208,7 +208,7 @@ namespace WhiskeyRealism.Strategic
         // Private helpers
         // ---------------------------------------------------------------------------
 
-        private static string BuildSignature(DefenseThreatSource src)
+        internal static string BuildSignature(DefenseThreatSource src)
         {
             switch (src.Kind)
             {
@@ -229,13 +229,13 @@ namespace WhiskeyRealism.Strategic
             switch (src.Kind)
             {
                 case DefenseThreatSourceKind.SeaInvasion:
-                    if (src.BeliefExpired) return DefensePosture.Recovered;
+                    if (src.SightingLapsed) return DefensePosture.Recovered;
                     return src.LandedSignal
                         ? DefensePosture.ActiveInvasion
                         : DefensePosture.InvasionWatch;
 
                 case DefenseThreatSourceKind.RaidForce:
-                    return DefensePosture.ActiveInvasion;
+                    return src.SightingLapsed ? DefensePosture.Recovered : DefensePosture.ActiveInvasion;
 
                 case DefenseThreatSourceKind.AssetProximity:
                     return DefensePosture.ActiveInvasion;

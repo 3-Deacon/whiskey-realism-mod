@@ -52,6 +52,16 @@ internal static class EnemyArmyModelTests
             ("ExpiredSeaInvasionBeliefCollapsesThreat", ExpiredSeaInvasionBeliefCollapsesThreat),
             ("StrengthRatioFromBeliefs", StrengthRatioFromBeliefs),
             ("CapitalSamplesFromBeliefsCarryNoMorale", CapitalSamplesFromBeliefsCarryNoMorale),
+            ("SameNameBeyondPlausibleMarchIsAnotherGroup", SameNameBeyondPlausibleMarchIsAnotherGroup),
+            ("NewGroupFarAwayDoesNotRetireRememberedOne", NewGroupFarAwayDoesNotRetireRememberedOne),
+            ("RoadMarchIsTheNormalDayBelowTheBound", RoadMarchIsTheNormalDayBelowTheBound),
+            ("LandedInvasionNeedsRecentSighting", LandedInvasionNeedsRecentSighting),
+            ("RaidLeavingSightRecoversThenReleases", RaidLeavingSightRecoversThenReleases),
+            ("DetectionModeFailsClosed", DetectionModeFailsClosed),
+            ("GridAnswerFailsClosed", GridAnswerFailsClosed),
+            ("AlliedGroupsAreViewers", AlliedGroupsAreViewers),
+            ("GarrisonGateRequiresSighting", GarrisonGateRequiresSighting),
+            ("StandDownAllianceStillDetects", StandDownAllianceStillDetects),
             ("DetectionWiringPinned", DetectionWiringPinned),
             ("MigratedReadersReadBeliefsOnly", MigratedReadersReadBeliefsOnly),
         });
@@ -73,6 +83,8 @@ internal static class EnemyArmyModelTests
     private static List<EnemyDetection> List(params EnemyDetection[] d) => new List<EnemyDetection>(d);
 
     private static Func<int, float> Drift(float perDay) => _ => perDay;
+    private static Func<int, float> March(float perDay) => _ => perDay;
+    private static readonly Func<int, float> NoMarch = _ => 0f;
 
     private static EnemyBelief Only(EnemyArmyModel m, string label)
     {
@@ -104,7 +116,7 @@ internal static class EnemyArmyModelTests
     private static void SeenEnemyGetsFullConfidence()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("Army of the Potomac:12", 101, 10f, 20f, 50000f)), 100, Drift(5f));
+        m.Update(List(Seen("Army of the Potomac:12", 101, 10f, 20f, 50000f)), 100, Drift(5f), NoMarch);
         var b = Only(m, "seen");
         AssertNear(1f, b.Confidence01, 1e-6f, "confidence 1");
         AssertNear(EnemyArmyModel.SeenRadius, b.UncertaintyRadius, 1e-6f, "seen radius");
@@ -117,20 +129,20 @@ internal static class EnemyArmyModelTests
     private static void UnseenConfidenceHalvesEverySevenDays()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f)), 10, Drift(1f));
-        m.Update(List(), 17, Drift(1f));
+        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f)), 10, Drift(1f), NoMarch);
+        m.Update(List(), 17, Drift(1f), NoMarch);
         AssertNear(0.5f, Only(m, "7d").Confidence01, 1e-4f, "half after 7 days");
-        m.Update(List(), 24, Drift(1f));
+        m.Update(List(), 24, Drift(1f), NoMarch);
         AssertNear(0.25f, Only(m, "14d").Confidence01, 1e-4f, "quarter after 14 days");
-        m.Update(List(), 13, Drift(1f));
+        m.Update(List(), 13, Drift(1f), NoMarch);
         AssertNear((float)Math.Pow(0.5, 3.0 / 7.0), Only(m, "3d").Confidence01, 1e-4f, "absolute from last seen, not compounded");
     }
 
     private static void UnseenRadiusGrowsByDrift()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f, unitTyp: 16)), 10, t => t == 16 ? 4f : 99f);
-        m.Update(List(), 15, t => t == 16 ? 4f : 99f);
+        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f, unitTyp: 16)), 10, t => t == 16 ? 4f : 99f, NoMarch);
+        m.Update(List(), 15, t => t == 16 ? 4f : 99f, NoMarch);
         AssertNear(EnemyArmyModel.SeenRadius + 20f, Only(m, "5d").UncertaintyRadius, 1e-4f, "radius = seen + drift(unittyp) x days");
         AssertNear(0f, Only(m, "pos").X, 1e-6f, "the last-seen position does not move");
     }
@@ -213,25 +225,25 @@ internal static class EnemyArmyModelTests
     private static void ExpiresAtThirtyDaysOrBelowMinConfidence()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f)), 0, Drift(1f));
-        m.Update(List(), EnemyArmyModel.ExpireDays - 1, Drift(1f));
+        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f)), 0, Drift(1f), NoMarch);
+        m.Update(List(), EnemyArmyModel.ExpireDays - 1, Drift(1f), NoMarch);
         AssertEqual(1, m.Beliefs.Count, "alive at 29 days");
         AssertTrue(m.Beliefs[0].Confidence01 >= EnemyArmyModel.MinConfidence, "above the floor at 29 days");
         AssertEqual(0, m.ExpiredKeys.Count, "nothing expired yet");
-        m.Update(List(), EnemyArmyModel.ExpireDays, Drift(1f));
+        m.Update(List(), EnemyArmyModel.ExpireDays, Drift(1f), NoMarch);
         AssertEqual(0, m.Beliefs.Count, "expired at 30 days");
         AssertEqual("A:1", m.ExpiredKeys.Count == 1 ? m.ExpiredKeys[0] : null, "expired key reported");
         AssertTrue(EnemyArmyModel.Confidence(31) < EnemyArmyModel.MinConfidence, "below the floor after 30 days anyway");
-        m.Update(List(), EnemyArmyModel.ExpireDays + 1, Drift(1f));
+        m.Update(List(), EnemyArmyModel.ExpireDays + 1, Drift(1f), NoMarch);
         AssertEqual(0, m.ExpiredKeys.Count, "expired keys are per update");
     }
 
     private static void ReappearingEnemyRefreshes()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f)), 0, Drift(2f));
-        m.Update(List(), 10, Drift(2f));
-        m.Update(List(Seen("A:1", 1, 50f, 60f, 900f)), 12, Drift(2f));
+        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f)), 0, Drift(2f), NoMarch);
+        m.Update(List(), 10, Drift(2f), NoMarch);
+        m.Update(List(Seen("A:1", 1, 50f, 60f, 900f)), 12, Drift(2f), NoMarch);
         var b = Only(m, "refreshed");
         AssertNear(1f, b.Confidence01, 1e-6f, "full confidence again");
         AssertNear(50f, b.X, 1e-6f, "new position");
@@ -275,13 +287,13 @@ internal static class EnemyArmyModelTests
         var seen = new List<EnemyDetection>();
         if (DetectionRules.TryDecide(false, false, false, false, viewerCovers: false, gridVisible: false, out _))
             seen.Add(DetectionRules.ObjectiveGarrison(7, "Fort Pulaski garrison:300", 14, 100f, 200f, 1200f));
-        m.Update(seen, 5, Drift(3f));
+        m.Update(seen, 5, Drift(3f), NoMarch);
         AssertEqual(0, m.Beliefs.Count, "unseen garrison: no belief");
 
         seen.Clear();
         if (DetectionRules.TryDecide(false, false, false, false, viewerCovers: true, gridVisible: true, out _))
             seen.Add(DetectionRules.ObjectiveGarrison(7, "Fort Pulaski garrison:300", 14, 100f, 200f, 1200f));
-        m.Update(seen, 6, Drift(3f));
+        m.Update(seen, 6, Drift(3f), NoMarch);
         var b = Only(m, "seen garrison");
         AssertNear(1200f, b.Strength, 1e-6f, "garrison strength");
         AssertNear(100f, b.X, 1e-6f, "at the town");
@@ -291,8 +303,8 @@ internal static class EnemyArmyModelTests
     private static void GarrisonBeliefDoesNotDrift()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(DetectionRules.ObjectiveGarrison(7, "G:1", 14, 0f, 0f, 500f)), 0, Drift(9f));
-        m.Update(List(), 6, Drift(9f));
+        m.Update(List(DetectionRules.ObjectiveGarrison(7, "G:1", 14, 0f, 0f, 500f)), 0, Drift(9f), NoMarch);
+        m.Update(List(), 6, Drift(9f), NoMarch);
         AssertNear(EnemyArmyModel.SeenRadius, Only(m, "garrison").UncertaintyRadius, 1e-6f, "a fort does not move");
         AssertTrue(Only(m, "garrison").Confidence01 < 1f, "but its picture still ages");
     }
@@ -352,10 +364,10 @@ internal static class EnemyArmyModelTests
     {
         var m = new EnemyArmyModel();
         var seen = List(Seen("A:1", 1, 0f, 0f, 1000f), Seen("B:2", 2, 40f, 0f, 2000f));
-        m.Update(seen, 0, Drift(2f));
-        m.Update(List(Seen("A:1", 1, 5f, 0f, 1000f)), 4, Drift(2f));
+        m.Update(seen, 0, Drift(2f), NoMarch);
+        m.Update(List(Seen("A:1", 1, 5f, 0f, 1000f)), 4, Drift(2f), NoMarch);
         string first = Dump(m);
-        m.Update(List(Seen("A:1", 1, 5f, 0f, 1000f)), 4, Drift(2f));
+        m.Update(List(Seen("A:1", 1, 5f, 0f, 1000f)), 4, Drift(2f), NoMarch);
         AssertEqual(first, Dump(m), "same day, same detections: same state");
         AssertEqual(2, m.Beliefs.Count, "no duplicate");
     }
@@ -372,8 +384,8 @@ internal static class EnemyArmyModelTests
     private static void EmptyDetectionsKeepsMemory()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f), Seen("B:2", 2, 9f, 9f, 500f)), 0, Drift(1f));
-        m.Update(List(), 3, Drift(1f));
+        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f), Seen("B:2", 2, 9f, 9f, 500f)), 0, Drift(1f), NoMarch);
+        m.Update(List(), 3, Drift(1f), NoMarch);
         AssertEqual(2, m.Beliefs.Count, "remembered");
         foreach (var b in m.Beliefs) AssertTrue(b.Confidence01 < 1f && b.Confidence01 > 0.5f, "decayed, not dropped");
     }
@@ -381,26 +393,38 @@ internal static class EnemyArmyModelTests
     private static void BeliefsKeyedByUnitKeyNotInstanceId()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("Army of Northern Virginia:7", 111, 0f, 0f, 60000f)), 0, Drift(1f));
-        m.Update(List(Seen("Army of Northern Virginia:7", 999, 3f, 0f, 61000f)), 1, Drift(1f));
+        m.Update(List(Seen("Army of Northern Virginia:7", 111, 0f, 0f, 60000f)), 0, Drift(1f), NoMarch);
+        m.Update(List(Seen("Army of Northern Virginia:7", 999, 3f, 0f, 61000f)), 1, Drift(1f), NoMarch);
         var b = Only(m, "one belief across instance ids");
         AssertEqual(999, b.InstanceId, "instance id rebound to this session's");
         AssertNear(61000f, b.Strength, 1e-6f, "refreshed");
     }
 
+    // Re-key (commander changed): same unit name and type within the plausibility radius (road
+    // march 30/day x 2 days = 60). It continues the belief (LastEmbarkedDay carries over), which a
+    // rename-retire would not.
     private static void CommanderChangeReKeysBeliefNotDuplicates()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("Army of the Potomac:12", 5, 0f, 0f, 80000f, unitTyp: 16)), 0, Drift(1f));
-        // Seen again 50 units away (outside the 2-unit radius, so the rename rule cannot apply)
-        // under a new commander: the same army by name and type.
-        m.Update(List(Seen("Army of the Potomac:31", 5, 50f, 0f, 80000f, unitTyp: 16)), 2, Drift(1f));
+        m.Update(List(Seen("Army of the Potomac:12", 5, 0f, 0f, 80000f, unitTyp: 16, traits: EnemyTraits.Embarked)), 0, Drift(500f), March(30f));
+        m.Update(List(Seen("Army of the Potomac:31", 5, 50f, 0f, 80000f, unitTyp: 16)), 2, Drift(500f), March(30f));
         var b = Only(m, "re-keyed");
         AssertEqual("Army of the Potomac:31", b.UnitKey, "new commander key");
+        AssertEqual(0, b.LastEmbarkedDay, "the same belief continues (not retired and recreated)");
 
         // Same name, different unit type: a different group, not a re-key.
-        m.Update(List(Seen("Army of the Potomac:31", 5, 50f, 0f, 80000f, unitTyp: 16), Seen("Army of the Potomac:44", 6, 900f, 0f, 3000f, unitTyp: 14)), 3, Drift(1f));
+        m.Update(List(Seen("Army of the Potomac:31", 5, 50f, 0f, 80000f, unitTyp: 16), Seen("Army of the Potomac:44", 6, 900f, 0f, 3000f, unitTyp: 14)), 3, Drift(500f), March(30f));
         AssertEqual(2, m.Beliefs.Count, "a matched belief is never re-keyed away");
+    }
+
+    // F2: a group with the same display name far beyond a normal march (inside P6's loose radius)
+    // is another group: both beliefs are kept.
+    private static void SameNameBeyondPlausibleMarchIsAnotherGroup()
+    {
+        var m = new EnemyArmyModel();
+        m.Update(List(Seen("1st Corps:12", 5, 0f, 0f, 20000f, unitTyp: 15)), 0, Drift(500f), March(30f));
+        m.Update(List(Seen("1st Corps:31", 9, 400f, 0f, 15000f, unitTyp: 15)), 2, Drift(500f), March(30f));
+        AssertEqual(2, m.Beliefs.Count, "400 units in 2 days is no road march (60): not a re-key");
     }
 
     private static void DuplicateUnitKeyNeverMergesTwoArmies()
@@ -408,7 +432,7 @@ internal static class EnemyArmyModelTests
         OnceLog.Reset();
         int before = OnceLog.FiredCount;
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("1st Corps:4", 10, 0f, 0f, 9000f), Seen("1st Corps:4", 11, 300f, 0f, 8000f)), 0, Drift(1f));
+        m.Update(List(Seen("1st Corps:4", 10, 0f, 0f, 9000f), Seen("1st Corps:4", 11, 300f, 0f, 8000f)), 0, Drift(1f), NoMarch);
         AssertEqual(2, m.Beliefs.Count, "two armies, two beliefs");
         AssertNear(17000f, EnemyBeliefQuery.StrengthWithin(m.Beliefs, 150f, 0f, 1000f), 1e-3f, "both counted");
         AssertEqual(before + 1, OnceLog.FiredCount, "one warning");
@@ -416,7 +440,7 @@ internal static class EnemyArmyModelTests
         keys.Sort(StringComparer.Ordinal);
         AssertEqual("1st Corps:4#10|1st Corps:4#11", string.Join("|", keys), "composite keys");
 
-        m.Update(List(Seen("1st Corps:4", 10, 5f, 0f, 9000f), Seen("1st Corps:4", 11, 305f, 0f, 8000f)), 1, Drift(1f));
+        m.Update(List(Seen("1st Corps:4", 10, 5f, 0f, 9000f), Seen("1st Corps:4", 11, 305f, 0f, 8000f)), 1, Drift(1f), NoMarch);
         AssertEqual(2, m.Beliefs.Count, "stable across reviews");
         AssertEqual(before + 1, OnceLog.FiredCount, "the warning stays once");
     }
@@ -424,21 +448,55 @@ internal static class EnemyArmyModelTests
     private static void RenamedGroupRetiresOldBelief()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("Old Name:3", 1, 0f, 0f, 9000f, unitTyp: 15)), 0, Drift(10f));
-        // Two days unseen: radius 20. A renamed corps appears 12 units away under a new key.
-        m.Update(List(Seen("Grand Corps:3", 2, 12f, 0f, 9500f, unitTyp: 15)), 2, Drift(10f));
+        m.Update(List(Seen("Old Name:3", 1, 0f, 0f, 9000f, unitTyp: 15)), 0, Drift(500f), March(10f));
+        // Two days unseen: plausibility 2 x 10 = 20. A renamed corps appears 12 units away.
+        m.Update(List(Seen("Grand Corps:3", 2, 12f, 0f, 9500f, unitTyp: 15)), 2, Drift(500f), March(10f));
         var b = Only(m, "renamed: one belief");
         AssertEqual("Grand Corps:3", b.UnitKey, "the detection is the fresh belief");
 
-        // A new key outside every unmatched belief's radius is simply a new army.
-        m.Update(List(Seen("Grand Corps:3", 2, 12f, 0f, 9500f, unitTyp: 15), Seen("Far Corps:8", 3, 900f, 0f, 4000f, unitTyp: 15)), 3, Drift(10f));
+        // A new key outside every unmatched belief's plausibility radius is simply a new army.
+        m.Update(List(Seen("Grand Corps:3", 2, 12f, 0f, 9500f, unitTyp: 15), Seen("Far Corps:8", 3, 900f, 0f, 4000f, unitTyp: 15)), 3, Drift(500f), March(10f));
         AssertEqual(2, m.Beliefs.Count, "two seen armies are never merged");
+    }
+
+    // F2: the first sighting of a new group far from a remembered one (inside the P6 uncertainty,
+    // outside a normal march) does not retire it; a group of another unit type never does.
+    private static void NewGroupFarAwayDoesNotRetireRememberedOne()
+    {
+        var m = new EnemyArmyModel();
+        m.Update(List(Seen("Corps A:3", 1, 0f, 0f, 9000f, unitTyp: 15)), 0, Drift(500f), March(10f));
+        m.Update(List(Seen("Corps B:4", 2, 150f, 0f, 7000f, unitTyp: 15)), 2, Drift(500f), March(10f));
+        AssertEqual(2, m.Beliefs.Count, "150 units in 2 days: inside the P6 radius (1000), outside a road march (20)");
+        AssertNear(1000f, m.Beliefs[0].UnitKey == "Corps A:3" ? m.Beliefs[0].UncertaintyRadius : m.Beliefs[1].UncertaintyRadius, 1e-3f,
+            "the P6 radius stays the planning uncertainty");
+
+        var n = new EnemyArmyModel();
+        n.Update(List(Seen("Old Division:3", 1, 0f, 0f, 4000f, unitTyp: 14)), 0, Drift(500f), March(10f));
+        n.Update(List(Seen("New Corps:5", 2, 5f, 0f, 9000f, unitTyp: 15)), 2, Drift(500f), March(10f));
+        AssertEqual(2, n.Beliefs.Count, "a new group of another unit type never retires a belief");
+    }
+
+    private static void RoadMarchIsTheNormalDayBelowTheBound()
+    {
+        CampaignSpeedPrefs p = SpeedFixture();
+        float road = 2f * 2.5f * 0.05f / 2f * 30f / 365.25f;
+        AssertNear(road, CampaignSpeedBound.RoadMarchPerDay(in p, 15), road * 1e-4f, "unitbasic x groupspeed x basic / road cost x general / 365.25");
+        AssertTrue(CampaignSpeedBound.RoadMarchPerDay(in p, 15) < CampaignSpeedBound.DriftPerDay(in p, 15), "below P6's loose bound");
+        p.TerrainSpecCost[CampaignSpeedBound.RoadTerrain] = 4f;
+        AssertNear(road / 2f, CampaignSpeedBound.RoadMarchPerDay(in p, 15), road * 1e-4f, "reads the road cost (index 7)");
+        AssertEqual(0f, CampaignSpeedBound.RoadMarchPerDay(in p, 99), "unknown unittyp");
+        AssertEqual(7, EnemyArmyModel.PlausibleDaysCap, "a week of march at most");
+
+        var m = new EnemyArmyModel();
+        m.Update(List(Seen("Corps A:3", 1, 0f, 0f, 9000f, unitTyp: 15)), 0, Drift(500f), March(10f));
+        m.Update(List(Seen("Corps B:4", 2, 75f, 0f, 7000f, unitTyp: 15)), 20, Drift(500f), March(10f));
+        AssertEqual(2, m.Beliefs.Count, "20 days unseen: plausibility capped at 7 days (70), so 75 away is another group");
     }
 
     private static void BeliefsSurviveReloadWithoutDoubleCount()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("Army of Tennessee:9", 77, 10f, 10f, 40000f, unitTyp: 16)), 20, Drift(1f));
+        m.Update(List(Seen("Army of Tennessee:9", 77, 10f, 10f, 40000f, unitTyp: 16)), 20, Drift(1f), NoMarch);
         var saved = new List<EnemyBelief>(m.Beliefs);
         float before = EnemyBeliefQuery.StrengthWithin(m.Beliefs, 10f, 10f, 100f);
 
@@ -446,7 +504,7 @@ internal static class EnemyArmyModelTests
         var dto = saved[0];
         dto.InstanceId = 0; // the sidecar stores no instance id
         reloaded.Restore(new[] { dto });
-        reloaded.Update(List(Seen("Army of Tennessee:9", 4242, 10f, 10f, 40000f, unitTyp: 16)), 20, Drift(1f));
+        reloaded.Update(List(Seen("Army of Tennessee:9", 4242, 10f, 10f, 40000f, unitTyp: 16)), 20, Drift(1f), NoMarch);
         AssertEqual(1, reloaded.Beliefs.Count, "one belief after reload");
         AssertEqual(4242, reloaded.Beliefs[0].InstanceId, "rebound");
         AssertNear(before, EnemyBeliefQuery.StrengthWithin(reloaded.Beliefs, 10f, 10f, 100f), 1e-3f, "StrengthWithin unchanged");
@@ -463,7 +521,7 @@ internal static class EnemyArmyModelTests
 
         var before = EnemyBeliefStore.Select(1, plannerOn: true, fogHonestOn: true, omniscient);
         AssertEqual(0, before.Count, "before the first review: empty model, not omniscient");
-        EnemyBeliefStore.ModelFor(1).Update(List(Seen("A:1", 1, 0f, 0f, 5000f)), 3, Drift(1f));
+        EnemyBeliefStore.ModelFor(1).Update(List(Seen("A:1", 1, 0f, 0f, 5000f)), 3, Drift(1f), NoMarch);
         var after = EnemyBeliefStore.Select(1, true, true, omniscient);
         AssertEqual(1, after.Count, "after the review: the model");
         AssertEqual(0, omniscientCalls, "omniscient branch never taken with both flags on");
@@ -482,7 +540,7 @@ internal static class EnemyArmyModelTests
     {
         float[] ox = { 0f }, oz = { 0f }, ob = { 10f };
         AssertTrue(DetectionRules.InBugleContact(8f, 0f, 1f, ox, oz, ob, 1), "inside the own formation's bugle range");
-        AssertTrue(DetectionRules.InBugleContact(14f, 0f, 15f, ox, oz, ob, 1), "inside the enemy's bugle range (127231)");
+        AssertTrue(DetectionRules.InBugleContact(14f, 0f, 15f, ox, oz, ob, 1), "inside the enemy's bugle range (CheckEnemyContactCampaign 115634-115637)");
         AssertFalse(DetectionRules.InBugleContact(30f, 0f, 15f, ox, oz, ob, 1), "out of both");
         AssertFalse(DetectionRules.InBugleContact(0f, 0f, 15f, ox, oz, ob, 0), "no own formation");
     }
@@ -502,7 +560,7 @@ internal static class EnemyArmyModelTests
         // never detected, so it is not in the model at all.
         var m = new EnemyArmyModel();
         seenStrength = 30000f;
-        m.Update(List(Seen("Seen Army:1", 1, 10f, 0f, seenStrength, unitTyp: 16, guns: 40f)), 0, Drift(1f));
+        m.Update(List(Seen("Seen Army:1", 1, 10f, 0f, seenStrength, unitTyp: 16, guns: 40f)), 0, Drift(1f), NoMarch);
         return m;
     }
 
@@ -520,7 +578,7 @@ internal static class EnemyArmyModelTests
         }, new FrontLedgerOptions { MinimumHoldRatio = 0.9f, ConcessionRatio = 0.55f, CriticalHoldRatioBonus = 0.2f });
         AssertNear(seen, ledger.GetSector("East").EnemyStrength, 1e-3f, "the front ledger sees only the believed army");
 
-        m.Update(List(), 7, Drift(1f));
+        m.Update(List(), 7, Drift(1f), NoMarch);
         byTheater.Clear();
         EnemyBeliefReadings.SumByKey(m.Beliefs, (x, z) => Theater.East, byTheater);
         AssertNear(seen * 0.5f, byTheater[Theater.East], 1e-1f, "confidence-weighted once unseen");
@@ -557,43 +615,58 @@ internal static class EnemyArmyModelTests
     {
         var afloat = new EnemyBelief { UnitKey = "Burnside Expedition:9", Strength = 12000f, Confidence01 = 1f, LastSeenDay = 10, LastEmbarkedDay = 10,
             Traits = EnemyTraits.Embarked | EnemyTraits.NearOwnCoast };
-        AssertTrue(EnemyBeliefReadings.IsSeaInvasionThreat(in afloat, out bool landed), "embarked off our coast");
+        AssertTrue(EnemyBeliefReadings.IsSeaInvasionThreat(in afloat, 10, out bool landed), "embarked off our coast");
         AssertFalse(landed, "still afloat: invasion watch");
 
         var farOut = afloat;
         farOut.Traits = EnemyTraits.Embarked;
-        AssertFalse(EnemyBeliefReadings.IsSeaInvasionThreat(in farOut, out _), "afloat far from our coast");
+        AssertFalse(EnemyBeliefReadings.IsSeaInvasionThreat(in farOut, 10, out _), "afloat far from our coast");
 
         var ashoreAtHome = new EnemyBelief { Traits = EnemyTraits.OnOwnSoil, LastSeenDay = 10, LastEmbarkedDay = -1, Confidence01 = 1f, Strength = 5000f };
-        AssertFalse(EnemyBeliefReadings.IsSeaInvasionThreat(in ashoreAtHome, out _), "an army that never embarked is no invasion");
+        AssertFalse(EnemyBeliefReadings.IsSeaInvasionThreat(in ashoreAtHome, 10, out _), "an army that never embarked is no invasion");
     }
 
     private static void LandingInferredFromSeenForceOnOwnCoast()
     {
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("Expedition:9", 1, 0f, 0f, 12000f, traits: EnemyTraits.Embarked | EnemyTraits.NearOwnCoast)), 10, Drift(1f));
-        m.Update(List(Seen("Expedition:9", 1, 2f, 0f, 12000f, traits: EnemyTraits.OnOwnSoil | EnemyTraits.NearOwnCoast)), 12, Drift(1f));
+        m.Update(List(Seen("Expedition:9", 1, 0f, 0f, 12000f, traits: EnemyTraits.Embarked | EnemyTraits.NearOwnCoast)), 10, Drift(1f), NoMarch);
+        m.Update(List(Seen("Expedition:9", 1, 2f, 0f, 12000f, traits: EnemyTraits.OnOwnSoil | EnemyTraits.NearOwnCoast)), 12, Drift(1f), NoMarch);
         var b = Only(m, "landed");
         AssertEqual(10, b.LastEmbarkedDay, "the day it was last seen afloat");
-        AssertTrue(EnemyBeliefReadings.IsSeaInvasionThreat(in b, out bool landed) && landed, "landed within 3 days of being seen afloat");
+        AssertTrue(EnemyBeliefReadings.IsSeaInvasionThreat(in b, 12, out bool landed) && landed, "landed within 3 days of being seen afloat");
 
-        m.Update(List(Seen("Expedition:9", 1, 9f, 0f, 12000f, traits: EnemyTraits.OnOwnSoil)), 14, Drift(1f));
-        AssertFalse(EnemyBeliefReadings.IsSeaInvasionThreat(Only(m, "inland"), out _), "4 days ashore: an army like any other");
+        m.Update(List(Seen("Expedition:9", 1, 9f, 0f, 12000f, traits: EnemyTraits.OnOwnSoil)), 14, Drift(1f), NoMarch);
+        AssertFalse(EnemyBeliefReadings.IsSeaInvasionThreat(Only(m, "inland"), 14, out _), "4 days ashore: an army like any other");
+    }
+
+    // F1: a landing raises orders only from a recent sighting.
+    private static void LandedInvasionNeedsRecentSighting()
+    {
+        var landed = new EnemyBelief { UnitKey = "Expedition:9", Strength = 9000f, Confidence01 = 0.8f, LastSeenDay = 12, LastEmbarkedDay = 11,
+            Traits = EnemyTraits.OnOwnSoil };
+        AssertTrue(EnemyBeliefReadings.IsSeaInvasionThreat(in landed, 12 + EnemyBeliefReadings.RecentSightingDays, out bool l) && l, "seen 3 days ago: still landed");
+        AssertFalse(EnemyBeliefReadings.IsSeaInvasionThreat(in landed, 13 + EnemyBeliefReadings.RecentSightingDays, out _), "unseen 4 days: no longer raises orders");
+        AssertEqual(EnemyBeliefReadings.LandingWindowDays, EnemyBeliefReadings.RecentSightingDays, "the recency is the landing window");
     }
 
     private static void RaidThreatFromSeenCavalryOnOwnSoil()
     {
-        var raid = new EnemyBelief { Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, Confidence01 = 1f, Strength = 2500f };
-        AssertTrue(EnemyBeliefReadings.IsRaidThreat(in raid), "cavalry on our soil");
+        var raid = new EnemyBelief { Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, Confidence01 = 1f, Strength = 2500f, LastSeenDay = 5 };
+        AssertTrue(EnemyBeliefReadings.IsRaidThreat(in raid, 5), "cavalry on our soil");
         var home = raid;
         home.Traits = EnemyTraits.CavalryMajority;
-        AssertFalse(EnemyBeliefReadings.IsRaidThreat(in home), "cavalry on its own soil");
+        AssertFalse(EnemyBeliefReadings.IsRaidThreat(in home, 5), "cavalry on its own soil");
         var infantry = raid;
         infantry.Traits = EnemyTraits.OnOwnSoil;
-        AssertFalse(EnemyBeliefReadings.IsRaidThreat(in infantry), "infantry is no raid");
+        AssertFalse(EnemyBeliefReadings.IsRaidThreat(in infantry, 5), "infantry is no raid");
         var expired = raid;
         expired.Confidence01 = 0f;
-        AssertFalse(EnemyBeliefReadings.IsRaidThreat(in expired), "an expired belief is no threat");
+        AssertFalse(EnemyBeliefReadings.IsRaidThreat(in expired, 5), "an expired belief is no threat");
+        var afloat = raid;
+        afloat.Traits |= EnemyTraits.Embarked;
+        AssertFalse(EnemyBeliefReadings.IsRaidThreat(in afloat, 5), "cavalry carried by ships is a sea move, not a raid");
+        AssertTrue(EnemyBeliefReadings.IsRaidThreat(in raid, 8), "seen 3 days ago: still a raid");
+        AssertFalse(EnemyBeliefReadings.IsRaidThreat(in raid, 9), "unseen 4 days: a remembered raid raises no orders");
     }
 
     private static void NoThreatFromUnseenInvasionForce()
@@ -601,31 +674,84 @@ internal static class EnemyArmyModelTests
         // An invasion force vanilla has loaded (seainvasionforce) but no viewer has seen: not in the
         // model, so no belief can produce a threat.
         var m = new EnemyArmyModel();
-        m.Update(List(Seen("Home Guard:2", 2, 0f, 0f, 3000f, traits: EnemyTraits.OnOwnSoil)), 1, Drift(1f));
+        m.Update(List(Seen("Home Guard:2", 2, 0f, 0f, 3000f, traits: EnemyTraits.OnOwnSoil)), 1, Drift(1f), NoMarch);
         int threats = 0;
         foreach (var b in m.Beliefs)
         {
             var copy = b;
-            if (EnemyBeliefReadings.IsSeaInvasionThreat(in copy, out _) || EnemyBeliefReadings.IsRaidThreat(in copy)) threats++;
+            if (EnemyBeliefReadings.IsSeaInvasionThreat(in copy, 1, out _) || EnemyBeliefReadings.IsRaidThreat(in copy, 1)) threats++;
         }
         AssertEqual(0, threats, "no threat without a seen force");
     }
 
-    // The "vanilla collapsed" signal becomes belief expiry: a sea-invasion belief that expired
-    // this review collapses the threat it produced the review before (Recovered posture).
+    // F1: a raid leaves sight. Days 0-3 it raises a custom defensive order (ActiveInvasion); day 4
+    // its signature is reported once as Recovered (no new order, units held for the cooldown);
+    // day 5 the signature is gone from the output, so the coastal runner releases its units. A
+    // stale belief never keeps the order alive.
+    private static void RaidLeavingSightRecoversThenReleases()
+    {
+        var m = new EnemyArmyModel();
+        var tracker = new LapsedThreatTracker();
+        var cooldown = new DefenseCooldownTable();
+        Func<DefenseThreatSource, string> sig = DefenseIntentLedger.BuildSignature;
+        m.Update(List(Seen("Stuart:7", 3, 0f, 0f, 2500f, unitTyp: 15, traits: EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil)), 0, Drift(5f), March(5f));
+        for (int day = 0; day <= 5; day++)
+        {
+            if (day > 0) m.Update(List(), day, Drift(5f), March(5f));
+            var input = new DefenseIntentInput { AllianceId = 1, Cooldown = cooldown, CooldownDays = 4 };
+            foreach (var b in m.Beliefs)
+            {
+                var copy = b;
+                if (EnemyBeliefReadings.IsRaidThreat(in copy, day))
+                    input.Threats.Add(new DefenseThreatSource { Kind = DefenseThreatSourceKind.RaidForce, EnemyUnitKey = b.UnitKey, AssetName = "wilmington", EnemyStrength = EnemyBeliefReadings.Weighted(in copy) });
+            }
+            tracker.Close(input.Threats, sig);
+            var output = DefenseIntentLedger.Build(input);
+            var r = output.Responses.Find(x => x.Threat != null && x.Threat.Signature == "raid:Stuart:7:wilmington");
+            if (day <= 3)
+            {
+                AssertTrue(r != null && r.Threat.Posture == DefensePosture.ActiveInvasion, "day " + day + ": active raid");
+                AssertTrue(DefenseCustomOrderPolicy.RequiresCustomOrder(r), "day " + day + ": orders defenders");
+            }
+            else if (day == 4)
+            {
+                AssertTrue(r != null && r.Threat.Posture == DefensePosture.Recovered, "day 4: Recovered once");
+                AssertFalse(DefenseCustomOrderPolicy.RequiresCustomOrder(r), "day 4: no new order");
+            }
+            else
+            {
+                AssertTrue(r == null, "day 5: signature gone, units released");
+            }
+            cooldown.Tick();
+        }
+    }
+
+    // A sea-invasion belief that expires is reported once as Recovered on the same signature.
     private static void ExpiredSeaInvasionBeliefCollapsesThreat()
     {
-        var previous = new HashSet<string> { DefenseThreatSignature.ForSeaInvasion("Expedition:9") };
-        var into = new List<string>();
-        EnemyBeliefReadings.CollapsedSeaInvasionKeys(new[] { "Expedition:9", "Raider:3" }, previous, into);
-        AssertEqual("Expedition:9", string.Join(",", into), "only the expired key that produced a threat");
+        var tracker = new LapsedThreatTracker();
+        Func<DefenseThreatSource, string> sig = DefenseIntentLedger.BuildSignature;
+        var first = new List<DefenseThreatSource>
+        {
+            new DefenseThreatSource { Kind = DefenseThreatSourceKind.SeaInvasion, EnemyUnitKey = "Expedition:9", LandedSignal = true },
+            new DefenseThreatSource { Kind = DefenseThreatSourceKind.AssetProximity, AssetName = "fort" }
+        };
+        tracker.Close(first, sig);
+        AssertEqual(2, first.Count, "nothing lapsed on the first review");
 
-        var src = new DefenseThreatSource { Kind = DefenseThreatSourceKind.SeaInvasion, EnemyUnitKey = "Expedition:9", BeliefExpired = true };
+        var second = new List<DefenseThreatSource>();
+        tracker.Close(second, sig);
+        AssertEqual(1, second.Count, "only the sea invasion is tracked");
+        AssertTrue(second[0].SightingLapsed && second[0].EnemyUnitKey == "Expedition:9", "lapsed copy");
         var input = new DefenseIntentInput { AllianceId = 1 };
-        input.Threats.Add(src);
+        input.Threats.AddRange(second);
         var output = DefenseIntentLedger.Build(input);
         AssertEqual(DefensePosture.Recovered, output.Responses[0].Threat.Posture, "Recovered");
         AssertEqual("sif:Expedition:9", output.Responses[0].Threat.Signature, "signature keyed on the belief's UnitKey");
+
+        var third = new List<DefenseThreatSource>();
+        tracker.Close(third, sig);
+        AssertEqual(0, third.Count, "reported once");
     }
 
     // Vanilla GetStrengthRatio (12366-12404) on beliefs: own strength from own knowledge, enemy
@@ -635,7 +761,7 @@ internal static class EnemyArmyModelTests
         var m = SeenAndUnseen(out float seen);
         AssertNear(60000f / seen, EnemyBeliefReadings.StrengthRatio(60000f, m.Beliefs), 1e-4f, "own / believed");
         AssertNear(5000f, EnemyBeliefReadings.StrengthRatio(5000f, new List<EnemyBelief>()), 1e-3f, "nothing believed: own / 1 (vanilla's Max(1, enemy))");
-        m.Update(List(), 7, Drift(1f));
+        m.Update(List(), 7, Drift(1f), NoMarch);
         AssertNear(60000f / (seen * 0.5f), EnemyBeliefReadings.StrengthRatio(60000f, m.Beliefs), 1e-2f, "confidence-weighted");
     }
 
@@ -646,10 +772,88 @@ internal static class EnemyArmyModelTests
         EnemyBeliefReadings.CapitalSamples(m.Beliefs, 10f, 30f, samples);
         AssertEqual(1, samples.Count, "one believed army");
         AssertNear(30f, samples[0].Distance, 1e-4f, "distance from the believed position");
-        AssertNear(seen, samples[0].Strength, 1e-3f, "confidence-weighted strength");
+        AssertNear(seen, samples[0].Strength, 1e-3f, "full confidence: its strength");
         AssertNear(1f, samples[0].Morale, 1e-6f, "a sighting shows no morale: min(str, str x 1) = str");
         AssertTrue(CampaignResponsivenessSignals.EnemyThreatensCapital(samples, new List<CapitalForceSample>(), 100f, 1000f),
             "a believed army near the capital threatens it");
+
+        m.Update(List(), 7, Drift(1f), NoMarch);
+        samples.Clear();
+        EnemyBeliefReadings.CapitalSamples(m.Beliefs, 10f, 30f, samples);
+        AssertNear(seen * 0.5f, samples[0].Strength, 1e-1f, "unseen a week: confidence-weighted");
+    }
+
+    // ---- Detection decisions that must fail closed (verify-g1 F3) ----
+
+    private static void DetectionModeFailsClosed()
+    {
+        AssertEqual(DetectionMode.ConfigOff, DetectionRules.Mode(false, true, false), "flag off");
+        AssertEqual(DetectionMode.NoFog, DetectionRules.Mode(true, false, false), "fog off");
+        AssertEqual(DetectionMode.OwnSideWithinFog, DetectionRules.Mode(true, true, true), "player-alliance side");
+        AssertEqual(DetectionMode.FogGrid, DetectionRules.Mode(true, true, false), "AI side");
+        AssertTrue(DetectionRules.IsOmniscient(DetectionMode.NoFog) && DetectionRules.IsOmniscient(DetectionMode.ConfigOff), "rollback modes");
+        AssertFalse(DetectionRules.IsOmniscient(DetectionMode.FogGrid) || DetectionRules.IsOmniscient(DetectionMode.OwnSideWithinFog), "fog modes");
+        AssertTrue(DetectionRules.GridUnavailable(DetectionMode.FogGrid, gridPresent: false), "FogGrid without the grid: contact only");
+        AssertFalse(DetectionRules.GridUnavailable(DetectionMode.FogGrid, true) || DetectionRules.GridUnavailable(DetectionMode.OwnSideWithinFog, false), "grid present or not needed");
+    }
+
+    private static void GridAnswerFailsClosed()
+    {
+        int calls = 0;
+        Func<int, bool> hidden = u => { calls++; return u == 1; };
+        AssertTrue(DetectionRules.GridVisible(true, true, hidden, 0, out bool threw) && !threw, "usable grid, not hidden: visible");
+        AssertFalse(DetectionRules.GridVisible(true, true, hidden, 1, out _), "hidden");
+        calls = 0;
+        AssertFalse(DetectionRules.GridVisible(false, true, hidden, 0, out _), "fog off: never asked (101188 NRE)");
+        AssertFalse(DetectionRules.GridVisible(true, false, hidden, 0, out _), "no usable grid: not visible");
+        AssertEqual(0, calls, "the grid is not asked in either case");
+        AssertFalse(DetectionRules.GridVisible<int>(true, true, u => throw new NullReferenceException(), 0, out threw), "a probe exception: not visible");
+        AssertTrue(threw, "and reported, so the review continues contact only");
+    }
+
+    private static void AlliedGroupsAreViewers()
+    {
+        AssertEqual(UnitRelation.Viewer, DetectionRules.RelationOf(1, 1, false, false, false, false), "own group");
+        AssertEqual(UnitRelation.Viewer, DetectionRules.RelationOf(1, 3, alliedWithSide: true, atWarWithSide: false, isFleet: false, isGarrison: false), "allied group paints fows[1] too");
+        AssertEqual(UnitRelation.Viewer, DetectionRules.RelationOf(1, 1, false, false, isFleet: true, isGarrison: false), "own fleet");
+        AssertEqual(UnitRelation.Viewer, DetectionRules.RelationOf(1, 1, false, false, false, isGarrison: true), "own garrison");
+        AssertEqual(UnitRelation.Enemy, DetectionRules.RelationOf(1, 0, false, true, false, false), "enemy army");
+        AssertEqual(UnitRelation.Ignore, DetectionRules.RelationOf(1, 0, false, true, isFleet: true, isGarrison: false), "enemy fleet");
+        AssertEqual(UnitRelation.Ignore, DetectionRules.RelationOf(1, 0, false, true, false, isGarrison: true), "enemy garrison: only via objective forts");
+        AssertEqual(UnitRelation.Ignore, DetectionRules.RelationOf(1, 2, false, false, false, false), "neutral");
+    }
+
+    private static void GarrisonGateRequiresSighting()
+    {
+        AssertFalse(DetectionRules.TryObjectiveGarrison(false, 7, "G:1", 14, 1f, 2f, 900f, out var none), "unseen garrison: no detection");
+        AssertEqual(null, none.UnitKey, "nothing built");
+        AssertTrue(DetectionRules.TryObjectiveGarrison(true, 7, "G:1", 14, 1f, 2f, 900f, out var seen), "seen garrison");
+        AssertEqual(DetectionSource.ObjectiveGarrison, seen.Source, "ObjectiveGarrison");
+        AssertNear(900f, seen.Strength, 1e-6f, "its strength");
+    }
+
+    // Integrator decision: detection is bookkeeping and runs for every alliance, including a W&L
+    // CIC player's stand-down alliance and during the pause.
+    private static void StandDownAllianceStillDetects()
+    {
+        string planner = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
+        string review = MethodBody(planner, "internal static void ReviewPlan(");
+        int detect = review.IndexOf("EnemyDetectionRuntime.Detect(", StringComparison.Ordinal);
+        int standDown = review.IndexOf("mode == PlannerReviewMode.StandDown) return;", StringComparison.Ordinal);
+        AssertTrue(detect >= 0 && standDown > detect, "the stand-down return comes after the belief step");
+        string beforeDetect = review.Substring(0, detect);
+        AssertFalse(beforeDetect.Contains("PlannerReviewMode.StandDown") || beforeDetect.Contains("PlannerReviewMode.Bookkeeping"), "no mode return before detection");
+
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        int cicBranch = coordinator.IndexOf("if (operationalRuntimeReady && IsPlayerCICOf(alliance, playerAlliance))", StringComparison.Ordinal);
+        int next = coordinator.IndexOf("continue;", cicBranch, StringComparison.Ordinal);
+        AssertTrue(cicBranch >= 0 && coordinator.IndexOf("CampaignPlannerRuntime.ReviewPlan(", cicBranch, StringComparison.Ordinal) is int call && call > cicBranch && call < next,
+            "the CIC player's alliance gets its bookkeeping review");
+
+        CampaignScope.ResetAll();
+        EnemyBeliefStore.ModelFor(0).Update(List(Seen("Army of Northern Virginia:7", 1, 0f, 0f, 60000f)), 3, Drift(1f), NoMarch);
+        AssertEqual(1, EnemyBeliefStore.Select(0, true, true, null).Count, "BeliefsFor serves the stand-down alliance's model");
+        CampaignScope.ResetAll();
     }
 
     // ---- Source pins (BattleWriteGateTests style) ----
@@ -659,7 +863,7 @@ internal static class EnemyArmyModelTests
         string planner = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
         string review = MethodBody(planner, "internal static void ReviewPlan(");
         int detect = review.IndexOf("EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn())", StringComparison.Ordinal);
-        int update = review.IndexOf(".Update(snapshot.Detections, snapshot.DaySerial, EnemyDetectionRuntime.DriftFor(alliance))", StringComparison.Ordinal);
+        int update = review.IndexOf(".Update(snapshot.Detections, snapshot.DaySerial, EnemyDetectionRuntime.DriftFor(alliance), EnemyDetectionRuntime.MarchFor())", StringComparison.Ordinal);
         int copy = review.IndexOf("snapshot.Beliefs.AddRange(", StringComparison.Ordinal);
         int report = review.IndexOf("EnemyDetectionRuntime.Report(snapshot, beliefs);", StringComparison.Ordinal);
         int bookkeeping = review.IndexOf("mode == PlannerReviewMode.Bookkeeping) return;", StringComparison.Ordinal);
@@ -667,24 +871,51 @@ internal static class EnemyArmyModelTests
             "detect -> update -> copy -> [EnemyBeliefs], before the bookkeeping return (beliefs and their rows continue during the pause)");
 
         string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/EnemyDetectionRuntime.cs");
-        string probe = MethodBody(runtime, "private static bool GridVisible(");
-        AssertTrue(probe.IndexOf("GameVars.usefow", StringComparison.Ordinal) >= 0
-                   && probe.IndexOf("GameVars.usefow", StringComparison.Ordinal) < probe.IndexOf("UnitIsHidden(", StringComparison.Ordinal),
-            "usefow gated before UnitIsHidden (101188 NRE)");
         string detectBody = MethodBody(runtime, "internal static void Detect(");
+        AssertContains(detectBody, "DetectionMode mode = DetectionRules.Mode(fogHonest, GameVars.usefow, sidePlayer);", "mode from the pure rule");
+        AssertContains(detectBody, "_probeNoFog = DetectionRules.IsOmniscient(mode);", "omniscient only in the rollback modes");
+        AssertContains(detectBody, "_gridBroken = DetectionRules.GridUnavailable(mode, (UnityEngine.Object)_probeGrid != null);", "a missing grid fails closed");
         AssertContains(detectBody, "DetectionRules.RunMasked(", "the grid probes run inside the incident mask");
-        AssertContains(detectBody, "DetectionRules.MasksPlayerIntelIncidents(", "mask only for rule (b)");
-        AssertContains(runtime, "DetectionRules.ObjectiveGarrison(", "garrison detections only through the shared rule");
+        AssertContains(detectBody, "DetectionRules.MasksPlayerIntelIncidents(mode == DetectionMode.FogGrid, DLC_WL.dlc_scenarioactive)", "mask only for rule (b)");
+        AssertContains(MethodBody(runtime, "private static void CollectUnits("),
+            "DetectionRules.RelationOf(side, other, sideState.IsInAllianceWith(other), sideState.IsAtWarWith(other), reg.unittyp == 17, (UnityEngine.Object)reg.garrisonreference != null)",
+            "own and allied viewers, enemy armies by the pure rule");
+        AssertContains(MethodBody(runtime, "private static bool GridVisible("),
+            "DetectionRules.GridVisible(GameVars.usefow, !_gridBroken && (UnityEngine.Object)_probeGrid != null, HiddenProbe, e, out bool threw)",
+            "the grid answer through the fail-closed rule");
+        AssertContains(MethodBody(runtime, "private static bool GridVisible("), "_gridBroken = true;", "a probe exception ends grid probing for the review");
+        int hiddenCalls = 0;
+        for (int at = runtime.IndexOf("UnitIsHidden(", StringComparison.Ordinal); at >= 0; at = runtime.IndexOf("UnitIsHidden(", at + 1, StringComparison.Ordinal)) hiddenCalls++;
+        AssertEqual(1, hiddenCalls, "one UnitIsHidden call");
+        AssertContains(MethodBody(runtime, "private static bool IsHiddenFromGrid("), "UnitIsHidden(", "inside the probe DetectionRules.GridVisible calls");
+        AssertContains(runtime, "private static readonly Func<Regiment, bool> HiddenProbe = IsHiddenFromGrid;", "the probe is only a delegate");
+        int probeRefs = 0;
+        for (int at = runtime.IndexOf("IsHiddenFromGrid", StringComparison.Ordinal); at >= 0; at = runtime.IndexOf("IsHiddenFromGrid", at + 1, StringComparison.Ordinal)) probeRefs++;
+        AssertEqual(2, probeRefs, "never called directly (delegate + definition only)");
+        AssertContains(MethodBody(runtime, "private static void ProbeObjectiveGarrisons("), "DetectionRules.TryObjectiveGarrison(Sees(s, garrison, out _),", "a garrison only once seen or contacted");
+        AssertContains(MethodBody(runtime, "internal static IReadOnlyList<EnemyBelief> BeliefsFor("),
+            "EnemyBeliefStore.Select(alliance, FlagOn(Plugin.EnableCampaignPlanner), FlagOn(Plugin.EnableCampaignFogHonestBeliefs), OmniscientDelegate);",
+            "fallback decided by the two flags, as they are");
         string code = CodeOnly(runtime);
         AssertFalse(code.Contains("GetLastTransmittedPathPos"), "never an enemy destination");
         AssertFalse(code.Contains("seainvasionforce") || code.Contains("raidforces"), "never enemy plan state");
 
-        // The only omniscient read is the flags-off rollback.
+        // The only omniscient read is the flags-off rollback, rebuilt once per campaign day.
         int reads = 0;
         for (int at = runtime.IndexOf("\"enemyunits\"", StringComparison.Ordinal); at >= 0; at = runtime.IndexOf("\"enemyunits\"", at + 1, StringComparison.Ordinal)) reads++;
         AssertEqual(1, reads, "one enemyunits read");
-        AssertContains(MethodBody(runtime, "private static IReadOnlyList<EnemyBelief> OmniscientBeliefs("), "\"enemyunits\"", "inside the rollback builder");
-        AssertContains(MethodBody(runtime, "internal static IReadOnlyList<EnemyBelief> BeliefsFor("), "Plugin.EnableCampaignFogHonestBeliefs", "fallback decided by the flags");
+        string rollback = MethodBody(runtime, "private static IReadOnlyList<EnemyBelief> OmniscientBeliefs(");
+        AssertContains(rollback, "\"enemyunits\"", "inside the rollback builder");
+        AssertTrue(rollback.IndexOf("if (OmniscientCacheDay[alliance] == campaignDay) return list;", StringComparison.Ordinal) >= 0
+                   && rollback.IndexOf("if (OmniscientCacheDay[alliance] == campaignDay) return list;", StringComparison.Ordinal) < rollback.IndexOf("list.Clear();", StringComparison.Ordinal),
+            "the rollback list is cached per campaign day");
+
+        // Order-raising threats use the recency clock and the lapse tracker.
+        string defense = ReadRepoFile("src/WhiskeyRealism/Strategic/DefenseIntentRuntime.cs");
+        AssertContains(defense, "int today = EnemyDetectionRuntime.ReviewDayFor(allianceId);", "recency clock");
+        AssertContains(defense, "EnemyBeliefReadings.IsRaidThreat(in belief, today)", "raids need a recent sighting");
+        AssertContains(defense, "EnemyBeliefReadings.IsSeaInvasionThreat(in belief, today, out bool landed)", "landings need a recent sighting");
+        AssertContains(defense, "LapseTrackers[allianceId].Close(input.Threats, LapseSignature);", "lapsed threats reported once");
     }
 
     private static void MigratedReadersReadBeliefsOnly()

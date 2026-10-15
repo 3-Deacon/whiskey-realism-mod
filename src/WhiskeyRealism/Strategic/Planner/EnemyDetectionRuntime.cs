@@ -9,8 +9,10 @@ namespace WhiskeyRealism.Strategic.Planner
 {
     // The only Whiskey code that reads raw enemy campaign groups (plan G1, spec component 2). Runs
     // once per AI alliance per daily review from CampaignPlannerRuntime.ReviewPlan, before the
-    // bookkeeping return, so beliefs keep updating while vanilla's job machine is paused. Runtime
-    // adapter: not in the test csproj; the decision rules are DetectionRules (pure).
+    // stand-down and bookkeeping returns: detection is bookkeeping, so beliefs keep updating for a
+    // W&L CIC player's alliance and while vanilla's job machine is paused (no executor writes).
+    // Runtime adapter: not in the test csproj; every decision is DetectionRules (pure): mode,
+    // relation, grid answer (fail closed), rule a-d, garrison gate.
     //
     // Enemy groups mirror AIFaction.SeparateUnits (10458-10515): campaignunitlist (79974-79994)
     // entries at war with the side, active, visibility state != 0, no garrison reference, not
@@ -18,7 +20,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   (a) GameVars.usefow is off or a fog-honest flag is off -> NoFog;
     //   (d) it shares a battle with an own formation (unittriggeredbattle, set for every unit of a
     //       battle by MoveUnitsToBFLocation 94063) or lies within an own formation's or its own
-    //       bugle range (127231) -> Contact;
+    //       bugle range (CheckEnemyContactCampaign 115634-115637) -> Contact;
     //   (c) the side is the player alliance (a W&L career under ai_vs_ai): !iswithinfog, vanilla's
     //       own verdict on fows[0] (127211-127225) -> OwnSideWithinFog;
     //   (b) any other side: an own or allied viewer (campaign visibility != 0, active, not routed,
@@ -37,10 +39,10 @@ namespace WhiskeyRealism.Strategic.Planner
     internal static class EnemyDetectionRuntime
     {
         private const int Alliances = 2;
-        private static readonly string[] ModeNames = { "FogGrid", "OwnSideWithinFog", "NoFog", "ConfigOff" };
         private static readonly int[] LastMode = { -1, -1 };
         private static readonly string[] LastSignature = new string[Alliances];
         private static readonly int[] LastDaySerial = { -1, -1 };
+        private static readonly int[] OmniscientCacheDay = { int.MinValue, int.MinValue };
 
         // Pooled per-review state.
         private static readonly List<Regiment> Enemies = new List<Regiment>();
@@ -57,6 +59,7 @@ namespace WhiskeyRealism.Strategic.Planner
         private static FogOfWar _probeGrid;
         private static bool _probeNoFog, _probeSidePlayer, _gridBroken;
         private static readonly Action ProbeEnemies = ProbeAllEnemies;
+        private static readonly Func<Regiment, bool> HiddenProbe = IsHiddenFromGrid;
 
         private static FogOfWar[] _fows;
         private static readonly FieldMask<DLC_WL.Incident, float> IncidentMask = new FieldMask<DLC_WL.Incident, float>(
@@ -66,11 +69,13 @@ namespace WhiskeyRealism.Strategic.Planner
         // Drift table for the alliance being updated (P6), read by the cached delegate.
         private static readonly float[] DriftTable = new float[32];
         private static readonly Func<int, float> DriftDelegate = unitTyp => unitTyp >= 0 && unitTyp < DriftTable.Length ? DriftTable[unitTyp] : 0f;
+        // Normal road march per day (identity plausibility radius, F2), same table shape.
+        private static readonly float[] MarchTable = new float[32];
+        private static readonly Func<int, float> MarchDelegate = unitTyp => unitTyp >= 0 && unitTyp < MarchTable.Length ? MarchTable[unitTyp] : 0f;
 
-        // Rollback lists (flags off), rebuilt on demand.
+        // Rollback lists (flags off), rebuilt once per campaign day.
         private static readonly List<EnemyBelief>[] Omniscient = { new List<EnemyBelief>(), new List<EnemyBelief>() };
         private static readonly Func<int, IReadOnlyList<EnemyBelief>> OmniscientDelegate = OmniscientBeliefs;
-        private static readonly string[] NoKeys = new string[0];
 
         static EnemyDetectionRuntime()
         {
@@ -84,6 +89,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 LastMode[a] = -1;
                 LastSignature[a] = null;
                 LastDaySerial[a] = -1;
+                OmniscientCacheDay[a] = int.MinValue;
                 Omniscient[a].Clear();
             }
             _fows = null;
@@ -108,15 +114,14 @@ namespace WhiskeyRealism.Strategic.Planner
         // full confidence, the documented rollback.
         internal static IReadOnlyList<EnemyBelief> BeliefsFor(int alliance)
         {
-            return EnemyBeliefStore.Select(alliance, FlagOn(Plugin.EnableCampaignPlanner),
-                FlagOn(Plugin.EnableCampaignFogHonestBeliefs), OmniscientDelegate);
+            return EnemyBeliefStore.Select(alliance, FlagOn(Plugin.EnableCampaignPlanner), FlagOn(Plugin.EnableCampaignFogHonestBeliefs), OmniscientDelegate);
         }
 
-        // The keys whose belief expired in the alliance's last update (empty in the rollback).
-        internal static IReadOnlyList<string> ExpiredKeysFor(int alliance)
+        // The review day the alliance's beliefs were last updated (the recency clock of the
+        // order-raising threats; the rollback list carries the same day, so it is always recent).
+        internal static int ReviewDayFor(int alliance)
         {
-            var model = FogHonestFlagsOn() ? EnemyBeliefStore.ModelFor(alliance) : null;
-            return model != null ? model.ExpiredKeys : NoKeys;
+            return alliance >= 0 && alliance < Alliances ? LastDaySerial[alliance] : -1;
         }
 
         internal static void Detect(CampaignSnapshot s, int playerAlliance, bool fogHonest)
@@ -129,10 +134,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 var alliances = GameVars.alliance;
                 if (alliances == null || side >= alliances.Length) return;
 
-                bool useFow = GameVars.usefow;
                 bool sidePlayer = side == playerAlliance;
-                int mode = !fogHonest ? 3 : !useFow ? 2 : sidePlayer ? 1 : 0;
-                LastMode[side] = mode;
+                DetectionMode mode = DetectionRules.Mode(fogHonest, GameVars.usefow, sidePlayer);
+                LastMode[side] = (int)mode;
                 LastDaySerial[side] = s.DaySerial;
 
                 CollectUnits(s, side);
@@ -140,14 +144,14 @@ namespace WhiskeyRealism.Strategic.Planner
                 CollectHarbours(side);
 
                 _probeSnapshot = s;
-                _probeNoFog = mode >= 2;
+                _probeNoFog = DetectionRules.IsOmniscient(mode);
                 _probeSidePlayer = sidePlayer;
-                _probeGrid = mode == 0 ? Grid(1) : null;
-                _gridBroken = mode == 0 && (UnityEngine.Object)_probeGrid == null;
+                _probeGrid = mode == DetectionMode.FogGrid ? Grid(1) : null;
+                _gridBroken = DetectionRules.GridUnavailable(mode, (UnityEngine.Object)_probeGrid != null);
                 if (_gridBroken)
                     OnceLog.Warning("campaign-planner:detect-no-grid", "[EnemyBeliefs] fows[1] not found; this review detects by contact only");
 
-                bool mask = DetectionRules.MasksPlayerIntelIncidents(mode == 0, DLC_WL.dlc_scenarioactive);
+                bool mask = DetectionRules.MasksPlayerIntelIncidents(mode == DetectionMode.FogGrid, DLC_WL.dlc_scenarioactive);
                 if (mask) FillIntelIncidents();
                 try
                 {
@@ -169,21 +173,32 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        // The drift table for the side's enemies (P6), filled before the model update.
+        // The drift table for the side's enemies (P6, the planning uncertainty) and the road-march
+        // table (identity plausibility), both filled before the model update.
         internal static Func<int, float> DriftFor(int alliance)
         {
             Array.Clear(DriftTable, 0, DriftTable.Length);
+            Array.Clear(MarchTable, 0, MarchTable.Length);
             try
             {
                 var prefs = SpeedPrefs(alliance);
                 for (int t = 0; t < DriftTable.Length; t++)
+                {
                     DriftTable[t] = CampaignSpeedBound.DriftPerDay(in prefs, t);
+                    MarchTable[t] = CampaignSpeedBound.RoadMarchPerDay(in prefs, t);
+                }
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("campaign-planner:drift", "[EnemyBeliefs] speed prefs not readable, beliefs do not widen: " + ex.Message);
             }
             return DriftDelegate;
+        }
+
+        // The road-march table DriftFor filled for this update.
+        internal static Func<int, float> MarchFor()
+        {
+            return MarchDelegate;
         }
 
         // [EnemyBeliefs] on change (signature-deduped per alliance).
@@ -200,7 +215,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (model.Beliefs[i].LastSeenDay != s.DaySerial) remembered++;
             int mode = LastMode[side];
             string line = "[EnemyBeliefs] alliance=" + side +
-                " mode=" + (mode >= 0 ? ModeNames[mode] : "None") +
+                " mode=" + (mode >= 0 ? ((DetectionMode)mode).ToString() : "None") +
                 " seen=" + seen +
                 " remembered=" + remembered +
                 " expired=" + model.ExpiredKeys.Count +
@@ -231,16 +246,17 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (BattleUnits.GetUnitVisibilityStateOnCampaignMap(reg) == 0) continue;
                 try
                 {
-                    if (other == side || sideState.IsInAllianceWith(other))
+                    var relation = DetectionRules.RelationOf(side, other, sideState.IsInAllianceWith(other), sideState.IsAtWarWith(other), reg.unittyp == 17, (UnityEngine.Object)reg.garrisonreference != null);
+                    if (relation == UnitRelation.Viewer)
                     {
                         if (other == side && reg.inbattle && (UnityEngine.Object)reg.unittriggeredbattle != null)
                             OwnBattles.Add(reg.unittriggeredbattle);
                         if (!reg.isrouted) AddViewer(reg, weather, fixPerkIds, career);
-                        continue;
                     }
-                    if (!sideState.IsAtWarWith(other)) continue;
-                    if (reg.unittyp == 17 || (UnityEngine.Object)reg.garrisonreference != null) continue;
-                    Enemies.Add(reg);
+                    else if (relation == UnitRelation.Enemy)
+                    {
+                        Enemies.Add(reg);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -356,10 +372,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (!TryObjectiveTargetOf(fort, out Vector3 at)) continue;
                     var garrison = fort.garrisonunit;
                     if ((UnityEngine.Object)garrison == null || !((Component)garrison).gameObject.activeInHierarchy) continue;
-                    if (!Sees(s, garrison, out _)) continue;
-                    s.Detections.Add(DetectionRules.ObjectiveGarrison(garrison.GetInstanceID(),
-                        SnapshotRules.UnitKey(((UnityEngine.Object)garrison).name, garrison.commander), garrison.unittyp,
-                        at.x, at.z, garrison.groupstrengthdirect));
+                    if (DetectionRules.TryObjectiveGarrison(Sees(s, garrison, out _), garrison.GetInstanceID(),
+                            SnapshotRules.UnitKey(((UnityEngine.Object)garrison).name, garrison.commander), garrison.unittyp,
+                            at.x, at.z, garrison.groupstrengthdirect, out EnemyDetection detection))
+                        s.Detections.Add(detection);
                 }
                 catch (Exception ex)
                 {
@@ -390,7 +406,7 @@ namespace WhiskeyRealism.Strategic.Planner
             Vector3 p = e.GetPosition();
             bool contact = InBattleWithSide(e) || DetectionRules.InBugleContact(p.x, p.z, e.buglerange, _ownX, _ownZ, _ownBugle, _ownCount);
             bool covers = !_probeNoFog && !contact && !_probeSidePlayer && ViewerCoverage.Covers(p.x, p.z, _viewerX, _viewerZ, _viewerR, _viewerCount);
-            bool grid = DetectionRules.NeedsGridProbe(_probeNoFog, contact, _probeSidePlayer, covers) && GridVisible(e, p);
+            bool grid = DetectionRules.NeedsGridProbe(_probeNoFog, contact, _probeSidePlayer, covers) && GridVisible(e);
             bool ownSide = _probeSidePlayer && !_probeNoFog && !e.iswithinfog;
             return DetectionRules.TryDecide(_probeNoFog, contact, _probeSidePlayer, ownSide, covers, grid, out source);
         }
@@ -400,30 +416,34 @@ namespace WhiskeyRealism.Strategic.Planner
             return e.inbattle && (UnityEngine.Object)e.unittriggeredbattle != null && OwnBattles.Contains(e.unittriggeredbattle);
         }
 
-        // fows[1].UnitIsHidden with CheckRegimentVisibility's arguments (127225); commander and
-        // unit type bound-checked (-1 skips the term, as vanilla's defaults do). Gated on usefow:
-        // with fog off the concealment grid is unallocated and UnitIsHidden NREs (101188). A grid
-        // exception fails closed for the rest of the review (contact only), never omniscient.
-        private static bool GridVisible(Regiment e, Vector3 p)
+        // Rule (b)'s grid answer through DetectionRules.GridVisible: usefow gated (101188 NRE), a
+        // missing or broken grid answers not visible, a probe exception fails closed for the rest
+        // of the review (contact only), never omniscient.
+        private static bool GridVisible(Regiment e)
         {
-            if (!GameVars.usefow || _gridBroken || (UnityEngine.Object)_probeGrid == null) return false;
-            try
-            {
-                var commanders = GameVars.commander;
-                int c = e.commander;
-                float cunning = commanders != null && c >= 0 && c < commanders.Count && commanders[c] != null ? commanders[c].GetCommanderCunning() : -1f;
-                var sizes = GamePrefs.unittypesize;
-                int t = e.unittyp;
-                bool typeKnown = sizes != null && t >= 0 && t < sizes.Length && sizes[t] > 0;
-                float relative = typeKnown ? (float)e.strength / (float)sizes[t] : -1f;
-                return !_probeGrid.UnitIsHidden(p, cunning, relative, e.liedown, e.coverobject, e.covervalue, typeKnown ? t : -1, e);
-            }
-            catch (Exception ex)
+            bool visible = DetectionRules.GridVisible(GameVars.usefow, !_gridBroken && (UnityEngine.Object)_probeGrid != null, HiddenProbe, e, out bool threw);
+            if (threw)
             {
                 _gridBroken = true;
-                OnceLog.Warning("campaign-planner:detect-grid-failed", "[EnemyBeliefs] fog-grid probe threw, the rest of this review detects by contact only: " + ex.Message);
-                return false;
+                OnceLog.Warning("campaign-planner:detect-grid-failed", "[EnemyBeliefs] fog-grid probe threw, the rest of this review detects by contact only");
             }
+            return visible;
+        }
+
+        // fows[1].UnitIsHidden with CheckRegimentVisibility's arguments (127225); commander and
+        // unit type bound-checked (-1 skips the term, as vanilla's defaults do). Called only through
+        // DetectionRules.GridVisible (HiddenProbe).
+        private static bool IsHiddenFromGrid(Regiment e)
+        {
+            Vector3 p = e.GetPosition();
+            var commanders = GameVars.commander;
+            int c = e.commander;
+            float cunning = commanders != null && c >= 0 && c < commanders.Count && commanders[c] != null ? commanders[c].GetCommanderCunning() : -1f;
+            var sizes = GamePrefs.unittypesize;
+            int t = e.unittyp;
+            bool typeKnown = sizes != null && t >= 0 && t < sizes.Length && sizes[t] > 0;
+            float relative = typeKnown ? (float)e.strength / (float)sizes[t] : -1f;
+            return _probeGrid.UnitIsHidden(p, cunning, relative, e.liedown, e.coverobject, e.covervalue, typeKnown ? t : -1, e);
         }
 
         private static EnemyTraits TraitsOf(Regiment e, Vector3 p, int side, float relocationRange)
@@ -469,6 +489,9 @@ namespace WhiskeyRealism.Strategic.Planner
         private static IReadOnlyList<EnemyBelief> OmniscientBeliefs(int alliance)
         {
             var list = Omniscient[alliance];
+            int campaignDay = CampaignDay();
+            if (OmniscientCacheDay[alliance] == campaignDay) return list;
+            OmniscientCacheDay[alliance] = campaignDay;
             list.Clear();
             try
             {
@@ -514,6 +537,13 @@ namespace WhiskeyRealism.Strategic.Planner
                 OnceLog.Warning("campaign-planner:omniscient-rollback", "[EnemyBeliefs] rollback enemy list not readable: " + ex.Message);
             }
             return list;
+        }
+
+        // The campaign calendar day (GameVars.currenttimefromstart is floating years, 30171): the
+        // rollback list is rebuilt once per game day, the daily-review granularity.
+        private static int CampaignDay()
+        {
+            return (int)Math.Floor(GameVars.currenttimefromstart * CampaignSpeedBound.DaysPerYear);
         }
 
         // Vanilla's speed terms for P6's bound; railroadspeedadj is the fastest of the alliances at

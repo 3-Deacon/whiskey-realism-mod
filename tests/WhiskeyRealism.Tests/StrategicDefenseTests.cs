@@ -636,7 +636,7 @@ internal static class StrategicDefenseTests
             Kind = DefenseThreatSourceKind.SeaInvasion,
             EnemyUnitKey = "savannah-spot:20",
             LandedSignal = true,
-            BeliefExpired = false,
+            SightingLapsed = false,
             AssetName = "savannah-harbor",
             AssetRole = AssetStrategicRole.BlockadeRunnerPort,
             EnemyStrength = 5000f
@@ -660,8 +660,8 @@ internal static class StrategicDefenseTests
         AssertTrue(input.Cooldown.IsActive(sig), "tick1: should be active after Active build");
         input.Cooldown.Tick();
 
-        // Tick 2: Recovered (BeliefExpired=true). Builder emits Recovered + calls MarkRecovered.
-        src.BeliefExpired = true;
+        // Tick 2: Recovered (SightingLapsed=true). Builder emits Recovered + calls MarkRecovered.
+        src.SightingLapsed = true;
         src.LandedSignal = false;
         var out2 = DefenseIntentLedger.Build(input);
         AssertTrue(out2.Responses.Count >= 1, "tick2: expected response");

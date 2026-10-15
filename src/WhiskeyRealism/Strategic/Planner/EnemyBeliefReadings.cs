@@ -14,6 +14,13 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const float GunExchangeWeight = 65f;
         // A force seen ashore within this many days of being seen afloat is a landing.
         internal const int LandingWindowDays = 3;
+        // The order-raising threats (a raid, a landed sea invasion) come only from a sighting this
+        // recent (integrator decision 2026-10-15, verify-g1 F1): the landing window. Vanilla itself
+        // keeps a defender only while a real enemy stays near its destination
+        // (CheckForEndOfDefensiveOperations 13795-13846) and aborts a raid on the enemy's current
+        // position (9099-9101); a remembered belief must not hold a custom order beyond that.
+        // Strength sums stay confidence-weighted over every live belief.
+        internal const int RecentSightingDays = LandingWindowDays;
 
         internal static float Weighted(in EnemyBelief belief)
         {
@@ -68,37 +75,33 @@ namespace WhiskeyRealism.Strategic.Planner
             return EnemyBeliefQuery.Nearest(beliefs, x, z, out float distance) >= 0 && distance <= range;
         }
 
+        internal static bool SeenRecently(in EnemyBelief belief, int today)
+        {
+            return belief.Confidence01 > 0f && today - belief.LastSeenDay <= RecentSightingDays;
+        }
+
         // DefenseIntentRuntime sea-invasion threat, inferred from what was seen (C25), never from
         // vanilla's seainvasionforce plan state: a group seen afloat off our coast (watch), or one
-        // seen ashore on our soil within LandingWindowDays of being seen afloat (landed).
-        internal static bool IsSeaInvasionThreat(in EnemyBelief belief, out bool landed)
+        // seen ashore on our soil within LandingWindowDays of being seen afloat and seen recently
+        // (landed, which raises orders).
+        internal static bool IsSeaInvasionThreat(in EnemyBelief belief, int today, out bool landed)
         {
             landed = false;
             if (belief.Confidence01 <= 0f) return false;
             if ((belief.Traits & EnemyTraits.Embarked) != 0)
                 return (belief.Traits & EnemyTraits.NearOwnCoast) != 0;
             if ((belief.Traits & EnemyTraits.OnOwnSoil) == 0 || belief.LastEmbarkedDay < 0) return false;
-            landed = belief.LastSeenDay - belief.LastEmbarkedDay <= LandingWindowDays;
+            landed = belief.LastSeenDay - belief.LastEmbarkedDay <= LandingWindowDays && SeenRecently(in belief, today);
             return landed;
         }
 
-        // DefenseIntentRuntime raid threat: a cavalry-majority group seen on our soil (never
-        // vanilla's raidforces state).
-        internal static bool IsRaidThreat(in EnemyBelief belief)
+        // DefenseIntentRuntime raid threat: a cavalry-majority group seen recently on our soil
+        // (never vanilla's raidforces state).
+        internal static bool IsRaidThreat(in EnemyBelief belief, int today)
         {
-            if (belief.Confidence01 <= 0f) return false;
+            if (!SeenRecently(in belief, today)) return false;
             const EnemyTraits raid = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil;
             return (belief.Traits & raid) == raid && (belief.Traits & EnemyTraits.Embarked) == 0;
-        }
-
-        // The sea-invasion "collapsed" signal is belief expiry: the keys whose belief expired this
-        // review and whose threat the previous review raised (previous sea-invasion signatures).
-        internal static void CollapsedSeaInvasionKeys(IReadOnlyList<string> expiredKeys, ISet<string> previousSignatures, List<string> into)
-        {
-            if (expiredKeys == null || previousSignatures == null || into == null) return;
-            for (int i = 0; i < expiredKeys.Count; i++)
-                if (previousSignatures.Contains(DefenseThreatSignature.ForSeaInvasion(expiredKeys[i])))
-                    into.Add(expiredKeys[i]);
         }
 
         // RecruitmentPatch.SafeStrengthRatio: vanilla GetStrengthRatio's shape (12366-12404) with
@@ -130,6 +133,62 @@ namespace WhiskeyRealism.Strategic.Planner
                 float dz = belief.Z - z;
                 into.Add(new CapitalForceSample { Distance = (float)Math.Sqrt(dx * dx + dz * dz), Strength = weighted, Morale = 1f });
             }
+        }
+    }
+
+    // A sea-invasion or raid threat raised last review whose belief no longer qualifies (left
+    // sight past the recency, re-embarked off the coast, expired) is reported once more as
+    // SightingLapsed: the ledger answers Recovered, so the coastal runner holds its units for
+    // the cooldown and releases them when the signature leaves the output (verify-g1 F1). One per
+    // alliance, held by DefenseIntentRuntime (CampaignScope).
+    internal sealed class LapsedThreatTracker
+    {
+        private readonly Dictionary<string, DefenseThreatSource> _previous = new Dictionary<string, DefenseThreatSource>(StringComparer.Ordinal);
+        private readonly HashSet<string> _current = new HashSet<string>(StringComparer.Ordinal);
+        private readonly List<DefenseThreatSource> _lapsed = new List<DefenseThreatSource>();
+
+        // Appends this review's lapsed sources to `threats`, then remembers the qualifying ones.
+        internal void Close(List<DefenseThreatSource> threats, Func<DefenseThreatSource, string> signature)
+        {
+            if (threats == null || signature == null) return;
+            _current.Clear();
+            for (int i = 0; i < threats.Count; i++)
+                if (threats[i] != null) _current.Add(signature(threats[i]));
+
+            _lapsed.Clear();
+            foreach (var pair in _previous)
+                if (!_current.Contains(pair.Key)) _lapsed.Add(Lapsed(pair.Value));
+
+            _previous.Clear();
+            for (int i = 0; i < threats.Count; i++)
+            {
+                var t = threats[i];
+                if (t == null || t.SightingLapsed) continue;
+                if (t.Kind != DefenseThreatSourceKind.SeaInvasion && t.Kind != DefenseThreatSourceKind.RaidForce) continue;
+                _previous[signature(t)] = t;
+            }
+            threats.AddRange(_lapsed);
+        }
+
+        internal void Clear()
+        {
+            _previous.Clear();
+        }
+
+        private static DefenseThreatSource Lapsed(DefenseThreatSource t)
+        {
+            return new DefenseThreatSource
+            {
+                Kind = t.Kind,
+                EnemyUnitKey = t.EnemyUnitKey,
+                AssetName = t.AssetName,
+                AssetKind = t.AssetKind,
+                AssetRole = t.AssetRole,
+                X = t.X,
+                Z = t.Z,
+                EnemyStrength = t.EnemyStrength,
+                SightingLapsed = true
+            };
         }
     }
 }
