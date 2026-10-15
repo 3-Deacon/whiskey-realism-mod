@@ -36,6 +36,18 @@ namespace WhiskeyRealism.Strategic
     {
         internal const int NoWrite = int.MinValue;
 
+        // Steering follows the LIVE phase posture (after CicReviewRouter overrides such as
+        // Recover / ScreenAndDelay / Pause), for catalog and generic plans alike. In vanilla
+        // followedcampaignobjective is an offensive importance weight on the objective's
+        // towns/IIPs (UpdateImportanceValues 14922/14961), so a phase in a defensive posture
+        // releases it and vanilla's own pick (17780-17785) is the defensive-phase behaviour.
+        internal static bool PhaseSteers(Phase livePhase)
+        {
+            return livePhase != null &&
+                livePhase.TargetObjectiveId >= 0 &&
+                !HistoricalOperationCatalog.IsDefensivePosture(livePhase.OperationPosture);
+        }
+
         internal static CampaignObjectiveSteer Decide(bool hasPlanTarget, int planTargetObjectiveId, int currentFollowed, int lastWrittenByMod)
         {
             if (hasPlanTarget && planTargetObjectiveId >= 0)

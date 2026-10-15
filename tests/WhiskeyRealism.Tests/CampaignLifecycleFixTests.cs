@@ -44,9 +44,10 @@ internal static class CampaignLifecycleFixTests
         Check("c1 r5 allow list matches phase targets", R5AllowListMatchesPhaseTargets);
         Check("c1 r5 every phase target has a resolvable position", R5EveryPhaseTargetHasResolvablePosition);
         Check("c1 r5 no profile targets capture washington", R5NoProfileTargetsWashington);
-        Check("c1 r5 defensive-posture profiles do not steer followedcampaignobjective", R5DefensiveProfilesDoNotSteerObjective);
+        Check("c1 r5 no catalog phase with a defensive posture steers", R5DefensiveCatalogPhasesDoNotSteer);
+        Check("c1 r5 router defensive override stops steering and releases", R5RouterDefensiveOverrideReleases);
+        Check("c1 r5 returning to an offensive posture steers again", R5OffensivePostureSteersAgain);
         Check("c1 r5 retired csa defense profiles are gone", R5RetiredCsaDefenseProfilesAreGone);
-        Check("c1 r5 defensive plan releases a mod-written objective to vanilla", R5DefensivePlanReleasesModWrittenObjective);
         Check("c1 r5 resolve rejects profile whose phase targets are unavailable", R5ResolveRejectsUnavailablePhaseTargets);
         Check("c1 r5 generic fallback only targets objectives with towns or IIPs", R5GenericFallbackRequiresVanillaGround);
         Check("c1 r5 generic fallback skips abstract objectives like capture washington", R5GenericFallbackSkipsAbstractObjectives);
@@ -495,18 +496,71 @@ internal static class CampaignLifecycleFixTests
                 TestHarness.AssertTrue(phase.TargetObjectiveId != 4, profile.OperationId + " must not target objective 4 (Capture Washington)");
     }
 
-    private static void R5DefensiveProfilesDoNotSteerObjective()
+    private static void R5DefensiveCatalogPhasesDoNotSteer()
     {
-        bool sawDefensive = false;
+        bool sawDefensive = false, sawOffensive = false;
         foreach (var profile in AllProfiles())
         {
-            bool defensive = HistoricalOperationCatalog.IsDefensivePosture(profile.Posture);
-            sawDefensive |= defensive;
-            TestHarness.AssertEqual(!defensive, HistoricalOperationCatalog.SteersCampaignObjective(profile.OperationId), profile.OperationId + " steering");
+            foreach (var template in profile.Phases)
+            {
+                var posture = template.Posture == OperationPosture.Inherit ? profile.Posture : template.Posture;
+                bool defensive = HistoricalOperationCatalog.IsDefensivePosture(posture);
+                sawDefensive |= defensive;
+                sawOffensive |= !defensive;
+                var phase = new Phase { PhaseId = template.PhaseId, TargetObjectiveId = template.TargetObjectiveId, OperationPosture = posture };
+                TestHarness.AssertEqual(!defensive, CampaignObjectiveSteering.PhaseSteers(phase), profile.OperationId + "/" + template.PhaseId + " steering");
+            }
         }
-        TestHarness.AssertTrue(sawDefensive, "catalog still has a defensive profile to exercise");
-        TestHarness.AssertTrue(HistoricalOperationCatalog.SteersCampaignObjective(null), "generic plan (ground-checked target) steers");
-        TestHarness.AssertFalse(HistoricalOperationCatalog.SteersCampaignObjective("no-such-operation"), "unknown operation never steers");
+        TestHarness.AssertTrue(sawDefensive && sawOffensive, "catalog exercises both kinds of phase");
+        TestHarness.AssertFalse(CampaignObjectiveSteering.PhaseSteers(null), "no phase");
+        TestHarness.AssertFalse(CampaignObjectiveSteering.PhaseSteers(new Phase { TargetObjectiveId = -1, OperationPosture = OperationPosture.ConcentratedAttack }), "no target");
+    }
+
+    private static OperationalPlan EastPressurePlan()
+    {
+        TestHarness.AssertTrue(HistoricalOperationCatalog.TryGetById("union-east-pressure", out var profile), "profile");
+        var template = profile.Phases[0];
+        var plan = new OperationalPlan { OperationId = profile.OperationId, OperationPosture = profile.Posture, PlanDeadlineMonth = 12, PlanDeadlineYear = 1861 };
+        plan.Phases.Add(new Phase
+        {
+            PhaseId = template.PhaseId,
+            TargetObjectiveId = template.TargetObjectiveId,
+            Transition = template.Transition,
+            OperationPosture = template.Posture,
+            AllowCoordinatedAttack = template.AllowCoordinatedAttack,
+            AllowReinforcementPackage = template.AllowReinforcementPackage,
+            AllowProbeOnly = template.AllowProbeOnly,
+            DeadlineMonth = 12,
+            DeadlineYear = 1861
+        });
+        return plan;
+    }
+
+    private static void R5RouterDefensiveOverrideReleases()
+    {
+        foreach (var action in new[] { PhaseTruthAction.ScreenAndDelay, PhaseTruthAction.Recover, PhaseTruthAction.Pause })
+        {
+            var plan = EastPressurePlan();
+            TestHarness.AssertTrue(CampaignObjectiveSteering.PhaseSteers(plan.CurrentPhase), "offensive phase steers");
+            CicReviewRouter.Route(plan, Truth(action), Serial(1, 7, 1861), 7, 1861);
+            bool steers = CampaignObjectiveSteering.PhaseSteers(plan.CurrentPhase);
+            TestHarness.AssertFalse(steers, action + " override stops steering");
+            var steer = CampaignObjectiveSteering.Decide(steers, plan.CurrentPhase.TargetObjectiveId, currentFollowed: 3, lastWrittenByMod: 3);
+            TestHarness.AssertTrue(steer.RunVanilla, action + ": vanilla picks");
+            TestHarness.AssertEqual(-1, steer.WriteFollowed, action + ": mod-written objective released (vanilla re-picks at 17780)");
+        }
+    }
+
+    private static void R5OffensivePostureSteersAgain()
+    {
+        var plan = EastPressurePlan();
+        CicReviewRouter.Route(plan, Truth(PhaseTruthAction.Recover), Serial(1, 7, 1861), 7, 1861);
+        CicReviewRouter.Route(plan, Truth(PhaseTruthAction.Continue), Serial(2, 7, 1861), 7, 1861);
+        bool steers = CampaignObjectiveSteering.PhaseSteers(plan.CurrentPhase);
+        TestHarness.AssertTrue(steers, "template posture restored => steers");
+        var steer = CampaignObjectiveSteering.Decide(steers, plan.CurrentPhase.TargetObjectiveId, currentFollowed: 12, lastWrittenByMod: -1);
+        TestHarness.AssertFalse(steer.RunVanilla, "mod steers again");
+        TestHarness.AssertEqual(3, steer.WriteFollowed, "plan target written");
     }
 
     private static void R5RetiredCsaDefenseProfilesAreGone()
@@ -515,14 +569,6 @@ internal static class CampaignLifecycleFixTests
         // both ops only pulled forces at the offensive B&O objective 32.
         TestHarness.AssertFalse(HistoricalOperationCatalog.TryGetById("csa-capital-defense", out _), "csa-capital-defense retired");
         TestHarness.AssertFalse(HistoricalOperationCatalog.TryGetById("csa-protraction-defense", out _), "csa-protraction-defense retired");
-    }
-
-    private static void R5DefensivePlanReleasesModWrittenObjective()
-    {
-        bool steers = HistoricalOperationCatalog.SteersCampaignObjective("csa-western-depth");
-        var steer = CampaignObjectiveSteering.Decide(hasPlanTarget: steers, planTargetObjectiveId: 30, currentFollowed: 30, lastWrittenByMod: 30);
-        TestHarness.AssertTrue(steer.RunVanilla, "defensive plan leaves the pick to vanilla");
-        TestHarness.AssertEqual(-1, steer.WriteFollowed, "objective the mod wrote earlier is released");
     }
 
     private static void R5ResolveRejectsUnavailablePhaseTargets()

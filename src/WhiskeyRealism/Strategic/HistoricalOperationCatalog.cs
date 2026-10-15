@@ -401,16 +401,6 @@ namespace WhiskeyRealism.Strategic
                 posture == OperationPosture.Recover;
         }
 
-        // Whether a plan may write AIFaction.followedcampaignobjective. Generic plans (no
-        // operation id) only exist on objectives with towns/IIPs (CIC fallback) and steer;
-        // catalog operations steer unless their posture is defensive; unknown ids never steer.
-        public static bool SteersCampaignObjective(string operationId)
-        {
-            if (string.IsNullOrEmpty(operationId)) return true;
-            if (!TryGetById(operationId, out var profile)) return false;
-            return !IsDefensivePosture(profile.Posture);
-        }
-
         // R5: every target below is validated against Config/campaignobjectives.dat by the
         // harness (CampaignLifecycleFixTests). Rules that come from vanilla:
         //  - CampaignObjective.GetAvailableObjectives (decompile 178827) only returns
@@ -427,14 +417,14 @@ namespace WhiskeyRealism.Strategic
         // Every CSA objective with ground (30 West Virginia, 32 B&O lines, 33 Maryland, 34
         // Pennsylvania) is an OFFENSIVE goal: its towns start Union-held or contested.
         // followedcampaignobjective is an offensive importance weight that pulls forces toward
-        // those towns, so defensive-posture operations never write it (SteersCampaignObjective)
-        // and vanilla keeps choosing the objective. The former csa-capital-defense and
+        // those towns, so a phase whose live posture is defensive never writes it
+        // (CampaignObjectiveSteering.PhaseSteers) and vanilla keeps choosing the objective. The former csa-capital-defense and
         // csa-protraction-defense ops were retired: no CSA objective describes ground the CSA
         // defends, and aiming them at 4 (Capture Washington) or 32 only pulled forces north.
         // csa-western-depth stays: it holds and reinforces in western Virginia (objective 30's
         // Charleston/Grafton/Lewisburg/Romney, the ground the CSA actually contested in 1862)
-        // through the mod's own ledgers (front/formation/probe posture flags) without steering
-        // vanilla's objective.
+        // through the mod's own ledgers (front/formation/probe posture flags); its defensive
+        // phases do not steer vanilla's objective.
         private static HistoricalOperationProfile[] BuildProfiles()
         {
             return new[]

@@ -14,9 +14,9 @@ namespace WhiskeyRealism.Patches
     // followedcampaignobjective feeds UpdateImportanceValues (14922/14961) and recruiting
     // (12337) through the objective's towns/IIPs.
     //
-    // Prefix (existing Prefix-skip, narrowed by R5): when the CIC has an active plan phase of
-    // a non-defensive operation the mod writes that target and skips the random pick.
-    // Defensive-posture operations leave the pick to vanilla. With no plan (no historical
+    // Prefix (existing Prefix-skip, narrowed by R5): when the CIC's current phase is in an
+    // offensive posture (live, after router overrides) the mod writes that target and skips
+    // the random pick. Defensive phases leave the pick to vanilla. With no plan (no historical
     // profile and no resolvable generic target) vanilla's pick runs; if the current
     // followedcampaignobjective is one the mod wrote, it is cleared first so vanilla
     // actually re-picks instead of keeping the stale mod target.
@@ -73,9 +73,9 @@ namespace WhiskeyRealism.Patches
                     int current = Convert.ToInt32(_followedField.GetValue(faction));
                     int lastWritten = LastWrittenByMod[allianceId];
 
-                    // Defensive-posture operations never write the objective: in vanilla it is an
-                    // offensive importance weight (UpdateImportanceValues 14922/14961).
-                    bool steers = phase != null && HistoricalOperationCatalog.SteersCampaignObjective(cic.ActivePlan.OperationId);
+                    // Steer only while the LIVE phase posture is offensive (router overrides
+                    // included); a defensive phase releases the objective to vanilla.
+                    bool steers = CampaignObjectiveSteering.PhaseSteers(phase);
                     var steer = CampaignObjectiveSteering.Decide(steers, planTarget, current, lastWritten);
                     if (steer.WriteFollowed != CampaignObjectiveSteering.NoWrite)
                     {
@@ -85,7 +85,7 @@ namespace WhiskeyRealism.Patches
 
                     if (steer.RunVanilla)
                     {
-                        if (cic != null) EmitVanillaPick(allianceId, phase == null ? "no-plan" : (steers ? "invalid-phase" : "defensive-operation"));
+                        if (cic != null) EmitVanillaPick(allianceId, phase == null ? "no-plan" : (phase.TargetObjectiveId < 0 ? "invalid-phase" : "defensive-phase"));
                         return true;
                     }
 
