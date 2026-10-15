@@ -58,6 +58,8 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableWlSupplyStaffScopeFix;
         internal static ConfigEntry<bool> EnableWlSupplyEfficiencySignFix;
         internal static ConfigEntry<bool> EnableWlActionOnceEffectsFix;
+        internal static ConfigEntry<bool> EnableBattleEntrenchmentAverageFix;
+        internal static ConfigEntry<bool> EnableBattleHqConditionFix;
         internal ConfigEntry<bool> EnableTacticalMacroStanceScorer;
         internal ConfigEntry<bool> EnableTacticalGroupSectorStance;
         internal ConfigEntry<bool> EnableTacticalCommanderIntentDoctrine;
@@ -397,6 +399,20 @@ namespace WhiskeyRealism
                 "points) store their bonus where vanilla never reads it. With this on that bonus multiplies the running effect, x(1 + value). " +
                 "The supply-efficiency part needs Enable W&L Supply Efficiency Sign Fix as well (otherwise it would slow resupply). The " +
                 "attrition values of Harsh Punishments, Ample Rewards and Purge stay vanilla (intent unclear). Off: vanilla.");
+            EnableBattleEntrenchmentAverageFix = Config.Bind(
+                "Tactical",
+                "Enable Battle Entrenchment Average Fix",
+                true,
+                "Default ON. Vanilla BattleUnits.CalculateAllUnitsOfAlliance averages the AI side's entrenchment level over the player side's " +
+                "group count, which sets the AI's battle fortification tier and engineering time. With this on it is averaged over the AI " +
+                "side's own groups, as readiness beside it is. A stat correction, not an order. Off: vanilla.");
+            EnableBattleHqConditionFix = Config.Bind(
+                "Tactical",
+                "Enable Battle HQ Condition Fix",
+                true,
+                "Default ON. Vanilla BattleUnits.AssignConditionToSubordinates sets each group HQ's horse and gun condition from the men " +
+                "value at battle start. With this on the HQ gets the horse and gun values its sub-units get, and the side's gun-condition " +
+                "average is recomputed from them. A stat correction, not an order. Off: vanilla.");
             EnableTacticalMacroStanceScorer = Config.Bind(
                 "Tactical",
                 "Enable Tactical Macro Stance Scorer",
