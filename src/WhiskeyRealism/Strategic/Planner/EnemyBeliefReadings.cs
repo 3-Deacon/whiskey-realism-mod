@@ -176,6 +176,14 @@ namespace WhiskeyRealism.Strategic.Planner
             _previous.Clear();
         }
 
+        // A threat that keeps the proximity pass off its asset (verify-g1 R2-4). A lapsed copy keeps
+        // its AssetName only for the signature the coastal runner releases on; it covers nothing,
+        // so a believed enemy still close to that asset raises its proximity threat.
+        internal static bool CoversAsset(DefenseThreatSource t)
+        {
+            return t != null && !t.SightingLapsed && !string.IsNullOrEmpty(t.AssetName);
+        }
+
         private static DefenseThreatSource Lapsed(DefenseThreatSource t)
         {
             return new DefenseThreatSource

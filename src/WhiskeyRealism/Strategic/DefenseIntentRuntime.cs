@@ -286,12 +286,12 @@ namespace WhiskeyRealism.Strategic
             // against Maryland and New York ports during Slice 1 smoke. The frontline-side
             // check rejects enemies who haven't actually crossed into our territory.
 
-            // Build set of asset names already covered by sif/raid threats to avoid duplicates.
+            // Build set of asset names already covered by sif/raid threats to avoid duplicates
+            // (a lapsed copy covers none).
             var coveredAssets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var threat in input.Threats)
             {
-                if (!string.IsNullOrEmpty(threat.AssetName))
-                    coveredAssets.Add(threat.AssetName);
+                if (LapsedThreatTracker.CoversAsset(threat)) coveredAssets.Add(threat.AssetName);
             }
 
             // Believed enemy positions + instance ids + confidence-weighted strengths. A sighting

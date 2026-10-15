@@ -370,6 +370,7 @@ namespace WhiskeyRealism.Strategic
 
             RefreshStrategicSettings();
             int reviewSerial = ReviewCadenceCatchUp.DaySerial(day, month, year);
+            EnemyDetectionRuntime.StampReviewDay(reviewSerial);
             bool weeklyCatchUp = ReviewCadenceCatchUp.SkippedWeeklyGate(_lastReviewSerial, reviewSerial);
             bool alternatingCatchUp = ReviewCadenceCatchUp.SkippedAlternatingGate(_lastReviewSerial, reviewSerial);
             _lastReviewSerial = reviewSerial;

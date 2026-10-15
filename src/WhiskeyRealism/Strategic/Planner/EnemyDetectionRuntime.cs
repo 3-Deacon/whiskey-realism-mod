@@ -43,6 +43,9 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly string[] LastSignature = new string[Alliances];
         private static readonly int[] LastDaySerial = { -1, -1 };
         private static readonly int[] OmniscientCacheDay = { int.MinValue, int.MinValue };
+        // The calendar day of the current strategic review (ReviewCadenceCatchUp.DaySerial),
+        // stamped by the coordinator before any alliance is reviewed, also with the planner off.
+        private static int _reviewDay = -1;
 
         // Pooled per-review state.
         private static readonly List<Regiment> Enemies = new List<Regiment>();
@@ -92,6 +95,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 OmniscientCacheDay[a] = int.MinValue;
                 Omniscient[a].Clear();
             }
+            _reviewDay = -1;
             _fows = null;
             _probeSnapshot = null;
             _probeGrid = null;
@@ -115,6 +119,11 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static IReadOnlyList<EnemyBelief> BeliefsFor(int alliance)
         {
             return EnemyBeliefStore.Select(alliance, FlagOn(Plugin.EnableCampaignPlanner), FlagOn(Plugin.EnableCampaignFogHonestBeliefs), OmniscientDelegate);
+        }
+
+        internal static void StampReviewDay(int daySerial)
+        {
+            _reviewDay = daySerial;
         }
 
         // The review day the alliance's beliefs were last updated (the recency clock of the
@@ -486,10 +495,13 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // The rollback (either flag off): vanilla's own omniscient enemyunits (SeparateUnits) at
         // full confidence, with the same traits a sighting would carry. The only enemyunits read.
+        // Rebuilt once per review day, keyed by the coordinator's calendar stamp (not by
+        // currenttimefromstart x 365.25: 30171 makes months 1/12 year wide, so 31 Jan and 1 Feb
+        // floor to the same day).
         private static IReadOnlyList<EnemyBelief> OmniscientBeliefs(int alliance)
         {
             var list = Omniscient[alliance];
-            int campaignDay = CampaignDay();
+            int campaignDay = _reviewDay;
             if (OmniscientCacheDay[alliance] == campaignDay) return list;
             OmniscientCacheDay[alliance] = campaignDay;
             list.Clear();
@@ -508,7 +520,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (enemies == null) return list;
                 CollectHarbours(alliance);
                 float relocation = GamePrefs.aimaximumdistancetosearchforunitrelocations;
-                int day = LastDaySerial[alliance];
+                int day = campaignDay;
                 for (int i = 0; i < enemies.Count; i++)
                 {
                     if (!(enemies[i] is Regiment e) || (UnityEngine.Object)e == null) continue;
@@ -537,13 +549,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 OnceLog.Warning("campaign-planner:omniscient-rollback", "[EnemyBeliefs] rollback enemy list not readable: " + ex.Message);
             }
             return list;
-        }
-
-        // The campaign calendar day (GameVars.currenttimefromstart is floating years, 30171): the
-        // rollback list is rebuilt once per game day, the daily-review granularity.
-        private static int CampaignDay()
-        {
-            return (int)Math.Floor(GameVars.currenttimefromstart * CampaignSpeedBound.DaysPerYear);
         }
 
         // Vanilla's speed terms for P6's bound; railroadspeedadj is the fastest of the alliances at

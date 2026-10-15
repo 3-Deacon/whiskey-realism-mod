@@ -62,6 +62,10 @@ internal static class EnemyArmyModelTests
             ("AlliedGroupsAreViewers", AlliedGroupsAreViewers),
             ("GarrisonGateRequiresSighting", GarrisonGateRequiresSighting),
             ("StandDownAllianceStillDetects", StandDownAllianceStillDetects),
+            ("SameDayIdentityUsesOneDayOfMarch", SameDayIdentityUsesOneDayOfMarch),
+            ("GarrisonIdentityHasNoMarchRadius", GarrisonIdentityHasNoMarchRadius),
+            ("BeliefAgeCountsCalendarDays", BeliefAgeCountsCalendarDays),
+            ("LapsedThreatLeavesAssetToProximity", LapsedThreatLeavesAssetToProximity),
             ("DetectionWiringPinned", DetectionWiringPinned),
             ("MigratedReadersReadBeliefsOnly", MigratedReadersReadBeliefsOnly),
         });
@@ -856,6 +860,82 @@ internal static class EnemyArmyModelTests
         CampaignScope.ResetAll();
     }
 
+    // verify-g1 r2 (N7): a same-day second sighting still gets one day of road march, so a re-key
+    // or a rename on the review day of the last sighting is recognised.
+    private static void SameDayIdentityUsesOneDayOfMarch()
+    {
+        var m = new EnemyArmyModel();
+        m.Update(List(Seen("Old Name:3", 1, 0f, 0f, 9000f, unitTyp: 15)), 10, Drift(500f), March(10f));
+        m.Update(List(Seen("Grand Corps:3", 2, 8f, 0f, 9500f, unitTyp: 15)), 10, Drift(500f), March(10f));
+        AssertEqual("Grand Corps:3", Only(m, "same-day rename within one day's march (10)").UnitKey, "old belief retired");
+
+        var n = new EnemyArmyModel();
+        n.Update(List(Seen("Army of the James:12", 5, 0f, 0f, 30000f, unitTyp: 16)), 10, Drift(500f), March(10f));
+        n.Update(List(Seen("Army of the James:40", 5, 6f, 0f, 30000f, unitTyp: 16)), 10, Drift(500f), March(10f));
+        AssertEqual("Army of the James:40", Only(n, "same-day commander change").UnitKey, "re-keyed");
+    }
+
+    // verify-g1 r2 (N8): a fort garrison does not march; its identity radius is 0 at any age.
+    private static void GarrisonIdentityHasNoMarchRadius()
+    {
+        var m = new EnemyArmyModel();
+        m.Update(List(DetectionRules.ObjectiveGarrison(7, "Fort Pulaski garrison:300", 14, 0f, 0f, 1200f)), 0, Drift(9f), March(10f));
+        m.Update(List(Seen("Raiders:5", 8, 5f, 0f, 900f, unitTyp: 14)), 3, Drift(9f), March(10f));
+        AssertEqual(2, m.Beliefs.Count, "a new group 5 units from a fort (inside 3 days of march) never retires its garrison");
+
+        m.Update(List(DetectionRules.ObjectiveGarrison(7, "Fort Pulaski garrison:301", 14, 0f, 0f, 1300f)), 4, Drift(9f), March(10f));
+        bool rekeyed = false;
+        foreach (var b in m.Beliefs) if (b.UnitKey == "Fort Pulaski garrison:301") rekeyed = true;
+        AssertTrue(rekeyed, "the same garrison at the same town under a new commander is re-keyed");
+        AssertEqual(2, m.Beliefs.Count, "re-keyed, not duplicated");
+    }
+
+    // R2-3: the belief clock counts calendar days (UniStorm's Gregorian rollover, 157818), so a
+    // month end adds no phantom days to an age.
+    private static void BeliefAgeCountsCalendarDays()
+    {
+        int feb27 = ReviewCadenceCatchUp.DaySerial(27, 2, 1862);
+        int mar1 = ReviewCadenceCatchUp.DaySerial(1, 3, 1862);
+        AssertEqual(2, mar1 - feb27, "27 Feb -> 1 Mar 1862: two days");
+        var raid = new EnemyBelief { UnitKey = "Stuart:7", Confidence01 = 1f, LastSeenDay = feb27, LastEmbarkedDay = -1,
+                                     Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil };
+        AssertTrue(EnemyBeliefReadings.IsRaidThreat(in raid, mar1), "a raid seen 27 Feb is still recent on 1 Mar");
+
+        var m = new EnemyArmyModel();
+        m.Update(List(Seen("A:1", 1, 0f, 0f, 1000f)), feb27, Drift(2f), NoMarch);
+        m.Update(List(), mar1, Drift(2f), NoMarch);
+        AssertNear((float)Math.Pow(0.5, 2.0 / 7.0), Only(m, "aged").Confidence01, 1e-6f, "decays two days");
+
+        int dec31 = ReviewCadenceCatchUp.DaySerial(31, 12, 1862);
+        int jan1 = ReviewCadenceCatchUp.DaySerial(1, 1, 1863);
+        AssertEqual(1, jan1 - dec31, "31 Dec -> 1 Jan: one day");
+        var n = new EnemyArmyModel();
+        n.Update(List(Seen("A:1", 1, 0f, 0f, 1000f)), dec31, Drift(2f), NoMarch);
+        n.Update(List(), jan1, Drift(2f), NoMarch);
+        AssertNear(2f, Only(n, "new year").UncertaintyRadius, 1e-4f, "drifts one day");
+    }
+
+    // R2-4: a lapsed copy carries its asset name for the signature but covers no asset, so the
+    // proximity pass still raises a threat at that asset.
+    private static void LapsedThreatLeavesAssetToProximity()
+    {
+        var tracker = new LapsedThreatTracker();
+        Func<DefenseThreatSource, string> sig = DefenseIntentLedger.BuildSignature;
+        var threats = new List<DefenseThreatSource>
+        {
+            new DefenseThreatSource { Kind = DefenseThreatSourceKind.RaidForce, EnemyUnitKey = "Stuart:7", AssetName = "Wilmington" }
+        };
+        tracker.Close(threats, sig);
+        AssertTrue(LapsedThreatTracker.CoversAsset(threats[0]), "an active raid covers its asset");
+        var next = new List<DefenseThreatSource>();
+        tracker.Close(next, sig);
+        AssertEqual(1, next.Count, "lapsed once");
+        AssertEqual("raid:Stuart:7:Wilmington", sig(next[0]), "the lapsed copy keeps the signature (the runner releases on it)");
+        AssertFalse(LapsedThreatTracker.CoversAsset(next[0]), "a lapsed copy covers no asset");
+        AssertFalse(LapsedThreatTracker.CoversAsset(new DefenseThreatSource { Kind = DefenseThreatSourceKind.RaidForce }), "no asset, nothing covered");
+        AssertFalse(LapsedThreatTracker.CoversAsset(null), "null");
+    }
+
     // ---- Source pins (BattleWriteGateTests style) ----
 
     private static void DetectionWiringPinned()
@@ -910,13 +990,32 @@ internal static class EnemyArmyModelTests
                    && rollback.IndexOf("if (OmniscientCacheDay[alliance] == campaignDay) return list;", StringComparison.Ordinal) < rollback.IndexOf("list.Clear();", StringComparison.Ordinal),
             "the rollback list is cached per campaign day");
 
+        AssertContains(MethodBody(runtime, "internal static int ReviewDayFor("),
+            "return alliance >= 0 && alliance < Alliances ? LastDaySerial[alliance] : -1;", "the recency clock is the alliance's last review day");
+        AssertContains(detectBody, "LastDaySerial[side] = s.DaySerial;", "stamped by each detection");
+        AssertContains(planner, "CampaignSnapshotRuntime.Build(alliance, faction, ReviewCadenceCatchUp.DaySerial(day, month, year),", "the snapshot day is the calendar day serial");
+        string coordinator = ReadRepoFile("src/WhiskeyRealism/Strategic/StrategicCoordinator.cs");
+        int serialAt = coordinator.IndexOf("int reviewSerial = ReviewCadenceCatchUp.DaySerial(day, month, year);", StringComparison.Ordinal);
+        int stampAt = coordinator.IndexOf("EnemyDetectionRuntime.StampReviewDay(reviewSerial);", StringComparison.Ordinal);
+        int loopAt = coordinator.IndexOf("for (int alliance = 0; alliance < 2; alliance++)", stampAt < 0 ? 0 : stampAt, StringComparison.Ordinal);
+        AssertTrue(serialAt >= 0 && stampAt > serialAt && loopAt > stampAt, "the calendar day is stamped once per review, before any alliance (also with the planner off)");
+        AssertContains(rollbackBodyOf(runtime), "int campaignDay = _reviewDay;", "the rollback is keyed by the calendar stamp");
+        AssertContains(rollbackBodyOf(runtime), "int day = campaignDay;", "and dated by it");
+        AssertFalse(CodeOnly(runtime).Contains("currenttimefromstart"), "no day from currenttimefromstart (30171: months are 1/12 year)");
+        foreach (string file in System.IO.Directory.GetFiles(System.IO.Path.GetDirectoryName(FindRepoPath("src/WhiskeyRealism/Strategic/Planner/EnemyArmyModel.cs")), "*.cs"))
+            AssertFalse(CodeOnly(System.IO.File.ReadAllText(file)).Contains("372"), "no legacy 372-day serial in " + System.IO.Path.GetFileName(file));
+
         // Order-raising threats use the recency clock and the lapse tracker.
         string defense = ReadRepoFile("src/WhiskeyRealism/Strategic/DefenseIntentRuntime.cs");
         AssertContains(defense, "int today = EnemyDetectionRuntime.ReviewDayFor(allianceId);", "recency clock");
         AssertContains(defense, "EnemyBeliefReadings.IsRaidThreat(in belief, today)", "raids need a recent sighting");
         AssertContains(defense, "EnemyBeliefReadings.IsSeaInvasionThreat(in belief, today, out bool landed)", "landings need a recent sighting");
         AssertContains(defense, "LapseTrackers[allianceId].Close(input.Threats, LapseSignature);", "lapsed threats reported once");
+        AssertContains(MethodBody(defense, "private static void ExtractAssetProximityThreats("),
+            "if (LapsedThreatTracker.CoversAsset(threat)) coveredAssets.Add(threat.AssetName);", "a lapsed copy leaves its asset to the proximity pass");
     }
+
+    private static string rollbackBodyOf(string runtime) => MethodBody(runtime, "private static IReadOnlyList<EnemyBelief> OmniscientBeliefs(");
 
     private static void MigratedReadersReadBeliefsOnly()
     {
